@@ -76,7 +76,15 @@ def rollup(end_hour_exclusive: datetime, runs_dir: Path, out_dir: Path, hours: i
             for row in tr_all:
                 w.writerow(row)
 
-    write_summary(str(out_dir))
+    # rollup窗口语义：覆盖过去N小时 [start, end)
+    window_end_ts = int(end_hour_exclusive.timestamp())
+    window_start_ts = int((end_hour_exclusive - timedelta(hours=hours)).timestamp())
+
+    write_summary(
+        str(out_dir),
+        window_start_ts=window_start_ts,
+        window_end_ts=window_end_ts,
+    )
     return out_dir / "summary.json"
 
 
