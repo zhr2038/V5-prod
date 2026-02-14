@@ -3,8 +3,15 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
+
+import numpy as np
+
+# allow running as a script from repo root
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 
 def _read_jsonl(p: Path) -> List[Dict[str, Any]]:
@@ -20,11 +27,75 @@ def _read_jsonl(p: Path) -> List[Dict[str, Any]]:
     return out
 
 
+def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float = math.sqrt(24 * 365)) -> Dict[str, Any]:
+    if not equity_rows:
+        return {
+            "equity_start": None,
+            "equity_end": None,
+            "total_return_pct": None,
+            "max_drawdown_pct": None,
+            "sharpe": None,
+        }
+
+    eq = np.array([float(r.get("equity") or 0.0) for r in equity_rows], dtype=float)
+    eq_start = float(eq[0])
+    eq_end = float(eq[-1])
+    total_ret = (eq_end / eq_start - 1.0) if eq_start else 0.0
+
+    peak = np.maximum.accumulate(eq)
+    dd = np.where(peak > 0, 1.0 - eq / peak, 0.0)
+    max_dd = float(np.max(dd))
+
+    if len(eq) >= 3:
+        rets = eq[1:] / eq[:-1] - 1.0
+        sharpe = float(np.mean(rets) / (np.std(rets) + 1e-12) * ann_factor)
+    else:
+        sharpe = None
+
+    return {
+        "equity_start": eq_start,
+        "equity_end": eq_end,
+        "total_return_pct": float(total_ret),
+        "max_drawdown_pct": float(max_dd),
+        "sharpe": sharpe,
+    }
+
+
 def export_v4(v4_reports_dir: str, out_dir: str) -> None:
     src = Path(v4_reports_dir)
     dst = Path(out_dir)
     dst.mkdir(parents=True, exist_ok=True)
 
+    # -----------------
+    # equity snapshots
+    # -----------------
+    eq_path = src / "equity_snapshots.jsonl"
+    equity_rows: List[Dict[str, Any]] = []
+    if eq_path.exists():
+        for r in _read_jsonl(eq_path):
+            # best-effort normalize
+            ts = r.get("ts") or r.get("timestamp") or r.get("time")
+            equity = r.get("equity")
+            if equity is None:
+                equity = r.get("total_equity")
+            if equity is None:
+                equity = r.get("equity_usdt")
+            if equity is None:
+                equity = r.get("totalEq")
+            if equity is None:
+                continue
+            equity_rows.append({"ts": ts, "equity": equity})
+
+        # write v5-compatible equity.jsonl
+        if equity_rows:
+            (dst / "equity.jsonl").write_text(
+                "\n".join([json.dumps(x, ensure_ascii=False) for x in equity_rows]) + "\n",
+                encoding="utf-8",
+            )
+
+    # -----------------
+    # trades
+    # -----------------
     # Prefer trade_reflections (has realized_pnl/pnl_pct), fallback to trades_*.jsonl
     candidates = sorted(src.glob("trade_reflections_*.jsonl"), key=lambda x: x.stat().st_mtime, reverse=True)
     trades: List[Dict[str, Any]] = []
@@ -115,7 +186,7 @@ def export_v4(v4_reports_dir: str, out_dir: str) -> None:
         for t in trades:
             w.writerow({c: t.get(c, "") for c in cols})
 
-    # summary minimal (trade-based only)
+    # summary
     realized = []
     for t in trades:
         try:
@@ -129,15 +200,19 @@ def export_v4(v4_reports_dir: str, out_dir: str) -> None:
     win_rate = (len(wins) / len(realized)) if realized else None
     pf = (sum(wins) / (sum(losses) + 1e-12)) if realized else None
 
-    summ = {
-        "run_id": "v4",
-        "start_ts": None,
-        "end_ts": None,
+    eqm = compute_equity_metrics(equity_rows) if equity_rows else {
         "equity_start": None,
         "equity_end": None,
         "total_return_pct": None,
         "max_drawdown_pct": None,
         "sharpe": None,
+    }
+
+    summ = {
+        "run_id": "v4",
+        "start_ts": (equity_rows[0].get("ts") if equity_rows else None),
+        "end_ts": (equity_rows[-1].get("ts") if equity_rows else None),
+        **eqm,
         "num_trades": len(trades),
         "num_round_trips": len(realized),
         "win_rate": win_rate,
