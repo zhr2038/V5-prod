@@ -20,6 +20,7 @@ class MarketSeries:
 class Order:
     symbol: str
     side: str  # buy|sell
+    intent: str  # OPEN_LONG|CLOSE_LONG|REBALANCE
     notional_usdt: float
     signal_price: float
     meta: Dict[str, Any]

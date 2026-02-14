@@ -11,6 +11,7 @@ from src.alpha.alpha_engine import AlphaEngine
 from src.data.mock_provider import MockProvider
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.execution_engine import ExecutionEngine
+from src.execution.position_store import PositionStore
 from src.portfolio.portfolio_engine import PortfolioEngine
 from src.regime.regime_engine import RegimeEngine
 from src.reporting.reporting import dump_run_artifacts
@@ -52,7 +53,12 @@ def compute_orders(current_weights: Dict[str, float], target_weights: Dict[str, 
         px = float(prices.get(sym, 0.0) or 0.0)
         if px <= 0:
             continue
-        orders.append(Order(symbol=sym, side=side, notional_usdt=float(notional), signal_price=px, meta={"target_w": tw, "current_w": cw}))
+        intent = "REBALANCE"
+        if cw <= 0 and delta > 0:
+            intent = "OPEN_LONG"
+        elif tw <= 0 and delta < 0:
+            intent = "CLOSE_LONG"
+        orders.append(Order(symbol=sym, side=side, intent=intent, notional_usdt=float(notional), signal_price=px, meta={"target_w": tw, "current_w": cw}))
     return orders
 
 
@@ -99,14 +105,16 @@ def main() -> None:
     portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
     portfolio = portfolio_engine.allocate(scores=alpha_snap.scores, market_data=md_1h, regime_mult=regime.multiplier)
 
-    # risk state (scaffold: start flat with equity=100)
+    # load persisted positions (scaffold equity=100 for now)
     equity = 100.0
+    store = PositionStore(path="reports/positions.sqlite")
+    pos = {p.symbol: p.qty for p in store.list()}
     ps = PositionState(
         equity_usdt=equity,
         equity_peak_usdt=equity,
         positions={},
-        entry_prices={},
-        highest_prices={},
+        entry_prices={p.symbol: p.avg_px for p in store.list()},
+        highest_prices={p.symbol: p.highest_px for p in store.list()},
         days_held={},
     )
     risk_engine = RiskEngine(cfg.risk)
@@ -118,7 +126,7 @@ def main() -> None:
     prices = {s: float(md_1h[s].close[-1]) for s in md_1h.keys() if md_1h[s].close}
     orders = compute_orders(ps.positions, target, prices, equity)
 
-    exec_engine = ExecutionEngine(cfg.execution)
+    exec_engine = ExecutionEngine(cfg.execution, position_store=store)
     report = exec_engine.execute(orders)
     report.notes = f"regime={regime.state} delever={rd.delever_mult} selected={portfolio.selected}"
 
