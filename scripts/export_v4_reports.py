@@ -43,11 +43,12 @@ def _parse_ts_to_epoch_ms(x: Any) -> int:
 
 
 def _in_window(ts_any: Any, start_ms: int, end_ms: int) -> bool:
+    """Window is [start_ms, end_ms) (end exclusive)."""
     try:
         t = _parse_ts_to_epoch_ms(ts_any)
     except Exception:
         return False
-    return (t >= start_ms) and (t <= end_ms)
+    return (t >= start_ms) and (t < end_ms)
 
 
 def _read_jsonl(p: Path) -> List[Dict[str, Any]]:
@@ -252,19 +253,33 @@ def export_v4(v4_reports_dir: str, out_dir: str, start_ts: Optional[str] = None,
     win_rate = (len(wins) / len(realized)) if realized else None
     pf = (sum(wins) / (sum(losses) + 1e-12)) if realized else None
 
-    # data quality flags
-    data_quality: List[str] = []
-    if not eq_path.exists():
-        data_quality.append("no_equity_file")
-    elif start_ms is not None and end_ms is not None and not equity_rows:
-        data_quality.append("no_equity_data_in_window")
+    # --- window coverage stats ---
+    equity_points = len(equity_rows)
+    trade_events = len(trades)
 
-    trade_file_exists = bool(candidates) or (not candidates and bool(sorted(src.glob("trades_*.jsonl"), key=lambda x: x.stat().st_mtime, reverse=True)))
-    if not trade_file_exists:
-        data_quality.append("no_trade_file")
+    has_equity = equity_points >= 2
+    has_trade = trade_events > 0
 
-    # equity metrics
-    eqm = compute_equity_metrics(equity_rows)
+    if not has_equity and not has_trade:
+        data_quality = "no_data"
+    elif has_equity and not has_trade:
+        data_quality = "no_trade_data"
+    elif not has_equity and has_trade:
+        data_quality = "no_equity_data"
+    else:
+        data_quality = "ok"
+
+    # equity metrics: require >=2 points to compute window return/DD
+    if has_equity:
+        eqm = compute_equity_metrics(equity_rows)
+    else:
+        eqm = {
+            "equity_start": None,
+            "equity_end": None,
+            "total_return_pct": None,
+            "max_drawdown_pct": None,
+            "sharpe": None,
+        }
 
     # 确定start_ts和end_ts：优先使用数据时间，否则使用传入的窗口时间
     data_start_ts = equity_rows[0].get("ts") if equity_rows else None
@@ -273,21 +288,39 @@ def export_v4(v4_reports_dir: str, out_dir: str, start_ts: Optional[str] = None,
     start_ts = data_start_ts if data_start_ts is not None else start_ms
     end_ts = data_end_ts if data_end_ts is not None else end_ms
 
-    # 如果这个窗口没有equity数据，则将交易指标也标为None（避免把no_data当成0）
-    no_equity_window = (start_ms is not None and end_ms is not None and not equity_rows)
+    # trade metrics handling
+    if data_quality == "no_data":
+        num_trades = None
+        num_round_trips = None
+        win_rate_out = None
+        pf_out = None
+    elif data_quality in ("no_equity_data",):
+        # trades exist but equity doesn't: keep trade counts, but equity metrics are None
+        num_trades = trade_events
+        num_round_trips = len(realized)
+        win_rate_out = win_rate
+        pf_out = pf
+    else:
+        # ok / no_trade_data
+        num_trades = trade_events
+        num_round_trips = len(realized)
+        win_rate_out = win_rate
+        pf_out = pf
 
     summ = {
         "run_id": "v4",
         "start_ts": start_ts,
         "end_ts": end_ts,
-        "window_start_ts": start_ms,  # 记录传入的窗口时间
-        "window_end_ts": end_ms,
+        "window_start_ts": start_ms,  # ms
+        "window_end_ts": end_ms,      # ms
         "data_quality": data_quality,
+        "equity_points": equity_points,
+        "trade_events": trade_events,
         **eqm,
-        "num_trades": (None if no_equity_window else len(trades)),
-        "num_round_trips": (None if no_equity_window else len(realized)),
-        "win_rate": (None if no_equity_window else win_rate),
-        "profit_factor": (None if no_equity_window else pf),
+        "num_trades": num_trades,
+        "num_round_trips": num_round_trips,
+        "win_rate": win_rate_out,
+        "profit_factor": pf_out,
     }
     (dst / "summary.json").write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
 

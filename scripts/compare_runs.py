@@ -80,7 +80,7 @@ def _load(p: str) -> Dict[str, Any]:
 
 def _fmt(x: Any) -> str:
     if x is None:
-        return "-"
+        return "N/A"
     try:
         return f"{float(x):.4g}"
     except Exception:
@@ -93,11 +93,17 @@ def compare(v4: Dict[str, Any], v5: Dict[str, Any], window: str = "") -> str:
     if window:
         lines.append(f"- window: {window}")
     lines.append(f"- v4: `{v4.get('run_id')}`")
-    if v4.get("data_quality"):
-        lines.append(f"- v4_data_quality: {v4.get('data_quality')}")
+    v4_q = v4.get("data_quality")
+    if v4_q and v4_q != "ok":
+        lines.append(
+            f"- v4 data_quality: {v4_q} (equity_points={v4.get('equity_points')}, trade_events={v4.get('trade_events')})"
+        )
     lines.append(f"- v5: `{v5.get('run_id')}`")
-    if v5.get("data_quality"):
-        lines.append(f"- v5_data_quality: {v5.get('data_quality')}")
+    v5_q = v5.get("data_quality")
+    if v5_q and v5_q != "ok":
+        lines.append(
+            f"- v5 data_quality: {v5_q} (equity_points={v5.get('equity_points')}, trade_events={v5.get('trade_events')})"
+        )
     lines.append("")
 
     lines.append("| metric | v4 | v5 | delta |")
