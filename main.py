@@ -32,7 +32,6 @@ def setup_logging(level: str = "INFO") -> None:
 
 def build_provider(cfg: AppConfig):
     # dry-run defaults to Mock; you can set V5_DATA_PROVIDER=okx to use public ccxt.
-    prov = (Path(".").resolve(),)
     import os
 
     which = (os.getenv("V5_DATA_PROVIDER") or "mock").lower()
@@ -66,8 +65,28 @@ def main() -> None:
 
     provider = build_provider(cfg)
 
+    symbols = list(cfg.symbols)
+    # Optional: dynamic universe
+    if cfg.universe.enabled:
+        try:
+            from src.data.universe.okx_universe import OKXUniverseProvider
+
+            up = OKXUniverseProvider(
+                cache_path=cfg.universe.cache_path,
+                cache_ttl_sec=cfg.universe.cache_ttl_sec,
+                min_24h_quote_volume_usdt=cfg.universe.min_24h_quote_volume_usdt,
+                blacklist_path=cfg.universe.blacklist_path,
+                exclude_stablecoins=cfg.universe.exclude_stablecoins,
+            )
+            uni = up.get_universe()
+            if cfg.universe.use_universe_symbols and uni:
+                symbols = uni
+                log.info(f"Universe enabled: using {len(symbols)} symbols")
+        except Exception as e:
+            log.warning(f"Universe fetch failed, fallback to config symbols: {e}")
+
     # fetch 1h bars for alpha/regime and 4h for auxiliary (placeholder)
-    md_1h = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=24 * 60)
+    md_1h = provider.fetch_ohlcv(symbols, timeframe=cfg.timeframe_main, limit=24 * 60)
 
     alpha_engine = AlphaEngine(cfg.alpha)
     alpha_snap = alpha_engine.compute_snapshot(md_1h)

@@ -15,6 +15,10 @@ exchange:
   testnet: false
 
 universe:
+  enabled: true
+  use_universe_symbols: false
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 3600
   top_n_market_cap: 30
   min_24h_quote_volume_usdt: 5000000
   blacklist_path: configs/blacklist.json

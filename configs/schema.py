@@ -21,6 +21,11 @@ class ExchangeConfig(BaseModel):
 
 
 class UniverseConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Enable dynamic universe selection")
+    use_universe_symbols: bool = Field(default=False, description="Use universe output as trading symbols")
+    cache_path: str = Field(default="reports/universe_cache.json")
+    cache_ttl_sec: int = Field(default=3600, ge=0)
+
     top_n_market_cap: int = Field(default=30, ge=1)
     min_24h_quote_volume_usdt: float = Field(default=5_000_000.0, ge=0)
     blacklist_path: str = Field(default="configs/blacklist.json")
