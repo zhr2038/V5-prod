@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from src.core.clock import TradingClock, SystemClock
+
 from src.core.models import Order
 from src.execution.position_store import Position
 from src.risk.atr_trailing import update_atr_trailing, ATRTrailingState
@@ -26,8 +28,9 @@ class ExitPolicy:
     - Regime exit: in Risk-Off, optionally force delever/close (scaffold closes all)
     """
 
-    def __init__(self, cfg: ExitConfig):
+    def __init__(self, cfg: ExitConfig, clock: Optional[TradingClock] = None):
         self.cfg = cfg
+        self.clock = clock or SystemClock()
 
     @staticmethod
     def _parse_ts(ts: str) -> Optional[datetime]:
@@ -62,7 +65,7 @@ class ExitPolicy:
                 )
             return orders
 
-        now = datetime.now(timezone.utc)
+        now = self.clock.now().astimezone(timezone.utc)
 
         for p in positions:
             s = market_data.get(p.symbol)
@@ -91,7 +94,10 @@ class ExitPolicy:
             if ent is not None:
                 days = (now.date() - ent.astimezone(timezone.utc).date()).days
                 if days >= int(self.cfg.time_stop_days):
-                    pnl = (last - float(p.avg_px)) / float(p.avg_px) if p.avg_px else 0.0
+                    # Use store-provided mark pnl when available, fallback to computed.
+                    pnl = float(getattr(p, 'unrealized_pnl_pct', 0.0) or 0.0)
+                    if pnl == 0.0 and p.avg_px:
+                        pnl = (last - float(p.avg_px)) / float(p.avg_px)
                     if pnl <= 0:
                         orders.append(
                             Order(

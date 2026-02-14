@@ -24,7 +24,7 @@ def test_time_stop_triggers_when_not_profitable():
     ep = ExitPolicy(cfg)
 
     ent = (datetime.now(timezone.utc) - timedelta(days=21)).isoformat().replace("+00:00", "Z")
-    pos = [Position(symbol="AAA/USDT", qty=1.0, avg_px=200.0, entry_ts=ent, highest_px=210.0)]
+    pos = [Position(symbol="AAA/USDT", qty=1.0, avg_px=200.0, entry_ts=ent, highest_px=210.0, last_update_ts=ent, last_mark_px=190.0, unrealized_pnl_pct=-0.05)]
     md = {"AAA/USDT": _series(last=190.0)}
     orders = ep.evaluate(pos, md, regime_state="Trending")
     # Could be time_stop or atr_trailing depending on ATR/price path; at least one exit must trigger.
@@ -33,7 +33,8 @@ def test_time_stop_triggers_when_not_profitable():
 
 def test_regime_exit_closes_all():
     ep = ExitPolicy(ExitConfig(enable_regime_exit=True))
-    pos = [Position(symbol="AAA/USDT", qty=1.0, avg_px=100.0, entry_ts=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), highest_px=100.0)]
+    ent = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    pos = [Position(symbol="AAA/USDT", qty=1.0, avg_px=100.0, entry_ts=ent, highest_px=100.0, last_update_ts=ent, last_mark_px=100.0, unrealized_pnl_pct=0.0)]
     md = {"AAA/USDT": _series(last=100.0)}
     orders = ep.evaluate(pos, md, regime_state="Risk-Off")
     assert len(orders) == 1
