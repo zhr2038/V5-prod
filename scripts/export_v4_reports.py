@@ -5,13 +5,49 @@ import csv
 import json
 import math
 import sys
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 # allow running as a script from repo root
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+
+def _parse_ts_to_epoch_ms(x: Any) -> int:
+    """Accepts epoch ms/seconds (int/float/str) or ISO time string."""
+    if x is None:
+        raise ValueError("ts is None")
+    if isinstance(x, (int, float)):
+        v = float(x)
+        # heuristic: ms timestamps are > 1e12
+        return int(v if v > 1e12 else v * 1000.0)
+    s = str(x).strip()
+    if not s:
+        raise ValueError("empty ts")
+    # numeric string
+    try:
+        v = float(s)
+        return int(v if v > 1e12 else v * 1000.0)
+    except Exception:
+        pass
+
+    # iso string (e.g. 2026-02-14T00:10:09.674567Z)
+    try:
+        s2 = s.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s2)
+        return int(dt.timestamp() * 1000)
+    except Exception as e:
+        raise ValueError(f"unparseable ts: {x}") from e
+
+
+def _in_window(ts_any: Any, start_ms: int, end_ms: int) -> bool:
+    try:
+        t = _parse_ts_to_epoch_ms(ts_any)
+    except Exception:
+        return False
+    return (t >= start_ms) and (t <= end_ms)
 
 
 def _read_jsonl(p: Path) -> List[Dict[str, Any]]:
@@ -61,10 +97,14 @@ def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float 
     }
 
 
-def export_v4(v4_reports_dir: str, out_dir: str) -> None:
+def export_v4(v4_reports_dir: str, out_dir: str, start_ts: Optional[str] = None, end_ts: Optional[str] = None) -> None:
     src = Path(v4_reports_dir)
     dst = Path(out_dir)
     dst.mkdir(parents=True, exist_ok=True)
+
+    # resolve window
+    start_ms: Optional[int] = _parse_ts_to_epoch_ms(start_ts) if start_ts else None
+    end_ms: Optional[int] = _parse_ts_to_epoch_ms(end_ts) if end_ts else None
 
     # -----------------
     # equity snapshots
@@ -84,6 +124,10 @@ def export_v4(v4_reports_dir: str, out_dir: str) -> None:
                 equity = r.get("totalEq")
             if equity is None:
                 continue
+
+            if start_ms is not None and end_ms is not None and not _in_window(ts, start_ms, end_ms):
+                continue
+
             equity_rows.append({"ts": ts, "equity": equity})
 
         # write v5-compatible equity.jsonl
@@ -102,6 +146,10 @@ def export_v4(v4_reports_dir: str, out_dir: str) -> None:
     if candidates:
         rows = _read_jsonl(candidates[0])
         for r in rows:
+            ts_any = r.get("ts") or r.get("timestamp") or ""
+            if start_ms is not None and end_ms is not None and not _in_window(ts_any, start_ms, end_ms):
+                continue
+
             sym = r.get("symbol") or ""
             side = r.get("side") or ""
             qty = r.get("qty") or ""
@@ -118,7 +166,7 @@ def export_v4(v4_reports_dir: str, out_dir: str) -> None:
             # entry_recorded buy events may have no realized
             trades.append(
                 {
-                    "ts": r.get("ts") or r.get("timestamp") or "",
+                    "ts": ts_any,
                     "run_id": "v4",
                     "symbol": sym,
                     "intent": ("OPEN_LONG" if side == "buy" else "CLOSE_LONG"),
@@ -138,6 +186,10 @@ def export_v4(v4_reports_dir: str, out_dir: str) -> None:
         if cand2:
             rows = _read_jsonl(cand2[0])
             for r in rows:
+                ts_any = r.get("ts") or r.get("timestamp") or ""
+                if start_ms is not None and end_ms is not None and not _in_window(ts_any, start_ms, end_ms):
+                    continue
+
                 sym = r.get("symbol") or ""
                 side = r.get("side") or ""
                 qty = r.get("qty") or ""
@@ -150,7 +202,7 @@ def export_v4(v4_reports_dir: str, out_dir: str) -> None:
                         notional = ""
                 trades.append(
                     {
-                        "ts": r.get("ts") or r.get("timestamp") or "",
+                        "ts": ts_any,
                         "run_id": "v4",
                         "symbol": sym,
                         "intent": ("OPEN_LONG" if side == "buy" else "CLOSE_LONG"),
@@ -225,8 +277,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--v4_reports_dir", required=True)
     ap.add_argument("--out_dir", default="v4_export")
+    ap.add_argument("--start_ts", default=None, help="epoch seconds/ms or ISO string")
+    ap.add_argument("--end_ts", default=None, help="epoch seconds/ms or ISO string")
     args = ap.parse_args()
-    export_v4(args.v4_reports_dir, args.out_dir)
+    export_v4(args.v4_reports_dir, args.out_dir, start_ts=args.start_ts, end_ts=args.end_ts)
     print(f"wrote {args.out_dir}/trades.csv and summary.json")
 
 
