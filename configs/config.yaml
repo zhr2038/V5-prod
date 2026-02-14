@@ -52,6 +52,8 @@ execution:
   split_interval_sec: 3
   max_hourly_volume_pct: 0.05
   slippage_db_path: reports/slippage.sqlite
+  fee_bps: 6
+  slippage_bps: 5
 
 backtest:
   fee_bps: 6

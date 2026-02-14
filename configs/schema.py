@@ -75,6 +75,10 @@ class ExecutionConfig(BaseModel):
     max_hourly_volume_pct: float = Field(default=0.05, gt=0, le=1)
     slippage_db_path: str = Field(default="reports/slippage.sqlite")
 
+    # dry-run cost model (bps)
+    fee_bps: float = Field(default=6.0, ge=0)
+    slippage_bps: float = Field(default=5.0, ge=0)
+
 
 class BacktestConfig(BaseModel):
     fee_bps: float = Field(default=6.0, ge=0)

@@ -150,9 +150,21 @@ def main() -> None:
 
     orders = out.orders
 
-    exec_engine = ExecutionEngine(cfg.execution, position_store=store, account_store=acc_store)
+    from src.reporting.trade_log import TradeLogWriter
+
+    trade_log = TradeLogWriter(run_dir=f"reports/runs/{run_id}")
+
+    exec_engine = ExecutionEngine(cfg.execution, position_store=store, account_store=acc_store, trade_log=trade_log, run_id=run_id)
     report = exec_engine.execute(orders)
     report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
+
+    # write/update summary
+    try:
+        from src.reporting.summary_writer import write_summary
+
+        write_summary(f"reports/runs/{run_id}")
+    except Exception:
+        pass
 
     dump_run_artifacts(
         reports_dir="reports",
