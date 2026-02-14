@@ -108,13 +108,13 @@ def main() -> None:
     # load persisted positions (scaffold equity=100 for now)
     equity = 100.0
     store = PositionStore(path="reports/positions.sqlite")
-    pos = {p.symbol: p.qty for p in store.list()}
+    held = store.list()
     ps = PositionState(
         equity_usdt=equity,
         equity_peak_usdt=equity,
         positions={},
-        entry_prices={p.symbol: p.avg_px for p in store.list()},
-        highest_prices={p.symbol: p.highest_px for p in store.list()},
+        entry_prices={p.symbol: p.avg_px for p in held},
+        highest_prices={p.symbol: p.highest_px for p in held},
         days_held={},
     )
     risk_engine = RiskEngine(cfg.risk)
@@ -124,11 +124,27 @@ def main() -> None:
     target = {s: float(w) * float(rd.delever_mult) for s, w in (portfolio.target_weights or {}).items()}
 
     prices = {s: float(md_1h[s].close[-1]) for s in md_1h.keys() if md_1h[s].close}
-    orders = compute_orders(ps.positions, target, prices, equity)
+
+    # Exits (informational in dry-run; still generates CLOSE_LONG intents)
+    exit_orders = []
+    try:
+        from src.risk.exit_policy import ExitPolicy, ExitConfig
+
+        ep = ExitPolicy(ExitConfig())
+        exit_orders = ep.evaluate(positions=held, market_data=md_1h, regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state))
+        # Update highest_px for continuity
+        for p in held:
+            if p.symbol in prices:
+                store.update_highest(p.symbol, max(p.highest_px, prices[p.symbol]))
+    except Exception:
+        exit_orders = []
+
+    rebalance_orders = compute_orders(ps.positions, target, prices, equity)
+    orders = exit_orders + rebalance_orders
 
     exec_engine = ExecutionEngine(cfg.execution, position_store=store)
     report = exec_engine.execute(orders)
-    report.notes = f"regime={regime.state} delever={rd.delever_mult} selected={portfolio.selected}"
+    report.notes = f"regime={regime.state} delever={rd.delever_mult} selected={portfolio.selected} exit_orders={len(exit_orders)}"
 
     dump_run_artifacts(
         reports_dir="reports",

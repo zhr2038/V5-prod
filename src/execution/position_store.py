@@ -102,6 +102,18 @@ class PositionStore:
         con.commit()
         con.close()
 
+    def upsert_position(self, pos: Position) -> None:
+        """Insert/update a full position row (used for migrations/tests)."""
+        con = sqlite3.connect(str(self.path))
+        c = con.cursor()
+        c.execute(
+            "INSERT INTO positions(symbol, qty, avg_px, entry_ts, highest_px, tags_json) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(symbol) DO UPDATE SET qty=excluded.qty, avg_px=excluded.avg_px, entry_ts=excluded.entry_ts, highest_px=excluded.highest_px, tags_json=excluded.tags_json",
+            (pos.symbol, float(pos.qty), float(pos.avg_px), str(pos.entry_ts), float(pos.highest_px), str(pos.tags_json)),
+        )
+        con.commit()
+        con.close()
+
     def close_long(self, symbol: str) -> None:
         con = sqlite3.connect(str(self.path))
         c = con.cursor()
