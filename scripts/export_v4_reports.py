@@ -25,29 +25,74 @@ def export_v4(v4_reports_dir: str, out_dir: str) -> None:
     dst = Path(out_dir)
     dst.mkdir(parents=True, exist_ok=True)
 
-    # Try trade_reflections first
+    # Prefer trade_reflections (has realized_pnl/pnl_pct), fallback to trades_*.jsonl
     candidates = sorted(src.glob("trade_reflections_*.jsonl"), key=lambda x: x.stat().st_mtime, reverse=True)
     trades: List[Dict[str, Any]] = []
     if candidates:
         rows = _read_jsonl(candidates[0])
         for r in rows:
-            # best-effort mapping
+            sym = r.get("symbol") or ""
+            side = r.get("side") or ""
+            qty = r.get("qty") or ""
+            price = r.get("price") or ""
+            notional = ""
+            try:
+                if qty and price:
+                    notional = float(qty) * float(price)
+            except Exception:
+                notional = ""
+
+            realized = r.get("realized_pnl")
+            pnl_pct = r.get("pnl_pct")
+            # entry_recorded buy events may have no realized
             trades.append(
                 {
                     "ts": r.get("ts") or r.get("timestamp") or "",
                     "run_id": "v4",
-                    "symbol": r.get("symbol") or "",
-                    "intent": r.get("intent") or r.get("side") or "",
-                    "side": r.get("side") or "",
-                    "qty": r.get("qty") or "",
-                    "price": r.get("price") or "",
-                    "notional_usdt": r.get("notional_usdt") or r.get("notional") or "",
-                    "fee_usdt": r.get("fee_usdt") or 0,
-                    "slippage_usdt": r.get("slippage_usdt") or 0,
-                    "realized_pnl_usdt": r.get("realized_pnl_usdt") or r.get("pnl_usdt") or r.get("pnl") or "",
-                    "realized_pnl_pct": r.get("realized_pnl_pct") or r.get("pnl_pct") or "",
+                    "symbol": sym,
+                    "intent": ("OPEN_LONG" if side == "buy" else "CLOSE_LONG"),
+                    "side": side,
+                    "qty": qty,
+                    "price": price,
+                    "notional_usdt": notional,
+                    "fee_usdt": 0,
+                    "slippage_usdt": 0,
+                    "realized_pnl_usdt": "" if realized is None else realized,
+                    "realized_pnl_pct": "" if pnl_pct is None else pnl_pct,
                 }
             )
+    else:
+        # fallback trades_*.jsonl
+        cand2 = sorted(src.glob("trades_*.jsonl"), key=lambda x: x.stat().st_mtime, reverse=True)
+        if cand2:
+            rows = _read_jsonl(cand2[0])
+            for r in rows:
+                sym = r.get("symbol") or ""
+                side = r.get("side") or ""
+                qty = r.get("qty") or ""
+                price = r.get("price") or ""
+                notional = r.get("notional_usdt") or ""
+                if not notional:
+                    try:
+                        notional = float(qty) * float(price)
+                    except Exception:
+                        notional = ""
+                trades.append(
+                    {
+                        "ts": r.get("ts") or r.get("timestamp") or "",
+                        "run_id": "v4",
+                        "symbol": sym,
+                        "intent": ("OPEN_LONG" if side == "buy" else "CLOSE_LONG"),
+                        "side": side,
+                        "qty": qty,
+                        "price": price,
+                        "notional_usdt": notional,
+                        "fee_usdt": 0,
+                        "slippage_usdt": 0,
+                        "realized_pnl_usdt": "",
+                        "realized_pnl_pct": "",
+                    }
+                )
 
     # Write trades.csv
     cols = [
