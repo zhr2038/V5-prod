@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+import json
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any, Dict
+
+from src.alpha.alpha_engine import AlphaSnapshot
+from src.core.models import ExecutionReport
+from src.regime.regime_engine import RegimeResult
+from src.portfolio.portfolio_engine import PortfolioSnapshot
+
+
+def write_json(path: str, obj: Any) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def dump_run_artifacts(
+    reports_dir: str,
+    alpha: AlphaSnapshot,
+    regime: RegimeResult,
+    portfolio: PortfolioSnapshot,
+    execution: ExecutionReport,
+) -> None:
+    Path(reports_dir).mkdir(parents=True, exist_ok=True)
+    write_json(f"{reports_dir}/alpha_snapshot.json", {
+        "raw_factors": alpha.raw_factors,
+        "z_factors": alpha.z_factors,
+        "scores": alpha.scores,
+    })
+    write_json(f"{reports_dir}/regime.json", asdict(regime))
+    write_json(f"{reports_dir}/portfolio.json", asdict(portfolio))
+    write_json(f"{reports_dir}/execution_report.json", {
+        "timestamp": execution.timestamp,
+        "dry_run": execution.dry_run,
+        "orders": [asdict(o) for o in execution.orders],
+        "notes": execution.notes,
+    })

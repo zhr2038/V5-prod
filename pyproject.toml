@@ -1,0 +1,17 @@
+[project]
+name = "v5-trading-bot"
+version = "0.1.0"
+description = "V5 cross-sectional trend rotation trading system (OKX spot, dry-run first)."
+requires-python = ">=3.8"
+
+dependencies = [
+  "pydantic>=2.6,<3",
+  "python-dotenv>=1.0",
+  "numpy>=1.23",
+  "pandas>=2.0",
+  "requests>=2.31",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
