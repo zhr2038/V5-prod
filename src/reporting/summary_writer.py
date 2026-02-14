@@ -12,7 +12,11 @@ from src.reporting.metrics import (
 )
 
 
-def write_summary(run_dir: str) -> Dict[str, Any]:
+def write_summary(
+    run_dir: str,
+    window_start_ts: int | None = None,
+    window_end_ts: int | None = None,
+) -> Dict[str, Any]:
     rd = Path(run_dir)
     eq_rows = read_equity_jsonl(str(rd / "equity.jsonl"))
     trades = read_trades_csv(str(rd / "trades.csv"))
@@ -24,11 +28,25 @@ def write_summary(run_dir: str) -> Dict[str, Any]:
 
     eqm = compute_equity_metrics(eq_rows)
     tm = compute_trade_metrics(trades, avg_equity=avg_equity)
+    
+    # 确定窗口时间：优先使用传入的窗口，否则使用equity.jsonl范围
+    equity_first_ts = eq_rows[0].get("ts") if eq_rows else None
+    equity_last_ts = eq_rows[-1].get("ts") if eq_rows else None
+    
+    start_ts = equity_first_ts
+    end_ts = equity_last_ts
+    
+    # 若main传了窗口，则覆盖（窗口语义优先）
+    if window_start_ts is not None and window_end_ts is not None:
+        start_ts = window_start_ts
+        end_ts = window_end_ts
 
     summ: Dict[str, Any] = {
         "run_id": rd.name,
-        "start_ts": (eq_rows[0].get("ts") if eq_rows else None),
-        "end_ts": (eq_rows[-1].get("ts") if eq_rows else None),
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "window_start_ts": window_start_ts,
+        "window_end_ts": window_end_ts,
         "avg_equity": avg_equity,
         **eqm,
         **tm,

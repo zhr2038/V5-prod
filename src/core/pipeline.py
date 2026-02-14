@@ -12,6 +12,7 @@ from src.regime.regime_engine import RegimeEngine, RegimeResult
 from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
 from src.core.models import PositionState
+from src.reporting.decision_audit import DecisionAudit
 
 
 @dataclass
@@ -70,6 +71,7 @@ class V5Pipeline:
         cash_usdt: float,
         equity_peak_usdt: float,
         run_logger=None,
+        audit: Optional[DecisionAudit] = None,
     ) -> PipelineOutput:
         # mark first
         store = None
@@ -77,10 +79,21 @@ class V5Pipeline:
             pass
         # caller can pass store via run_logger hook if desired; for now, marking is done by main.
 
+        # 1. Alpha计算后审计
         alpha = self.alpha_engine.compute_snapshot(market_data_1h)
+        if audit:
+            # 记录top scores
+            sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
+            audit.top_scores = [{"symbol": sym, "score": score} for sym, score in sorted_scores[:10]]
+            audit.counts["scored"] = len(alpha.scores)
+        
+        # 2. Regime检测后审计
         btc = market_data_1h.get("BTC/USDT") or next(iter(market_data_1h.values()))
         regime = self.regime_engine.detect(btc)
-
+        if audit:
+            audit.regime = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+            audit.regime_multiplier = regime.multiplier
+        
         equity = self.compute_equity(cash_usdt=cash_usdt, positions=positions, market_data_1h=market_data_1h)
 
         # Risk: drawdown-based exposure multiplier
@@ -89,33 +102,112 @@ class V5Pipeline:
         pst = PortfolioState(cash_usdt=float(cash_usdt), equity_usdt=float(equity), peak_equity_usdt=float(equity_peak_usdt))
         pst.update_equity(equity)
         dd_mult = self.risk_engine.exposure_multiplier(pst.drawdown_pct)
+        
+        # 3. DD multiplier审计
+        if audit and dd_mult < 1.0:
+            audit.reject("dd_throttle")
+            audit.add_note(f"DD multiplier: {dd_mult} (drawdown: {pst.drawdown_pct:.2%})")
 
-        portfolio = self.portfolio_engine.allocate(scores=alpha.scores, market_data=market_data_1h, regime_mult=regime.multiplier)
+        # 4. Portfolio分配后审计
+        portfolio = self.portfolio_engine.allocate(
+            scores=alpha.scores, 
+            market_data=market_data_1h, 
+            regime_mult=regime.multiplier,
+            audit=audit
+        )
         target0 = dict(portfolio.target_weights or {})
+        if audit:
+            audit.targets_pre_risk = target0
+            audit.counts["targets_pre_risk"] = len(target0)
+            audit.counts["selected"] = len(portfolio.selected)
+            # 从portfolio_debug获取更多信息
+            if hasattr(audit, 'portfolio_debug') and audit.portfolio_debug:
+                audit.portfolio_debug = audit.portfolio_debug
+        
+        # 5. 风险缩放后审计
         target = self.portfolio_engine.scale_targets(target0, dd_mult)
-
+        if audit:
+            audit.targets_post_risk = target
+        
         prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
 
-        # exits
+        # 6. Exit orders审计
         exit_orders = self.exit_policy.evaluate(
             positions=positions,
             market_data=market_data_1h,
             regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state),
         )
+        if audit:
+            audit.counts["orders_exit"] = len(exit_orders)
 
-        # rebalance (long-only opens; closing from rebalance not implemented yet)
+        # 7. Rebalance orders生成（添加拒绝原因审计）
         rebalance_orders: List[Order] = []
+        router_decisions = []
+        
         for sym, tw in target.items():
             px = float(prices.get(sym, 0.0) or 0.0)
             if px <= 0:
+                if audit:
+                    audit.reject("no_closed_bar")
                 continue
+            
             held = next((p for p in positions if p.symbol == sym and p.qty > 0), None)
             side = "buy"
             intent = "OPEN_LONG" if held is None else "REBALANCE"
             notional = float(tw) * float(equity)
+            
             if notional <= 0:
                 continue
-            rebalance_orders.append(Order(symbol=sym, side=side, intent=intent, notional_usdt=notional, signal_price=px, meta={"target_w": tw, "dd_mult": dd_mult}))
+            
+            # 模拟router决策（这里简化，实际应该调用router）
+            # 检查min_notional（假设最小交易额为10 USDT）
+            min_notional = 10.0
+            if notional < min_notional:
+                if audit:
+                    audit.reject("min_notional")
+                    router_decisions.append({
+                        "symbol": sym,
+                        "action": "skip",
+                        "reason": "min_notional",
+                        "notional": notional,
+                        "min_notional": min_notional
+                    })
+                continue
+            
+            # 检查cash是否足够
+            if notional > cash_usdt:
+                if audit:
+                    audit.reject("insufficient_cash")
+                    router_decisions.append({
+                        "symbol": sym,
+                        "action": "skip", 
+                        "reason": "insufficient_cash",
+                        "notional": notional,
+                        "cash_available": cash_usdt
+                    })
+                continue
+            
+            # 如果通过所有检查，生成订单
+            rebalance_orders.append(Order(
+                symbol=sym, 
+                side=side, 
+                intent=intent, 
+                notional_usdt=notional, 
+                signal_price=px, 
+                meta={"target_w": tw, "dd_mult": dd_mult}
+            ))
+            
+            if audit:
+                router_decisions.append({
+                    "symbol": sym,
+                    "action": "create",
+                    "reason": "ok",
+                    "notional": notional
+                })
+        
+        if audit:
+            audit.router_decisions = router_decisions
+            audit.counts["orders_rebalance"] = len(rebalance_orders)
 
         if run_logger is not None:
             try:

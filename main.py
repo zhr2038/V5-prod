@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from configs.loader import load_config
 from configs.schema import AppConfig
@@ -29,6 +30,18 @@ def setup_logging(level: str = "INFO") -> None:
             logging.StreamHandler(),
         ],
     )
+
+
+def _get_env_epoch_sec(name: str) -> Optional[int]:
+    """从环境变量读取时间戳（秒/毫秒兼容）"""
+    v = os.getenv(name)
+    if not v:
+        return None
+    x = int(v)
+    # 兼容毫秒 epoch
+    if x > 10_000_000_000:  # ~2286-11-20 in seconds
+        x //= 1000
+    return x
 
 
 def build_provider(cfg: AppConfig):
@@ -92,7 +105,20 @@ def main() -> None:
             log.warning(f"Universe fetch failed, fallback to config symbols: {e}")
 
     # fetch 1h bars for alpha/regime and 4h for auxiliary (placeholder)
-    md_1h = provider.fetch_ohlcv(symbols, timeframe=cfg.timeframe_main, limit=24 * 60)
+    # 使用窗口时间过滤，只取已收盘bar
+    window_start_ts = _get_env_epoch_sec("V5_WINDOW_START_TS")
+    window_end_ts = _get_env_epoch_sec("V5_WINDOW_END_TS")
+    
+    end_ts_ms = None
+    if window_end_ts is not None:
+        end_ts_ms = window_end_ts * 1000  # 转换为毫秒
+    
+    md_1h = provider.fetch_ohlcv(
+        symbols, 
+        timeframe=cfg.timeframe_main, 
+        limit=24 * 60,
+        end_ts_ms=end_ts_ms
+    )
 
     alpha_engine = AlphaEngine(cfg.alpha)
     alpha_snap = alpha_engine.compute_snapshot(md_1h)
@@ -125,6 +151,7 @@ def main() -> None:
     # Run unified pipeline with equity/drawdown scaling
     from src.core.pipeline import V5Pipeline
     from src.core.run_logger import RunLogger
+    from src.reporting.decision_audit import DecisionAudit
 
     import os
 
@@ -132,6 +159,16 @@ def main() -> None:
     if not run_id:
         run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     run_logger = RunLogger(run_dir=f"reports/runs/{run_id}")
+    
+    # 创建DecisionAudit
+    audit = DecisionAudit(
+        run_id=run_id,
+        window_start_ts=window_start_ts,
+        window_end_ts=window_end_ts,
+    )
+    
+    # 记录universe数量
+    audit.counts["universe"] = len(symbols)
 
     pipe = V5Pipeline(cfg)
     out = pipe.run(
@@ -140,7 +177,11 @@ def main() -> None:
         cash_usdt=float(acc.cash_usdt),
         equity_peak_usdt=float(acc.equity_peak_usdt),
         run_logger=run_logger,
+        audit=audit,
     )
+    
+    # 保存DecisionAudit
+    audit.save(f"reports/runs/{run_id}")
 
     # Update account peak equity
     # (equity is logged inside pipeline; recompute here quickly)
@@ -165,8 +206,20 @@ def main() -> None:
     # write/update summary
     try:
         from src.reporting.summary_writer import write_summary
-
-        write_summary(f"reports/runs/{run_id}")
+        
+        window_start_ts = _get_env_epoch_sec("V5_WINDOW_START_TS")
+        window_end_ts = _get_env_epoch_sec("V5_WINDOW_END_TS")
+        
+        # 窗口长度校验（避免 silent bug）
+        if window_start_ts is not None and window_end_ts is not None:
+            if window_end_ts <= window_start_ts:
+                raise ValueError(f"Invalid window: {window_start_ts} -> {window_end_ts}")
+        
+        write_summary(
+            f"reports/runs/{run_id}",
+            window_start_ts=window_start_ts,
+            window_end_ts=window_end_ts,
+        )
     except Exception:
         pass
 
