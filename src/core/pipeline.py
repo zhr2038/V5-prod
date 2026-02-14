@@ -25,53 +25,121 @@ class PipelineOutput:
 class V5Pipeline:
     """Shared Alpha->Regime->Portfolio->Risk->Exit pipeline.
 
+    Adds Commit-B semantics:
+    - mark-to-market at cycle start (highest_px/mark/pnl/update_ts)
+    - equity = cash + Σ(qty*mark)
+    - portfolio drawdown scaling via RiskEngine
+
     Designed so live(dry-run) and backtest can share the same semantics.
     """
 
-    def __init__(self, cfg: AppConfig):
+    def __init__(self, cfg: AppConfig, clock=None):
         self.cfg = cfg
+        from src.core.clock import SystemClock
+
+        self.clock = clock or SystemClock()
         self.alpha_engine = AlphaEngine(cfg.alpha)
         self.regime_engine = RegimeEngine(cfg.regime)
         self.portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
         self.risk_engine = RiskEngine(cfg.risk)
-        self.exit_policy = ExitPolicy(ExitConfig())
+        self.exit_policy = ExitPolicy(ExitConfig(), clock=self.clock)
 
-    def run(self, market_data_1h: Dict[str, MarketSeries], positions: List[Position], equity_usdt: float = 100.0) -> PipelineOutput:
+    def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
+        now_ts = self.clock.now().isoformat().replace("+00:00", "Z")
+        for p in store.list():
+            s = market_data_1h.get(p.symbol)
+            if not s or not s.close:
+                continue
+            mark = float(s.close[-1])
+            hi = float(s.high[-1]) if s.high else mark
+            store.mark_position(symbol=p.symbol, now_ts=now_ts, mark_px=mark, high_px=hi)
+
+    def compute_equity(self, cash_usdt: float, positions: List[Position], market_data_1h: Dict[str, MarketSeries]) -> float:
+        eq = float(cash_usdt)
+        for p in positions:
+            s = market_data_1h.get(p.symbol)
+            if not s or not s.close:
+                continue
+            eq += float(p.qty) * float(s.close[-1])
+        return float(eq)
+
+    def run(
+        self,
+        market_data_1h: Dict[str, MarketSeries],
+        positions: List[Position],
+        cash_usdt: float,
+        equity_peak_usdt: float,
+        run_logger=None,
+    ) -> PipelineOutput:
+        # mark first
+        store = None
+        if positions and hasattr(positions[0], 'symbol'):
+            pass
+        # caller can pass store via run_logger hook if desired; for now, marking is done by main.
+
         alpha = self.alpha_engine.compute_snapshot(market_data_1h)
         btc = market_data_1h.get("BTC/USDT") or next(iter(market_data_1h.values()))
         regime = self.regime_engine.detect(btc)
-        portfolio = self.portfolio_engine.allocate(scores=alpha.scores, market_data=market_data_1h, regime_mult=regime.multiplier)
 
-        ps = PositionState(
-            equity_usdt=float(equity_usdt),
-            equity_peak_usdt=float(equity_usdt),
-            positions={},
-            entry_prices={p.symbol: p.avg_px for p in positions},
-            highest_prices={p.symbol: p.highest_px for p in positions},
-            days_held={},
-        )
-        rd = self.risk_engine.apply(ps)
-        target = {s: float(w) * float(rd.delever_mult) for s, w in (portfolio.target_weights or {}).items()}
+        equity = self.compute_equity(cash_usdt=cash_usdt, positions=positions, market_data_1h=market_data_1h)
+
+        # Risk: drawdown-based exposure multiplier
+        from src.portfolio.portfolio_state import PortfolioState
+
+        pst = PortfolioState(cash_usdt=float(cash_usdt), equity_usdt=float(equity), peak_equity_usdt=float(equity_peak_usdt))
+        pst.update_equity(equity)
+        dd_mult = self.risk_engine.exposure_multiplier(pst.drawdown_pct)
+
+        portfolio = self.portfolio_engine.allocate(scores=alpha.scores, market_data=market_data_1h, regime_mult=regime.multiplier)
+        target0 = dict(portfolio.target_weights or {})
+        target = self.portfolio_engine.scale_targets(target0, dd_mult)
 
         prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
 
         # exits
-        exit_orders = self.exit_policy.evaluate(positions=positions, market_data=market_data_1h, regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state))
+        exit_orders = self.exit_policy.evaluate(
+            positions=positions,
+            market_data=market_data_1h,
+            regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state),
+        )
 
-        # rebalance (currently assumes current weights unknown => only opens; backtest fills handle positions)
+        # rebalance (long-only opens; closing from rebalance not implemented yet)
         rebalance_orders: List[Order] = []
         for sym, tw in target.items():
             px = float(prices.get(sym, 0.0) or 0.0)
             if px <= 0:
                 continue
-            # if already held, treat as rebalance; else open
             held = next((p for p in positions if p.symbol == sym and p.qty > 0), None)
             side = "buy"
             intent = "OPEN_LONG" if held is None else "REBALANCE"
-            notional = float(tw) * float(equity_usdt)
+            notional = float(tw) * float(equity)
             if notional <= 0:
                 continue
-            rebalance_orders.append(Order(symbol=sym, side=side, intent=intent, notional_usdt=notional, signal_price=px, meta={"target_w": tw}))
+            rebalance_orders.append(Order(symbol=sym, side=side, intent=intent, notional_usdt=notional, signal_price=px, meta={"target_w": tw, "dd_mult": dd_mult}))
+
+        if run_logger is not None:
+            try:
+                now_ts = self.clock.now().isoformat().replace("+00:00", "Z")
+                run_logger.log_equity({
+                    "ts": now_ts,
+                    "cash": float(cash_usdt),
+                    "equity": float(equity),
+                    "peak": float(pst.peak_equity_usdt),
+                    "dd": float(pst.drawdown_pct),
+                    "exposure_mult": float(dd_mult),
+                })
+                for p in positions:
+                    run_logger.log_position({
+                        "ts": now_ts,
+                        "symbol": p.symbol,
+                        "qty": float(p.qty),
+                        "avg_px": float(p.avg_px),
+                        "mark_px": float(getattr(p, 'last_mark_px', 0.0) or prices.get(p.symbol, 0.0)),
+                        "highest_px": float(getattr(p, 'highest_px', 0.0)),
+                        "unrealized_pnl_pct": float(getattr(p, 'unrealized_pnl_pct', 0.0)),
+                    })
+            except Exception:
+                pass
 
         orders = exit_orders + rebalance_orders
         return PipelineOutput(alpha=alpha, regime=regime, portfolio=portfolio, orders=orders)

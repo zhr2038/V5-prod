@@ -70,7 +70,8 @@ class BacktestEngine:
                                         close=market_data[s].close[: i + 1],
                                         volume=market_data[s].volume[: i + 1]) for s in syms}
 
-            out = pipeline.run(md_slice, positions=list(positions.values()), equity_usdt=equity)
+            # In backtest, treat all equity as cash for the cycle.
+            out = pipeline.run(md_slice, positions=list(positions.values()), cash_usdt=float(equity), equity_peak_usdt=float(peak))
 
             exec_px = {s: float(market_data[s].close[i + 1]) for s in syms}
 

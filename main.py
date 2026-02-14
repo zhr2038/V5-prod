@@ -105,46 +105,54 @@ def main() -> None:
     portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
     portfolio = portfolio_engine.allocate(scores=alpha_snap.scores, market_data=md_1h, regime_mult=regime.multiplier)
 
-    # load persisted positions (scaffold equity=100 for now)
-    equity = 100.0
+    # load persisted positions/account
     store = PositionStore(path="reports/positions.sqlite")
+    from src.execution.account_store import AccountStore
+    acc_store = AccountStore(path="reports/positions.sqlite")
+    acc = acc_store.get()
     held = store.list()
-    ps = PositionState(
-        equity_usdt=equity,
-        equity_peak_usdt=equity,
-        positions={},
-        entry_prices={p.symbol: p.avg_px for p in held},
-        highest_prices={p.symbol: p.highest_px for p in held},
-        days_held={},
-    )
-    risk_engine = RiskEngine(cfg.risk)
-    rd = risk_engine.apply(ps)
-
-    # apply delever multiplier to target weights
-    target = {s: float(w) * float(rd.delever_mult) for s, w in (portfolio.target_weights or {}).items()}
-
+    # Mark-to-market at cycle start
+    now_ts = datetime.utcnow().isoformat() + "Z"
     prices = {s: float(md_1h[s].close[-1]) for s in md_1h.keys() if md_1h[s].close}
+    for p in held:
+        s = md_1h.get(p.symbol)
+        if not s or not s.close:
+            continue
+        store.mark_position(p.symbol, now_ts=now_ts, mark_px=float(s.close[-1]), high_px=float(s.high[-1]) if s.high else float(s.close[-1]))
 
-    # Exits (informational in dry-run; still generates CLOSE_LONG intents)
-    exit_orders = []
-    try:
-        from src.risk.exit_policy import ExitPolicy, ExitConfig
+    held = store.list()
 
-        ep = ExitPolicy(ExitConfig())
-        exit_orders = ep.evaluate(positions=held, market_data=md_1h, regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state))
-        # Update highest_px for continuity
-        for p in held:
-            if p.symbol in prices:
-                store.update_highest(p.symbol, max(p.highest_px, prices[p.symbol]))
-    except Exception:
-        exit_orders = []
+    # Run unified pipeline with equity/drawdown scaling
+    from src.core.pipeline import V5Pipeline
+    from src.core.run_logger import RunLogger
 
-    rebalance_orders = compute_orders(ps.positions, target, prices, equity)
-    orders = exit_orders + rebalance_orders
+    run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    run_logger = RunLogger(run_dir=f"reports/runs/{run_id}")
 
-    exec_engine = ExecutionEngine(cfg.execution, position_store=store)
+    pipe = V5Pipeline(cfg)
+    out = pipe.run(
+        market_data_1h=md_1h,
+        positions=held,
+        cash_usdt=float(acc.cash_usdt),
+        equity_peak_usdt=float(acc.equity_peak_usdt),
+        run_logger=run_logger,
+    )
+
+    # Update account peak equity
+    # (equity is logged inside pipeline; recompute here quickly)
+    eq = float(acc.cash_usdt)
+    for p in held:
+        s = md_1h.get(p.symbol)
+        if s and s.close:
+            eq += float(p.qty) * float(s.close[-1])
+    acc.equity_peak_usdt = max(float(acc.equity_peak_usdt), float(eq))
+    acc_store.set(acc)
+
+    orders = out.orders
+
+    exec_engine = ExecutionEngine(cfg.execution, position_store=store, account_store=acc_store)
     report = exec_engine.execute(orders)
-    report.notes = f"regime={regime.state} delever={rd.delever_mult} selected={portfolio.selected} exit_orders={len(exit_orders)}"
+    report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
 
     dump_run_artifacts(
         reports_dir="reports",

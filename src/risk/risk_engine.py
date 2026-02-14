@@ -11,10 +11,7 @@ class RiskEngine:
         self.cfg = cfg
 
     def apply(self, position_state: PositionState) -> RiskDecision:
-        """Apply portfolio-level drawdown delever rule.
-
-        - If drawdown from peak > trigger, reduce target exposure by cfg.drawdown_delever.
-        """
+        """Backwards-compatible API using PositionState."""
         peak = float(position_state.equity_peak_usdt or 0.0)
         eq = float(position_state.equity_usdt or 0.0)
         if peak <= 0:
@@ -24,3 +21,9 @@ class RiskEngine:
         if dd > float(self.cfg.drawdown_trigger):
             return RiskDecision(delever_mult=float(self.cfg.drawdown_delever), reason=f"drawdown={dd:.2%}>")
         return RiskDecision(delever_mult=1.0, reason="ok")
+
+    def exposure_multiplier(self, drawdown_pct: float) -> float:
+        dd = float(drawdown_pct)
+        if dd > float(self.cfg.drawdown_trigger):
+            return float(self.cfg.drawdown_delever)
+        return 1.0

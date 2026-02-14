@@ -136,12 +136,46 @@ class PositionStore:
         self.upsert_position(pos)
         return pos
 
+    def mark_position(
+        self,
+        symbol: str,
+        now_ts: str,
+        mark_px: float,
+        high_px: Optional[float] = None,
+    ) -> None:
+        """Mark-to-market a position.
+
+        - update last_update_ts
+        - update last_mark_px
+        - update unrealized_pnl_pct
+        - update highest_px = max(existing, high_px or mark_px)
+        """
+        p = self.get(symbol)
+        if not p:
+            return
+        mp = float(mark_px)
+        hp = float(high_px) if high_px is not None else mp
+        hi = max(float(p.highest_px), hp)
+        pnl = (mp - float(p.avg_px)) / float(p.avg_px) if float(p.avg_px) > 0 else 0.0
+        self.upsert_position(
+            Position(
+                symbol=p.symbol,
+                qty=float(p.qty),
+                avg_px=float(p.avg_px),
+                entry_ts=str(p.entry_ts),
+                highest_px=float(hi),
+                last_update_ts=str(now_ts),
+                last_mark_px=float(mp),
+                unrealized_pnl_pct=float(pnl),
+                tags_json=str(p.tags_json),
+            )
+        )
+
     def update_highest(self, symbol: str, highest_px: float) -> None:
-        con = sqlite3.connect(str(self.path))
-        c = con.cursor()
-        c.execute("UPDATE positions SET highest_px=? WHERE symbol=?", (float(highest_px), symbol))
-        con.commit()
-        con.close()
+        p = self.get(symbol)
+        if not p:
+            return
+        self.mark_position(symbol=symbol, now_ts=p.last_update_ts or p.entry_ts, mark_px=p.last_mark_px or p.avg_px, high_px=highest_px)
 
     def upsert_position(self, pos: Position) -> None:
         """Insert/update a full position row (used for migrations/tests)."""

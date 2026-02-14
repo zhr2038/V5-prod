@@ -74,5 +74,15 @@ class PortfolioEngine:
         gross = clamp(gross, 0.0, float(self.risk_cfg.max_gross_exposure))
 
         capped = {s: min(w2[s] * gross, float(self.risk_cfg.max_single_weight)) for s in selected}
-        # renormalize if under gross, keep as-is (cash remainder)
         return PortfolioSnapshot(target_weights=capped, selected=selected, volatilities=vols)
+
+    def scale_targets(self, targets: Dict[str, float], mult: float) -> Dict[str, float]:
+        """Scale portfolio target weights by exposure multiplier, keeping caps."""
+        m = float(mult)
+        if m >= 1.0:
+            return dict(targets or {})
+        out: Dict[str, float] = {}
+        for sym, w in (targets or {}).items():
+            w2 = float(w) * m
+            out[sym] = min(w2, float(self.risk_cfg.max_single_weight))
+        return out
