@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily v4 vs v5 last24h rollup compare
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-trading-bot
+ExecStart=/usr/bin/python3 /home/admin/clawd/v5-trading-bot/scripts/rollup_last24h.py

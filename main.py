@@ -126,7 +126,11 @@ def main() -> None:
     from src.core.pipeline import V5Pipeline
     from src.core.run_logger import RunLogger
 
-    run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    import os
+
+    run_id = os.getenv("V5_RUN_ID")
+    if not run_id:
+        run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     run_logger = RunLogger(run_dir=f"reports/runs/{run_id}")
 
     pipe = V5Pipeline(cfg)
