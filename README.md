@@ -8,6 +8,7 @@ V5 横截面趋势轮动系统（OKX 现货），**先 dry-run**。
 - 回测 + walk-forward 框架
 - 成本校准与回灌（F2）
 - 日级预算监控 + 预算驱动的换手抑制（F3）
+- 市场微观结构快照：bid/ask/mid/spread（F1.2）
 
 ## 快速开始
 
@@ -45,6 +46,7 @@ python3 main.py
 - `reports/runs/<run_id>/summary.json`：本次窗口指标汇总（并包含 budget 打标）
 - `reports/runs/<run_id>/trades.csv`：逐笔成交（dry-run fill）
 - `reports/runs/<run_id>/equity.jsonl`：净值曲线点
+- `reports/runs/<run_id>/spread_snapshot.json`：当小时 bid/ask/mid/spread_bps 快照（即使 0 单也会写）
 
 ## F2：回测成本模型校准/回灌
 
@@ -75,6 +77,22 @@ V5 会维护 UTC 日切的预算状态，并把预算信息写回每次运行的
 - Stage-2（F3.2）：当成交样本足够且小额噪声单占比高时，提高 `min_trade_notional`，过滤极小额噪声交易
 
 所有触发条件、有效阈值与抑制计数，都会写入 `decision_audit.json` 的 `budget_action` 字段，保证可追责。
+
+## F1.2：Spread 快照（不依赖成交样本）
+
+为了解决“0 单导致 fills 样本增长慢”的问题，V5 会在每次 hourly run 记录市场微观结构快照（top-of-book）：
+- 日级 NDJSON：`reports/spread_snapshots/YYYYMMDD.jsonl`
+- 每次运行副本：`reports/runs/<run_id>/spread_snapshot.json`
+
+并提供日级 rollup（分位数统计）：
+- `reports/spread_stats/daily_spread_stats_YYYYMMDD.json`
+
+手动 rollup：
+```bash
+python3 scripts/rollup_spreads.py --day YYYYMMDD
+```
+
+（可选）systemd timer：`v5-spread-rollup.timer` 会在 **00:20 UTC** 自动 rollup 昨天数据。
 
 ## v4 vs v5 对比（compare）
 
