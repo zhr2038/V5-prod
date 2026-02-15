@@ -5,7 +5,7 @@ V5 横截面趋势轮动系统（OKX 现货），**先 dry-run**。
 本仓库包含：
 - 信号流水线（Alpha → Regime → Portfolio → Risk → Orders）
 - 执行层：dry-run（模拟成交）/ live（OKX 私有接口：下单/查单/撤单）
-- SQLite 落盘：Positions/Account/Orders/Fills（幂等可追溯）
+- SQLite 落盘：Positions/Account/Orders/Fills/Bills（幂等可追溯）
 - 回测 + walk-forward 框架
 - 成本校准与回灌（F2）
 - 日级预算监控 + 预算驱动的换手抑制（F3）
@@ -62,6 +62,15 @@ slippage 计算：
 python3 scripts/fill_sync.py --db reports/fills.sqlite
 ```
 
+## Bills 同步（G0.4）
+
+Bills 是账本闭环的事实源（覆盖所有导致余额变化的事件，包含但不限于成交）。
+
+手动同步 bills：
+```bash
+python3 scripts/bills_sync.py --db reports/bills.sqlite
+```
+
 ## 运维：reconcile timer（G1.1）
 
 仓库提供 systemd timer `v5-reconcile.timer`，用于定期刷新 `reports/reconcile_status.json`（默认每 5 分钟）。
@@ -94,6 +103,7 @@ cat reports/reconcile_status.json
 落盘文件：
 - fills：`reports/fills.sqlite`
 - orders：`reports/orders.sqlite`
+- bills：`reports/bills.sqlite`
 
 FillStore 去重规则：同一 `instId` 下同一 `tradeId` 只处理一次（主键 `(inst_id, trade_id)`）。
 
