@@ -61,6 +61,35 @@ slippage 计算：
 python3 scripts/fill_sync.py --db reports/fills.sqlite
 ```
 
+## 运维：reconcile timer（G1.1）
+
+仓库提供 systemd timer `v5-reconcile.timer`，用于定期刷新 `reports/reconcile_status.json`（默认每 5 分钟）。
+
+安装（system-wide，需要 sudo）：
+```bash
+bash deploy/install_systemd.sh
+```
+
+安装（user-level，不需要 sudo）：
+```bash
+bash deploy/install_systemd.sh --user
+```
+
+注意：如果使用 **user-level timer** 且希望“用户不登录也运行”，需要开启 lingering：
+```bash
+sudo loginctl enable-linger admin
+```
+
+巡检：
+```bash
+systemctl list-timers --all | grep v5-reconcile
+journalctl -u v5-reconcile.service -n 50 --no-pager
+
+# 文件侧闭环（确认是否持续刷新）
+ls -l --time-style=long-iso reports/reconcile_status.json
+cat reports/reconcile_status.json
+```
+
 落盘文件：
 - fills：`reports/fills.sqlite`
 - orders：`reports/orders.sqlite`
