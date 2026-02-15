@@ -12,7 +12,13 @@ fi
 if [[ "${1:-}" == "--user" ]]; then
   DST="$HOME/.config/systemd/user"
   mkdir -p "$DST"
-  cp "$SRC"/*.service "$SRC"/*.timer "$DST/"
+  # Copy shared timers and default services
+  cp "$SRC"/*.timer "$DST/"
+  cp "$SRC"/*.service "$DST/"
+  # Override reconcile/ledger service units for user mode (avoid User=/Group=, which can fail with 216/GROUP)
+  cp "$SRC"/v5-reconcile.user.service "$DST"/v5-reconcile.service
+  cp "$SRC"/v5-ledger.user.service "$DST"/v5-ledger.service
+
   systemctl --user daemon-reload
   systemctl --user enable --now v5-hourly.timer
   systemctl --user enable --now v5-daily.timer
