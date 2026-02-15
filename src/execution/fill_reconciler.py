@@ -188,6 +188,8 @@ class FillReconciler:
                     regime=None,
                     deadband_pct=None,
                     drift=None,
+                    cl_ord_id=str(row.cl_ord_id),
+                    order_store_path=str(getattr(self.order_store, 'path', 'reports/orders.sqlite')),
                 )
                 self.fill_store.mark_processed(inst_id, trade_id)
                 exported += 1

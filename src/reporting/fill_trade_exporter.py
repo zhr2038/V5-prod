@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 from src.reporting.trade_log import Fill, TradeLogWriter
 from src.reporting.cost_events import append_cost_event
 from src.reporting.spread_snapshot_store import SpreadSnapshotStore
+from src.execution.order_store import OrderStore
 
 
 def _dec(x: Optional[str]) -> Decimal:
@@ -101,6 +102,34 @@ def compute_slippage(
     return None, None, bid, ask
 
 
+def _read_submit_meta(*, symbol: str, cl_ord_id: Optional[str], order_store_path: str = "reports/orders.sqlite") -> Tuple[Optional[float], Optional[float], Optional[float], Optional[int]]:
+    """Return (mid,bid,ask,ts_ms) from OrderStore.req_json._meta if available."""
+    if not cl_ord_id:
+        return None, None, None, None
+    try:
+        os = OrderStore(path=order_store_path)
+        row = os.get(str(cl_ord_id))
+        if row is None:
+            return None, None, None, None
+        try:
+            req = json.loads(row.req_json or "{}")
+        except Exception:
+            req = {}
+        meta = (req.get("_meta") or {}) if isinstance(req, dict) else {}
+        if not isinstance(meta, dict):
+            return None, None, None, None
+        mid = meta.get("mid_px_at_submit")
+        bid = meta.get("bid")
+        ask = meta.get("ask")
+        ts = meta.get("ts_ms")
+        return (float(mid) if mid is not None else None,
+                float(bid) if bid is not None else None,
+                float(ask) if ask is not None else None,
+                int(ts) if ts is not None else None)
+    except Exception:
+        return None, None, None, None
+
+
 def export_fill(
     *,
     fill_ts_ms: int,
@@ -119,6 +148,8 @@ def export_fill(
     deadband_pct: Optional[float] = None,
     drift: Optional[float] = None,
     spread_store: Optional[SpreadSnapshotStore] = None,
+    cl_ord_id: Optional[str] = None,
+    order_store_path: str = "reports/orders.sqlite",
 ) -> ExportResult:
     """Export a single fill into trades.csv (per run) and cost_events NDJSON (daily).
 
@@ -133,18 +164,26 @@ def export_fill(
     fee_cost = fee_cost_usdt(fee=str(fee) if fee is not None else "0", fee_ccy=str(fee_ccy) if fee_ccy is not None else "", inst_id=inst_id, fill_px=fill_px)
     fee_usdt = float(fee_cost) if fee_cost is not None else 0.0
 
-    # Spread snapshot (best-effort)
-    ss = spread_store or SpreadSnapshotStore()
-    snap = None
-    try:
-        snap = ss.get_latest_before(symbol=symbol, ts_ms=int(fill_ts_ms))
-    except Exception:
-        snap = None
+    # Slippage reference (priority): mid_at_submit -> spread snapshot -> None
+    mid, bid, ask, meta_ts_ms = _read_submit_meta(symbol=symbol, cl_ord_id=cl_ord_id, order_store_path=order_store_path)
 
-    bid = float(snap.bid) if snap is not None else None
-    ask = float(snap.ask) if snap is not None else None
-    mid = float(snap.mid) if snap is not None else None
-    spread_bps = float(snap.spread_bps) if (snap is not None and snap.spread_bps is not None) else None
+    spread_bps = None
+    if mid is None:
+        ss = spread_store or SpreadSnapshotStore()
+        snap = None
+        try:
+            snap = ss.get_latest_before(symbol=symbol, ts_ms=int(fill_ts_ms))
+        except Exception:
+            snap = None
+
+        bid = float(snap.bid) if snap is not None else None
+        ask = float(snap.ask) if snap is not None else None
+        mid = float(snap.mid) if snap is not None else None
+        spread_bps = float(snap.spread_bps) if (snap is not None and snap.spread_bps is not None) else None
+    else:
+        # derive spread_bps if we have bid/ask
+        if bid is not None and ask is not None and mid is not None and mid > 0:
+            spread_bps = float((ask - bid) / mid * 10_000.0)
 
     slip_bps, slip_usdt, _, _ = compute_slippage(side=str(side), fill_px=float(px), qty=float(qty), bid=bid, ask=ask, mid=mid)
 
@@ -189,7 +228,10 @@ def export_fill(
             "bid": (float(bid) if bid is not None else None),
             "ask": (float(ask) if ask is not None else None),
             "spread_bps": (float(spread_bps) if spread_bps is not None else None),
+            "mid_source": ("submit" if meta_ts_ms is not None and mid is not None else ("snapshot" if mid is not None else None)),
             "fill_px": float(px),
+            "mid_px_at_submit": (float(mid) if (meta_ts_ms is not None and mid is not None) else None),
+            "mid_ts_ms": (int(meta_ts_ms) if meta_ts_ms is not None else None),
             "slippage_bps": (float(slip_bps) if slip_bps is not None else None),
             "fee_usdt": float(fee_usdt) if fee_cost is not None else None,
             "fee_bps": None,
