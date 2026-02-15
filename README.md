@@ -1,5 +1,7 @@
 # v5-trading-bot
 
+中文说明见：**README.zh-CN.md**
+
 V5 cross-sectional trend rotation system (OKX spot), **dry-run first**.
 
 This repo includes:
