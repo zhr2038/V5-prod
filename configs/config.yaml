@@ -52,7 +52,15 @@ rebalance:
   deadband_riskoff: 0.05
 
 execution:
+  mode: dry_run
   dry_run: true
+  order_store_path: reports/orders.sqlite
+  kill_switch_path: reports/kill_switch.json
+  reconcile_status_path: reports/reconcile_status.json
+  okx_exp_time_ms: 1500
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+
   split_orders: 3
   split_interval_sec: 3
   max_hourly_volume_pct: 0.05

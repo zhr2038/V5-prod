@@ -33,12 +33,12 @@ def _load_json(path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def load_kill_switch_enabled(path: str = "reports/kill_switch.json") -> bool:
+def load_kill_switch_enabled(path: str) -> bool:
     d = _load_json(path) or {}
     return bool(d.get("enabled") or d.get("kill_switch") or d.get("active"))
 
 
-def load_reconcile_ok(path: str = "reports/reconcile_status.json") -> bool:
+def load_reconcile_ok(path: str) -> bool:
     # Placeholder before G1.0: assume OK unless file exists and says not ok.
     d = _load_json(path)
     if d is None:
@@ -50,9 +50,9 @@ def load_reconcile_ok(path: str = "reports/reconcile_status.json") -> bool:
     return True
 
 
-def submit_gate_for_live() -> Tuple[str, bool, bool]:
-    ks = load_kill_switch_enabled()
-    rc_ok = load_reconcile_ok()
+def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
+    ks = load_kill_switch_enabled(getattr(cfg, "kill_switch_path", "reports/kill_switch.json"))
+    rc_ok = load_reconcile_ok(getattr(cfg, "reconcile_status_path", "reports/reconcile_status.json"))
     if ks or not rc_ok:
         return "SELL_ONLY", rc_ok, ks
     return "ALLOW", rc_ok, ks
@@ -104,7 +104,7 @@ class LiveExecutionEngine:
     ):
         self.cfg = cfg
         self.okx = okx
-        self.order_store = order_store or OrderStore(path="reports/orders.sqlite")
+        self.order_store = order_store or OrderStore(path=str(getattr(cfg, "order_store_path", "reports/orders.sqlite")))
         self.position_store = position_store or PositionStore(path="reports/positions.sqlite")
         self.run_id = str(run_id or "")
         self.exp_time_ms = exp_time_ms
@@ -162,7 +162,7 @@ class LiveExecutionEngine:
         return payload
 
     def place(self, o: Order) -> LiveExecutionResult:
-        gate, reconcile_ok, kill_switch = submit_gate_for_live()
+        gate, reconcile_ok, kill_switch = submit_gate_for_live(self.cfg)
 
         # Gate: block all buys (OPEN/REBALANCE) in SELL_ONLY mode.
         if gate == "SELL_ONLY" and o.side == "buy" and o.intent in {"OPEN_LONG", "REBALANCE"}:

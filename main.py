@@ -283,7 +283,37 @@ def main() -> None:
 
     trade_log = TradeLogWriter(run_dir=f"reports/runs/{run_id}")
 
-    exec_engine = ExecutionEngine(cfg.execution, position_store=store, account_store=acc_store, trade_log=trade_log, run_id=run_id)
+    def make_executor():
+        mode = getattr(cfg.execution, "mode", "dry_run")
+        if str(mode).lower() == "live":
+            # Last-arm safety
+            arm_env = str(getattr(cfg.execution, "live_arm_env", "V5_LIVE_ARM"))
+            arm_val = str(getattr(cfg.execution, "live_arm_value", "YES"))
+            if os.getenv(arm_env) != arm_val:
+                raise RuntimeError(f"Live mode requested but not armed: set {arm_env}={arm_val}")
+
+            # Key completeness
+            if not (cfg.exchange.api_key and cfg.exchange.api_secret and cfg.exchange.passphrase):
+                raise RuntimeError("Live mode requested but exchange API credentials are missing")
+
+            from src.execution.okx_private_client import OKXPrivateClient
+            from src.execution.live_execution_engine import LiveExecutionEngine
+
+            client = OKXPrivateClient(exchange=cfg.exchange)
+            live = LiveExecutionEngine(
+                cfg.execution,
+                okx=client,
+                order_store=None,
+                position_store=store,
+                run_id=run_id,
+                exp_time_ms=getattr(cfg.execution, "okx_exp_time_ms", None),
+            )
+            return live, True
+
+        # default dry-run
+        return ExecutionEngine(cfg.execution, position_store=store, account_store=acc_store, trade_log=trade_log, run_id=run_id), False
+
+    exec_engine, is_live = make_executor()
 
     # pre-trade equity point (so instant runs reflect costs)
     try:
@@ -305,8 +335,20 @@ def main() -> None:
     except Exception:
         pass
 
+    if is_live and hasattr(exec_engine, "poll_open"):
+        try:
+            exec_engine.poll_open(limit=200)
+        except Exception as e:
+            log.warning(f"live poll_open (pre) failed: {e}")
+
     report = exec_engine.execute(orders)
     report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
+
+    if is_live and hasattr(exec_engine, "poll_open"):
+        try:
+            exec_engine.poll_open(limit=200)
+        except Exception as e:
+            log.warning(f"live poll_open (post) failed: {e}")
 
     # post-trade equity point (after applying fees/slippage)
     try:

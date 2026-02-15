@@ -116,7 +116,8 @@ class OKXPrivateClient:
             "Content-Type": "application/json",
         }
         if self.req_exptime_ms is not None:
-            h["OK-ACCESS-EXPTIME"] = str(int(self.req_exptime_ms))
+            # OKX trading endpoints support expTime header (milliseconds)
+            h["expTime"] = str(int(self.req_exptime_ms))
         return h
 
     def _build_request_path(self, path: str, params: Optional[Dict[str, Any]]) -> str:
@@ -145,7 +146,7 @@ class OKXPrivateClient:
             ts = _utc_iso_ms()
             headers = self._headers(timestamp=ts, method=method_u, request_path=request_path, body=body_str)
             if exp_time_ms is not None:
-                headers["OK-ACCESS-EXPTIME"] = str(int(exp_time_ms))
+                headers["expTime"] = str(int(exp_time_ms))
             try:
                 resp = self._client.request(method_u, request_path, content=body_str if body_str else None, headers=headers)
             except httpx.TimeoutException as e:

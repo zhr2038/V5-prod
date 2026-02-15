@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class RegimeState(str, Enum):
@@ -76,7 +76,22 @@ class RebalanceConfig(BaseModel):
 
 
 class ExecutionConfig(BaseModel):
+    # Mode selector (preferred). Keep dry_run for backward compatibility.
+    mode: str = Field(default="dry_run", description="dry_run|live")
     dry_run: bool = True
+
+    # Stores / safety files
+    order_store_path: str = Field(default="reports/orders.sqlite")
+    kill_switch_path: str = Field(default="reports/kill_switch.json")
+    reconcile_status_path: str = Field(default="reports/reconcile_status.json")
+
+    # OKX request expiration (ms) for trading endpoints (optional)
+    okx_exp_time_ms: Optional[int] = Field(default=1500, ge=1)
+
+    # Last-arm safety env var (required for live)
+    live_arm_env: str = Field(default="V5_LIVE_ARM")
+    live_arm_value: str = Field(default="YES")
+
     split_orders: int = Field(default=3, ge=1, le=10)
     split_interval_sec: float = Field(default=3.0, ge=0)
     max_hourly_volume_pct: float = Field(default=0.05, gt=0, le=1)
@@ -85,6 +100,25 @@ class ExecutionConfig(BaseModel):
     # dry-run cost model (bps)
     fee_bps: float = Field(default=6.0, ge=0)
     slippage_bps: float = Field(default=5.0, ge=0)
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_norm(cls, v: str) -> str:
+        vv = str(v or "dry_run").strip().lower()
+        if vv not in {"dry_run", "live"}:
+            raise ValueError("execution.mode must be 'dry_run' or 'live'")
+        return vv
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_pre(cls, data: object) -> object:
+        # Backward-compat: if mode not present, derive from dry_run.
+        if isinstance(data, dict) and "mode" not in data and "dry_run" in data:
+            d = dict(data)
+            d["mode"] = "dry_run" if bool(d.get("dry_run", True)) else "live"
+            return d
+        return data
 
 
 class BacktestConfig(BaseModel):
