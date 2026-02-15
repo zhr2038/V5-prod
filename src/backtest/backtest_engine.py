@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import numpy as np
 
@@ -15,6 +15,7 @@ class BacktestResult:
     max_dd: float
     profit_factor: float
     turnover: float
+    cost_assumption: Optional[Dict[str, Any]] = None
 
 
 class BacktestEngine:
@@ -29,15 +30,24 @@ class BacktestEngine:
     This scaffold implements a minimal simulator; it is not yet production-grade.
     """
 
-    def __init__(self, fee_bps: float = 6.0, slippage_bps: float = 5.0, one_bar_delay: bool = True):
+    def __init__(
+        self,
+        fee_bps: float = 6.0,
+        slippage_bps: float = 5.0,
+        one_bar_delay: bool = True,
+        cost_model=None,
+        cost_model_meta: Optional[Dict[str, Any]] = None,
+    ):
         self.fee_bps = float(fee_bps)
         self.slippage_bps = float(slippage_bps)
         self.one_bar_delay = bool(one_bar_delay)
+        self.cost_model = cost_model
+        self.cost_model_meta = cost_model_meta or {}
 
     def run(self, market_data: Dict[str, MarketSeries], pipeline=None) -> BacktestResult:
         syms = list(market_data.keys())
         if not syms:
-            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0)
+            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self.cost_model_meta)
 
         from src.execution.position_store import Position
         from src.core.pipeline import V5Pipeline
@@ -49,7 +59,7 @@ class BacktestEngine:
         # align by min length
         n = min(len(market_data[s].close) for s in syms)
         if n < 80:
-            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0)
+            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self.cost_model_meta)
 
         equity = 1.0
         equity_curve = []
@@ -72,6 +82,7 @@ class BacktestEngine:
 
             # In backtest, treat all equity as cash for the cycle.
             out = pipeline.run(md_slice, positions=list(positions.values()), cash_usdt=float(equity), equity_peak_usdt=float(peak))
+            regime_state = str(out.regime.state.value if hasattr(out.regime.state, 'value') else out.regime.state)
 
             exec_px = {s: float(market_data[s].close[i + 1]) for s in syms}
 
@@ -81,8 +92,20 @@ class BacktestEngine:
                 px = float(exec_px.get(o.symbol, o.signal_price) or 0.0)
                 if px <= 0:
                     continue
-                # fees+slippage
-                cost = (self.fee_bps + self.slippage_bps) / 10_000.0
+                # fees+slippage (calibrated if cost_model is provided)
+                fee_bps = self.fee_bps
+                slp_bps = self.slippage_bps
+                if self.cost_model is not None:
+                    try:
+                        fee_bps, slp_bps, _meta = self.cost_model.resolve(
+                            o.symbol,
+                            regime_state,
+                            "fill",
+                            float(o.notional_usdt),
+                        )
+                    except Exception:
+                        fee_bps, slp_bps = self.fee_bps, self.slippage_bps
+                cost = (float(fee_bps) + float(slp_bps)) / 10_000.0
                 if o.side == 'buy':
                     qty = (o.notional_usdt / px) * (1.0 - cost)
                     traded_notional += abs(o.notional_usdt)
@@ -115,7 +138,7 @@ class BacktestEngine:
 
         eq = np.array(equity_curve, dtype=float)
         if len(eq) < 5:
-            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0)
+            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self.cost_model_meta)
 
         rets = eq[1:] / eq[:-1] - 1.0
         max_eq = np.maximum.accumulate(eq)
@@ -128,7 +151,7 @@ class BacktestEngine:
         pf = float(gains / (losses + 1e-12))
         turnover = float(np.mean(np.array(turnovers, dtype=float)))
 
-        return BacktestResult(sharpe=sharpe, cagr=cagr, max_dd=max_dd, profit_factor=pf, turnover=turnover)
+        return BacktestResult(sharpe=sharpe, cagr=cagr, max_dd=max_dd, profit_factor=pf, turnover=turnover, cost_assumption=self.cost_model_meta)
 
     def walk_forward(self, market_data: Dict[str, MarketSeries], folds: int = 4) -> List[BacktestResult]:
         # Placeholder: split time into folds and run run()
