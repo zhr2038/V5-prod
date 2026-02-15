@@ -65,7 +65,7 @@ def main() -> None:
             "source": str(args.source),
             "ok": False,
             "reason": "rate_limited",
-            "error": {"type": "rate_limit", "detail": str(e)},
+            "error": {"type": "rate_limit", "detail": str(e), "http_status": None, "okx_code": "50011", "okx_msg": str(e)},
         }
         _write_status(args.out, status)
 

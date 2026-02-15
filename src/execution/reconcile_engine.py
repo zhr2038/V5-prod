@@ -57,7 +57,7 @@ class ReconcileEngine:
         self.account_store = account_store
         self.thresholds = thresholds or ReconcileThresholds()
 
-    def _fetch_exchange_cash(self) -> Tuple[Dict[str, str], Dict[str, str], int]:
+    def _fetch_exchange_cash(self) -> Tuple[Dict[str, str], Dict[str, str], int, Dict[str, Any]]:
         r = self.okx.get_balance(ccy=None)
         data = (r.data or {}).get("data")
         cash: Dict[str, str] = {}
@@ -82,7 +82,13 @@ class ReconcileEngine:
                     u_max = max(u_max, int(ut or 0))
                 except Exception:
                     pass
-        return cash, frozen, int(u_max)
+
+        meta = {
+            "http_status": int(getattr(r, "http_status", 0) or 0),
+            "okx_code": getattr(r, "okx_code", None),
+            "okx_msg": getattr(r, "okx_msg", None),
+        }
+        return cash, frozen, int(u_max), meta
 
     def _local_snapshot(self) -> Tuple[str, Dict[str, str]]:
         acc = self.account_store.get()
@@ -94,7 +100,7 @@ class ReconcileEngine:
         return cash_usdt, ccy_qty
 
     def reconcile(self, *, out_path: str = "reports/reconcile_status.json") -> Dict[str, Any]:
-        cash, ord_frozen, u_max = self._fetch_exchange_cash()
+        cash, ord_frozen, u_max, meta = self._fetch_exchange_cash()
         local_cash_usdt, local_ccy_qty = self._local_snapshot()
 
         ccys = sorted(set(cash.keys()) | set(local_ccy_qty.keys()) | {"USDT"})
@@ -103,6 +109,21 @@ class ReconcileEngine:
         ok = True
         reason = None
         max_abs_usdt = 0.0
+        max_abs_base = 0.0
+
+        # OKX top-level code/msg
+        okx_code = meta.get("okx_code")
+        okx_msg = meta.get("okx_msg")
+        http_status = meta.get("http_status")
+        if okx_code and str(okx_code) != "0":
+            ok = False
+            # classify common codes
+            if str(okx_code).startswith("501") or str(okx_code) == "50041":
+                reason = "auth_error"
+            elif str(okx_code) == "50011":
+                reason = "rate_limited"
+            else:
+                reason = "api_system_error"
 
         for ccy in ccys:
             ex = cash.get(ccy) or "0"
@@ -125,6 +146,7 @@ class ReconcileEngine:
                     ok = False
                     reason = reason or "usdt_mismatch"
             else:
+                max_abs_base = max(max_abs_base, abs(float(delta)))
                 if abs(float(delta)) > float(self.thresholds.abs_base_tol):
                     ok = False
                     reason = reason or "base_mismatch"
@@ -160,7 +182,8 @@ class ReconcileEngine:
                 "abs_base_tol": float(self.thresholds.abs_base_tol),
                 "dust_usdt_ignore": float(self.thresholds.dust_usdt_ignore),
             },
-            "stats": {"max_abs_usdt_delta": float(max_abs_usdt)},
+            "stats": {"max_abs_usdt_delta": float(max_abs_usdt), "max_abs_base_delta": float(max_abs_base)},
+            "error": {"http_status": http_status, "okx_code": okx_code, "okx_msg": okx_msg} if okx_code or okx_msg or http_status else None,
             "open_orders": {
                 "note": "using cashBal avoids false mismatch from ordFrozen",
             },

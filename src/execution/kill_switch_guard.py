@@ -173,8 +173,26 @@ class KillSwitchGuard:
             trigger = "reconcile_hard_fail"
 
         if trigger:
+            # details snapshot for post-mortem
+            stats = status.get("stats") or {}
+            max_abs_usdt_delta = stats.get("max_abs_usdt_delta")
+            max_abs_base_delta = stats.get("max_abs_base_delta")
+
+            # if stats missing, try compute from diffs
+            try:
+                if max_abs_base_delta is None:
+                    xs = []
+                    for d in (status.get("diffs") or []):
+                        if str(d.get("ccy") or "").upper() == "USDT":
+                            continue
+                        xs.append(abs(float(d.get("delta") or 0.0)))
+                    max_abs_base_delta = max(xs) if xs else 0.0
+            except Exception:
+                pass
+
             details = {
-                "max_abs_usdt_delta": ((status.get("stats") or {}).get("max_abs_usdt_delta")),
+                "max_abs_usdt_delta": max_abs_usdt_delta,
+                "max_abs_base_delta": max_abs_base_delta,
                 "reconcile_status_path": self.cfg.reconcile_status_path,
                 "okx_code": err.get("okx_code"),
                 "okx_msg": err.get("okx_msg"),
