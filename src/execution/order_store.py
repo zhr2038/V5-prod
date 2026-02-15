@@ -207,6 +207,9 @@ class OrderStore:
         con.commit()
         con.close()
 
+    def _row_from_sql(self, row) -> Optional[OrderRow]:
+        return OrderRow(*row) if row else None
+
     def get(self, cl_ord_id: str) -> Optional[OrderRow]:
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
@@ -228,7 +231,30 @@ class OrderStore:
         )
         row = cur.fetchone()
         con.close()
-        return OrderRow(*row) if row else None
+        return self._row_from_sql(row)
+
+    def get_by_ord_id(self, ord_id: str) -> Optional[OrderRow]:
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute(
+            """
+            SELECT
+              cl_ord_id, run_id, window_start_ts, window_end_ts,
+              inst_id, side, intent, decision_hash, td_mode, ord_type,
+              px, sz, notional_usdt,
+              state, ord_id,
+              req_json, ack_json, last_query_json,
+              last_error_code, last_error_msg,
+              created_ts, updated_ts, last_poll_ts,
+              acc_fill_sz, avg_px, fee,
+              reconcile_ok_at_submit, kill_switch_at_submit, submit_gate
+            FROM orders WHERE ord_id=?
+            """,
+            (str(ord_id),),
+        )
+        row = cur.fetchone()
+        con.close()
+        return self._row_from_sql(row)
 
     def update_state(
         self,
