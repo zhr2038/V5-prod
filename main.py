@@ -341,6 +341,20 @@ def main() -> None:
         except Exception as e:
             log.warning(f"live poll_open (pre) failed: {e}")
 
+    # G1.0 reconcile: write reconcile_status.json after pre poll (fills processed)
+    if is_live:
+        try:
+            from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
+
+            client = getattr(exec_engine, "okx", None)
+            if client is not None:
+                th = ReconcileThresholds(abs_usdt_tol=1.0, abs_base_tol=1e-8, dust_usdt_ignore=0.0)
+                ReconcileEngine(okx=client, position_store=store, account_store=acc_store, thresholds=th).reconcile(
+                    out_path=str(getattr(cfg.execution, "reconcile_status_path", "reports/reconcile_status.json"))
+                )
+        except Exception as e:
+            log.warning(f"reconcile failed: {e}")
+
     report = exec_engine.execute(orders)
     report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
 
