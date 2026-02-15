@@ -34,7 +34,7 @@ class Fill:
     price: float
     notional_usdt: float
     fee_usdt: float
-    slippage_usdt: float
+    slippage_usdt: Optional[float]
     realized_pnl_usdt: Optional[float] = None
     realized_pnl_pct: Optional[float] = None
 
@@ -49,7 +49,7 @@ class Fill:
             "price": f"{float(self.price):.12g}",
             "notional_usdt": f"{float(self.notional_usdt):.12g}",
             "fee_usdt": f"{float(self.fee_usdt):.12g}",
-            "slippage_usdt": f"{float(self.slippage_usdt):.12g}",
+            "slippage_usdt": "" if self.slippage_usdt is None else f"{float(self.slippage_usdt):.12g}",
             "realized_pnl_usdt": "" if self.realized_pnl_usdt is None else f"{float(self.realized_pnl_usdt):.12g}",
             "realized_pnl_pct": "" if self.realized_pnl_pct is None else f"{float(self.realized_pnl_pct):.12g}",
         }

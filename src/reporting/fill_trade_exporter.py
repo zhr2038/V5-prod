@@ -161,7 +161,7 @@ def export_fill(
             price=float(px),
             notional_usdt=float(notional),
             fee_usdt=float(fee_usdt),
-            slippage_usdt=float(slip_usdt or 0.0),
+            slippage_usdt=(None if slip_usdt is None else float(slip_usdt)),
             realized_pnl_usdt=None,
             realized_pnl_pct=None,
         )

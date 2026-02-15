@@ -81,6 +81,18 @@ def _to_f(x: Any) -> float:
         return 0.0
 
 
+def _to_opt_f(x: Any) -> Optional[float]:
+    try:
+        if x is None:
+            return None
+        s = str(x).strip()
+        if s == "":
+            return None
+        return float(s)
+    except Exception:
+        return None
+
+
 def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[float] = None) -> Dict[str, Any]:
     if not trades:
         return {
@@ -96,7 +108,8 @@ def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[flo
 
     notionals = [abs(_to_f(t.get("notional_usdt"))) for t in trades]
     fees = [_to_f(t.get("fee_usdt")) for t in trades]
-    slp = [_to_f(t.get("slippage_usdt")) for t in trades]
+    slp_opt = [_to_opt_f(t.get("slippage_usdt")) for t in trades]
+    slp_vals = [x for x in slp_opt if x is not None]
 
     realized = [_to_f(t.get("realized_pnl_usdt")) for t in trades if str(t.get("realized_pnl_usdt") or "").strip() != ""]
 
@@ -109,7 +122,7 @@ def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[flo
     turnover = float(sum(notionals)) / float(avg_equity or 1.0) if avg_equity else None
 
     fee_total = float(sum(fees))
-    slp_total = float(sum(slp))
+    slp_total = float(sum(slp_vals))
     cost_total = fee_total + slp_total
 
     cost_ratio = float(cost_total) / float(avg_equity or 1.0) if avg_equity else None
@@ -120,6 +133,7 @@ def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[flo
         "turnover_ratio": turnover,
         "fees_usdt_total": fee_total,
         "slippage_usdt_total": slp_total,
+        "slippage_coverage": (float(len(slp_vals)) / float(len(trades))) if trades else None,
         "cost_usdt_total": cost_total,
         "cost_ratio": cost_ratio,
         "win_rate": win_rate,
