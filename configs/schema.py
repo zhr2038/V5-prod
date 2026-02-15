@@ -68,6 +68,13 @@ class RiskConfig(BaseModel):
     drawdown_delever: float = Field(default=0.50, gt=0, le=1)
 
 
+class RebalanceConfig(BaseModel):
+    # no-trade region (deadband) by regime
+    deadband_sideways: float = Field(default=0.05, ge=0, le=1)
+    deadband_trending: float = Field(default=0.03, ge=0, le=1)
+    deadband_riskoff: float = Field(default=0.05, ge=0, le=1)
+
+
 class ExecutionConfig(BaseModel):
     dry_run: bool = True
     split_orders: int = Field(default=3, ge=1, le=10)
@@ -96,6 +103,7 @@ class AppConfig(BaseModel):
     alpha: AlphaConfig = Field(default_factory=AlphaConfig)
     regime: RegimeConfig = Field(default_factory=RegimeConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
+    rebalance: RebalanceConfig = Field(default_factory=RebalanceConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
 

@@ -140,11 +140,50 @@ class V5Pipeline:
         if audit:
             audit.counts["orders_exit"] = len(exit_orders)
 
-        # 7. Rebalance orders生成（添加拒绝原因审计）
+        # 7. Rebalance orders生成（deadband + 拒绝原因审计）
         rebalance_orders: List[Order] = []
         router_decisions = []
-        
+
+        # deadband: adapt by regime
+        rstate = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+        if rstate == "Trending":
+            deadband = float(self.cfg.rebalance.deadband_trending)
+        elif rstate in ("Risk-Off", "Risk_Off", "RiskOff"):
+            deadband = float(self.cfg.rebalance.deadband_riskoff)
+        else:
+            deadband = float(self.cfg.rebalance.deadband_sideways)
+        if audit:
+            audit.rebalance_deadband_pct = deadband
+
+        # current weights
+        current_w: Dict[str, float] = {}
+        if equity > 0:
+            for p in positions:
+                pxp = float(prices.get(p.symbol, 0.0) or 0.0)
+                if pxp <= 0:
+                    continue
+                current_w[p.symbol] = float(p.qty) * pxp / float(equity)
+
         for sym, tw in target.items():
+            # deadband check on weight drift
+            cw = float(current_w.get(sym, 0.0))
+            drift = float(tw) - cw
+            if audit:
+                audit.rebalance_drift_by_symbol[sym] = drift
+            if abs(drift) <= deadband:
+                if audit:
+                    audit.rebalance_skipped_deadband_count += 1
+                    audit.rebalance_skipped_deadband_by_symbol[sym] = abs(drift)
+                    audit.reject("deadband_skip")
+                    router_decisions.append({
+                        "symbol": sym,
+                        "action": "skip",
+                        "reason": "deadband",
+                        "drift": drift,
+                        "deadband": deadband,
+                    })
+                continue
+
             px = float(prices.get(sym, 0.0) or 0.0)
             if px <= 0:
                 if audit:

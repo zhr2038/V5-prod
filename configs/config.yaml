@@ -46,6 +46,11 @@ risk:
   drawdown_trigger: 0.08
   drawdown_delever: 0.50
 
+rebalance:
+  deadband_sideways: 0.05
+  deadband_trending: 0.03
+  deadband_riskoff: 0.05
+
 execution:
   dry_run: true
   split_orders: 3

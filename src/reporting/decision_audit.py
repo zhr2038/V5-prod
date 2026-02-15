@@ -39,6 +39,12 @@ class DecisionAudit:
     # Portfolio调试信息
     portfolio_debug: Dict[str, Any] = field(default_factory=dict)
     
+    # Rebalance deadband info
+    rebalance_deadband_pct: Optional[float] = None
+    rebalance_skipped_deadband_count: int = 0
+    rebalance_skipped_deadband_by_symbol: Dict[str, float] = field(default_factory=dict)  # sym -> abs(drift)
+    rebalance_drift_by_symbol: Dict[str, float] = field(default_factory=dict)  # sym -> signed drift
+
     # 路由决策
     router_decisions: List[Dict[str, Any]] = field(default_factory=list)
     
