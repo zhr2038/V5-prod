@@ -248,6 +248,54 @@ class OKXPrivateClient:
         }
         return self.request("GET", "/api/v5/trade/fills", params=params)
 
+    def get_bills(
+        self,
+        *,
+        ccy: Optional[str] = None,
+        inst_type: Optional[str] = None,
+        mgn_mode: Optional[str] = None,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        begin: Optional[int] = None,
+        end: Optional[int] = None,
+        limit: int = 100,
+    ) -> OKXResponse:
+        params: Dict[str, Any] = {
+            "ccy": ccy,
+            "instType": inst_type,
+            "mgnMode": mgn_mode,
+            "after": after,
+            "before": before,
+            "begin": begin,
+            "end": end,
+            "limit": int(limit),
+        }
+        return self.request("GET", "/api/v5/account/bills", params=params)
+
+    def get_bills_archive(
+        self,
+        *,
+        ccy: Optional[str] = None,
+        inst_type: Optional[str] = None,
+        mgn_mode: Optional[str] = None,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        begin: Optional[int] = None,
+        end: Optional[int] = None,
+        limit: int = 100,
+    ) -> OKXResponse:
+        params: Dict[str, Any] = {
+            "ccy": ccy,
+            "instType": inst_type,
+            "mgnMode": mgn_mode,
+            "after": after,
+            "before": before,
+            "begin": begin,
+            "end": end,
+            "limit": int(limit),
+        }
+        return self.request("GET", "/api/v5/account/bills-archive", params=params)
+
     # Minimal self-check helper
     def get_balance(self, ccy: Optional[str] = None) -> OKXResponse:
         params = {"ccy": ccy} if ccy else None

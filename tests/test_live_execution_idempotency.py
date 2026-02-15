@@ -53,7 +53,8 @@ def test_place_idempotent_same_intent() -> None:
         pos = PositionStore(path=f"{td}/pos.sqlite")
         pos.upsert_buy("BTC/USDT", qty=1.0, px=100.0)
 
-        eng = LiveExecutionEngine(ExecutionConfig(), okx=okx, order_store=store, position_store=pos, run_id="r")
+        cfg = ExecutionConfig(reconcile_status_path=f"{td}/reconcile_status.json", kill_switch_path=f"{td}/kill_switch.json")
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
 
         o = Order(symbol="BTC/USDT", side="buy", intent="OPEN_LONG", notional_usdt=10.0, signal_price=100.0, meta={"decision_hash": "h"})
 
@@ -72,7 +73,8 @@ def test_sell_market_uses_position_qty() -> None:
         pos = PositionStore(path=f"{td}/pos.sqlite")
         pos.upsert_buy("ETH/USDT", qty=2.0, px=100.0)
 
-        eng = LiveExecutionEngine(ExecutionConfig(), okx=okx, order_store=store, position_store=pos, run_id="r")
+        cfg = ExecutionConfig(reconcile_status_path=f"{td}/reconcile_status.json", kill_switch_path=f"{td}/kill_switch.json")
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
         o = Order(symbol="ETH/USDT", side="sell", intent="REBALANCE", notional_usdt=50.0, signal_price=100.0, meta={"decision_hash": "h2"})
 
         eng.place(o)
