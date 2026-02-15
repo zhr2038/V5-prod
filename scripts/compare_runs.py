@@ -97,6 +97,87 @@ def _fmt(x: Any) -> str:
         return str(x)
 
 
+def _fmt_bool(x: Any) -> str:
+    if x is None:
+        return "N/A"
+    if isinstance(x, bool):
+        return "true" if x else "false"
+    s = str(x).strip().lower()
+    if s in ("true", "false"):
+        return s
+    return s
+
+
+def _budget_reason_norm(reason: Any) -> str:
+    if not reason:
+        return "N/A"
+    s = str(reason)
+    if "+" in s:
+        parts = s.split("+")
+        out = []
+        if any("turnover" in p for p in parts):
+            out.append("turnover")
+        if any("cost" in p for p in parts):
+            out.append("cost")
+        if len(out) == 2:
+            return "both"
+        return out[0] if out else s
+    if "turnover" in s:
+        return "turnover"
+    if "cost" in s:
+        return "cost"
+    return s
+
+
+def _budget_header_lines(v5: Dict[str, Any], v5_audit: Optional[Dict[str, Any]]) -> list:
+    """Budget lines for the top summary block.
+
+    Priority:
+    1) v5 summary.json top-level budget
+    2) decision_audit.json.budget_action for effective deadband/min_notional
+    """
+    lines = []
+    b = (v5.get("budget") or {}) if isinstance(v5, dict) else {}
+
+    exceeded = b.get("exceeded")
+    reason = b.get("reason")
+
+    if b:
+        lines.append(f"- v5 budget_exceeded: {_fmt_bool(exceeded)}")
+        lines.append(f"- v5 budget_reason: {_budget_reason_norm(reason)}")
+
+        # optional compact used/budget line (only if any budgets set)
+        t_used = b.get("turnover_used")
+        t_budget = b.get("turnover_budget_per_day")
+        c_bps = b.get("cost_used_bps")
+        c_budget = b.get("cost_budget_bps_per_day")
+        if t_budget is not None or c_budget is not None:
+            tu = _fmt(t_used)
+            tb = _fmt(t_budget)
+            cu = _fmt(c_bps)
+            cb = _fmt(c_budget)
+            lines.append(f"- v5 budget_used: turnover={tu}/{tb} cost_bps={cu}/{cb}")
+
+    # deadband/min_notional effective come from audit.budget_action
+    ba = (v5_audit.get("budget_action") or {}) if v5_audit else {}
+    if ba and bool(ba.get("enabled")):
+        # deadband effective line
+        if ba.get("deadband_effective") is not None:
+            lines.append(
+                f"- v5 deadband_effective: {_fmt(ba.get('deadband_effective'))} "
+                f"(base={_fmt(ba.get('deadband_base'))} mult={_fmt(ba.get('deadband_multiplier'))} cap={_fmt(ba.get('deadband_cap'))})"
+            )
+        # min_trade_notional effective line
+        if ba.get("min_trade_notional_effective") is not None:
+            cap = ba.get("min_trade_notional_cap")
+            lines.append(
+                f"- v5 min_trade_notional_effective: {_fmt(ba.get('min_trade_notional_effective'))} "
+                f"(base={_fmt(ba.get('min_trade_notional_base'))} mult={_fmt(ba.get('min_trade_notional_multiplier'))} cap={_fmt(cap)})"
+            )
+
+    return lines
+
+
 def compare(
     v4: Dict[str, Any],
     v5: Dict[str, Any],
@@ -126,6 +207,9 @@ def compare(
         lines.append(f"- v5 deadband_skipped_count: {_fmt(v5_audit.get('rebalance_skipped_deadband_count'))}")
         deadband_rej = (v5_audit.get('rejects') or {}).get('deadband_skip')
         lines.append(f"- v5 rejects.deadband_skip: {_fmt(deadband_rej)}")
+
+    # budget control-state lines (should be on first screen)
+    lines.extend(_budget_header_lines(v5, v5_audit))
 
     lines.append("")
 
