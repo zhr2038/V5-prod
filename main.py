@@ -166,6 +166,28 @@ def main() -> None:
         window_start_ts=window_start_ts,
         window_end_ts=window_end_ts,
     )
+
+    # F3.1 pre-run budget action input: load today's budget state (UTC) and set audit.budget
+    try:
+        from src.reporting.budget_state import _utc_yyyymmdd_from_epoch_sec, load_budget_state
+
+        ts_for_day = window_end_ts or window_start_ts
+        if ts_for_day is not None:
+            ymd = _utc_yyyymmdd_from_epoch_sec(int(ts_for_day))
+            st = load_budget_state(f"reports/budget_state/{ymd}.json")
+            if st is not None:
+                audit.budget = {
+                    "ymd_utc": ymd,
+                    "turnover_used": st.turnover_used,
+                    "turnover_budget_per_day": st.turnover_budget_per_day,
+                    "cost_used_usdt": st.cost_used_usdt,
+                    "cost_used_bps": st.cost_used_bps(),
+                    "cost_budget_bps_per_day": st.cost_budget_bps_per_day,
+                    "exceeded": st.exceeded(),
+                    "reason": st.reason(),
+                }
+    except Exception:
+        pass
     
     # 记录universe数量
     audit.counts["universe"] = len(symbols)

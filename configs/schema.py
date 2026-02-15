@@ -104,9 +104,14 @@ class BacktestConfig(BaseModel):
 
 
 class BudgetConfig(BaseModel):
-    # F3.0: monitoring only (no behavior change)
+    # F3.0: monitoring
     turnover_budget_per_day: Optional[float] = Field(default=None, ge=0)
     cost_budget_bps_per_day: Optional[float] = Field(default=None, ge=0)
+
+    # F3.1: action (default off unless budgets are set & exceeded)
+    action_enabled: bool = Field(default=True)
+    deadband_multiplier_exceeded: float = Field(default=1.5, ge=1.0)
+    deadband_cap: float = Field(default=0.15, ge=0, le=1)
 
 
 class AppConfig(BaseModel):

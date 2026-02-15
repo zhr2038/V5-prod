@@ -3,6 +3,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+
+def _effective_deadband(base: float, cfg: AppConfig, audit: Optional[DecisionAudit]) -> float:
+    """F3.1: widen deadband when daily budget exceeded (monitor-driven, controlled).
+
+    Budget is computed in main() from persisted daily state; pipeline consumes audit.budget.
+    """
+    db = float(base)
+    try:
+        if not cfg.budget.action_enabled:
+            return db
+        b = (audit.budget or {}) if audit else {}
+        if not b or not bool(b.get("exceeded")):
+            return db
+        mult = float(cfg.budget.deadband_multiplier_exceeded)
+        cap = float(cfg.budget.deadband_cap)
+        return float(min(db * mult, cap))
+    except Exception:
+        return db
+
+
 from configs.schema import AppConfig
 from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
@@ -147,13 +167,32 @@ class V5Pipeline:
         # deadband: adapt by regime
         rstate = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
         if rstate == "Trending":
-            deadband = float(self.cfg.rebalance.deadband_trending)
+            deadband_base = float(self.cfg.rebalance.deadband_trending)
         elif rstate in ("Risk-Off", "Risk_Off", "RiskOff"):
-            deadband = float(self.cfg.rebalance.deadband_riskoff)
+            deadband_base = float(self.cfg.rebalance.deadband_riskoff)
         else:
-            deadband = float(self.cfg.rebalance.deadband_sideways)
+            deadband_base = float(self.cfg.rebalance.deadband_sideways)
+
+        deadband = _effective_deadband(deadband_base, self.cfg, audit)
         if audit:
             audit.rebalance_deadband_pct = deadband
+            # record budget action (F3.1)
+            b = audit.budget or {}
+            if b.get("exceeded") and self.cfg.budget.action_enabled:
+                audit.budget_action = {
+                    "enabled": True,
+                    "trigger": b.get("reason") or "unknown",
+                    "deadband_base": deadband_base,
+                    "deadband_multiplier": float(self.cfg.budget.deadband_multiplier_exceeded),
+                    "deadband_cap": float(self.cfg.budget.deadband_cap),
+                    "deadband_effective": deadband,
+                    "min_trade_notional_multiplier": 1.0,
+                    "min_trade_notional_effective": None,
+                    "suppressed_orders_count": 0,
+                    "suppressed_reasons": [],
+                }
+            else:
+                audit.budget_action = {"enabled": False}
 
         # current weights
         current_w: Dict[str, float] = {}
@@ -261,6 +300,15 @@ class V5Pipeline:
         if audit:
             audit.router_decisions = router_decisions
             audit.counts["orders_rebalance"] = len(rebalance_orders)
+            # fill budget_action suppression stats (F3.1)
+            try:
+                ba = audit.budget_action or {}
+                if ba.get("enabled"):
+                    ba["suppressed_orders_count"] = int(audit.rebalance_skipped_deadband_count)
+                    ba["suppressed_reasons"] = ["deadband"] if audit.rebalance_skipped_deadband_count > 0 else []
+                    audit.budget_action = ba
+            except Exception:
+                pass
 
         if run_logger is not None:
             try:

@@ -60,8 +60,9 @@ class DecisionAudit:
         "provider_error": 0,
     })
     
-    # Budget (F3.0)
+    # Budget (F3)
     budget: Dict[str, Any] = field(default_factory=dict)
+    budget_action: Dict[str, Any] = field(default_factory=dict)
 
     # 备注
     notes: List[str] = field(default_factory=list)
@@ -121,6 +122,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.router_decisions = data.get("router_decisions", [])
     audit.rejects = data.get("rejects", {})
     audit.budget = data.get("budget", {})
+    audit.budget_action = data.get("budget_action", {})
     audit.notes = data.get("notes", [])
     
     return audit
