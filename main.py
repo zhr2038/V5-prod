@@ -114,10 +114,10 @@ def main() -> None:
         end_ts_ms = window_end_ts * 1000  # 转换为毫秒
     
     md_1h = provider.fetch_ohlcv(
-        symbols, 
-        timeframe=cfg.timeframe_main, 
+        symbols,
+        timeframe=cfg.timeframe_main,
         limit=24 * 60,
-        end_ts_ms=end_ts_ms
+        end_ts_ms=end_ts_ms,
     )
 
     alpha_engine = AlphaEngine(cfg.alpha)
@@ -206,6 +206,55 @@ def main() -> None:
         run_logger=run_logger,
         audit=audit,
     )
+
+    # F1.2 spread snapshot (records even when no orders/fills)
+    try:
+        from src.reporting.spread_snapshots import append_spread_snapshot
+
+        tob = {}
+        if hasattr(provider, "fetch_top_of_book"):
+            tob = provider.fetch_top_of_book(symbols)
+
+        selected = set(getattr(out.portfolio, "selected", []) or [])
+        rows = []
+        for sym in symbols:
+            ba = tob.get(sym) or {}
+            bid = ba.get("bid")
+            ask = ba.get("ask")
+            if bid is None or ask is None:
+                continue
+            bid = float(bid)
+            ask = float(ask)
+            if bid <= 0 or ask <= 0:
+                continue
+            mid = (bid + ask) / 2.0
+            spread_bps = (ask - bid) / mid * 10_000.0 if mid > 0 else None
+            rows.append(
+                {
+                    "symbol": sym,
+                    "bid": bid,
+                    "ask": ask,
+                    "mid": mid,
+                    "spread_bps": spread_bps,
+                    "selected": sym in selected,
+                }
+            )
+
+        if window_end_ts is not None:
+            evt = {
+                "ts": datetime.utcnow().isoformat() + "Z",
+                "run_id": run_id,
+                "window_start_ts": window_start_ts,
+                "window_end_ts": window_end_ts,
+                "symbols": rows,
+            }
+            append_spread_snapshot(evt)
+            # also keep a per-run copy for easy inspection
+            Path(f"reports/runs/{run_id}/spread_snapshot.json").write_text(
+                json.dumps(evt, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+    except Exception as e:
+        log.warning(f"spread snapshot failed: {e}")
     
     # 保存DecisionAudit
     audit.save(f"reports/runs/{run_id}")

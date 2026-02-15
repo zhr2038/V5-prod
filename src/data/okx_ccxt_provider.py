@@ -9,7 +9,7 @@ from .market_data_provider import MarketDataProvider
 
 
 class OKXCCXTProvider(MarketDataProvider):
-    """OKX spot data provider using ccxt (public endpoints for OHLCV)."""
+    """OKX spot data provider using ccxt (public endpoints for OHLCV + top-of-book)."""
 
     def __init__(self, rate_limit: bool = True):
         self.ex = ccxt.okx({"enableRateLimit": bool(rate_limit)})
@@ -64,4 +64,36 @@ class OKXCCXTProvider(MarketDataProvider):
                     )
             
             out[s] = series
+        return out
+
+    def fetch_top_of_book(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
+        """Return {symbol: {bid, ask}} using ccxt tickers.
+
+        Best-effort: if bid/ask missing, symbol omitted.
+        """
+        out: Dict[str, Dict[str, float]] = {}
+        try:
+            tickers = None
+            # fetch_tickers is more efficient if available
+            if hasattr(self.ex, "fetch_tickers"):
+                try:
+                    tickers = self.ex.fetch_tickers(symbols)
+                except Exception:
+                    tickers = None
+            if tickers is None:
+                tickers = {s: self.ex.fetch_ticker(s) for s in symbols}
+
+            for s in symbols:
+                t = (tickers or {}).get(s) or {}
+                bid = t.get("bid")
+                ask = t.get("ask")
+                if bid is None or ask is None:
+                    continue
+                bid_f = float(bid)
+                ask_f = float(ask)
+                if bid_f <= 0 or ask_f <= 0:
+                    continue
+                out[s] = {"bid": bid_f, "ask": ask_f}
+        except Exception:
+            return out
         return out

@@ -11,7 +11,10 @@ from .market_data_provider import MarketDataProvider
 
 
 class MockProvider(MarketDataProvider):
-    """Deterministic-ish mock OHLCV for dry-run/tests without network."""
+    """Deterministic-ish mock OHLCV for dry-run/tests without network.
+
+    Also supports top-of-book snapshots with a fixed synthetic spread.
+    """
 
     def __init__(self, seed: int = 7):
         self.rng = np.random.default_rng(seed)
@@ -34,4 +37,22 @@ class MockProvider(MarketDataProvider):
             low = [min(o, c) * (1 - abs(float(self.rng.normal(0, 0.002)))) for o, c in zip(open_, close)]
             volume = [float(1_000_000 + 100_000 * math.sin(k / 5.0) + 50_000 * i) for k in range(limit)]
             out[sym] = MarketSeries(symbol=sym, timeframe=timeframe, ts=ts, open=open_, high=high, low=low, close=close, volume=volume)
+        return out
+
+    def fetch_top_of_book(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
+        # Use last close from a small 1h sample and apply ±5bps synthetic spread
+        md = self.fetch_ohlcv(symbols, timeframe="1h", limit=2)
+        out: Dict[str, Dict[str, float]] = {}
+        for s in symbols:
+            series = md.get(s)
+            if not series or not series.close:
+                continue
+            px = float(series.close[-1])
+            if px <= 0:
+                continue
+            spread_bps = 5.0
+            half = spread_bps / 2.0 / 10_000.0
+            bid = px * (1.0 - half)
+            ask = px * (1.0 + half)
+            out[s] = {"bid": float(bid), "ask": float(ask)}
         return out
