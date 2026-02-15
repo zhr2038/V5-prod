@@ -107,8 +107,16 @@ class V5Pipeline:
             audit.top_scores = [{"symbol": sym, "score": score} for sym, score in sorted_scores[:10]]
             audit.counts["scored"] = len(alpha.scores)
         
-        # 2. Regime检测后审计
-        btc = market_data_1h.get("BTC/USDT") or next(iter(market_data_1h.values()))
+        # 2. Regime检测后审计（显式处理空行情，避免 StopIteration）
+        if not market_data_1h:
+            if audit:
+                audit.reject("no_market_data")
+                audit.add_note("market_data_1h is empty; cannot run pipeline")
+            raise ValueError("market_data_1h is empty")
+
+        btc = market_data_1h.get("BTC/USDT")
+        if btc is None:
+            btc = next(iter(market_data_1h.values()))
         regime = self.regime_engine.detect(btc)
         if audit:
             audit.regime = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)

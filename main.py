@@ -123,8 +123,16 @@ def main() -> None:
     alpha_engine = AlphaEngine(cfg.alpha)
     alpha_snap = alpha_engine.compute_snapshot(md_1h)
 
-    # regime from BTC
-    btc = md_1h.get("BTC/USDT") or next(iter(md_1h.values()))
+    # regime from BTC (handle empty market data explicitly)
+    if not md_1h:
+        log.error("No market data returned from provider (md_1h is empty); aborting run")
+        return
+
+    btc = md_1h.get("BTC/USDT")
+    if btc is None:
+        # fallback to any available symbol
+        btc = next(iter(md_1h.values()))
+
     regime_engine = RegimeEngine(cfg.regime)
     regime = regime_engine.detect(btc)
 
