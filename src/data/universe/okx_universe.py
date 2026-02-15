@@ -42,6 +42,10 @@ class OKXUniverseProvider:
         blacklist_path: str = "configs/blacklist.json",
         exclude_stablecoins: bool = True,
         timeout_sec: int = 10,
+        *,
+        refine_with_single_ticker: bool = False,
+        refine_single_ticker_max_candidates: int = 200,
+        refine_single_ticker_sleep_sec: float = 0.02,
     ):
         self.base_url = base_url.rstrip("/")
         self.cache_path = Path(cache_path)
@@ -51,6 +55,9 @@ class OKXUniverseProvider:
         self.blacklist_path = blacklist_path
         self.exclude_stablecoins = bool(exclude_stablecoins)
         self.timeout_sec = int(timeout_sec)
+        self.refine_with_single_ticker = bool(refine_with_single_ticker)
+        self.refine_single_ticker_max_candidates = int(refine_single_ticker_max_candidates)
+        self.refine_single_ticker_sleep_sec = float(refine_single_ticker_sleep_sec)
 
     def get_universe(self, now_ts: Optional[float] = None) -> List[str]:
         now_ts = float(now_ts or time.time())
@@ -63,6 +70,11 @@ class OKXUniverseProvider:
         inst = self._fetch_instruments()
         tks = self._fetch_tickers()
         items = self._build(inst, tks)
+
+        # Optional refinement: per-instrument ticker gives a more reliable 24h quote volume on some mirrors.
+        if self.refine_with_single_ticker and items:
+            items = self._refine_by_single_ticker(items)
+
         syms = [it.symbol for it in items]
         self._save_cache(now_ts, syms)
         return syms
@@ -106,10 +118,66 @@ class OKXUniverseProvider:
         obj = r.json()
         return list(obj.get("data") or [])
 
+    def _fetch_ticker(self, inst_id: str) -> Optional[Dict[str, Any]]:
+        url = f"{self.base_url}/api/v5/market/ticker"
+        r = requests.get(url, params={"instId": str(inst_id)}, timeout=self.timeout_sec)
+        r.raise_for_status()
+        obj = r.json()
+        rows = obj.get("data") if isinstance(obj, dict) else None
+        if isinstance(rows, list) and rows:
+            if isinstance(rows[0], dict):
+                return rows[0]
+        return None
+
     @staticmethod
     def _is_stablecoin(asset: str) -> bool:
         a = (asset or "").upper()
         return a in {"USDT", "USDC", "DAI", "TUSD", "USDG", "FDUSD", "BUSD", "USDP"}
+
+    def _quote_vol_usdt_from_ticker(self, t: Dict[str, Any]) -> float:
+        qv_f = 0.0
+        for k in ("volCcyQuote", "volCcy24h"):
+            try:
+                qv_f = float(t.get(k) or 0.0)
+            except Exception:
+                qv_f = 0.0
+            if qv_f > 0:
+                return float(qv_f)
+
+        # Fallback: estimate quote volume from base volume * last.
+        try:
+            vol_base = float(t.get("vol24h") or 0.0)
+        except Exception:
+            vol_base = 0.0
+        try:
+            last_px = float(t.get("last") or 0.0)
+        except Exception:
+            last_px = 0.0
+        if vol_base > 0 and last_px > 0:
+            return float(vol_base * last_px)
+        return 0.0
+
+    def _refine_by_single_ticker(self, items: List[UniverseItem]) -> List[UniverseItem]:
+        # Take a subset of candidates (already sorted by batch volume) and re-rank using per-inst ticker.
+        import time as _time
+
+        m = int(self.refine_single_ticker_max_candidates or 0)
+        cand = list(items)[:m] if m > 0 else list(items)
+        refined: List[UniverseItem] = []
+        for it in cand:
+            t = self._fetch_ticker(it.inst_id)
+            if not isinstance(t, dict):
+                continue
+            qv = self._quote_vol_usdt_from_ticker(t)
+            refined.append(UniverseItem(symbol=it.symbol, inst_id=it.inst_id, quote_volume_usdt_24h=float(qv)))
+            if float(self.refine_single_ticker_sleep_sec) > 0:
+                _time.sleep(float(self.refine_single_ticker_sleep_sec))
+
+        refined.sort(key=lambda x: float(x.quote_volume_usdt_24h), reverse=True)
+        refined = [x for x in refined if float(x.quote_volume_usdt_24h) >= float(self.min_24h_quote_volume_usdt)]
+        if int(self.top_n) > 0:
+            refined = refined[: int(self.top_n)]
+        return refined
 
     def _build(self, instruments: List[Dict[str, Any]], tickers: List[Dict[str, Any]]) -> List[UniverseItem]:
         # instId -> (base, quote)
@@ -139,30 +207,7 @@ class OKXUniverseProvider:
             if sym.upper() in bl_syms or inst_id.upper().replace("-", "/") in bl_syms:
                 continue
 
-            # OKX tickers: prefer quote-volume fields.
-            # In practice, some endpoints return volCcy24h (quote volume) but not volCcyQuote.
-            qv_f = 0.0
-            for k in ("volCcyQuote", "volCcy24h"):
-                try:
-                    qv_f = float(t.get(k) or 0.0)
-                except Exception:
-                    qv_f = 0.0
-                if qv_f > 0:
-                    break
-
-            # Fallback: estimate quote volume from base volume * last.
-            if qv_f <= 0:
-                try:
-                    vol_base = float(t.get("vol24h") or 0.0)
-                except Exception:
-                    vol_base = 0.0
-                try:
-                    last_px = float(t.get("last") or 0.0)
-                except Exception:
-                    last_px = 0.0
-                if vol_base > 0 and last_px > 0:
-                    qv_f = vol_base * last_px
-
+            qv_f = self._quote_vol_usdt_from_ticker(t)
             if qv_f < self.min_24h_quote_volume_usdt:
                 continue
             out.append(UniverseItem(symbol=sym, inst_id=inst_id, quote_volume_usdt_24h=float(qv_f)))

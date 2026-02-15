@@ -97,6 +97,9 @@ def main() -> None:
                 min_24h_quote_volume_usdt=cfg.universe.min_24h_quote_volume_usdt,
                 blacklist_path=cfg.universe.blacklist_path,
                 exclude_stablecoins=cfg.universe.exclude_stablecoins,
+                refine_with_single_ticker=bool(getattr(cfg.universe, "refine_with_single_ticker", False)),
+                refine_single_ticker_max_candidates=int(getattr(cfg.universe, "refine_single_ticker_max_candidates", 200) or 200),
+                refine_single_ticker_sleep_sec=float(getattr(cfg.universe, "refine_single_ticker_sleep_sec", 0.02) or 0.0),
             )
             uni = up.get_universe()
             if cfg.universe.use_universe_symbols and uni:

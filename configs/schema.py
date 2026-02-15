@@ -32,6 +32,11 @@ class UniverseConfig(BaseModel):
     blacklist_path: str = Field(default="configs/blacklist.json")
     exclude_stablecoins: bool = True
 
+    # Step-2: refine liquidity ranking using per-instrument ticker (more reliable than batch tickers on some mirrors).
+    refine_with_single_ticker: bool = Field(default=False)
+    refine_single_ticker_max_candidates: int = Field(default=200, ge=1)
+    refine_single_ticker_sleep_sec: float = Field(default=0.02, ge=0)
+
 
 class AlphaWeights(BaseModel):
     f1_mom_5d: float = 0.25
