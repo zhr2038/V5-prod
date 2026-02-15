@@ -13,6 +13,7 @@ from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 from src.execution.ledger_engine import LedgerEngine
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
+from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
 
 
 def _now_ms() -> int:
@@ -124,9 +125,47 @@ class LivePreflight:
 
         out = KillSwitchGuard(GuardConfig(reconcile_status_path=self.reconcile_status_path)).apply()
         reconcile_ok = bool(out.get("ok"))
+        reconcile_reason = out.get("reason")
         kill_switch_enabled = bool((out.get("kill_switch") or {}).get("enabled"))
-        details["reconcile"] = {"ok": reconcile_ok, "reason": out.get("reason"), "category": out.get("category")}
+        details["reconcile"] = {"ok": reconcile_ok, "reason": reconcile_reason, "category": out.get("category")}
         details["kill_switch"] = {"enabled": kill_switch_enabled, "trigger": (out.get("kill_switch") or {}).get("trigger")}
+
+        # 3b) Optional controlled patch (only for state alignment)
+        if (
+            (not reconcile_ok)
+            and bool(getattr(self.cfg, "preflight_bootstrap_patch_enabled", False))
+            and str(reconcile_reason) in {"base_mismatch", "usdt_mismatch"}
+            and bool(ledger_ok)
+        ):
+            pr = controlled_patch_from_okx_balance(
+                okx=self.okx,
+                position_store=self.position_store,
+                account_store=self.account_store,
+                max_total_drift_usdt=float(getattr(self.cfg, "preflight_bootstrap_patch_max_total_usdt", 50.0) or 50.0),
+                min_interval_sec=int(getattr(self.cfg, "preflight_bootstrap_patch_min_interval_sec", 300) or 300),
+            )
+            details["bootstrap_patch"] = {
+                "applied": bool(pr.applied),
+                "reason": pr.reason,
+                "est_total_drift_usdt": pr.est_total_drift_usdt,
+                "updated_cash": pr.updated_cash,
+                "updated_positions": pr.updated_positions,
+            }
+
+            # rerun reconcile/guard after patch
+            status = eng.reconcile(out_path=self.reconcile_status_path)
+            status["generated_ts_ms"] = int(status.get("ts_ms") or _now_ms())
+            p = Path(self.reconcile_status_path)
+            tmp = p.with_suffix(p.suffix + ".tmp")
+            tmp.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(p)
+
+            out = KillSwitchGuard(GuardConfig(reconcile_status_path=self.reconcile_status_path)).apply()
+            reconcile_ok = bool(out.get("ok"))
+            reconcile_reason = out.get("reason")
+            kill_switch_enabled = bool((out.get("kill_switch") or {}).get("enabled"))
+            details["reconcile_after_patch"] = {"ok": reconcile_ok, "reason": reconcile_reason, "category": out.get("category")}
+            details["kill_switch_after_patch"] = {"enabled": kill_switch_enabled, "trigger": (out.get("kill_switch") or {}).get("trigger")}
 
         # 4) Freshness check (avoid stale ok=true)
         rec_obj = _read_json(self.reconcile_status_path)

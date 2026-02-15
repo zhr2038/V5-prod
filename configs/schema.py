@@ -95,6 +95,11 @@ class ExecutionConfig(BaseModel):
     max_status_age_sec: int = Field(default=180, ge=1)
     preflight_fail_action: str = Field(default="sell_only", description="sell_only|abort")
 
+    # Optional: controlled exchange->local bootstrap patch (live-only)
+    preflight_bootstrap_patch_enabled: bool = Field(default=False, description="When reconcile fails (base/usdt mismatch), patch local cash/qty from exchange as a state-alignment step.")
+    preflight_bootstrap_patch_max_total_usdt: float = Field(default=50.0, ge=0, description="Safety cap: if estimated total drift exceeds this, do not patch.")
+    preflight_bootstrap_patch_min_interval_sec: int = Field(default=300, ge=0, description="Min seconds between patches to avoid thrash.")
+
     # OKX request expiration (ms) for trading endpoints (optional).
     # Note: OKX expects expTime as an epoch-millisecond timestamp.
     # We treat values < 1e12 as a delta-ms from now for convenience.
