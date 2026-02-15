@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
+from collections import Counter
 
 import numpy as np
 
@@ -43,11 +44,17 @@ class BacktestEngine:
         self.one_bar_delay = bool(one_bar_delay)
         self.cost_model = cost_model
         self.cost_model_meta = cost_model_meta or {}
+        self._fallback_counts = Counter()
+
+    def _cost_assumption(self) -> Dict[str, Any]:
+        ca = dict(self.cost_model_meta or {})
+        ca["fallback_level_counts"] = dict(self._fallback_counts)
+        return ca
 
     def run(self, market_data: Dict[str, MarketSeries], pipeline=None) -> BacktestResult:
         syms = list(market_data.keys())
         if not syms:
-            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self.cost_model_meta)
+            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self._cost_assumption())
 
         from src.execution.position_store import Position
         from src.core.pipeline import V5Pipeline
@@ -59,7 +66,7 @@ class BacktestEngine:
         # align by min length
         n = min(len(market_data[s].close) for s in syms)
         if n < 80:
-            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self.cost_model_meta)
+            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self._cost_assumption())
 
         equity = 1.0
         equity_curve = []
@@ -97,25 +104,54 @@ class BacktestEngine:
                 slp_bps = self.slippage_bps
                 if self.cost_model is not None:
                     try:
-                        fee_bps, slp_bps, _meta = self.cost_model.resolve(
+                        res = self.cost_model.resolve(
                             o.symbol,
                             regime_state,
                             "fill",
                             float(o.notional_usdt),
                         )
+                        meta = {}
+                        if isinstance(res, tuple) and len(res) == 3:
+                            fee_bps, slp_bps, meta = res
+                        else:
+                            fee_bps, slp_bps = res
+                        lvl = (meta or {}).get("fallback_level")
+                        if lvl:
+                            self._fallback_counts[str(lvl)] += 1
+                        else:
+                            self._fallback_counts["UNKNOWN"] += 1
                     except Exception:
                         fee_bps, slp_bps = self.fee_bps, self.slippage_bps
+                        self._fallback_counts["ERROR"] += 1
                 cost = (float(fee_bps) + float(slp_bps)) / 10_000.0
                 if o.side == 'buy':
                     qty = (o.notional_usdt / px) * (1.0 - cost)
                     traded_notional += abs(o.notional_usdt)
                     p = positions.get(o.symbol)
                     if p is None:
-                        positions[o.symbol] = Position(symbol=o.symbol, qty=qty, avg_px=px, entry_ts='0', highest_px=px)
+                        positions[o.symbol] = Position(
+                            symbol=o.symbol,
+                            qty=qty,
+                            avg_px=px,
+                            entry_ts='0',
+                            highest_px=px,
+                            last_update_ts='0',
+                            last_mark_px=px,
+                            unrealized_pnl_pct=0.0,
+                        )
                     else:
                         new_qty = p.qty + qty
                         avg = (p.avg_px * p.qty + px * qty) / new_qty if new_qty else px
-                        positions[o.symbol] = Position(symbol=o.symbol, qty=new_qty, avg_px=avg, entry_ts=p.entry_ts, highest_px=max(p.highest_px, px))
+                        positions[o.symbol] = Position(
+                            symbol=o.symbol,
+                            qty=new_qty,
+                            avg_px=avg,
+                            entry_ts=p.entry_ts,
+                            highest_px=max(p.highest_px, px),
+                            last_update_ts='0',
+                            last_mark_px=px,
+                            unrealized_pnl_pct=0.0,
+                        )
                 else:
                     p = positions.get(o.symbol)
                     if p is None:
@@ -138,7 +174,7 @@ class BacktestEngine:
 
         eq = np.array(equity_curve, dtype=float)
         if len(eq) < 5:
-            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self.cost_model_meta)
+            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self._cost_assumption())
 
         rets = eq[1:] / eq[:-1] - 1.0
         max_eq = np.maximum.accumulate(eq)
@@ -151,7 +187,9 @@ class BacktestEngine:
         pf = float(gains / (losses + 1e-12))
         turnover = float(np.mean(np.array(turnovers, dtype=float)))
 
-        return BacktestResult(sharpe=sharpe, cagr=cagr, max_dd=max_dd, profit_factor=pf, turnover=turnover, cost_assumption=self.cost_model_meta)
+        ca = dict(self.cost_model_meta or {})
+        ca["fallback_level_counts"] = dict(self._fallback_counts)
+        return BacktestResult(sharpe=sharpe, cagr=cagr, max_dd=max_dd, profit_factor=pf, turnover=turnover, cost_assumption=ca)
 
     def walk_forward(self, market_data: Dict[str, MarketSeries], folds: int = 4) -> List[BacktestResult]:
         # Placeholder: split time into folds and run run()

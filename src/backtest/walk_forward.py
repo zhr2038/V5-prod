@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
+from configs.schema import AppConfig
 from src.core.models import MarketSeries
 from src.backtest.backtest_engine import BacktestEngine, BacktestResult
+from src.backtest.cost_factory import make_cost_model_from_cfg
 
 
 @dataclass
@@ -29,13 +31,22 @@ def build_folds(n: int, folds: int = 4) -> List[Tuple[Tuple[int, int], Tuple[int
     return out
 
 
-def run_walk_forward(market_data: Dict[str, MarketSeries], folds: int = 4) -> List[WalkForwardFold]:
+def run_walk_forward(market_data: Dict[str, MarketSeries], folds: int = 4, cfg: Optional[AppConfig] = None) -> List[WalkForwardFold]:
     syms = list(market_data.keys())
     if not syms:
         return []
     n = min(len(market_data[s].close) for s in syms)
     out: List[WalkForwardFold] = []
-    bt = BacktestEngine()
+    if cfg is None:
+        cfg = AppConfig(symbols=syms)
+    cost_model, meta = make_cost_model_from_cfg(cfg)
+    bt = BacktestEngine(
+        fee_bps=float(cfg.backtest.fee_bps),
+        slippage_bps=float(cfg.backtest.slippage_bps),
+        one_bar_delay=bool(cfg.backtest.one_bar_delay),
+        cost_model=cost_model,
+        cost_model_meta=meta.to_dict(),
+    )
     for tr, te in build_folds(n, folds=folds):
         # For now: run on test slice only (train slice reserved for future calibration)
         s0, s1 = te

@@ -11,17 +11,17 @@ def _utc_today_yyyymmdd() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
-def load_latest_cost_stats(stats_dir: str, max_age_days: int = 7) -> Optional[Dict[str, Any]]:
+def load_latest_cost_stats(stats_dir: str, max_age_days: int = 7) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Load newest daily_cost_stats_YYYYMMDD.json within max_age_days (UTC).
 
-    Returns parsed dict or None.
+    Returns (stats_dict, stats_path) or (None, None).
     """
     d = Path(stats_dir)
     if not d.exists():
-        return None
+        return None, None
     files = sorted(d.glob("daily_cost_stats_*.json"))
     if not files:
-        return None
+        return None, None
 
     # newest by filename (YYYYMMDD)
     files.sort(key=lambda p: p.name)
@@ -33,15 +33,15 @@ def load_latest_cost_stats(stats_dir: str, max_age_days: int = 7) -> Optional[Di
         dt = datetime.strptime(tag, "%Y%m%d").replace(tzinfo=timezone.utc)
         age_days = (datetime.now(timezone.utc) - dt).days
         if age_days > int(max_age_days):
-            return None
+            return None, None
     except Exception:
         # if parse fails, allow load
         pass
 
     try:
-        return json.loads(latest.read_text(encoding="utf-8"))
+        return json.loads(latest.read_text(encoding="utf-8")), str(latest)
     except Exception:
-        return None
+        return None, None
 
 
 def _bucket_key(symbol: str, regime: str, router_action: str, notional_bucket: str) -> str:
@@ -69,7 +69,8 @@ class FixedCostModel:
     def resolve(self, symbol: str, regime: str, router_action: str, notional_usdt: float):
         return float(self.fee_bps), float(self.slippage_bps), {
             "mode": "default",
-            "level": "fixed",
+            "fallback_level": "DEFAULT",
+            "bucket_key_used": "fixed",
         }
 
 
@@ -129,6 +130,9 @@ class CalibratedCostModel:
                 "mode": "default",
                 "reason": "min_fills_global",
                 "fills_global": self._global_fills(),
+                "fallback_level": "DEFAULT",
+                "bucket_key_used": "DEFAULT",
+                "source_day": self.stats.get("day"),
             }
 
         nb = _notional_bucket(float(notional_usdt))
@@ -137,13 +141,13 @@ class CalibratedCostModel:
 
         # fallback ladder
         levels = [
-            (symbol, regime, router_action, nb),
-            ("ALL", regime, router_action, nb),
-            ("ALL", "ALL", router_action, nb),
-            ("ALL", "ALL", "ALL", "ALL"),
+            (symbol, regime, router_action, nb, "L0_exact"),
+            ("ALL", regime, router_action, nb, "L1_no_symbol"),
+            ("ALL", "ALL", router_action, nb, "L2_no_symbol_regime"),
+            ("ALL", "ALL", "ALL", "ALL", "L4_global"),
         ]
 
-        for i, (sym2, reg2, act2, nb2) in enumerate(levels):
+        for i, (sym2, reg2, act2, nb2, lvl) in enumerate(levels):
             key = _bucket_key(sym2, reg2, act2, nb2)
             b = self._get_bucket(key)
             if not b:
@@ -160,7 +164,8 @@ class CalibratedCostModel:
 
             return fee, slp, {
                 "mode": "calibrated",
-                "level": key,
+                "fallback_level": lvl,
+                "bucket_key_used": key,
                 "fills_bucket": b.get("count"),
                 "fee_quantile": self.fee_quantile,
                 "slippage_quantile": self.slippage_quantile,
@@ -172,4 +177,6 @@ class CalibratedCostModel:
             "mode": "default",
             "reason": "no_bucket",
             "source_day": self.stats.get("day"),
+            "fallback_level": "DEFAULT",
+            "bucket_key_used": "DEFAULT",
         }

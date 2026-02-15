@@ -17,7 +17,7 @@ def main() -> None:
     provider = OKXCCXTProvider() if which == "okx" else MockProvider(seed=7)
 
     md = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=24 * 120)
-    folds = run_walk_forward(md, folds=int(cfg.backtest.walk_forward_folds))
+    folds = run_walk_forward(md, folds=int(cfg.backtest.walk_forward_folds), cfg=cfg)
 
     out = [
         {
