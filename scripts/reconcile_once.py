@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 
 from configs.loader import load_config
@@ -32,9 +33,15 @@ def main() -> None:
             thresholds=ReconcileThresholds(abs_usdt_tol=float(args.abs_usdt_tol), abs_base_tol=float(args.abs_base_tol)),
         )
         obj = eng.reconcile(out_path=args.out)
-        logging.info(
-            f"RECONCILE ok={obj.get('ok')} reason={obj.get('reason')} max_abs_usdt_delta={obj.get('stats',{}).get('max_abs_usdt_delta')} out={args.out}"
-        )
+        # Single-line structured log for ops / grep (helps G1.2 consecutive-fail analysis)
+        payload = {
+            "event": "RECONCILE",
+            "ok": obj.get("ok"),
+            "reason": obj.get("reason"),
+            "max_abs_usdt_delta": (obj.get("stats", {}) or {}).get("max_abs_usdt_delta"),
+            "out": args.out,
+        }
+        logging.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     finally:
         client.close()
 
