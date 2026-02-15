@@ -89,6 +89,12 @@ class ExecutionConfig(BaseModel):
     reconcile_dust_usdt_ignore: float = Field(default=1.0, ge=0, description="Ignore base mismatches whose USDT value is below this (best-effort using mid).")
     reconcile_ccy_mode: str = Field(default="universe_only", description="universe_only|all")
 
+    # Live preflight catch-up (A)
+    preflight_enabled: bool = Field(default=True)
+    preflight_max_pages: int = Field(default=5, ge=1)
+    max_status_age_sec: int = Field(default=180, ge=1)
+    preflight_fail_action: str = Field(default="sell_only", description="sell_only|abort")
+
     # OKX request expiration (ms) for trading endpoints (optional).
     # Note: OKX expects expTime as an epoch-millisecond timestamp.
     # We treat values < 1e12 as a delta-ms from now for convenience.
@@ -121,6 +127,14 @@ class ExecutionConfig(BaseModel):
         vv = str(v or "universe_only").strip().lower()
         if vv not in {"universe_only", "all"}:
             raise ValueError("execution.reconcile_ccy_mode must be 'universe_only' or 'all'")
+        return vv
+
+    @field_validator("preflight_fail_action")
+    @classmethod
+    def _preflight_fail_action(cls, v: str) -> str:
+        vv = str(v or "sell_only").strip().lower()
+        if vv not in {"sell_only", "abort"}:
+            raise ValueError("execution.preflight_fail_action must be 'sell_only' or 'abort'")
         return vv
 
 
