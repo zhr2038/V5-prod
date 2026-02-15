@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from src.reporting.trade_log import Fill, TradeLogWriter
 from src.reporting.cost_events import append_cost_event
+from src.reporting.spread_snapshot_store import SpreadSnapshotStore
 
 
 def _dec(x: Optional[str]) -> Decimal:
@@ -67,6 +68,39 @@ class ExportResult:
     cost_event_written: bool
 
 
+def compute_slippage(
+    *,
+    side: str,
+    fill_px: float,
+    qty: float,
+    bid: Optional[float],
+    ask: Optional[float],
+    mid: Optional[float],
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Compute (slippage_bps, slippage_usdt, bid, ask) with direction-normalized sign.
+
+    - buy: worse if fill_px > mid
+    - sell: worse if fill_px < mid
+
+    Returns:
+      slippage_bps, slippage_usdt, bid, ask
+    """
+    if mid is None or mid <= 0 or fill_px <= 0 or qty <= 0:
+        return None, None, bid, ask
+
+    s = str(side).lower()
+    if s == "buy":
+        slip_bps = (fill_px - mid) / mid * 10_000.0
+        slip_usdt = abs(fill_px - mid) * qty
+        return float(slip_bps), float(slip_usdt), bid, ask
+    if s == "sell":
+        slip_bps = (mid - fill_px) / mid * 10_000.0
+        slip_usdt = abs(fill_px - mid) * qty
+        return float(slip_bps), float(slip_usdt), bid, ask
+
+    return None, None, bid, ask
+
+
 def export_fill(
     *,
     fill_ts_ms: int,
@@ -84,6 +118,7 @@ def export_fill(
     regime: Optional[str] = None,
     deadband_pct: Optional[float] = None,
     drift: Optional[float] = None,
+    spread_store: Optional[SpreadSnapshotStore] = None,
 ) -> ExportResult:
     """Export a single fill into trades.csv (per run) and cost_events NDJSON (daily).
 
@@ -98,6 +133,21 @@ def export_fill(
     fee_cost = fee_cost_usdt(fee=str(fee) if fee is not None else "0", fee_ccy=str(fee_ccy) if fee_ccy is not None else "", inst_id=inst_id, fill_px=fill_px)
     fee_usdt = float(fee_cost) if fee_cost is not None else 0.0
 
+    # Spread snapshot (best-effort)
+    ss = spread_store or SpreadSnapshotStore()
+    snap = None
+    try:
+        snap = ss.get_latest_before(symbol=symbol, ts_ms=int(fill_ts_ms))
+    except Exception:
+        snap = None
+
+    bid = float(snap.bid) if snap is not None else None
+    ask = float(snap.ask) if snap is not None else None
+    mid = float(snap.mid) if snap is not None else None
+    spread_bps = float(snap.spread_bps) if (snap is not None and snap.spread_bps is not None) else None
+
+    slip_bps, slip_usdt, _, _ = compute_slippage(side=str(side), fill_px=float(px), qty=float(qty), bid=bid, ask=ask, mid=mid)
+
     # Trades CSV
     tl = TradeLogWriter(run_dir=run_dir)
     tl.append_fill(
@@ -111,7 +161,7 @@ def export_fill(
             price=float(px),
             notional_usdt=float(notional),
             fee_usdt=float(fee_usdt),
-            slippage_usdt=0.0,
+            slippage_usdt=float(slip_usdt or 0.0),
             realized_pnl_usdt=None,
             realized_pnl_pct=None,
         )
@@ -135,12 +185,12 @@ def export_fill(
             "regime": regime,
             "router_action": "fill",
             "notional_usdt": float(notional),
-            "mid_px": None,
-            "bid": None,
-            "ask": None,
-            "spread_bps": None,
+            "mid_px": (float(mid) if mid is not None else None),
+            "bid": (float(bid) if bid is not None else None),
+            "ask": (float(ask) if ask is not None else None),
+            "spread_bps": (float(spread_bps) if spread_bps is not None else None),
             "fill_px": float(px),
-            "slippage_bps": None,
+            "slippage_bps": (float(slip_bps) if slip_bps is not None else None),
             "fee_usdt": float(fee_usdt) if fee_cost is not None else None,
             "fee_bps": None,
             "cost_usdt_total": float(fee_usdt) if fee_cost is not None else None,
