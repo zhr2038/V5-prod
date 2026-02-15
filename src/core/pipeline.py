@@ -203,6 +203,8 @@ class V5Pipeline:
                     continue
                 current_w[p.symbol] = float(p.qty) * pxp / float(equity)
 
+        cash_remaining = float(cash_usdt)
+
         for sym, tw in target.items():
             # deadband check on weight drift
             cw = float(current_w.get(sym, 0.0))
@@ -278,17 +280,20 @@ class V5Pipeline:
                         pass
                 continue
             
-            # 检查cash是否足够
-            if notional > cash_usdt:
+            # 检查cash是否足够（按批次累计扣减，避免多单同时通过导致超额下单）
+            if notional > cash_remaining:
                 if audit:
                     audit.reject("insufficient_cash")
-                    router_decisions.append({
-                        "symbol": sym,
-                        "action": "skip", 
-                        "reason": "insufficient_cash",
-                        "notional": notional,
-                        "cash_available": cash_usdt
-                    })
+                    router_decisions.append(
+                        {
+                            "symbol": sym,
+                            "action": "skip",
+                            "reason": "insufficient_cash",
+                            "notional": notional,
+                            "cash_available": cash_remaining,
+                            "cash_initial": float(cash_usdt),
+                        }
+                    )
                 continue
             
             # 如果通过所有检查，生成订单
@@ -314,14 +319,19 @@ class V5Pipeline:
                     meta=meta,
                 )
             )
-            
+
+            cash_remaining -= float(notional)
+
             if audit:
-                router_decisions.append({
-                    "symbol": sym,
-                    "action": "create",
-                    "reason": "ok",
-                    "notional": notional
-                })
+                router_decisions.append(
+                    {
+                        "symbol": sym,
+                        "action": "create",
+                        "reason": "ok",
+                        "notional": notional,
+                        "cash_after": cash_remaining,
+                    }
+                )
         
         if audit:
             audit.router_decisions = router_decisions
