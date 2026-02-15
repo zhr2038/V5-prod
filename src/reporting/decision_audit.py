@@ -56,6 +56,7 @@ class DecisionAudit:
         "dd_throttle": 0,
         "cap_clipped": 0,
         "insufficient_cash": 0,
+        "deadband_skip": 0,
         "provider_error": 0,
     })
     
