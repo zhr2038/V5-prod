@@ -50,9 +50,18 @@ def main() -> None:
             okx=client,
             position_store=PositionStore(path=args.positions_db),
             account_store=AccountStore(path=args.positions_db),
-            thresholds=ReconcileThresholds(abs_usdt_tol=float(args.abs_usdt_tol), abs_base_tol=float(args.abs_base_tol)),
+            thresholds=ReconcileThresholds(
+                abs_usdt_tol=float(args.abs_usdt_tol),
+                abs_base_tol=float(args.abs_base_tol),
+                dust_usdt_ignore=float(getattr(cfg.execution, "reconcile_dust_usdt_ignore", 0.0) or 0.0),
+            ),
         )
-        status = eng.reconcile(out_path=args.out)
+        universe_bases = [str(s).split("/")[0] for s in (cfg.symbols or [])]
+        status = eng.reconcile(
+            out_path=args.out,
+            universe_bases=universe_bases,
+            ccy_mode=str(getattr(cfg.execution, "reconcile_ccy_mode", "universe_only")),
+        )
         status["generated_ts_ms"] = int(status.get("ts_ms") or now)
         status["source"] = str(args.source)
         _write_status(args.out, status)

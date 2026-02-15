@@ -85,6 +85,10 @@ class ExecutionConfig(BaseModel):
     kill_switch_path: str = Field(default="reports/kill_switch.json")
     reconcile_status_path: str = Field(default="reports/reconcile_status.json")
 
+    # Reconcile behavior (G1)
+    reconcile_dust_usdt_ignore: float = Field(default=1.0, ge=0, description="Ignore base mismatches whose USDT value is below this (best-effort using mid).")
+    reconcile_ccy_mode: str = Field(default="universe_only", description="universe_only|all")
+
     # OKX request expiration (ms) for trading endpoints (optional).
     # Note: OKX expects expTime as an epoch-millisecond timestamp.
     # We treat values < 1e12 as a delta-ms from now for convenience.
@@ -109,6 +113,14 @@ class ExecutionConfig(BaseModel):
         vv = str(v or "dry_run").strip().lower()
         if vv not in {"dry_run", "live"}:
             raise ValueError("execution.mode must be 'dry_run' or 'live'")
+        return vv
+
+    @field_validator("reconcile_ccy_mode")
+    @classmethod
+    def _reconcile_ccy_mode(cls, v: str) -> str:
+        vv = str(v or "universe_only").strip().lower()
+        if vv not in {"universe_only", "all"}:
+            raise ValueError("execution.reconcile_ccy_mode must be 'universe_only' or 'all'")
         return vv
 
 

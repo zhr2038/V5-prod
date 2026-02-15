@@ -99,11 +99,25 @@ class ReconcileEngine:
             ccy_qty[base] = f"{float(p.qty):.12g}"
         return cash_usdt, ccy_qty
 
-    def reconcile(self, *, out_path: str = "reports/reconcile_status.json") -> Dict[str, Any]:
+    def reconcile(
+        self,
+        *,
+        out_path: str = "reports/reconcile_status.json",
+        universe_bases: Optional[List[str]] = None,
+        ccy_mode: str = "universe_only",
+    ) -> Dict[str, Any]:
         cash, ord_frozen, u_max, meta = self._fetch_exchange_cash()
         local_cash_usdt, local_ccy_qty = self._local_snapshot()
 
-        ccys = sorted(set(cash.keys()) | set(local_ccy_qty.keys()) | {"USDT"})
+        ccys_all = sorted(set(cash.keys()) | set(local_ccy_qty.keys()) | {"USDT"})
+
+        mode = str(ccy_mode or "universe_only").strip().lower()
+        bases = set([b.upper() for b in (universe_bases or [])])
+        if mode == "all" or not bases:
+            ccys = ccys_all
+        else:
+            # only enforce mismatches for USDT + universe bases; still report other ccys in diffs.
+            ccys = ccys_all
 
         diffs: List[Dict[str, Any]] = []
         ok = True
@@ -124,6 +138,10 @@ class ReconcileEngine:
                 reason = "rate_limited"
             else:
                 reason = "api_system_error"
+
+        from src.reporting.spread_snapshot_store import SpreadSnapshotStore
+
+        ss = SpreadSnapshotStore()
 
         for ccy in ccys:
             ex = cash.get(ccy) or "0"
@@ -147,9 +165,27 @@ class ReconcileEngine:
                     reason = reason or "usdt_mismatch"
             else:
                 max_abs_base = max(max_abs_base, abs(float(delta)))
-                if abs(float(delta)) > float(self.thresholds.abs_base_tol):
-                    ok = False
-                    reason = reason or "base_mismatch"
+
+                # dust ignore (best-effort using mid from spread snapshots)
+                dust_ignore = float(getattr(self.thresholds, "dust_usdt_ignore", 0.0) or 0.0)
+                est_usdt = None
+                try:
+                    snap = ss.get_latest_before(symbol=f"{ccy}/USDT", ts_ms=_now_ms())
+                    if snap is not None and snap.mid and float(snap.mid) > 0:
+                        est_usdt = abs(float(delta)) * float(snap.mid)
+                except Exception:
+                    est_usdt = None
+
+                is_universe = (ccy.upper() in bases) if bases else True
+                enforce = True if (mode == "all") else is_universe
+
+                if enforce and abs(float(delta)) > float(self.thresholds.abs_base_tol):
+                    if est_usdt is not None and est_usdt < dust_ignore:
+                        # ignore dust
+                        pass
+                    else:
+                        ok = False
+                        reason = reason or "base_mismatch"
 
             diffs.append(
                 {
