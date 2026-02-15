@@ -178,6 +178,7 @@ def main() -> None:
             if st is not None:
                 audit.budget = {
                     "ymd_utc": ymd,
+                    "avg_equity_est": st.avg_equity_est,
                     "turnover_used": st.turnover_used,
                     "turnover_budget_per_day": st.turnover_budget_per_day,
                     "cost_used_usdt": st.cost_used_usdt,
@@ -185,6 +186,10 @@ def main() -> None:
                     "cost_budget_bps_per_day": st.cost_budget_bps_per_day,
                     "exceeded": st.exceeded(),
                     "reason": st.reason(),
+                    "fills_count_today": st.fills_count_today,
+                    "median_notional_usdt_today": st.median_notional_usdt_today,
+                    "small_trade_ratio_today": st.small_trade_ratio_today,
+                    "small_trade_notional_cutoff": st.small_trade_notional_cutoff,
                 }
     except Exception:
         pass
@@ -292,8 +297,10 @@ def main() -> None:
             from src.reporting.metrics import read_trades_csv
 
             trades = read_trades_csv(f"reports/runs/{run_id}/trades.csv")
-            turnover_inc = float(sum(abs(float(t.get("notional_usdt") or 0.0)) for t in trades))
+            notionals = [abs(float(t.get("notional_usdt") or 0.0)) for t in trades]
+            turnover_inc = float(sum(notionals))
             cost_inc = float(sum(float(t.get("fee_usdt") or 0.0) + float(t.get("slippage_usdt") or 0.0) for t in trades))
+            fills_count_inc = int(len([x for x in notionals if x > 0]))
 
             ymd = derive_ymd_utc_from_summary(summ)
             st = update_daily_budget_state(
@@ -301,12 +308,16 @@ def main() -> None:
                 run_id=run_id,
                 turnover_inc=turnover_inc,
                 cost_inc_usdt=cost_inc,
+                fills_count_inc=fills_count_inc,
+                notionals_inc=notionals,
                 avg_equity=summ.get("avg_equity"),
                 turnover_budget_per_day=cfg.budget.turnover_budget_per_day,
                 cost_budget_bps_per_day=cfg.budget.cost_budget_bps_per_day,
+                small_trade_notional_cutoff=float(cfg.budget.min_trade_notional_base),
             )
             budget_dict = {
                 "ymd_utc": ymd,
+                "avg_equity_est": st.avg_equity_est,
                 "turnover_used": st.turnover_used,
                 "turnover_budget_per_day": st.turnover_budget_per_day,
                 "cost_used_usdt": st.cost_used_usdt,
@@ -314,6 +325,10 @@ def main() -> None:
                 "cost_budget_bps_per_day": st.cost_budget_bps_per_day,
                 "exceeded": st.exceeded(),
                 "reason": st.reason(),
+                "fills_count_today": st.fills_count_today,
+                "median_notional_usdt_today": st.median_notional_usdt_today,
+                "small_trade_ratio_today": st.small_trade_ratio_today,
+                "small_trade_notional_cutoff": st.small_trade_notional_cutoff,
             }
             attach_budget(f"reports/runs/{run_id}", budget_dict)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 
 def _effective_deadband(base: float, cfg: AppConfig, audit: Optional[DecisionAudit]) -> float:
@@ -237,10 +237,22 @@ class V5Pipeline:
             if notional <= 0:
                 continue
             
-            # 模拟router决策（这里简化，实际应该调用router）
-            # 检查min_notional（假设最小交易额为10 USDT）
-            min_notional = 10.0
-            if notional < min_notional:
+            # Router check: min_notional (base + F3.2 stage-2)
+            min_notional = float(self.cfg.budget.min_trade_notional_base)
+            if audit and (audit.budget or {}).get("exceeded") and self.cfg.budget.action_enabled:
+                try:
+                    from src.core.budget_action import effective_min_trade_notional
+
+                    eff, patch = effective_min_trade_notional(self.cfg, audit)
+                    min_notional = float(eff)
+                    # merge patch into budget_action
+                    ba = audit.budget_action or {}
+                    ba.update(patch)
+                    audit.budget_action = ba
+                except Exception:
+                    pass
+
+            if notional < float(min_notional):
                 if audit:
                     audit.reject("min_notional")
                     router_decisions.append({
@@ -248,8 +260,22 @@ class V5Pipeline:
                         "action": "skip",
                         "reason": "min_notional",
                         "notional": notional,
-                        "min_notional": min_notional
+                        "min_notional": float(min_notional),
                     })
+                    # budget_action suppression stats
+                    try:
+                        ba = audit.budget_action or {}
+                        if ba.get("enabled"):
+                            ba.setdefault("suppressed_reasons", [])
+                            if "min_notional" not in ba["suppressed_reasons"]:
+                                ba["suppressed_reasons"].append("min_notional")
+                            ba["suppressed_orders_count"] = int(ba.get("suppressed_orders_count") or 0) + 1
+                            sbs = ba.get("suppressed_by_symbol") or {}
+                            sbs[sym] = float(notional)
+                            ba["suppressed_by_symbol"] = sbs
+                            audit.budget_action = ba
+                    except Exception:
+                        pass
                 continue
             
             # 检查cash是否足够

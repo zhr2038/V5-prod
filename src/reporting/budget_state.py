@@ -33,7 +33,16 @@ class BudgetState:
     avg_equity_est: Optional[float] = None
 
     # keep per-run contributions to avoid double count
-    runs: Dict[str, Dict[str, float]] = field(default_factory=dict)  # run_id -> {turnover, cost_usdt}
+    # run_id -> {turnover, cost_usdt, fills_count, notionals_json}
+    runs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+    # Derived daily stats for F3.2 trigger (cached for pipeline consumption)
+    fills_count_today: int = 0
+    median_notional_usdt_today: Optional[float] = None
+    p25_notional_usdt_today: Optional[float] = None
+    p75_notional_usdt_today: Optional[float] = None
+    small_trade_ratio_today: Optional[float] = None
+    small_trade_notional_cutoff: Optional[float] = None
 
     def cost_used_bps(self) -> Optional[float]:
         if not self.avg_equity_est or self.avg_equity_est <= 0:
@@ -79,6 +88,13 @@ def load_budget_state(path: str) -> Optional[BudgetState]:
     st.cost_used_usdt = _safe_float(data.get("cost_used_usdt"), 0.0)
     st.avg_equity_est = data.get("avg_equity_est")
     st.runs = data.get("runs") or {}
+
+    st.fills_count_today = int(data.get("fills_count_today") or 0)
+    st.median_notional_usdt_today = data.get("median_notional_usdt_today")
+    st.p25_notional_usdt_today = data.get("p25_notional_usdt_today")
+    st.p75_notional_usdt_today = data.get("p75_notional_usdt_today")
+    st.small_trade_ratio_today = data.get("small_trade_ratio_today")
+    st.small_trade_notional_cutoff = data.get("small_trade_notional_cutoff")
     return st
 
 
@@ -89,9 +105,12 @@ def update_daily_budget_state(
     run_id: str,
     turnover_inc: float,
     cost_inc_usdt: float,
+    fills_count_inc: int,
+    notionals_inc: list,
     avg_equity: Optional[float],
     turnover_budget_per_day: Optional[float],
     cost_budget_bps_per_day: Optional[float],
+    small_trade_notional_cutoff: Optional[float] = None,
 ) -> BudgetState:
     out_dir = Path(base_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -111,17 +130,61 @@ def update_daily_budget_state(
 
     # idempotent per run_id
     prev = st.runs.get(run_id)
+    record = {
+        "turnover": float(turnover_inc),
+        "cost_usdt": float(cost_inc_usdt),
+        "fills_count": int(fills_count_inc),
+        # store notionals as JSON list for easy recompute
+        "notionals": [float(x) for x in (notionals_inc or [])],
+    }
     if prev is None:
-        st.runs[run_id] = {"turnover": float(turnover_inc), "cost_usdt": float(cost_inc_usdt)}
+        st.runs[run_id] = record
         st.turnover_used += float(turnover_inc)
         st.cost_used_usdt += float(cost_inc_usdt)
     else:
         # if re-run with changed numbers, adjust delta
         prev_turn = _safe_float(prev.get("turnover"), 0.0)
         prev_cost = _safe_float(prev.get("cost_usdt"), 0.0)
-        st.runs[run_id] = {"turnover": float(turnover_inc), "cost_usdt": float(cost_inc_usdt)}
+        st.runs[run_id] = record
         st.turnover_used += float(turnover_inc) - prev_turn
         st.cost_used_usdt += float(cost_inc_usdt) - prev_cost
+
+    # recompute derived notionals stats from per-run storage (small daily size)
+    all_notionals = []
+    fills_count = 0
+    for rr in (st.runs or {}).values():
+        try:
+            xs = rr.get("notionals") or []
+            all_notionals.extend([float(x) for x in xs])
+            fills_count += int(rr.get("fills_count") or len(xs) or 0)
+        except Exception:
+            pass
+
+    all_notionals = [float(x) for x in all_notionals if float(x) > 0]
+    all_notionals.sort()
+
+    st.fills_count_today = int(fills_count if fills_count else len(all_notionals))
+    if all_notionals:
+        mid = len(all_notionals) // 2
+        if len(all_notionals) % 2 == 1:
+            st.median_notional_usdt_today = float(all_notionals[mid])
+        else:
+            st.median_notional_usdt_today = float((all_notionals[mid - 1] + all_notionals[mid]) / 2.0)
+        st.p25_notional_usdt_today = float(all_notionals[int(0.25 * (len(all_notionals) - 1))])
+        st.p75_notional_usdt_today = float(all_notionals[int(0.75 * (len(all_notionals) - 1))])
+    else:
+        st.median_notional_usdt_today = None
+        st.p25_notional_usdt_today = None
+        st.p75_notional_usdt_today = None
+
+    if small_trade_notional_cutoff is not None and all_notionals:
+        cutoff = float(small_trade_notional_cutoff)
+        st.small_trade_notional_cutoff = cutoff
+        small_cnt = sum(1 for x in all_notionals if float(x) < cutoff)
+        st.small_trade_ratio_today = float(small_cnt) / float(len(all_notionals))
+    else:
+        st.small_trade_notional_cutoff = small_trade_notional_cutoff
+        st.small_trade_ratio_today = None
 
     path.write_text(json.dumps(st.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
     return st

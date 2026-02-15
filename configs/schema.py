@@ -108,10 +108,24 @@ class BudgetConfig(BaseModel):
     turnover_budget_per_day: Optional[float] = Field(default=None, ge=0)
     cost_budget_bps_per_day: Optional[float] = Field(default=None, ge=0)
 
-    # F3.1: action (default off unless budgets are set & exceeded)
+    # F3.1/F3.2: action (only takes effect when budget exceeded)
     action_enabled: bool = Field(default=True)
+
+    # Stage-1: widen deadband
     deadband_multiplier_exceeded: float = Field(default=1.5, ge=1.0)
     deadband_cap: float = Field(default=0.15, ge=0, le=1)
+
+    # Stage-2: raise min_trade_notional to suppress small noisy rebalances
+    min_fills_for_second_stage: int = Field(default=5, ge=0)
+    min_trade_notional_base: float = Field(default=25.0, ge=0)
+    min_trade_notional_multiplier_exceeded: float = Field(default=2.0, ge=1.0)
+    min_trade_notional_cap_abs: float = Field(default=200.0, ge=0)
+    min_trade_notional_cap_equity_ratio: float = Field(default=0.01, ge=0, le=1)
+
+    # Trigger metrics (computed from daily trades)
+    small_trade_ratio_threshold: float = Field(default=0.6, ge=0, le=1)
+    small_trade_median_threshold_abs: float = Field(default=10.0, ge=0)
+    small_trade_median_threshold_equity_ratio: float = Field(default=0.0025, ge=0, le=1)
 
 
 class AppConfig(BaseModel):
