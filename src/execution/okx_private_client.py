@@ -135,6 +135,7 @@ class OKXPrivateClient:
         *,
         params: Optional[Dict[str, Any]] = None,
         json_body: Optional[Dict[str, Any]] = None,
+        exp_time_ms: Optional[int] = None,
     ) -> OKXResponse:
         method_u = str(method).upper()
         request_path = self._build_request_path(path, params)
@@ -143,6 +144,8 @@ class OKXPrivateClient:
         def _do() -> OKXResponse:
             ts = _utc_iso_ms()
             headers = self._headers(timestamp=ts, method=method_u, request_path=request_path, body=body_str)
+            if exp_time_ms is not None:
+                headers["OK-ACCESS-EXPTIME"] = str(int(exp_time_ms))
             try:
                 resp = self._client.request(method_u, request_path, content=body_str if body_str else None, headers=headers)
             except httpx.TimeoutException as e:
@@ -177,6 +180,38 @@ class OKXPrivateClient:
             return False
 
         return retry(_do, should_retry=_should_retry, cfg=self.retry_cfg)
+
+    # --- Convenience wrappers (G0.2) ---
+    def place_order(self, payload: Dict[str, Any], *, exp_time_ms: Optional[int] = None) -> OKXResponse:
+        return self.request("POST", "/api/v5/trade/order", json_body=payload, exp_time_ms=exp_time_ms)
+
+    def get_order(
+        self,
+        *,
+        inst_id: str,
+        ord_id: Optional[str] = None,
+        cl_ord_id: Optional[str] = None,
+    ) -> OKXResponse:
+        if not inst_id:
+            raise OKXPrivateClientError("inst_id is required")
+        if not ord_id and not cl_ord_id:
+            raise OKXPrivateClientError("ord_id or cl_ord_id is required")
+        params = {"instId": inst_id, "ordId": ord_id, "clOrdId": cl_ord_id}
+        return self.request("GET", "/api/v5/trade/order", params=params)
+
+    def cancel_order(
+        self,
+        *,
+        inst_id: str,
+        ord_id: Optional[str] = None,
+        cl_ord_id: Optional[str] = None,
+    ) -> OKXResponse:
+        if not inst_id:
+            raise OKXPrivateClientError("inst_id is required")
+        if not ord_id and not cl_ord_id:
+            raise OKXPrivateClientError("ord_id or cl_ord_id is required")
+        payload = {"instId": inst_id, "ordId": ord_id, "clOrdId": cl_ord_id}
+        return self.request("POST", "/api/v5/trade/cancel-order", json_body=payload)
 
     # Minimal self-check helper
     def get_balance(self, ccy: Optional[str] = None) -> OKXResponse:
