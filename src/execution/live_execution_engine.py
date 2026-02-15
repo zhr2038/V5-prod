@@ -13,6 +13,7 @@ from src.execution.clordid import make_cl_ord_id, make_decision_hash
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
+from src.data.okx_instruments import OKXSpotInstrumentsCache, round_down_to_lot
 
 
 log = logging.getLogger(__name__)
@@ -85,6 +86,16 @@ def _parse_okx_order_ack(ack_data: Any) -> Tuple[bool, Optional[str], Optional[s
     err_code = str(s_code) if s_code is not None and str(s_code) != "0" else (str(code_s) if code_s else None)
     err_msg = str(s_msg) if s_msg else (str(msg) if msg else None)
     return False, None, err_code, err_msg
+
+
+class DustOrderSkip(Exception):
+    def __init__(self, symbol: str, *, qty: float, qty_rounded: float, min_sz: float, lot_sz: float):
+        super().__init__(f"dust_skip {symbol}: qty={qty} rounded={qty_rounded} minSz={min_sz} lotSz={lot_sz}")
+        self.symbol = symbol
+        self.qty = float(qty)
+        self.qty_rounded = float(qty_rounded)
+        self.min_sz = float(min_sz)
+        self.lot_sz = float(lot_sz)
 
 
 def map_okx_state(okx_state: Optional[str]) -> str:
@@ -185,7 +196,21 @@ class LiveExecutionEngine:
             p = self.position_store.get(o.symbol)
             if not p or float(p.qty) <= 0:
                 raise ValueError(f"No position qty available for sell market: {o.symbol}")
-            payload["sz"] = str(float(p.qty))
+
+            qty = float(p.qty)
+            # Enforce OKX minSz/lotSz to avoid Parameter sz error.
+            specs = OKXSpotInstrumentsCache().get_spec(inst_id)
+            if specs is not None and float(specs.lot_sz or 0.0) > 0:
+                qty_rounded = round_down_to_lot(qty, float(specs.lot_sz))
+            else:
+                qty_rounded = qty
+
+            min_sz = float(specs.min_sz) if specs is not None else 0.0
+            lot_sz = float(specs.lot_sz) if specs is not None else 0.0
+            if min_sz > 0 and qty_rounded < min_sz:
+                raise DustOrderSkip(o.symbol, qty=qty, qty_rounded=qty_rounded, min_sz=min_sz, lot_sz=lot_sz)
+
+            payload["sz"] = str(float(qty_rounded))
             payload["tgtCcy"] = "base_ccy"
 
         return payload
@@ -231,7 +256,29 @@ class LiveExecutionEngine:
             st, ord_id = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
             return LiveExecutionResult(cl_ord_id=clid, state=st, ord_id=ord_id)
 
-        payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
+        try:
+            payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
+        except DustOrderSkip as e:
+            # Persist and mark as rejected (terminal) without touching the exchange.
+            self.order_store.upsert_new(
+                cl_ord_id=clid,
+                run_id=self.run_id,
+                inst_id=inst_id,
+                side=o.side,
+                intent=o.intent,
+                decision_hash=dh,
+                td_mode="cash",
+                ord_type="market",
+                notional_usdt=float(o.notional_usdt),
+                window_start_ts=(o.meta or {}).get("window_start_ts"),
+                window_end_ts=(o.meta or {}).get("window_end_ts"),
+                req={"dust_skip": True, "symbol": e.symbol, "qty": e.qty, "qty_rounded": e.qty_rounded, "minSz": e.min_sz, "lotSz": e.lot_sz},
+                reconcile_ok_at_submit=reconcile_ok,
+                kill_switch_at_submit=kill_switch,
+                submit_gate=gate,
+            )
+            self.order_store.update_state(clid, new_state="REJECTED", last_error_code="DUST", last_error_msg=str(e), event_type="DUST_SKIP")
+            return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         # 1) persist intent before sending
         self.order_store.upsert_new(
