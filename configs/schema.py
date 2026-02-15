@@ -85,7 +85,9 @@ class ExecutionConfig(BaseModel):
     kill_switch_path: str = Field(default="reports/kill_switch.json")
     reconcile_status_path: str = Field(default="reports/reconcile_status.json")
 
-    # OKX request expiration (ms) for trading endpoints (optional)
+    # OKX request expiration (ms) for trading endpoints (optional).
+    # Note: OKX expects expTime as an epoch-millisecond timestamp.
+    # We treat values < 1e12 as a delta-ms from now for convenience.
     okx_exp_time_ms: Optional[int] = Field(default=1500, ge=1)
 
     # Last-arm safety env var (required for live)

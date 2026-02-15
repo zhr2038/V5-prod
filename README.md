@@ -23,6 +23,32 @@ python3 main.py
 pytest -q
 ```
 
+## 执行模式（dry-run / live）
+
+执行层通过 `cfg.execution.mode` 分流：
+- `dry_run`：使用 `ExecutionEngine`（默认，安全，不会触发实盘下单）
+- `live`：使用 `LiveExecutionEngine`（OKX 现货私有接口下单/查单/撤单）
+
+### Live 最后一道保险（ARM）
+即使配置写了 `mode: live`，也必须显式 arm 才会真的运行：
+
+```bash
+export V5_LIVE_ARM=YES
+python3 main.py
+```
+
+如果未设置 ARM 环境变量，`main.py` 会直接拒绝启动 live（避免 timer/误配置触发实盘）。
+
+### OKX 私有接口自检（balance）
+在写好 `.env`（api_key/api_secret/passphrase）后可运行：
+
+```bash
+python3 scripts/okx_private_selfcheck.py
+```
+
+### OKX expTime
+OKX 支持在交易接口请求头传 `expTime`（epoch 毫秒）。本项目配置项 `execution.okx_exp_time_ms` 若小于 1e12，会被当作“从现在起的 delta 毫秒”自动换算成 epoch 毫秒。
+
 ### 使用 OKX 公共行情数据（可选）
 
 ```bash

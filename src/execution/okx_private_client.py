@@ -41,6 +41,10 @@ def _utc_iso_ms() -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _epoch_ms() -> int:
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
 def _json_dumps_compact(obj: Any) -> str:
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
 
@@ -116,8 +120,12 @@ class OKXPrivateClient:
             "Content-Type": "application/json",
         }
         if self.req_exptime_ms is not None:
-            # OKX trading endpoints support expTime header (milliseconds)
-            h["expTime"] = str(int(self.req_exptime_ms))
+            # OKX trading endpoints support expTime header (milliseconds).
+            # It is an epoch-millisecond timestamp. For convenience, if user passes a small number
+            # (e.g. 1500), treat it as a delta ms from now.
+            x = int(self.req_exptime_ms)
+            exp = x if x > 1_000_000_000_000 else (_epoch_ms() + x)
+            h["expTime"] = str(int(exp))
         return h
 
     def _build_request_path(self, path: str, params: Optional[Dict[str, Any]]) -> str:
@@ -146,7 +154,9 @@ class OKXPrivateClient:
             ts = _utc_iso_ms()
             headers = self._headers(timestamp=ts, method=method_u, request_path=request_path, body=body_str)
             if exp_time_ms is not None:
-                headers["expTime"] = str(int(exp_time_ms))
+                x = int(exp_time_ms)
+                exp = x if x > 1_000_000_000_000 else (_epoch_ms() + x)
+                headers["expTime"] = str(int(exp))
             try:
                 resp = self._client.request(method_u, request_path, content=body_str if body_str else None, headers=headers)
             except httpx.TimeoutException as e:
