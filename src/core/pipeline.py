@@ -205,7 +205,12 @@ class V5Pipeline:
 
         cash_remaining = float(cash_usdt)
 
-        for sym, tw in target.items():
+        # Rebalance should also handle symbols currently held but removed from target universe.
+        # Iterate union(current positions, target weights). For symbols not in target, desired weight = 0.
+        symbols_all = sorted(set(current_w.keys()) | set(target.keys()))
+
+        for sym in symbols_all:
+            tw = float(target.get(sym, 0.0))
             # deadband check on weight drift
             cw = float(current_w.get(sym, 0.0))
             drift = float(tw) - cw
@@ -232,12 +237,20 @@ class V5Pipeline:
                 continue
             
             held = next((p for p in positions if p.symbol == sym and p.qty > 0), None)
-            side = "buy"
-            intent = "OPEN_LONG" if held is None else "REBALANCE"
-            notional = float(tw) * float(equity)
-            
-            if notional <= 0:
-                continue
+
+            # If symbol is removed from target universe but currently held, generate a sell to reduce drift.
+            if sym not in target and held is not None:
+                side = "sell"
+                intent = "REBALANCE"
+                notional = abs(float(cw)) * float(equity)
+                if notional <= 0:
+                    continue
+            else:
+                side = "buy"
+                intent = "OPEN_LONG" if held is None else "REBALANCE"
+                notional = float(tw) * float(equity)
+                if notional <= 0:
+                    continue
             
             # Router check: min_notional (base + F3.2 stage-2)
             min_notional = float(self.cfg.budget.min_trade_notional_base)
@@ -254,16 +267,19 @@ class V5Pipeline:
                 except Exception:
                     pass
 
-            if notional < float(min_notional):
+            # Min-notional filter: apply to buys; allow sells (especially for removed symbols) to reduce drift.
+            if side == "buy" and notional < float(min_notional):
                 if audit:
                     audit.reject("min_notional")
-                    router_decisions.append({
-                        "symbol": sym,
-                        "action": "skip",
-                        "reason": "min_notional",
-                        "notional": notional,
-                        "min_notional": float(min_notional),
-                    })
+                    router_decisions.append(
+                        {
+                            "symbol": sym,
+                            "action": "skip",
+                            "reason": "min_notional",
+                            "notional": notional,
+                            "min_notional": float(min_notional),
+                        }
+                    )
                     # budget_action suppression stats
                     try:
                         ba = audit.budget_action or {}
@@ -320,7 +336,11 @@ class V5Pipeline:
                 )
             )
 
-            cash_remaining -= float(notional)
+            # Update batch cash budget.
+            if side == "buy":
+                cash_remaining -= float(notional)
+            else:
+                cash_remaining += float(notional)
 
             if audit:
                 router_decisions.append(
@@ -328,6 +348,7 @@ class V5Pipeline:
                         "symbol": sym,
                         "action": "create",
                         "reason": "ok",
+                        "side": side,
                         "notional": notional,
                         "cash_after": cash_remaining,
                     }
