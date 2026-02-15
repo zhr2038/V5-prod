@@ -23,6 +23,7 @@ class ExchangeConfig(BaseModel):
 class UniverseConfig(BaseModel):
     enabled: bool = Field(default=False, description="Enable dynamic universe selection")
     use_universe_symbols: bool = Field(default=False, description="Use universe output as trading symbols")
+    include_symbols: List[str] = Field(default_factory=list, description="Always include these symbols when use_universe_symbols=true (e.g. BTC/USDT).")
     cache_path: str = Field(default="reports/universe_cache.json")
     cache_ttl_sec: int = Field(default=3600, ge=0)
 

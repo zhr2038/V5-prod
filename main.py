@@ -99,8 +99,10 @@ def main() -> None:
             )
             uni = up.get_universe()
             if cfg.universe.use_universe_symbols and uni:
-                symbols = uni
-                log.info(f"Universe enabled: using {len(symbols)} symbols")
+                inc = [str(s) for s in (getattr(cfg.universe, "include_symbols", []) or [])]
+                merged = list(dict.fromkeys(inc + list(uni)))
+                symbols = merged
+                log.info(f"Universe enabled: using {len(symbols)} symbols (include={len(inc)})")
         except Exception as e:
             log.warning(f"Universe fetch failed, fallback to config symbols: {e}")
 
