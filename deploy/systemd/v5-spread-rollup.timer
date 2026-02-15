@@ -1,0 +1,12 @@
+[Unit]
+Description=Run V5 spread rollup daily at 00:20 UTC
+
+[Timer]
+OnCalendar=*-*-* 00:20:00 UTC
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=2min
+Unit=v5-spread-rollup.service
+
+[Install]
+WantedBy=timers.target
