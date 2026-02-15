@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -78,6 +79,15 @@ def _load(p: str) -> Dict[str, Any]:
     return json.loads(Path(p).read_text(encoding="utf-8"))
 
 
+def _safe_load_json(path: str) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+
 def _fmt(x: Any) -> str:
     if x is None:
         return "N/A"
@@ -87,7 +97,12 @@ def _fmt(x: Any) -> str:
         return str(x)
 
 
-def compare(v4: Dict[str, Any], v5: Dict[str, Any], window: str = "") -> str:
+def compare(
+    v4: Dict[str, Any],
+    v5: Dict[str, Any],
+    window: str = "",
+    v5_audit: Optional[Dict[str, Any]] = None,
+) -> str:
     lines = []
     lines.append("# v4 vs v5\n")
     if window:
@@ -104,6 +119,14 @@ def compare(v4: Dict[str, Any], v5: Dict[str, Any], window: str = "") -> str:
         lines.append(
             f"- v5 data_quality: {v5_q} (equity_points={v5.get('equity_points')}, trade_events={v5.get('trade_events')})"
         )
+
+    # v5 deadband stats (hourly only; daily rollup typically has no decision_audit)
+    if v5_audit:
+        lines.append(f"- v5 deadband_pct: {_fmt(v5_audit.get('rebalance_deadband_pct'))}")
+        lines.append(f"- v5 deadband_skipped_count: {_fmt(v5_audit.get('rebalance_skipped_deadband_count'))}")
+        deadband_rej = (v5_audit.get('rejects') or {}).get('deadband_skip')
+        lines.append(f"- v5 rejects.deadband_skip: {_fmt(deadband_rej)}")
+
     lines.append("")
 
     lines.append("| metric | v4 | v5 | delta |")
@@ -188,7 +211,10 @@ def main():
             f"(raw v4={v4_start_raw}->{v4_end_raw}, v5={v5_start_raw}->{v5_end_raw})"
         )
 
-    md = compare(v4, v5, window=window)
+    v5_run_dir = os.path.dirname(str(args.v5_summary))
+    v5_audit = _safe_load_json(os.path.join(v5_run_dir, "decision_audit.json"))
+
+    md = compare(v4, v5, window=window, v5_audit=v5_audit)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
