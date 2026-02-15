@@ -1,0 +1,13 @@
+[Unit]
+Description=V5 reconcile (OKX balance vs local stores)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-trading-bot
+User=admin
+Group=admin
+Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=v5-reconcile
+ExecStart=/usr/bin/flock -n /tmp/v5_reconcile.lock -c "/bin/bash -lc 'python3 scripts/reconcile_once.py --out reports/reconcile_status.json'"

@@ -18,7 +18,8 @@ if [[ "${1:-}" == "--user" ]]; then
   systemctl --user enable --now v5-daily.timer
   systemctl --user enable --now v5-cost-rollup.timer
   systemctl --user enable --now v5-spread-rollup.timer
-  systemctl --user list-timers --all | grep -E "v5-(hourly|daily|cost-rollup|spread-rollup)" || true
+  systemctl --user enable --now v5-reconcile.timer
+  systemctl --user list-timers --all | grep -E "v5-(hourly|daily|cost-rollup|spread-rollup|reconcile)" || true
   exit 0
 fi
 
@@ -29,4 +30,5 @@ sudo systemctl enable --now v5-hourly.timer
 sudo systemctl enable --now v5-daily.timer
 sudo systemctl enable --now v5-cost-rollup.timer
 sudo systemctl enable --now v5-spread-rollup.timer
-systemctl list-timers --all | grep -E "v5-(hourly|daily|cost-rollup|spread-rollup)" || true
+sudo systemctl enable --now v5-reconcile.timer
+systemctl list-timers --all | grep -E "v5-(hourly|daily|cost-rollup|spread-rollup|reconcile)" || true
