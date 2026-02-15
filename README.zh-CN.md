@@ -4,7 +4,8 @@ V5 横截面趋势轮动系统（OKX 现货），**先 dry-run**。
 
 本仓库包含：
 - 信号流水线（Alpha → Regime → Portfolio → Risk → Orders）
-- Dry-run 执行引擎 + 持久化存储（仓位/账户/成交日志）
+- 执行层：dry-run（模拟成交）/ live（OKX 私有接口：下单/查单/撤单）
+- SQLite 落盘：Positions/Account/Orders/Fills（幂等可追溯）
 - 回测 + walk-forward 框架
 - 成本校准与回灌（F2）
 - 日级预算监控 + 预算驱动的换手抑制（F3）
@@ -45,6 +46,20 @@ python3 main.py
 python3 scripts/okx_private_selfcheck.py
 ```
 
+### Fill 同步（G0.3）
+Live 模式下，执行引擎会在 `poll_open()` 里 best-effort 做 fills → orders 的状态推进。
+你也可以手动同步 fills 到本地 SQLite：
+
+```bash
+python3 scripts/fill_sync.py --db reports/fills.sqlite
+```
+
+落盘文件：
+- fills：`reports/fills.sqlite`
+- orders：`reports/orders.sqlite`
+
+FillStore 去重规则：同一 `instId` 下同一 `tradeId` 只处理一次（主键 `(inst_id, trade_id)`）。
+
 ### OKX expTime
 OKX 支持在交易接口请求头传 `expTime`（epoch 毫秒）。本项目配置项 `execution.okx_exp_time_ms` 若小于 1e12，会被当作“从现在起的 delta 毫秒”自动换算成 epoch 毫秒。
 
@@ -69,7 +84,7 @@ python3 main.py
 ### 按次运行产物（建议重点看）
 - `reports/runs/<run_id>/decision_audit.json`：解释“为什么 0 单 / 为什么被拒绝”
 - `reports/runs/<run_id>/summary.json`：本次窗口指标汇总（并包含 budget 打标）
-- `reports/runs/<run_id>/trades.csv`：逐笔成交（dry-run fill）
+- `reports/runs/<run_id>/trades.csv`：逐笔成交（dry-run fill；后续会切到真实 fills 导出）
 - `reports/runs/<run_id>/equity.jsonl`：净值曲线点
 
 ## F2：回测成本模型校准/回灌
@@ -123,4 +138,8 @@ python3 scripts/compare_runs.py \
 
 - v5 phase-1：不做做空
 - 不加杠杆
-- 执行引擎目前以 dry-run 为主；实盘执行与对账门控计划在后续阶段引入
+- 实盘（live）需要：
+  - `execution.mode: live`
+  - 环境变量 ARM：`V5_LIVE_ARM=YES`
+  - OKX API key 完整（key/secret/passphrase）
+- 对账门控（G1）尚在推进中：当前 live 侧会读取 `reports/kill_switch.json` / `reports/reconcile_status.json` 来决定是否进入 SELL_ONLY。
