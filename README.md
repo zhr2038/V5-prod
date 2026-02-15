@@ -47,8 +47,15 @@ python3 main.py
 python3 scripts/okx_private_selfcheck.py
 ```
 
-### Fill 同步（G0.3）
-Live 模式下，执行引擎会在 `poll_open()` 里 best-effort 做 fills → orders 的状态推进。
+### Fill 同步与 slippage（G0.3）
+Live 模式下，执行引擎会在 `poll_open()` 里 best-effort 做 fills → orders 的状态推进，并把 fills 导出为 `trades.csv` / `cost_events`。
+
+slippage 计算：
+- 优先从 `reports/spread_snapshots/YYYYMMDD.jsonl` 找到该 symbol 在 fill 时间点之前最近一条 snapshot（mid/bid/ask）
+- 找不到 snapshot 时：
+  - `trades.csv` 的 `slippage_usdt` 写空值（表示 N/A）
+  - `cost_events` 的 mid/bid/ask/slippage 字段保持 null
+
 你也可以手动同步 fills 到本地 SQLite：
 
 ```bash
@@ -85,7 +92,7 @@ python3 main.py
 ### 按次运行产物（建议重点看）
 - `reports/runs/<run_id>/decision_audit.json`：解释“为什么 0 单 / 为什么被拒绝”
 - `reports/runs/<run_id>/summary.json`：本次窗口指标汇总（并包含 budget 打标）
-- `reports/runs/<run_id>/trades.csv`：逐笔成交（dry-run fill；后续会切到真实 fills 导出）
+- `reports/runs/<run_id>/trades.csv`：逐笔成交（live 时来自真实 fills；slippage 若无 snapshot 会写空值）
 - `reports/runs/<run_id>/equity.jsonl`：净值曲线点
 - `reports/runs/<run_id>/spread_snapshot.json`：当小时 bid/ask/mid/spread_bps 快照（即使 0 单也会写）
 
