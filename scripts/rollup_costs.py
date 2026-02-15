@@ -106,7 +106,9 @@ def rollup_day(day_yyyymmdd: str, base_dir: str = "reports/cost_events", out_dir
         }
 
     out_path = dst / f"daily_cost_stats_{day_yyyymmdd}.json"
-    out_path.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path = dst / f".daily_cost_stats_{day_yyyymmdd}.json.tmp"
+    tmp_path.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(out_path)
     return out_path
 
 

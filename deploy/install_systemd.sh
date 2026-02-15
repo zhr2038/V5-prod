@@ -16,7 +16,8 @@ if [[ "${1:-}" == "--user" ]]; then
   systemctl --user daemon-reload
   systemctl --user enable --now v5-hourly.timer
   systemctl --user enable --now v5-daily.timer
-  systemctl --user list-timers --all | grep -E "v5-(hourly|daily)" || true
+  systemctl --user enable --now v5-cost-rollup.timer
+  systemctl --user list-timers --all | grep -E "v5-(hourly|daily|cost-rollup)" || true
   exit 0
 fi
 
@@ -25,4 +26,5 @@ sudo cp "$SRC"/*.service "$SRC"/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now v5-hourly.timer
 sudo systemctl enable --now v5-daily.timer
-systemctl list-timers --all | grep -E "v5-(hourly|daily)" || true
+sudo systemctl enable --now v5-cost-rollup.timer
+systemctl list-timers --all | grep -E "v5-(hourly|daily|cost-rollup)" || true
