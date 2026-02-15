@@ -93,6 +93,15 @@ class BacktestConfig(BaseModel):
     one_bar_delay: bool = True
     walk_forward_folds: int = Field(default=4, ge=1)
 
+    # cost calibration (F2)
+    cost_model: str = Field(default="default", description="default|calibrated")
+    cost_stats_dir: str = Field(default="reports/cost_stats")
+    fee_quantile: str = Field(default="p75")
+    slippage_quantile: str = Field(default="p90")
+    min_fills_global: int = Field(default=30, ge=0)
+    min_fills_bucket: int = Field(default=10, ge=0)
+    max_stats_age_days: int = Field(default=7, ge=0)
+
 
 class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
