@@ -247,20 +247,61 @@ def main() -> None:
     # write/update summary
     try:
         from src.reporting.summary_writer import write_summary
-        
+
         window_start_ts = _get_env_epoch_sec("V5_WINDOW_START_TS")
         window_end_ts = _get_env_epoch_sec("V5_WINDOW_END_TS")
-        
+
         # 窗口长度校验（避免 silent bug）
         if window_start_ts is not None and window_end_ts is not None:
             if window_end_ts <= window_start_ts:
                 raise ValueError(f"Invalid window: {window_start_ts} -> {window_end_ts}")
-        
-        write_summary(
+
+        summ = write_summary(
             f"reports/runs/{run_id}",
             window_start_ts=window_start_ts,
             window_end_ts=window_end_ts,
         )
+
+        # F3.0 budget monitoring (monitor + tagging only, no behavior change)
+        try:
+            from src.reporting.budget_state import derive_ymd_utc_from_summary, update_daily_budget_state
+            from src.reporting.summary_writer import attach_budget
+            from src.reporting.decision_audit import load_decision_audit
+            from src.reporting.metrics import read_trades_csv
+
+            trades = read_trades_csv(f"reports/runs/{run_id}/trades.csv")
+            turnover_inc = float(sum(abs(float(t.get("notional_usdt") or 0.0)) for t in trades))
+            cost_inc = float(sum(float(t.get("fee_usdt") or 0.0) + float(t.get("slippage_usdt") or 0.0) for t in trades))
+
+            ymd = derive_ymd_utc_from_summary(summ)
+            st = update_daily_budget_state(
+                ymd_utc=ymd,
+                run_id=run_id,
+                turnover_inc=turnover_inc,
+                cost_inc_usdt=cost_inc,
+                avg_equity=summ.get("avg_equity"),
+                turnover_budget_per_day=cfg.budget.turnover_budget_per_day,
+                cost_budget_bps_per_day=cfg.budget.cost_budget_bps_per_day,
+            )
+            budget_dict = {
+                "ymd_utc": ymd,
+                "turnover_used": st.turnover_used,
+                "turnover_budget_per_day": st.turnover_budget_per_day,
+                "cost_used_usdt": st.cost_used_usdt,
+                "cost_used_bps": st.cost_used_bps(),
+                "cost_budget_bps_per_day": st.cost_budget_bps_per_day,
+                "exceeded": st.exceeded(),
+                "reason": st.reason(),
+            }
+            attach_budget(f"reports/runs/{run_id}", budget_dict)
+
+            audit = load_decision_audit(f"reports/runs/{run_id}")
+            if audit is not None:
+                audit.budget = budget_dict
+                audit.save(f"reports/runs/{run_id}")
+        except Exception:
+            pass
+
     except Exception:
         pass
 

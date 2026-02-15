@@ -103,6 +103,12 @@ class BacktestConfig(BaseModel):
     max_stats_age_days: int = Field(default=7, ge=0)
 
 
+class BudgetConfig(BaseModel):
+    # F3.0: monitoring only (no behavior change)
+    turnover_budget_per_day: Optional[float] = Field(default=None, ge=0)
+    cost_budget_bps_per_day: Optional[float] = Field(default=None, ge=0)
+
+
 class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
     timeframe_main: str = "1h"
@@ -115,6 +121,7 @@ class AppConfig(BaseModel):
     rebalance: RebalanceConfig = Field(default_factory=RebalanceConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
 
     @field_validator("symbols")
     @classmethod

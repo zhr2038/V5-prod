@@ -54,3 +54,16 @@ def write_summary(
 
     (rd / "summary.json").write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
     return summ
+
+
+def attach_budget(run_dir: str, budget: Dict[str, Any]) -> Dict[str, Any]:
+    """Patch run_dir/summary.json with a top-level 'budget' field."""
+    rd = Path(run_dir)
+    p = rd / "summary.json"
+    if not p.exists():
+        raise FileNotFoundError(str(p))
+    summ = json.loads(p.read_text(encoding="utf-8"))
+    summ["budget"] = budget
+    p.write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summ
+
