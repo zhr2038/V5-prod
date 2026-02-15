@@ -68,7 +68,7 @@ class BacktestEngine:
         if n < 80:
             return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self._cost_assumption())
 
-        equity = 1.0
+        cash = 1.0
         equity_curve = []
         peak = 1.0
         turnovers = []
@@ -87,8 +87,8 @@ class BacktestEngine:
                                         close=market_data[s].close[: i + 1],
                                         volume=market_data[s].volume[: i + 1]) for s in syms}
 
-            # In backtest, treat all equity as cash for the cycle.
-            out = pipeline.run(md_slice, positions=list(positions.values()), cash_usdt=float(equity), equity_peak_usdt=float(peak))
+            # Backtest semantics: pass *cash* into pipeline; pipeline computes equity = cash + positions MTM.
+            out = pipeline.run(md_slice, positions=list(positions.values()), cash_usdt=float(cash), equity_peak_usdt=float(peak))
             regime_state = str(out.regime.state.value if hasattr(out.regime.state, 'value') else out.regime.state)
 
             exec_px = {s: float(market_data[s].close[i + 1]) for s in syms}
@@ -99,17 +99,13 @@ class BacktestEngine:
                 px = float(exec_px.get(o.symbol, o.signal_price) or 0.0)
                 if px <= 0:
                     continue
+
                 # fees+slippage (calibrated if cost_model is provided)
                 fee_bps = self.fee_bps
                 slp_bps = self.slippage_bps
                 if self.cost_model is not None:
                     try:
-                        res = self.cost_model.resolve(
-                            o.symbol,
-                            regime_state,
-                            "fill",
-                            float(o.notional_usdt),
-                        )
+                        res = self.cost_model.resolve(o.symbol, regime_state, "fill", float(o.notional_usdt))
                         meta = {}
                         if isinstance(res, tuple) and len(res) == 3:
                             fee_bps, slp_bps, meta = res
@@ -123,19 +119,27 @@ class BacktestEngine:
                     except Exception:
                         fee_bps, slp_bps = self.fee_bps, self.slippage_bps
                         self._fallback_counts["ERROR"] += 1
+
                 cost = (float(fee_bps) + float(slp_bps)) / 10_000.0
-                if o.side == 'buy':
-                    qty = (o.notional_usdt / px) * (1.0 - cost)
-                    traded_notional += abs(o.notional_usdt)
+                notional = float(o.notional_usdt)
+
+                if o.side == "buy":
+                    # cash outflow is full notional; received base qty net of costs
+                    if cash < notional:
+                        continue
+                    cash -= notional
+                    qty = (notional / px) * (1.0 - cost)
+                    traded_notional += abs(notional)
+
                     p = positions.get(o.symbol)
                     if p is None:
                         positions[o.symbol] = Position(
                             symbol=o.symbol,
                             qty=qty,
                             avg_px=px,
-                            entry_ts='0',
+                            entry_ts="0",
                             highest_px=px,
-                            last_update_ts='0',
+                            last_update_ts="0",
                             last_mark_px=px,
                             unrealized_pnl_pct=0.0,
                         )
@@ -148,29 +152,40 @@ class BacktestEngine:
                             avg_px=avg,
                             entry_ts=p.entry_ts,
                             highest_px=max(p.highest_px, px),
-                            last_update_ts='0',
+                            last_update_ts="0",
                             last_mark_px=px,
                             unrealized_pnl_pct=0.0,
                         )
+
                 else:
                     p = positions.get(o.symbol)
                     if p is None:
                         continue
-                    traded_notional += abs(o.notional_usdt)
-                    # realize pnl on full close
+
+                    traded_notional += abs(notional)
+
+                    # Realize PnL (simplification: treat as full close)
                     pnl = (px - p.avg_px) * p.qty
                     if pnl >= 0:
                         gains += pnl
                     else:
                         losses += -pnl
-                    equity += pnl
-                    equity *= (1.0 - cost)
+
+                    # cash inflow net of costs
+                    cash += notional * (1.0 - cost)
                     positions.pop(o.symbol, None)
 
             turnovers.append(traded_notional)
 
-            equity_curve.append(equity)
-            peak = max(peak, equity)
+            # Mark-to-market equity after execution at bar i+1 close
+            eq_now = float(cash)
+            for p in positions.values():
+                mp = float(exec_px.get(p.symbol, 0.0) or 0.0)
+                if mp > 0:
+                    eq_now += float(p.qty) * mp
+
+            equity_curve.append(eq_now)
+            peak = max(peak, eq_now)
 
         eq = np.array(equity_curve, dtype=float)
         if len(eq) < 5:
