@@ -2,7 +2,8 @@
 Description=Run V5 reconcile every 5 minutes
 
 [Timer]
-OnUnitActiveSec=300
+# Calendar timer so Persistent=true can catch up missed runs after downtime.
+OnCalendar=*:0/5
 Persistent=true
 AccuracySec=10s
 RandomizedDelaySec=10s

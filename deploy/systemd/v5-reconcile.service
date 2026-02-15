@@ -11,3 +11,5 @@ Group=admin
 Environment=PYTHONUNBUFFERED=1
 SyslogIdentifier=v5-reconcile
 ExecStart=/usr/bin/flock -n /tmp/v5_reconcile.lock -c "/bin/bash -lc 'python3 scripts/reconcile_once.py --out reports/reconcile_status.json'"
+Restart=on-failure
+RestartSec=10
