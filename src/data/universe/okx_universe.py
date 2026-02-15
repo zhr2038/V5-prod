@@ -37,6 +37,7 @@ class OKXUniverseProvider:
         base_url: str = OKX_PUBLIC,
         cache_path: str = "reports/universe_cache.json",
         cache_ttl_sec: int = 3600,
+        top_n: int = 30,
         min_24h_quote_volume_usdt: float = 5_000_000.0,
         blacklist_path: str = "configs/blacklist.json",
         exclude_stablecoins: bool = True,
@@ -45,6 +46,7 @@ class OKXUniverseProvider:
         self.base_url = base_url.rstrip("/")
         self.cache_path = Path(cache_path)
         self.cache_ttl_sec = int(cache_ttl_sec)
+        self.top_n = int(top_n)
         self.min_24h_quote_volume_usdt = float(min_24h_quote_volume_usdt)
         self.blacklist_path = blacklist_path
         self.exclude_stablecoins = bool(exclude_stablecoins)
@@ -54,6 +56,8 @@ class OKXUniverseProvider:
         now_ts = float(now_ts or time.time())
         cached = self._load_cache(now_ts)
         if cached is not None:
+            if int(self.top_n) > 0:
+                return list(cached)[: int(self.top_n)]
             return cached
 
         inst = self._fetch_instruments()
@@ -164,4 +168,6 @@ class OKXUniverseProvider:
             out.append(UniverseItem(symbol=sym, inst_id=inst_id, quote_volume_usdt_24h=float(qv_f)))
 
         out.sort(key=lambda x: float(x.quote_volume_usdt_24h), reverse=True)
+        if int(self.top_n) > 0:
+            out = out[: int(self.top_n)]
         return out

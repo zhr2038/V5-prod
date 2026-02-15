@@ -93,6 +93,7 @@ def main() -> None:
             up = OKXUniverseProvider(
                 cache_path=cfg.universe.cache_path,
                 cache_ttl_sec=cfg.universe.cache_ttl_sec,
+                top_n=int(getattr(cfg.universe, "top_n_market_cap", 30) or 30),
                 min_24h_quote_volume_usdt=cfg.universe.min_24h_quote_volume_usdt,
                 blacklist_path=cfg.universe.blacklist_path,
                 exclude_stablecoins=cfg.universe.exclude_stablecoins,

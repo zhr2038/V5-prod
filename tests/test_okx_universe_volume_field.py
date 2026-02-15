@@ -4,7 +4,7 @@ from src.data.universe.okx_universe import OKXUniverseProvider
 
 
 def test_universe_uses_volCcy24h_when_volCcyQuote_missing(monkeypatch):
-    p = OKXUniverseProvider(min_24h_quote_volume_usdt=100.0)
+    p = OKXUniverseProvider(min_24h_quote_volume_usdt=100.0, top_n=30)
 
     monkeypatch.setattr(
         p,
@@ -28,7 +28,7 @@ def test_universe_uses_volCcy24h_when_volCcyQuote_missing(monkeypatch):
 
 
 def test_universe_fallback_vol24h_times_last(monkeypatch):
-    p = OKXUniverseProvider(min_24h_quote_volume_usdt=100.0)
+    p = OKXUniverseProvider(min_24h_quote_volume_usdt=100.0, top_n=30)
 
     monkeypatch.setattr(
         p,
