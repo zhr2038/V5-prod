@@ -227,14 +227,28 @@ class V5Pipeline:
                 continue
             
             # 如果通过所有检查，生成订单
-            rebalance_orders.append(Order(
-                symbol=sym, 
-                side=side, 
-                intent=intent, 
-                notional_usdt=notional, 
-                signal_price=px, 
-                meta={"target_w": tw, "dd_mult": dd_mult}
-            ))
+            meta = {"target_w": tw, "dd_mult": dd_mult}
+            if audit:
+                meta.update(
+                    {
+                        "regime": audit.regime,
+                        "window_start_ts": audit.window_start_ts,
+                        "window_end_ts": audit.window_end_ts,
+                        "deadband_pct": audit.rebalance_deadband_pct,
+                        "drift": drift,
+                    }
+                )
+
+            rebalance_orders.append(
+                Order(
+                    symbol=sym,
+                    side=side,
+                    intent=intent,
+                    notional_usdt=notional,
+                    signal_price=px,
+                    meta=meta,
+                )
+            )
             
             if audit:
                 router_decisions.append({

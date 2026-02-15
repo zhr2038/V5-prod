@@ -119,6 +119,51 @@ class ExecutionEngine:
                 except Exception:
                     pass
 
+            # cost event log (fills only)
+            try:
+                from src.reporting.cost_events import append_cost_event
+
+                # best-effort extract window/regime from order meta
+                meta = o.meta or {}
+                window_start_ts = meta.get("window_start_ts")
+                window_end_ts = meta.get("window_end_ts")
+
+                if window_start_ts is not None and window_end_ts is not None:
+                    fee_bps_eff = (float(fee) / float(notional) * 10_000.0) if float(notional) else None
+                    slp_bps_eff = (float(slp) / float(notional) * 10_000.0) if float(notional) else None
+                    cost_usdt_total = float(fee) + float(slp)
+                    cost_bps_total = (cost_usdt_total / float(notional) * 10_000.0) if float(notional) else None
+
+                    event = {
+                        "schema_version": 1,
+                        "event_type": "fill",
+                        "ts": int(datetime.utcnow().timestamp()),
+                        "run_id": self.run_id,
+                        "window_start_ts": int(window_start_ts),
+                        "window_end_ts": int(window_end_ts),
+                        "symbol": o.symbol,
+                        "side": o.side,
+                        "intent": o.intent,
+                        "regime": meta.get("regime"),
+                        "router_action": "fill",
+                        "notional_usdt": float(notional),
+                        "mid_px": float(o.signal_price),
+                        "bid": None,
+                        "ask": None,
+                        "spread_bps": None,
+                        "fill_px": float(o.signal_price),
+                        "slippage_bps": slp_bps_eff,
+                        "fee_usdt": float(fee),
+                        "fee_bps": fee_bps_eff,
+                        "cost_usdt_total": cost_usdt_total,
+                        "cost_bps_total": cost_bps_total,
+                        "deadband_pct": meta.get("deadband_pct"),
+                        "drift": meta.get("drift"),
+                    }
+                    append_cost_event(event)
+            except Exception:
+                pass
+
         return ExecutionReport(timestamp=ts, dry_run=bool(self.cfg.dry_run), orders=list(order_batch or []))
 
     def _record(self, symbol: str, side: str, signal_price: float, execution_price: float) -> None:
