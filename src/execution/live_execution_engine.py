@@ -58,6 +58,35 @@ def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
     return "ALLOW", rc_ok, ks
 
 
+def _parse_okx_order_ack(ack_data: Any) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
+    """Return (ok, ord_id, err_code, err_msg)."""
+    d = ack_data if isinstance(ack_data, dict) else {}
+    code = d.get("code")
+    msg = d.get("msg")
+    code_s = str(code) if code is not None else None
+
+    rows = d.get("data")
+    r0 = (rows[0] if isinstance(rows, list) and rows else {}) or {}
+    s_code = r0.get("sCode")
+    s_msg = r0.get("sMsg")
+
+    # OKX semantics: code==0 and sCode==0 means accepted.
+    ok = True
+    if code_s and code_s != "0":
+        ok = False
+    if s_code is not None and str(s_code) != "0":
+        ok = False
+
+    ord_id = r0.get("ordId") or r0.get("ord_id")
+
+    if ok:
+        return True, (str(ord_id) if ord_id else None), None, None
+
+    err_code = str(s_code) if s_code is not None and str(s_code) != "0" else (str(code_s) if code_s else None)
+    err_msg = str(s_msg) if s_msg else (str(msg) if msg else None)
+    return False, None, err_code, err_msg
+
+
 def map_okx_state(okx_state: Optional[str]) -> str:
     s = str(okx_state or "").lower()
     if s in {"live", "new", "submitted"}:
@@ -228,11 +257,24 @@ class LiveExecutionEngine:
 
         try:
             ack = self.okx.place_order(payload, exp_time_ms=self.exp_time_ms)
+            ok_ack, ord_id, err_code, err_msg = _parse_okx_order_ack(ack.data)
+            if not ok_ack:
+                # Exchange explicitly rejected the order: terminal REJECTED, no polling.
+                self.order_store.update_state(
+                    clid,
+                    new_state="REJECTED",
+                    ack=ack.data,
+                    last_error_code=err_code,
+                    last_error_msg=err_msg,
+                    event_type="REJECTED_ACK",
+                )
+                return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
+
             self.order_store.update_state(
                 clid,
                 new_state="ACK",
                 ack=ack.data,
-                ord_id=self._extract_ord_id(ack),
+                ord_id=ord_id or self._extract_ord_id(ack),
                 event_type="ACK",
             )
             # follow-up poll to get state if possible
