@@ -42,6 +42,9 @@ class GuardConfig:
 
     stale_threshold_sec: int = 900  # 15 min
 
+    # G1.2.4: only stale_status triggers a SOFT-kill threshold
+    stale_soft_threshold: int = 3
+
 
 def classify_reason(reason: Optional[str], *, okx_code: Optional[str] = None) -> Tuple[str, str]:
     """Return (category, normalized_reason).
@@ -103,6 +106,8 @@ class KillSwitchGuard:
             "updated_ts_ms": int(st.get("updated_ts_ms") or 0),
             "consecutive_hard": int(st.get("consecutive_hard") or 0),
             "consecutive_soft": int(st.get("consecutive_soft") or 0),
+            "consecutive_stale": int(st.get("consecutive_stale") or 0),
+            "last_stale_ts_ms": int(st.get("last_stale_ts_ms") or 0),
             "last_reason": st.get("last_reason"),
             "last_ok_ts_ms": int(st.get("last_ok_ts_ms") or 0),
             "last_reconcile_ts_ms": int(st.get("last_reconcile_ts_ms") or 0),
@@ -152,6 +157,13 @@ class KillSwitchGuard:
         if gen_ts_ms and int(st.get("last_reconcile_ts_ms") or 0) == int(gen_ts_ms):
             return {"ok": ok, "reason": norm_reason, "category": category, "skipped": True, "failure_state": st, "kill_switch": self._load_kill_switch()}
 
+        # stale counter is independent; it resets unless the current normalized_reason is exactly stale_status.
+        if norm_reason == "stale_status":
+            st["consecutive_stale"] = int(st.get("consecutive_stale") or 0) + 1
+            st["last_stale_ts_ms"] = int(gen_ts_ms or now)
+        else:
+            st["consecutive_stale"] = 0
+
         if ok:
             st["consecutive_hard"] = 0
             st["consecutive_soft"] = 0
@@ -160,6 +172,9 @@ class KillSwitchGuard:
             if category == "HARD":
                 st["consecutive_hard"] = int(st.get("consecutive_hard") or 0) + 1
                 st["consecutive_soft"] = 0
+            elif category == "AUTH":
+                # treat AUTH as its own lane; keep soft counter for visibility
+                st["consecutive_soft"] = int(st.get("consecutive_soft") or 0) + 1
             else:
                 st["consecutive_soft"] = int(st.get("consecutive_soft") or 0) + 1
                 # do not reset hard counter on soft by default
@@ -178,6 +193,8 @@ class KillSwitchGuard:
             trigger = "reconcile_auth_fail"
         elif (not ok) and category == "HARD" and int(st.get("consecutive_hard") or 0) >= int(self.cfg.hard_fail_threshold):
             trigger = "reconcile_hard_fail"
+        elif (not ok) and norm_reason == "stale_status" and int(st.get("consecutive_stale") or 0) >= int(self.cfg.stale_soft_threshold):
+            trigger = "reconcile_stale_fail"
 
         if trigger:
             # details snapshot for post-mortem
@@ -204,6 +221,8 @@ class KillSwitchGuard:
                 "okx_code": err.get("okx_code"),
                 "okx_msg": err.get("okx_msg"),
                 "http_status": err.get("http_status"),
+                "consecutive_stale": int(st.get("consecutive_stale") or 0),
+                "stale_age_ms": int(age_ms) if age_ms is not None else None,
             }
             ks_new = {
                 "enabled": True,
