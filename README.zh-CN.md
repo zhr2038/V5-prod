@@ -39,6 +39,47 @@ python3 main.py
 
 如果未设置 ARM 环境变量，`main.py` 会直接拒绝启动 live（避免 timer/误配置触发实盘）。
 
+### Live Preflight（上线建议：常开）
+Live 每次执行前会先做一轮 **preflight catch-up**（不改变策略逻辑，只做运行自洽/可运维）：
+
+1) `bills_sync`：追平最近 7 天账单流水（事实源）
+2) `ledger_once`：用 bills 聚合推导 expected balance，并与 OKX balance 做闭环校验
+3) `reconcile_guard`：交易所余额/仓位 vs 本地 Store 对账 + kill-switch guard
+4) 输出明确结论：`ALLOW / SELL_ONLY / ABORT`
+
+> 目的：避免“timer 还没刷新状态文件”导致 live 用旧的 ok=true 误放行。
+
+#### 可选：Preflight Bootstrap Patch（受控状态对齐，不是财务真相）
+成交后，交易所余额会先变化，本地 `AccountStore/PositionStore` 可能在下一轮 preflight 前尚未反映，导致 `reconcile_guard` 短暂变红（`base_mismatch/usdt_mismatch`）。
+
+开启 `preflight_bootstrap_patch` 后：当 **ledger 已 ok** 且 reconcile 的失败原因属于 mismatch 时，preflight 会对本地做一次受控 patch，并再次 reconcile，做到“自动回绿”，减少人工 bootstrap。
+
+关键原则：
+- **账务真相以 `fills → bills → ledger` 为主**，bootstrap patch 仅用于状态对齐
+- patch **只覆盖**：`cash(USDT)` + `positions.qty`
+- patch **不覆盖**：`avg_px / pnl / strategy_state`
+- 带安全阈值与最小间隔，避免抖动/限频
+
+推荐上线默认值（仅 live 启用）：
+```yaml
+execution:
+  # preflight
+  preflight_enabled: true
+  preflight_max_pages: 5
+  max_status_age_sec: 180
+  preflight_fail_action: sell_only   # sell_only|abort
+
+  # controlled bootstrap patch (exchange -> local)
+  preflight_bootstrap_patch_enabled: true
+  preflight_bootstrap_patch_min_interval_sec: 300   # 5min, avoid thrash
+  preflight_bootstrap_patch_max_total_usdt: 50.0    # refuse patch if estimated drift > 50U
+```
+
+运维手工入口（查看 preflight 细节 JSON）：
+```bash
+python3 scripts/live_preflight_once.py --max-pages 5 --max-status-age-sec 180
+```
+
 ### OKX 私有接口自检（balance）
 在写好 `.env`（api_key/api_secret/passphrase）后可运行：
 
