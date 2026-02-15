@@ -8,5 +8,11 @@ from src.core.models import MarketSeries
 
 class MarketDataProvider(ABC):
     @abstractmethod
-    def fetch_ohlcv(self, symbols: List[str], timeframe: str, limit: int) -> Dict[str, MarketSeries]:
+    def fetch_ohlcv(
+        self,
+        symbols: List[str],
+        timeframe: str,
+        limit: int,
+        end_ts_ms: int | None = None,
+    ) -> Dict[str, MarketSeries]:
         raise NotImplementedError

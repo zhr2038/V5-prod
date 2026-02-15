@@ -19,7 +19,7 @@ class MockProvider(MarketDataProvider):
     def __init__(self, seed: int = 7):
         self.rng = np.random.default_rng(seed)
 
-    def fetch_ohlcv(self, symbols: List[str], timeframe: str, limit: int) -> Dict[str, MarketSeries]:
+    def fetch_ohlcv(self, symbols: List[str], timeframe: str, limit: int, end_ts_ms: int | None = None) -> Dict[str, MarketSeries]:
         now = int(time.time() * 1000)
         step = 3600_000 if timeframe.endswith("h") else 3600_000
         out: Dict[str, MarketSeries] = {}
