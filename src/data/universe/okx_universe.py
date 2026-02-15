@@ -135,15 +135,33 @@ class OKXUniverseProvider:
             if sym.upper() in bl_syms or inst_id.upper().replace("-", "/") in bl_syms:
                 continue
 
-            # OKX tickers: volCcyQuote = quote volume (in quote currency)
-            qv = t.get("volCcyQuote")
-            try:
-                qv_f = float(qv or 0.0)
-            except Exception:
-                qv_f = 0.0
+            # OKX tickers: prefer quote-volume fields.
+            # In practice, some endpoints return volCcy24h (quote volume) but not volCcyQuote.
+            qv_f = 0.0
+            for k in ("volCcyQuote", "volCcy24h"):
+                try:
+                    qv_f = float(t.get(k) or 0.0)
+                except Exception:
+                    qv_f = 0.0
+                if qv_f > 0:
+                    break
+
+            # Fallback: estimate quote volume from base volume * last.
+            if qv_f <= 0:
+                try:
+                    vol_base = float(t.get("vol24h") or 0.0)
+                except Exception:
+                    vol_base = 0.0
+                try:
+                    last_px = float(t.get("last") or 0.0)
+                except Exception:
+                    last_px = 0.0
+                if vol_base > 0 and last_px > 0:
+                    qv_f = vol_base * last_px
+
             if qv_f < self.min_24h_quote_volume_usdt:
                 continue
-            out.append(UniverseItem(symbol=sym, inst_id=inst_id, quote_volume_usdt_24h=qv_f))
+            out.append(UniverseItem(symbol=sym, inst_id=inst_id, quote_volume_usdt_24h=float(qv_f)))
 
         out.sort(key=lambda x: float(x.quote_volume_usdt_24h), reverse=True)
         return out
