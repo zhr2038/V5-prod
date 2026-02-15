@@ -181,6 +181,45 @@ class BillsStore:
             return None
         return str(row[0]), int(row[1])
 
+    def list_by_ts(self, *, begin_ts_ms: int, end_ts_ms: int, limit: int = 50000) -> List[BillRow]:
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute(
+            """
+            SELECT bill_id, ts_ms, ccy, bal_chg, bal, type, sub_type,
+                   inst_type, inst_id, ord_id, cl_ord_id, sz, px, source, raw_json
+            FROM bills
+            WHERE ts_ms > ? AND ts_ms <= ?
+            ORDER BY ts_ms ASC
+            LIMIT ?
+            """,
+            (int(begin_ts_ms), int(end_ts_ms), int(limit)),
+        )
+        rows = cur.fetchall()
+        con.close()
+        out: List[BillRow] = []
+        for r in rows:
+            out.append(
+                BillRow(
+                    bill_id=r[0],
+                    ts_ms=int(r[1]),
+                    ccy=r[2],
+                    bal_chg=r[3],
+                    bal=r[4],
+                    typ=r[5],
+                    sub_type=r[6],
+                    inst_type=r[7],
+                    inst_id=r[8],
+                    ord_id=r[9],
+                    cl_ord_id=r[10],
+                    sz=r[11],
+                    px=r[12],
+                    source=r[13],
+                    raw_json=r[14],
+                )
+            )
+        return out
+
 
 def parse_okx_bills(resp_data: Dict[str, Any], *, source: str = "bills") -> List[BillRow]:
     data = (resp_data or {}).get("data")
