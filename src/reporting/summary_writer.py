@@ -56,6 +56,41 @@ def write_summary(
     return summ
 
 
+def refresh_summary_metrics(run_dir: str) -> Dict[str, Any]:
+    """Recompute trade/equity metrics from current trades.csv + equity.jsonl.
+
+    Used for live finalize: fills/trades may arrive after the initial summary was written.
+    This function patches summary.json in-place while preserving unrelated fields (e.g. budget).
+    """
+
+    rd = Path(run_dir)
+    p = rd / "summary.json"
+    if not p.exists():
+        # create from scratch
+        return write_summary(run_dir)
+
+    summ = json.loads(p.read_text(encoding="utf-8"))
+
+    eq_rows = read_equity_jsonl(str(rd / "equity.jsonl"))
+    trades = read_trades_csv(str(rd / "trades.csv"))
+
+    avg_equity = None
+    if eq_rows:
+        xs = [float(r.get("equity") or 0.0) for r in eq_rows]
+        avg_equity = sum(xs) / len(xs) if xs else None
+
+    eqm = compute_equity_metrics(eq_rows)
+    tm = compute_trade_metrics(trades, avg_equity=avg_equity)
+
+    # patch
+    summ["avg_equity"] = avg_equity
+    for k, v in {**eqm, **tm}.items():
+        summ[k] = v
+
+    p.write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summ
+
+
 def attach_budget(run_dir: str, budget: Dict[str, Any]) -> Dict[str, Any]:
     """Patch run_dir/summary.json with a top-level 'budget' field."""
     rd = Path(run_dir)

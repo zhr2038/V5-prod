@@ -426,6 +426,15 @@ def main() -> None:
             window_end_ts=window_end_ts,
         )
 
+        # Live finalize: refresh summary metrics after fills/trades export may have appended rows.
+        try:
+            if is_live:
+                from src.reporting.summary_writer import refresh_summary_metrics
+
+                summ = refresh_summary_metrics(f"reports/runs/{run_id}")
+        except Exception:
+            pass
+
         # F3.0 budget monitoring (monitor + tagging only, no behavior change)
         try:
             from src.reporting.budget_state import derive_ymd_utc_from_summary, update_daily_budget_state

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import time
+
+import requests
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -118,6 +120,35 @@ class LiveExecutionResult:
     cl_ord_id: str
     state: str
     ord_id: Optional[str] = None
+
+
+def _public_mid_at_submit(*, inst_id: str, timeout_sec: float = 2.0) -> Optional[Dict[str, Any]]:
+    """Best-effort fetch mid/bid/ask from OKX public ticker.
+
+    Returns dict with keys: mid,bid,ask,ts_ms. None on failure.
+    """
+
+    try:
+        url = "https://www.okx.com/api/v5/market/ticker"
+        r = requests.get(url, params={"instId": str(inst_id)}, timeout=float(timeout_sec))
+        r.raise_for_status()
+        obj = r.json() if r is not None else {}
+        rows = obj.get("data") if isinstance(obj, dict) else None
+        if not isinstance(rows, list) or not rows:
+            return None
+        t = rows[0] if isinstance(rows[0], dict) else {}
+        bid = float(t.get("bidPx") or 0.0)
+        ask = float(t.get("askPx") or 0.0)
+        ts = int(t.get("ts") or 0)
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2.0
+        else:
+            mid = float(t.get("last") or 0.0)
+        if mid <= 0:
+            return None
+        return {"mid": float(mid), "bid": float(bid) if bid > 0 else None, "ask": float(ask) if ask > 0 else None, "ts_ms": ts or None}
+    except Exception:
+        return None
 
 
 class LiveExecutionEngine:
@@ -258,6 +289,11 @@ class LiveExecutionEngine:
 
         try:
             payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
+            # Best-effort mid at submit for slippage attribution (do not send to exchange).
+            tob = _public_mid_at_submit(inst_id=inst_id, timeout_sec=2.0)
+            req_store = dict(payload)
+            if tob:
+                req_store["_meta"] = {"mid_px_at_submit": tob.get("mid"), "bid": tob.get("bid"), "ask": tob.get("ask"), "ts_ms": tob.get("ts_ms")}
         except DustOrderSkip as e:
             # Persist and mark as rejected (terminal) without touching the exchange.
             self.order_store.upsert_new(
@@ -293,7 +329,7 @@ class LiveExecutionEngine:
             notional_usdt=float(o.notional_usdt),
             window_start_ts=(o.meta or {}).get("window_start_ts"),
             window_end_ts=(o.meta or {}).get("window_end_ts"),
-            req=payload,
+            req=req_store,
             reconcile_ok_at_submit=reconcile_ok,
             kill_switch_at_submit=kill_switch,
             submit_gate=gate,
