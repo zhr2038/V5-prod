@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from src.execution.reconcile_reason import FailureContext, classify_reconcile_failure
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
@@ -126,24 +128,29 @@ class KillSwitchGuard:
             gen_ts_ms = 0
 
         age_ms = max(0, now - gen_ts_ms) if gen_ts_ms > 0 else None
-        ok = bool(status.get("ok")) if status else False
-        reason = status.get("reason")
+        ok0 = bool(status.get("ok")) if status else False
+        reason0 = status.get("reason")
 
         # Capture OKX error code/msg if present
         err = status.get("error") or {}
-        okx_code = err.get("okx_code")
 
-        # stale status becomes SOFT failure even if ok=true
-        if age_ms is not None and gen_ts_ms > 0 and age_ms > int(self.cfg.stale_threshold_sec) * 1000:
-            ok = False
-            reason = "stale_status"
+        # Normalize reason/category (stable, greppable)
+        norm_reason, category = classify_reconcile_failure(
+            FailureContext(
+                ok=ok0,
+                reason=reason0,
+                error=err if isinstance(err, dict) else None,
+                exc=None,
+                status_age_ms=age_ms,
+                stale_threshold_ms=int(self.cfg.stale_threshold_sec) * 1000,
+            )
+        )
+        ok = bool(ok0) and norm_reason == "ok"
 
         # Idempotency guard: only count once per reconcile ts
         st = self._load_failure_state()
         if gen_ts_ms and int(st.get("last_reconcile_ts_ms") or 0) == int(gen_ts_ms):
-            return {"ok": ok, "reason": reason, "skipped": True, "failure_state": st, "kill_switch": self._load_kill_switch()}
-
-        category, norm_reason = ("OK", "ok") if ok else classify_reason(reason, okx_code=str(okx_code) if okx_code is not None else None)
+            return {"ok": ok, "reason": norm_reason, "category": category, "skipped": True, "failure_state": st, "kill_switch": self._load_kill_switch()}
 
         if ok:
             st["consecutive_hard"] = 0
