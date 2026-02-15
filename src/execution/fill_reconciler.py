@@ -96,18 +96,14 @@ class FillReconciler:
     def reconcile(self, *, limit: int = 2000, max_get_order_per_run: int = 20) -> Dict[str, Any]:
         fills = self._load_unprocessed_fills(limit=limit)
         if not fills:
-            return {"new_fills": 0, "updated_orders": 0, "get_order_calls": 0}
+            return {"new_fills": 0, "updated_orders": 0, "get_order_calls": 0, "fills_exported": 0, "export_errors": 0}
 
         aggs = self._aggregate(fills)
         updated = 0
         get_calls = 0
 
-        # Mark each fill processed (idempotency) after successful reconciliation loop.
-        for f in fills:
-            try:
-                self.fill_store.mark_processed(str(f.get("inst_id")), str(f.get("trade_id")))
-            except Exception:
-                pass
+        # NOTE: processed marker is written *only after* successful export (trades/cost_events).
+        # This prevents data loss if exporter fails mid-run.
 
         for a in aggs:
             # Associate
@@ -149,4 +145,59 @@ class FillReconciler:
                 except Exception as e:
                     log.debug(f"get_order confirm failed for {clid}: {e}")
 
-        return {"new_fills": len(fills), "updated_orders": updated, "get_order_calls": int(get_calls)}
+        # Export per-fill trades/cost events and mark processed only after export.
+        exported = 0
+        export_errors = 0
+        try:
+            from src.reporting.fill_trade_exporter import export_fill
+        except Exception:
+            export_fill = None
+
+        for f in fills:
+            inst_id = str(f.get("inst_id") or "")
+            trade_id = str(f.get("trade_id") or "")
+            if not inst_id or not trade_id:
+                continue
+
+            # associate for run_id/intent/window
+            row = None
+            clid_f = f.get("cl_ord_id")
+            oid_f = f.get("ord_id")
+            if clid_f:
+                row = self.order_store.get(str(clid_f))
+            if row is None and oid_f:
+                row = self.order_store.get_by_ord_id(str(oid_f))
+
+            if row is None or export_fill is None:
+                continue
+
+            try:
+                export_fill(
+                    fill_ts_ms=int(f.get("ts_ms") or 0),
+                    inst_id=inst_id,
+                    side=str(f.get("side") or row.side or ""),
+                    fill_px=str(f.get("fill_px") or "0"),
+                    fill_sz=str(f.get("fill_sz") or "0"),
+                    fee=f.get("fee"),
+                    fee_ccy=f.get("fee_ccy"),
+                    run_id=str(row.run_id),
+                    intent=str(row.intent),
+                    window_start_ts=row.window_start_ts,
+                    window_end_ts=row.window_end_ts,
+                    run_dir=f"reports/runs/{row.run_id}",
+                    regime=None,
+                    deadband_pct=None,
+                    drift=None,
+                )
+                self.fill_store.mark_processed(inst_id, trade_id)
+                exported += 1
+            except Exception:
+                export_errors += 1
+
+        return {
+            "new_fills": len(fills),
+            "updated_orders": updated,
+            "get_order_calls": int(get_calls),
+            "fills_exported": int(exported),
+            "export_errors": int(export_errors),
+        }
