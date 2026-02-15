@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
+from collections import Counter
 
 from configs.schema import AppConfig
 from src.core.models import MarketSeries
@@ -14,6 +15,37 @@ class WalkForwardFold:
     train_range: Tuple[int, int]
     test_range: Tuple[int, int]
     result: BacktestResult
+
+
+def build_walk_forward_report(folds: List[WalkForwardFold], cost_meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Serialize folds + cost assumption into a report dict (schema_version=2)."""
+    report: Dict[str, Any] = {
+        "schema_version": 2,
+        "cost_assumption_meta": cost_meta or {},
+        "cost_assumption_aggregate": {"fallback_level_counts": {}},
+        "folds": [],
+    }
+
+    agg = Counter()
+    for f in folds:
+        ca = (f.result.cost_assumption or {})
+        fc = ca.get("fallback_level_counts") or {}
+        try:
+            agg.update({str(k): int(v) for k, v in fc.items()})
+        except Exception:
+            pass
+
+        report["folds"].append(
+            {
+                "train_range": list(f.train_range),
+                "test_range": list(f.test_range),
+                "result": f.result.__dict__,
+                "cost_assumption": ca,
+            }
+        )
+
+    report["cost_assumption_aggregate"]["fallback_level_counts"] = dict(agg)
+    return report
 
 
 def build_folds(n: int, folds: int = 4) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
