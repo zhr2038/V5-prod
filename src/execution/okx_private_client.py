@@ -7,7 +7,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 from urllib.parse import urlencode
 
 import httpx
@@ -223,6 +223,30 @@ class OKXPrivateClient:
             raise OKXPrivateClientError("ord_id or cl_ord_id is required")
         payload = {"instId": inst_id, "ordId": ord_id, "clOrdId": cl_ord_id}
         return self.request("POST", "/api/v5/trade/cancel-order", json_body=payload)
+
+    def get_fills(
+        self,
+        *,
+        inst_type: str = "SPOT",
+        inst_id: Optional[str] = None,
+        ord_id: Optional[str] = None,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        begin: Optional[int] = None,
+        end: Optional[int] = None,
+        limit: int = 100,
+    ) -> OKXResponse:
+        params: Dict[str, Any] = {
+            "instType": inst_type,
+            "instId": inst_id,
+            "ordId": ord_id,
+            "after": after,
+            "before": before,
+            "begin": begin,
+            "end": end,
+            "limit": int(limit),
+        }
+        return self.request("GET", "/api/v5/trade/fills", params=params)
 
     # Minimal self-check helper
     def get_balance(self, ccy: Optional[str] = None) -> OKXResponse:

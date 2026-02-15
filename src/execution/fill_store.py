@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+@dataclass
+class FillRow:
+    inst_id: str
+    trade_id: str
+    ts_ms: int
+
+    ord_id: Optional[str] = None
+    cl_ord_id: Optional[str] = None
+    side: Optional[str] = None
+    exec_type: Optional[str] = None
+
+    fill_px: Optional[str] = None
+    fill_sz: Optional[str] = None
+    fill_notional: Optional[str] = None
+
+    fee: Optional[str] = None
+    fee_ccy: Optional[str] = None
+
+    source: str = "fills"  # fills|fills_history
+    raw_json: str = "{}"
+
+
+class FillStore:
+    """SQLite store for OKX fills.
+
+    Idempotency / dedup rule:
+    - For the same instId, tradeId should only be processed once.
+
+    We store numeric strings as TEXT to preserve exact exchange values.
+    """
+
+    def __init__(self, path: str = "reports/fills.sqlite"):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _init_db(self) -> None:
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fills (
+              inst_id TEXT NOT NULL,
+              trade_id TEXT NOT NULL,
+              ts_ms INTEGER NOT NULL,
+
+              ord_id TEXT,
+              cl_ord_id TEXT,
+              side TEXT,
+              exec_type TEXT,
+
+              fill_px TEXT,
+              fill_sz TEXT,
+              fill_notional TEXT,
+
+              fee TEXT,
+              fee_ccy TEXT,
+
+              source TEXT NOT NULL,
+              raw_json TEXT NOT NULL,
+
+              created_ts_ms INTEGER NOT NULL,
+
+              PRIMARY KEY(inst_id, trade_id)
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_fills_clid ON fills(cl_ord_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_fills_oid ON fills(ord_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_fills_ts ON fills(ts_ms)")
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sync_state (
+              k TEXT PRIMARY KEY,
+              v TEXT NOT NULL,
+              updated_ts_ms INTEGER NOT NULL
+            )
+            """
+        )
+        con.commit()
+        con.close()
+
+    def get_state(self, key: str) -> Optional[str]:
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute("SELECT v FROM sync_state WHERE k=?", (str(key),))
+        row = cur.fetchone()
+        con.close()
+        return str(row[0]) if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO sync_state(k, v, updated_ts_ms) VALUES (?,?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v, updated_ts_ms=excluded.updated_ts_ms",
+            (str(key), str(value), _now_ms()),
+        )
+        con.commit()
+        con.close()
+
+    def upsert_many(self, rows: Iterable[FillRow]) -> Tuple[int, int]:
+        """Upsert fills; returns (inserted, total_processed)."""
+        rows_list = list(rows)
+        if not rows_list:
+            return 0, 0
+
+        now = _now_ms()
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+
+        inserted = 0
+        total = 0
+        for r in rows_list:
+            total += 1
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO fills(
+                  inst_id, trade_id, ts_ms,
+                  ord_id, cl_ord_id, side, exec_type,
+                  fill_px, fill_sz, fill_notional,
+                  fee, fee_ccy,
+                  source, raw_json,
+                  created_ts_ms
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(r.inst_id),
+                    str(r.trade_id),
+                    int(r.ts_ms),
+                    str(r.ord_id) if r.ord_id is not None else None,
+                    str(r.cl_ord_id) if r.cl_ord_id is not None else None,
+                    str(r.side) if r.side is not None else None,
+                    str(r.exec_type) if r.exec_type is not None else None,
+                    str(r.fill_px) if r.fill_px is not None else None,
+                    str(r.fill_sz) if r.fill_sz is not None else None,
+                    str(r.fill_notional) if r.fill_notional is not None else None,
+                    str(r.fee) if r.fee is not None else None,
+                    str(r.fee_ccy) if r.fee_ccy is not None else None,
+                    str(r.source),
+                    str(r.raw_json or "{}"),
+                    int(now),
+                ),
+            )
+            inserted += int(cur.rowcount)
+
+        con.commit()
+        con.close()
+        return inserted, total
+
+    def count(self) -> int:
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(*) FROM fills")
+        n = int(cur.fetchone()[0] or 0)
+        con.close()
+        return n
+
+    def list_recent(self, limit: int = 50) -> List[FillRow]:
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute(
+            """
+            SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, exec_type,
+                   fill_px, fill_sz, fill_notional, fee, fee_ccy, source, raw_json
+            FROM fills ORDER BY ts_ms DESC LIMIT ?
+            """,
+            (int(limit),),
+        )
+        rows = cur.fetchall()
+        con.close()
+        out: List[FillRow] = []
+        for r in rows:
+            out.append(
+                FillRow(
+                    inst_id=r[0],
+                    trade_id=r[1],
+                    ts_ms=int(r[2]),
+                    ord_id=r[3],
+                    cl_ord_id=r[4],
+                    side=r[5],
+                    exec_type=r[6],
+                    fill_px=r[7],
+                    fill_sz=r[8],
+                    fill_notional=r[9],
+                    fee=r[10],
+                    fee_ccy=r[11],
+                    source=r[12],
+                    raw_json=r[13],
+                )
+            )
+        return out
+
+
+def parse_okx_fills(resp_data: Dict[str, Any], *, source: str = "fills") -> List[FillRow]:
+    rows = []
+    data = (resp_data or {}).get("data")
+    if not isinstance(data, list):
+        return []
+
+    for it in data:
+        if not isinstance(it, dict):
+            continue
+        inst_id = str(it.get("instId") or "")
+        trade_id = str(it.get("tradeId") or it.get("trade_id") or "")
+        if not inst_id or not trade_id:
+            continue
+        ts = it.get("ts") or it.get("fillTime") or it.get("fill_time")
+        try:
+            ts_ms = int(ts)
+        except Exception:
+            ts_ms = 0
+
+        rows.append(
+            FillRow(
+                inst_id=inst_id,
+                trade_id=trade_id,
+                ts_ms=int(ts_ms),
+                ord_id=str(it.get("ordId")) if it.get("ordId") is not None else None,
+                cl_ord_id=str(it.get("clOrdId")) if it.get("clOrdId") is not None else None,
+                side=str(it.get("side")) if it.get("side") is not None else None,
+                exec_type=str(it.get("execType")) if it.get("execType") is not None else None,
+                fill_px=str(it.get("fillPx")) if it.get("fillPx") is not None else None,
+                fill_sz=str(it.get("fillSz")) if it.get("fillSz") is not None else None,
+                fill_notional=str(it.get("fillNotionalUsd")) if it.get("fillNotionalUsd") is not None else (str(it.get("fillNotional")) if it.get("fillNotional") is not None else None),
+                fee=str(it.get("fee")) if it.get("fee") is not None else None,
+                fee_ccy=str(it.get("feeCcy")) if it.get("feeCcy") is not None else None,
+                source=str(source),
+                raw_json=json.dumps(it, ensure_ascii=False, separators=(",", ":")),
+            )
+        )
+
+    return rows

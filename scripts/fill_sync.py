@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import time
+
+from configs.loader import load_config
+from src.execution.fill_store import FillStore, parse_okx_fills
+from src.execution.okx_private_client import OKXPrivateClient
+
+
+log = logging.getLogger("fill_sync")
+
+
+def sync_once(*, store: FillStore, client: OKXPrivateClient, limit: int = 100, max_pages: int = 20) -> int:
+    """Sync latest fills (last 3 days window) into FillStore.
+
+    Strategy: page backward starting from newest; stop when a page produces 0 new inserts.
+    This makes the sync idempotent and cheap after warm-up.
+    """
+
+    after = None
+    total_new = 0
+    for _ in range(int(max_pages)):
+        r = client.get_fills(after=after, limit=int(limit))
+        rows = parse_okx_fills(r.data, source="fills")
+        ins, _ = store.upsert_many(rows)
+        total_new += int(ins)
+
+        data = (r.data or {}).get("data") or []
+        if not isinstance(data, list) or not data:
+            break
+
+        # OKX pagination: use billId as cursor if present; else fallback to last tradeId.
+        last = data[-1] if isinstance(data[-1], dict) else {}
+        after = last.get("billId") or last.get("tradeId")
+
+        if ins == 0:
+            break
+
+        time.sleep(0.05)  # be gentle; rate-limit retry is in client anyway
+
+    store.set_state("last_sync_ts_ms", str(int(time.time() * 1000)))
+    if after is not None:
+        store.set_state("last_after_cursor", str(after))
+    return total_new
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="configs/config.yaml")
+    ap.add_argument("--env", default=".env")
+    ap.add_argument("--db", default="reports/fills.sqlite")
+    ap.add_argument("--limit", type=int, default=100)
+    ap.add_argument("--max-pages", type=int, default=20)
+    args = ap.parse_args()
+
+    logging.basicConfig(level=logging.INFO)
+
+    cfg = load_config(args.config, env_path=args.env)
+    if not (cfg.exchange.api_key and cfg.exchange.api_secret and cfg.exchange.passphrase):
+        raise RuntimeError("Missing OKX API credentials (exchange.api_key/api_secret/passphrase)")
+
+    store = FillStore(path=str(args.db))
+    client = OKXPrivateClient(exchange=cfg.exchange)
+    try:
+        n = sync_once(store=store, client=client, limit=args.limit, max_pages=args.max_pages)
+        log.info(f"fill_sync: new_fills={n} total={store.count()} db={args.db}")
+        log.info(f"cursor(last_after)={store.get_state('last_after_cursor')} last_sync_ts_ms={store.get_state('last_sync_ts_ms')}")
+    finally:
+        client.close()
+
+
+if __name__ == "__main__":
+    main()
