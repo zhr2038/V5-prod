@@ -200,8 +200,49 @@ def main() -> None:
     trade_log = TradeLogWriter(run_dir=f"reports/runs/{run_id}")
 
     exec_engine = ExecutionEngine(cfg.execution, position_store=store, account_store=acc_store, trade_log=trade_log, run_id=run_id)
+
+    # pre-trade equity point (so instant runs reflect costs)
+    try:
+        pre_acc = acc_store.get()
+        pre_cash = float(pre_acc.cash_usdt)
+        pre_eq = float(pre_cash)
+        for p in store.list():
+            s = md_1h.get(p.symbol)
+            if s and s.close:
+                pre_eq += float(p.qty) * float(s.close[-1])
+        run_logger.log_equity(
+            {
+                "ts": datetime.utcnow().isoformat() + "Z",
+                "phase": "pre_trade",
+                "cash": pre_cash,
+                "equity": pre_eq,
+            }
+        )
+    except Exception:
+        pass
+
     report = exec_engine.execute(orders)
     report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
+
+    # post-trade equity point (after applying fees/slippage)
+    try:
+        post_acc = acc_store.get()
+        post_cash = float(post_acc.cash_usdt)
+        post_eq = float(post_cash)
+        for p in store.list():
+            s = md_1h.get(p.symbol)
+            if s and s.close:
+                post_eq += float(p.qty) * float(s.close[-1])
+        run_logger.log_equity(
+            {
+                "ts": datetime.utcnow().isoformat() + "Z",
+                "phase": "post_trade",
+                "cash": post_cash,
+                "equity": post_eq,
+            }
+        )
+    except Exception:
+        pass
 
     # write/update summary
     try:
