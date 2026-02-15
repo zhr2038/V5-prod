@@ -113,6 +113,8 @@ def rollup_day(day_yyyymmdd: str, base_dir: str = "reports/cost_events", out_dir
 
 
 def main() -> None:
+    import time
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", default=None, help="UTC day YYYYMMDD; default today(UTC)")
     ap.add_argument("--base_dir", default="reports/cost_events")
@@ -123,7 +125,30 @@ def main() -> None:
     if not day:
         day = datetime.now(timezone.utc).strftime("%Y%m%d")
 
+    t0 = time.time()
     out = rollup_day(day, base_dir=args.base_dir, out_dir=args.out_dir)
+    duration_ms = int((time.time() - t0) * 1000)
+
+    # load stats to print an ops-friendly one-line summary
+    try:
+        d = json.loads(Path(out).read_text(encoding="utf-8"))
+    except Exception:
+        d = {}
+
+    cov = d.get("coverage") or {}
+    bucket_count = len(d.get("buckets") or {})
+
+    print(
+        "COST_ROLLUP "
+        f"day={day} "
+        f"out={out} "
+        f"events_total={cov.get('events_total')} "
+        f"fills={cov.get('fills')} "
+        f"missing_bidask={cov.get('missing_bidask')} "
+        f"buckets={bucket_count} "
+        f"duration_ms={duration_ms}",
+        flush=True,
+    )
     print(f"wrote {out}")
 
 

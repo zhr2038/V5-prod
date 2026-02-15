@@ -8,4 +8,6 @@ Type=oneshot
 WorkingDirectory=/home/admin/clawd/v5-trading-bot
 User=admin
 Group=admin
+Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=v5-cost-rollup
 ExecStart=/usr/bin/flock -n /tmp/v5_cost_rollup.lock -c "/bin/bash -lc 'python3 scripts/rollup_costs.py --day $(date -u -d \"yesterday\" +%%Y%%m%%d)'"
