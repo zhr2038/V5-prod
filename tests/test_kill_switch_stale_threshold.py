@@ -57,7 +57,7 @@ def test_stale_resets_on_timeout() -> None:
         g.apply()
 
         # then a timeout (non-stale reason) => consecutive_stale resets
-        _write(status, {"generated_ts_ms": int(time.time() * 1000), "ok": False, "reason": "timeout"})
+        _write(status, {"generated_ts_ms": base + 20000, "ok": False, "reason": "timeout"})
         out = g.apply()
         st = out.get("failure_state") or {}
         assert int(st.get("consecutive_stale") or 0) == 0
@@ -104,7 +104,7 @@ def test_ok_resets_stale() -> None:
         _write(status, {"generated_ts_ms": base, "ok": True})
         g.apply()
 
-        _write(status, {"generated_ts_ms": int(time.time() * 1000), "ok": True})
+        _write(status, {"generated_ts_ms": base + 20000, "ok": True})
         out = g.apply()
         st = out.get("failure_state") or {}
         assert int(st.get("consecutive_stale") or 0) == 0

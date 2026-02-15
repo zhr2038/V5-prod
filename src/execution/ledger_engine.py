@@ -186,7 +186,8 @@ class LedgerEngine:
 
         _atomic_write_json(out_path, obj)
 
-        # advance baseline when ok (or always; here we advance always to keep the check moving)
-        self._write_baseline(ts_ms=now, last_bill_id=last_bill_id, last_bill_ts_ms=end_ts, balances=current_bal)
+        # Advance baseline only when ok=true (keeps failures reproducible for debugging).
+        if ok:
+            self._write_baseline(ts_ms=now, last_bill_id=last_bill_id, last_bill_ts_ms=end_ts, balances=current_bal)
 
         return obj
