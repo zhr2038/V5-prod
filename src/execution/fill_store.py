@@ -92,6 +92,18 @@ class FillStore:
             )
             """
         )
+
+        # Reconcile processed marker (S1): allows safe replays/backfills without cursor bugs.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fill_processed (
+              inst_id TEXT NOT NULL,
+              trade_id TEXT NOT NULL,
+              processed_ts_ms INTEGER NOT NULL,
+              PRIMARY KEY(inst_id, trade_id)
+            )
+            """
+        )
         con.commit()
         con.close()
 
@@ -169,6 +181,55 @@ class FillStore:
         n = int(cur.fetchone()[0] or 0)
         con.close()
         return n
+
+    def mark_processed(self, inst_id: str, trade_id: str) -> None:
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute(
+            "INSERT OR IGNORE INTO fill_processed(inst_id, trade_id, processed_ts_ms) VALUES (?,?,?)",
+            (str(inst_id), str(trade_id), _now_ms()),
+        )
+        con.commit()
+        con.close()
+
+    def list_unprocessed(self, limit: int = 2000) -> List[Dict[str, Any]]:
+        """Return unprocessed fill records (joined with fill_processed)."""
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute(
+            """
+            SELECT f.inst_id, f.trade_id, f.ts_ms, f.ord_id, f.cl_ord_id, f.side, f.exec_type,
+                   f.fill_px, f.fill_sz, f.fee, f.fee_ccy, f.raw_json
+            FROM fills f
+            LEFT JOIN fill_processed p
+              ON p.inst_id = f.inst_id AND p.trade_id = f.trade_id
+            WHERE p.trade_id IS NULL
+            ORDER BY f.ts_ms ASC
+            LIMIT ?
+            """,
+            (int(limit),),
+        )
+        rows = cur.fetchall()
+        con.close()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "inst_id": r[0],
+                    "trade_id": r[1],
+                    "ts_ms": int(r[2]),
+                    "ord_id": r[3],
+                    "cl_ord_id": r[4],
+                    "side": r[5],
+                    "exec_type": r[6],
+                    "fill_px": r[7],
+                    "fill_sz": r[8],
+                    "fee": r[9],
+                    "fee_ccy": r[10],
+                    "raw_json": r[11],
+                }
+            )
+        return out
 
     def list_recent(self, limit: int = 50) -> List[FillRow]:
         con = sqlite3.connect(str(self.path))

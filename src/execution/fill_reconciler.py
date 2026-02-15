@@ -43,7 +43,7 @@ class FillReconciler:
     - Fees are aggregated per feeCcy.
 
     Incremental processing:
-    - Uses FillStore sync_state key `last_reconcile_created_ts_ms` and processes new fills by created_ts_ms.
+    - Uses FillStore.fill_processed (S1) to ensure each (inst_id, trade_id) is processed once.
     """
 
     def __init__(self, *, fill_store: FillStore, order_store: OrderStore, okx: Optional[OKXPrivateClient] = None):
@@ -51,43 +51,8 @@ class FillReconciler:
         self.order_store = order_store
         self.okx = okx
 
-    def _load_new_fills(self, since_created_ms: int, limit: int = 2000) -> List[Dict[str, Any]]:
-        # We need created_ts_ms field which is internal; query directly.
-        con = sqlite3.connect(str(self.fill_store.path))
-        cur = con.cursor()
-        cur.execute(
-            """
-            SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, exec_type,
-                   fill_px, fill_sz, fee, fee_ccy, raw_json, created_ts_ms
-            FROM fills
-            WHERE created_ts_ms > ?
-            ORDER BY created_ts_ms ASC
-            LIMIT ?
-            """,
-            (int(since_created_ms), int(limit)),
-        )
-        rows = cur.fetchall()
-        con.close()
-        out: List[Dict[str, Any]] = []
-        for r in rows:
-            out.append(
-                {
-                    "inst_id": r[0],
-                    "trade_id": r[1],
-                    "ts_ms": int(r[2]),
-                    "ord_id": r[3],
-                    "cl_ord_id": r[4],
-                    "side": r[5],
-                    "exec_type": r[6],
-                    "fill_px": r[7],
-                    "fill_sz": r[8],
-                    "fee": r[9],
-                    "fee_ccy": r[10],
-                    "raw_json": r[11],
-                    "created_ts_ms": int(r[12]),
-                }
-            )
-        return out
+    def _load_unprocessed_fills(self, limit: int = 2000) -> List[Dict[str, Any]]:
+        return self.fill_store.list_unprocessed(limit=limit)
 
     def _aggregate(self, fills: List[Dict[str, Any]]) -> List[FillAgg]:
         # group key: (inst_id, cl_ord_id or '', ord_id or '') but we keep both
@@ -128,18 +93,21 @@ class FillReconciler:
 
         return aggs
 
-    def reconcile(self, *, limit: int = 2000) -> Dict[str, Any]:
-        since = self.fill_store.get_state("last_reconcile_created_ts_ms")
-        since_ms = int(since) if since else 0
-
-        fills = self._load_new_fills(since_ms, limit=limit)
+    def reconcile(self, *, limit: int = 2000, max_get_order_per_run: int = 20) -> Dict[str, Any]:
+        fills = self._load_unprocessed_fills(limit=limit)
         if not fills:
-            return {"new_fills": 0, "updated_orders": 0}
-
-        max_created = max(int(f.get("created_ts_ms") or 0) for f in fills)
+            return {"new_fills": 0, "updated_orders": 0, "get_order_calls": 0}
 
         aggs = self._aggregate(fills)
         updated = 0
+        get_calls = 0
+
+        # Mark each fill processed (idempotency) after successful reconciliation loop.
+        for f in fills:
+            try:
+                self.fill_store.mark_processed(str(f.get("inst_id")), str(f.get("trade_id")))
+            except Exception:
+                pass
 
         for a in aggs:
             # Associate
@@ -167,9 +135,10 @@ class FillReconciler:
             updated += 1
 
             # Confirm terminal state via get_order when possible
-            if self.okx is not None:
+            if self.okx is not None and get_calls < int(max_get_order_per_run):
                 try:
                     r = self.okx.get_order(inst_id=str(row.inst_id), ord_id=row.ord_id, cl_ord_id=row.cl_ord_id)
+                    get_calls += 1
                     d = (r.data or {}).get("data") or []
                     if isinstance(d, list) and d:
                         st = str((d[0] or {}).get("state") or "")
@@ -180,5 +149,4 @@ class FillReconciler:
                 except Exception as e:
                     log.debug(f"get_order confirm failed for {clid}: {e}")
 
-        self.fill_store.set_state("last_reconcile_created_ts_ms", str(int(max_created)))
-        return {"new_fills": len(fills), "updated_orders": updated, "max_created_ts_ms": int(max_created)}
+        return {"new_fills": len(fills), "updated_orders": updated, "get_order_calls": int(get_calls)}

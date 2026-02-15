@@ -303,6 +303,17 @@ class LiveExecutionEngine:
             return False
 
     def poll_open(self, limit: int = 200) -> List[LiveExecutionResult]:
+        # 0) Optional: sync fills into FillStore then reconcile into OrderStore.
+        try:
+            from src.execution.fill_store import FillStore
+            from src.execution.fill_reconciler import FillReconciler
+
+            fs = FillStore(path="reports/fills.sqlite")
+            rec = FillReconciler(fill_store=fs, order_store=self.order_store, okx=self.okx)
+            rec.reconcile(limit=2000, max_get_order_per_run=20)
+        except Exception:
+            pass
+
         out: List[LiveExecutionResult] = []
         rows = self.order_store.list_open(limit=limit)
         for r in rows:
