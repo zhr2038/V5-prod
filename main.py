@@ -341,19 +341,37 @@ def main() -> None:
         except Exception as e:
             log.warning(f"live poll_open (pre) failed: {e}")
 
-    # G1.0 reconcile: write reconcile_status.json after pre poll (fills processed)
-    if is_live:
+    # Live preflight catch-up (Commit A): bills -> ledger -> reconcile/guard -> decision
+    if is_live and bool(getattr(cfg.execution, "preflight_enabled", True)):
         try:
-            from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
+            from src.execution.live_preflight import LivePreflight
 
             client = getattr(exec_engine, "okx", None)
             if client is not None:
-                th = ReconcileThresholds(abs_usdt_tol=1.0, abs_base_tol=1e-8, dust_usdt_ignore=0.0)
-                ReconcileEngine(okx=client, position_store=store, account_store=acc_store, thresholds=th).reconcile(
-                    out_path=str(getattr(cfg.execution, "reconcile_status_path", "reports/reconcile_status.json"))
+                pf = LivePreflight(
+                    cfg.execution,
+                    okx=client,
+                    position_store=store,
+                    account_store=acc_store,
+                    bills_db_path="reports/bills.sqlite",
+                    ledger_state_path="reports/ledger_state.json",
+                    ledger_status_path="reports/ledger_status.json",
+                    reconcile_status_path=str(getattr(cfg.execution, "reconcile_status_path", "reports/reconcile_status.json")),
                 )
+                res = pf.run(
+                    max_pages=int(getattr(cfg.execution, "preflight_max_pages", 5)),
+                    max_status_age_sec=int(getattr(cfg.execution, "max_status_age_sec", 180)),
+                )
+                log.info(f"LIVE_PREFLIGHT decision={res.decision} reason={res.reason}")
+
+                fail_action = str(getattr(cfg.execution, "preflight_fail_action", "sell_only") or "sell_only").lower()
+                if res.decision == "ABORT" or (res.decision == "SELL_ONLY" and fail_action == "abort"):
+                    raise RuntimeError(f"live preflight blocked: {res.decision} {res.reason}")
+
+                if res.decision == "SELL_ONLY":
+                    orders = [o for o in orders if str(o.side).lower() == "sell" or str(o.intent) == "CLOSE_LONG"]
         except Exception as e:
-            log.warning(f"reconcile failed: {e}")
+            log.warning(f"live preflight failed: {e}")
 
     report = exec_engine.execute(orders)
     report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
