@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -38,6 +38,18 @@ def _quantiles(xs: List[float], ps: List[float]) -> Dict[str, Optional[float]]:
         k = max(0, min(n - 1, int(round(p * (n - 1)))))
         out[f"p{int(p*100)}"] = xs2[k]
     return out
+
+
+def _median(xs: List[float]) -> Optional[float]:
+    xs2 = [float(x) for x in xs if x is not None]
+    if not xs2:
+        return None
+    xs2.sort()
+    n = len(xs2)
+    mid = n // 2
+    if n % 2 == 1:
+        return xs2[mid]
+    return 0.5 * (xs2[mid - 1] + xs2[mid])
 
 
 def notional_bucket(x: float) -> str:
@@ -85,6 +97,7 @@ def rollup_day(day_yyyymmdd: str, base_dir: str = "reports/cost_events", out_dir
     }
 
     for (sym, regime, action, nb), rows in groups.items():
+
         def _get_f(name: str) -> List[float]:
             out = []
             for r in rows:
@@ -112,6 +125,100 @@ def rollup_day(day_yyyymmdd: str, base_dir: str = "reports/cost_events", out_dir
     return out_path
 
 
+def _parse_yyyymmdd(s: str) -> date:
+    return date(int(s[0:4]), int(s[4:6]), int(s[6:8]))
+
+
+def _overall_p50_cost_bps(stats: Dict[str, Any]) -> Optional[float]:
+    ps: List[float] = []
+    for b in (stats.get("buckets") or {}).values():
+        q = (b or {}).get("cost_bps_total") or {}
+        p50 = q.get("p50")
+        if p50 is None:
+            continue
+        try:
+            ps.append(float(p50))
+        except Exception:
+            continue
+    return _median(ps)
+
+
+def check_anomaly(
+    day_yyyymmdd: str,
+    out_dir: str = "reports/cost_stats",
+    lookback_days: int = 7,
+    multiplier: float = 2.0,
+    abs_bps: float = 30.0,
+) -> Dict[str, Any]:
+    """Detect cost anomalies by comparing today's overall p50(total_cost_bps) vs lookback median.
+
+    - overall p50 is computed as the median of per-bucket p50 values.
+    - anomaly if today's p50 >= max(lookback_median * multiplier, abs_bps)
+    """
+
+    out_path = Path(out_dir) / f"daily_cost_stats_{day_yyyymmdd}.json"
+    today_stats = {}
+    try:
+        today_stats = json.loads(out_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    today_p50 = _overall_p50_cost_bps(today_stats)
+
+    d0 = _parse_yyyymmdd(day_yyyymmdd)
+    prev_p50s: List[float] = []
+    prev_days: List[str] = []
+
+    for i in range(1, int(lookback_days) + 1):
+        di = d0 - timedelta(days=i)
+        ds = di.strftime("%Y%m%d")
+        p = Path(out_dir) / f"daily_cost_stats_{ds}.json"
+        if not p.exists():
+            continue
+        try:
+            s = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        p50 = _overall_p50_cost_bps(s)
+        if p50 is None:
+            continue
+        prev_p50s.append(float(p50))
+        prev_days.append(ds)
+
+    baseline = _median(prev_p50s)
+    threshold = None
+    if baseline is not None:
+        threshold = max(float(abs_bps), float(baseline) * float(multiplier))
+    else:
+        threshold = float(abs_bps)
+
+    is_anomaly = (today_p50 is not None) and (float(today_p50) >= float(threshold))
+
+    report: Dict[str, Any] = {
+        "schema_version": 1,
+        "day": day_yyyymmdd,
+        "today_overall_p50_cost_bps": today_p50,
+        "lookback_days": int(lookback_days),
+        "lookback_used_days": prev_days,
+        "lookback_overall_p50_cost_bps": prev_p50s,
+        "baseline_median_p50_cost_bps": baseline,
+        "threshold": {
+            "multiplier": float(multiplier),
+            "abs_bps": float(abs_bps),
+            "computed_bps": float(threshold) if threshold is not None else None,
+        },
+        "is_anomaly": bool(is_anomaly),
+    }
+
+    # write sidecar report for ops
+    rpt_path = Path(out_dir) / f"daily_cost_anomaly_{day_yyyymmdd}.json"
+    tmp = Path(out_dir) / f".daily_cost_anomaly_{day_yyyymmdd}.json.tmp"
+    tmp.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(rpt_path)
+
+    return report
+
+
 def main() -> None:
     import time
 
@@ -119,6 +226,11 @@ def main() -> None:
     ap.add_argument("--day", default=None, help="UTC day YYYYMMDD; default today(UTC)")
     ap.add_argument("--base_dir", default="reports/cost_events")
     ap.add_argument("--out_dir", default="reports/cost_stats")
+
+    ap.add_argument("--check_anomaly", action="store_true", help="Enable basic cost anomaly detection")
+    ap.add_argument("--lookback_days", type=int, default=7)
+    ap.add_argument("--anomaly_multiplier", type=float, default=2.0)
+    ap.add_argument("--anomaly_abs_bps", type=float, default=30.0)
     args = ap.parse_args()
 
     day = args.day
@@ -149,6 +261,27 @@ def main() -> None:
         f"duration_ms={duration_ms}",
         flush=True,
     )
+
+    if args.check_anomaly:
+        rpt = check_anomaly(
+            day,
+            out_dir=args.out_dir,
+            lookback_days=args.lookback_days,
+            multiplier=args.anomaly_multiplier,
+            abs_bps=args.anomaly_abs_bps,
+        )
+        print(
+            "COST_ANOMALY "
+            f"day={day} "
+            f"today_overall_p50_cost_bps={rpt.get('today_overall_p50_cost_bps')} "
+            f"baseline_median_p50_cost_bps={rpt.get('baseline_median_p50_cost_bps')} "
+            f"threshold_bps={(rpt.get('threshold') or {}).get('computed_bps')} "
+            f"is_anomaly={rpt.get('is_anomaly')}",
+            flush=True,
+        )
+        if rpt.get("is_anomaly") is True:
+            raise SystemExit(2)
+
     print(f"wrote {out}")
 
 

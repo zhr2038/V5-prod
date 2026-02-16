@@ -1,0 +1,6 @@
+# Example cron (runs daily at 00:15 UTC)
+#
+# Install with: crontab -e
+# (Ensure python3 points to the correct venv/system python)
+#
+# 15 0 * * * /path/to/v5-trading-bot/deploy/cron/v5-cost-rollup.sh >> /var/log/v5-cost-rollup.log 2>&1

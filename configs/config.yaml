@@ -73,3 +73,11 @@ backtest:
   slippage_bps: 5
   one_bar_delay: true
   walk_forward_folds: 4
+  # 成本校准（F2）
+  cost_model: default  # default|calibrated
+  cost_stats_dir: reports/cost_stats
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 30
+  min_fills_bucket: 10
+  max_stats_age_days: 7

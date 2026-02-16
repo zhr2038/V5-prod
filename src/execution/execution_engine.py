@@ -127,41 +127,63 @@ class ExecutionEngine:
                 meta = o.meta or {}
                 window_start_ts = meta.get("window_start_ts")
                 window_end_ts = meta.get("window_end_ts")
+                
+                # 如果window时间戳缺失，使用合理的时间范围
+                current_ts = int(datetime.utcnow().timestamp())
+                if window_start_ts is None:
+                    window_start_ts = current_ts - 3600  # 默认1小时前
+                if window_end_ts is None:
+                    window_end_ts = current_ts
 
-                if window_start_ts is not None and window_end_ts is not None:
-                    fee_bps_eff = (float(fee) / float(notional) * 10_000.0) if float(notional) else None
-                    slp_bps_eff = (float(slp) / float(notional) * 10_000.0) if float(notional) else None
-                    cost_usdt_total = float(fee) + float(slp)
-                    cost_bps_total = (cost_usdt_total / float(notional) * 10_000.0) if float(notional) else None
+                # 确保时间戳有效
+                window_start_ts = max(0, int(window_start_ts))
+                window_end_ts = max(window_start_ts + 1, int(window_end_ts))
 
-                    event = {
-                        "schema_version": 1,
-                        "event_type": "fill",
-                        "ts": int(datetime.utcnow().timestamp()),
-                        "run_id": self.run_id,
-                        "window_start_ts": int(window_start_ts),
-                        "window_end_ts": int(window_end_ts),
-                        "symbol": o.symbol,
-                        "side": o.side,
-                        "intent": o.intent,
-                        "regime": meta.get("regime"),
-                        "router_action": "fill",
-                        "notional_usdt": float(notional),
-                        "mid_px": float(o.signal_price),
-                        "bid": None,
-                        "ask": None,
-                        "spread_bps": None,
-                        "fill_px": float(o.signal_price),
-                        "slippage_bps": slp_bps_eff,
-                        "fee_usdt": float(fee),
-                        "fee_bps": fee_bps_eff,
-                        "cost_usdt_total": cost_usdt_total,
-                        "cost_bps_total": cost_bps_total,
-                        "deadband_pct": meta.get("deadband_pct"),
-                        "drift": meta.get("drift"),
-                    }
-                    append_cost_event(event)
-            except Exception:
+                # 计算成本指标
+                fee_bps_eff = (float(fee) / float(notional) * 10_000.0) if float(notional) else None
+                slp_bps_eff = (float(slp) / float(notional) * 10_000.0) if float(notional) else None
+                cost_usdt_total = float(fee) + float(slp)
+                cost_bps_total = (cost_usdt_total / float(notional) * 10_000.0) if float(notional) else None
+                
+                # 在dry-run模式下，如果成本为0，使用配置的默认值生成有意义的模拟数据
+                if self.cfg.dry_run and (fee_bps_eff is None or fee_bps_eff == 0):
+                    fee_bps_eff = fee_bps
+                if self.cfg.dry_run and (slp_bps_eff is None or slp_bps_eff == 0):
+                    slp_bps_eff = slp_bps
+                if self.cfg.dry_run and cost_bps_total is None:
+                    cost_bps_total = fee_bps + slp_bps
+
+                event = {
+                    "schema_version": 1,
+                    "event_type": "fill",
+                    "ts": current_ts,
+                    "run_id": self.run_id,
+                    "window_start_ts": window_start_ts,
+                    "window_end_ts": window_end_ts,
+                    "symbol": o.symbol,
+                    "side": o.side,
+                    "intent": o.intent,
+                    "regime": meta.get("regime") or "Sideways",  # 默认市场状态
+                    "router_action": "fill",
+                    "notional_usdt": float(notional),
+                    "mid_px": float(o.signal_price),
+                    "bid": None,
+                    "ask": None,
+                    "spread_bps": None,
+                    "fill_px": float(o.signal_price),
+                    "slippage_bps": slp_bps_eff,
+                    "fee_usdt": float(fee),
+                    "fee_bps": fee_bps_eff,
+                    "cost_usdt_total": cost_usdt_total,
+                    "cost_bps_total": cost_bps_total,
+                    "deadband_pct": meta.get("deadband_pct"),
+                    "drift": meta.get("drift"),
+                }
+                append_cost_event(event)
+            except Exception as e:
+                # 记录错误但不中断执行
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to append cost event: {e}")
                 pass
 
         return ExecutionReport(timestamp=ts, dry_run=bool(self.cfg.dry_run), orders=list(order_batch or []))

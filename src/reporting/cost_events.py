@@ -8,8 +8,27 @@ from typing import Any, Dict, Optional
 
 
 def _utc_yyyymmdd_from_epoch_sec(ts: int) -> str:
-    dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-    return dt.strftime("%Y%m%d")
+    """Convert epoch seconds to YYYYMMDD string, handling invalid timestamps."""
+    try:
+        # 处理无效或过小的时间戳
+        if ts <= 0:
+            # 使用当前日期作为回退
+            return datetime.now(timezone.utc).strftime("%Y%m%d")
+        
+        dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+        # 额外检查：确保日期合理（不在未来，不太久远）
+        now = datetime.now(timezone.utc)
+        if dt > now:
+            # 如果时间戳在未来，使用当前日期
+            return now.strftime("%Y%m%d")
+        if dt.year < 2020:
+            # 如果时间戳在2020年之前，可能无效
+            return now.strftime("%Y%m%d")
+        
+        return dt.strftime("%Y%m%d")
+    except Exception:
+        # 任何异常都返回当前日期
+        return datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
 def append_cost_event(event: Dict[str, Any], base_dir: str = "reports/cost_events") -> Path:
