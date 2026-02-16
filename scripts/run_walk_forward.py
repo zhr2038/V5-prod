@@ -14,9 +14,11 @@ from src.backtest.walk_forward import run_walk_forward, build_walk_forward_repor
 
 
 def main() -> None:
-    cfg = load_config("configs/config.yaml", env_path=".env")
-
     import os
+
+    cfg_path = os.getenv("V5_CONFIG") or "configs/config.yaml"
+    cfg = load_config(cfg_path, env_path=".env")
+
     which = (os.getenv("V5_DATA_PROVIDER") or "mock").lower()
     provider = OKXCCXTProvider() if which == "okx" else MockProvider(seed=7)
 
