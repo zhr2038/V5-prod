@@ -44,9 +44,9 @@ risk:
   drawdown_delever: 0.50
 
 rebalance:
-  deadband_sideways: 0.05
+  deadband_sideways: 0.07
   deadband_trending: 0.03
-  deadband_riskoff: 0.05
+  deadband_riskoff: 0.07
 
 execution:
   mode: live
