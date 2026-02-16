@@ -168,8 +168,6 @@ def main() -> None:
     from src.core.run_logger import RunLogger
     from src.reporting.decision_audit import DecisionAudit
 
-    import os
-
     run_id = os.getenv("V5_RUN_ID")
     if not run_id:
         run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
