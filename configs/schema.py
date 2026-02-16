@@ -195,6 +195,10 @@ class BudgetConfig(BaseModel):
     min_trade_notional_cap_abs: float = Field(default=200.0, ge=0)
     min_trade_notional_cap_equity_ratio: float = Field(default=0.01, ge=0, le=1)
 
+    # Optional: for live small-budget sampling, cap the equity used by sizing logic.
+    # This does NOT change reconcile/accounting; it only caps order sizing.
+    live_equity_cap_usdt: Optional[float] = Field(default=None, ge=0)
+
     # Trigger metrics (computed from daily trades)
     small_trade_ratio_threshold: float = Field(default=0.6, ge=0, le=1)
     small_trade_median_threshold_abs: float = Field(default=10.0, ge=0)

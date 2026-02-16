@@ -76,7 +76,8 @@ def compute_orders(current_weights: Dict[str, float], target_weights: Dict[str, 
 
 
 def main() -> None:
-    cfg = load_config("configs/config.yaml", env_path=".env")
+    cfg_path = os.getenv("V5_CONFIG") or "configs/config.yaml"
+    cfg = load_config(cfg_path, env_path=".env")
     setup_logging()
     log = logging.getLogger("v5")
 

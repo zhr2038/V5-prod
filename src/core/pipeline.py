@@ -124,6 +124,17 @@ class V5Pipeline:
         
         equity = self.compute_equity(cash_usdt=cash_usdt, positions=positions, market_data_1h=market_data_1h)
 
+        # Live small-budget safety: cap sizing equity if configured.
+        cap_eq = getattr(self.cfg.budget, "live_equity_cap_usdt", None)
+        if cap_eq is not None:
+            try:
+                cap_eq_f = float(cap_eq)
+                if cap_eq_f >= 0:
+                    equity = min(float(equity), cap_eq_f)
+                    cash_usdt = min(float(cash_usdt), cap_eq_f)
+            except Exception:
+                pass
+
         # Risk: drawdown-based exposure multiplier
         from src.portfolio.portfolio_state import PortfolioState
 

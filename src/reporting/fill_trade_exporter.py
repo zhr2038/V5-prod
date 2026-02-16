@@ -211,6 +211,21 @@ def export_fill(
     # Cost event (requires window_start_ts)
     cost_event_written = False
     if window_start_ts is not None and window_end_ts is not None:
+        fee_usdt_val = (float(fee_usdt) if fee_cost is not None else None)
+        slip_usdt_val = (float(slip_usdt) if slip_usdt is not None else None)
+
+        fee_bps_val = None
+        if fee_usdt_val is not None and float(notional) > 0:
+            fee_bps_val = float(fee_usdt_val) / float(notional) * 10_000.0
+
+        cost_usdt_total_val = None
+        if fee_usdt_val is not None:
+            cost_usdt_total_val = float(fee_usdt_val) + (float(slip_usdt_val) if slip_usdt_val is not None else 0.0)
+
+        cost_bps_total_val = None
+        if cost_usdt_total_val is not None and float(notional) > 0:
+            cost_bps_total_val = float(cost_usdt_total_val) / float(notional) * 10_000.0
+
         event: Dict[str, Any] = {
             "schema_version": 1,
             "event_type": "fill",
@@ -233,10 +248,10 @@ def export_fill(
             "mid_px_at_submit": (float(mid) if (meta_ts_ms is not None and mid is not None) else None),
             "mid_ts_ms": (int(meta_ts_ms) if meta_ts_ms is not None else None),
             "slippage_bps": (float(slip_bps) if slip_bps is not None else None),
-            "fee_usdt": float(fee_usdt) if fee_cost is not None else None,
-            "fee_bps": None,
-            "cost_usdt_total": float(fee_usdt) if fee_cost is not None else None,
-            "cost_bps_total": None,
+            "fee_usdt": fee_usdt_val,
+            "fee_bps": fee_bps_val,
+            "cost_usdt_total": cost_usdt_total_val,
+            "cost_bps_total": cost_bps_total_val,
             "deadband_pct": deadband_pct,
             "drift": drift,
         }
