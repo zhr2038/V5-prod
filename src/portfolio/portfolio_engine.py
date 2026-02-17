@@ -79,8 +79,8 @@ class PortfolioEngine:
             "inv_vol_norm": base_w,
             "confidence_raw": conf,
             "score_stats": {
-                "min": mn,
-                "max": mx,
+                "min": float(np.min(sel_scores)) if len(sel_scores) > 0 else 0.0,
+                "max": float(np.max(sel_scores)) if len(sel_scores) > 0 else 0.0,
                 "std": float(np.std(sel_scores)) if len(sel_scores) > 1 else 0.0,
                 "count": len(sel_scores)
             }

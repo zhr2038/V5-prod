@@ -163,34 +163,6 @@ def main() -> None:
 
     alpha_engine = AlphaEngine(cfg.alpha)
     alpha_snap = alpha_engine.compute_snapshot(md_1h)
-    
-    # 收集 alpha 历史数据用于评估
-    collector = None
-    selected_symbols = []
-    if ALPHA_HISTORY_ENABLED and AlphaHistoryCollector:
-        try:
-            collector = AlphaHistoryCollector()
-            
-            # 获取选中的币种
-            if hasattr(portfolio, 'targets'):
-                selected_symbols = list(portfolio.targets.keys())
-            elif hasattr(portfolio, 'allocations'):
-                selected_symbols = [s for s, w in portfolio.allocations.items() if w > 0]
-            
-            # 保存 snapshot
-            collector.save_snapshot(
-                run_id=run_id,
-                ts=int(datetime.utcnow().timestamp()),
-                snapshot=alpha_snap,
-                regime=regime.name if hasattr(regime, 'name') else str(regime),
-                regime_multiplier=regime.multiplier if hasattr(regime, 'multiplier') else 1.0,
-                selected_symbols=selected_symbols,
-                traded_symbols=[]  # 将在执行后更新
-            )
-            log.info(f"Alpha snapshot saved to history database (run_id={run_id})")
-        except Exception as e:
-            log.warning(f"Failed to save alpha history: {e}")
-            collector = None
 
     # regime from BTC (handle empty market data explicitly)
     if not md_1h:
@@ -207,6 +179,38 @@ def main() -> None:
 
     portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
     portfolio = portfolio_engine.allocate(scores=alpha_snap.scores, market_data=md_1h, regime_mult=regime.multiplier)
+    
+    # 收集 alpha 历史数据用于评估
+    collector = None
+    selected_symbols = []
+    log.info(f"ALPHA_HISTORY_ENABLED={ALPHA_HISTORY_ENABLED}, AlphaHistoryCollector={AlphaHistoryCollector}")
+    if ALPHA_HISTORY_ENABLED and AlphaHistoryCollector:
+        try:
+            collector = AlphaHistoryCollector()
+            log.info(f"AlphaHistoryCollector initialized")
+            
+            # 获取选中的币种
+            if hasattr(portfolio, 'targets'):
+                selected_symbols = list(portfolio.targets.keys())
+            elif hasattr(portfolio, 'allocations'):
+                selected_symbols = [s for s, w in portfolio.allocations.items() if w > 0]
+            
+            log.info(f"Selected symbols: {selected_symbols}")
+            
+            # 保存 snapshot
+            collector.save_snapshot(
+                run_id=run_id,
+                ts=int(datetime.utcnow().timestamp()),
+                snapshot=alpha_snap,
+                regime=regime.name if hasattr(regime, 'name') else str(regime),
+                regime_multiplier=regime.multiplier if hasattr(regime, 'multiplier') else 1.0,
+                selected_symbols=selected_symbols,
+                traded_symbols=[]  # 将在执行后更新
+            )
+            log.info(f"Alpha snapshot saved to history database (run_id={run_id})")
+        except Exception as e:
+            log.warning(f"Failed to save alpha history: {e}")
+            collector = None
 
     # load persisted positions/account
     store = PositionStore(path="reports/positions.sqlite")
