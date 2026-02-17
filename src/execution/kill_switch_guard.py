@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 from src.execution.reconcile_reason import FailureContext, classify_reconcile_failure
 
@@ -37,7 +40,7 @@ class GuardConfig:
     failure_state_path: str = "reports/reconcile_failure_state.json"
     kill_switch_path: str = "reports/kill_switch.json"
 
-    hard_fail_threshold: int = 3
+    hard_fail_threshold: int = 5
     auth_fail_threshold: int = 1
 
     stale_threshold_sec: int = 900  # 15 min
@@ -185,6 +188,15 @@ class KillSwitchGuard:
         _atomic_write_json(self.cfg.failure_state_path, st)
 
         ks = self._load_kill_switch()
+        
+        # Auto-disable kill switch if reconcile succeeded
+        if ok and bool(ks.get("enabled")):
+            ks["enabled"] = False
+            ks["auto_disabled_ts_ms"] = int(now)
+            ks["auto_disabled_reason"] = "reconcile_succeeded"
+            _atomic_write_json(self.cfg.kill_switch_path, ks)
+            logging.info(f"Kill switch auto-disabled because reconcile succeeded")
+        
         if bool(ks.get("enabled")):
             return {"ok": ok, "reason": norm_reason, "category": category, "failure_state": st, "kill_switch": ks}
 
