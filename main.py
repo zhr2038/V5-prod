@@ -20,6 +20,14 @@ from src.reporting.reporting import dump_run_artifacts
 from src.core.models import Order, PositionState
 from src.risk.risk_engine import RiskEngine
 
+# Alpha 历史数据收集（可选）
+try:
+    from scripts.collect_alpha_history import AlphaHistoryCollector
+    ALPHA_HISTORY_ENABLED = True
+except ImportError:
+    ALPHA_HISTORY_ENABLED = False
+    AlphaHistoryCollector = None
+
 
 def setup_logging(level: str = "INFO") -> None:
     Path("logs").mkdir(exist_ok=True)
@@ -155,6 +163,34 @@ def main() -> None:
 
     alpha_engine = AlphaEngine(cfg.alpha)
     alpha_snap = alpha_engine.compute_snapshot(md_1h)
+    
+    # 收集 alpha 历史数据用于评估
+    collector = None
+    selected_symbols = []
+    if ALPHA_HISTORY_ENABLED and AlphaHistoryCollector:
+        try:
+            collector = AlphaHistoryCollector()
+            
+            # 获取选中的币种
+            if hasattr(portfolio, 'targets'):
+                selected_symbols = list(portfolio.targets.keys())
+            elif hasattr(portfolio, 'allocations'):
+                selected_symbols = [s for s, w in portfolio.allocations.items() if w > 0]
+            
+            # 保存 snapshot
+            collector.save_snapshot(
+                run_id=run_id,
+                ts=int(datetime.utcnow().timestamp()),
+                snapshot=alpha_snap,
+                regime=regime.name if hasattr(regime, 'name') else str(regime),
+                regime_multiplier=regime.multiplier if hasattr(regime, 'multiplier') else 1.0,
+                selected_symbols=selected_symbols,
+                traded_symbols=[]  # 将在执行后更新
+            )
+            log.info(f"Alpha snapshot saved to history database (run_id={run_id})")
+        except Exception as e:
+            log.warning(f"Failed to save alpha history: {e}")
+            collector = None
 
     # regime from BTC (handle empty market data explicitly)
     if not md_1h:
@@ -404,6 +440,23 @@ def main() -> None:
             exec_engine.poll_open(limit=200)
         except Exception as e:
             log.warning(f"live poll_open (post) failed: {e}")
+    
+    # 更新 alpha 历史数据中的交易信息
+    if collector and hasattr(report, 'orders') and report.orders:
+        traded_symbols = set()
+        for order in report.orders:
+            if hasattr(order, 'symbol'):
+                traded_symbols.add(order.symbol)
+                # 如果有盈亏信息，可以更新
+                # if hasattr(order, 'pnl'):
+                #     collector.update_trade_pnl(
+                #         symbol=order.symbol,
+                #         ts=int(datetime.utcnow().timestamp()),
+                #         pnl=order.pnl
+                #     )
+        
+        # 更新 traded_symbols（简化：在下次运行时更新）
+        log.info(f"Traded symbols: {list(traded_symbols)}")
 
     # post-trade equity point (after applying fees/slippage)
     try:
