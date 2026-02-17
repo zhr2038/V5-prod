@@ -19,6 +19,7 @@ def main() -> None:
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
     ap.add_argument("--abs-usdt-tol", type=float, default=1.0)
     ap.add_argument("--abs-base-tol", type=float, default=1e-8)
+    ap.add_argument("--dust-usdt-ignore", type=float, default=1.0, help="Ignore non-USDT diffs whose estimated USDT value is below this (0=strict)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -30,7 +31,11 @@ def main() -> None:
             okx=client,
             position_store=PositionStore(path=args.positions_db),
             account_store=AccountStore(path=args.positions_db),
-            thresholds=ReconcileThresholds(abs_usdt_tol=float(args.abs_usdt_tol), abs_base_tol=float(args.abs_base_tol)),
+            thresholds=ReconcileThresholds(
+                abs_usdt_tol=float(args.abs_usdt_tol),
+                abs_base_tol=float(args.abs_base_tol),
+                dust_usdt_ignore=float(args.dust_usdt_ignore),
+            ),
         )
         obj = eng.reconcile(out_path=args.out)
         # Single-line structured log for ops / grep (helps G1.2 consecutive-fail analysis)

@@ -304,11 +304,14 @@ def main() -> None:
             from src.execution.okx_private_client import OKXPrivateClient
             from src.execution.live_execution_engine import LiveExecutionEngine
 
+            from src.execution.order_store import OrderStore
+            
             client = OKXPrivateClient(exchange=cfg.exchange)
+            order_store = OrderStore(cfg.execution.order_store_path)
             live = LiveExecutionEngine(
                 cfg.execution,
                 okx=client,
-                order_store=None,
+                order_store=order_store,
                 position_store=store,
                 run_id=run_id,
                 exp_time_ms=getattr(cfg.execution, "okx_exp_time_ms", None),
