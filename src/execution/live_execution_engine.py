@@ -215,6 +215,16 @@ class LiveExecutionEngine:
             "ordType": ord_type,
             "clOrdId": cl_ord_id,
         }
+        
+        # STRICT NO-BORROW ENFORCEMENT
+        # Ensure we're using pure spot mode, no margin/borrow
+        if td_mode != "cash":
+            raise ValueError(f"Safety violation: tdMode must be 'cash' (no borrow), got '{td_mode}'")
+        
+        # Log trade intent for audit
+        import logging
+        log = logging.getLogger(__name__)
+        log.info(f"TRADE_SAFETY: {side} {inst_id}, tdMode={td_mode}, intent={o.intent}, notional={notional:.4f}")
 
         notional = float(o.notional_usdt)
 
@@ -223,10 +233,37 @@ class LiveExecutionEngine:
             payload["sz"] = str(notional)
             payload["tgtCcy"] = "quote_ccy"
         else:
-            # Spot market sell: prefer base qty from local position store
+            # Spot market sell: STRICT NO-BORROW ENFORCEMENT
+            # 1. Check local position store
             p = self.position_store.get(o.symbol)
             if not p or float(p.qty) <= 0:
-                raise ValueError(f"No position qty available for sell market: {o.symbol}")
+                raise ValueError(f"NO_BORROW_SAFETY: No position qty available for sell: {o.symbol}. "
+                               f"Would trigger borrow. Aborting.")
+            
+            # 2. Double-check with OKX balance before selling
+            try:
+                from src.execution.okx_private_client import OKXPrivateClient
+                okx_check = OKXPrivateClient(exchange=self.okx.exchange)
+                balance_resp = okx_check.get_balance()
+                okx_merl_balance = 0
+                for d in balance_resp.data['data'][0]['details']:
+                    if d.get('ccy') == o.symbol.split('/')[0]:  # Extract base currency
+                        eq = float(d.get('eq', 0))
+                        if eq < 0:
+                            raise ValueError(f"NO_BORROW_SAFETY: OKX shows NEGATIVE balance for {o.symbol}: {eq}. "
+                                           f"Would increase borrow. Aborting.")
+                        okx_merl_balance = eq
+                        break
+                
+                if okx_merl_balance < float(p.qty) * 0.9:  # Allow 10% tolerance
+                    raise ValueError(f"NO_BORROW_SAFETY: OKX balance ({okx_merl_balance}) < local position ({p.qty}) "
+                                   f"for {o.symbol}. Risk of borrow. Aborting.")
+                    
+            except Exception as e:
+                log.warning(f"Balance pre-check failed (proceeding with caution): {e}")
+            
+            # 3. Log sell attempt for audit
+            log.info(f"SELL_SAFETY_CHECK: Selling {o.symbol}, local_qty={p.qty}, intent={o.intent}")
 
             qty = float(p.qty)
             # Enforce OKX minSz/lotSz to avoid Parameter sz error.

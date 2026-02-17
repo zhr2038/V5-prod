@@ -157,6 +157,19 @@ class ReconcileEngine:
 
             delta = ex_f - lo_f
             delta_usdt = None
+            
+            # Special handling for MERL - was negative, now positive after repayment
+            # Allow normal reconciliation for MERL now
+            if ccy.upper() == "MERL":
+                # Log the current MERL balance for debugging
+                import logging
+                log = logging.getLogger(__name__)
+                if ex_f < -0.1:
+                    log.warning(f"RECONCILE: MERL still negative: eq={ex_f}")
+                elif ex_f > 0.1:
+                    log.info(f"RECONCILE: MERL now positive: eq={ex_f}")
+                # Allow normal delta calculation - no special treatment
+            
             if ccy.upper() == "USDT":
                 delta_usdt = float(delta)
                 max_abs_usdt = max(max_abs_usdt, abs(float(delta_usdt)))

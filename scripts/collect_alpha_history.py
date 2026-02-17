@@ -135,9 +135,10 @@ class AlphaHistoryCollector:
                     f1_mom_5d, f2_mom_20d, f3_vol_adj_ret_20d, f4_volume_expansion, f5_rsi_trend_confirm,
                     z1_mom_5d, z2_mom_20d, z3_vol_adj_ret_20d, z4_volume_expansion, z5_rsi_trend_confirm,
                     score, score_rank,
+                    fwd_ret_1h, fwd_ret_4h, fwd_ret_12h, fwd_ret_24h, fwd_ret_72h,
                     regime, regime_multiplier,
-                    selected, traded
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    selected, traded, pnl
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 run_id, ts, symbol,
                 raw.get("f1_mom_5d", 0.0),
@@ -152,10 +153,12 @@ class AlphaHistoryCollector:
                 z.get("f5_rsi_trend_confirm", 0.0),
                 score,
                 rank_dict.get(symbol, 0),
+                None, None, None, None, None,  # 未来收益占位
                 regime,
                 regime_multiplier,
                 1 if selected_symbols and symbol in selected_symbols else 0,
-                1 if traded_symbols and symbol in traded_symbols else 0
+                1 if traded_symbols and symbol in traded_symbols else 0,
+                0.0  # pnl
             ))
         
         # 保存运行元数据
