@@ -230,12 +230,27 @@ class V5Pipeline:
 
         for sym in symbols_all:
             tw = float(target.get(sym, 0.0))
-            # deadband check on weight drift
+            # deadband check on weight drift with banding: new position vs existing
             cw = float(current_w.get(sym, 0.0))
             drift = float(tw) - cw
+            
+            # Banding 逻辑：新建仓阈值 > 维持仓阈值
+            # 判断是否是新建仓（当前权重接近0）
+            is_new_position = cw < 0.001  # 当前持仓小于0.1%
+            
+            # 调整 deadband：新建仓需要更大的信号强度
+            effective_deadband = deadband
+            if is_new_position:
+                # 新建仓阈值加倍（更保守）
+                effective_deadband = deadband * 2.0
+                if audit:
+                    audit.add_note(f"Banding: {sym} is new position, deadband {deadband}→{effective_deadband:.3f}")
+            
             if audit:
                 audit.rebalance_drift_by_symbol[sym] = drift
-            if abs(drift) <= deadband:
+                audit.rebalance_effective_deadband_by_symbol[sym] = effective_deadband
+            
+            if abs(drift) <= effective_deadband:
                 if audit:
                     audit.rebalance_skipped_deadband_count += 1
                     audit.rebalance_skipped_deadband_by_symbol[sym] = abs(drift)
@@ -245,7 +260,8 @@ class V5Pipeline:
                         "action": "skip",
                         "reason": "deadband",
                         "drift": drift,
-                        "deadband": deadband,
+                        "deadband": effective_deadband,
+                        "is_new_position": is_new_position,
                     })
                 continue
 

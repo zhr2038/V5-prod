@@ -63,7 +63,9 @@ class PortfolioEngine:
         sel_scores = np.array([scores[s] for s in selected], dtype=float)
         
         # 方法1: softmax with temperature (避免0权重)
-        temperature = 0.5  # 温度参数，越小越集中，越大越分散
+        # temperature 参数优化：0.5→0.9 降低集中度，减少换手
+        # 目标 Effective N (1/∑w²) 在 3-6 之间
+        temperature = 0.9  # 温度参数，越小越集中，越大越分散
         exp_scores = np.exp(sel_scores / temperature)
         softmax_probs = exp_scores / np.sum(exp_scores)
         conf = {s: float(softmax_probs[i]) for i, s in enumerate(selected)}

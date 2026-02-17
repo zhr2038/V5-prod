@@ -44,6 +44,7 @@ class DecisionAudit:
     rebalance_skipped_deadband_count: int = 0
     rebalance_skipped_deadband_by_symbol: Dict[str, float] = field(default_factory=dict)  # sym -> abs(drift)
     rebalance_drift_by_symbol: Dict[str, float] = field(default_factory=dict)  # sym -> signed drift
+    rebalance_effective_deadband_by_symbol: Dict[str, float] = field(default_factory=dict)  # sym -> effective deadband (with banding)
 
     # 路由决策
     router_decisions: List[Dict[str, Any]] = field(default_factory=list)
