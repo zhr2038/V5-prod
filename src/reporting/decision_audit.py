@@ -64,6 +64,9 @@ class DecisionAudit:
     budget: Dict[str, Any] = field(default_factory=dict)
     budget_action: Dict[str, Any] = field(default_factory=dict)
 
+    # Universe配置信息
+    universe_config: Dict[str, Any] = field(default_factory=dict)
+    
     # 备注
     notes: List[str] = field(default_factory=list)
     
@@ -123,6 +126,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.rejects = data.get("rejects", {})
     audit.budget = data.get("budget", {})
     audit.budget_action = data.get("budget_action", {})
+    audit.universe_config = data.get("universe_config", {})
     audit.notes = data.get("notes", [])
     
     return audit

@@ -84,6 +84,22 @@ def main() -> None:
 
     Path("reports").mkdir(exist_ok=True)
 
+    # 创建DecisionAudit（需要先定义run_id）
+    from src.reporting.decision_audit import DecisionAudit
+
+    run_id = os.getenv("V5_RUN_ID")
+    if not run_id:
+        run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    
+    window_start_ts = _get_env_epoch_sec("V5_WINDOW_START_TS")
+    window_end_ts = _get_env_epoch_sec("V5_WINDOW_END_TS")
+    
+    audit = DecisionAudit(
+        run_id=run_id,
+        window_start_ts=window_start_ts,
+        window_end_ts=window_end_ts,
+    )
+
     provider = build_provider(cfg)
 
     symbols = list(cfg.symbols)
@@ -111,6 +127,15 @@ def main() -> None:
                 log.info(f"Universe enabled: using {len(symbols)} symbols (include={len(inc)})")
         except Exception as e:
             log.warning(f"Universe fetch failed, fallback to config symbols: {e}")
+    
+    # 记录universe配置到audit
+    audit.universe_config = {
+        "enabled": cfg.universe.enabled,
+        "use_universe_symbols": cfg.universe.use_universe_symbols,
+        "config_symbols_count": len(cfg.symbols),
+        "actual_symbols_count": len(symbols),
+        "actual_symbols_sample": symbols[:10] if symbols else [],
+    }
 
     # fetch 1h bars for alpha/regime and 4h for auxiliary (placeholder)
     # 使用窗口时间过滤，只取已收盘bar
@@ -167,19 +192,8 @@ def main() -> None:
     # Run unified pipeline with equity/drawdown scaling
     from src.core.pipeline import V5Pipeline
     from src.core.run_logger import RunLogger
-    from src.reporting.decision_audit import DecisionAudit
 
-    run_id = os.getenv("V5_RUN_ID")
-    if not run_id:
-        run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     run_logger = RunLogger(run_dir=f"reports/runs/{run_id}")
-    
-    # 创建DecisionAudit
-    audit = DecisionAudit(
-        run_id=run_id,
-        window_start_ts=window_start_ts,
-        window_end_ts=window_end_ts,
-    )
 
     # F3.1 pre-run budget action input: load today's budget state (UTC) and set audit.budget
     try:
