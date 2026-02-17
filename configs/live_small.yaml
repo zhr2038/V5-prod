@@ -83,6 +83,18 @@ budget:
   # for small live sampling (20 USDT budget)
   live_equity_cap_usdt: 20.0
   min_trade_notional_base: 1.0
+  min_trade_notional_multiplier_exceeded: 2.0
+  min_trade_notional_cap_abs: 200.0
+  min_trade_notional_cap_equity_ratio: 0.01
+  small_trade_median_threshold_abs: 10.0
+  small_trade_median_threshold_equity_ratio: 0.0025
+  small_trade_ratio_threshold: 0.6
+  min_fills_for_second_stage: 5
+  deadband_multiplier_exceeded: 1.5
+  deadband_cap: 0.15
+  action_enabled: true
+  turnover_budget_per_day: null
+  cost_budget_bps_per_day: null
 
 backtest:
   fee_bps: 6
