@@ -15,8 +15,8 @@ exchange:
   testnet: false
 
 universe:
-  enabled: false
-  use_universe_symbols: false
+  enabled: true
+  use_universe_symbols: true
   cache_path: reports/universe_cache.json
   cache_ttl_sec: 3600
   top_n_market_cap: 30
