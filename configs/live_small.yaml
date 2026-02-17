@@ -82,7 +82,7 @@ execution:
 budget:
   # for small live sampling (20 USDT budget)
   live_equity_cap_usdt: 20.0
-  min_trade_notional_base: 2.0
+  min_trade_notional_base: 1.0
 
 backtest:
   fee_bps: 6
