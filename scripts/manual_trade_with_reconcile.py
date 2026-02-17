@@ -98,9 +98,9 @@ def main() -> None:
                     position_store=PositionStore(path="reports/positions.sqlite"),
                     account_store=AccountStore(path="reports/positions.sqlite"),
                     thresholds=ReconcileThresholds(
-                        abs_usdt_tol=2.0,
-                        abs_base_tol=1e-4,
-                        dust_usdt_ignore=5.0,
+                        abs_usdt_tol=1.0,
+                        abs_base_tol=1e-5,
+                        dust_usdt_ignore=2.0,
                     ),
                 )
                 obj = eng.reconcile(out_path="reports/reconcile_status.json")
