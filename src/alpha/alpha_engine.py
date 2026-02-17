@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
-
+from typing import Dict, List, Optional
 import numpy as np
 
 from src.core.models import MarketSeries
 from src.utils.math import safe_pct_change, zscore_cross_section
 from configs.schema import AlphaConfig
+from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
 
 
 def _rsi(closes: List[float], period: int = 14) -> float:
@@ -39,7 +39,7 @@ class AlphaEngine:
         snap = self.compute_snapshot(market_data)
         return snap.scores
 
-    def compute_snapshot(self, market_data: Dict[str, MarketSeries]) -> AlphaSnapshot:
+    def compute_snapshot(self, market_data: Dict[str, MarketSeries], use_robust_zscore: bool = True) -> AlphaSnapshot:
         # Compute raw factors
         f1: Dict[str, float] = {}
         f2: Dict[str, float] = {}
@@ -63,14 +63,24 @@ class AlphaEngine:
             vol = float(np.std(rets)) if len(rets) > 10 else 0.0
             vol_adj = mom_20d / (vol + 1e-12)
 
-            # volume expansion: last 24h volume vs prev 7d average daily volume
-            vol_1d = float(np.sum(v[-24:])) if len(v) >= 24 else float(np.sum(v))
-            daily = []
-            if len(v) >= 24 * 8:
-                for k in range(1, 8):
-                    daily.append(float(np.sum(v[-24 * (k + 1) : -24 * k])))
-            avg_7d = float(np.mean(daily)) if daily else vol_1d
-            vol_exp = (vol_1d / (avg_7d + 1e-12)) - 1.0
+            # volume expansion: last 24h QUOTE volume vs prev 7d average daily QUOTE volume
+            # Quote volume = volume * close (USDT value)
+            if len(v) >= 24 and len(c) >= 24:
+                # 计算最近24小时的quote volume
+                vol_1d = compute_quote_volume(v[-24:], c[-24:])
+                
+                # 计算过去7天的平均daily quote volume
+                daily_quote = []
+                if len(v) >= 24 * 8 and len(c) >= 24 * 8:
+                    for k in range(1, 8):
+                        start = -24 * (k + 1)
+                        end = -24 * k
+                        daily_quote.append(compute_quote_volume(v[start:end], c[start:end]))
+                
+                avg_7d = float(np.mean(daily_quote)) if daily_quote else vol_1d
+                vol_exp = (vol_1d / (avg_7d + 1e-12)) - 1.0
+            else:
+                vol_exp = 0.0
 
             # RSI trend confirm: RSI - 50 (positive is bullish)
             rsi = _rsi(c, 14)
@@ -82,11 +92,19 @@ class AlphaEngine:
             f4[sym] = float(vol_exp)
             f5[sym] = float(rsi_trend)
 
-        z1 = zscore_cross_section(f1)
-        z2 = zscore_cross_section(f2)
-        z3 = zscore_cross_section(f3)
-        z4 = zscore_cross_section(f4)
-        z5 = zscore_cross_section(f5)
+        # 使用稳健的z-score或标准z-score
+        if use_robust_zscore:
+            z1 = robust_zscore_cross_section(f1, winsorize_pct=0.05)
+            z2 = robust_zscore_cross_section(f2, winsorize_pct=0.05)
+            z3 = robust_zscore_cross_section(f3, winsorize_pct=0.05)
+            z4 = robust_zscore_cross_section(f4, winsorize_pct=0.05)
+            z5 = robust_zscore_cross_section(f5, winsorize_pct=0.05)
+        else:
+            z1 = zscore_cross_section(f1)
+            z2 = zscore_cross_section(f2)
+            z3 = zscore_cross_section(f3)
+            z4 = zscore_cross_section(f4)
+            z5 = zscore_cross_section(f5)
 
         raw_factors: Dict[str, Dict[str, float]] = {}
         z_factors: Dict[str, Dict[str, float]] = {}

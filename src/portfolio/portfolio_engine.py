@@ -59,12 +59,20 @@ class PortfolioEngine:
         inv_sum = float(sum(inv.values())) or 1.0
         base_w = {sym: float(inv[sym]) / inv_sum for sym in selected}
 
-        # Confidence weighting by normalized score within selected (0..1)
+        # Confidence weighting: softmax with temperature (更平滑的映射)
         sel_scores = np.array([scores[s] for s in selected], dtype=float)
-        mn = float(np.min(sel_scores))
-        mx = float(np.max(sel_scores))
-        denom = (mx - mn) if (mx - mn) != 0 else 1.0
-        conf = {s: float((scores[s] - mn) / denom) for s in selected}
+        
+        # 方法1: softmax with temperature (避免0权重)
+        temperature = 0.5  # 温度参数，越小越集中，越大越分散
+        exp_scores = np.exp(sel_scores / temperature)
+        softmax_probs = exp_scores / np.sum(exp_scores)
+        conf = {s: float(softmax_probs[i]) for i, s in enumerate(selected)}
+        
+        # 方法2: 带下限的min-max (保留原逻辑作为备选)
+        # mn = float(np.min(sel_scores))
+        # mx = float(np.max(sel_scores))
+        # denom = (mx - mn) if (mx - mn) != 0 else 1.0
+        # conf = {s: max(0.2, float((scores[s] - mn) / denom)) for s in selected}  # 20%下限
         
         # 诊断：记录为什么conf可能为0
         portfolio_debug = {
