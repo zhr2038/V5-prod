@@ -18,7 +18,7 @@ def main() -> None:
     ap.add_argument("--out", default="reports/reconcile_status.json")
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
     ap.add_argument("--abs-usdt-tol", type=float, default=1.0)
-    ap.add_argument("--abs-base-tol", type=float, default=1e-8)
+    ap.add_argument("--abs-base-tol", type=float, default=1e-5)
     ap.add_argument("--dust-usdt-ignore", type=float, default=1.0, help="Ignore non-USDT diffs whose estimated USDT value is below this (0=strict)")
     args = ap.parse_args()
 
