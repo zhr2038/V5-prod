@@ -1,5 +1,8 @@
 symbols:
+  - BTC/USDT
   - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
 
 timeframe_main: 1h
 timeframe_aux: 4h
