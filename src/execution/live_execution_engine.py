@@ -230,7 +230,10 @@ class LiveExecutionEngine:
 
         if side == "buy":
             # Spot market buy: submit quote notional in USDT
-            payload["sz"] = str(notional)
+            # OKX expects plain decimal string
+            from decimal import Decimal
+
+            payload["sz"] = format(Decimal(str(notional)), "f")
             payload["tgtCcy"] = "quote_ccy"
         else:
             # Spot market sell: STRICT NO-BORROW ENFORCEMENT
@@ -290,7 +293,12 @@ class LiveExecutionEngine:
             if min_sz > 0 and qty_rounded < min_sz:
                 raise DustOrderSkip(o.symbol, qty=qty, qty_rounded=qty_rounded, min_sz=min_sz, lot_sz=lot_sz)
 
-            payload["sz"] = str(float(qty_rounded))
+            # OKX rejects scientific notation (e.g. 5e-05) with 51000 Parameter sz error.
+            # Always send plain decimal string.
+            from decimal import Decimal
+
+            sz_dec = Decimal(str(qty_rounded))
+            payload["sz"] = format(sz_dec, "f")
             payload["tgtCcy"] = "base_ccy"
 
         return payload
