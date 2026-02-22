@@ -434,7 +434,10 @@ def main() -> None:
                 if res.decision == "SELL_ONLY":
                     orders = [o for o in orders if str(o.side).lower() == "sell" or str(o.intent) == "CLOSE_LONG"]
         except Exception as e:
-            log.warning(f"live preflight failed: {e}")
+            # Safety: in live mode, preflight failure must stop execution.
+            # Otherwise we could trade with stale/unknown reconcile state or while liabilities exist.
+            log.error(f"live preflight failed (ABORT LIVE): {e}")
+            raise
 
     report = exec_engine.execute(orders)
     report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
