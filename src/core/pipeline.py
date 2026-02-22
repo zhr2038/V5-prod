@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
 
+import json
+from pathlib import Path
+
 
 def _effective_deadband(base: float, cfg: AppConfig, audit: Optional[DecisionAudit]) -> float:
     """F3.1: widen deadband when daily budget exceeded (monitor-driven, controlled).
@@ -33,6 +36,38 @@ from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
 from src.core.models import PositionState
 from src.reporting.decision_audit import DecisionAudit
+
+
+def _load_borrow_prevention_rules(path: str) -> Dict[str, Any]:
+    try:
+        p = Path(path)
+        if not p.exists():
+            return {}
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _is_high_risk_symbol(sym: str, *, rules: Dict[str, Any]) -> bool:
+    s = str(sym)
+    hr = rules.get("high_risk_symbols") or []
+    if isinstance(hr, list) and s in [str(x) for x in hr]:
+        return True
+    return False
+
+
+def _min_price_usdt(*, rules: Dict[str, Any]) -> Optional[float]:
+    try:
+        th = rules.get("rules") or []
+        for r in th:
+            if isinstance(r, dict) and "thresholds" in r:
+                t = r.get("thresholds") or {}
+                if isinstance(t, dict) and "min_price_usdt" in t:
+                    return float(t.get("min_price_usdt"))
+    except Exception:
+        pass
+    return None
 
 
 @dataclass
@@ -307,6 +342,22 @@ class V5Pipeline:
                     audit.budget_action = ba
                 except Exception:
                     pass
+
+            # Borrow-prevention filter (live): skip opening high-risk low-price meme coins.
+            # - allow sells to exit/clean up positions
+            if side == "buy" and bool(getattr(self.cfg.execution, "borrow_prevention", False)):
+                rules = _load_borrow_prevention_rules(str(getattr(self.cfg.execution, "high_risk_blacklist_path", "configs/borrow_prevention_rules.json")))
+                mp = _min_price_usdt(rules=rules)
+                if _is_high_risk_symbol(sym, rules=rules):
+                    if audit:
+                        audit.reject("high_risk_symbol")
+                        router_decisions.append({"symbol": sym, "action": "skip", "reason": "high_risk_symbol"})
+                    continue
+                if mp is not None and float(px) < float(mp):
+                    if audit:
+                        audit.reject("min_price")
+                        router_decisions.append({"symbol": sym, "action": "skip", "reason": f"min_price<{mp}", "px": px})
+                    continue
 
             # Min-notional filter: apply to buys; allow sells (especially for removed symbols) to reduce drift.
             if side == "buy" and notional < float(min_notional):
