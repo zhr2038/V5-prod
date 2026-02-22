@@ -162,6 +162,36 @@ python3 main.py
 
 执行 `python3 main.py` 后，会生成最新一轮输出以及按 run_id 分目录的产物。
 
+## Alpha 研究工具（IC / forward returns / regime-aware weights）
+
+### 1) IC 诊断（含按 Regime 分层）
+输出：`reports/ic_diagnostics_30d_*.json`
+
+```bash
+python3 scripts/ic_diagnostics.py --lookback-days 30 --universe 20u
+```
+
+### 2) 修复/回填 alpha_history.db 的 fwd_ret_*（从 market_data_1h 重算）
+当发现 `fwd_ret_col_distinct=1`（forward return 列被 0/占位污染）时，使用该脚本回填：
+
+```bash
+python3 scripts/update_forward_returns_from_market_data.py --lookback-days 30
+```
+
+### 3) 计算按 Regime 的动态权重
+输出：`reports/alpha_dynamic_weights_by_regime.json`
+
+```bash
+python3 scripts/compute_dynamic_alpha_weights_by_regime.py --lookback-days 30 --horizon 1h
+```
+
+### 4) Shadow 模式（dry-run）验证 Regime-aware 权重（不影响实盘）
+仓库提供 shadow config + user-level systemd timer 示例：
+- `configs/live_20u_shadow_regime.yaml`
+- `deploy/systemd/v5-shadow-regime.user.{service,timer}`
+
+注意：shadow 会设置 `execution: dry_run`，并通过 `V5_DISABLE_TOPLEVEL_ARTIFACTS=1` 避免覆盖顶层快照文件。
+
 ### 顶层产物（概览）
 - `reports/alpha_snapshot.json`
 - `reports/regime.json`
@@ -177,6 +207,20 @@ python3 main.py
 - `reports/runs/<run_id>/spread_snapshot.json`：当小时 bid/ask/mid/spread_bps 快照（即使 0 单也会写）
 
 ## F2：回测成本模型校准/回灌
+
+### 成本事件（cost_events）与日统计（cost_stats）
+- 原始事件：`reports/cost_events/YYYYMMDD.jsonl`（NDJSON）
+- 日统计：`reports/cost_stats/daily_cost_stats_YYYYMMDD.json`
+
+Live fills 会导出为 `cost_events`，并尽量附带 micro-structure 与运行上下文：
+- bid/ask/mid + spread_bps（优先 submit meta，其次 spread snapshot）
+- slippage_bps / fee_bps / cost_bps_total
+- **regime / deadband_pct / drift**（从 `reports/runs/<run_id>/decision_audit.json` 回填，用于分桶）
+
+生成/重跑某天统计：
+```bash
+python3 scripts/rollup_costs.py --day YYYYMMDD --source okx_fill --check_anomaly --lookback_days 7
+```
 
 回测支持 **calibrated** 成本模型（来自日级统计）：
 - 统计文件：`reports/cost_stats/daily_cost_stats_YYYYMMDD.json`
