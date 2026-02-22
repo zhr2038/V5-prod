@@ -188,8 +188,8 @@ class OKXUniverseProvider:
         return refined
 
     def _build(self, instruments: List[Dict[str, Any]], tickers: List[Dict[str, Any]]) -> List[UniverseItem]:
-        # instId -> (base, quote)
-        pairs: Dict[str, Tuple[str, str]] = {}
+        # instId -> (base, quote, minSz)
+        pairs: Dict[str, Tuple[str, str, float]] = {}
         for it in instruments or []:
             inst_id = str(it.get("instId") or "")
             if not inst_id:
@@ -200,7 +200,11 @@ class OKXUniverseProvider:
                 continue
             if self.exclude_stablecoins and self._is_stablecoin(base):
                 continue
-            pairs[inst_id] = (base, quote)
+            try:
+                min_sz = float(it.get("minSz") or 0.0)
+            except Exception:
+                min_sz = 0.0
+            pairs[inst_id] = (base, quote, float(min_sz))
 
         bl = load_blacklist(self.blacklist_path)
         bl_syms = set(str(s).upper() for s in (bl.get("symbols") or []))
@@ -210,13 +214,18 @@ class OKXUniverseProvider:
             inst_id = str(t.get("instId") or "")
             if inst_id not in pairs:
                 continue
-            base, quote = pairs[inst_id]
+            base, quote, min_sz = pairs[inst_id]
             sym = f"{base}/{quote}"
             if sym.upper() in bl_syms or inst_id.upper().replace("-", "/") in bl_syms:
                 continue
 
             qv_f = self._quote_vol_usdt_from_ticker(t)
             if qv_f < self.min_24h_quote_volume_usdt:
+                continue
+
+            # Filter out instruments with extremely large minSz (not suitable for small budgets).
+            # Example: SPACE-USDT has minSz=1000, which is impossible with ~20-100 USDT budgets.
+            if float(min_sz) >= 100:
                 continue
 
             # Optional tradability filter: spread
