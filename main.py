@@ -54,12 +54,22 @@ def _get_env_epoch_sec(name: str) -> Optional[int]:
 
 
 def build_provider(cfg: AppConfig):
-    # dry-run defaults to Mock; you can set V5_DATA_PROVIDER=okx to use public ccxt.
-    import os
+    """Build market data provider.
+
+    Safety rule:
+    - dry-run: default to MockProvider
+    - live: MUST use a real provider (OKX public) to avoid trading on fake data
+    """
 
     which = (os.getenv("V5_DATA_PROVIDER") or "mock").lower()
+    mode = str(getattr(cfg.execution, "mode", "dry_run") or "dry_run").lower()
+
+    if mode == "live" and which != "okx":
+        raise RuntimeError("Live mode requires V5_DATA_PROVIDER=okx (refuse to trade on mock data)")
+
     if which == "okx":
         return OKXCCXTProvider(rate_limit=True)
+
     return MockProvider(seed=7)
 
 
