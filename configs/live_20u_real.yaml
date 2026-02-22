@@ -22,10 +22,20 @@ universe:
   use_universe_symbols: true
   cache_path: reports/universe_cache.json
   cache_ttl_sec: 3600
-  # 用 universe，但收紧范围：只取更靠前的市值币 + 更高成交额门槛
-  top_n_market_cap: 10
-  min_24h_quote_volume_usdt: 20000000
-  max_spread_bps: 30
+
+  # 扩大 universe，但规避小币种/低流动性币：
+  # - 取更大的市值范围
+  # - 更高 24h 成交额门槛
+  # - 更严格点差限制
+  top_n_market_cap: 50
+  min_24h_quote_volume_usdt: 100000000
+  max_spread_bps: 20
+
+  # 用单币 ticker 进一步筛流动性（更可靠，但会多一点请求）
+  refine_with_single_ticker: true
+  refine_single_ticker_max_candidates: 200
+  refine_single_ticker_sleep_sec: 0.02
+
   blacklist_path: configs/blacklist.json
   exclude_stablecoins: true
   include_symbols:
