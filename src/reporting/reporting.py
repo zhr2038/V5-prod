@@ -24,6 +24,13 @@ def dump_run_artifacts(
     portfolio: PortfolioSnapshot,
     execution: ExecutionReport,
 ) -> None:
+    import os
+
+    # Shadow/research mode: avoid overwriting top-level artifacts (alpha_snapshot.json etc)
+    # which can confuse operators watching the live bot.
+    if str(os.getenv("V5_DISABLE_TOPLEVEL_ARTIFACTS", "0")).strip() in {"1", "true", "TRUE", "yes", "YES"}:
+        return
+
     Path(reports_dir).mkdir(parents=True, exist_ok=True)
     write_json(f"{reports_dir}/alpha_snapshot.json", {
         "raw_factors": alpha.raw_factors,

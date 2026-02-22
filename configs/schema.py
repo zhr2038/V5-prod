@@ -61,6 +61,10 @@ class AlphaConfig(BaseModel):
     weights: AlphaWeights = Field(default_factory=AlphaWeights)
     long_top_pct: float = Field(default=0.20, gt=0, le=1)
 
+    # Research/ops: optionally override weights by regime from a JSON file.
+    dynamic_weights_by_regime_path: Optional[str] = Field(default=None, description="Path to reports/alpha_dynamic_weights_by_regime.json")
+    dynamic_weights_by_regime_enabled: bool = Field(default=False)
+
 
 class RegimeConfig(BaseModel):
     atr_threshold: float = Field(default=0.02, gt=0, description="ATR% threshold above which trend regime allowed")

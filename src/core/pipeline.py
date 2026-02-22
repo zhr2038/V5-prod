@@ -134,15 +134,8 @@ class V5Pipeline:
             pass
         # caller can pass store via run_logger hook if desired; for now, marking is done by main.
 
-        # 1. Alpha计算后审计
-        alpha = self.alpha_engine.compute_snapshot(market_data_1h)
-        if audit:
-            # 记录top scores
-            sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
-            audit.top_scores = [{"symbol": sym, "score": score} for sym, score in sorted_scores[:10]]
-            audit.counts["scored"] = len(alpha.scores)
-        
-        # 2. Regime检测后审计（显式处理空行情，避免 StopIteration）
+        # 1) Regime detection (needed early if we want regime-aware alpha weights)
+        # Regime检测后审计（显式处理空行情，避免 StopIteration）
         if not market_data_1h:
             if audit:
                 audit.reject("no_market_data")
@@ -156,7 +149,32 @@ class V5Pipeline:
         if audit:
             audit.regime = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
             audit.regime_multiplier = regime.multiplier
-        
+
+        # Optional: override alpha weights by regime (research/shadow only)
+        if bool(getattr(self.cfg.alpha, 'dynamic_weights_by_regime_enabled', False)) and getattr(self.cfg.alpha, 'dynamic_weights_by_regime_path', None):
+            try:
+                import json
+                from pathlib import Path
+                from configs.schema import AlphaWeights
+
+                p = Path(str(getattr(self.cfg.alpha, 'dynamic_weights_by_regime_path')))
+                obj = json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
+                reg_key = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+                w = ((obj.get('regimes') or {}).get(reg_key) or {}).get('weights')
+                if isinstance(w, dict) and w:
+                    self.alpha_engine.cfg.weights = AlphaWeights(**w)
+                    if audit:
+                        audit.add_note(f"alpha weights overridden by regime={reg_key} from {p}")
+            except Exception:
+                pass
+
+        # 2) Alpha计算后审计
+        alpha = self.alpha_engine.compute_snapshot(market_data_1h)
+        if audit:
+            sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
+            audit.top_scores = [{"symbol": sym, "score": score} for sym, score in sorted_scores[:10]]
+            audit.counts["scored"] = len(alpha.scores)
+
         # Compute *raw* equity (for reporting / performance).
         equity_raw = self.compute_equity(cash_usdt=cash_usdt, positions=positions, market_data_1h=market_data_1h)
         cash_raw = float(cash_usdt)
