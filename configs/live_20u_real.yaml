@@ -28,7 +28,7 @@ universe:
   # - 更高 24h 成交额门槛
   # - 更严格点差限制
   top_n_market_cap: 50
-  min_24h_quote_volume_usdt: 30000000
+  min_24h_quote_volume_usdt: 10000000
   max_spread_bps: 20
 
   # 用单币 ticker 进一步筛流动性（更可靠，但会多一点请求）
