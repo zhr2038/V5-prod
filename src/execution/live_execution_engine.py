@@ -226,12 +226,26 @@ class LiveExecutionEngine:
         # Log trade intent for audit
         import logging
         log = logging.getLogger(__name__)
+        meta = o.meta or {}
         reason = None
         try:
-            reason = (o.meta or {}).get("reason")
+            reason = meta.get("reason")
         except Exception:
             reason = None
-        log.info(f"TRADE_SAFETY: {side} {inst_id}, tdMode={td_mode}, intent={o.intent}, reason={reason}, notional={notional:.4f}")
+
+        extra = ""
+        if reason == "atr_trailing":
+            try:
+                extra = (
+                    f" last={meta.get('last')} stop={meta.get('stop')} highest={meta.get('highest')}"
+                    f" atr={meta.get('atr')} mult={meta.get('atr_mult')} n={meta.get('atr_n')}"
+                )
+            except Exception:
+                extra = ""
+
+        log.info(
+            f"TRADE_SAFETY: {side} {inst_id}, tdMode={td_mode}, intent={o.intent}, reason={reason}, notional={notional:.4f}{extra}"
+        )
 
         if side == "buy":
             # Spot market buy: submit quote notional in USDT
