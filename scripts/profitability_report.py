@@ -84,6 +84,14 @@ def load_summary(path: Path) -> Optional[RunRow]:
     ws = obj.get("window_start_ts")
     we = obj.get("window_end_ts")
 
+    # Prefer new explicit ratio field when available.
+    tr = None
+    if obj.get("total_return_ratio") is not None:
+        tr = float(obj.get("total_return_ratio"))
+    elif obj.get("total_return_pct") is not None:
+        # legacy: could be ratio or pct depending on version
+        tr = float(obj.get("total_return_pct"))
+
     row = RunRow(
         run_id=run_id,
         path=path.parent,
@@ -92,7 +100,7 @@ def load_summary(path: Path) -> Optional[RunRow]:
         num_trades=int(obj.get("num_trades") or 0),
         equity_start=(float(obj.get("equity_start")) if obj.get("equity_start") is not None else None),
         equity_end=(float(obj.get("equity_end")) if obj.get("equity_end") is not None else None),
-        total_return_raw=(float(obj.get("total_return_pct")) if obj.get("total_return_pct") is not None else None),
+        total_return_raw=tr,
         max_drawdown_pct=(float(obj.get("max_drawdown_pct")) if obj.get("max_drawdown_pct") is not None else None),
         sharpe=(float(obj.get("sharpe")) if obj.get("sharpe") is not None else None),
         fees_usdt_total=(float(obj.get("fees_usdt_total")) if obj.get("fees_usdt_total") is not None else None),
@@ -142,15 +150,16 @@ def normalize_total_return(row: RunRow) -> Tuple[Optional[float], str]:
         return r, "equity_based"
 
     # Heuristic for legacy:
-    # - tiny values like 1e-5 are already ratios (0.001%)
     # - values between -1 and 1 likely ratios
-    # - values like 4.46 likely multiples (+446%)
+    # - values between -100 and 100 could be pct
     if -1.0 <= x <= 1.0:
         return x, "raw_ratio"
 
-    # If x looks like a percent already (e.g. 2.5 meaning 2.5%), we can't know.
-    # But in our observed data, 4.46 came from equity_end/equity_start-1 (multiple).
-    # Treat >1 as multiple ratio.
+    if -100.0 <= x <= 100.0:
+        # Ambiguous; assume pct and convert to ratio.
+        return x / 100.0, "raw_pct_assumed"
+
+    # Very large numbers: assume it's a multiple/ratio.
     return x, "raw_multiple"
 
 
