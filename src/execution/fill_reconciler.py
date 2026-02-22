@@ -153,6 +153,36 @@ class FillReconciler:
         except Exception:
             export_fill = None
 
+        # Cache per-run context for richer cost_events bucketing (regime/deadband/drift)
+        run_ctx_cache: Dict[str, Dict[str, Any]] = {}
+
+        def _load_run_ctx(run_id: str) -> Dict[str, Any]:
+            if run_id in run_ctx_cache:
+                return run_ctx_cache[run_id]
+            ctx: Dict[str, Any] = {"regime": None, "by_symbol": {}}
+            try:
+                import os
+                from pathlib import Path
+
+                p = Path(os.path.join("reports", "runs", str(run_id), "decision_audit.json"))
+                if p.exists():
+                    obj = json.loads(p.read_text(encoding="utf-8"))
+                    ctx["regime"] = obj.get("regime")
+                    # router_decisions entries often include: symbol, drift, deadband
+                    by_sym: Dict[str, Dict[str, Any]] = {}
+                    for it in (obj.get("router_decisions") or []):
+                        if not isinstance(it, dict):
+                            continue
+                        sym = it.get("symbol")
+                        if not sym:
+                            continue
+                        by_sym[str(sym)] = it
+                    ctx["by_symbol"] = by_sym
+            except Exception:
+                pass
+            run_ctx_cache[run_id] = ctx
+            return ctx
+
         for f in fills:
             inst_id = str(f.get("inst_id") or "")
             trade_id = str(f.get("trade_id") or "")
@@ -172,6 +202,11 @@ class FillReconciler:
                 continue
 
             try:
+                # enrich export with per-run regime and per-symbol deadband/drift when available
+                run_id = str(row.run_id)
+                symbol = str(inst_id).replace("-", "/")
+                ctx = _load_run_ctx(run_id)
+                sym_ctx = (ctx.get("by_symbol") or {}).get(symbol) if isinstance(ctx, dict) else None
                 export_fill(
                     fill_ts_ms=int(f.get("ts_ms") or 0),
                     inst_id=inst_id,
@@ -180,14 +215,14 @@ class FillReconciler:
                     fill_sz=str(f.get("fill_sz") or "0"),
                     fee=f.get("fee"),
                     fee_ccy=f.get("fee_ccy"),
-                    run_id=str(row.run_id),
+                    run_id=run_id,
                     intent=str(row.intent),
                     window_start_ts=row.window_start_ts,
                     window_end_ts=row.window_end_ts,
                     run_dir=f"reports/runs/{row.run_id}",
-                    regime=None,
-                    deadband_pct=None,
-                    drift=None,
+                    regime=(ctx.get("regime") if isinstance(ctx, dict) else None),
+                    deadband_pct=((sym_ctx or {}).get("deadband") if isinstance(sym_ctx, dict) else None),
+                    drift=((sym_ctx or {}).get("drift") if isinstance(sym_ctx, dict) else None),
                     cl_ord_id=str(row.cl_ord_id),
                     order_store_path=str(getattr(self.order_store, 'path', 'reports/orders.sqlite')),
                 )
