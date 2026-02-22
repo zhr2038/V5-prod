@@ -122,9 +122,15 @@ class V5Pipeline:
             audit.regime = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
             audit.regime_multiplier = regime.multiplier
         
-        equity = self.compute_equity(cash_usdt=cash_usdt, positions=positions, market_data_1h=market_data_1h)
+        # Compute *raw* equity (for reporting / performance).
+        equity_raw = self.compute_equity(cash_usdt=cash_usdt, positions=positions, market_data_1h=market_data_1h)
+        cash_raw = float(cash_usdt)
 
         # Live small-budget safety: cap sizing equity if configured.
+        # IMPORTANT: this cap is for *order sizing only*; it must not pollute reporting.
+        equity = float(equity_raw)
+        cash_usdt = float(cash_raw)
+
         cap_eq = getattr(self.cfg.budget, "live_equity_cap_usdt", None)
         if cap_eq is not None:
             try:
@@ -407,8 +413,12 @@ class V5Pipeline:
                 now_ts = self.clock.now().isoformat().replace("+00:00", "Z")
                 run_logger.log_equity({
                     "ts": now_ts,
-                    "cash": float(cash_usdt),
-                    "equity": float(equity),
+                    # Reporting (raw) vs sizing (capped)
+                    "cash": float(cash_raw),
+                    "equity": float(equity_raw),
+                    "cash_sizing": float(cash_usdt),
+                    "equity_sizing": float(equity),
+                    "equity_cap_usdt": float(getattr(self.cfg.budget, "live_equity_cap_usdt", 0.0) or 0.0) if getattr(self.cfg.budget, "live_equity_cap_usdt", None) is not None else None,
                     "peak": float(pst.peak_equity_usdt),
                     "dd": float(pst.drawdown_pct),
                     "exposure_mult": float(dd_mult),

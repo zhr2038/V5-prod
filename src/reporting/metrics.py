@@ -31,6 +31,7 @@ def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float 
         return {
             "equity_start": None,
             "equity_end": None,
+            "total_return_ratio": None,
             "total_return_pct": None,
             "max_drawdown_pct": None,
             "sharpe": None,
@@ -39,7 +40,7 @@ def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float 
     eq = np.array([float(r.get("equity") or 0.0) for r in equity_rows], dtype=float)
     eq_start = float(eq[0])
     eq_end = float(eq[-1])
-    total_ret = (eq_end / eq_start - 1.0) if eq_start else 0.0
+    total_ret_ratio = (eq_end / eq_start - 1.0) if eq_start else 0.0
 
     peak = np.maximum.accumulate(eq)
     dd = np.where(peak > 0, 1.0 - eq / peak, 0.0)
@@ -54,8 +55,10 @@ def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float 
     return {
         "equity_start": eq_start,
         "equity_end": eq_end,
-        "total_return_pct": float(total_ret),
-        "max_drawdown_pct": float(max_dd),
+        # Keep both for clarity.
+        "total_return_ratio": float(total_ret_ratio),
+        "total_return_pct": float(total_ret_ratio) * 100.0,
+        "max_drawdown_pct": float(max_dd) * 100.0,
         "sharpe": sharpe,
     }
 
