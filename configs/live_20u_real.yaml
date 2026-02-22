@@ -22,10 +22,16 @@ universe:
   use_universe_symbols: true
   cache_path: reports/universe_cache.json
   cache_ttl_sec: 3600
-  top_n_market_cap: 30
-  min_24h_quote_volume_usdt: 5000000
+  # 用 universe，但收紧范围：只取更靠前的市值币 + 更高成交额门槛
+  top_n_market_cap: 10
+  min_24h_quote_volume_usdt: 20000000
   blacklist_path: configs/blacklist.json
   exclude_stablecoins: true
+  include_symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
 
 alpha:
   long_top_pct: 0.25  # 提高选择比例，避免选到受限币种
