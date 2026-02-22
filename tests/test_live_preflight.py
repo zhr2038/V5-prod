@@ -8,7 +8,13 @@ import src.execution.live_preflight as lp
 
 
 class DummyOKX:
-    pass
+    def get_balance(self, ccy=None):
+        # minimal OKXResponse-like object
+        class R:
+            def __init__(self):
+                self.data = {"data": [{"details": []}]}
+
+        return R()
 
 
 class DummyBillsStore:

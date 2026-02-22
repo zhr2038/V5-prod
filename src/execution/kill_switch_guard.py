@@ -188,15 +188,8 @@ class KillSwitchGuard:
         _atomic_write_json(self.cfg.failure_state_path, st)
 
         ks = self._load_kill_switch()
-        
-        # Auto-disable kill switch if reconcile succeeded
-        if ok and bool(ks.get("enabled")):
-            ks["enabled"] = False
-            ks["auto_disabled_ts_ms"] = int(now)
-            ks["auto_disabled_reason"] = "reconcile_succeeded"
-            _atomic_write_json(self.cfg.kill_switch_path, ks)
-            logging.info(f"Kill switch auto-disabled because reconcile succeeded")
-        
+
+        # Never auto-disable kill-switch. If it's enabled, operator must clear it.
         if bool(ks.get("enabled")):
             return {"ok": ok, "reason": norm_reason, "category": category, "failure_state": st, "kill_switch": ks}
 

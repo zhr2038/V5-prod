@@ -111,6 +111,16 @@ class ExecutionConfig(BaseModel):
     # We treat values < 1e12 as a delta-ms from now for convenience.
     okx_exp_time_ms: Optional[int] = Field(default=1500, ge=1)
 
+    # Borrow safety (live only)
+    abort_on_borrow: bool = Field(default=True, description="If OKX balance shows any liabilities/negative eq, abort preflight")
+    borrow_liab_eps: float = Field(default=1e-6, ge=0)
+    borrow_neg_eq_eps: float = Field(default=1e-6, ge=0)
+
+    # (Optional / future) borrow prevention knobs (kept for config compatibility)
+    borrow_prevention: bool = Field(default=False)
+    check_fee_currency_balance: bool = Field(default=False)
+    high_risk_blacklist_path: str = Field(default="configs/borrow_prevention_rules.json")
+
     # Last-arm safety env var (required for live)
     live_arm_env: str = Field(default="V5_LIVE_ARM")
     live_arm_value: str = Field(default="YES")

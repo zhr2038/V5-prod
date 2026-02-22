@@ -14,6 +14,7 @@ from src.execution.ledger_engine import LedgerEngine
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
 from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
+from src.execution.borrow_guard import check_okx_borrows
 
 
 def _now_ms() -> int:
@@ -99,6 +100,51 @@ class LivePreflight:
         ledger_obj = led.run(out_path=self.ledger_status_path)
         ledger_ok = bool(ledger_obj.get("ok"))
         details["ledger"] = {"ok": ledger_ok, "reason": ledger_obj.get("reason"), "bill_count": (ledger_obj.get("bills_aggregate") or {}).get("count")}
+
+        # 2b) Borrow/liability safety check (before reconcile/decision)
+        try:
+            bal = self.okx.get_balance()
+            borrow_res = check_okx_borrows(
+                bal.data,
+                liab_eps=float(getattr(self.cfg, "borrow_liab_eps", 1e-6) or 1e-6),
+                neg_eq_eps=float(getattr(self.cfg, "borrow_neg_eq_eps", 1e-6) or 1e-6),
+            )
+            details["borrow_check"] = {
+                "ok": bool(borrow_res.ok),
+                "reason": borrow_res.reason,
+                "count": len(borrow_res.items),
+                "items": [
+                    {
+                        "ccy": i.ccy,
+                        "eq": i.eq,
+                        "liab": i.liab,
+                        "cross_liab": i.cross_liab,
+                        "borrow_froz": i.borrow_froz,
+                    }
+                    for i in (borrow_res.items or [])
+                ],
+            }
+
+            if (not borrow_res.ok) and bool(getattr(self.cfg, "abort_on_borrow", True)):
+                return LivePreflightResult(
+                    decision="ABORT",
+                    reconcile_ok=False,
+                    ledger_ok=ledger_ok,
+                    kill_switch_enabled=False,
+                    reason="borrow_detected",
+                    details=details,
+                )
+        except Exception as e:
+            details["borrow_check"] = {"ok": False, "reason": f"error:{e}"}
+            # Conservative: do not allow buys when borrow check is unavailable
+            return LivePreflightResult(
+                decision="SELL_ONLY",
+                reconcile_ok=False,
+                ledger_ok=ledger_ok,
+                kill_switch_enabled=False,
+                reason="borrow_check_error",
+                details=details,
+            )
 
         # 3) Reconcile once + kill-switch guard
         # (Write reconcile_status.json; then guard will write failure_state/kill_switch)

@@ -240,25 +240,37 @@ class LiveExecutionEngine:
                 raise ValueError(f"NO_BORROW_SAFETY: No position qty available for sell: {o.symbol}. "
                                f"Would trigger borrow. Aborting.")
             
-            # 2. Double-check with OKX balance before selling
+            # 2. Double-check with OKX balance before selling (best-effort).
+            # If OKX explicitly reports negative balance or insufficient base, abort.
             try:
-                from src.execution.okx_private_client import OKXPrivateClient
-                okx_check = OKXPrivateClient(exchange=self.okx.exchange)
-                balance_resp = okx_check.get_balance()
-                okx_merl_balance = 0
-                for d in balance_resp.data['data'][0]['details']:
-                    if d.get('ccy') == o.symbol.split('/')[0]:  # Extract base currency
-                        eq = float(d.get('eq', 0))
-                        if eq < 0:
-                            raise ValueError(f"NO_BORROW_SAFETY: OKX shows NEGATIVE balance for {o.symbol}: {eq}. "
-                                           f"Would increase borrow. Aborting.")
-                        okx_merl_balance = eq
-                        break
-                
-                if okx_merl_balance < float(p.qty) * 0.9:  # Allow 10% tolerance
-                    raise ValueError(f"NO_BORROW_SAFETY: OKX balance ({okx_merl_balance}) < local position ({p.qty}) "
-                                   f"for {o.symbol}. Risk of borrow. Aborting.")
-                    
+                balance_resp = self.okx.get_balance()
+                base_ccy = o.symbol.split('/')[0]
+                okx_base_eq = None
+
+                rows = (balance_resp.data or {}).get("data") if isinstance(balance_resp.data, dict) else None
+                details = ((rows[0] if isinstance(rows, list) and rows else {}) or {}).get("details")
+                if isinstance(details, list):
+                    for d in details:
+                        if isinstance(d, dict) and str(d.get("ccy")) == str(base_ccy):
+                            okx_base_eq = float(d.get("eq") or 0.0)
+                            break
+
+                if okx_base_eq is not None:
+                    if okx_base_eq < 0:
+                        raise ValueError(
+                            f"NO_BORROW_SAFETY: OKX shows NEGATIVE balance for {o.symbol}: {okx_base_eq}. "
+                            f"Would increase borrow. Aborting."
+                        )
+
+                    # Allow 10% tolerance for local store drift, but do not allow obvious oversell.
+                    if okx_base_eq < float(p.qty) * 0.9:
+                        raise ValueError(
+                            f"NO_BORROW_SAFETY: OKX balance ({okx_base_eq}) < local position ({p.qty}) "
+                            f"for {o.symbol}. Risk of borrow. Aborting."
+                        )
+
+            except ValueError:
+                raise
             except Exception as e:
                 log.warning(f"Balance pre-check failed (proceeding with caution): {e}")
             

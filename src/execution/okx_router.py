@@ -31,11 +31,11 @@ class OKXOrderRouter:
         spread = (ask - bid) / mid if mid else 1.0
 
         if force_market:
-            return RouterDecision(order_type="market", reason="force_market", params={"tdMode": "cash", "tgtCcy": "quote"})
+            return RouterDecision(order_type="market", reason="force_market", params={"tdMode": "cash", "tgtCcy": "quote_ccy"})
 
         if spread <= self.max_spread_pct:
             # prefer limit IOC in tight spread
             return RouterDecision(order_type="limit", reason=f"spread_ok({spread:.4%})", params={"tdMode": "cash"})
 
         # too wide => avoid; fallback to market with tgtCcy quote (USDT notional)
-        return RouterDecision(order_type="market", reason=f"spread_wide({spread:.4%})", params={"tdMode": "cash", "tgtCcy": "quote"})
+        return RouterDecision(order_type="market", reason=f"spread_wide({spread:.4%})", params={"tdMode": "cash", "tgtCcy": "quote_ccy"})
