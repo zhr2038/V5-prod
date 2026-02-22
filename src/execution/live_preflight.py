@@ -15,6 +15,7 @@ from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
 from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
 from src.execution.borrow_guard import check_okx_borrows
+from src.utils.auto_blacklist import add_symbol as auto_blacklist_add
 
 
 def _now_ms() -> int:
@@ -126,6 +127,14 @@ class LivePreflight:
             }
 
             if (not borrow_res.ok) and bool(getattr(self.cfg, "abort_on_borrow", True)):
+                # Auto blacklist currencies with liabilities to prevent further trading in them.
+                try:
+                    for it in (borrow_res.items or []):
+                        sym = f"{it.ccy}/USDT"
+                        auto_blacklist_add(sym, reason="borrow_detected", ttl_sec=30 * 24 * 3600, meta={"eq": it.eq, "liab": it.liab, "cross_liab": it.cross_liab, "borrow_froz": it.borrow_froz})
+                except Exception:
+                    pass
+
                 return LivePreflightResult(
                     decision="ABORT",
                     reconcile_ok=False,
