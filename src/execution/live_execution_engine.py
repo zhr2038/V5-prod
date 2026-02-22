@@ -410,8 +410,49 @@ class LiveExecutionEngine:
                 event_type="ACK",
             )
             # follow-up poll to get state if possible
-            polled = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
-            return LiveExecutionResult(cl_ord_id=clid, state=polled[0], ord_id=polled[1])
+            polled_state, polled_ord_id = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
+
+            # Best-effort position sync on FILLED to keep local store consistent and avoid
+            # NO_BORROW false positives on subsequent sells.
+            try:
+                if polled_state == "FILLED":
+                    row = self.order_store.get(clid)
+                    # parse last_query to extract accFillSz/avgPx if present
+                    last_q = None
+                    if row is not None and getattr(row, "last_query_json", None):
+                        import json as _json
+
+                        last_q = _json.loads(row.last_query_json)
+                    elif row is not None and getattr(row, "ack_json", None):
+                        import json as _json
+
+                        last_q = _json.loads(row.ack_json)
+
+                    r0 = None
+                    if isinstance(last_q, dict):
+                        rows = last_q.get("data")
+                        if isinstance(rows, list) and rows:
+                            r0 = rows[0] if isinstance(rows[0], dict) else None
+
+                    acc_fill_sz = float((r0 or {}).get("accFillSz") or 0.0) if r0 else 0.0
+                    avg_px = float((r0 or {}).get("avgPx") or 0.0) if r0 else 0.0
+                    if acc_fill_sz > 0:
+                        if str(o.side).lower() == "buy":
+                            self.position_store.upsert_buy(o.symbol, qty=float(acc_fill_sz), px=float(avg_px or o.signal_price or 0.0))
+                        elif str(o.side).lower() == "sell":
+                            # reduce qty; if becomes dust, close
+                            p = self.position_store.get(o.symbol)
+                            if p is not None:
+                                new_qty = max(0.0, float(p.qty) - float(acc_fill_sz))
+                                if new_qty <= 0:
+                                    self.position_store.close_long(o.symbol)
+                                else:
+                                    # keep avg_px unchanged on partial close
+                                    self.position_store.set_qty(o.symbol, qty=new_qty)
+            except Exception:
+                pass
+
+            return LiveExecutionResult(cl_ord_id=clid, state=polled_state, ord_id=polled_ord_id)
 
         except OKXPrivateClientError as e:
             # network/timeout/etc. => do NOT resubmit; query by clOrdId

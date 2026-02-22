@@ -201,6 +201,26 @@ class PositionStore:
         con.commit()
         con.close()
 
+    def set_qty(self, symbol: str, *, qty: float, now_ts: Optional[str] = None) -> None:
+        """Update qty only (avg_px unchanged)."""
+        p = self.get(symbol)
+        if not p:
+            return
+        now = now_ts or (datetime.utcnow().isoformat() + "Z")
+        self.upsert_position(
+            Position(
+                symbol=p.symbol,
+                qty=float(qty),
+                avg_px=float(p.avg_px),
+                entry_ts=str(p.entry_ts),
+                highest_px=float(p.highest_px),
+                last_update_ts=str(now),
+                last_mark_px=float(p.last_mark_px or p.avg_px),
+                unrealized_pnl_pct=float(p.unrealized_pnl_pct),
+                tags_json=str(p.tags_json),
+            )
+        )
+
     def close_long(self, symbol: str) -> None:
         con = sqlite3.connect(str(self.path))
         c = con.cursor()
