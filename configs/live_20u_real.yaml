@@ -114,6 +114,11 @@ execution:
 budget:
   # 实盘测试 - 设置明确的资金限制
   live_equity_cap_usdt: 20.0  # ✅ 限制为 20 USDT（安全测试规模）
+
+  # Exchange min-order protection (avoid 51020/minSz failures on small budget)
+  exchange_min_notional_enabled: true
+  exchange_min_notional_slack_multiplier: 1.05
+
   min_trade_notional_base: 1.0  # 恢复合理的最小交易金额
   min_trade_notional_multiplier_exceeded: 1.5  # 启用超支惩罚
   min_trade_notional_cap_abs: 100.0

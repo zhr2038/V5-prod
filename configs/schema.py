@@ -194,6 +194,10 @@ class BacktestConfig(BaseModel):
 
 
 class BudgetConfig(BaseModel):
+    # Exchange min-order protection (works even when budget is not exceeded)
+    exchange_min_notional_enabled: bool = Field(default=True)
+    exchange_min_notional_slack_multiplier: float = Field(default=1.05, ge=1.0)
+
     # F3.0: monitoring
     turnover_budget_per_day: Optional[float] = Field(default=None, ge=0)
     cost_budget_bps_per_day: Optional[float] = Field(default=None, ge=0)

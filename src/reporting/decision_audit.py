@@ -59,6 +59,7 @@ class DecisionAudit:
         "insufficient_cash": 0,
         "deadband_skip": 0,
         "provider_error": 0,
+        "exchange_min_notional": 0,
     })
     
     # Budget (F3)

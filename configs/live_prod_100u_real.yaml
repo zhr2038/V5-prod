@@ -1,0 +1,85 @@
+# V5 LIVE production-like config (100 USDT sizing)
+# - Larger per-trade sizing (~100u) so symbols with larger minSz (e.g. SPACE) become tradable.
+# - Keep exchange min-order protection to avoid OKX 51020 and minSz failures.
+
+# Base: copy from live_20u_real.yaml and adjust budget sizing knobs.
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+
+auto_blacklist:
+  enabled: true
+  ttl_sec: 604800
+
+universe:
+  enabled: true
+  use_universe_symbols: true
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 3600
+  top_n_market_cap: 50
+  min_24h_quote_volume_usdt: 10000000
+  max_spread_bps: 20
+  refine_with_single_ticker: true
+  refine_single_ticker_max_candidates: 200
+  refine_single_ticker_sleep_sec: 0.02
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+  include_symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+
+alpha:
+  long_top_pct: 0.25
+  weights:
+    f1_mom_5d: 0.20
+    f2_mom_20d: 0.30
+    f3_vol_adj_ret_20d: 0.25
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.10
+
+regime:
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  pos_mult_trending: 1.2
+  pos_mult_sideways: 0.6
+  pos_mult_risk_off: 1.0
+
+risk:
+  max_single_weight: 0.30
+  max_gross_exposure: 1.0
+  drawdown_trigger: 0.10
+  drawdown_delever: 0.60
+
+rebalance:
+  deadband_sideways: 0.05
+  deadband_trending: 0.03
+  deadband_riskoff: 0.05
+
+execution:
+  mode: live
+  dry_run: false
+  preflight_enabled: true
+  preflight_fail_action: sell_only
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+  auto_clear_kill_switch_if_ok: true
+
+budget:
+  # In prod we typically size by full equity; do NOT cap.
+  live_equity_cap_usdt: null
+
+  # Exchange min-order protection (symbol-specific)
+  exchange_min_notional_enabled: true
+  exchange_min_notional_slack_multiplier: 1.05
+
+  # Base min notional (router-level). Keep reasonable in prod.
+  min_trade_notional_base: 25.0
+
+  action_enabled: true
+  turnover_budget_per_day: null
+  cost_budget_bps_per_day: null

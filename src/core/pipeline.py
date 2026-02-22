@@ -378,6 +378,37 @@ class V5Pipeline:
                         router_decisions.append({"symbol": sym, "action": "skip", "reason": f"min_price<{mp}", "px": px})
                     continue
 
+            # Exchange min-order filter (symbol-specific): avoid placing orders that the exchange will reject.
+            # Uses OKX instrument minSz (base qty) to estimate a minimum USDT notional.
+            if side == "buy" and bool(getattr(self.cfg.budget, "exchange_min_notional_enabled", True)):
+                try:
+                    from src.data.okx_instruments import OKXSpotInstrumentsCache
+
+                    spec = OKXSpotInstrumentsCache().get_spec(symbol_to_inst_id(sym))
+                    if spec is not None:
+                        min_sz = float(spec.min_sz or 0.0)
+                        # Estimate min notional requirement from base minSz.
+                        min_notional_ex = float(min_sz) * float(px)
+                        slack = float(getattr(self.cfg.budget, "exchange_min_notional_slack_multiplier", 1.05) or 1.05)
+                        if min_notional_ex > 0 and float(notional) < float(min_notional_ex) * slack:
+                            if audit:
+                                audit.reject("exchange_min_notional")
+                                router_decisions.append(
+                                    {
+                                        "symbol": sym,
+                                        "action": "skip",
+                                        "reason": "exchange_min_notional",
+                                        "notional": float(notional),
+                                        "min_notional_ex": float(min_notional_ex),
+                                        "min_sz": float(min_sz),
+                                        "px": float(px),
+                                        "slack": float(slack),
+                                    }
+                                )
+                            continue
+                except Exception:
+                    pass
+
             # Min-notional filter: apply to buys; allow sells (especially for removed symbols) to reduce drift.
             if side == "buy" and notional < float(min_notional):
                 if audit:

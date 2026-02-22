@@ -223,11 +223,6 @@ class OKXUniverseProvider:
             if qv_f < self.min_24h_quote_volume_usdt:
                 continue
 
-            # Filter out instruments with extremely large minSz (not suitable for small budgets).
-            # Example: SPACE-USDT has minSz=1000, which is impossible with ~20-100 USDT budgets.
-            if float(min_sz) >= 100:
-                continue
-
             # Optional tradability filter: spread
             if self.max_spread_bps is not None:
                 try:
