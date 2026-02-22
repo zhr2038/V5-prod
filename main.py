@@ -583,7 +583,10 @@ def main() -> None:
         execution=report,
     )
 
-    log.info("V5 dry-run completed")
+    if is_live:
+        log.info("V5 live run completed")
+    else:
+        log.info("V5 dry-run completed")
     log.info(report.notes)
     log.info(f"orders={len(report.orders)}")
 
