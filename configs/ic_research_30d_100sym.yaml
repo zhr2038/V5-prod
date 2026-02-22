@@ -17,8 +17,8 @@ universe:
   top_n_market_cap: 100
   # For research, we allow a wider universe to reach ~100 symbols.
   # Live configs remain stricter.
-  min_24h_quote_volume_usdt: 1000000
-  max_spread_bps: 30
+  min_24h_quote_volume_usdt: 200000
+  max_spread_bps: 50
   refine_with_single_ticker: false
   refine_single_ticker_max_candidates: 0
   refine_single_ticker_sleep_sec: 0.0
