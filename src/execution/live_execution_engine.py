@@ -294,12 +294,20 @@ class LiveExecutionEngine:
                 raise DustOrderSkip(o.symbol, qty=qty, qty_rounded=qty_rounded, min_sz=min_sz, lot_sz=lot_sz)
 
             # OKX rejects scientific notation (e.g. 5e-05) with 51000 Parameter sz error.
-            # Always send plain decimal string.
-            from decimal import Decimal
+            # Always send plain decimal string and avoid float->str exponent.
+            from decimal import Decimal, ROUND_DOWN
 
-            sz_dec = Decimal(str(qty_rounded))
-            payload["sz"] = format(sz_dec, "f")
-            payload["tgtCcy"] = "base_ccy"
+            lot = float(specs.lot_sz) if specs is not None and specs.lot_sz is not None else 0.0
+            if lot and lot > 0:
+                lot_dec = Decimal(str(lot))
+                # quantize to lot step
+                q = (Decimal(str(qty)) / lot_dec).to_integral_value(rounding=ROUND_DOWN) * lot_dec
+                sz_str = format(q, "f")
+            else:
+                sz_str = format(Decimal(str(qty)), "f")
+
+            payload["sz"] = sz_str
+            # For spot market SELL, omit tgtCcy to avoid OKX 51000 on some instruments.
 
         return payload
 
