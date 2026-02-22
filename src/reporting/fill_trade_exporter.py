@@ -228,6 +228,7 @@ def export_fill(
 
         event: Dict[str, Any] = {
             "schema_version": 1,
+            "source": "okx_fill",
             "event_type": "fill",
             "ts": int(int(fill_ts_ms) / 1000),
             "run_id": str(run_id),

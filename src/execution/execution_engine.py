@@ -155,6 +155,7 @@ class ExecutionEngine:
 
                 event = {
                     "schema_version": 1,
+                    "source": "dry_run",
                     "event_type": "fill",
                     "ts": current_ts,
                     "run_id": self.run_id,
