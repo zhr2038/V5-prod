@@ -65,12 +65,23 @@ def notional_bucket(x: float) -> str:
     return "ge250"
 
 
-def rollup_day(day_yyyymmdd: str, base_dir: str = "reports/cost_events", out_dir: str = "reports/cost_stats") -> Path:
+def rollup_day(
+    day_yyyymmdd: str,
+    base_dir: str = "reports/cost_events",
+    out_dir: str = "reports/cost_stats",
+    source: Optional[str] = None,
+) -> Path:
     src = Path(base_dir) / f"{day_yyyymmdd}.jsonl"
     dst = Path(out_dir)
     dst.mkdir(parents=True, exist_ok=True)
 
-    fills: List[Dict[str, Any]] = [e for e in _iter_jsonl(src) if e.get("event_type") == "fill"]
+    all_events = list(_iter_jsonl(src))
+
+    if source:
+        src_norm = str(source).strip().lower()
+        all_events = [e for e in all_events if str(e.get("source") or "").strip().lower() == src_norm]
+
+    fills: List[Dict[str, Any]] = [e for e in all_events if e.get("event_type") == "fill"]
 
     # group by dims
     groups: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = {}
@@ -89,9 +100,10 @@ def rollup_day(day_yyyymmdd: str, base_dir: str = "reports/cost_events", out_dir
         "schema_version": 1,
         "day": day_yyyymmdd,
         "coverage": {
-            "events_total": len(list(_iter_jsonl(src))),
+            "events_total": len(all_events),
             "fills": len(fills),
             "missing_bidask": missing_bidask,
+            "source": (str(source) if source else None),
         },
         "buckets": {},
     }
@@ -226,6 +238,7 @@ def main() -> None:
     ap.add_argument("--day", default=None, help="UTC day YYYYMMDD; default today(UTC)")
     ap.add_argument("--base_dir", default="reports/cost_events")
     ap.add_argument("--out_dir", default="reports/cost_stats")
+    ap.add_argument("--source", default=None, help="Filter cost_events by event.source (e.g. okx_fill|dry_run)")
 
     ap.add_argument("--check_anomaly", action="store_true", help="Enable basic cost anomaly detection")
     ap.add_argument("--lookback_days", type=int, default=7)
@@ -238,7 +251,7 @@ def main() -> None:
         day = datetime.now(timezone.utc).strftime("%Y%m%d")
 
     t0 = time.time()
-    out = rollup_day(day, base_dir=args.base_dir, out_dir=args.out_dir)
+    out = rollup_day(day, base_dir=args.base_dir, out_dir=args.out_dir, source=args.source)
     duration_ms = int((time.time() - t0) * 1000)
 
     # load stats to print an ops-friendly one-line summary
