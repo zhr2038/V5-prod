@@ -474,6 +474,46 @@ def main() -> None:
             exec_engine.poll_open(limit=200)
         except Exception as e:
             log.warning(f"live poll_open (post) failed: {e}")
+
+    # Live fills sync + export (F2): pull OKX fills into FillStore then reconcile/export to trades.csv + cost_events.
+    # This is needed because get_order polling alone doesn't guarantee fills are exported.
+    if is_live:
+        try:
+            from src.execution.fill_store import FillStore, parse_okx_fills
+            from src.execution.fill_reconciler import FillReconciler
+
+            client = getattr(exec_engine, "okx", None)
+            if client is not None:
+                fs = FillStore(path="reports/fills.sqlite")
+                # page newest fills backward; keep small to limit API usage
+                after = None
+                total_new = 0
+                for _ in range(5):
+                    r = client.get_fills(after=after, limit=100)
+                    rows = parse_okx_fills(r.data, source="fills")
+                    ins, _ = fs.upsert_many(rows)
+                    total_new += int(ins)
+
+                    data = (r.data or {}).get("data") or []
+                    if not isinstance(data, list) or not data:
+                        break
+                    last = data[-1] if isinstance(data[-1], dict) else {}
+                    after = last.get("billId") or last.get("tradeId")
+                    if ins == 0:
+                        break
+                    time.sleep(0.05)
+
+                # reconcile + export
+                try:
+                    rec = FillReconciler(fill_store=fs, order_store=getattr(exec_engine, "order_store", None) or order_store, okx=client)
+                    rec.reconcile(limit=2000, max_get_order_per_run=10)
+                except Exception:
+                    pass
+
+                if total_new > 0:
+                    log.info(f"FILLS_SYNC new_fills={total_new} total={fs.count()}")
+        except Exception as e:
+            log.warning(f"fills sync/export failed: {e}")
     
     # 更新 alpha 历史数据中的交易信息
     if collector and hasattr(report, 'orders') and report.orders:

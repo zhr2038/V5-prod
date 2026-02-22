@@ -25,6 +25,31 @@ def _iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
             continue
 
 
+def _is_invalid_cost_event(evt: Dict[str, Any]) -> bool:
+    """Drop obviously-bad placeholder events.
+
+    We saw polluted okx_fill events like: ts=0, run_id='r', window_start_ts=1.
+    Those break F2 calibration rollups.
+    """
+    try:
+        src = evt.get("source")
+        ts = int(evt.get("ts") or 0)
+        run_id = str(evt.get("run_id") or "")
+        w0 = int(evt.get("window_start_ts") or 0)
+    except Exception:
+        return True
+
+    if src == "okx_fill":
+        if ts <= 0:
+            return True
+        if run_id in {"r", "", "none", "null"}:
+            return True
+        # windows are epoch seconds; anything tiny is placeholder
+        if w0 > 0 and w0 < 1_600_000_000:
+            return True
+    return False
+
+
 def _quantiles(xs: List[float], ps: List[float]) -> Dict[str, Optional[float]]:
     if not xs:
         out: Dict[str, Optional[float]] = {f"p{int(p*100)}": None for p in ps}
@@ -75,7 +100,9 @@ def rollup_day(
     dst = Path(out_dir)
     dst.mkdir(parents=True, exist_ok=True)
 
-    all_events = list(_iter_jsonl(src))
+    all_events0 = list(_iter_jsonl(src))
+    dropped_invalid = sum(1 for e in all_events0 if _is_invalid_cost_event(e))
+    all_events = [e for e in all_events0 if not _is_invalid_cost_event(e)]
 
     if source:
         src_norm = str(source).strip().lower()
@@ -103,6 +130,7 @@ def rollup_day(
             "events_total": len(all_events),
             "fills": len(fills),
             "missing_bidask": missing_bidask,
+            "dropped_invalid": int(dropped_invalid),
             "source": (str(source) if source else None),
         },
         "buckets": {},
