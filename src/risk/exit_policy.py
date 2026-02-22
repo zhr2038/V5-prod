@@ -8,7 +8,7 @@ from src.core.clock import TradingClock, SystemClock
 
 from src.core.models import Order
 from src.execution.position_store import Position
-from src.risk.atr_trailing import update_atr_trailing, ATRTrailingState
+from src.risk.atr_trailing import update_atr_trailing, ATRTrailingState, atr
 from src.core.models import MarketSeries
 
 
@@ -76,6 +76,7 @@ class ExitPolicy:
             # ATR trailing
             st = ATRTrailingState(highest_price=float(p.highest_px), stop_price=0.0)
             st2 = update_atr_trailing(s, st, atr_mult=float(self.cfg.atr_mult), n=int(self.cfg.atr_n))
+            a = atr(s, n=int(self.cfg.atr_n))
             if last <= float(st2.stop_price):
                 orders.append(
                     Order(
@@ -84,7 +85,15 @@ class ExitPolicy:
                         intent="CLOSE_LONG",
                         notional_usdt=float(p.qty) * last,
                         signal_price=last,
-                        meta={"reason": "atr_trailing", "stop": float(st2.stop_price), "highest": float(st2.highest_price)},
+                        meta={
+                            "reason": "atr_trailing",
+                            "last": float(last),
+                            "stop": float(st2.stop_price),
+                            "highest": float(st2.highest_price),
+                            "atr": float(a),
+                            "atr_mult": float(self.cfg.atr_mult),
+                            "atr_n": int(self.cfg.atr_n),
+                        },
                     )
                 )
                 continue

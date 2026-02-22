@@ -586,6 +586,14 @@ def main() -> None:
             if audit is not None:
                 audit.budget = budget_dict
                 audit.save(f"reports/runs/{run_id}")
+
+                # Also attach exit signals into summary for explainability
+                try:
+                    from src.reporting.summary_writer import attach_exit_signals
+
+                    attach_exit_signals(f"reports/runs/{run_id}", audit.exit_signals or [])
+                except Exception:
+                    pass
         except Exception:
             pass
 

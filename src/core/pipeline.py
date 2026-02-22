@@ -219,6 +219,25 @@ class V5Pipeline:
         )
         if audit:
             audit.counts["orders_exit"] = len(exit_orders)
+            # capture detailed exit reasons for explainability
+            xs = []
+            for o in exit_orders:
+                meta = o.meta or {}
+                xs.append(
+                    {
+                        "symbol": o.symbol,
+                        "side": o.side,
+                        "intent": o.intent,
+                        "reason": meta.get("reason"),
+                        "last": meta.get("last") or o.signal_price,
+                        "stop": meta.get("stop"),
+                        "highest": meta.get("highest"),
+                        "atr": meta.get("atr"),
+                        "atr_mult": meta.get("atr_mult"),
+                        "atr_n": meta.get("atr_n"),
+                    }
+                )
+            audit.exit_signals = xs
 
         # 7. Rebalance orders生成（deadband + 拒绝原因审计）
         rebalance_orders: List[Order] = []

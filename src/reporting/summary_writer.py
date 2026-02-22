@@ -102,3 +102,15 @@ def attach_budget(run_dir: str, budget: Dict[str, Any]) -> Dict[str, Any]:
     p.write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
     return summ
 
+
+def attach_exit_signals(run_dir: str, exit_signals: list[dict[str, Any]]) -> Dict[str, Any]:
+    """Patch run_dir/summary.json with a top-level 'exit_signals' field."""
+    rd = Path(run_dir)
+    p = rd / "summary.json"
+    if not p.exists():
+        raise FileNotFoundError(str(p))
+    summ = json.loads(p.read_text(encoding="utf-8"))
+    summ["exit_signals"] = exit_signals
+    p.write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summ
+

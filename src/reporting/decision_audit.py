@@ -68,6 +68,9 @@ class DecisionAudit:
     # Universe配置信息
     universe_config: Dict[str, Any] = field(default_factory=dict)
     
+    # Exit signals (why exits happened)
+    exit_signals: List[Dict[str, Any]] = field(default_factory=list)
+
     # 备注
     notes: List[str] = field(default_factory=list)
     
@@ -128,6 +131,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.budget = data.get("budget", {})
     audit.budget_action = data.get("budget_action", {})
     audit.universe_config = data.get("universe_config", {})
+    audit.exit_signals = data.get("exit_signals", [])
     audit.notes = data.get("notes", [])
     
     return audit
