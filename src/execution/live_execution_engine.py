@@ -482,8 +482,16 @@ class LiveExecutionEngine:
                                 if new_qty <= 0:
                                     self.position_store.close_long(o.symbol)
                                 else:
-                                    # keep avg_px unchanged on partial close
-                                    self.position_store.set_qty(o.symbol, qty=new_qty)
+                                    # If remaining is dust (very small notional), close it to avoid stale trailing state.
+                                    try:
+                                        last_px = float(o.signal_price or avg_px or 0.0)
+                                        if last_px > 0 and float(new_qty) * last_px < 0.01:
+                                            self.position_store.close_long(o.symbol)
+                                        else:
+                                            # keep avg_px unchanged on partial close
+                                            self.position_store.set_qty(o.symbol, qty=new_qty)
+                                    except Exception:
+                                        self.position_store.set_qty(o.symbol, qty=new_qty)
             except Exception:
                 pass
 
