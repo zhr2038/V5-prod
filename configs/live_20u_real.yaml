@@ -86,6 +86,9 @@ execution:
   max_status_age_sec: 180
   preflight_fail_action: sell_only
 
+  # Ops: allow kill-switch to auto-clear when reconcile+ledger OK (prevents stuck automation)
+  auto_clear_kill_switch_if_ok: true
+
   # state-alignment patch when reconcile shows base/usdt mismatch
   preflight_bootstrap_patch_enabled: true
   preflight_bootstrap_patch_min_interval_sec: 300

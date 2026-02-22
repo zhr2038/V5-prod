@@ -243,14 +243,35 @@ class LivePreflight:
 
         # 5) Decision
         if kill_switch_enabled:
-            return LivePreflightResult(
-                decision="ABORT",
-                reconcile_ok=reconcile_ok,
-                ledger_ok=ledger_ok,
-                kill_switch_enabled=True,
-                reason="kill_switch",
-                details=details,
-            )
+            # Optional: auto-clear kill-switch if everything is currently OK.
+            # This prevents a one-time mismatch (e.g. local store drift after manual cleanup)
+            # from permanently blocking automation.
+            try:
+                if bool(getattr(self.cfg, "auto_clear_kill_switch_if_ok", False)) and bool(reconcile_ok) and bool(ledger_ok):
+                    ks_path = getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json")
+                    ks_obj = _read_json(str(ks_path)) or {}
+                    ks_obj["enabled"] = False
+                    ks_obj["auto_cleared_ts_ms"] = _now_ms()
+                    ks_obj["auto_cleared_reason"] = "preflight_ok"
+                    p = Path(str(ks_path))
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = p.with_suffix(p.suffix + ".tmp")
+                    tmp.write_text(json.dumps(ks_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+                    tmp.replace(p)
+                    kill_switch_enabled = False
+                    details["kill_switch_auto_cleared"] = True
+            except Exception:
+                pass
+
+            if kill_switch_enabled:
+                return LivePreflightResult(
+                    decision="ABORT",
+                    reconcile_ok=reconcile_ok,
+                    ledger_ok=ledger_ok,
+                    kill_switch_enabled=True,
+                    reason="kill_switch",
+                    details=details,
+                )
 
         if reconcile_ok and ledger_ok:
             return LivePreflightResult(

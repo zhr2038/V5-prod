@@ -119,6 +119,10 @@ class ExecutionConfig(BaseModel):
     borrow_liab_eps: float = Field(default=1e-6, ge=0)
     borrow_neg_eq_eps: float = Field(default=1e-6, ge=0)
 
+    # Ops convenience: allow controlled auto-clear of kill-switch when reconcile/ledger are OK.
+    # Default False for safety.
+    auto_clear_kill_switch_if_ok: bool = Field(default=False)
+
     # (Optional / future) borrow prevention knobs (kept for config compatibility)
     borrow_prevention: bool = Field(default=False)
     check_fee_currency_balance: bool = Field(default=False)
