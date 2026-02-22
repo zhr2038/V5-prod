@@ -1,0 +1,10 @@
+[Unit]
+Description=V5: compute dynamic alpha weights from alpha_history.db
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-trading-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-trading-bot && python3 scripts/compute_dynamic_alpha_weights.py --lookback-days 7 --horizon 1h'
