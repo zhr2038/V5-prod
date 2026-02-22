@@ -29,6 +29,9 @@ class UniverseConfig(BaseModel):
 
     top_n_market_cap: int = Field(default=30, ge=1)
     min_24h_quote_volume_usdt: float = Field(default=5_000_000.0, ge=0)
+    # Optional tradability filter: drop instruments whose quoted spread is too wide.
+    max_spread_bps: Optional[float] = Field(default=None, ge=0)
+
     blacklist_path: str = Field(default="configs/blacklist.json")
     exclude_stablecoins: bool = True
 

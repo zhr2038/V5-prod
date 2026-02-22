@@ -10,6 +10,12 @@ import requests
 
 from configs.loader import load_blacklist
 
+# Optional dynamic auto-blacklist (best-effort)
+try:
+    from src.utils.auto_blacklist import add_symbol as auto_blacklist_add
+except Exception:  # pragma: no cover
+    auto_blacklist_add = None
+
 
 OKX_PUBLIC = "https://www.okx.com"
 
@@ -42,6 +48,7 @@ class OKXUniverseProvider:
         blacklist_path: str = "configs/blacklist.json",
         exclude_stablecoins: bool = True,
         timeout_sec: int = 10,
+        max_spread_bps: Optional[float] = None,
         *,
         refine_with_single_ticker: bool = False,
         refine_single_ticker_max_candidates: int = 200,
@@ -55,6 +62,7 @@ class OKXUniverseProvider:
         self.blacklist_path = blacklist_path
         self.exclude_stablecoins = bool(exclude_stablecoins)
         self.timeout_sec = int(timeout_sec)
+        self.max_spread_bps = (float(max_spread_bps) if max_spread_bps is not None else None)
         self.refine_with_single_ticker = bool(refine_with_single_ticker)
         self.refine_single_ticker_max_candidates = int(refine_single_ticker_max_candidates)
         self.refine_single_ticker_sleep_sec = float(refine_single_ticker_sleep_sec)
@@ -210,6 +218,26 @@ class OKXUniverseProvider:
             qv_f = self._quote_vol_usdt_from_ticker(t)
             if qv_f < self.min_24h_quote_volume_usdt:
                 continue
+
+            # Optional tradability filter: spread
+            if self.max_spread_bps is not None:
+                try:
+                    bid = float(t.get("bidPx") or 0.0)
+                    ask = float(t.get("askPx") or 0.0)
+                    if bid > 0 and ask > 0:
+                        mid = (bid + ask) / 2.0
+                        spread_bps = (ask - bid) / mid * 10_000.0 if mid > 0 else 0.0
+                        if spread_bps > float(self.max_spread_bps):
+                            # Add to dynamic blacklist to avoid repeated selection.
+                            try:
+                                if auto_blacklist_add is not None:
+                                    auto_blacklist_add(sym, reason=f"spread_too_wide>{self.max_spread_bps}bps", ttl_sec=7 * 24 * 3600, meta={"spread_bps": spread_bps})
+                            except Exception:
+                                pass
+                            continue
+                except Exception:
+                    pass
+
             out.append(UniverseItem(symbol=sym, inst_id=inst_id, quote_volume_usdt_24h=float(qv_f)))
 
         out.sort(key=lambda x: float(x.quote_volume_usdt_24h), reverse=True)

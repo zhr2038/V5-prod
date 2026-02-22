@@ -100,6 +100,22 @@ def main() -> None:
     setup_logging()
     log = logging.getLogger("v5")
 
+    # Optional: dynamic alpha weights (computed offline from alpha_history.db)
+    # Enable with env: V5_DYNAMIC_ALPHA_WEIGHTS=YES
+    try:
+        if str(os.getenv("V5_DYNAMIC_ALPHA_WEIGHTS") or "").upper() == "YES":
+            p = Path("reports/alpha_dynamic_weights.json")
+            if p.exists():
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                w = (obj.get("weights") or {}) if isinstance(obj, dict) else {}
+                if isinstance(w, dict) and w:
+                    for k, v in w.items():
+                        if hasattr(cfg.alpha.weights, k):
+                            setattr(cfg.alpha.weights, k, float(v))
+                    log.info(f"Dynamic alpha weights loaded: {w}")
+    except Exception as e:
+        log.warning(f"Dynamic alpha weights load failed: {e}")
+
     Path("reports").mkdir(exist_ok=True)
 
     # 创建DecisionAudit（需要先定义run_id）
@@ -131,6 +147,7 @@ def main() -> None:
                 cache_ttl_sec=cfg.universe.cache_ttl_sec,
                 top_n=int(getattr(cfg.universe, "top_n_market_cap", 30) or 30),
                 min_24h_quote_volume_usdt=cfg.universe.min_24h_quote_volume_usdt,
+                max_spread_bps=getattr(cfg.universe, "max_spread_bps", None),
                 blacklist_path=cfg.universe.blacklist_path,
                 exclude_stablecoins=cfg.universe.exclude_stablecoins,
                 refine_with_single_ticker=bool(getattr(cfg.universe, "refine_with_single_ticker", False)),
