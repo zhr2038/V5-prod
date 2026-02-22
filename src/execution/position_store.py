@@ -105,6 +105,14 @@ class PositionStore:
         now = now_ts or (datetime.utcnow().isoformat() + "Z")
 
         cur_pos = self.get(symbol)
+
+        # If existing position is only dust (very small notional), treat as flat.
+        # This avoids stale trailing-stop state (e.g. highest_px from an old position)
+        # causing immediate exits right after a fresh re-entry.
+        dust_reset_notional_usdt = 0.01
+        if cur_pos and float(cur_pos.qty) > 0 and float(cur_pos.qty) * float(px) < dust_reset_notional_usdt:
+            cur_pos = None
+
         if not cur_pos or cur_pos.qty <= 0:
             pos = Position(
                 symbol=symbol,
