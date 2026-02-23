@@ -1,0 +1,112 @@
+# 方案B：正常交易加速配置
+# 目标：2-3天内积累50+真实交易数据
+# 策略：优化参数，适度加速，保持稳定性
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+  - ADA/USDT
+  - DOGE/USDT
+  - XRP/USDT
+  - DOT/USDT
+  - LINK/USDT
+  - AVAX/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  api_key: ${EXCHANGE_API_KEY}
+  api_secret: ${EXCHANGE_API_SECRET}
+  passphrase: ${EXCHANGE_API_PASSPHRASE}
+  testnet: false
+
+universe:
+  enabled: true
+  use_universe_symbols: true  # 使用动态币种选择
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 1800  # 30分钟更新一次
+  top_n_market_cap: 25  # 选择前25个币种
+  min_24h_quote_volume_usdt: 10000000  # 1000万USDT流动性
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+
+alpha:
+  long_top_pct: 0.20  # 选择前20%币种
+  weights:
+    f1_mom_5d: 0.28      # 短期动量权重
+    f2_mom_20d: 0.20      # ✅ 基于验证结果适度回调
+    f3_vol_adj_ret_20d: 0.24  # 波动调整权重
+    f4_volume_expansion: 0.14  # 保持
+    f5_rsi_trend_confirm: 0.14  # 保持
+
+regime:
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  pos_mult_trending: 1.0    # 适度仓位
+  pos_mult_sideways: 0.7    # 增加横盘仓位
+  pos_mult_risk_off: 0.4    # 适度风险规避仓位
+
+risk:
+  max_single_weight: 0.20   # 适度分散
+  max_gross_exposure: 0.8   # 适度风险暴露
+  drawdown_trigger: 0.06    # 适度风控
+  drawdown_delever: 0.50
+
+rebalance:
+  interval_minutes: 45      # 45分钟调仓（适度加速）
+  deadband_sideways: 0.04   # 降低deadband，适度敏感
+  deadband_trending: 0.025  # 趋势状态更敏感
+  deadband_riskoff: 0.05    # 风险规避状态保持
+
+execution:
+  mode: dry_run            # 保持dry-run安全
+  dry_run: true
+  order_store_path: reports/orders_accelerated.sqlite  # 单独数据库
+  kill_switch_path: reports/kill_switch_accelerated.json
+  reconcile_status_path: reports/reconcile_status_accelerated.json
+  okx_exp_time_ms: 1500
+  
+  split_orders: 2
+  split_interval_sec: 2
+  max_hourly_volume_pct: 0.02  # 适度交易量限制
+  slippage_db_path: reports/slippage_accelerated.sqlite
+  fee_bps: 6
+  slippage_bps: 5
+
+backtest:
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  cost_model: calibrated
+  cost_stats_dir: reports/cost_stats_real  # 使用真实数据目录
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 10     # 真实数据要求更低
+  min_fills_bucket: 5
+  max_stats_age_days: 30
+
+# 方案B特定配置
+plan_b_acceleration:
+  enabled: true
+  target_days: 3           # 3天目标
+  target_fills: 50         # 目标50个真实fills
+  daily_target_fills: 17   # 每日目标17个
+  monitoring_interval_minutes: 30  # 30分钟监控一次
+  adaptive_adjustment: true  # 自适应调整参数
+  fallback_to_normal: true   # 达不到目标时回退到正常参数
+  
+  # 自适应参数调整
+  adjustment_rules:
+    - if: "fills_today < 5"
+      then: "reduce_deadband_by: 0.005"
+    - if: "fills_today > 25"
+      then: "increase_deadband_by: 0.005"
+    - if: "market_volatility > high"
+      then: "increase_rebalance_interval_by: 15"
+    - if: "market_volatility < low"
+      then: "reduce_rebalance_interval_by: 15"

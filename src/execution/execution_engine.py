@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import List, Optional
 
@@ -9,6 +11,15 @@ from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
 from src.execution.position_store import PositionStore
 from src.execution.account_store import AccountStore, AccountState
+
+log = logging.getLogger(__name__)
+
+
+def _to_decimal(value: float | str | Decimal) -> Decimal:
+    """Convert value to Decimal for precise financial calculations."""
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
 
 
 class ExecutionEngine:
@@ -47,8 +58,9 @@ class ExecutionEngine:
             )
             con.commit()
             con.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.exception("Failed to initialize slippage database: %s", e)
+            raise
 
     def execute(self, order_batch: List[Order]) -> ExecutionReport:
         ts = datetime.utcnow().isoformat() + "Z"
@@ -71,6 +83,9 @@ class ExecutionEngine:
 
             realized_usdt = None
             realized_pct = None
+            
+            # Track close_qty explicitly for sell orders
+            close_qty = 0.0
 
             if self.position_store and o.intent in {"OPEN_LONG", "REBALANCE"} and o.side == "buy":
                 if acc is not None:
@@ -100,6 +115,9 @@ class ExecutionEngine:
                 try:
                     from src.reporting.trade_log import Fill
 
+                    # Use explicit close_qty for sell orders
+                    fill_qty = qty if o.side == 'buy' else close_qty
+                    
                     self.trade_log.append_fill(
                         Fill(
                             ts=ts,
@@ -107,7 +125,7 @@ class ExecutionEngine:
                             symbol=o.symbol,
                             intent=o.intent,
                             side=o.side,
-                            qty=float(qty if o.side == 'buy' else (close_qty if 'close_qty' in locals() else qty)),
+                            qty=float(fill_qty),
                             price=px,
                             notional_usdt=float(notional),
                             fee_usdt=float(fee),
@@ -116,8 +134,8 @@ class ExecutionEngine:
                             realized_pnl_pct=realized_pct,
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("Failed to append fill to trade log: %s", e)
 
             # cost event log (fills only)
             try:
@@ -139,11 +157,15 @@ class ExecutionEngine:
                 window_start_ts = max(0, int(window_start_ts))
                 window_end_ts = max(window_start_ts + 1, int(window_end_ts))
 
-                # 计算成本指标
-                fee_bps_eff = (float(fee) / float(notional) * 10_000.0) if float(notional) else None
-                slp_bps_eff = (float(slp) / float(notional) * 10_000.0) if float(notional) else None
-                cost_usdt_total = float(fee) + float(slp)
-                cost_bps_total = (cost_usdt_total / float(notional) * 10_000.0) if float(notional) else None
+                # 使用Decimal进行精确计算
+                notional_dec = _to_decimal(notional)
+                fee_dec = _to_decimal(fee)
+                slp_dec = _to_decimal(slp)
+                
+                fee_bps_eff = float((fee_dec / notional_dec * Decimal('10000')).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)) if notional_dec else None
+                slp_bps_eff = float((slp_dec / notional_dec * Decimal('10000')).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)) if notional_dec else None
+                cost_usdt_total = float(fee_dec + slp_dec)
+                cost_bps_total = float(((fee_dec + slp_dec) / notional_dec * Decimal('10000')).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)) if notional_dec else None
                 
                 # 在dry-run模式下，如果成本为0，使用配置的默认值生成有意义的模拟数据
                 if self.cfg.dry_run and (fee_bps_eff is None or fee_bps_eff == 0):
@@ -164,7 +186,7 @@ class ExecutionEngine:
                     "symbol": o.symbol,
                     "side": o.side,
                     "intent": o.intent,
-                    "regime": meta.get("regime") or "Sideways",  # 默认市场状态
+                    "regime": meta.get("regime") or "Sideways",
                     "router_action": "fill",
                     "notional_usdt": float(notional),
                     "mid_px": float(o.signal_price),
@@ -182,10 +204,7 @@ class ExecutionEngine:
                 }
                 append_cost_event(event)
             except Exception as e:
-                # 记录错误但不中断执行
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to append cost event: {e}")
-                pass
+                log.warning("Failed to append cost event: %s", e)
 
         return ExecutionReport(timestamp=ts, dry_run=bool(self.cfg.dry_run), orders=list(order_batch or []))
 
@@ -202,5 +221,5 @@ class ExecutionEngine:
             )
             con.commit()
             con.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed to record slippage: %s", e)

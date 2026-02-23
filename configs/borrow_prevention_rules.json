@@ -1,0 +1,37 @@
+{
+  "name": "\u501f\u5e01\u98ce\u9669\u8fc7\u6ee4\u5668",
+  "description": "\u9632\u6b62\u56e0\u624b\u7eed\u8d39\u5bfc\u81f4\u501f\u5e01\u7684\u4ea4\u6613",
+  "rules": [
+    {
+      "rule": "\u68c0\u67e5\u624b\u7eed\u8d39\u5e01\u79cd\u4f59\u989d",
+      "description": "\u4ea4\u6613\u524d\u68c0\u67e5\u662f\u5426\u6709\u8db3\u591f\u7684\u624b\u7eed\u8d39\u5e01\u79cd\u4f59\u989d",
+      "implementation": "\u5728\u4ea4\u6613\u6267\u884c\u524d\u8c03\u7528\u4f59\u989d\u68c0\u67e5"
+    },
+    {
+      "rule": "\u8fc7\u6ee4\u4f4e\u4ef7\u503c\u9ad8\u624b\u7eed\u8d39\u5e01\u79cd",
+      "description": "\u907f\u514d\u4ea4\u6613\u5355\u4ef7\u6781\u4f4e\u3001\u624b\u7eed\u8d39\u6bd4\u4f8b\u9ad8\u7684\u5e01\u79cd",
+      "thresholds": {
+        "min_price_usdt": 0.001,
+        "max_fee_ratio": 0.1,
+        "min_trade_value": 5.0
+      }
+    },
+    {
+      "rule": "\u9884\u7559\u624b\u7eed\u8d39",
+      "description": "\u8d2d\u4e70\u65f6\u9884\u7559\u989d\u5916\u6570\u91cf\u652f\u4ed8\u624b\u7eed\u8d39",
+      "reserve_ratio": 0.001
+    },
+    {
+      "rule": "\u501f\u5e01\u68c0\u6d4b\u963b\u6b62",
+      "description": "\u68c0\u6d4b\u5230\u8d26\u6237\u6709\u501f\u5e01\u65f6\u963b\u6b62\u65b0\u4ea4\u6613",
+      "action": "block_trades"
+    }
+  ],
+  "high_risk_symbols": [
+    "PEPE/USDT",
+    "SHIB/USDT",
+    "FLOKI/USDT",
+    "BONK/USDT"
+  ],
+  "created_at": "2026-02-18"
+}

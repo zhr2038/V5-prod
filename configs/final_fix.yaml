@@ -1,0 +1,66 @@
+# 最终修复配置：解决所有已知问题
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  testnet: false
+
+alpha:
+  long_top_pct: 0.30
+  weights:
+    f1_mom_5d: 0.30
+    f2_mom_20d: 0.20
+    f3_vol_adj_ret_20d: 0.20
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.15
+
+regime:
+  atr_threshold: 0.01
+  atr_very_low: 0.004
+  pos_mult_trending: 1.2
+  pos_mult_sideways: 0.7
+  pos_mult_risk_off: 0.7
+
+risk:
+  max_single_weight: 0.25
+  max_gross_exposure: 1.0
+  drawdown_trigger: 0.08
+  drawdown_delever: 0.50
+
+rebalance:
+  interval_minutes: 60
+  deadband_sideways: 0.01  # 1% deadband
+  deadband_trending: 0.008
+  deadband_riskoff: 0.015
+
+execution:
+  mode: dry_run
+  dry_run: true
+  fee_bps: 6
+  slippage_bps: 5
+  min_trade_notional_base: 0.001  # 极低最小交易金额
+
+backtest:
+  start_date: "2026-01-19"
+  end_date: "2026-02-17"
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  cost_model: calibrated
+  cost_stats_dir: reports/cost_stats_clean
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 10
+  min_fills_bucket: 5
+  max_stats_age_days: 30
+
+budget:
+  action_enabled: false  # 禁用预算限制
+  min_trade_notional_base: 0.001  # 覆盖pipeline中的min_notional

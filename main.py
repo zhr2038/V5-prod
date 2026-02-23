@@ -46,11 +46,20 @@ def _get_env_epoch_sec(name: str) -> Optional[int]:
     v = os.getenv(name)
     if not v:
         return None
-    x = int(v)
-    # 兼容毫秒 epoch
-    if x > 10_000_000_000:  # ~2286-11-20 in seconds
-        x //= 1000
-    return x
+    try:
+        x = int(v)
+        # 判断是否为毫秒时间戳（13位）或微秒（16位）
+        # 秒级时间戳通常是10位（2001-09-09之后）
+        now_sec = int(datetime.utcnow().timestamp())
+        now_ms = now_sec * 1000
+        
+        # 如果数值接近当前毫秒时间戳，则认为是毫秒
+        if abs(x - now_ms) < abs(x - now_sec):
+            x //= 1000
+        return x
+    except (ValueError, TypeError) as e:
+        logging.getLogger(__name__).warning("Invalid timestamp for %s: %s - %s", name, v, e)
+        return None
 
 
 def build_provider(cfg: AppConfig):
@@ -301,12 +310,19 @@ def main() -> None:
             if s and s.close:
                 eq_now += float(p.qty) * float(s.close[-1])
         peak = float(acc.equity_peak_usdt or 0.0)
-        if peak > 1000.0 and peak > eq_now * 5.0 and eq_now > 0:
-            log.warning(f"equity_peak_usdt seems corrupted: peak={peak} >> equity={eq_now}; clamping peak to equity")
+        
+        # 动态阈值：基于配置的资金规模
+        # 小资金账户（<100U）使用更敏感的阈值
+        equity_cap = float(getattr(cfg.budget, 'live_equity_cap_usdt', 0) or eq_now)
+        min_equity_threshold = min(100.0, equity_cap * 0.5) if equity_cap > 0 else 100.0
+        ratio_threshold = 3.0 if equity_cap < 100 else 5.0  # 小资金用3倍，大资金用5倍
+        
+        if peak > min_equity_threshold and peak > eq_now * ratio_threshold and eq_now > 0:
+            log.warning(f"equity_peak_usdt seems corrupted: peak={peak} >> equity={eq_now} (cap={equity_cap}); clamping peak to equity")
             acc.equity_peak_usdt = float(eq_now)
             acc_store.set(acc)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("equity peak check skipped: %s", e)
 
     pipe = V5Pipeline(cfg)
     out = pipe.run(

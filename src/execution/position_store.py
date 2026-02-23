@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -75,29 +78,37 @@ class PositionStore:
                 cur.execute(sql)
             con.commit()
             con.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed to migrate position columns: %s", e)
 
     def list(self) -> List[Position]:
-        con = sqlite3.connect(str(self.path))
-        cur = con.cursor()
-        cur.execute(
-            "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions"
-        )
-        rows = cur.fetchall()
-        con.close()
-        return [Position(*r) for r in rows]
+        try:
+            con = sqlite3.connect(str(self.path))
+            cur = con.cursor()
+            cur.execute(
+                "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions"
+            )
+            rows = cur.fetchall()
+            con.close()
+            return [Position(*r) for r in rows]
+        except Exception as e:
+            log.exception("Failed to list positions: %s", e)
+            return []
 
     def get(self, symbol: str) -> Optional[Position]:
-        con = sqlite3.connect(str(self.path))
-        cur = con.cursor()
-        cur.execute(
-            "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE symbol=?",
-            (symbol,),
-        )
-        row = cur.fetchone()
-        con.close()
-        return Position(*row) if row else None
+        try:
+            con = sqlite3.connect(str(self.path))
+            cur = con.cursor()
+            cur.execute(
+                "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE symbol=?",
+                (symbol,),
+            )
+            row = cur.fetchone()
+            con.close()
+            return Position(*row) if row else None
+        except Exception as e:
+            log.exception("Failed to get position for %s: %s", symbol, e)
+            return None
 
     def upsert_buy(self, symbol: str, qty: float, px: float, now_ts: Optional[str] = None) -> Position:
         qty = float(qty)
@@ -187,27 +198,31 @@ class PositionStore:
 
     def upsert_position(self, pos: Position) -> None:
         """Insert/update a full position row (used for migrations/tests)."""
-        con = sqlite3.connect(str(self.path))
-        c = con.cursor()
-        c.execute(
-            "INSERT INTO positions(symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json) "
-            "VALUES (?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(symbol) DO UPDATE SET qty=excluded.qty, avg_px=excluded.avg_px, entry_ts=excluded.entry_ts, highest_px=excluded.highest_px, "
-            "last_update_ts=excluded.last_update_ts, last_mark_px=excluded.last_mark_px, unrealized_pnl_pct=excluded.unrealized_pnl_pct, tags_json=excluded.tags_json",
-            (
-                pos.symbol,
-                float(pos.qty),
-                float(pos.avg_px),
-                str(pos.entry_ts),
-                float(pos.highest_px),
-                str(pos.last_update_ts),
-                float(pos.last_mark_px),
-                float(pos.unrealized_pnl_pct),
-                str(pos.tags_json),
-            ),
-        )
-        con.commit()
-        con.close()
+        try:
+            con = sqlite3.connect(str(self.path))
+            c = con.cursor()
+            c.execute(
+                "INSERT INTO positions(symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(symbol) DO UPDATE SET qty=excluded.qty, avg_px=excluded.avg_px, entry_ts=excluded.entry_ts, highest_px=excluded.highest_px, "
+                "last_update_ts=excluded.last_update_ts, last_mark_px=excluded.last_mark_px, unrealized_pnl_pct=excluded.unrealized_pnl_pct, tags_json=excluded.tags_json",
+                (
+                    pos.symbol,
+                    float(pos.qty),
+                    float(pos.avg_px),
+                    str(pos.entry_ts),
+                    float(pos.highest_px),
+                    str(pos.last_update_ts),
+                    float(pos.last_mark_px),
+                    float(pos.unrealized_pnl_pct),
+                    str(pos.tags_json),
+                ),
+            )
+            con.commit()
+            con.close()
+        except Exception as e:
+            log.exception("Failed to upsert position: %s", e)
+            raise
 
     def set_qty(self, symbol: str, *, qty: float, now_ts: Optional[str] = None) -> None:
         """Update qty only (avg_px unchanged)."""
@@ -230,8 +245,12 @@ class PositionStore:
         )
 
     def close_long(self, symbol: str) -> None:
-        con = sqlite3.connect(str(self.path))
-        c = con.cursor()
-        c.execute("DELETE FROM positions WHERE symbol=?", (symbol,))
-        con.commit()
-        con.close()
+        try:
+            con = sqlite3.connect(str(self.path))
+            c = con.cursor()
+            c.execute("DELETE FROM positions WHERE symbol=?", (symbol,))
+            con.commit()
+            con.close()
+        except Exception as e:
+            log.exception("Failed to close position for %s: %s", symbol, e)
+            raise

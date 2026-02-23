@@ -1,0 +1,64 @@
+# 极端调试配置 - 绕过所有限制
+symbols:
+  - BTC/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  testnet: false
+
+alpha:
+  long_top_pct: 1.0  # 选择100%
+  weights:
+    f1_mom_5d: 1.0   # 只用一个因子
+    f2_mom_20d: 0.0
+    f3_vol_adj_ret_20d: 0.0
+    f4_volume_expansion: 0.0
+    f5_rsi_trend_confirm: 0.0
+
+regime:
+  atr_threshold: 0.0001  # 极低阈值
+  atr_very_low: 0.00005
+  pos_mult_trending: 1.0
+  pos_mult_sideways: 1.0
+  pos_mult_risk_off: 1.0
+
+risk:
+  max_single_weight: 1.0  # 允许全仓
+  max_gross_exposure: 1.0
+  drawdown_trigger: 1.0   # 无回撤限制
+  drawdown_delever: 1.0
+
+rebalance:
+  interval_minutes: 60
+  deadband_sideways: 0.00001  # 极低deadband (0.001%)
+  deadband_trending: 0.00001
+  deadband_riskoff: 0.00001
+
+budget:
+  action_enabled: false  # 禁用预算限制
+  min_trade_notional_base: 0.01  # 极低最小交易金额
+  live_equity_cap_usdt: 1000000  # 高上限
+
+execution:
+  mode: dry_run
+  dry_run: true
+  fee_bps: 0  # 零成本
+  slippage_bps: 0
+
+backtest:
+  start_date: "2026-01-19"
+  end_date: "2026-02-17"
+  fee_bps: 0
+  slippage_bps: 0
+  one_bar_delay: true
+  walk_forward_folds: 2
+  cost_model: fixed
+  cost_stats_dir: ""
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 1
+  min_fills_bucket: 1
+  max_stats_age_days: 365

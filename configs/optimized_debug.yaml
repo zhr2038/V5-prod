@@ -1,0 +1,64 @@
+# 综合优化配置 - 基于深度调试结果
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+  - ADA/USDT
+  - DOGE/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  testnet: false
+
+alpha:
+  long_top_pct: 0.25  # 选择前25% (原20%)
+  weights:
+    f1_mom_5d: 0.30   # 增加短期动量权重
+    f2_mom_20d: 0.25  # 增加长期动量权重
+    f3_vol_adj_ret_20d: 0.20
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.10
+
+regime:
+  atr_threshold: 0.01      # 降低阈值到1% (原2%)
+  atr_very_low: 0.004      # 降低极低阈值到0.4% (原0.8%)
+  pos_mult_trending: 1.2
+  pos_mult_sideways: 0.7   # 提高横盘仓位 (原0.6)
+  pos_mult_risk_off: 0.7   # 提高Risk-Off仓位 (原0.3)
+
+risk:
+  max_single_weight: 0.25
+  max_gross_exposure: 1.0
+  drawdown_trigger: 0.08
+  drawdown_delever: 0.50
+
+rebalance:
+  interval_minutes: 60
+  deadband_sideways: 0.03  # 降低deadband到3% (原5%)
+  deadband_trending: 0.02  # 降低deadband到2% (原3%)
+  deadband_riskoff: 0.04   # 降低deadband到4% (原5%)
+
+execution:
+  mode: dry_run
+  dry_run: true
+  fee_bps: 6
+  slippage_bps: 5
+
+backtest:
+  start_date: "2026-01-19"
+  end_date: "2026-02-17"
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  cost_model: fixed        # 使用固定成本避免限制
+  cost_stats_dir: ""
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 1      # 极低要求
+  min_fills_bucket: 1
+  max_stats_age_days: 365  # 不限制数据年龄
