@@ -267,6 +267,15 @@ class V5Pipeline:
         rebalance_orders: List[Order] = []
         router_decisions = []
 
+        # P0 FIX: Risk-Off + regime_exit 时禁止 rebalance buy，只允许清理不在target的持仓
+        regime_state_str = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+        exit_config = ExitConfig()
+        enable_regime_exit = getattr(exit_config, 'enable_regime_exit', True)
+        is_risk_off_close_only = (regime_state_str in ("Risk-Off", "Risk_Off", "RiskOff") 
+                                   and enable_regime_exit)
+        if is_risk_off_close_only and audit:
+            audit.add_note("Risk-Off regime: rebalance buy suppressed, only cleanup sells allowed")
+
         # deadband: adapt by regime
         rstate = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
         if rstate == "Trending":
@@ -369,17 +378,34 @@ class V5Pipeline:
             
             held = next((p for p in positions if p.symbol == sym and p.qty > 0), None)
 
+            # P0 FIX: Risk-Off close-only 模式：跳过所有买入型的 rebalance
+            if is_risk_off_close_only and drift > 0:
+                if audit:
+                    audit.reject("risk_off_close_only")
+                    router_decisions.append({
+                        "symbol": sym,
+                        "action": "skip",
+                        "reason": "risk_off_close_only",
+                        "drift": drift,
+                    })
+                continue
+
             # If symbol is removed from target universe but currently held, generate a sell to reduce drift.
-            if sym not in target and held is not None:
+            # P0 FIX: 统一逻辑：根据 drift 符号决定买卖方向
+            if drift < 0:
+                # 需要减仓/清仓
                 side = "sell"
                 intent = "REBALANCE"
-                notional = abs(float(cw)) * float(equity)
+                # P0 FIX: notional 用 delta 计算
+                notional = abs(float(drift)) * float(equity)
                 if notional <= 0:
                     continue
             else:
+                # drift > 0，需要加仓
                 side = "buy"
                 intent = "OPEN_LONG" if held is None else "REBALANCE"
-                notional = float(tw) * float(equity)
+                # P0 FIX: notional 用 delta 计算
+                notional = abs(float(drift)) * float(equity)
                 if notional <= 0:
                     continue
             
