@@ -27,4 +27,4 @@ export V5_RUN_ID="$WIN_ID"
 export V5_WINDOW_START_TS="${START_EPOCH}"
 export V5_WINDOW_END_TS="${END_EPOCH}"
 
-python3 main.py
+/home/admin/clawd/v5-trading-bot/.venv/bin/python main.py

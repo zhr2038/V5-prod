@@ -29,7 +29,7 @@ def get_latest_orders(limit=20):
     if not ORDERS_DB.exists():
         return []
     
-    conn = sqlite3.connect(ORDERS_DB)
+    conn = sqlite3.connect(str(ORDERS_DB))
     cursor = conn.cursor()
     cursor.execute("""
         SELECT cl_ord_id, inst_id, side, state, intent, ord_id, last_error_code, last_error_msg
