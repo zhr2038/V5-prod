@@ -1,6 +1,7 @@
 # 20 USDT 实盘小资金测试配置
-# 基于 live_20u_test.yaml，但启用真实交易
+# 优化版：启用 universe 动态选股 + auto_blacklist + 动态权重
 
+# symbols 作为保底，universe 会在此基础上扩展
 symbols:
   - BTC/USDT
   - ETH/USDT
@@ -23,37 +24,57 @@ universe:
   cache_path: reports/universe_cache.json
   cache_ttl_sec: 3600
 
-  # 扩大 universe，但规避小币种/低流动性币：
-  # - 取更大的市值范围
-  # - 更高 24h 成交额门槛
-  # - 更严格点差限制
-  top_n_market_cap: 50
-  min_24h_quote_volume_usdt: 10000000
-  max_spread_bps: 20
-
-  # 用单币 ticker 进一步筛流动性（更可靠，但会多一点请求）
-  refine_with_single_ticker: true
-  refine_single_ticker_max_candidates: 200
-  refine_single_ticker_sleep_sec: 0.02
-
+  # 动态选股参数（历史优化配置）
+  top_n_market_cap: 30              # 选市值前30
+  min_24h_quote_volume_usdt: 10000000  # 24h成交额 > 1000万 USDT
+  max_spread_bps: 20                 # 点差 < 20bps
+  
+  # 点差过大的币自动拉黑7天
   blacklist_path: configs/blacklist.json
   exclude_stablecoins: true
+  
+  # 单币 ticker 精筛（更可靠的成交量数据）
+  refine_with_single_ticker: true
+  refine_single_ticker_max_candidates: 100
+  refine_single_ticker_sleep_sec: 0.02
+  
+  # 保底币种（确保这些主流币始终在池子里）
   include_symbols:
     - BTC/USDT
     - ETH/USDT
     - SOL/USDT
     - BNB/USDT
+    - ADA/USDT
+    - DOT/USDT
+    - AVAX/USDT
+    - POL/USDT
+    - ATOM/USDT
+    - NEAR/USDT
+    - LINK/USDT
+    - UNI/USDT
+    - AAVE/USDT
+    - LTC/USDT
+    - BCH/USDT
+    - ETC/USDT
+    - XRP/USDT
+    - DOGE/USDT
+    - TRX/USDT
+    - SUI/USDT
 
 alpha:
-  long_top_pct: 0.25  # 提高选择比例，避免选到受限币种
+  long_top_pct: 0.25  # 选择评分前25%的币
+  
+  # 基于 IC 分析的静态权重（IC(1h)=0.5549）
   weights:
-    # 基于 IC 分析优化权重
-    # IC(1h)=0.5549，所有因子正相关
     f1_mom_5d: 0.20      # IC=0.1788
-    f2_mom_20d: 0.30     # IC=0.2599（表现最好，增加权重）
+    f2_mom_20d: 0.30     # IC=0.2599（最佳因子）
     f3_vol_adj_ret_20d: 0.25  # IC=0.1243
     f4_volume_expansion: 0.15  # IC=0.1376
-    f5_rsi_trend_confirm: 0.10  # IC=0.0505（效果一般，降低权重）
+    f5_rsi_trend_confirm: 0.10  # IC=0.0505
+  
+  # 动态权重配置（按市场状态调整）
+  dynamic_weights_by_regime_enabled: true
+  dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
 
 regime:
   atr_threshold: 0.02
