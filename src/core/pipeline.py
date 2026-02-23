@@ -30,6 +30,8 @@ from configs.schema import AppConfig
 from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.execution.position_store import Position
+from src.execution.position_builder import PositionBuilder  # Phase 2: 分批建仓
+from src.execution.multi_level_stop_loss import MultiLevelStopLoss, StopLossConfig  # Phase 2: 动态止损
 from src.portfolio.portfolio_engine import PortfolioEngine, PortfolioSnapshot
 from src.regime.regime_engine import RegimeEngine, RegimeResult
 from src.risk.exit_policy import ExitPolicy, ExitConfig
@@ -99,6 +101,20 @@ class V5Pipeline:
         self.portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
         self.risk_engine = RiskEngine(cfg.risk)
         self.exit_policy = ExitPolicy(ExitConfig(), clock=self.clock)
+        
+        # Phase 2: 初始化分批建仓和动态止损管理器
+        self.position_builder = PositionBuilder(
+            stages=[0.3, 0.3, 0.4],
+            price_drop_threshold=0.02,
+            trend_confirmation_bars=2
+        )
+        self.stop_loss_manager = MultiLevelStopLoss(
+            config=StopLossConfig(
+                tight_pct=0.03,
+                normal_pct=0.05,
+                loose_pct=0.08
+            )
+        )
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         now_ts = self.clock.now().isoformat().replace("+00:00", "Z")
