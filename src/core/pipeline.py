@@ -115,6 +115,10 @@ class V5Pipeline:
                 loose_pct=0.08
             )
         )
+        
+        # Phase 3: 初始化ML数据收集器
+        from src.execution.ml_data_collector import MLDataCollector
+        self.data_collector = MLDataCollector()
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         now_ts = self.clock.now().isoformat().replace("+00:00", "Z")
@@ -614,6 +618,35 @@ class V5Pipeline:
                     })
             except Exception:
                 pass
+
+        # Phase 3: ML数据收集
+        # 收集特征快照用于训练ML模型
+        try:
+            current_ts = int(self.clock.now().timestamp() * 1000)
+            for sym in symbols_all:
+                if sym in market_data_1h:
+                    px = float(prices.get(sym, 0))
+                    if px > 0:
+                        self.data_collector.collect_features(
+                            timestamp=current_ts,
+                            symbol=sym,
+                            market_data={
+                                'close': list(market_data_1h[sym].close) if hasattr(market_data_1h[sym], 'close') else [px],
+                                'high': list(market_data_1h[sym].high) if hasattr(market_data_1h[sym], 'high') else [px],
+                                'low': list(market_data_1h[sym].low) if hasattr(market_data_1h[sym], 'low') else [px],
+                                'volume': list(market_data_1h[sym].volume) if hasattr(market_data_1h[sym], 'volume') else [0],
+                            },
+                            regime=str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+                        )
+            
+            # 回填6小时前的标签
+            filled_count = self.data_collector.fill_labels(current_ts)
+            if audit and filled_count > 0:
+                audit.add_note(f"ML data: filled {filled_count} labels")
+        except Exception as e:
+            # 数据收集失败不应影响交易
+            if audit:
+                audit.add_note(f"ML data collection skipped: {str(e)[:50]}")
 
         orders = exit_orders + rebalance_orders
         return PipelineOutput(alpha=alpha, regime=regime, portfolio=portfolio, orders=orders)
