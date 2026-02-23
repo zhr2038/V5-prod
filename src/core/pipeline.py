@@ -314,13 +314,14 @@ class V5Pipeline:
             
             # Banding 逻辑：新建仓阈值 > 维持仓阈值
             # 判断是否是新建仓（当前权重接近0）
-            is_new_position = cw < 0.001  # 当前持仓小于0.1%
-            
+            eps = float(getattr(self.cfg.rebalance, "new_position_weight_eps", 0.001) or 0.001)
+            is_new_position = cw < eps
+
             # 调整 deadband：新建仓需要更大的信号强度
             effective_deadband = deadband
             if is_new_position:
-                # 新建仓阈值加倍（更保守）
-                effective_deadband = deadband * 2.0
+                mult = float(getattr(self.cfg.rebalance, "new_position_deadband_multiplier", 2.0) or 2.0)
+                effective_deadband = deadband * mult
                 if audit:
                     audit.add_note(f"Banding: {sym} is new position, deadband {deadband}→{effective_deadband:.3f}")
             

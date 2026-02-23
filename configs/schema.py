@@ -87,6 +87,10 @@ class RebalanceConfig(BaseModel):
     deadband_trending: float = Field(default=0.03, ge=0, le=1)
     deadband_riskoff: float = Field(default=0.05, ge=0, le=1)
 
+    # New position banding: effective_deadband = deadband * multiplier when current weight is ~0
+    new_position_deadband_multiplier: float = Field(default=2.0, ge=1.0, le=5.0)
+    new_position_weight_eps: float = Field(default=0.001, ge=0.0, le=0.05, description="Treat current weight < eps as new position")
+
 
 class ExecutionConfig(BaseModel):
     # Mode selector (preferred). Keep dry_run for backward compatibility.

@@ -73,6 +73,10 @@ rebalance:
   deadband_trending: 0.03
   deadband_riskoff: 0.07
 
+  # Small-budget tuning: do NOT double deadband for new positions; otherwise signals rarely cross.
+  new_position_deadband_multiplier: 1.0
+  new_position_weight_eps: 0.001
+
 execution:
   mode: live
   dry_run: false  # ⚠️ 关键：启用真实交易！
@@ -119,7 +123,8 @@ budget:
   exchange_min_notional_enabled: true
   exchange_min_notional_slack_multiplier: 1.05
 
-  min_trade_notional_base: 1.0  # 恢复合理的最小交易金额
+  # Let exchange minSz-based filter be the primary guard; avoid blocking valid small-budget opens.
+  min_trade_notional_base: 0.0
   min_trade_notional_multiplier_exceeded: 1.5  # 启用超支惩罚
   min_trade_notional_cap_abs: 100.0
   min_trade_notional_cap_equity_ratio: 0.03  # 合理上限
