@@ -77,6 +77,10 @@ rebalance:
   new_position_deadband_multiplier: 1.0
   new_position_weight_eps: 0.001
 
+  # If a coin drops out of selected (tw=0), allow faster cleanup than normal rebalance.
+  close_only_deadband_multiplier: 0.25
+  close_only_weight_eps: 0.001
+
 execution:
   mode: live
   dry_run: false  # ⚠️ 关键：启用真实交易！

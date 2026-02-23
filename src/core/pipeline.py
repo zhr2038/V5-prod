@@ -323,13 +323,24 @@ class V5Pipeline:
             eps = float(getattr(self.cfg.rebalance, "new_position_weight_eps", 0.001) or 0.001)
             is_new_position = cw < eps
 
-            # 调整 deadband：新建仓需要更大的信号强度
+            # 调整 deadband：新建仓需要更大的信号强度；清仓（tw≈0）允许更小 deadband 以加速清理
             effective_deadband = deadband
             if is_new_position:
                 mult = float(getattr(self.cfg.rebalance, "new_position_deadband_multiplier", 2.0) or 2.0)
                 effective_deadband = deadband * mult
                 if audit:
                     audit.add_note(f"Banding: {sym} is new position, deadband {deadband}→{effective_deadband:.3f}")
+
+            # If target weight is ~0 (close-only), shrink deadband (but keep sells allowed) to avoid stuck dust positions.
+            try:
+                tw_eps = float(getattr(self.cfg.rebalance, "close_only_weight_eps", 0.001) or 0.001)
+                if abs(float(tw)) <= tw_eps and abs(float(cw)) > tw_eps:
+                    cm = float(getattr(self.cfg.rebalance, "close_only_deadband_multiplier", 0.5) or 0.5)
+                    effective_deadband = min(float(effective_deadband), float(deadband) * float(cm))
+                    if audit:
+                        audit.add_note(f"Close-only: {sym} tw≈0, deadband {deadband}→{effective_deadband:.3f}")
+            except Exception:
+                pass
             
             if audit:
                 audit.rebalance_drift_by_symbol[sym] = drift

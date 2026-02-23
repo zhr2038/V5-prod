@@ -91,6 +91,11 @@ class RebalanceConfig(BaseModel):
     new_position_deadband_multiplier: float = Field(default=2.0, ge=1.0, le=5.0)
     new_position_weight_eps: float = Field(default=0.001, ge=0.0, le=0.05, description="Treat current weight < eps as new position")
 
+    # Close-only (tw==0) tuning: allow faster cleanup of stale holdings without increasing overall churn.
+    # effective_deadband_close = deadband * multiplier
+    close_only_deadband_multiplier: float = Field(default=0.5, ge=0.0, le=1.0)
+    close_only_weight_eps: float = Field(default=0.001, ge=0.0, le=0.05, description="Treat target weight < eps as close-only")
+
 
 class ExecutionConfig(BaseModel):
     # Mode selector (preferred). Keep dry_run for backward compatibility.
