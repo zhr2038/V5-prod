@@ -195,10 +195,16 @@ class V5Pipeline:
                 pass
 
         # Risk: drawdown-based exposure multiplier
+        # IMPORTANT: drawdown must be computed on *raw* equity (accounting truth), not capped sizing equity.
+        # Otherwise small-budget equity caps (e.g. 20U) will create a fake massive drawdown and permanently throttle.
         from src.portfolio.portfolio_state import PortfolioState
 
-        pst = PortfolioState(cash_usdt=float(cash_usdt), equity_usdt=float(equity), peak_equity_usdt=float(equity_peak_usdt))
-        pst.update_equity(equity)
+        pst = PortfolioState(
+            cash_usdt=float(cash_raw),
+            equity_usdt=float(equity_raw),
+            peak_equity_usdt=float(equity_peak_usdt),
+        )
+        pst.update_equity(equity_raw)
         dd_mult = self.risk_engine.exposure_multiplier(pst.drawdown_pct)
         
         # 3. DD multiplier审计
