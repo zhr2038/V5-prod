@@ -292,6 +292,22 @@ def main() -> None:
     # 记录universe数量
     audit.counts["universe"] = len(symbols)
 
+    # Sanity-check equity peak: if an old corrupted peak is orders-of-magnitude above current equity,
+    # it will permanently trigger drawdown throttle (DD multiplier). Clamp it.
+    try:
+        eq_now = float(acc.cash_usdt)
+        for p in held:
+            s = md_1h.get(p.symbol)
+            if s and s.close:
+                eq_now += float(p.qty) * float(s.close[-1])
+        peak = float(acc.equity_peak_usdt or 0.0)
+        if peak > 1000.0 and peak > eq_now * 5.0 and eq_now > 0:
+            log.warning(f"equity_peak_usdt seems corrupted: peak={peak} >> equity={eq_now}; clamping peak to equity")
+            acc.equity_peak_usdt = float(eq_now)
+            acc_store.set(acc)
+    except Exception:
+        pass
+
     pipe = V5Pipeline(cfg)
     out = pipe.run(
         market_data_1h=md_1h,
