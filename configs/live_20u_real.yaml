@@ -177,3 +177,58 @@ backtest:
   min_fills_global: 2
   min_fills_bucket: 1
   max_stats_age_days: 7
+
+# ============================================================
+# 因子权重配置 (新增情绪因子 f6)
+# ============================================================
+factor_weights:
+  scheme: hierarchical  # conservative | dynamic | hierarchical
+  
+  # 基础技术因子 (70%)
+  base:
+    f1_mom_5d: 0.12           # 短期动量 12%
+    f2_mom_20d: 0.20          # 中期动量 20% (核心)
+    f3_vol_adj_ret_20d: 0.12  # 波动率调整 12%
+    f4_volume_expansion: 0.13 # 成交量 13%
+    f5_rsi_trend_confirm: 0.13# RSI趋势 13%
+  
+  # 情绪因子 (15%基础 + 动态调整)
+  sentiment:
+    f6_sentiment: 0.15
+    enabled: true
+    max_weight: 0.30
+    min_weight: 0.05
+  
+  # 情绪反向操作策略
+  sentiment_contrarian:
+    enabled: true
+    greedy_threshold: 0.70      # 极度贪婪阈值
+    fearful_threshold: -0.70    # 极度恐惧阈值
+    position_adjustment: 0.30   # 仓位调整幅度
+    
+    # 具体操作
+    actions:
+      extreme_greed:
+        factor_boost: -0.10     # 降低情绪权重
+        position_scale: 0.70    # 减仓30%
+        reason: "FOMO预警:市场过热"
+      extreme_fear:
+        factor_boost: +0.10     # 提高情绪权重
+        position_scale: 1.20    # 加仓20%
+        reason: "恐慌抄底:市场超跌"
+
+# 数据源配置 (情绪分析)
+sentiment:
+  enabled: true
+  provider: deepseek          # deepseek | openai | textblob
+  update_interval: 3600       # 每小时更新 (秒)
+  cache_dir: data/sentiment_cache
+  symbols:
+    - BTC-USDT
+    - ETH-USDT
+    - SOL-USDT
+    - BNB-USDT
+    - ADA-USDT
+    - DOT-USDT
+    - AVAX-USDT
+    - POL/USDT
