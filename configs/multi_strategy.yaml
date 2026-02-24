@@ -1,0 +1,61 @@
+# 多策略配置 - Multi-Strategy Configuration
+
+# 是否启用多策略模式
+enabled: true
+
+# 总资金配置
+total_capital: 20.0  # USDT
+
+# 策略资金分配 (总和应为1.0)
+strategy_allocations:
+  TrendFollowing: 0.5    # 50% 趋势跟踪
+  MeanReversion: 0.3     # 30% 均值回归
+  Momentum: 0.2          # 20% 动量策略 (预留)
+
+# 趋势跟踪策略配置
+trend_following:
+  enabled: true
+  fast_ma: 20
+  slow_ma: 60
+  adx_threshold: 25
+  position_size_pct: 0.5    # 策略内单信号仓位
+  trailing_stop: 0.05       # 5%追踪止损
+
+# 均值回归策略配置
+mean_reversion:
+  enabled: true
+  rsi_period: 14
+  rsi_oversold: 30
+  rsi_overbought: 70
+  bb_period: 20
+  bb_std: 2
+  position_size_pct: 0.3
+  mean_rev_threshold: 0.02  # 偏离均值2%
+
+# 信号融合配置
+signal_fusion:
+  # 同向信号加权方法: average, max, weighted
+  same_direction_method: "weighted"
+  # 反向信号处理: cancel, strongest, consensus
+  opposite_direction_method: "strongest"
+  # 置信度差异阈值 (低于此值视为冲突)
+  confidence_diff_threshold: 0.2
+
+# 动态资金调整
+dynamic_allocation:
+  enabled: true
+  # 评估周期 (天)
+  evaluation_period: 7
+  # 调整频率 (每N天)
+  rebalance_frequency: 7
+  # 单次调整幅度上限
+  max_adjustment: 0.05
+
+# 风控配置 (每个策略独立)
+risk_management:
+  # 最大单币权重
+  max_single_symbol_weight: 0.3
+  # 策略最大回撤限制
+  max_strategy_drawdown: 0.1
+  # 日交易次数限制
+  max_daily_trades: 10
