@@ -171,45 +171,84 @@ class ReflectionAgent:
             return pd.DataFrame()
     
     def _calculate_overall_metrics(self, trades_df: pd.DataFrame) -> Dict:
-        """计算整体绩效指标"""
+        """计算整体绩效指标 - 使用FIFO方法计算已实现盈亏"""
         if trades_df.empty:
             return {}
         
         # 转换数据类型
         trades_df['fee'] = pd.to_numeric(trades_df['fee'], errors='coerce').fillna(0)
         
-        # 计算每笔交易的盈亏（简化计算）
-        trades_df['net_flow'] = trades_df.apply(
-            lambda row: row['notional_usdt'] if row['side'] == 'sell' else -row['notional_usdt'],
-            axis=1
-        )
-        trades_df['net_flow'] = trades_df['net_flow'] - trades_df['fee']
+        # 过滤异常手续费 (超过交易金额10%的视为异常)
+        trades_df['fee_abs'] = trades_df['fee'].abs()
+        abnormal_mask = trades_df['fee_abs'] > trades_df['notional_usdt'] * 0.1
+        abnormal_count = abnormal_mask.sum()
+        if abnormal_count > 0:
+            print(f"[ReflectionAgent] 发现 {abnormal_count} 笔异常手续费数据，已过滤")
+            trades_df.loc[abnormal_mask, 'fee'] = 0
         
-        # 按币种聚合计算实际盈亏
+        # 按币种使用FIFO方法计算已实现盈亏
         symbol_pnl = {}
+        symbol_fees = {}
+        
         for symbol in trades_df['inst_id'].unique():
             symbol_trades = trades_df[trades_df['inst_id'] == symbol].sort_values('created_ts')
-            if len(symbol_trades) >= 2:
-                # 简化为：卖出总额 - 买入总额
-                buys = symbol_trades[symbol_trades['side'] == 'buy']['notional_usdt'].sum()
-                sells = symbol_trades[symbol_trades['side'] == 'sell']['notional_usdt'].sum()
-                fees = symbol_trades['fee'].sum()
-                pnl = sells - buys - fees
-                symbol_pnl[symbol] = pnl
+            
+            # FIFO队列：记录买入批次 (数量, 成本)
+            buy_queue = []
+            realized_pnl = 0
+            total_fees = 0
+            
+            for _, trade in symbol_trades.iterrows():
+                side = trade['side']
+                notional = trade['notional_usdt']
+                fee = trade['fee']
+                total_fees += abs(fee)
+                
+                if side == 'buy':
+                    # 买入：加入队列
+                    buy_queue.append(notional)
+                elif side == 'sell':
+                    # 卖出：按FIFO匹配买入
+                    sell_amount = notional
+                    
+                    while sell_amount > 0 and buy_queue:
+                        buy_cost = buy_queue.pop(0)
+                        
+                        if sell_amount >= buy_cost:
+                            # 完全匹配一个买入批次
+                            realized_pnl += sell_amount - buy_cost
+                            sell_amount -= buy_cost
+                        else:
+                            # 部分匹配
+                            realized_pnl += sell_amount - buy_cost
+                            # 剩余的买入成本放回队列
+                            buy_queue.insert(0, buy_cost - sell_amount)
+                            sell_amount = 0
+            
+            # 扣除手续费后的净盈亏
+            net_pnl = realized_pnl - total_fees
+            symbol_pnl[symbol] = net_pnl
+            symbol_fees[symbol] = total_fees
         
-        total_pnl = sum(symbol_pnl.values())
-        winning_symbols = sum(1 for pnl in symbol_pnl.values() if pnl > 0)
-        total_symbols = len(symbol_pnl)
+        # 只保留有完整买卖周期的币种（已卖出的部分）
+        completed_trades_pnl = {k: v for k, v in symbol_pnl.items() if v != 0}
+        
+        total_pnl = sum(completed_trades_pnl.values())
+        winning_symbols = sum(1 for pnl in completed_trades_pnl.values() if pnl > 0)
+        losing_symbols = sum(1 for pnl in completed_trades_pnl.values() if pnl < 0)
+        total_symbols = len(completed_trades_pnl)
         
         metrics = {
             'total_trades': len(trades_df),
             'unique_symbols': total_symbols,
-            'total_pnl': total_pnl,
+            'total_pnl': round(total_pnl, 2),
             'winning_symbols': winning_symbols,
+            'losing_symbols': losing_symbols,
             'win_rate_symbols': winning_symbols / total_symbols if total_symbols > 0 else 0,
-            'symbol_pnl': symbol_pnl,
+            'symbol_pnl': {k: round(v, 2) for k, v in completed_trades_pnl.items()},
+            'symbol_fees': {k: round(v, 4) for k, v in symbol_fees.items()},
             'avg_trade_size': trades_df['notional_usdt'].mean(),
-            'total_fees': trades_df['fee'].sum(),
+            'total_fees': round(sum(symbol_fees.values()), 4),
             'period_days': self.analysis_period_days
         }
         
@@ -228,29 +267,48 @@ class ReflectionAgent:
             if len(symbol_trades) < 2:
                 continue
             
-            # 计算盈亏
-            buys = symbol_trades[symbol_trades['side'] == 'buy']
-            sells = symbol_trades[symbol_trades['side'] == 'sell']
+            # 使用FIFO计算已实现盈亏
+            buy_queue = []
+            realized_pnl = 0
+            total_fees = 0
+            total_buys = 0
+            total_sells = 0
             
-            if buys.empty or sells.empty:
-                continue
+            for _, trade in symbol_trades.iterrows():
+                side = trade['side']
+                notional = trade['notional_usdt']
+                fee = trade['fee']
+                total_fees += abs(fee)
+                
+                if side == 'buy':
+                    buy_queue.append(notional)
+                    total_buys += notional
+                elif side == 'sell':
+                    sell_amount = notional
+                    total_sells += notional
+                    
+                    while sell_amount > 0 and buy_queue:
+                        buy_cost = buy_queue.pop(0)
+                        
+                        if sell_amount >= buy_cost:
+                            realized_pnl += sell_amount - buy_cost
+                            sell_amount -= buy_cost
+                        else:
+                            realized_pnl += sell_amount - buy_cost
+                            buy_queue.insert(0, buy_cost - sell_amount)
+                            sell_amount = 0
             
-            total_buy = buys['notional_usdt'].sum()
-            total_sell = sells['notional_usdt'].sum()
-            total_fee = symbol_trades['fee'].sum()
-            pnl = total_sell - total_buy - total_fee
+            pnl = realized_pnl - total_fees
             
-            # 计算胜率（按卖出次数）
-            # 简化：假设每次卖出对应一次买入
-            sell_count = len(sells)
-            # 这里简化处理，实际需要更复杂的匹配逻辑
+            # 计算胜率（基于盈亏方向）
+            win_rate = 0.5 if pnl == 0 else (1.0 if pnl > 0 else 0.0)
             
             performance = CoinPerformance(
                 symbol=symbol,
-                total_pnl=pnl,
+                total_pnl=round(pnl, 2),
                 trade_count=len(symbol_trades),
-                win_rate=0.5,  # 简化
-                avg_hold_time=timedelta(hours=12),  # 简化
+                win_rate=win_rate,
+                avg_hold_time=timedelta(hours=12),
                 best_strategy="unknown",
                 worst_strategy="unknown"
             )
