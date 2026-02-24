@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V5 交易监控面板</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 V5 交易监控面板</h1>
+            <div class="status-bar">
+                <span id="last-update">加载中...</span>
+                <span id="system-status" class="badge">检查中...</span>
+            </div>
+        </header>
+
+        <!-- 账户总览 -->
+        <section class="section">
+            <h2>📊 账户总览</h2>
+            <div class="cards-grid">
+                <div class="card">
+                    <div class="card-title">现金余额</div>
+                    <div class="card-value" id="cash-usdt">--</div>
+                    <div class="card-unit">USDT</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">总交易次数</div>
+                    <div class="card-value" id="total-trades">--</div>
+                    <div class="card-unit">笔</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">已实现盈亏</div>
+                    <div class="card-value" id="realized-pnl">--</div>
+                    <div class="card-unit">USDT</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">总手续费</div>
+                    <div class="card-value" id="total-fees">--</div>
+                    <div class="card-unit">USDT</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 系统状态 -->
+        <section class="section">
+            <h2>⚙️ 系统状态</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">定时器状态:</span>
+                    <span id="timer-status" class="badge">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">交易模式:</span>
+                    <span id="trade-mode">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">资金上限:</span>
+                    <span id="equity-cap">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">市场状态:</span>
+                    <span id="market-regime" class="badge">--</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 币种评分 -->
+        <section class="section">
+            <h2>📈 币种评分 (Top 20)</h2>
+            <div class="table-container">
+                <table id="scores-table">
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>币种</th>
+                            <th>评分</th>
+                            <th>信号强度</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="4" class="loading">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 权益曲线 -->
+        <section class="section">
+            <h2>📉 权益曲线</h2>
+            <div class="chart-container">
+                <canvas id="equity-chart"></canvas>
+            </div>
+        </section>
+
+        <!-- 最近交易 -->
+        <section class="section">
+            <h2>📝 最近交易</h2>
+            <div class="table-container">
+                <table id="trades-table">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>币种</th>
+                            <th>方向</th>
+                            <th>金额</th>
+                            <th>手续费</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="5" class="loading">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
