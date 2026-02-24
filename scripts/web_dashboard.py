@@ -323,16 +323,18 @@ def api_timer():
         
         next_run = None
         countdown_seconds = 0
-        interval_minutes = 120  # 默认2小时
+        interval_minutes = 60  # 默认1小时
         
         # 解析配置获取间隔
         for line in result.stdout.split('\n'):
             if line.startswith('OnCalendar='):
                 calendar_str = line.split('=', 1)[1].strip()
-                # 解析 OnCalendar=*:0/2:00 格式
-                if '0/2' in calendar_str:
+                # 解析 OnCalendar 格式
+                if '0/2' in calendar_str or '00/2' in calendar_str:
                     interval_minutes = 120  # 2小时
-                elif '0/1' in calendar_str or '*:' in calendar_str:
+                elif 'hourly' in calendar_str.lower():
+                    interval_minutes = 60  # 1小时
+                elif '0/1' in calendar_str:
                     interval_minutes = 60  # 1小时
             
             if line.startswith('Trigger='):
