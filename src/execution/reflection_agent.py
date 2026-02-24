@@ -81,7 +81,7 @@ class ReflectionAgent:
     
     def __init__(
         self,
-        db_path: str = '/home/admin/clawd/v5-trading-bot/data/v5_live.db',
+        db_path: str = '/home/admin/clawd/v5-trading-bot/reports/orders.sqlite',
         report_dir: str = '/home/admin/clawd/v5-trading-bot/reports/reflection'
     ):
         self.db_path = db_path
@@ -149,7 +149,7 @@ class ReflectionAgent:
             query = f"""
                 SELECT 
                     inst_id, side, state, notional_usdt, fee, 
-                    created_ts, updated_ts, tag
+                    created_ts, updated_ts
                 FROM orders 
                 WHERE state = 'FILLED'
                 AND created_ts >= {start_timestamp}
@@ -174,6 +174,9 @@ class ReflectionAgent:
         """计算整体绩效指标"""
         if trades_df.empty:
             return {}
+        
+        # 转换数据类型
+        trades_df['fee'] = pd.to_numeric(trades_df['fee'], errors='coerce').fillna(0)
         
         # 计算每笔交易的盈亏（简化计算）
         trades_df['net_flow'] = trades_df.apply(
