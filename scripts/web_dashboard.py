@@ -298,7 +298,96 @@ def api_status():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/equity_history')
+def calculate_market_indicators():
+    """从BTC K线数据计算市场指标"""
+    try:
+        # 读取BTC缓存数据
+        cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/cache')
+        btc_files = list(cache_dir.glob('BTC_USDT_1H_*.csv'))
+        
+        if not btc_files:
+            return {'ma20': 0, 'ma60': 0, 'atr_percent': 1.0, 'price': 0}
+        
+        # 读取最新的BTC数据
+        latest_file = max(btc_files, key=lambda x: x.stat().st_mtime)
+        df = pd.read_csv(latest_file)
+        
+        if len(df) < 60:
+            return {'ma20': 0, 'ma60': 0, 'atr_percent': 1.0, 'price': 0}
+        
+        # 计算MA20和MA60
+        df['ma20'] = df['close'].rolling(window=20).mean()
+        df['ma60'] = df['close'].rolling(window=60).mean()
+        
+        # 计算ATR
+        df['high_low'] = df['high'] - df['low']
+        df['high_close'] = abs(df['high'] - df['close'].shift())
+        df['low_close'] = abs(df['low'] - df['close'].shift())
+        df['tr'] = df[['high_low', 'high_close', 'low_close']].max(axis=1)
+        df['atr'] = df['tr'].rolling(window=14).mean()
+        
+        # 获取最新值
+        latest = df.iloc[-1]
+        price = latest['close']
+        ma20 = latest['ma20']
+        ma60 = latest['ma60']
+        atr = latest['atr']
+        atr_percent = (atr / price * 100) if price > 0 else 1.0
+        
+        return {
+            'ma20': round(ma20, 2) if not pd.isna(ma20) else 0,
+            'ma60': round(ma60, 2) if not pd.isna(ma60) else 0,
+            'atr_percent': round(atr_percent, 2) if not pd.isna(atr_percent) else 1.0,
+            'price': round(price, 2)
+        }
+    except Exception as e:
+        print(f"计算市场指标失败: {e}")
+        return {'ma20': 0, 'ma60': 0, 'atr_percent': 1.0, 'price': 0}
+
+
+@app.route('/api/market_state')
+def api_market_state():
+    """市场状态API"""
+    try:
+        # 获取评分数据中的regime
+        scores_data = api_scores().get_json()
+        regime = scores_data.get('regime', 'Risk-Off')
+        
+        # 计算市场指标
+        indicators = calculate_market_indicators()
+        
+        # 根据regime确定仓位乘数
+        multiplier_map = {
+            'Risk-Off': 0.0,
+            'RISK_OFF': 0.0,
+            'Trending': 1.0,
+            'TRENDING': 1.0,
+            'Sideways': 0.5,
+            'SIDEWAYS': 0.5
+        }
+        multiplier = multiplier_map.get(regime, 0.3)
+        
+        # 描述
+        descriptions = {
+            'Risk-Off': '风险规避模式，空仓保护中',
+            'RISK_OFF': '风险规避模式，空仓保护中',
+            'Trending': '趋势行情，增加仓位暴露',
+            'TRENDING': '趋势行情，增加仓位暴露',
+            'Sideways': '震荡行情，正常仓位',
+            'SIDEWAYS': '震荡行情，正常仓位'
+        }
+        
+        return jsonify({
+            'state': regime.upper().replace('-', '_'),
+            'ma20': indicators['ma20'],
+            'ma60': indicators['ma60'],
+            'atr_percent': indicators['atr_percent'],
+            'price': indicators['price'],
+            'position_multiplier': multiplier,
+            'description': descriptions.get(regime, '市场状态监控中')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 def api_equity_history():
     """权益曲线历史"""
     try:
@@ -364,14 +453,7 @@ def api_dashboard():
         equity_data = api_equity_history().get_json()
         
         # 获取市场状态
-        market_state = {
-            'state': scores_data.get('regime', 'RISK_OFF').upper().replace('-', '_'),
-            'ma20': 0,
-            'ma60': 0,
-            'atrPercent': 1.0,
-            'positionMultiplier': 0.3 if scores_data.get('regime') == 'Risk-Off' else 1.0,
-            'description': 'Risk-Off模式下减少仓位暴露'
-        }
+        market_state_data = api_market_state().get_json()
         
         # 转换持仓格式
         positions = []
@@ -431,7 +513,7 @@ def api_dashboard():
             'positions': positions,
             'trades': trades,
             'alphaScores': alpha_scores,
-            'marketState': market_state,
+            'marketState': market_state_data,
             'systemStatus': {
                 'isRunning': status_data.get('timer_active', False),
                 'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',

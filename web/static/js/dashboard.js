@@ -379,7 +379,45 @@ async function loadPositionsData() {
 
 // 加载市场状态
 async function loadMarketState() {
-    // 市场状态已从评分数据更新
+    try {
+        const response = await fetch(`${API_BASE}/api/market_state`);
+        const data = await response.json();
+        
+        // 更新市场状态徽章
+        const badge = document.getElementById('market-state-badge');
+        const desc = document.getElementById('market-desc');
+        
+        const state = data.state || 'RISK_OFF';
+        
+        if (state === 'RISK_OFF') {
+            badge.innerHTML = '<i class="fas fa-shield-alt"></i><span>Risk-Off</span>';
+            badge.style.background = 'rgba(239, 68, 68, 0.1)';
+            badge.style.color = 'var(--color-danger)';
+            badge.style.borderColor = 'var(--color-danger)';
+        } else if (state === 'TRENDING') {
+            badge.innerHTML = '<i class="fas fa-arrow-trend-up"></i><span>趋势行情</span>';
+            badge.style.background = 'rgba(16, 185, 129, 0.1)';
+            badge.style.color = 'var(--color-success)';
+            badge.style.borderColor = 'var(--color-success)';
+        } else if (state === 'SIDEWAYS') {
+            badge.innerHTML = '<i class="fas fa-minus"></i><span>震荡行情</span>';
+            badge.style.background = 'rgba(245, 158, 11, 0.1)';
+            badge.style.color = 'var(--color-warning)';
+            badge.style.borderColor = 'var(--color-warning)';
+        }
+        
+        // 更新描述
+        if (desc) desc.textContent = data.description || '--';
+        
+        // 更新指标数值
+        document.getElementById('ma20').textContent = data.ma20 ? '$' + data.ma20.toLocaleString() : '--';
+        document.getElementById('ma60').textContent = data.ma60 ? '$' + data.ma60.toLocaleString() : '--';
+        document.getElementById('atr-percent').textContent = data.atr_percent ? data.atr_percent.toFixed(2) + '%' : '--';
+        document.getElementById('pos-multiplier').textContent = data.position_multiplier !== undefined ? data.position_multiplier + 'x' : '--';
+        
+    } catch (error) {
+        console.error('加载市场状态失败:', error);
+    }
 }
 
 // 加载权益曲线
