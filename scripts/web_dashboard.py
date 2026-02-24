@@ -24,7 +24,9 @@ from flask import Flask, render_template, jsonify, send_from_directory
 import pandas as pd
 import yaml
 
-app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
+app = Flask(__name__, 
+            template_folder='/home/admin/clawd/v5-trading-bot/web/templates', 
+            static_folder='/home/admin/clawd/v5-trading-bot/web/static')
 
 # 配置路径
 WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
