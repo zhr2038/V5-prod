@@ -56,20 +56,20 @@ def load_config():
 
 @app.route('/')
 def index():
-    """主页面 - 跳转到监控页"""
-    return render_template('monitor.html')
+    """主页面 - 综合监控面板"""
+    return render_template('index.html')
 
 
 @app.route('/monitor')
 def monitor():
-    """监控页面"""
+    """旧版监控页面（保留兼容）"""
     return render_template('monitor.html')
 
 
-@app.route('/dashboard')
-def old_dashboard():
-    """旧版Dashboard（React）"""
-    return render_template('index.html')
+@app.route('/simple')
+def simple_dashboard():
+    """简洁版监控页"""
+    return render_template('monitor.html')
 
 
 @app.route('/<path:filename>')
