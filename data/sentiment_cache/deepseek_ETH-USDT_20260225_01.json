@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": -0.9,
+  "f6_sentiment_magnitude": 0.9,
+  "f6_fear_greed_index": 10.0,
+  "f6_sentiment_summary": "社交媒体评论显示ETH市场情绪极度恐慌，普遍存在割肉、爆仓和看跌预期。",
+  "f6_sentiment_confidence": 0.95,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论中频繁出现'归零'、'瀑布'、'熊市'等负面术语，反映强烈看跌情绪。",
+    "用户提及'割肉ETH'和'合约爆仓'，表明实际亏损和恐慌性抛售行为。",
+    "'韭菜连根拔起'等表述暗示散户投资者感到被市场收割，情绪悲观。",
+    "整体评论缺乏抄底或乐观信号，指向市场处于恐慌阶段。",
+    "情绪高度一致，无阴阳怪气或讽刺迹象，增强分析置信度。"
+  ],
+  "f6_market_stage": "panic"
+}

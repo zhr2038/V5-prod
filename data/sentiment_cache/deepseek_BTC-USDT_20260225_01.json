@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": -0.9,
+  "f6_sentiment_magnitude": 0.9,
+  "f6_fear_greed_index": 10.0,
+  "f6_sentiment_summary": "社交媒体评论显示市场情绪极度恐慌，普遍认为BTC价格暴跌且前景悲观。",
+  "f6_sentiment_confidence": 0.95,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论中频繁出现'归零'、'瀑布'、'熊市'等负面术语，反映强烈看跌情绪",
+    "用户提及'割肉'、'爆仓'，表明恐慌性抛售和亏损现象普遍",
+    "'韭菜连根拔起'等表述暗示散户投资者遭受重创，市场信心崩溃",
+    "缺乏抄底或乐观信号，情绪偏向单向恐慌",
+    "评论整体语气直接且负面，无明显讽刺或阴阳怪气成分"
+  ],
+  "f6_market_stage": "panic"
+}

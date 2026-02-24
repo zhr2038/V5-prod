@@ -4,3 +4,4 @@ logs/
 reports/
 v4_export/
 .env
+.env.deepseek

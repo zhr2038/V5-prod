@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": -0.9,
+  "f6_sentiment_magnitude": 0.9,
+  "f6_fear_greed_index": 10.0,
+  "f6_sentiment_summary": "社交媒体评论显示对SOL-USDT的极度恐慌情绪，普遍表达亏损、抛售和负面预期。",
+  "f6_sentiment_confidence": 0.95,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论中频繁出现'归零'、'快跑'、'割肉'等恐慌性词汇，暗示抛售压力大。",
+    "用户提及'瀑布'、'熊市'，反映市场下跌趋势和悲观预期。",
+    "讨论涉及'韭菜'、'爆仓'，表明散户亏损严重，情绪偏向恐惧。",
+    "没有正面或抄底信号，整体情绪高度负面，缺乏贪婪或FOMO迹象。",
+    "评论集中于损失和风险，可能处于恐慌性抛售阶段。"
+  ],
+  "f6_market_stage": "panic"
+}
