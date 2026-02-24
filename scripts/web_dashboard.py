@@ -312,27 +312,37 @@ def api_timer():
     try:
         import subprocess
         import re
-        from datetime import datetime
+        from datetime import datetime, timedelta
         
-        # 获取timer状态 - 使用list-timers获取人类可读格式
+        # 获取timer状态 - 使用status命令获取更准确的信息
         result = subprocess.run(
-            ['systemctl', '--user', 'list-timers', 'v5-live-20u.user.timer', '--no-pager'],
+            ['systemctl', '--user', 'show', 'v5-live-20u.user.timer', 
+             '--property=OnCalendar', '--property=Trigger'],
             capture_output=True, text=True
         )
         
         next_run = None
         countdown_seconds = 0
+        interval_minutes = 120  # 默认2小时
         
-        # 解析输出
+        # 解析配置获取间隔
         for line in result.stdout.split('\n'):
-            if 'v5-live-20u.user.timer' in line:
-                # 格式: "Tue 2026-02-24 14:48:02 CST 36s left ..."
-                # 提取时间部分
-                match = re.search(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', line)
-                if match:
-                    time_str = match.group(1)
+            if line.startswith('OnCalendar='):
+                calendar_str = line.split('=', 1)[1].strip()
+                # 解析 OnCalendar=*:0/2:00 格式
+                if '0/2' in calendar_str:
+                    interval_minutes = 120  # 2小时
+                elif '0/1' in calendar_str or '*:' in calendar_str:
+                    interval_minutes = 60  # 1小时
+            
+            if line.startswith('Trigger='):
+                trigger_str = line.split('=', 1)[1].strip()
+                if trigger_str and trigger_str != 'n/a':
                     try:
-                        next_run_dt = datetime.strptime(time_str, '%a %Y-%m-%d %H:%M:%S')
+                        # 解析 "Tue 2026-02-24 14:52:00 CST" 格式
+                        # 去掉时区缩写
+                        trigger_clean = re.sub(r'\s+[A-Z]{3}$', '', trigger_str)
+                        next_run_dt = datetime.strptime(trigger_clean, '%a %Y-%m-%d %H:%M:%S')
                         next_run = next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
                         
                         # 计算倒计时
@@ -340,14 +350,54 @@ def api_timer():
                         diff = next_run_dt - now
                         countdown_seconds = max(0, int(diff.total_seconds()))
                     except Exception as e:
-                        print(f"解析时间失败: {e}")
-                break
+                        print(f"解析Trigger时间失败: {e}, trigger_str={trigger_str}")
+        
+        # 如果上面的方法失败，尝试使用list-timers
+        if not next_run:
+            result2 = subprocess.run(
+                ['systemctl', '--user', 'list-timers', 'v5-live-20u.user.timer', '--no-pager'],
+                capture_output=True, text=True
+            )
+            
+            for line in result2.stdout.split('\n'):
+                if 'v5-live-20u.user.timer' in line:
+                    # 格式: "Tue 2026-02-24 14:52:00 CST  1min 4s left ..."
+                    # 或: "n/a  n/a  ..."
+                    match = re.search(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', line)
+                    if match:
+                        time_str = match.group(1)
+                        try:
+                            next_run_dt = datetime.strptime(time_str, '%a %Y-%m-%d %H:%M:%S')
+                            next_run = next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
+                            
+                            now = datetime.now()
+                            diff = next_run_dt - now
+                            countdown_seconds = max(0, int(diff.total_seconds()))
+                            
+                            # 尝试解析LEFT列获取倒计时
+                            left_match = re.search(r'\d{2}:\d{2}:\d{2}\s+([\d\w\s]+?)\s+\w{3}\s+v5-live', line)
+                            if left_match:
+                                left_str = left_match.group(1).strip()
+                                # 解析类似 "1min 4s" 或 "45s" 或 "1h 30min"
+                                total_seconds = 0
+                                for part in left_str.split():
+                                    if 'h' in part:
+                                        total_seconds += int(part.replace('h', '')) * 3600
+                                    elif 'min' in part:
+                                        total_seconds += int(part.replace('min', '')) * 60
+                                    elif 's' in part:
+                                        total_seconds += int(part.replace('s', ''))
+                                if total_seconds > 0:
+                                    countdown_seconds = total_seconds
+                        except Exception as e:
+                            print(f"解析list-timers失败: {e}")
+                    break
         
         return jsonify({
             'timer_name': 'v5-live-20u.user.timer',
             'next_run': next_run,
             'countdown_seconds': countdown_seconds,
-            'interval_minutes': 120,  # 每2小时
+            'interval_minutes': interval_minutes,
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
@@ -356,6 +406,7 @@ def api_timer():
             'timer_name': 'v5-live-20u.user.timer',
             'next_run': None,
             'countdown_seconds': 0,
+            'interval_minutes': 120,
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500

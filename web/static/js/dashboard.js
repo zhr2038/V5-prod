@@ -113,6 +113,17 @@ async function loadTimerData() {
         countdownSeconds = data.countdown_seconds || 0;
         maxIntervalSeconds = (data.interval_minutes || 120) * 60;
         
+        // 更新间隔显示
+        const intervalEl = document.getElementById('timer-interval');
+        if (intervalEl) {
+            const interval = data.interval_minutes || 120;
+            if (interval >= 60) {
+                intervalEl.textContent = `每${interval / 60}小时执行`;
+            } else {
+                intervalEl.textContent = `每${interval}分钟执行`;
+            }
+        }
+        
         // 启动倒计时
         startCountdown();
         
