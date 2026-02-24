@@ -3,13 +3,17 @@
 V5 横截面趋势轮动系统（OKX 现货），**先 dry-run**。
 
 本仓库包含：
-- 信号流水线（Alpha → Regime → Portfolio → Risk → Orders）
-- 执行层：dry-run（模拟成交）/ live（OKX 私有接口：下单/查单/撤单）
+- **信号流水线**（Alpha → Regime → Portfolio → Risk → Orders）
+- **多策略并行系统**（趋势跟踪 + 均值回归 + 信号融合）
+- **执行层**：dry-run（模拟成交）/ live（OKX 私有接口：下单/查单/撤单）
+- **反思Agent**：自动交易后分析与优化建议
 - SQLite 落盘：Positions/Account/Orders/Fills/Bills（幂等可追溯）
 - 回测 + walk-forward 框架
 - 成本校准与回灌（F2）
 - 日级预算监控 + 预算驱动的换手抑制（F3）
 - 市场微观结构快照：bid/ask/mid/spread（F1.2）
+
+---
 
 ## 快速开始
 
@@ -23,6 +27,97 @@ python3 main.py
 # 运行测试
 pytest -q
 ```
+
+---
+
+## 多策略并行系统（Multi-Strategy）
+
+V5 支持同时运行多个策略，通过信号融合生成最终交易决策。
+
+### 架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   StrategyOrchestrator                   │
+│  ┌──────────────────┐  ┌──────────────────┐            │
+│  │ TrendFollowing   │  │ MeanReversion    │            │
+│  │ (趋势跟踪)        │  │ (均值回归)        │            │
+│  └────────┬─────────┘  └────────┬─────────┘            │
+│           │                     │                       │
+│           ▼                     ▼                       │
+│      ┌──────────────────────────────────┐              │
+│      │      Signal Fusion (信号融合)     │              │
+│      │  - 同向信号加权                   │              │
+│      │  - 反向信号冲突解决               │              │
+│      └──────────────────────────────────┘              │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 内置策略
+
+| 策略 | 类型 | 核心逻辑 |
+|------|------|----------|
+| TrendFollowing | 趋势跟踪 | 双均线交叉 + ADX确认 |
+| MeanReversion | 均值回归 | RSI超买超卖 + 布林带 |
+
+### 配置
+
+```yaml
+# configs/multi_strategy.yaml
+strategy_allocations:
+  TrendFollowing: 0.5    # 50% 资金
+  MeanReversion: 0.3     # 30% 资金
+  Momentum: 0.2          # 20% 资金 (预留)
+```
+
+### 演示
+
+```bash
+python3 scripts/multi_strategy_demo.py
+```
+
+---
+
+## 反思Agent（Reflection Agent）
+
+自动分析交易记录，识别问题并生成优化建议。
+
+### 功能
+
+- **数据加载**：自动从 SQLite 读取最近7天交易记录
+- **绩效计算**：整体/币种/策略三级绩效指标
+- **洞察识别**：6类交易洞察自动检测
+- **建议生成**：按优先级排序的可执行建议
+
+### 洞察类型
+
+| 类型 | 说明 |
+|------|------|
+| STRONG_PERFORMER | 表现优秀 |
+| UNDER_PERFORMER | 表现不佳 |
+| FACTOR_DECAY | 因子失效 |
+| RISK_CONCENTRATION | 风险集中 |
+| OPPORTUNITY | 潜在机会 |
+| ANOMALY | 异常检测 |
+
+### 定时任务
+
+```bash
+# 启用（每天21:00自动运行）
+systemctl --user enable v5-reflection-agent.timer
+systemctl --user start v5-reflection-agent.timer
+
+# 手动运行
+python3 src/execution/reflection_agent.py
+```
+
+### 演示
+
+```bash
+python3 scripts/reflection_demo.py
+```
+
+---
 
 ## 执行模式（dry-run / live）
 
@@ -283,6 +378,89 @@ python3 scripts/compare_runs.py \
   --out /tmp/compare.md
 ```
 
+---
+
+## ML 模型训练自动化
+
+V5 内置 LightGBM 机器学习因子模型，支持自动训练与评估。
+
+### 特征工程
+
+- **20+特征**：动量、波动率、成交量、技术指标
+- **自动特征重要性分析**
+- **IC评估**：模型预测与实际收益的相关系数
+
+### 定时训练
+
+```bash
+# 启用（每天00:30自动训练）
+systemctl --user enable v5-daily-ml-training.timer
+systemctl --user start v5-daily-ml-training.timer
+
+# 手动训练
+python3 scripts/daily_ml_training.py
+```
+
+### 训练流程
+
+1. 导出最近交易数据（需100+条记录）
+2. 训练 LightGBM 模型
+3. 计算 IC（信息系数）
+4. IC > 0.02 时保存模型
+5. 生成特征重要性报告
+
+---
+
+## 回测系统
+
+支持多版本回测策略验证。
+
+### 快速回测
+
+```bash
+python3 scripts/quick_backtest.py
+```
+
+### 策略版本
+
+| 版本 | 特点 | 适用场景 |
+|------|------|----------|
+| v1 | 基础回测 | 快速验证 |
+| v2 | Risk-Off + 做空 | 完整测试 |
+| v3 | 保守策略（仅做多，4h频率） | 实盘参考 |
+
+### Walk-Forward 分析
+
+```bash
+python3 scripts/run_walk_forward.py
+# 输出：reports/walk_forward.json
+```
+
+---
+
+## Web 监控面板
+
+实时交易监控与数据分析。
+
+### 启动面板
+
+```bash
+# Flask 后端（端口5000）
+python3 scripts/web_dashboard.py
+
+# React 前端（开发模式，端口3000）
+cd /home/admin/v5-trading-dashboard && npm run dev
+```
+
+### API 端点
+
+- `/api/account` - 账户信息
+- `/api/trades` - 交易记录
+- `/api/scores` - 信号评分
+- `/api/dashboard` - 综合数据
+
+---
+
 ## 约束 / 备注
 
 - v5 phase-1：不做做空
@@ -292,3 +470,40 @@ python3 scripts/compare_runs.py \
   - 环境变量 ARM：`V5_LIVE_ARM=YES`
   - OKX API key 完整（key/secret/passphrase）
 - 对账门控（G1）尚在推进中：当前 live 侧会读取 `reports/kill_switch.json` / `reports/reconcile_status.json` 来决定是否进入 SELL_ONLY。
+
+---
+
+## 多Agent架构
+
+V5 采用行业标准的6-Agent量化架构：
+
+| Agent | 模块 | 职责 |
+|-------|------|------|
+| 数据 | `DataFetcher` | 行情数据获取与缓存 |
+| 策略 | `StrategyOrchestrator` | 多策略并行与信号融合 |
+| 风控 | `RiskEngine` | Risk-Off检测与仓位控制 |
+| 执行 | `ExecutionEngine` + `PositionBuilder` | 订单执行与分批建仓 |
+| 学习 | `MLFactorModel` | LightGBM因子模型训练 |
+| 监控 | `AuditEngine` + Dashboard | 实时交易监控 |
+| 反思 | `ReflectionAgent` | 交易后分析与优化建议 |
+
+### 通信机制
+
+- **SQLite**：持久化存储（positions/orders/fills）
+- **文件系统**：状态快照与报告
+- **JSON配置**：策略参数与运行配置
+
+---
+
+## 系统定时任务
+
+| Timer | 频率 | 功能 |
+|-------|------|------|
+| `v5-live-20u.user.timer` | 每小时 | 实盘交易执行 |
+| `v5-reconcile.timer` | 每5分钟 | 对账状态刷新 |
+| `v5-daily-ml-training.timer` | 每天00:30 | ML模型自动训练 |
+| `v5-reflection-agent.timer` | 每天21:00 | 交易后分析 |
+
+---
+
+*V5 Trading Bot - 专业级量化交易系统*
