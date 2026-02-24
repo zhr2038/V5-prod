@@ -56,7 +56,19 @@ def load_config():
 
 @app.route('/')
 def index():
-    """主页面"""
+    """主页面 - 跳转到监控页"""
+    return render_template('monitor.html')
+
+
+@app.route('/monitor')
+def monitor():
+    """监控页面"""
+    return render_template('monitor.html')
+
+
+@app.route('/dashboard')
+def old_dashboard():
+    """旧版Dashboard（React）"""
     return render_template('index.html')
 
 
@@ -521,7 +533,13 @@ def api_dashboard():
                 'killSwitch': False,
                 'errors': []
             },
-            'equityCurve': equity_data if isinstance(equity_data, list) else []
+            'equityCurve': equity_data if isinstance(equity_data, list) else [],
+            # 新增：系统进度数据
+            'timers': api_timers().get_json() if hasattr(api_timers(), 'get_json') else {'timers': []},
+            'costCalibration': api_cost_calibration().get_json() if hasattr(api_cost_calibration(), 'get_json') else {'status': 'unknown'},
+            'icDiagnostics': api_ic_diagnostics().get_json() if hasattr(api_ic_diagnostics(), 'get_json') else {'status': 'no_data'},
+            'mlTraining': api_ml_training().get_json() if hasattr(api_ml_training(), 'get_json') else {'status': 'unknown'},
+            'reflectionReports': api_reflection_reports().get_json() if hasattr(api_reflection_reports(), 'get_json') else {'reports': []}
         }
         
         return jsonify(dashboard_data)
@@ -636,6 +654,319 @@ def api_timer():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
+
+
+@app.route('/api/timers')
+def api_timers():
+    """所有定时任务状态API"""
+    try:
+        import subprocess
+        import re
+        
+        # 定义要监控的timer
+        timer_configs = [
+            {'name': 'v5-live-20u.user.timer', 'desc': '实盘交易执行', 'icon': '🔄'},
+            {'name': 'v5-reconcile.timer', 'desc': '对账状态刷新', 'icon': '🔍'},
+            {'name': 'v5-daily-ml-training.timer', 'desc': 'ML模型训练', 'icon': '🧠'},
+            {'name': 'v5-reflection-agent.timer', 'desc': '交易后分析', 'icon': '📊'},
+        ]
+        
+        timers = []
+        
+        for config in timer_configs:
+            timer_name = config['name']
+            
+            # 获取timer状态
+            result = subprocess.run(
+                ['systemctl', '--user', 'show', timer_name,
+                 '--property=UnitFileState', '--property=ActiveState'],
+                capture_output=True, text=True
+            )
+            
+            enabled = False
+            active = False
+            
+            for line in result.stdout.split('\n'):
+                if line.startswith('UnitFileState='):
+                    enabled = line.split('=', 1)[1].strip() == 'enabled'
+                if line.startswith('ActiveState='):
+                    active = line.split('=', 1)[1].strip() == 'active'
+            
+            # 获取下次执行时间
+            result2 = subprocess.run(
+                ['systemctl', '--user', 'list-timers', timer_name, '--no-pager'],
+                capture_output=True, text=True
+            )
+            
+            next_run = None
+            left_str = None
+            
+            for line in result2.stdout.split('\n'):
+                if timer_name in line:
+                    # 解析 LEFT 列
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        left_str = parts[-3] if 'left' in line else None
+                        # 解析下次执行时间
+                        match = re.search(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', line)
+                        if match:
+                            next_run = match.group(1)
+                    break
+            
+            timers.append({
+                'name': timer_name,
+                'desc': config['desc'],
+                'icon': config['icon'],
+                'enabled': enabled,
+                'active': active,
+                'next_run': next_run,
+                'time_left': left_str
+            })
+        
+        return jsonify({
+            'timers': timers,
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@app.route('/api/cost_calibration')
+def api_cost_calibration():
+    """F2成本校准进度API"""
+    try:
+        cost_dir = REPORTS_DIR / 'cost_stats'
+        events_dir = REPORTS_DIR / 'cost_events'
+        
+        # 获取成本统计数据
+        stats_files = sorted(cost_dir.glob('daily_cost_stats_*.json')) if cost_dir.exists() else []
+        
+        calibration_data = []
+        total_days = 0
+        avg_slippage_bps = 0
+        avg_fee_bps = 0
+        
+        for stats_file in stats_files[-30:]:  # 最近30天
+            try:
+                with open(stats_file, 'r') as f:
+                    stats = json.load(f)
+                
+                day = stats_file.stem.replace('daily_cost_stats_', '')
+                calibration_data.append({
+                    'date': day,
+                    'slippage_bps': stats.get('avg_slippage_bps', 0),
+                    'fee_bps': stats.get('avg_fee_bps', 0),
+                    'total_cost_bps': stats.get('avg_total_cost_bps', 0),
+                    'trade_count': stats.get('trade_count', 0)
+                })
+                
+                total_days += 1
+                avg_slippage_bps += stats.get('avg_slippage_bps', 0)
+                avg_fee_bps += stats.get('avg_fee_bps', 0)
+            except:
+                continue
+        
+        # 计算平均值
+        if total_days > 0:
+            avg_slippage_bps /= total_days
+            avg_fee_bps /= total_days
+        
+        # 获取事件文件数
+        event_count = 0
+        if events_dir.exists():
+            event_count = len(list(events_dir.glob('*.jsonl')))
+        
+        return jsonify({
+            'status': 'calibrated' if total_days >= 7 else 'calibrating',
+            'total_days': total_days,
+            'avg_slippage_bps': round(avg_slippage_bps, 4),
+            'avg_fee_bps': round(avg_fee_bps, 4),
+            'avg_total_cost_bps': round(avg_slippage_bps + avg_fee_bps, 4),
+            'event_files': event_count,
+            'daily_stats': calibration_data[-7:],  # 最近7天
+            'progress_percent': min(100, int(total_days / 7 * 100)),
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ic_diagnostics')
+def api_ic_diagnostics():
+    """IC诊断进度API"""
+    try:
+        # 查找最新的IC诊断文件
+        ic_files = sorted(REPORTS_DIR.glob('ic_diagnostics_*.json'))
+        
+        if not ic_files:
+            return jsonify({
+                'status': 'no_data',
+                'message': '暂无IC诊断数据'
+            })
+        
+        latest_ic = ic_files[-1]
+        with open(latest_ic, 'r') as f:
+            ic_data = json.load(f)
+        
+        # 解析IC数据
+        overall_ic = ic_data.get('overall', {})
+        by_factor = ic_data.get('by_factor', {})
+        by_regime = ic_data.get('by_regime', {})
+        
+        # 计算各因子IC
+        factors = []
+        for factor_name, factor_data in by_factor.items():
+            factors.append({
+                'name': factor_name,
+                'ic': round(factor_data.get('ic', 0), 4),
+                'ic_std': round(factor_data.get('ic_std', 0), 4),
+                'ir': round(factor_data.get('ir', 0), 4)
+            })
+        
+        # 按regime分组
+        regimes = []
+        for regime_name, regime_data in by_regime.items():
+            regimes.append({
+                'name': regime_name,
+                'ic': round(regime_data.get('ic', 0), 4),
+                'sample_count': regime_data.get('n', 0)
+            })
+        
+        return jsonify({
+            'status': 'ready',
+            'overall_ic': round(overall_ic.get('ic', 0), 4),
+            'overall_ir': round(overall_ic.get('ir', 0), 4),
+            'sample_count': overall_ic.get('n', 0),
+            'lookback_days': ic_data.get('lookback_days', 30),
+            'factors': factors,
+            'regimes': regimes,
+            'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ml_training')
+def api_ml_training():
+    """机器学习训练进度API"""
+    try:
+        # 检查模型目录
+        model_dir = WORKSPACE / 'models'
+        latest_model = None
+        model_files = sorted(model_dir.glob('lgb_model_*.pkl')) if model_dir.exists() else []
+        
+        if model_files:
+            latest_model = model_files[-1]
+            model_time = datetime.fromtimestamp(latest_model.stat().st_mtime)
+        else:
+            model_time = None
+        
+        # 检查数据收集进度
+        data_dir = WORKSPACE / 'data' / 'ml_training'
+        data_files = list(data_dir.glob('training_data_*.csv')) if data_dir.exists() else []
+        
+        total_samples = 0
+        for df in data_files:
+            try:
+                import pandas as pd
+                data = pd.read_csv(df)
+                total_samples += len(data)
+            except:
+                continue
+        
+        # 检查训练日志
+        training_log = WORKSPACE / 'logs' / 'ml_training.log'
+        last_training = None
+        last_ic = None
+        
+        if training_log.exists():
+            try:
+                with open(training_log, 'r') as f:
+                    lines = f.readlines()
+                    # 查找最后一行包含IC的
+                    for line in reversed(lines):
+                        if 'IC:' in line or 'ic:' in line:
+                            import re
+                            ic_match = re.search(r'IC[:\s]+([\d.]+)', line)
+                            if ic_match:
+                                last_ic = float(ic_match.group(1))
+                                break
+                    if lines:
+                        last_training = lines[-1][:50]  # 最后一条日志
+            except:
+                pass
+        
+        # 确定状态
+        if model_time and (datetime.now() - model_time).days < 1:
+            status = 'trained_today'
+        elif total_samples >= 100:
+            status = 'ready_to_train'
+        elif total_samples > 0:
+            status = 'collecting_data'
+        else:
+            status = 'no_data'
+        
+        return jsonify({
+            'status': status,
+            'total_samples': total_samples,
+            'samples_needed': 100,
+            'progress_percent': min(100, int(total_samples / 100 * 100)),
+            'latest_model': latest_model.name if latest_model else None,
+            'model_date': model_time.strftime('%Y-%m-%d %H:%M') if model_time else None,
+            'last_ic': round(last_ic, 4) if last_ic else None,
+            'data_files': len(data_files),
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/reflection_reports')
+def api_reflection_reports():
+    """反思Agent报告列表API"""
+    try:
+        reflection_dir = REPORTS_DIR / 'reflection'
+        
+        if not reflection_dir.exists():
+            return jsonify({'reports': [], 'message': '暂无反思报告'})
+        
+        reports = []
+        report_files = sorted(reflection_dir.glob('reflection_*.json'), reverse=True)
+        
+        for report_file in report_files[:10]:  # 最近10份
+            try:
+                with open(report_file, 'r') as f:
+                    data = json.load(f)
+                
+                # 提取关键信息
+                metrics = data.get('overall_metrics', {})
+                insights = data.get('insights', [])
+                
+                # 统计洞察
+                high_severity = sum(1 for i in insights if i.get('severity') == 'high')
+                medium_severity = sum(1 for i in insights if i.get('severity') == 'medium')
+                
+                reports.append({
+                    'filename': report_file.name,
+                    'date': report_file.stem.replace('reflection_', ''),
+                    'total_pnl': round(metrics.get('total_pnl', 0), 2),
+                    'trade_count': metrics.get('total_trades', 0),
+                    'symbols': metrics.get('unique_symbols', 0),
+                    'insights_count': len(insights),
+                    'high_priority': high_severity,
+                    'medium_priority': medium_severity
+                })
+            except:
+                continue
+        
+        return jsonify({
+            'reports': reports,
+            'total_reports': len(report_files),
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

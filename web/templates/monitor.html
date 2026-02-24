@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V5 Trading Bot - 系统监控</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0e1a;
+            color: #e0e6ed;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid #1e2530;
+            margin-bottom: 30px;
+        }
+        
+        header h1 {
+            font-size: 2rem;
+            background: linear-gradient(135deg, #00d4ff, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        header p {
+            color: #64748b;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .card {
+            background: linear-gradient(135deg, #1a1f2e 0%, #151921 100%);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid #2a3142;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .card-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-right: 16px;
+        }
+        
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        
+        .card-subtitle {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-top: 4px;
+        }
+        
+        /* Timer Styles */
+        .timer-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .timer-icon {
+            font-size: 20px;
+            margin-right: 12px;
+        }
+        
+        .timer-info {
+            flex: 1;
+        }
+        
+        .timer-name {
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+        
+        .timer-desc {
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        
+        .timer-status {
+            text-align: right;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        
+        .status-active {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+        
+        .status-inactive {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        
+        .timer-next {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
+        
+        /* Progress Styles */
+        .progress-container {
+            margin: 15px 0;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-green {
+            background: linear-gradient(90deg, #22c55e, #4ade80);
+        }
+        
+        .progress-blue {
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        }
+        
+        .progress-purple {
+            background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+        }
+        
+        .progress-orange {
+            background: linear-gradient(90deg, #f59e0b, #fbbf24);
+        }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-top: 15px;
+        }
+        
+        .stat-item {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 12px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #fff;
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 4px;
+        }
+        
+        /* List Styles */
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .list-item:last-child {
+            border-bottom: none;
+        }
+        
+        .list-label {
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+        
+        .list-value {
+            font-weight: 600;
+        }
+        
+        .value-positive {
+            color: #22c55e;
+        }
+        
+        .value-negative {
+            color: #ef4444;
+        }
+        
+        /* Update Time */
+        .update-time {
+            text-align: center;
+            margin-top: 30px;
+            padding: 15px;
+            color: #64748b;
+            font-size: 0.85rem;
+        }
+        
+        /* Loading State */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: #64748b;
+        }
+        
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 12px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Factor Tags */
+        .factor-tag {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            margin: 2px;
+        }
+        
+        .factor-good {
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+        }
+        
+        .factor-bad {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+        }
+        
+        .factor-neutral {
+            background: rgba(148, 163, 184, 0.15);
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 V5 Trading Bot 系统监控</h1>
+            <p>实时监控系统状态与训练进度</p>
+        </header>
+        
+        <div class="grid" id="dashboard">
+            <!-- 定时任务卡片 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(59, 130, 246, 0.2);">⏰</div>
+                    <div>
+                        <div class="card-title">定时任务状态</div>
+                        <div class="card-subtitle">System Timers</div>
+                    </div>
+                </div>
+                <div id="timers-container">
+                    <div class="loading"><div class="spinner"></div>加载中...</div>
+                </div>
+            </div>
+            
+            <!-- F2成本校准 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(34, 197, 94, 0.2);">💰</div>
+                    <div>
+                        <div class="card-title">F2 成本校准</div>
+                        <div class="card-subtitle">Cost Calibration</div>
+                    </div>
+                </div>
+                <div id="cost-container">
+                    <div class="loading"><div class="spinner"></div>加载中...</div>
+                </div>
+            </div>
+            
+            <!-- ML训练进度 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(139, 92, 246, 0.2);">🧠</div>
+                    <div>
+                        <div class="card-title">ML 模型训练</div>
+                        <div class="card-subtitle">Machine Learning</div>
+                    </div>
+                </div>
+                <div id="ml-container">
+                    <div class="loading"><div class="spinner"></div>加载中...</div>
+                </div>
+            </div>
+            
+            <!-- IC诊断 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(245, 158, 11, 0.2);">📈</div>
+                    <div>
+                        <div class="card-title">IC 因子诊断</div>
+                        <div class="card-subtitle">Information Coefficient</div>
+                    </div>
+                </div>
+                <div id="ic-container">
+                    <div class="loading"><div class="spinner"></div>加载中...</div>
+                </div>
+            </div>
+            
+            <!-- 反思报告 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(236, 72, 153, 0.2);">📝</div>
+                    <div>
+                        <div class="card-title">反思Agent报告</div>
+                        <div class="card-subtitle">Reflection Analysis</div>
+                    </div>
+                </div>
+                <div id="reflection-container">
+                    <div class="loading"><div class="spinner"></div>加载中...</div>
+                </div>
+            </div>
+            
+            <!-- 快速链接 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(6, 182, 212, 0.2);">🔗</div>
+                    <div>
+                        <div class="card-title">快速链接</div>
+                        <div class="card-subtitle">Quick Links</div>
+                    </div>
+                </div>
+                <div style="padding: 10px 0;">
+                    <a href="/" style="display: block; padding: 12px; color: #00d4ff; text-decoration: none; border-radius: 8px; background: rgba(0, 212, 255, 0.1); margin-bottom: 10px;">
+                        📊 主控制台
+                    </a>
+                    <a href="http://claw.hrhome.top:3000" target="_blank" style="display: block; padding: 12px; color: #8b5cf6; text-decoration: none; border-radius: 8px; background: rgba(139, 92, 246, 0.1); margin-bottom: 10px;">
+                        🎨 React 面板 (Dev)
+                    </a>
+                    <a href="https://github.com/zhr2038/v5-trading-bot" target="_blank" style="display: block; padding: 12px; color: #64748b; text-decoration: none; border-radius: 8px; background: rgba(255, 255, 255, 0.05);">
+                        📦 GitHub 仓库
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="update-time" id="update-time">
+            最后更新: --
+        </div>
+    </div>
+    
+    <script>
+        // API 基础URL
+        const API_BASE = '';
+        
+        // 格式化数字
+        function formatNumber(num, decimals = 2) {
+            if (num === null || num === undefined) return '-';
+            return Number(num).toFixed(decimals);
+        }
+        
+        // 格式化时间
+        function formatTime(dateStr) {
+            if (!dateStr) return '--';
+            const date = new Date(dateStr);
+            return date.toLocaleString('zh-CN');
+        }
+        
+        // 加载定时任务
+        async function loadTimers() {
+            try {
+                const res = await fetch(`${API_BASE}/api/timers`);
+                const data = await res.json();
+                
+                const container = document.getElementById('timers-container');
+                
+                if (data.error) {
+                    container.innerHTML = `<div style="color: #ef4444;">加载失败: ${data.error}</div>`;
+                    return;
+                }
+                
+                let html = '';
+                data.timers.forEach(timer => {
+                    const statusClass = timer.active ? 'status-active' : 'status-inactive';
+                    const statusText = timer.active ? '运行中' : '已停止';
+                    
+                    html += `
+                        <div class="timer-item">
+                            <div class="timer-icon">${timer.icon}</div>
+                            <div class="timer-info">
+                                <div class="timer-name">${timer.desc}</div>
+                                <div class="timer-desc">${timer.name}</div>
+                            </div>
+                            <div class="timer-status">
+                                <span class="status-badge ${statusClass}">${statusText}</span>
+                                <div class="timer-next">下次: ${timer.time_left || '--'}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+            } catch (e) {
+                document.getElementById('timers-container').innerHTML = 
+                    `<div style="color: #ef4444;">加载失败</div>`;
+            }
+        }
+        
+        // 加载成本校准
+        async function loadCostCalibration() {
+            try {
+                const res = await fetch(`${API_BASE}/api/cost_calibration`);
+                const data = await res.json();
+                
+                const container = document.getElementById('cost-container');
+                
+                if (data.error) {
+                    container.innerHTML = `<div style="color: #ef4444;">${data.error}</div>`;
+                    return;
+                }
+                
+                const statusColor = data.status === 'calibrated' ? '#22c55e' : '#f59e0b';
+                const statusText = data.status === 'calibrated' ? '已校准' : '校准中...';
+                
+                let html = `
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>校准进度</span>
+                            <span style="color: ${statusColor}">${statusText}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-green" style="width: ${data.progress_percent}%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value">${data.total_days}</div>
+                            <div class="stat-label">校准天数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${formatNumber(data.avg_slippage_bps, 2)}</div>
+                            <div class="stat-label">平均滑点(bps)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${formatNumber(data.avg_fee_bps, 2)}</div>
+                            <div class="stat-label">平均费率(bps)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.event_files}</div>
+                            <div class="stat-label">事件文件</div>
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+            } catch (e) {
+                document.getElementById('cost-container').innerHTML = 
+                    `<div style="color: #ef4444;">加载失败</div>`;
+            }
+        }
+        
+        // 加载ML训练
+        async function loadMLTraining() {
+            try {
+                const res = await fetch(`${API_BASE}/api/ml_training`);
+                const data = await res.json();
+                
+                const container = document.getElementById('ml-container');
+                
+                if (data.error) {
+                    container.innerHTML = `<div style="color: #ef4444;">${data.error}</div>`;
+                    return;
+                }
+                
+                const statusMap = {
+                    'trained_today': { color: '#22c55e', text: '今日已训练' },
+                    'ready_to_train': { color: '#3b82f6', text: '等待训练' },
+                    'collecting_data': { color: '#f59e0b', text: '数据收集中' },
+                    'no_data': { color: '#64748b', text: '暂无数据' }
+                };
+                
+                const status = statusMap[data.status] || { color: '#64748b', text: '未知' };
+                
+                let html = `
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>数据收集</span>
+                            <span>${data.total_samples} / ${data.samples_needed} 条</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-purple" style="width: ${data.progress_percent}%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" style="color: ${status.color}">${status.text}</div>
+                            <div class="stat-label">训练状态</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.last_ic ? formatNumber(data.last_ic, 4) : '--'}</div>
+                            <div class="stat-label">最新IC</div>
+                        </div>
+                    </div>
+                `;
+                
+                if (data.latest_model) {
+                    html += `
+                        <div style="margin-top: 15px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px;">
+                            <div style="font-size: 0.85rem; color: #64748b;">最新模型</div>
+                            <div style="font-size: 0.9rem; margin-top: 4px;">${data.latest_model}</div>
+                            <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;">${data.model_date}</div>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            } catch (e) {
+                document.getElementById('ml-container').innerHTML = 
+                    `<div style="color: #ef4444;">加载失败</div>`;
+            }
+        }
+        
+        // 加载IC诊断
+        async function loadICDiagnostics() {
+            try {
+                const res = await fetch(`${API_BASE}/api/ic_diagnostics`);
+                const data = await res.json();
+                
+                const container = document.getElementById('ic-container');
+                
+                if (data.error || data.status === 'no_data') {
+                    container.innerHTML = `
+                        <div style="text-align: center; padding: 20px; color: #64748b;">
+                            <div style="font-size: 2rem; margin-bottom: 10px;">📊</div>
+                            <div>暂无IC诊断数据</div>
+                            <div style="font-size: 0.85rem; margin-top: 8px;">需要至少30天交易数据</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const icColor = data.overall_ic > 0.02 ? '#22c55e' : data.overall_ic > 0 ? '#f59e0b' : '#ef4444';
+                
+                let html = `
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" style="color: ${icColor}">${formatNumber(data.overall_ic, 4)}</div>
+                            <div class="stat-label">整体IC</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${formatNumber(data.overall_ir, 4)}</div>
+                            <div class="stat-label">IR比率</div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 15px;">
+                        <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 10px;">因子IC表现</div>
+                `;
+                
+                if (data.factors) {
+                    data.factors.slice(0, 5).forEach(factor => {
+                        const factorColor = factor.ic > 0.02 ? 'factor-good' : factor.ic > 0 ? 'factor-neutral' : 'factor-bad';
+                        html += `
+                            <div class="list-item">
+                                <span class="list-label">${factor.name}</span>
+                                <span class="factor-tag ${factorColor}">IC: ${formatNumber(factor.ic, 4)}</span>
+                            </div>
+                        `;
+                    });
+                }
+                
+                html += '</div>';
+                container.innerHTML = html;
+            } catch (e) {
+                document.getElementById('ic-container').innerHTML = 
+                    `<div style="color: #ef4444;">加载失败</div>`;
+            }
+        }
+        
+        // 加载反思报告
+        async function loadReflectionReports() {
+            try {
+                const res = await fetch(`${API_BASE}/api/reflection_reports`);
+                const data = await res.json();
+                
+                const container = document.getElementById('reflection-container');
+                
+                if (data.error || !data.reports || data.reports.length === 0) {
+                    container.innerHTML = `
+                        <div style="text-align: center; padding: 20px; color: #64748b;">
+                            <div style="font-size: 2rem; margin-bottom: 10px;">📝</div>
+                            <div>暂无反思报告</div>
+                            <div style="font-size: 0.85rem; margin-top: 8px;">每天21:00自动生成</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const latest = data.reports[0];
+                
+                let html = `
+                    <div style="padding: 15px; background: rgba(236, 72, 153, 0.1); border-radius: 10px; margin-bottom: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-weight: 600;">最新报告: ${latest.date}</div>
+                                <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">
+                                    ${latest.trade_count}笔交易 · ${latest.symbols}个币种
+                                </div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 1.2rem; font-weight: 700; color: ${latest.total_pnl >= 0 ? '#22c55e' : '#ef4444'}">
+                                    ${latest.total_pnl >= 0 ? '+' : ''}${formatNumber(latest.total_pnl, 2)}
+                                </div>
+                                <div style="font-size: 0.75rem; color: #64748b;">总盈亏</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 1; padding: 10px; background: rgba(239, 68, 68, 0.1); border-radius: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 700; color: #ef4444;">${latest.high_priority}</div>
+                            <div style="font-size: 0.75rem; color: #64748b;">高优先级</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: rgba(245, 158, 11, 0.1); border-radius: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 700; color: #f59e0b;">${latest.medium_priority}</div>
+                            <div style="font-size: 0.75rem; color: #64748b;">中优先级</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: rgba(34, 197, 94, 0.1); border-radius: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 700; color: #22c55e;">${latest.insights_count}</div>
+                            <div style="font-size: 0.75rem; color: #64748b;">总洞察</div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 15px; font-size: 0.85rem; color: #64748b;">
+                        共 ${data.total_reports} 份历史报告
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+            } catch (e) {
+                document.getElementById('reflection-container').innerHTML = 
+                    `<div style="color: #ef4444;">加载失败</div>`;
+            }
+        }
+        
+        // 加载所有数据
+        async function loadAll() {
+            await Promise.all([
+                loadTimers(),
+                loadCostCalibration(),
+                loadMLTraining(),
+                loadICDiagnostics(),
+                loadReflectionReports()
+            ]);
+            
+            document.getElementById('update-time').textContent = 
+                '最后更新: ' + new Date().toLocaleString('zh-CN');
+        }
+        
+        // 初始加载
+        loadAll();
+        
+        // 每30秒刷新
+        setInterval(loadAll, 30000);
+    </script>
+</body>
+</html>
