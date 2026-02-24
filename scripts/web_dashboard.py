@@ -882,38 +882,120 @@ def api_timers():
 
 @app.route('/api/cost_calibration')
 def api_cost_calibration():
-    """F2成本校准进度API"""
+    """F2成本校准进度API - 从原始数据计算"""
     try:
         cost_dir = REPORTS_DIR / 'cost_stats'
         events_dir = REPORTS_DIR / 'cost_events'
-        
-        # 获取成本统计数据
-        stats_files = sorted(cost_dir.glob('daily_cost_stats_*.json')) if cost_dir.exists() else []
         
         calibration_data = []
         total_days = 0
         avg_slippage_bps = 0
         avg_fee_bps = 0
+        total_trade_count = 0
         
-        for stats_file in stats_files[-30:]:  # 最近30天
-            try:
-                with open(stats_file, 'r') as f:
-                    stats = json.load(f)
-                
-                day = stats_file.stem.replace('daily_cost_stats_', '')
-                calibration_data.append({
-                    'date': day,
-                    'slippage_bps': stats.get('avg_slippage_bps', 0),
-                    'fee_bps': stats.get('avg_fee_bps', 0),
-                    'total_cost_bps': stats.get('avg_total_cost_bps', 0),
-                    'trade_count': stats.get('trade_count', 0)
-                })
-                
-                total_days += 1
-                avg_slippage_bps += stats.get('avg_slippage_bps', 0)
-                avg_fee_bps += stats.get('avg_fee_bps', 0)
-            except:
-                continue
+        # 优先从cost_stats读取已汇总的数据
+        if cost_dir.exists():
+            stats_files = sorted(cost_dir.glob('daily_cost_stats_*.json'))
+            
+            for stats_file in stats_files[-30:]:  # 最近30天
+                try:
+                    with open(stats_file, 'r') as f:
+                        stats = json.load(f)
+                    
+                    day = stats_file.stem.replace('daily_cost_stats_', '')
+                    
+                    # 从嵌套的buckets计算平均值
+                    buckets = stats.get('buckets', {})
+                    day_slippage = []
+                    day_fee = []
+                    day_trade_count = 0
+                    
+                    for bucket_name, bucket_data in buckets.items():
+                        slippage_data = bucket_data.get('slippage_bps', {})
+                        fee_data = bucket_data.get('fee_bps', {})
+                        
+                        if slippage_data.get('count', 0) > 0 and slippage_data.get('mean') is not None:
+                            day_slippage.append(slippage_data['mean'])
+                        if fee_data.get('count', 0) > 0 and fee_data.get('mean') is not None:
+                            day_fee.append(fee_data['mean'])
+                        
+                        day_trade_count += slippage_data.get('count', 0)
+                    
+                    avg_day_slippage = sum(day_slippage) / len(day_slippage) if day_slippage else 0
+                    avg_day_fee = sum(day_fee) / len(day_fee) if day_fee else 0
+                    
+                    calibration_data.append({
+                        'date': day,
+                        'slippage_bps': round(avg_day_slippage, 4),
+                        'fee_bps': round(avg_day_fee, 4),
+                        'total_cost_bps': round(avg_day_slippage + avg_day_fee, 4),
+                        'trade_count': day_trade_count
+                    })
+                    
+                    total_days += 1
+                    avg_slippage_bps += avg_day_slippage
+                    avg_fee_bps += avg_day_fee
+                    total_trade_count += day_trade_count
+                except Exception as e:
+                    print(f"处理 {stats_file} 失败: {e}")
+                    continue
+        
+        # 如果没有stats数据，从cost_events原始数据计算
+        if total_days == 0 and events_dir.exists():
+            event_files = sorted(events_dir.glob('*.jsonl'))
+            
+            # 按日期分组统计
+            daily_stats = {}
+            
+            for event_file in event_files[-30:]:  # 最近30天
+                try:
+                    # 从文件名提取日期 (YYYYMMDD.jsonl)
+                    day = event_file.stem
+                    if not day.isdigit() or len(day) != 8:
+                        continue
+                    
+                    slippage_list = []
+                    fee_list = []
+                    
+                    with open(event_file, 'r') as f:
+                        for line in f:
+                            try:
+                                event = json.loads(line.strip())
+                                # 提取滑点和费率
+                                slippage = event.get('slippage_bps') or event.get('slippage_usdt', 0) / event.get('notional_usdt', 1) * 10000
+                                fee = event.get('fee_bps') or event.get('fee', 0) / event.get('notional_usdt', 1) * 10000
+                                
+                                if slippage is not None and not isinstance(slippage, str):
+                                    slippage_list.append(float(slippage))
+                                if fee is not None and not isinstance(fee, str):
+                                    fee_list.append(float(fee))
+                            except:
+                                continue
+                    
+                    if slippage_list or fee_list:
+                        avg_s = sum(slippage_list) / len(slippage_list) if slippage_list else 0
+                        avg_f = sum(fee_list) / len(fee_list) if fee_list else 0
+                        
+                        daily_stats[day] = {
+                            'date': day,
+                            'slippage_bps': round(avg_s, 4),
+                            'fee_bps': round(avg_f, 4),
+                            'total_cost_bps': round(avg_s + avg_f, 4),
+                            'trade_count': len(slippage_list) + len(fee_list)
+                        }
+                except Exception as e:
+                    print(f"处理 {event_file} 失败: {e}")
+                    continue
+            
+            # 转换为列表并计算平均值
+            calibration_data = list(daily_stats.values())
+            calibration_data.sort(key=lambda x: x['date'])
+            
+            total_days = len(calibration_data)
+            for d in calibration_data:
+                avg_slippage_bps += d['slippage_bps']
+                avg_fee_bps += d['fee_bps']
+                total_trade_count += d['trade_count']
         
         # 计算平均值
         if total_days > 0:
@@ -932,12 +1014,15 @@ def api_cost_calibration():
             'avg_fee_bps': round(avg_fee_bps, 4),
             'avg_total_cost_bps': round(avg_slippage_bps + avg_fee_bps, 4),
             'event_files': event_count,
+            'total_trades': total_trade_count,
             'daily_stats': calibration_data[-7:],  # 最近7天
             'progress_percent': min(100, int(total_days / 7 * 100)),
+            'data_source': 'events' if total_days > 0 and not (cost_dir.exists() and list(cost_dir.glob('*.json'))) else 'stats',
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/ic_diagnostics')
