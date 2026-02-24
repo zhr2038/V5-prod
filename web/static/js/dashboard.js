@@ -32,15 +32,26 @@ async function loadAccountData() {
         const response = await fetch(`${API_BASE}/api/account`);
         const data = await response.json();
         
-        document.getElementById('cash-usdt').textContent = data.cash_usdt.toFixed(2);
-        document.getElementById('total-trades').textContent = data.total_trades;
-        document.getElementById('total-fees').textContent = data.total_fees.toFixed(4);
+        if (data.error) {
+            console.error('API错误:', data.error);
+            return;
+        }
+        
+        document.getElementById('cash-usdt').textContent = data.cash_usdt?.toFixed(2) || '--';
+        document.getElementById('total-trades').textContent = data.total_trades || '0';
+        document.getElementById('total-fees').textContent = (data.total_fees?.toFixed(4) || '0') + ' USDT';
         
         const pnlElement = document.getElementById('realized-pnl');
-        pnlElement.textContent = (data.realized_pnl >= 0 ? '+' : '') + data.realized_pnl.toFixed(2);
-        pnlElement.className = 'card-value ' + (data.realized_pnl >= 0 ? 'positive' : 'negative');
+        const pnl = data.realized_pnl || 0;
+        pnlElement.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' USDT';
+        pnlElement.className = 'card-value ' + (pnl >= 0 ? 'positive' : 'negative');
     } catch (error) {
         console.error('加载账户数据失败:', error);
+        // 显示错误状态
+        document.getElementById('cash-usdt').textContent = 'Error';
+        document.getElementById('total-trades').textContent = '--';
+        document.getElementById('total-fees').textContent = '--';
+        document.getElementById('realized-pnl').textContent = '--';
     }
 }
 
@@ -79,44 +90,58 @@ async function loadScoresData() {
         
         // 市场状态
         const regimeBadge = document.getElementById('market-regime');
-        regimeBadge.textContent = data.regime || 'Unknown';
+        const regime = data.regime || 'Unknown';
+        regimeBadge.textContent = regime;
         
-        if (data.regime === 'Risk-Off') {
+        if (regime === 'Risk-Off' || regime === 'Risk_Off') {
             regimeBadge.className = 'badge warning';
-        } else if (data.regime === 'Trending') {
+        } else if (regime === 'Trending') {
             regimeBadge.className = 'badge active';
+        } else if (regime === 'Sideways') {
+            regimeBadge.className = 'badge';
         } else {
             regimeBadge.className = 'badge';
         }
         
         // 评分表格
         const tbody = document.querySelector('#scores-table tbody');
-        if (data.scores && data.scores.length > 0) {
-            tbody.innerHTML = data.scores.map((item, index) => {
-                const scorePercent = Math.min(Math.max(item.score * 50, 0), 100);
+        const scores = data.scores || [];
+        
+        if (scores.length > 0) {
+            tbody.innerHTML = scores.map((item, index) => {
+                const score = item.score || 0;
+                const scorePercent = Math.min(Math.max(score * 50, 0), 100);
                 let signalStrength = '弱';
-                if (item.score > 0.5) signalStrength = '强';
-                else if (item.score > 0.3) signalStrength = '中';
+                let strengthClass = 'weak';
+                if (score > 0.5) {
+                    signalStrength = '强';
+                    strengthClass = 'strong';
+                } else if (score > 0.3) {
+                    signalStrength = '中';
+                    strengthClass = 'medium';
+                }
                 
                 return `
                     <tr>
                         <td>${index + 1}</td>
                         <td>${item.symbol}</td>
-                        <td>${item.score.toFixed(4)}</td>
+                        <td>${score.toFixed(4)}</td>
                         <td>
                             <div class="score-bar">
-                                <div class="score-fill" style="width: ${scorePercent}%"></div>
+                                <div class="score-fill ${strengthClass}" style="width: ${scorePercent}%"></div>
                             </div>
-                            <span style="font-size: 11px; color: #8892b0;">${signalStrength}</span>
+                            <span class="signal-text ${strengthClass}">${signalStrength}</span>
                         </td>
                     </tr>
                 `;
             }).join('');
         } else {
-            tbody.innerHTML = '<tr><td colspan="4" class="loading">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="loading">暂无评分数据</td></tr>';
         }
     } catch (error) {
         console.error('加载评分数据失败:', error);
+        const tbody = document.querySelector('#scores-table tbody');
+        tbody.innerHTML = '<tr><td colspan="4" class="loading">加载失败</td></tr>';
     }
 }
 
@@ -127,21 +152,36 @@ async function loadTradesData() {
         const trades = await response.json();
         
         const tbody = document.querySelector('#trades-table tbody');
-        if (trades.length > 0) {
-            tbody.innerHTML = trades.slice(0, 20).map(trade => `
-                <tr>
-                    <td>${trade.time}</td>
-                    <td>${trade.symbol}</td>
-                    <td class="side-${trade.side}">${trade.side === 'buy' ? '买入' : '卖出'}</td>
-                    <td>$${trade.amount.toFixed(2)}</td>
-                    <td>$${Math.abs(trade.fee).toFixed(6)}</td>
-                </tr>
-            `).join('');
+        
+        if (trades.error) {
+            tbody.innerHTML = `<tr><td colspan="5" class="loading">数据加载失败: ${trades.error}</td></tr>`;
+            return;
+        }
+        
+        if (Array.isArray(trades) && trades.length > 0) {
+            tbody.innerHTML = trades.slice(0, 20).map(trade => {
+                const sideClass = trade.side === 'buy' ? 'side-buy' : 'side-sell';
+                const sideText = trade.side === 'buy' ? '买入' : '卖出';
+                const amount = trade.amount || 0;
+                const fee = Math.abs(trade.fee || 0);
+                
+                return `
+                    <tr>
+                        <td>${trade.time || '--'}</td>
+                        <td>${trade.symbol || '--'}</td>
+                        <td class="${sideClass}">${sideText}</td>
+                        <td>$${amount.toFixed(2)}</td>
+                        <td>$${fee.toFixed(6)}</td>
+                    </tr>
+                `;
+            }).join('');
         } else {
             tbody.innerHTML = '<tr><td colspan="5" class="loading">暂无交易记录</td></tr>';
         }
     } catch (error) {
         console.error('加载交易数据失败:', error);
+        const tbody = document.querySelector('#trades-table tbody');
+        tbody.innerHTML = '<tr><td colspan="5" class="loading">加载失败，请刷新重试</td></tr>';
     }
 }
 
@@ -153,7 +193,38 @@ async function loadEquityHistory() {
         const response = await fetch(`${API_BASE}/api/equity_history`);
         const data = await response.json();
         
-        if (data.length === 0) return;
+        if (data.error) {
+            console.error('权益历史API错误:', data.error);
+            return;
+        }
+        
+        if (!Array.isArray(data) || data.length === 0) {
+            // 显示空状态
+            const ctx = document.getElementById('equity-chart').getContext('2d');
+            if (equityChart) {
+                equityChart.destroy();
+            }
+            
+            equityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: []
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '暂无历史数据',
+                            color: '#8892b0'
+                        }
+                    }
+                }
+            });
+            return;
+        }
         
         const labels = data.map(d => d.date);
         const values = data.map(d => d.net_flow);
@@ -164,13 +235,20 @@ async function loadEquityHistory() {
             equityChart.destroy();
         }
         
+        // 计算累计盈亏
+        let cumulative = 0;
+        const cumulativeValues = values.map(v => {
+            cumulative += v;
+            return cumulative;
+        });
+        
         equityChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [{
-                    label: '日净流入',
-                    data: values,
+                    label: '累计盈亏',
+                    data: cumulativeValues,
                     borderColor: '#00d4ff',
                     backgroundColor: 'rgba(0, 212, 255, 0.1)',
                     borderWidth: 2,
@@ -192,7 +270,12 @@ async function loadEquityHistory() {
                         grid: { color: '#1e2444' }
                     },
                     y: {
-                        ticks: { color: '#8892b0' },
+                        ticks: { 
+                            color: '#8892b0',
+                            callback: function(value) {
+                                return '$' + value.toFixed(2);
+                            }
+                        },
                         grid: { color: '#1e2444' }
                     }
                 }

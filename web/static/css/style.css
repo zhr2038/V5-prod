@@ -198,13 +198,42 @@ tr:hover {
     background: #1e2444;
     border-radius: 3px;
     overflow: hidden;
+    margin-bottom: 4px;
 }
 
 .score-fill {
     height: 100%;
-    background: linear-gradient(90deg, #00d4ff, #7b68ee);
     border-radius: 3px;
     transition: width 0.3s;
+}
+
+.score-fill.strong {
+    background: linear-gradient(90deg, #00c853, #64dd17);
+}
+
+.score-fill.medium {
+    background: linear-gradient(90deg, #ffd600, #ffab00);
+}
+
+.score-fill.weak {
+    background: linear-gradient(90deg, #ff5252, #ff1744);
+}
+
+.signal-text {
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.signal-text.strong {
+    color: #00c853;
+}
+
+.signal-text.medium {
+    color: #ffd600;
+}
+
+.signal-text.weak {
+    color: #ff5252;
 }
 
 .chart-container {
@@ -225,4 +254,10 @@ tr:hover {
     .info-grid {
         grid-template-columns: 1fr;
     }
+}
+
+/* Error state */
+.error-text {
+    color: #ff5252;
+    font-size: 12px;
 }

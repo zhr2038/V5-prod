@@ -33,6 +33,9 @@ WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
 REPORTS_DIR = WORKSPACE / 'reports'
 CONFIG_PATH = WORKSPACE / 'configs/live_20u_real.yaml'
 
+# 排除测试/异常数据
+EXCLUDED_SYMBOLS = ['PEPE-USDT', 'MERL-USDT', 'SPACE-USDT']
+
 
 def get_db_connection():
     """获取数据库连接"""
@@ -63,48 +66,54 @@ def api_account():
     try:
         # 读取reconcile状态
         reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+        cash = 0
         if reconcile_file.exists():
             with open(reconcile_file, 'r') as f:
                 reconcile = json.load(f)
-        else:
-            reconcile = {}
+            cash = reconcile.get('local_snapshot', {}).get('cash_usdt', 0)
         
-        # 获取最新权益
+        # 获取最新权益 - 排除异常数据
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            # 使用参数化查询排除异常币种
+            placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
+            query = f"""
                 SELECT 
                     COUNT(*) as total_trades,
                     SUM(CASE WHEN side='buy' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_buy,
                     SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell,
                     SUM(CASE WHEN state='FILLED' THEN fee ELSE 0 END) as total_fees
                 FROM orders
-            """)
+                WHERE inst_id NOT IN ({placeholders})
+                AND notional_usdt < 1000  -- 排除异常大额
+            """
+            cursor.execute(query, EXCLUDED_SYMBOLS)
             row = cursor.fetchone()
             conn.close()
             
-            total_trades, total_buy, total_sell, total_fees = row
+            total_trades = row[0] or 0
+            total_buy = row[1] or 0
+            total_sell = row[2] or 0
+            total_fees = row[3] or 0
             
             # 计算已实现盈亏
-            realized_pnl = (total_sell or 0) - (total_buy or 0) + (total_fees or 0)
+            realized_pnl = float(total_sell) - float(total_buy) + float(total_fees)
         else:
             total_trades = total_buy = total_sell = total_fees = realized_pnl = 0
         
-        # 从reconcile获取现金
-        cash = reconcile.get('local_snapshot', {}).get('cash_usdt', 0)
-        
         return jsonify({
             'cash_usdt': round(float(cash), 2),
-            'total_trades': total_trades or 0,
-            'total_buy': round(total_buy or 0, 2),
-            'total_sell': round(total_sell or 0, 2),
-            'total_fees': round(total_fees or 0, 4),
-            'realized_pnl': round(realized_pnl, 2),
+            'total_trades': int(total_trades),
+            'total_buy': round(float(total_buy), 2),
+            'total_sell': round(float(total_sell), 2),
+            'total_fees': round(float(total_fees), 4),
+            'realized_pnl': round(float(realized_pnl), 2),
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/trades')
@@ -116,31 +125,39 @@ def api_trades():
             return jsonify([])
         
         cursor = conn.cursor()
-        cursor.execute("""
+        placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
+        cursor.execute(f"""
             SELECT 
                 inst_id, side, notional_usdt, fee, state,
                 datetime(created_ts/1000, 'unixepoch') as time
             FROM orders 
             WHERE state='FILLED'
+            AND inst_id NOT IN ({placeholders})
+            AND notional_usdt < 1000
             ORDER BY created_ts DESC
             LIMIT 100
-        """)
+        """, EXCLUDED_SYMBOLS)
         
         trades = []
         for row in cursor.fetchall():
-            trades.append({
-                'symbol': row[0],
-                'side': row[1],
-                'amount': round(row[2], 4),
-                'fee': round(row[3], 6),
-                'state': row[4],
-                'time': row[5]
-            })
+            try:
+                trades.append({
+                    'symbol': str(row[0]),
+                    'side': str(row[1]),
+                    'amount': round(float(row[2]), 4),
+                    'fee': round(float(row[3]), 6),
+                    'state': str(row[4]),
+                    'time': str(row[5])
+                })
+            except (TypeError, ValueError) as e:
+                # 跳过异常数据
+                continue
         
         conn.close()
         return jsonify(trades)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/positions')
@@ -159,12 +176,17 @@ def api_positions():
         ccy_qty = reconcile.get('local_snapshot', {}).get('ccy_qty', {})
         
         for symbol, qty in ccy_qty.items():
-            if symbol != 'USDT' and float(qty) > 0.000001:
-                positions.append({
-                    'symbol': symbol,
-                    'qty': float(qty),
-                    'value_usdt': 0  # 需要实时价格
-                })
+            try:
+                qty_float = float(qty)
+                # 只显示有实际持仓的（大于最小精度）
+                if symbol != 'USDT' and qty_float > 0.0001:
+                    positions.append({
+                        'symbol': symbol,
+                        'qty': round(qty_float, 8),
+                        'value_usdt': 0  # TODO: 需要实时价格
+                    })
+            except (TypeError, ValueError):
+                continue
         
         return jsonify(positions)
     except Exception as e:
@@ -178,36 +200,44 @@ def api_scores():
         # 查找最新的决策文件
         runs_dir = REPORTS_DIR / 'runs'
         if not runs_dir.exists():
-            return jsonify([])
+            return jsonify({'regime': 'Unknown', 'scores': []})
         
-        # 获取最新的run目录
-        run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], reverse=True)
+        # 获取所有run目录并按修改时间排序（最新的在前）
+        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir()]
+        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        
         if not run_dirs:
-            return jsonify([])
+            return jsonify({'regime': 'Unknown', 'scores': []})
         
-        latest_run = run_dirs[0]
-        decision_file = latest_run / 'decision_audit.json'
+        # 尝试找到有decision_audit.json的最近run
+        for run_dir in run_dirs[:10]:  # 检查最近10个
+            decision_file = run_dir / 'decision_audit.json'
+            if decision_file.exists():
+                try:
+                    with open(decision_file, 'r') as f:
+                        decision = json.load(f)
+                    
+                    scores = []
+                    top_scores = decision.get('top_scores', [])
+                    for item in top_scores[:20]:
+                        try:
+                            scores.append({
+                                'symbol': item.get('symbol', 'Unknown'),
+                                'score': round(float(item.get('score', 0)), 4)
+                            })
+                        except (TypeError, ValueError):
+                            continue
+                    
+                    return jsonify({
+                        'regime': decision.get('regime', 'Unknown'),
+                        'scores': scores
+                    })
+                except (json.JSONDecodeError, KeyError) as e:
+                    continue
         
-        if not decision_file.exists():
-            return jsonify([])
-        
-        with open(decision_file, 'r') as f:
-            decision = json.load(f)
-        
-        scores = []
-        top_scores = decision.get('top_scores', [])
-        for item in top_scores[:20]:
-            scores.append({
-                'symbol': item['symbol'],
-                'score': round(item['score'], 4)
-            })
-        
-        return jsonify({
-            'regime': decision.get('regime', 'Unknown'),
-            'scores': scores
-        })
+        return jsonify({'regime': 'Unknown', 'scores': []})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'regime': 'Error', 'scores': [], 'error': str(e)}), 500
 
 
 @app.route('/api/status')
@@ -243,26 +273,32 @@ def api_equity_history():
         if not conn:
             return jsonify([])
         
-        # 按日期汇总盈亏
+        # 按日期汇总盈亏 - 排除异常数据
         cursor = conn.cursor()
-        cursor.execute("""
+        placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
+        cursor.execute(f"""
             SELECT 
                 date(created_ts/1000, 'unixepoch') as date,
                 SUM(CASE WHEN side='sell' THEN notional_usdt ELSE -notional_usdt END) as net_flow,
                 SUM(fee) as fees
             FROM orders 
             WHERE state='FILLED'
+            AND inst_id NOT IN ({placeholders})
+            AND notional_usdt < 1000
             GROUP BY date
             ORDER BY date
-        """)
+        """, EXCLUDED_SYMBOLS)
         
         data = []
         for row in cursor.fetchall():
-            data.append({
-                'date': row[0],
-                'net_flow': round(row[1] or 0, 2),
-                'fees': round(row[2] or 0, 4)
-            })
+            try:
+                data.append({
+                    'date': str(row[0]),
+                    'net_flow': round(float(row[1] or 0), 2),
+                    'fees': round(float(row[2] or 0), 4)
+                })
+            except (TypeError, ValueError):
+                continue
         
         conn.close()
         return jsonify(data)
