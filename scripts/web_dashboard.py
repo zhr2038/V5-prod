@@ -1042,42 +1042,84 @@ def api_ic_diagnostics():
         with open(latest_ic, 'r') as f:
             ic_data = json.load(f)
         
-        # 解析IC数据
-        overall_ic = ic_data.get('overall', {})
-        by_factor = ic_data.get('by_factor', {})
-        by_regime = ic_data.get('by_regime', {})
+        # 解析IC数据 - 新版结构在overall_tradable.ic下
+        overall_tradable = ic_data.get('overall_tradable', {})
+        overall_raw = ic_data.get('overall_raw', {})
+        
+        # 获取IC数据
+        ic_by_factor = overall_tradable.get('ic', {})
+        
+        # 计算整体IC（所有因子的平均）
+        all_ic_values = []
+        for factor_data in ic_by_factor.values():
+            mean_ic = factor_data.get('mean')
+            if mean_ic is not None:
+                all_ic_values.append(mean_ic)
+        
+        overall_ic_mean = sum(all_ic_values) / len(all_ic_values) if all_ic_values else 0
         
         # 计算各因子IC
         factors = []
-        for factor_name, factor_data in by_factor.items():
+        for factor_name, factor_data in ic_by_factor.items():
+            mean_ic = factor_data.get('mean', 0)
+            p50_ic = factor_data.get('p50', 0)
+            count = factor_data.get('count', 0)
+            
+            # 简化计算IR (IC / std)，如果std不可用则用近似值
+            std_approx = (factor_data.get('p75', 0) - factor_data.get('p25', 0)) / 1.35 if factor_data.get('p75') else 0.1
+            ir = mean_ic / std_approx if std_approx > 0 else 0
+            
             factors.append({
                 'name': factor_name,
-                'ic': round(factor_data.get('ic', 0), 4),
-                'ic_std': round(factor_data.get('ic_std', 0), 4),
-                'ir': round(factor_data.get('ir', 0), 4)
+                'ic': round(mean_ic, 4),
+                'ic_median': round(p50_ic, 4),
+                'ic_std': round(std_approx, 4),
+                'ir': round(ir, 4),
+                'sample_count': count
             })
         
-        # 按regime分组
+        # 按Regime分组 - 从by_regime数据中提取
         regimes = []
-        for regime_name, regime_data in by_regime.items():
-            regimes.append({
-                'name': regime_name,
-                'ic': round(regime_data.get('ic', 0), 4),
-                'sample_count': regime_data.get('n', 0)
-            })
+        regime_data = ic_data.get('by_regime', {})
+        for regime_name, regime_info in regime_data.items():
+            regime_ic_data = regime_info.get('ic', {})
+            if regime_ic_data:
+                # 计算该regime下所有因子的平均IC
+                regime_ic_values = []
+                for factor_ic in regime_ic_data.values():
+                    if isinstance(factor_ic, dict) and 'mean' in factor_ic:
+                        regime_ic_values.append(factor_ic['mean'])
+                    elif isinstance(factor_ic, (int, float)):
+                        regime_ic_values.append(factor_ic)
+                
+                avg_regime_ic = sum(regime_ic_values) / len(regime_ic_values) if regime_ic_values else 0
+                
+                regimes.append({
+                    'name': regime_name,
+                    'ic': round(avg_regime_ic, 4),
+                    'sample_count': regime_info.get('n', 0)
+                })
+        
+        # 计算整体IR
+        overall_std = 0.1  # 默认值
+        if factors:
+            overall_std = sum(f['ic_std'] for f in factors) / len(factors)
+        overall_ir = overall_ic_mean / overall_std if overall_std > 0 else 0
         
         return jsonify({
             'status': 'ready',
-            'overall_ic': round(overall_ic.get('ic', 0), 4),
-            'overall_ir': round(overall_ic.get('ir', 0), 4),
-            'sample_count': overall_ic.get('n', 0),
+            'overall_ic': round(overall_ic_mean, 4),
+            'overall_ir': round(overall_ir, 4),
+            'sample_count': overall_tradable.get('used_points', 0),
+            'timestamps_count': overall_tradable.get('used_timestamps', 0),
             'lookback_days': ic_data.get('lookback_days', 30),
             'factors': factors,
             'regimes': regimes,
             'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/ml_training')
