@@ -6,6 +6,11 @@ const API_BASE = '';
 // 刷新间隔（毫秒）
 const REFRESH_INTERVAL = 30000; // 30秒
 
+// 倒计时相关变量
+let countdownInterval = null;
+let countdownSeconds = 0;
+let maxIntervalSeconds = 7200; // 2小时 = 7200秒
+
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
     loadAllData();
@@ -17,6 +22,7 @@ async function loadAllData() {
     await Promise.all([
         loadAccountData(),
         loadStatusData(),
+        loadTimerData(),
         loadScoresData(),
         loadTradesData(),
         loadEquityHistory()
@@ -79,6 +85,94 @@ async function loadStatusData() {
         document.getElementById('equity-cap').textContent = data.equity_cap + ' USDT';
     } catch (error) {
         console.error('加载状态数据失败:', error);
+    }
+}
+
+// 加载定时任务数据
+async function loadTimerData() {
+    try {
+        const response = await fetch(`${API_BASE}/api/timer`);
+        const data = await response.json();
+        
+        if (data.error) {
+            console.error('Timer API错误:', data.error);
+            document.getElementById('next-run-time').textContent = '获取失败';
+            return;
+        }
+        
+        // 更新下次运行时间
+        if (data.next_run) {
+            const nextRun = new Date(data.next_run);
+            document.getElementById('next-run-time').textContent = 
+                '下次: ' + nextRun.toLocaleString('zh-CN');
+        } else {
+            document.getElementById('next-run-time').textContent = '计算中...';
+        }
+        
+        // 设置倒计时
+        countdownSeconds = data.countdown_seconds || 0;
+        maxIntervalSeconds = (data.interval_minutes || 120) * 60;
+        
+        // 启动倒计时
+        startCountdown();
+        
+    } catch (error) {
+        console.error('加载定时任务数据失败:', error);
+        document.getElementById('next-run-time').textContent = '加载失败';
+    }
+}
+
+// 启动倒计时
+function startCountdown() {
+    // 清除现有倒计时
+    if (countdownInterval) {
+        clearInterval(countdownInterval);
+    }
+    
+    updateCountdownDisplay();
+    
+    // 每秒更新
+    countdownInterval = setInterval(() => {
+        if (countdownSeconds > 0) {
+            countdownSeconds--;
+            updateCountdownDisplay();
+        } else {
+            // 倒计时结束，刷新数据
+            loadTimerData();
+        }
+    }, 1000);
+}
+
+// 更新倒计时显示
+function updateCountdownDisplay() {
+    const hours = Math.floor(countdownSeconds / 3600);
+    const minutes = Math.floor((countdownSeconds % 3600) / 60);
+    const seconds = countdownSeconds % 60;
+    
+    // 更新数值
+    const hoursEl = document.getElementById('countdown-hours');
+    const minutesEl = document.getElementById('countdown-minutes');
+    const secondsEl = document.getElementById('countdown-seconds');
+    
+    if (hoursEl) hoursEl.textContent = String(hours).padStart(2, '0');
+    if (minutesEl) minutesEl.textContent = String(minutes).padStart(2, '0');
+    if (secondsEl) secondsEl.textContent = String(seconds).padStart(2, '0');
+    
+    // 更新进度条
+    const progressEl = document.getElementById('timer-progress');
+    if (progressEl) {
+        const progress = ((maxIntervalSeconds - countdownSeconds) / maxIntervalSeconds) * 100;
+        progressEl.style.width = progress + '%';
+    }
+    
+    // 根据剩余时间改变颜色
+    if (secondsEl) {
+        secondsEl.className = 'countdown-value';
+        if (countdownSeconds < 300) { // 少于5分钟
+            secondsEl.classList.add('danger');
+        } else if (countdownSeconds < 600) { // 少于10分钟
+            secondsEl.classList.add('warning');
+        }
     }
 }
 

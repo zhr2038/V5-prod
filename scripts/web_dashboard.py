@@ -306,6 +306,61 @@ def api_equity_history():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/timer')
+def api_timer():
+    """定时任务信息API"""
+    try:
+        import subprocess
+        import re
+        from datetime import datetime
+        
+        # 获取timer状态 - 使用list-timers获取人类可读格式
+        result = subprocess.run(
+            ['systemctl', '--user', 'list-timers', 'v5-live-20u.user.timer', '--no-pager'],
+            capture_output=True, text=True
+        )
+        
+        next_run = None
+        countdown_seconds = 0
+        
+        # 解析输出
+        for line in result.stdout.split('\n'):
+            if 'v5-live-20u.user.timer' in line:
+                # 格式: "Tue 2026-02-24 14:48:02 CST 36s left ..."
+                # 提取时间部分
+                match = re.search(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', line)
+                if match:
+                    time_str = match.group(1)
+                    try:
+                        next_run_dt = datetime.strptime(time_str, '%a %Y-%m-%d %H:%M:%S')
+                        next_run = next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        # 计算倒计时
+                        now = datetime.now()
+                        diff = next_run_dt - now
+                        countdown_seconds = max(0, int(diff.total_seconds()))
+                    except Exception as e:
+                        print(f"解析时间失败: {e}")
+                break
+        
+        return jsonify({
+            'timer_name': 'v5-live-20u.user.timer',
+            'next_run': next_run,
+            'countdown_seconds': countdown_seconds,
+            'interval_minutes': 120,  # 每2小时
+            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'timer_name': 'v5-live-20u.user.timer',
+            'next_run': None,
+            'countdown_seconds': 0,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 if __name__ == '__main__':
     print("="*60)
     print("V5 Web Dashboard 启动中...")

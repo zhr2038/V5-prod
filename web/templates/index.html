@@ -65,6 +65,37 @@
                     <span id="market-regime" class="badge">--</span>
                 </div>
             </div>
+            
+            <!-- 定时任务倒计时 -->
+            <div class="timer-section">
+                <div class="timer-header">
+                    <span class="timer-icon">⏰</span>
+                    <span class="timer-title">下次交易执行</span>
+                </div>
+                <div class="countdown-display">
+                    <div class="countdown-unit">
+                        <span class="countdown-value" id="countdown-hours">00</span>
+                        <span class="countdown-label">小时</span>
+                    </div>
+                    <div class="countdown-separator">:</div>
+                    <div class="countdown-unit">
+                        <span class="countdown-value" id="countdown-minutes">00</span>
+                        <span class="countdown-label">分钟</span>
+                    </div>
+                    <div class="countdown-separator">:</div>
+                    <div class="countdown-unit">
+                        <span class="countdown-value" id="countdown-seconds">00</span>
+                        <span class="countdown-label">秒</span>
+                    </div>
+                </div>
+                <div class="timer-info">
+                    <span id="next-run-time">计算中...</span>
+                    <span class="timer-interval">每2小时执行</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="timer-progress"></div>
+                </div>
+            </div>
         </section>
 
         <!-- 币种评分 -->
