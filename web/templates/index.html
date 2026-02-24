@@ -3,455 +3,866 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>V5 Trading Bot - 专业版监控面板</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <title>V5 Trading Bot - 综合监控面板</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0e1a;
+            color: #e0e6ed;
+            min-height: 100vh;
+        }
+        
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        
+        header {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #1e2530;
+            margin-bottom: 20px;
+        }
+        
+        header h1 {
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, #00d4ff, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .nav-tab {
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid #2a3142;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            color: #94a3b8;
+        }
+        
+        .nav-tab:hover { background: rgba(255,255,255,0.1); }
+        .nav-tab.active { 
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            color: white;
+            border-color: transparent;
+        }
+        
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 15px;
+        }
+        
+        .card {
+            background: linear-gradient(135deg, #1a1f2e 0%, #151921 100%);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #2a3142;
+        }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .card-icon {
+            width: 40px; height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-right: 12px;
+        }
+        
+        .card-title { font-size: 1rem; font-weight: 600; }
+        .card-subtitle { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+        
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        
+        .stat-item {
+            background: rgba(255,255,255,0.03);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
+        .stat-label { font-size: 0.75rem; color: #64748b; margin-top: 5px; }
+        
+        /* Progress */
+        .progress-container { margin: 10px 0; }
+        .progress-header { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 6px; }
+        .progress-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+        .progress-green { background: linear-gradient(90deg, #22c55e, #4ade80); }
+        .progress-blue { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+        .progress-purple { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+        
+        /* Timers */
+        .timer-item {
+            display: flex; align-items: center;
+            padding: 10px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .timer-icon { font-size: 18px; margin-right: 10px; }
+        .timer-name { font-weight: 500; font-size: 0.9rem; }
+        .timer-desc { font-size: 0.75rem; color: #64748b; }
+        .timer-status { margin-left: auto; text-align: right; }
+        .status-badge {
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+        .status-active { background: rgba(34,197,94,0.2); color: #22c55e; }
+        .status-inactive { background: rgba(239,68,68,0.2); color: #ef4444; }
+        
+        /* Chart Container */
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 20px 0;
+        }
+        
+        /* Positions & Trades */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .data-table th, .data-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .data-table th { color: #64748b; font-weight: 500; }
+        .data-table tr:hover { background: rgba(255,255,255,0.02); }
+        .positive { color: #22c55e; }
+        .negative { color: #ef4444; }
+        
+        /* Update Time */
+        .update-time {
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            color: #64748b;
+            font-size: 0.8rem;
+        }
+        
+        .loading {
+            display: flex; align-items: center; justify-content: center;
+            padding: 40px; color: #64748b;
+        }
+        .spinner {
+            width: 24px; height: 24px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
 </head>
 <body>
     <div class="container">
-        <!-- 顶部导航 -->
-        <header class="main-header">
-            <div class="logo">
-                <i class="fas fa-robot"></i>
-                <span>V5 Trading Bot</span>
-                <span class="version">Pro</span>
-            </div>
-            <nav class="main-nav">
-                <a href="#overview" class="nav-link active" data-tab="overview">
-                    <i class="fas fa-chart-line"></i> 总览
-                </a>
-                <a href="#backtest" class="nav-link" data-tab="backtest">
-                    <i class="fas fa-history"></i> 回测中心
-                </a>
-                <a href="#strategy" class="nav-link" data-tab="strategy">
-                    <i class="fas fa-sliders-h"></i> 策略配置
-                </a>
-                <a href="#alerts" class="nav-link" data-tab="alerts">
-                    <i class="fas fa-bell"></i> 告警通知
-                </a>
-                <a href="#system" class="nav-link" data-tab="system">
-                    <i class="fas fa-server"></i> 系统状态
-                </a>
-            </nav>
-            <div class="header-actions">
-                <span id="system-status-badge" class="badge">检查中...</span>
-                <button class="btn-refresh" onclick="refreshAllData()">
-                    <i class="fas fa-sync-alt"></i> 刷新
-                </button>
-            </div>
+        <header>
+            <h1>🚀 V5 Trading Bot 综合监控面板</h1>
         </header>
-
-        <!-- 总览面板 -->
+        
+        <div class="nav-tabs">
+            <div class="nav-tab active" onclick="switchTab('overview')">📊 总览</div>
+            <div class="nav-tab" onclick="switchTab('equity')">📈 权益曲线</div>
+            <div class="nav-tab" onclick="switchTab('positions')">💼 持仓&交易</div>
+            <div class="nav-tab" onclick="switchTab('system')">⚙️ 系统状态</div>
+        </div>
+        
+        <!-- 总览 Tab -->
         <div id="tab-overview" class="tab-content active">
-            <!-- 统计卡片 -->
-            <section class="section">
-                <div class="cards-grid">
-                    <div class="card card-primary">
-                        <div class="card-icon"><i class="fas fa-wallet"></i></div>
-                        <div class="card-content">
-                            <div class="card-title">总权益</div>
-                            <div class="card-value" id="cash-usdt">--</div>
-                            <div class="card-change" id="total-pnl-change">--</div>
+            <div class="grid">
+                <!-- 账户概览 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(59,130,246,0.2);">💰</div>
+                        <div>
+                            <div class="card-title">账户概览</div>
+                            <div class="card-subtitle">Account Overview</div>
                         </div>
                     </div>
-                    <div class="card card-success">
-                        <div class="card-icon"><i class="fas fa-chart-pie"></i></div>
-                        <div class="card-content">
-                            <div class="card-title">总交易次数</div>
-                            <div class="card-value" id="total-trades">--</div>
-                            <div class="card-subtitle">笔</div>
-                        </div>
-                    </div>
-                    <div class="card" id="pnl-card">
-                        <div class="card-icon"><i class="fas fa-percentage"></i></div>
-                        <div class="card-content">
-                            <div class="card-title">已实现盈亏</div>
-                            <div class="card-value" id="realized-pnl">--</div>
-                            <div class="card-subtitle">USDT</div>
-                        </div>
-                    </div>
-                    <div class="card card-info">
-                        <div class="card-icon"><i class="fas fa-receipt"></i></div>
-                        <div class="card-content">
-                            <div class="card-title">总手续费</div>
-                            <div class="card-value" id="total-fees">--</div>
-                            <div class="card-subtitle">USDT</div>
-                        </div>
+                    <div class="stats-grid" id="account-stats">
+                        <div class="loading"><div class="spinner"></div></div>
                     </div>
                 </div>
-            </section>
-
-            <!-- 图表和市场状态 -->
-            <section class="section">
-                <div class="two-column">
-                    <div class="column-main">
-                        <h2 class="section-title"><i class="fas fa-chart-area"></i> 权益曲线</h2>
-                        <div class="chart-container large">
-                            <canvas id="equity-chart"></canvas>
+                
+                <!-- 市场状态 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(245,158,11,0.2);">📉</div>
+                        <div>
+                            <div class="card-title">市场状态</div>
+                            <div class="card-subtitle">Market State</div>
                         </div>
                     </div>
-                    <div class="column-side">
-                        <div class="market-state-card">
-                            <h3><i class="fas fa-globe"></i> 市场状态</h3>
-                            <div class="market-state-badge" id="market-state-badge">
-                                <i class="fas fa-shield-alt"></i>
-                                <span>Risk-Off</span>
-                            </div>
-                            <div class="market-metrics">
-                                <div class="metric">
-                                    <span class="metric-label">MA20</span>
-                                    <span class="metric-value" id="ma20">--</span>
-                                </div>
-                                <div class="metric">
-                                    <span class="metric-label">MA60</span>
-                                    <span class="metric-value" id="ma60">--</span>
-                                </div>
-                                <div class="metric">
-                                    <span class="metric-label">ATR%</span>
-                                    <span class="metric-value" id="atr-percent">--</span>
-                                </div>
-                                <div class="metric highlight">
-                                    <span class="metric-label">仓位乘数</span>
-                                    <span class="metric-value" id="pos-multiplier">--</span>
-                                </div>
-                            </div>
-                            <p class="market-description" id="market-desc">--</p>
-                        </div>
-
-                        <!-- 定时倒计时 -->
-                        <div class="timer-section">
-                            <div class="timer-header">
-                                <i class="fas fa-clock"></i>
-                                <span>下次交易执行</span>
-                            </div>
-                            <div class="countdown-display">
-                                <div class="countdown-unit">
-                                    <span class="countdown-value" id="countdown-hours">00</span>
-                                    <span class="countdown-label">小时</span>
-                                </div>
-                                <div class="countdown-separator">:</div>
-                                <div class="countdown-unit">
-                                    <span class="countdown-value" id="countdown-minutes">00</span>
-                                    <span class="countdown-label">分钟</span>
-                                </div>
-                                <div class="countdown-separator">:</div>
-                                <div class="countdown-unit">
-                                    <span class="countdown-value" id="countdown-seconds">00</span>
-                                    <span class="countdown-label">秒</span>
-                                </div>
-                            </div>
-                            <div class="timer-info">
-                                <span id="next-run-time">计算中...</span>
-                                <span class="timer-interval">每小时执行</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="timer-progress"></div>
-                            </div>
-                        </div>
+                    <div id="market-state">
+                        <div class="loading"><div class="spinner"></div></div>
                     </div>
                 </div>
-            </section>
-
-            <!-- Alpha 排名和最近交易 -->
-            <section class="section">
-                <div class="two-column">
-                    <div class="column">
-                        <h2 class="section-title"><i class="fas fa-trophy"></i> Alpha 选股排名 (Top 10)</h2>
-                        <div class="table-container">
-                            <table id="scores-table">
-                                <thead>
-                                    <tr>
-                                        <th>排名</th>
-                                        <th>币种</th>
-                                        <th>评分</th>
-                                        <th>信号</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr><td colspan="4" class="loading">加载中...</td></tr>
-                                </tbody>
-                            </table>
+                
+                <!-- 定时任务 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(34,197,94,0.2);">⏰</div>
+                        <div>
+                            <div class="card-title">定时任务</div>
+                            <div class="card-subtitle">System Timers</div>
                         </div>
                     </div>
-                    <div class="column">
-                        <h2 class="section-title"><i class="fas fa-list-alt"></i> 最近交易</h2>
-                        <div class="table-container">
-                            <table id="trades-table">
-                                <thead>
-                                    <tr>
-                                        <th>时间</th>
-                                        <th>币种</th>
-                                        <th>方向</th>
-                                        <th>金额</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr><td colspan="4" class="loading">加载中...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
+                    <div id="timers-list">
+                        <div class="loading"><div class="spinner"></div></div>
                     </div>
                 </div>
-            </section>
-
-            <!-- 持仓列表 -->
-            <section class="section">
-                <h2 class="section-title"><i class="fas fa-coins"></i> 当前持仓</h2>
-                <div class="table-container">
-                    <table id="positions-table">
+                
+                <!-- ML训练 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(139,92,246,0.2);">🧠</div>
+                        <div>
+                            <div class="card-title">ML训练进度</div>
+                            <div class="card-subtitle">Machine Learning</div>
+                        </div>
+                    </div>
+                    <div id="ml-progress">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 权益曲线 Tab -->
+        <div id="tab-equity" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(59,130,246,0.2);">📈</div>
+                    <div>
+                        <div class="card-title">权益曲线</div>
+                        <div class="card-subtitle">Equity Curve</div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="equityChart"></canvas>
+                </div>
+                
+                <div class="stats-grid" style="margin-top: 20px;" id="equity-stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="equity-initial">--</div>
+                        <div class="stat-label">初始权益</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="equity-current">--</div>
+                        <div class="stat-label">当前权益</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="equity-return">--</div>
+                        <div class="stat-label">总收益率</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="equity-days">--</div>
+                        <div class="stat-label">交易天数</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 持仓 Tab -->
+        <div id="tab-positions" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(34,197,94,0.2);">💼</div>
+                        <div>
+                            <div class="card-title">当前持仓</div>
+                            <div class="card-subtitle">Positions</div>
+                        </div>
+                    </div>
+                    <div id="positions-table-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(6,182,212,0.2);">🔄</div>
+                        <div>
+                            <div class="card-title">最近交易</div>
+                            <div class="card-subtitle">Recent Trades</div>
+                        </div>
+                    </div>
+                    <div id="trades-table-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        
+        <!-- 系统状态 Tab -->
+        <div id="tab-system" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(34,197,94,0.2);">💰</div>
+                        <div>
+                            <div class="card-title">F2成本校准</div>
+                            <div class="card-subtitle">Cost Calibration</div>
+                        </div>
+                    </div>
+                    <div id="cost-calibration">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(245,158,11,0.2);">📊</div>
+                        <div>
+                            <div class="card-title">IC因子诊断</div>
+                            <div class="card-subtitle">IC Diagnostics</div>
+                        </div>
+                    </div>
+                    <div id="ic-diagnostics">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(236,72,153,0.2);">📝</div>
+                        <div>
+                            <div class="card-title">反思报告</div>
+                            <div class="card-subtitle">Reflection Reports</div>
+                        </div>
+                    </div>
+                    <div id="reflection-reports">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="update-time" id="update-time">
+            最后更新: --
+        </div>
+    </div>
+    
+    <script>
+        // Tab切换
+        function switchTab(tabName) {
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            
+            if (tabName === 'equity') loadEquityChart();
+        }
+        
+        // 加载账户数据
+        async function loadAccount() {
+            try {
+                const res = await fetch('/api/account');
+                const data = await res.json();
+                
+                const html = `
+                    <div class="stat-item">
+                        <div class="stat-value">$${data.cash_usdt?.toFixed(2) || '--'}</div>
+                        <div class="stat-label">可用资金</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value ${data.realized_pnl >= 0 ? 'positive' : 'negative'}">
+                            ${data.realized_pnl >= 0 ? '+' : ''}${data.realized_pnl?.toFixed(2) || '--'}
+                        </div>
+                        <div class="stat-label">已实现盈亏</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.total_trades || 0}</div>
+                        <div class="stat-label">总交易数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.total_fees?.toFixed(4) || '--'}</div>
+                        <div class="stat-label">手续费</div>
+                    </div>
+                `;
+                document.getElementById('account-stats').innerHTML = html;
+            } catch (e) {
+                console.error('加载账户失败:', e);
+            }
+        }
+        
+        // 加载市场状态
+        async function loadMarketState() {
+            try {
+                const res = await fetch('/api/market_state');
+                const data = await res.json();
+                
+                const stateColors = {
+                    'RISK_OFF': '#ef4444',
+                    'TRENDING': '#22c55e',
+                    'SIDEWAYS': '#f59e0b'
+                };
+                
+                const html = `
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" style="color: ${stateColors[data.state] || '#fff'}">
+                                ${data.state || '--'}
+                            </div>
+                            <div class="stat-label">市场状态</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.position_multiplier}x</div>
+                            <div class="stat-label">仓位乘数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.ma20?.toFixed(0) || '--'}</div>
+                            <div class="stat-label">MA20</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.ma60?.toFixed(0) || '--'}</div>
+                            <div class="stat-label">MA60</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 0.9rem;">
+                        ${data.description || '市场状态监控中'}
+                    </div>
+                `;
+                document.getElementById('market-state').innerHTML = html;
+            } catch (e) {
+                console.error('加载市场状态失败:', e);
+            }
+        }
+        
+        // 加载定时任务
+        async function loadTimers() {
+            try {
+                const res = await fetch('/api/timers');
+                const data = await res.json();
+                
+                let html = '';
+                data.timers?.forEach(timer => {
+                    const statusClass = timer.active ? 'status-active' : 'status-inactive';
+                    const statusText = timer.active ? '运行' : '停止';
+                    
+                    html += `
+                        <div class="timer-item">
+                            <div class="timer-icon">${timer.icon}</div>
+                            <div style="flex: 1;">
+                                <div class="timer-name">${timer.desc}</div>
+                                <div class="timer-desc">${timer.time_left || '等待中'}</div>
+                            </div>
+                            <div class="timer-status">
+                                <span class="status-badge ${statusClass}">${statusText}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                document.getElementById('timers-list').innerHTML = html || '<div style="color: #64748b; text-align: center;">暂无定时任务</div>';
+            } catch (e) {
+                console.error('加载定时任务失败:', e);
+            }
+        }
+        
+        // 加载ML训练进度
+        async function loadMLProgress() {
+            try {
+                const res = await fetch('/api/ml_training');
+                const data = await res.json();
+                
+                const statusMap = {
+                    'trained_today': { color: '#22c55e', text: '今日已训练' },
+                    'ready_to_train': { color: '#3b82f6', text: '等待训练' },
+                    'collecting_data': { color: '#f59e0b', text: '数据收集中' },
+                    'no_data': { color: '#64748b', text: '暂无数据' }
+                };
+                const status = statusMap[data.status] || { color: '#64748b', text: '未知' };
+                
+                const html = `
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>数据收集: ${data.total_samples || 0}/${data.samples_needed || 100}</span>
+                            <span style="color: ${status.color}">${status.text}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-purple" style="width: ${data.progress_percent || 0}%"></div>
+                        </div>
+                    </div>
+                    ${data.last_ic ? `
+                        <div style="margin-top: 10px; text-align: center;">
+                            <span style="color: #64748b;">最新IC: </span>
+                            <span style="color: ${data.last_ic > 0.02 ? '#22c55e' : '#f59e0b'}; font-weight: 600;">${data.last_ic.toFixed(4)}</span>
+                        </div>
+                    ` : ''}
+                `;
+                document.getElementById('ml-progress').innerHTML = html;
+            } catch (e) {
+                console.error('加载ML进度失败:', e);
+            }
+        }
+        
+        // 加载权益曲线图表
+        let equityChart = null;
+        async function loadEquityChart() {
+            try {
+                const res = await fetch('/api/equity_curve');
+                const data = await res.json();
+                
+                // 更新统计数据
+                document.getElementById('equity-initial').textContent = `$${data.initial || 100}`;
+                document.getElementById('equity-current').textContent = `$${data.current || 100}`;
+                const returnEl = document.getElementById('equity-return');
+                returnEl.textContent = `${data.total_return >= 0 ? '+' : ''}${data.total_return?.toFixed(2) || 0}%`;
+                returnEl.className = 'stat-value ' + (data.total_return >= 0 ? 'positive' : 'negative');
+                document.getElementById('equity-days').textContent = data.dates?.length || 0;
+                
+                // 绘制图表
+                const ctx = document.getElementById('equityChart').getContext('2d');
+                
+                if (equityChart) {
+                    equityChart.destroy();
+                }
+                
+                if (!data.dates || data.dates.length === 0) {
+                    document.getElementById('equityChart').parentElement.innerHTML = 
+                        '<div style="text-align: center; padding: 100px 20px; color: #64748b;">暂无权益数据</div>';
+                    return;
+                }
+                
+                equityChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.dates,
+                        datasets: [{
+                            label: '权益曲线',
+                            data: data.values,
+                            borderColor: '#00d4ff',
+                            backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(10, 14, 26, 0.9)',
+                                borderColor: '#2a3142',
+                                borderWidth: 1,
+                                callbacks: {
+                                    label: (context) => `权益: $${context.raw.toFixed(2)}`
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: { color: '#64748b', maxTicksLimit: 8 }
+                            },
+                            y: {
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: { 
+                                    color: '#64748b',
+                                    callback: (val) => '$' + val.toFixed(0)
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('加载权益曲线失败:', e);
+            }
+        }
+        
+        // 加载持仓
+        async function loadPositions() {
+            try {
+                const res = await fetch('/api/positions');
+                const data = await res.json();
+                
+                if (!data || data.length === 0) {
+                    document.getElementById('positions-table-container').innerHTML = 
+                        '<div style="text-align: center; padding: 40px; color: #64748b;">当前无持仓</div>';
+                    return;
+                }
+                
+                let html = `
+                    <table class="data-table">
                         <thead>
                             <tr>
                                 <th>币种</th>
                                 <th>数量</th>
-                                <th>市值</th>
-                                <th>占比</th>
-                                <th>状态</th>
+                                <th>价值(USDT)</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr><td colspan="5" class="loading">加载中...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-        </div>
-
-        <!-- 回测中心 -->
-        <div id="tab-backtest" class="tab-content">
-            <section class="section">
-                <h2 class="section-title"><i class="fas fa-history"></i> 回测中心</h2>
-                <div class="backtest-panel">
-                    <div class="backtest-form">
-                        <div class="form-group">
-                            <label>策略选择</label>
-                            <select id="backtest-strategy">
-                                <option value="multi_factor">多因子策略 (当前)</option>
-                                <option value="momentum">动量策略</option>
-                                <option value="mean_reversion">均值回归</option>
-                            </select>
+                `;
+                
+                data.forEach(pos => {
+                    html += `
+                        <tr>
+                            <td>${pos.symbol}</td>
+                            <td>${pos.qty?.toFixed(6) || '--'}</td>
+                            <td>${pos.value_usdt?.toFixed(2) || '--'}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</tbody></table>';
+                document.getElementById('positions-table-container').innerHTML = html;
+            } catch (e) {
+                console.error('加载持仓失败:', e);
+            }
+        }
+        
+        // 加载交易记录
+        async function loadTrades() {
+            try {
+                const res = await fetch('/api/trades');
+                const data = await res.json();
+                
+                if (!data || data.length === 0) {
+                    document.getElementById('trades-table-container').innerHTML = 
+                        '<div style="text-align: center; padding: 40px; color: #64748b;">暂无交易记录</div>';
+                    return;
+                }
+                
+                let html = `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>币种</th>
+                                <th>方向</th>
+                                <th>金额</th>
+                                <th>手续费</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                data.slice(0, 10).forEach(trade => {
+                    const sideClass = trade.side === 'buy' ? 'negative' : 'positive';
+                    const sideText = trade.side === 'buy' ? '买入' : '卖出';
+                    
+                    html += `
+                        <tr>
+                            <td>${trade.time?.slice(0, 16).replace('T', ' ') || '--'}</td>
+                            <td>${trade.symbol}</td>
+                            <td class="${sideClass}">${sideText}</td>
+                            <td>$${trade.amount?.toFixed(2) || '--'}</td>
+                            <td>${trade.fee?.toFixed(6) || '--'}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</tbody></table>';
+                document.getElementById('trades-table-container').innerHTML = html;
+            } catch (e) {
+                console.error('加载交易失败:', e);
+            }
+        }
+        
+        // 加载成本校准
+        async function loadCostCalibration() {
+            try {
+                const res = await fetch('/api/cost_calibration');
+                const data = await res.json();
+                
+                const statusText = data.status === 'calibrated' ? '已校准' : '校准中';
+                const statusColor = data.status === 'calibrated' ? '#22c55e' : '#f59e0b';
+                
+                const html = `
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>校准进度</span>
+                            <span style="color: ${statusColor}">${statusText}</span>
                         </div>
-                        <div class="form-group">
-                            <label>时间范围</label>
-                            <input type="date" id="backtest-start" value="2025-12-01">
-                            <span>至</span>
-                            <input type="date" id="backtest-end" value="2026-02-24">
-                        </div>
-                        <button class="btn-primary" onclick="runBacktest()">
-                            <i class="fas fa-play"></i> 运行回测
-                        </button>
-                    </div>
-
-                    <h3 class="subsection-title">历史回测记录</h3>
-                    <div class="table-container">
-                        <table id="backtest-history">
-                            <thead>
-                                <tr>
-                                    <th>回测ID</th>
-                                    <th>时间范围</th>
-                                    <th>策略</th>
-                                    <th>总收益</th>
-                                    <th>夏普</th>
-                                    <th>最大回撤</th>
-                                    <th>状态</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td colspan="7" class="loading">暂无回测记录</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <!-- 策略配置 -->
-        <div id="tab-strategy" class="tab-content">
-            <section class="section">
-                <h2 class="section-title"><i class="fas fa-sliders-h"></i> 策略配置</h2>
-                <div class="strategy-panel">
-                    <div class="strategy-section">
-                        <h3>Alpha 因子权重</h3>
-                        <div class="slider-group">
-                            <label>5日动量权重 <span id="weight-f1">25%</span></label>
-                            <input type="range" id="f1-weight" min="0" max="100" value="25" oninput="updateWeight('f1', this.value)">
-                        </div>
-                        <div class="slider-group">
-                            <label>20日动量权重 <span id="weight-f2">25%</span></label>
-                            <input type="range" id="f2-weight" min="0" max="100" value="25" oninput="updateWeight('f2', this.value)">
-                        </div>
-                        <div class="slider-group">
-                            <label>波动率调整收益 <span id="weight-f3">20%</span></label>
-                            <input type="range" id="f3-weight" min="0" max="100" value="20" oninput="updateWeight('f3', this.value)">
-                        </div>
-                        <div class="slider-group">
-                            <label>成交量扩张 <span id="weight-f4">15%</span></label>
-                            <input type="range" id="f4-weight" min="0" max="100" value="15" oninput="updateWeight('f4', this.value)">
-                        </div>
-                        <div class="slider-group">
-                            <label>RSI趋势确认 <span id="weight-f5">15%</span></label>
-                            <input type="range" id="f5-weight" min="0" max="100" value="15" oninput="updateWeight('f5', this.value)">
-                        </div>
-                    </div>
-
-                    <div class="strategy-section">
-                        <h3>风险控制</h3>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Kill Switch 回撤阈值</label>
-                                <input type="number" id="kill-switch-threshold" value="15" min="5" max="50">%
-                            </div>
-                            <div class="form-group">
-                                <label>最大单币权重</label>
-                                <input type="number" id="max-single-weight" value="25" min="10" max="50">%
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>手续费 (bps)</label>
-                                <input type="number" id="fee-bps" value="6" min="1" max="20">
-                            </div>
-                            <div class="form-group">
-                                <label>滑点 (bps)</label>
-                                <input type="number" id="slippage-bps" value="5" min="1" max="20">
-                            </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-green" style="width: ${data.progress_percent || 0}%"></div>
                         </div>
                     </div>
-
-                    <div class="strategy-actions">
-                        <button class="btn-secondary" onclick="resetStrategy()">重置默认</button>
-                        <button class="btn-primary" onclick="saveStrategy()">保存配置</button>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <!-- 告警通知 -->
-        <div id="tab-alerts" class="tab-content">
-            <section class="section">
-                <h2 class="section-title"><i class="fas fa-bell"></i> 告警通知</h2>
-                <div class="alerts-panel">
-                    <div class="alert-rules">
-                        <div class="alert-rule enabled">
-                            <div class="alert-toggle">
-                                <input type="checkbox" checked id="alert-kill-switch">
-                                <span class="toggle-slider"></span>
-                            </div>
-                            <div class="alert-content">
-                                <h4>Kill Switch 触发告警</h4>
-                                <p>当系统触发Kill Switch时发送通知</p>
-                            </div>
-                            <div class="alert-channel">
-                                <i class="fab fa-telegram"></i> Telegram
-                            </div>
+                    <div class="stats-grid" style="margin-top: 15px;">
+                        <div class="stat-item">
+                            <div class="stat-value">${data.total_days || 0}</div>
+                            <div class="stat-label">校准天数</div>
                         </div>
-                        <div class="alert-rule enabled">
-                            <div class="alert-toggle">
-                                <input type="checkbox" checked id="alert-drawdown">
-                                <span class="toggle-slider"></span>
-                            </div>
-                            <div class="alert-content">
-                                <h4>回撤超过 10%</h4>
-                                <p>账户回撤达到设定阈值时告警</p>
-                            </div>
-                            <div class="alert-channel">
-                                <i class="fab fa-telegram"></i> Telegram
-                            </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.avg_slippage_bps?.toFixed(2) || '--'}</div>
+                            <div class="stat-label">滑点(bps)</div>
                         </div>
-                        <div class="alert-rule">
-                            <div class="alert-toggle">
-                                <input type="checkbox" id="alert-daily-pnl">
-                                <span class="toggle-slider"></span>
-                            </div>
-                            <div class="alert-content">
-                                <h4>单日收益超过 5%</h4>
-                                <p>单日盈亏达到设定阈值时告警</p>
-                            </div>
-                            <div class="alert-channel">
-                                <i class="fab fa-telegram"></i> Telegram
-                            </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.avg_fee_bps?.toFixed(2) || '--'}</div>
+                            <div class="stat-label">费率(bps)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.event_files || 0}</div>
+                            <div class="stat-label">事件文件</div>
                         </div>
                     </div>
-                </div>
-            </section>
-        </div>
-
-        <!-- 系统状态 -->
-        <div id="tab-system" class="tab-content">
-            <section class="section">
-                <h2 class="section-title"><i class="fas fa-server"></i> 系统状态</h2>
-                <div class="system-panel">
-                    <div class="system-cards">
-                        <div class="system-card">
-                            <div class="system-icon green">
-                                <i class="fas fa-check-circle"></i>
-                            </div>
-                            <div class="system-info">
-                                <h4>API 连接</h4>
-                                <p id="api-status">正常</p>
-                            </div>
+                `;
+                document.getElementById('cost-calibration').innerHTML = html;
+            } catch (e) {
+                console.error('加载成本校准失败:', e);
+            }
+        }
+        
+        // 加载IC诊断
+        async function loadICDiagnostics() {
+            try {
+                const res = await fetch('/api/ic_diagnostics');
+                const data = await res.json();
+                
+                if (data.status === 'no_data' || data.error) {
+                    document.getElementById('ic-diagnostics').innerHTML = 
+                        '<div style="text-align: center; padding: 40px; color: #64748b;">暂无IC诊断数据<br/><span style="font-size: 0.85rem;">需要至少30天交易数据</span></div>';
+                    return;
+                }
+                
+                const icColor = data.overall_ic > 0.02 ? '#22c55e' : data.overall_ic > 0 ? '#f59e0b' : '#ef4444';
+                
+                let html = `
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" style="color: ${icColor}">${data.overall_ic?.toFixed(4) || '--'}</div>
+                            <div class="stat-label">整体IC</div>
                         </div>
-                        <div class="system-card">
-                            <div class="system-icon green">
-                                <i class="fas fa-database"></i>
-                            </div>
-                            <div class="system-info">
-                                <h4>数据同步</h4>
-                                <p id="sync-status">正常</p>
-                            </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.overall_ir?.toFixed(4) || '--'}</div>
+                            <div class="stat-label">IR比率</div>
                         </div>
-                        <div class="system-card">
-                            <div class="system-icon green">
-                                <i class="fas fa-exchange-alt"></i>
+                    </div>
+                `;
+                
+                if (data.factors && data.factors.length > 0) {
+                    html += '<div style="margin-top: 15px; font-size: 0.85rem; color: #64748b;">因子IC:</div>';
+                    data.factors.slice(0, 5).forEach(f => {
+                        const color = f.ic > 0.02 ? '#22c55e' : f.ic > 0 ? '#94a3b8' : '#ef4444';
+                        html += `
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                <span style="color: #94a3b8;">${f.name}</span>
+                                <span style="color: ${color}; font-weight: 500;">${f.ic?.toFixed(4) || '--'}</span>
                             </div>
-                            <div class="system-info">
-                                <h4>订单执行</h4>
-                                <p id="order-status">正常</p>
+                        `;
+                    });
+                }
+                
+                document.getElementById('ic-diagnostics').innerHTML = html;
+            } catch (e) {
+                console.error('加载IC诊断失败:', e);
+            }
+        }
+        
+        // 加载反思报告
+        async function loadReflectionReports() {
+            try {
+                const res = await fetch('/api/reflection_reports');
+                const data = await res.json();
+                
+                if (!data.reports || data.reports.length === 0) {
+                    document.getElementById('reflection-reports').innerHTML = 
+                        '<div style="text-align: center; padding: 40px; color: #64748b;">暂无反思报告<br/><span style="font-size: 0.85rem;">每天21:00自动生成</span></div>';
+                    return;
+                }
+                
+                const r = data.reports[0];
+                const pnlColor = r.total_pnl >= 0 ? '#22c55e' : '#ef4444';
+                
+                const html = `
+                    <div style="background: rgba(236,72,153,0.1); border-radius: 10px; padding: 15px; margin-bottom: 15px;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <div>
+                                <div style="font-weight: 600;">最新报告: ${r.date}</div>
+                                <div style="font-size: 0.8rem; color: #64748b;">${r.trade_count}笔 · ${r.symbols}币种</div>
                             </div>
-                        </div>
-                        <div class="system-card">
-                            <div class="system-icon" id="timer-status-icon">
-                                <i class="fas fa-clock"></i>
-                            </div>
-                            <div class="system-info">
-                                <h4>定时任务</h4>
-                                <p id="timer-system-status">运行中</p>
+                            <div style="text-align: right;">
+                                <div style="font-size: 1.3rem; font-weight: 700; color: ${pnlColor};">
+                                    ${r.total_pnl >= 0 ? '+' : ''}${r.total_pnl?.toFixed(2)}
+                                </div>
+                                <div style="font-size: 0.75rem; color: #64748b;">总盈亏</div>
                             </div>
                         </div>
                     </div>
-
-                    <div class="system-details">
-                        <h3>系统信息</h3>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="info-label">交易模式:</span>
-                                <span id="trade-mode" class="info-value">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">资金上限:</span>
-                                <span id="equity-cap" class="info-value">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">最后更新:</span>
-                                <span id="last-update" class="info-value">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label">运行时长:</span>
-                                <span id="uptime" class="info-value">--</span>
-                            </div>
+                    <div style="display: flex; gap: 10px; text-align: center;">
+                        <div style="flex: 1; padding: 10px; background: rgba(239,68,68,0.1); border-radius: 8px;">
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #ef4444;">${r.high_priority}</div>
+                            <div style="font-size: 0.7rem; color: #64748b;">高优先级</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: rgba(245,158,11,0.1); border-radius: 8px;">
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #f59e0b;">${r.medium_priority}</div>
+                            <div style="font-size: 0.7rem; color: #64748b;">中优先级</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: rgba(34,197,94,0.1); border-radius: 8px;">
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #22c55e;">${r.insights_count}</div>
+                            <div style="font-size: 0.7rem; color: #64748b;">总洞察</div>
                         </div>
                     </div>
-                </div>
-            </section>
-        </div>
-
-        <footer class="main-footer">
-            <p>V5 Trading Bot Dashboard Pro | 最后更新: <span id="footer-update">--</span></p>
-        </footer>
-    </div>
-
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+                `;
+                document.getElementById('reflection-reports').innerHTML = html;
+            } catch (e) {
+                console.error('加载反思报告失败:', e);
+            }
+        }
+        
+        // 加载所有数据
+        async function loadAll() {
+            await Promise.all([
+                loadAccount(),
+                loadMarketState(),
+                loadTimers(),
+                loadMLProgress(),
+                loadPositions(),
+                loadTrades(),
+                loadCostCalibration(),
+                loadICDiagnostics(),
+                loadReflectionReports()
+            ]);
+            
+            document.getElementById('update-time').textContent = 
+                '最后更新: ' + new Date().toLocaleString('zh-CN');
+        }
+        
+        // 初始加载
+        loadAll();
+        setInterval(loadAll, 30000);
+    </script>
 </body>
 </html>

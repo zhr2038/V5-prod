@@ -400,6 +400,9 @@ def api_market_state():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/equity_history')
 def api_equity_history():
     """权益曲线历史"""
     try:
@@ -438,6 +441,62 @@ def api_equity_history():
         
         conn.close()
         return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/equity_curve')
+def api_equity_curve():
+    """权益曲线 - 新版格式（支持图表库）"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'dates': [], 'values': [], 'pnl': []})
+        
+        cursor = conn.cursor()
+        placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
+        cursor.execute(f"""
+            SELECT 
+                date(created_ts/1000, 'unixepoch') as date,
+                SUM(CASE WHEN side='sell' THEN notional_usdt ELSE -notional_usdt END) as net_flow,
+                SUM(fee) as fees
+            FROM orders 
+            WHERE state='FILLED'
+            AND inst_id NOT IN ({placeholders})
+            AND notional_usdt < 1000
+            GROUP BY date
+            ORDER BY date
+        """, EXCLUDED_SYMBOLS)
+        
+        dates = []
+        values = []
+        pnls = []
+        cumulative = 100
+        
+        for row in cursor.fetchall():
+            try:
+                date_str = str(row[0])
+                net_flow = float(row[1] or 0)
+                fees = float(row[2] or 0)
+                pnl = net_flow - fees
+                cumulative += pnl
+                
+                dates.append(date_str)
+                values.append(round(cumulative, 2))
+                pnls.append(round(pnl, 2))
+            except (TypeError, ValueError):
+                continue
+        
+        conn.close()
+        
+        return jsonify({
+            'dates': dates,
+            'values': values,
+            'pnl': pnls,
+            'initial': 100,
+            'current': values[-1] if values else 100,
+            'total_return': round((values[-1] - 100) / 100 * 100, 2) if values else 0
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
