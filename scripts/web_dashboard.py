@@ -290,12 +290,14 @@ def api_equity_history():
         """, EXCLUDED_SYMBOLS)
         
         data = []
+        cumulative = 100  # 初始权益
         for row in cursor.fetchall():
             try:
+                net_flow = float(row[1] or 0)
+                cumulative += net_flow
                 data.append({
-                    'date': str(row[0]),
-                    'net_flow': round(float(row[1] or 0), 2),
-                    'fees': round(float(row[2] or 0), 4)
+                    'timestamp': str(row[0]) + 'T00:00:00Z',
+                    'value': round(cumulative, 2)
                 })
             except (TypeError, ValueError):
                 continue
@@ -304,6 +306,113 @@ def api_equity_history():
         return jsonify(data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dashboard')
+def api_dashboard():
+    """Dashboard 完整数据API"""
+    try:
+        # 获取账户数据
+        account_data = api_account().get_json()
+        
+        # 获取持仓
+        positions_data = api_positions().get_json()
+        
+        # 获取交易
+        trades_data = api_trades().get_json()
+        
+        # 获取评分
+        scores_data = api_scores().get_json()
+        
+        # 获取状态
+        status_data = api_status().get_json()
+        
+        # 获取权益曲线
+        equity_data = api_equity_history().get_json()
+        
+        # 获取市场状态
+        market_state = {
+            'state': scores_data.get('regime', 'RISK_OFF').upper().replace('-', '_'),
+            'ma20': 0,
+            'ma60': 0,
+            'atrPercent': 1.0,
+            'positionMultiplier': 0.3 if scores_data.get('regime') == 'Risk-Off' else 1.0,
+            'description': 'Risk-Off模式下减少仓位暴露'
+        }
+        
+        # 转换持仓格式
+        positions = []
+        for pos in positions_data:
+            positions.append({
+                'symbol': pos.get('symbol', ''),
+                'qty': pos.get('qty', 0),
+                'avgPrice': 0,
+                'currentPrice': 0,
+                'value': pos.get('value_usdt', 0),
+                'pnl': 0,
+                'pnlPercent': 0
+            })
+        
+        # 转换交易格式
+        trades = []
+        for i, trade in enumerate(trades_data[:20]):
+            trades.append({
+                'id': str(i),
+                'timestamp': trade.get('time', '') + 'Z' if trade.get('time') else '',
+                'symbol': trade.get('symbol', '').replace('-USDT', '/USDT'),
+                'side': trade.get('side', 'buy'),
+                'type': 'REBALANCE',
+                'price': 0,
+                'qty': 0,
+                'value': trade.get('amount', 0),
+                'fee': abs(trade.get('fee', 0))
+            })
+        
+        # 转换Alpha评分
+        alpha_scores = []
+        for i, score in enumerate(scores_data.get('scores', [])[:10]):
+            alpha_scores.append({
+                'symbol': score.get('symbol', '').replace('-USDT', '/USDT'),
+                'score': score.get('score', 0),
+                'f1_mom_5d': 0,
+                'f2_mom_20d': 0,
+                'f3_vol_adj': 0,
+                'f4_volume': 0,
+                'f5_rsi': 0,
+                'weight': 0.1
+            })
+        
+        dashboard_data = {
+            'account': {
+                'totalEquity': account_data.get('cash_usdt', 0),
+                'cash': account_data.get('cash_usdt', 0),
+                'totalPnl': account_data.get('realized_pnl', 0),
+                'totalPnlPercent': round((account_data.get('realized_pnl', 0) / 100) * 100, 2) if account_data.get('cash_usdt', 0) > 0 else 0,
+                'todayPnl': 0,
+                'todayPnlPercent': 0,
+                'sharpeRatio': 0,
+                'maxDrawdown': 0,
+                'winRate': 0,
+                'totalTrades': account_data.get('total_trades', 0)
+            },
+            'positions': positions,
+            'trades': trades,
+            'alphaScores': alpha_scores,
+            'marketState': market_state,
+            'systemStatus': {
+                'isRunning': status_data.get('timer_active', False),
+                'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',
+                'lastUpdate': account_data.get('last_update', ''),
+                'killSwitch': False,
+                'errors': []
+            },
+            'equityCurve': equity_data if isinstance(equity_data, list) else []
+        }
+        
+        return jsonify(dashboard_data)
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/timer')
