@@ -240,7 +240,7 @@ def api_positions():
 
 @app.route('/api/scores')
 def api_scores():
-    """币种评分API"""
+    """币种评分API - 包含与上次结果的比较"""
     try:
         # 查找最新的决策文件
         runs_dir = REPORTS_DIR / 'runs'
@@ -255,6 +255,9 @@ def api_scores():
             return jsonify({'regime': 'Unknown', 'scores': []})
         
         # 尝试找到有decision_audit.json的最近run
+        current_scores = []
+        current_regime = 'Unknown'
+        
         for run_dir in run_dirs[:10]:  # 检查最近10个
             decision_file = run_dir / 'decision_audit.json'
             if decision_file.exists():
@@ -262,25 +265,111 @@ def api_scores():
                     with open(decision_file, 'r') as f:
                         decision = json.load(f)
                     
-                    scores = []
+                    current_regime = decision.get('regime', 'Unknown')
                     top_scores = decision.get('top_scores', [])
+                    
                     for item in top_scores[:20]:
                         try:
-                            scores.append({
+                            current_scores.append({
                                 'symbol': item.get('symbol', 'Unknown'),
                                 'score': round(float(item.get('score', 0)), 4)
                             })
                         except (TypeError, ValueError):
                             continue
                     
-                    return jsonify({
-                        'regime': decision.get('regime', 'Unknown'),
-                        'scores': scores
-                    })
+                    break  # 找到了当前数据
                 except (json.JSONDecodeError, KeyError) as e:
                     continue
         
-        return jsonify({'regime': 'Unknown', 'scores': []})
+        # 加载历史评分数据
+        history_file = REPORTS_DIR / 'scores_history.json'
+        previous_ranking = {}
+        
+        if history_file.exists():
+            try:
+                with open(history_file, 'r') as f:
+                    history = json.load(f)
+                
+                # 获取最近一次的数据（排除当前）
+                current_time = datetime.now().isoformat()
+                for entry in reversed(history):
+                    entry_time = entry.get('timestamp', '')
+                    # 如果这条记录比当前时间早至少5分钟，认为是上一次的数据
+                    if entry_time < current_time:
+                        prev_scores = entry.get('scores', [])
+                        for idx, s in enumerate(prev_scores):
+                            previous_ranking[s.get('symbol')] = {
+                                'rank': idx + 1,
+                                'score': s.get('score', 0)
+                            }
+                        break
+            except Exception as e:
+                print(f"加载历史评分失败: {e}")
+        
+        # 比较排名变化
+        scores_with_trend = []
+        for idx, s in enumerate(current_scores):
+            symbol = s['symbol']
+            current_rank = idx + 1
+            prev_info = previous_ranking.get(symbol)
+            
+            if prev_info:
+                rank_change = prev_info['rank'] - current_rank  # 正值表示排名上升
+                score_change = s['score'] - prev_info['score']
+                
+                if rank_change > 0:
+                    trend = 'up'  # 排名上升（数字变小）
+                elif rank_change < 0:
+                    trend = 'down'  # 排名下降（数字变大）
+                else:
+                    trend = 'stable'  # 排名不变
+                
+                scores_with_trend.append({
+                    **s,
+                    'rank': current_rank,
+                    'previous_rank': prev_info['rank'],
+                    'rank_change': rank_change,
+                    'score_change': round(score_change, 4),
+                    'trend': trend
+                })
+            else:
+                scores_with_trend.append({
+                    **s,
+                    'rank': current_rank,
+                    'previous_rank': None,
+                    'rank_change': None,
+                    'score_change': None,
+                    'trend': 'new'  # 新上榜
+                })
+        
+        # 保存当前评分到历史
+        try:
+            history = []
+            if history_file.exists():
+                with open(history_file, 'r') as f:
+                    history = json.load(f)
+            
+            # 添加新记录
+            history.append({
+                'timestamp': datetime.now().isoformat(),
+                'regime': current_regime,
+                'scores': current_scores
+            })
+            
+            # 只保留最近100条记录
+            if len(history) > 100:
+                history = history[-100:]
+            
+            with open(history_file, 'w') as f:
+                json.dump(history, f, indent=2)
+        except Exception as e:
+            print(f"保存历史评分失败: {e}")
+        
+        return jsonify({
+            'regime': current_regime,
+            'scores': scores_with_trend,
+            'last_update': datetime.now().isoformat()
+        })
     except Exception as e:
         return jsonify({'regime': 'Error', 'scores': [], 'error': str(e)}), 500
 
