@@ -285,6 +285,21 @@ def api_scores():
         history_file = REPORTS_DIR / 'scores_history.json'
         previous_ranking = {}
         
+        # 初始化历史数据（如果是第一次运行）
+        if not history_file.exists():
+            try:
+                # 创建初始历史记录（所有币当前排名作为基准）
+                initial_history = [{
+                    'timestamp': (datetime.now() - timedelta(hours=1)).isoformat(),
+                    'regime': current_regime,
+                    'scores': current_scores[:15]  # 前15名作为初始
+                }]
+                with open(history_file, 'w') as f:
+                    json.dump(initial_history, f, indent=2)
+                print(f"[Scores] 创建初始历史数据: {len(current_scores)} 个币种")
+            except Exception as e:
+                print(f"[Scores] 创建初始历史失败: {e}")
+        
         if history_file.exists():
             try:
                 with open(history_file, 'r') as f:
@@ -294,7 +309,7 @@ def api_scores():
                 current_time = datetime.now().isoformat()
                 for entry in reversed(history):
                     entry_time = entry.get('timestamp', '')
-                    # 如果这条记录比当前时间早至少5分钟，认为是上一次的数据
+                    # 如果这条记录比当前时间早至少30分钟，认为是上一次的数据
                     if entry_time < current_time:
                         prev_scores = entry.get('scores', [])
                         for idx, s in enumerate(prev_scores):
@@ -372,6 +387,62 @@ def api_scores():
         })
     except Exception as e:
         return jsonify({'regime': 'Error', 'scores': [], 'error': str(e)}), 500
+
+
+@app.route('/api/sentiment')
+def api_sentiment():
+    """情绪分析API"""
+    try:
+        # 导入情绪因子
+        sys.path.insert(0, '/home/admin/clawd/v5-trading-bot/src')
+        from factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
+        
+        factor = DeepSeekSentimentFactor()
+        
+        # 分析主要币种
+        symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']
+        results = {}
+        
+        for symbol in symbols:
+            try:
+                result = factor.calculate(symbol)
+                results[symbol] = {
+                    'sentiment': result['f6_sentiment'],
+                    'fear_greed': result['f6_fear_greed_index'],
+                    'stage': result.get('f6_market_stage', 'unknown'),
+                    'summary': result.get('f6_sentiment_summary', '')
+                }
+            except Exception as e:
+                results[symbol] = {'error': str(e)}
+        
+        # 计算平均情绪
+        valid_scores = [r['sentiment'] for r in results.values() if 'sentiment' in r]
+        avg_sentiment = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+        
+        # 判断整体市场状态
+        if avg_sentiment > 0.5:
+            market_mood = '贪婪'
+            mood_color = '#22c55e'
+        elif avg_sentiment < -0.5:
+            market_mood = '恐慌'
+            mood_color = '#ef4444'
+        else:
+            market_mood = '中性'
+            mood_color = '#64748b'
+        
+        return jsonify({
+            'overall': {
+                'sentiment': round(avg_sentiment, 4),
+                'fear_greed': int((avg_sentiment + 1) * 50),
+                'mood': market_mood,
+                'mood_color': mood_color
+            },
+            'by_symbol': results,
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/status')

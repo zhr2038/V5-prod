@@ -270,6 +270,20 @@
                         <div class="loading"><div class="spinner"></div></div>
                     </div>
                 </div>
+                
+                <!-- 情绪分析 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(139,92,246,0.2);">😊</div>
+                        <div>
+                            <div class="card-title">市场情绪</div>
+                            <div class="card-subtitle">Fear & Greed</div>
+                        </div>
+                    </div>
+                    <div id="sentiment-display">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -976,6 +990,51 @@
             }
         }
         
+        // 加载情绪分析
+        async function loadSentiment() {
+            try {
+                const res = await fetch('/api/sentiment');
+                const data = await res.json();
+                
+                const container = document.getElementById('sentiment-display');
+                
+                if (data.error) {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">情绪分析暂未启用</div>';
+                    return;
+                }
+                
+                const overall = data.overall || {};
+                const mood = overall.mood || '中性';
+                const moodColor = overall.mood_color || '#64748b';
+                const fearGreed = overall.fear_greed || 50;
+                
+                let html = `
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <div style="font-size: 2.5rem; font-weight: 700; color: ${moodColor}; margin-bottom: 5px;">
+                            ${fearGreed}
+                        </div>
+                        <div style="font-size: 1rem; color: ${moodColor}; font-weight: 500;">
+                            ${mood}
+                        </div>
+                        <div style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">
+                            恐惧贪婪指数 (0-100)
+                        </div>
+                    </div>
+                    
+                    <div style="height: 8px; background: linear-gradient(90deg, #ef4444 0%, #f59e0b 25%, #64748b 50%, #3b82f6 75%, #22c55e 100%); border-radius: 4px; position: relative; margin: 15px 0;">
+                        <div style="position: absolute; top: -5px; left: ${fearGreed}%; width: 4px; height: 18px; background: white; border-radius: 2px; transform: translateX(-50%); box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+                
+            } catch (e) {
+                console.error('加载情绪分析失败:', e);
+                document.getElementById('sentiment-display').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
         // 加载所有数据
         async function loadAll() {
             await Promise.all([
@@ -984,6 +1043,7 @@
                 loadTimers(),
                 loadMLProgress(),
                 loadAlphaScores(),
+                loadSentiment(),
                 loadPositions(),
                 loadTrades(),
                 loadCostCalibration(),
