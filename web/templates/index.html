@@ -485,14 +485,49 @@
                 let html = '';
                 data.timers?.forEach(timer => {
                     const statusClass = timer.active ? 'status-active' : 'status-inactive';
-                    const statusText = timer.active ? '运行' : '停止';
+                    const statusText = timer.active ? '运行中' : '已停止';
+                    
+                    // 格式化下次运行时间
+                    let nextRunText = '未启用';
+                    if (timer.next_run && timer.next_run !== 'n/a') {
+                        try {
+                            // 解析 "Tue 2026-02-24 22:00:00" 格式
+                            const dateMatch = timer.next_run.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d+)/);
+                            if (dateMatch) {
+                                const [_, year, month, day, hour, minute] = dateMatch;
+                                const date = new Date(year, month - 1, day, hour, minute);
+                                const now = new Date();
+                                const diffMs = date - now;
+                                
+                                if (diffMs > 0) {
+                                    const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+                                    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                                    
+                                    if (diffHrs > 0) {
+                                        nextRunText = `${diffHrs}小时${diffMins}分钟后`;
+                                    } else if (diffMins > 0) {
+                                        nextRunText = `${diffMins}分钟后`;
+                                    } else {
+                                        nextRunText = '即将运行';
+                                    }
+                                    
+                                    // 添加具体时间
+                                    nextRunText += ` (${hour}:${minute})`;
+                                } else {
+                                    nextRunText = '正在运行或已过期';
+                                }
+                            }
+                        } catch (e) {
+                            nextRunText = timer.next_run;
+                        }
+                    }
                     
                     html += `
                         <div class="timer-item">
                             <div class="timer-icon">${timer.icon}</div>
                             <div style="flex: 1;">
                                 <div class="timer-name">${timer.desc}</div>
-                                <div class="timer-desc">${timer.time_left || '等待中'}</div>
+                                <div class="timer-desc" style="color: #00d4ff; font-size: 0.8rem;">${nextRunText}</div>
                             </div>
                             <div class="timer-status">
                                 <span class="status-badge ${statusClass}">${statusText}</span>
