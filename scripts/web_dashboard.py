@@ -60,6 +60,39 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/<path:filename>')
+def static_files(filename):
+    """提供React静态文件"""
+    react_build_path = '/home/admin/v5-trading-dashboard/dist'
+    file_path = os.path.join(react_build_path, filename)
+    
+    # 检查文件是否存在
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        # 根据扩展名设置Content-Type
+        content_types = {
+            '.js': 'application/javascript',
+            '.css': 'text/css',
+            '.html': 'text/html',
+            '.json': 'application/json',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.svg': 'image/svg+xml',
+        }
+        ext = os.path.splitext(filename)[1]
+        content_type = content_types.get(ext, 'application/octet-stream')
+        
+        with open(file_path, 'rb') as f:
+            return f.read(), 200, {'Content-Type': content_type}
+    
+    # 如果文件不存在，返回index.html（支持React Router）
+    index_path = os.path.join(react_build_path, 'index.html')
+    if os.path.exists(index_path):
+        with open(index_path, 'r') as f:
+            return f.read(), 200, {'Content-Type': 'text/html'}
+    
+    return 'Not found', 404
+
+
 @app.route('/api/account')
 def api_account():
     """账户信息API"""

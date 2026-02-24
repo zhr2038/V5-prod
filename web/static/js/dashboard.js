@@ -1,4 +1,4 @@
-// V5 Dashboard JavaScript
+// V5 Dashboard Pro - 完整JavaScript
 
 // API 端点
 const API_BASE = '';
@@ -9,27 +9,78 @@ const REFRESH_INTERVAL = 30000; // 30秒
 // 倒计时相关变量
 let countdownInterval = null;
 let countdownSeconds = 0;
-let maxIntervalSeconds = 7200; // 2小时 = 7200秒
+let maxIntervalSeconds = 3600; // 1小时 = 3600秒
 
-// 初始化
+// Tab 切换
 document.addEventListener('DOMContentLoaded', function() {
+    // 初始化Tab切换
+    initTabs();
+    
+    // 加载所有数据
     loadAllData();
+    
+    // 设置自动刷新
     setInterval(loadAllData, REFRESH_INTERVAL);
+    
+    // 启动倒计时
+    startCountdown();
 });
+
+// Tab切换初始化
+function initTabs() {
+    const navLinks = document.querySelectorAll('.nav-link');
+    const tabContents = document.querySelectorAll('.tab-content');
+    
+    navLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const targetTab = link.getAttribute('data-tab');
+            
+            // 更新导航激活状态
+            navLinks.forEach(l => l.classList.remove('active'));
+            link.classList.add('active');
+            
+            // 切换内容
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+                if (content.id === `tab-${targetTab}`) {
+                    content.classList.add('active');
+                }
+            });
+        });
+    });
+}
 
 // 加载所有数据
 async function loadAllData() {
-    await Promise.all([
-        loadAccountData(),
-        loadStatusData(),
-        loadTimerData(),
-        loadScoresData(),
-        loadTradesData(),
-        loadEquityHistory()
-    ]);
+    try {
+        await Promise.all([
+            loadAccountData(),
+            loadStatusData(),
+            loadTimerData(),
+            loadScoresData(),
+            loadTradesData(),
+            loadPositionsData(),
+            loadMarketState(),
+            loadEquityHistory()
+        ]);
+        
+        updateFooterTime();
+    } catch (error) {
+        console.error('加载数据失败:', error);
+    }
+}
+
+// 刷新所有数据
+function refreshAllData() {
+    const btn = document.querySelector('.btn-refresh i');
+    btn.classList.add('fa-spin');
     
-    document.getElementById('last-update').textContent = 
-        '最后更新: ' + new Date().toLocaleString('zh-CN');
+    loadAllData().then(() => {
+        setTimeout(() => {
+            btn.classList.remove('fa-spin');
+        }, 1000);
+    });
 }
 
 // 加载账户数据
@@ -43,46 +94,61 @@ async function loadAccountData() {
             return;
         }
         
-        document.getElementById('cash-usdt').textContent = data.cash_usdt?.toFixed(2) || '--';
+        // 更新统计卡片
+        document.getElementById('cash-usdt').textContent = '$' + (data.cash_usdt?.toFixed(2) || '0.00');
         document.getElementById('total-trades').textContent = data.total_trades || '0';
-        document.getElementById('total-fees').textContent = (data.total_fees?.toFixed(4) || '0') + ' USDT';
+        document.getElementById('total-fees').textContent = '$' + Math.abs(data.total_fees || 0).toFixed(4);
         
-        const pnlElement = document.getElementById('realized-pnl');
+        // 盈亏显示
         const pnl = data.realized_pnl || 0;
-        pnlElement.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' USDT';
-        pnlElement.className = 'card-value ' + (pnl >= 0 ? 'positive' : 'negative');
+        const pnlEl = document.getElementById('realized-pnl');
+        pnlEl.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2);
+        pnlEl.style.color = pnl >= 0 ? 'var(--color-success)' : 'var(--color-danger)';
+        
+        // 卡片盈亏变化
+        const pnlChangeEl = document.getElementById('total-pnl-change');
+        if (pnlChangeEl) {
+            pnlChangeEl.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' USDT';
+            pnlChangeEl.className = 'card-change ' + (pnl >= 0 ? 'positive' : 'negative');
+        }
+        
     } catch (error) {
         console.error('加载账户数据失败:', error);
-        // 显示错误状态
-        document.getElementById('cash-usdt').textContent = 'Error';
-        document.getElementById('total-trades').textContent = '--';
-        document.getElementById('total-fees').textContent = '--';
-        document.getElementById('realized-pnl').textContent = '--';
     }
 }
 
-// 加载状态数据
+// 加载系统状态
 async function loadStatusData() {
     try {
         const response = await fetch(`${API_BASE}/api/status`);
         const data = await response.json();
         
-        // 定时器状态
-        const timerBadge = document.getElementById('timer-status');
-        timerBadge.textContent = data.timer_active ? '运行中' : '已停止';
-        timerBadge.className = 'badge ' + (data.timer_active ? 'active' : 'inactive');
+        // 系统状态徽章
+        const statusBadge = document.getElementById('system-status-badge');
+        if (data.timer_active) {
+            statusBadge.textContent = '运行中';
+            statusBadge.className = 'badge active';
+        } else {
+            statusBadge.textContent = '已停止';
+            statusBadge.className = 'badge inactive';
+        }
         
-        // 系统状态
-        const systemBadge = document.getElementById('system-status');
-        systemBadge.textContent = data.timer_active ? '正常' : '异常';
-        systemBadge.className = 'badge ' + (data.timer_active ? 'active' : 'inactive');
+        // 系统信息
+        document.getElementById('trade-mode').textContent = data.mode + (data.dry_run ? ' (模拟)' : ' (实盘)');
+        document.getElementById('equity-cap').textContent = '$' + data.equity_cap;
+        document.getElementById('last-update').textContent = data.last_check;
         
-        // 交易模式
-        const modeText = data.mode + (data.dry_run ? ' (模拟)' : ' (实盘)');
-        document.getElementById('trade-mode').textContent = modeText;
+        // 系统状态Tab
+        const timerStatusIcon = document.getElementById('timer-status-icon');
+        const timerStatusText = document.getElementById('timer-system-status');
+        if (data.timer_active) {
+            timerStatusIcon.className = 'system-icon green';
+            timerStatusText.textContent = '运行中';
+        } else {
+            timerStatusIcon.className = 'system-icon red';
+            timerStatusText.textContent = '已停止';
+        }
         
-        // 资金上限
-        document.getElementById('equity-cap').textContent = data.equity_cap + ' USDT';
     } catch (error) {
         console.error('加载状态数据失败:', error);
     }
@@ -93,12 +159,6 @@ async function loadTimerData() {
     try {
         const response = await fetch(`${API_BASE}/api/timer`);
         const data = await response.json();
-        
-        if (data.error) {
-            console.error('Timer API错误:', data.error);
-            document.getElementById('next-run-time').textContent = '获取失败';
-            return;
-        }
         
         // 更新下次运行时间
         if (data.next_run) {
@@ -124,31 +184,24 @@ async function loadTimerData() {
             }
         }
         
-        // 启动倒计时
-        startCountdown();
-        
     } catch (error) {
         console.error('加载定时任务数据失败:', error);
-        document.getElementById('next-run-time').textContent = '加载失败';
     }
 }
 
 // 启动倒计时
 function startCountdown() {
-    // 清除现有倒计时
     if (countdownInterval) {
         clearInterval(countdownInterval);
     }
     
     updateCountdownDisplay();
     
-    // 每秒更新
     countdownInterval = setInterval(() => {
         if (countdownSeconds > 0) {
             countdownSeconds--;
             updateCountdownDisplay();
         } else {
-            // 倒计时结束，刷新数据
             loadTimerData();
         }
     }, 1000);
@@ -160,30 +213,21 @@ function updateCountdownDisplay() {
     const minutes = Math.floor((countdownSeconds % 3600) / 60);
     const seconds = countdownSeconds % 60;
     
-    // 更新数值
-    const hoursEl = document.getElementById('countdown-hours');
-    const minutesEl = document.getElementById('countdown-minutes');
-    const secondsEl = document.getElementById('countdown-seconds');
-    
-    if (hoursEl) hoursEl.textContent = String(hours).padStart(2, '0');
-    if (minutesEl) minutesEl.textContent = String(minutes).padStart(2, '0');
-    if (secondsEl) secondsEl.textContent = String(seconds).padStart(2, '0');
+    document.getElementById('countdown-hours').textContent = String(hours).padStart(2, '0');
+    document.getElementById('countdown-minutes').textContent = String(minutes).padStart(2, '0');
+    document.getElementById('countdown-seconds').textContent = String(seconds).padStart(2, '0');
     
     // 更新进度条
-    const progressEl = document.getElementById('timer-progress');
-    if (progressEl) {
-        const progress = ((maxIntervalSeconds - countdownSeconds) / maxIntervalSeconds) * 100;
-        progressEl.style.width = progress + '%';
-    }
+    const progress = ((maxIntervalSeconds - countdownSeconds) / maxIntervalSeconds) * 100;
+    document.getElementById('timer-progress').style.width = progress + '%';
     
-    // 根据剩余时间改变颜色
-    if (secondsEl) {
-        secondsEl.className = 'countdown-value';
-        if (countdownSeconds < 300) { // 少于5分钟
-            secondsEl.classList.add('danger');
-        } else if (countdownSeconds < 600) { // 少于10分钟
-            secondsEl.classList.add('warning');
-        }
+    // 颜色变化
+    const secondsEl = document.getElementById('countdown-seconds');
+    secondsEl.className = 'countdown-value';
+    if (countdownSeconds < 300) {
+        secondsEl.classList.add('danger');
+    } else if (countdownSeconds < 600) {
+        secondsEl.classList.add('warning');
     }
 }
 
@@ -193,22 +237,6 @@ async function loadScoresData() {
         const response = await fetch(`${API_BASE}/api/scores`);
         const data = await response.json();
         
-        // 市场状态
-        const regimeBadge = document.getElementById('market-regime');
-        const regime = data.regime || 'Unknown';
-        regimeBadge.textContent = regime;
-        
-        if (regime === 'Risk-Off' || regime === 'Risk_Off') {
-            regimeBadge.className = 'badge warning';
-        } else if (regime === 'Trending') {
-            regimeBadge.className = 'badge active';
-        } else if (regime === 'Sideways') {
-            regimeBadge.className = 'badge';
-        } else {
-            regimeBadge.className = 'badge';
-        }
-        
-        // 评分表格
         const tbody = document.querySelector('#scores-table tbody');
         const scores = data.scores || [];
         
@@ -243,10 +271,45 @@ async function loadScoresData() {
         } else {
             tbody.innerHTML = '<tr><td colspan="4" class="loading">暂无评分数据</td></tr>';
         }
+        
+        // 更新市场状态
+        updateMarketStateFromScores(data.regime);
+        
     } catch (error) {
         console.error('加载评分数据失败:', error);
-        const tbody = document.querySelector('#scores-table tbody');
-        tbody.innerHTML = '<tr><td colspan="4" class="loading">加载失败</td></tr>';
+    }
+}
+
+// 更新市场状态
+function updateMarketStateFromScores(regime) {
+    const badge = document.getElementById('market-state-badge');
+    const desc = document.getElementById('market-desc');
+    
+    if (!regime) return;
+    
+    const regimeUpper = regime.toUpperCase().replace('-', '_');
+    
+    if (regimeUpper === 'RISK_OFF') {
+        badge.innerHTML = '<i class="fas fa-shield-alt"></i><span>Risk-Off</span>';
+        badge.style.background = 'rgba(239, 68, 68, 0.1)';
+        badge.style.color = 'var(--color-danger)';
+        badge.style.borderColor = 'var(--color-danger)';
+        desc.textContent = '风险规避模式，减少仓位暴露';
+        document.getElementById('pos-multiplier').textContent = '0.0x';
+    } else if (regimeUpper === 'TRENDING') {
+        badge.innerHTML = '<i class="fas fa-arrow-trend-up"></i><span>趋势行情</span>';
+        badge.style.background = 'rgba(16, 185, 129, 0.1)';
+        badge.style.color = 'var(--color-success)';
+        badge.style.borderColor = 'var(--color-success)';
+        desc.textContent = '趋势行情，增加仓位暴露';
+        document.getElementById('pos-multiplier').textContent = '1.0x';
+    } else if (regimeUpper === 'SIDEWAYS') {
+        badge.innerHTML = '<i class="fas fa-minus"></i><span>震荡行情</span>';
+        badge.style.background = 'rgba(245, 158, 11, 0.1)';
+        badge.style.color = 'var(--color-warning)';
+        badge.style.borderColor = 'var(--color-warning)';
+        desc.textContent = '震荡行情，正常仓位';
+        document.getElementById('pos-multiplier').textContent = '0.5x';
     }
 }
 
@@ -259,16 +322,15 @@ async function loadTradesData() {
         const tbody = document.querySelector('#trades-table tbody');
         
         if (trades.error) {
-            tbody.innerHTML = `<tr><td colspan="5" class="loading">数据加载失败: ${trades.error}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="4" class="loading">数据加载失败</td></tr>`;
             return;
         }
         
         if (Array.isArray(trades) && trades.length > 0) {
-            tbody.innerHTML = trades.slice(0, 20).map(trade => {
+            tbody.innerHTML = trades.slice(0, 10).map(trade => {
                 const sideClass = trade.side === 'buy' ? 'side-buy' : 'side-sell';
                 const sideText = trade.side === 'buy' ? '买入' : '卖出';
                 const amount = trade.amount || 0;
-                const fee = Math.abs(trade.fee || 0);
                 
                 return `
                     <tr>
@@ -276,89 +338,84 @@ async function loadTradesData() {
                         <td>${trade.symbol || '--'}</td>
                         <td class="${sideClass}">${sideText}</td>
                         <td>$${amount.toFixed(2)}</td>
-                        <td>$${fee.toFixed(6)}</td>
                     </tr>
                 `;
             }).join('');
         } else {
-            tbody.innerHTML = '<tr><td colspan="5" class="loading">暂无交易记录</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="loading">暂无交易记录</td></tr>';
         }
     } catch (error) {
         console.error('加载交易数据失败:', error);
-        const tbody = document.querySelector('#trades-table tbody');
-        tbody.innerHTML = '<tr><td colspan="5" class="loading">加载失败，请刷新重试</td></tr>';
     }
 }
 
-// 权益曲线图表
-let equityChart = null;
+// 加载持仓数据
+async function loadPositionsData() {
+    try {
+        const response = await fetch(`${API_BASE}/api/positions`);
+        const positions = await response.json();
+        
+        const tbody = document.querySelector('#positions-table tbody');
+        
+        if (positions.length > 0) {
+            tbody.innerHTML = positions.map(pos => {
+                return `
+                    <tr>
+                        <td><strong>${pos.symbol}</strong></td>
+                        <td>${pos.qty.toFixed(8)}</td>
+                        <td>$${pos.value_usdt.toFixed(2)}</td>
+                        <td>--</td>
+                        <td><span class="badge">持仓</span></td>
+                    </tr>
+                `;
+            }).join('');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5" class="loading">当前无持仓（Risk-Off模式）</td></tr>';
+        }
+    } catch (error) {
+        console.error('加载持仓数据失败:', error);
+    }
+}
 
+// 加载市场状态
+async function loadMarketState() {
+    // 市场状态已从评分数据更新
+}
+
+// 加载权益曲线
 async function loadEquityHistory() {
     try {
         const response = await fetch(`${API_BASE}/api/equity_history`);
         const data = await response.json();
         
-        if (data.error) {
-            console.error('权益历史API错误:', data.error);
+        if (data.error || !Array.isArray(data) || data.length === 0) {
             return;
         }
-        
-        if (!Array.isArray(data) || data.length === 0) {
-            // 显示空状态
-            const ctx = document.getElementById('equity-chart').getContext('2d');
-            if (equityChart) {
-                equityChart.destroy();
-            }
-            
-            equityChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: []
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        title: {
-                            display: true,
-                            text: '暂无历史数据',
-                            color: '#8892b0'
-                        }
-                    }
-                }
-            });
-            return;
-        }
-        
-        const labels = data.map(d => d.date);
-        const values = data.map(d => d.net_flow);
         
         const ctx = document.getElementById('equity-chart').getContext('2d');
         
-        if (equityChart) {
-            equityChart.destroy();
+        // 销毁旧图表
+        if (window.equityChart) {
+            window.equityChart.destroy();
         }
         
-        // 计算累计盈亏
-        let cumulative = 0;
-        const cumulativeValues = values.map(v => {
-            cumulative += v;
-            return cumulative;
-        });
+        const labels = data.map(d => d.timestamp?.split('T')[0] || '');
+        const values = data.map(d => d.value || 100);
         
-        equityChart = new Chart(ctx, {
+        window.equityChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [{
-                    label: '累计盈亏',
-                    data: cumulativeValues,
-                    borderColor: '#00d4ff',
-                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                    label: '累计权益',
+                    data: values,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
                     borderWidth: 2,
                     fill: true,
-                    tension: 0.4
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
                 }]
             },
             options: {
@@ -366,27 +423,107 @@ async function loadEquityHistory() {
                 maintainAspectRatio: false,
                 plugins: {
                     legend: {
-                        labels: { color: '#e0e0e0' }
+                        display: false
                     }
                 },
                 scales: {
                     x: {
-                        ticks: { color: '#8892b0' },
-                        grid: { color: '#1e2444' }
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        },
+                        ticks: {
+                            color: '#718096',
+                            maxTicksLimit: 6
+                        }
                     },
                     y: {
-                        ticks: { 
-                            color: '#8892b0',
-                            callback: function(value) {
-                                return '$' + value.toFixed(2);
-                            }
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
                         },
-                        grid: { color: '#1e2444' }
+                        ticks: {
+                            color: '#718096',
+                            callback: function(value) {
+                                return '$' + value.toFixed(0);
+                            }
+                        }
                     }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
                 }
             }
         });
+        
     } catch (error) {
         console.error('加载权益历史失败:', error);
     }
+}
+
+// 策略配置 - 权重滑块
+function updateWeight(factor, value) {
+    document.getElementById(`weight-${factor}`).textContent = value + '%';
+}
+
+// 保存策略配置
+function saveStrategy() {
+    const weights = {
+        f1: document.getElementById('f1-weight').value,
+        f2: document.getElementById('f2-weight').value,
+        f3: document.getElementById('f3-weight').value,
+        f4: document.getElementById('f4-weight').value,
+        f5: document.getElementById('f5-weight').value
+    };
+    
+    const killSwitch = document.getElementById('kill-switch-threshold').value;
+    const maxWeight = document.getElementById('max-single-weight').value;
+    const fee = document.getElementById('fee-bps').value;
+    const slippage = document.getElementById('slippage-bps').value;
+    
+    alert('策略配置已保存！\n\n因子权重:\n' + 
+          `5日动量: ${weights.f1}%\n` +
+          `20日动量: ${weights.f2}%\n` +
+          `波动率调整: ${weights.f3}%\n` +
+          `成交量: ${weights.f4}%\n` +
+          `RSI: ${weights.f5}%\n\n` +
+          `风险控制:\n` +
+          `Kill Switch阈值: ${killSwitch}%\n` +
+          `最大单币权重: ${maxWeight}%\n` +
+          `手续费: ${fee} bps\n` +
+          `滑点: ${slippage} bps`);
+}
+
+// 重置策略配置
+function resetStrategy() {
+    document.getElementById('f1-weight').value = 25;
+    document.getElementById('f2-weight').value = 25;
+    document.getElementById('f3-weight').value = 20;
+    document.getElementById('f4-weight').value = 15;
+    document.getElementById('f5-weight').value = 15;
+    
+    document.getElementById('weight-f1').textContent = '25%';
+    document.getElementById('weight-f2').textContent = '25%';
+    document.getElementById('weight-f3').textContent = '20%';
+    document.getElementById('weight-f4').textContent = '15%';
+    document.getElementById('weight-f5').textContent = '15%';
+    
+    document.getElementById('kill-switch-threshold').value = 15;
+    document.getElementById('max-single-weight').value = 25;
+    document.getElementById('fee-bps').value = 6;
+    document.getElementById('slippage-bps').value = 5;
+}
+
+// 运行回测
+function runBacktest() {
+    const strategy = document.getElementById('backtest-strategy').value;
+    const startDate = document.getElementById('backtest-start').value;
+    const endDate = document.getElementById('backtest-end').value;
+    
+    alert(`开始回测:\n策略: ${strategy}\n时间: ${startDate} 至 ${endDate}\n\n回测任务已提交，请稍后查看结果。`);
+}
+
+// 更新页脚时间
+function updateFooterTime() {
+    const now = new Date();
+    document.getElementById('footer-update').textContent = now.toLocaleString('zh-CN');
 }

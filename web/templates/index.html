@@ -3,149 +3,453 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>V5 交易监控面板</title>
+    <title>V5 Trading Bot - 专业版监控面板</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>🤖 V5 交易监控面板</h1>
-            <div class="status-bar">
-                <span id="last-update">加载中...</span>
-                <span id="system-status" class="badge">检查中...</span>
+        <!-- 顶部导航 -->
+        <header class="main-header">
+            <div class="logo">
+                <i class="fas fa-robot"></i>
+                <span>V5 Trading Bot</span>
+                <span class="version">Pro</span>
+            </div>
+            <nav class="main-nav">
+                <a href="#overview" class="nav-link active" data-tab="overview">
+                    <i class="fas fa-chart-line"></i> 总览
+                </a>
+                <a href="#backtest" class="nav-link" data-tab="backtest">
+                    <i class="fas fa-history"></i> 回测中心
+                </a>
+                <a href="#strategy" class="nav-link" data-tab="strategy">
+                    <i class="fas fa-sliders-h"></i> 策略配置
+                </a>
+                <a href="#alerts" class="nav-link" data-tab="alerts">
+                    <i class="fas fa-bell"></i> 告警通知
+                </a>
+                <a href="#system" class="nav-link" data-tab="system">
+                    <i class="fas fa-server"></i> 系统状态
+                </a>
+            </nav>
+            <div class="header-actions">
+                <span id="system-status-badge" class="badge">检查中...</span>
+                <button class="btn-refresh" onclick="refreshAllData()">
+                    <i class="fas fa-sync-alt"></i> 刷新
+                </button>
             </div>
         </header>
 
-        <!-- 账户总览 -->
-        <section class="section">
-            <h2>📊 账户总览</h2>
-            <div class="cards-grid">
-                <div class="card">
-                    <div class="card-title">现金余额</div>
-                    <div class="card-value" id="cash-usdt">--</div>
-                    <div class="card-unit">USDT</div>
+        <!-- 总览面板 -->
+        <div id="tab-overview" class="tab-content active">
+            <!-- 统计卡片 -->
+            <section class="section">
+                <div class="cards-grid">
+                    <div class="card card-primary">
+                        <div class="card-icon"><i class="fas fa-wallet"></i></div>
+                        <div class="card-content">
+                            <div class="card-title">总权益</div>
+                            <div class="card-value" id="cash-usdt">--</div>
+                            <div class="card-change" id="total-pnl-change">--</div>
+                        </div>
+                    </div>
+                    <div class="card card-success">
+                        <div class="card-icon"><i class="fas fa-chart-pie"></i></div>
+                        <div class="card-content">
+                            <div class="card-title">总交易次数</div>
+                            <div class="card-value" id="total-trades">--</div>
+                            <div class="card-subtitle">笔</div>
+                        </div>
+                    </div>
+                    <div class="card" id="pnl-card">
+                        <div class="card-icon"><i class="fas fa-percentage"></i></div>
+                        <div class="card-content">
+                            <div class="card-title">已实现盈亏</div>
+                            <div class="card-value" id="realized-pnl">--</div>
+                            <div class="card-subtitle">USDT</div>
+                        </div>
+                    </div>
+                    <div class="card card-info">
+                        <div class="card-icon"><i class="fas fa-receipt"></i></div>
+                        <div class="card-content">
+                            <div class="card-title">总手续费</div>
+                            <div class="card-value" id="total-fees">--</div>
+                            <div class="card-subtitle">USDT</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="card">
-                    <div class="card-title">总交易次数</div>
-                    <div class="card-value" id="total-trades">--</div>
-                    <div class="card-unit">笔</div>
+            </section>
+
+            <!-- 图表和市场状态 -->
+            <section class="section">
+                <div class="two-column">
+                    <div class="column-main">
+                        <h2 class="section-title"><i class="fas fa-chart-area"></i> 权益曲线</h2>
+                        <div class="chart-container large">
+                            <canvas id="equity-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="column-side">
+                        <div class="market-state-card">
+                            <h3><i class="fas fa-globe"></i> 市场状态</h3>
+                            <div class="market-state-badge" id="market-state-badge">
+                                <i class="fas fa-shield-alt"></i>
+                                <span>Risk-Off</span>
+                            </div>
+                            <div class="market-metrics">
+                                <div class="metric">
+                                    <span class="metric-label">MA20</span>
+                                    <span class="metric-value" id="ma20">--</span>
+                                </div>
+                                <div class="metric">
+                                    <span class="metric-label">MA60</span>
+                                    <span class="metric-value" id="ma60">--</span>
+                                </div>
+                                <div class="metric">
+                                    <span class="metric-label">ATR%</span>
+                                    <span class="metric-value" id="atr-percent">--</span>
+                                </div>
+                                <div class="metric highlight">
+                                    <span class="metric-label">仓位乘数</span>
+                                    <span class="metric-value" id="pos-multiplier">--</span>
+                                </div>
+                            </div>
+                            <p class="market-description" id="market-desc">--</p>
+                        </div>
+
+                        <!-- 定时倒计时 -->
+                        <div class="timer-section">
+                            <div class="timer-header">
+                                <i class="fas fa-clock"></i>
+                                <span>下次交易执行</span>
+                            </div>
+                            <div class="countdown-display">
+                                <div class="countdown-unit">
+                                    <span class="countdown-value" id="countdown-hours">00</span>
+                                    <span class="countdown-label">小时</span>
+                                </div>
+                                <div class="countdown-separator">:</div>
+                                <div class="countdown-unit">
+                                    <span class="countdown-value" id="countdown-minutes">00</span>
+                                    <span class="countdown-label">分钟</span>
+                                </div>
+                                <div class="countdown-separator">:</div>
+                                <div class="countdown-unit">
+                                    <span class="countdown-value" id="countdown-seconds">00</span>
+                                    <span class="countdown-label">秒</span>
+                                </div>
+                            </div>
+                            <div class="timer-info">
+                                <span id="next-run-time">计算中...</span>
+                                <span class="timer-interval">每小时执行</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="timer-progress"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="card">
-                    <div class="card-title">已实现盈亏</div>
-                    <div class="card-value" id="realized-pnl">--</div>
-                    <div class="card-unit">USDT</div>
+            </section>
+
+            <!-- Alpha 排名和最近交易 -->
+            <section class="section">
+                <div class="two-column">
+                    <div class="column">
+                        <h2 class="section-title"><i class="fas fa-trophy"></i> Alpha 选股排名 (Top 10)</h2>
+                        <div class="table-container">
+                            <table id="scores-table">
+                                <thead>
+                                    <tr>
+                                        <th>排名</th>
+                                        <th>币种</th>
+                                        <th>评分</th>
+                                        <th>信号</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="4" class="loading">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="column">
+                        <h2 class="section-title"><i class="fas fa-list-alt"></i> 最近交易</h2>
+                        <div class="table-container">
+                            <table id="trades-table">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>币种</th>
+                                        <th>方向</th>
+                                        <th>金额</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="4" class="loading">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
-                <div class="card">
-                    <div class="card-title">总手续费</div>
-                    <div class="card-value" id="total-fees">--</div>
-                    <div class="card-unit">USDT</div>
+            </section>
+
+            <!-- 持仓列表 -->
+            <section class="section">
+                <h2 class="section-title"><i class="fas fa-coins"></i> 当前持仓</h2>
+                <div class="table-container">
+                    <table id="positions-table">
+                        <thead>
+                            <tr>
+                                <th>币种</th>
+                                <th>数量</th>
+                                <th>市值</th>
+                                <th>占比</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="5" class="loading">加载中...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
-            </div>
-        </section>
+            </section>
+        </div>
+
+        <!-- 回测中心 -->
+        <div id="tab-backtest" class="tab-content">
+            <section class="section">
+                <h2 class="section-title"><i class="fas fa-history"></i> 回测中心</h2>
+                <div class="backtest-panel">
+                    <div class="backtest-form">
+                        <div class="form-group">
+                            <label>策略选择</label>
+                            <select id="backtest-strategy">
+                                <option value="multi_factor">多因子策略 (当前)</option>
+                                <option value="momentum">动量策略</option>
+                                <option value="mean_reversion">均值回归</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>时间范围</label>
+                            <input type="date" id="backtest-start" value="2025-12-01">
+                            <span>至</span>
+                            <input type="date" id="backtest-end" value="2026-02-24">
+                        </div>
+                        <button class="btn-primary" onclick="runBacktest()">
+                            <i class="fas fa-play"></i> 运行回测
+                        </button>
+                    </div>
+
+                    <h3 class="subsection-title">历史回测记录</h3>
+                    <div class="table-container">
+                        <table id="backtest-history">
+                            <thead>
+                                <tr>
+                                    <th>回测ID</th>
+                                    <th>时间范围</th>
+                                    <th>策略</th>
+                                    <th>总收益</th>
+                                    <th>夏普</th>
+                                    <th>最大回撤</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="7" class="loading">暂无回测记录</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- 策略配置 -->
+        <div id="tab-strategy" class="tab-content">
+            <section class="section">
+                <h2 class="section-title"><i class="fas fa-sliders-h"></i> 策略配置</h2>
+                <div class="strategy-panel">
+                    <div class="strategy-section">
+                        <h3>Alpha 因子权重</h3>
+                        <div class="slider-group">
+                            <label>5日动量权重 <span id="weight-f1">25%</span></label>
+                            <input type="range" id="f1-weight" min="0" max="100" value="25" oninput="updateWeight('f1', this.value)">
+                        </div>
+                        <div class="slider-group">
+                            <label>20日动量权重 <span id="weight-f2">25%</span></label>
+                            <input type="range" id="f2-weight" min="0" max="100" value="25" oninput="updateWeight('f2', this.value)">
+                        </div>
+                        <div class="slider-group">
+                            <label>波动率调整收益 <span id="weight-f3">20%</span></label>
+                            <input type="range" id="f3-weight" min="0" max="100" value="20" oninput="updateWeight('f3', this.value)">
+                        </div>
+                        <div class="slider-group">
+                            <label>成交量扩张 <span id="weight-f4">15%</span></label>
+                            <input type="range" id="f4-weight" min="0" max="100" value="15" oninput="updateWeight('f4', this.value)">
+                        </div>
+                        <div class="slider-group">
+                            <label>RSI趋势确认 <span id="weight-f5">15%</span></label>
+                            <input type="range" id="f5-weight" min="0" max="100" value="15" oninput="updateWeight('f5', this.value)">
+                        </div>
+                    </div>
+
+                    <div class="strategy-section">
+                        <h3>风险控制</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Kill Switch 回撤阈值</label>
+                                <input type="number" id="kill-switch-threshold" value="15" min="5" max="50">%
+                            </div>
+                            <div class="form-group">
+                                <label>最大单币权重</label>
+                                <input type="number" id="max-single-weight" value="25" min="10" max="50">%
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>手续费 (bps)</label>
+                                <input type="number" id="fee-bps" value="6" min="1" max="20">
+                            </div>
+                            <div class="form-group">
+                                <label>滑点 (bps)</label>
+                                <input type="number" id="slippage-bps" value="5" min="1" max="20">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="strategy-actions">
+                        <button class="btn-secondary" onclick="resetStrategy()">重置默认</button>
+                        <button class="btn-primary" onclick="saveStrategy()">保存配置</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- 告警通知 -->
+        <div id="tab-alerts" class="tab-content">
+            <section class="section">
+                <h2 class="section-title"><i class="fas fa-bell"></i> 告警通知</h2>
+                <div class="alerts-panel">
+                    <div class="alert-rules">
+                        <div class="alert-rule enabled">
+                            <div class="alert-toggle">
+                                <input type="checkbox" checked id="alert-kill-switch">
+                                <span class="toggle-slider"></span>
+                            </div>
+                            <div class="alert-content">
+                                <h4>Kill Switch 触发告警</h4>
+                                <p>当系统触发Kill Switch时发送通知</p>
+                            </div>
+                            <div class="alert-channel">
+                                <i class="fab fa-telegram"></i> Telegram
+                            </div>
+                        </div>
+                        <div class="alert-rule enabled">
+                            <div class="alert-toggle">
+                                <input type="checkbox" checked id="alert-drawdown">
+                                <span class="toggle-slider"></span>
+                            </div>
+                            <div class="alert-content">
+                                <h4>回撤超过 10%</h4>
+                                <p>账户回撤达到设定阈值时告警</p>
+                            </div>
+                            <div class="alert-channel">
+                                <i class="fab fa-telegram"></i> Telegram
+                            </div>
+                        </div>
+                        <div class="alert-rule">
+                            <div class="alert-toggle">
+                                <input type="checkbox" id="alert-daily-pnl">
+                                <span class="toggle-slider"></span>
+                            </div>
+                            <div class="alert-content">
+                                <h4>单日收益超过 5%</h4>
+                                <p>单日盈亏达到设定阈值时告警</p>
+                            </div>
+                            <div class="alert-channel">
+                                <i class="fab fa-telegram"></i> Telegram
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
 
         <!-- 系统状态 -->
-        <section class="section">
-            <h2>⚙️ 系统状态</h2>
-            <div class="info-grid">
-                <div class="info-item">
-                    <span class="info-label">定时器状态:</span>
-                    <span id="timer-status" class="badge">--</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">交易模式:</span>
-                    <span id="trade-mode">--</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">资金上限:</span>
-                    <span id="equity-cap">--</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">市场状态:</span>
-                    <span id="market-regime" class="badge">--</span>
-                </div>
-            </div>
-            
-            <!-- 定时任务倒计时 -->
-            <div class="timer-section">
-                <div class="timer-header">
-                    <span class="timer-icon">⏰</span>
-                    <span class="timer-title">下次交易执行</span>
-                </div>
-                <div class="countdown-display">
-                    <div class="countdown-unit">
-                        <span class="countdown-value" id="countdown-hours">00</span>
-                        <span class="countdown-label">小时</span>
+        <div id="tab-system" class="tab-content">
+            <section class="section">
+                <h2 class="section-title"><i class="fas fa-server"></i> 系统状态</h2>
+                <div class="system-panel">
+                    <div class="system-cards">
+                        <div class="system-card">
+                            <div class="system-icon green">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="system-info">
+                                <h4>API 连接</h4>
+                                <p id="api-status">正常</p>
+                            </div>
+                        </div>
+                        <div class="system-card">
+                            <div class="system-icon green">
+                                <i class="fas fa-database"></i>
+                            </div>
+                            <div class="system-info">
+                                <h4>数据同步</h4>
+                                <p id="sync-status">正常</p>
+                            </div>
+                        </div>
+                        <div class="system-card">
+                            <div class="system-icon green">
+                                <i class="fas fa-exchange-alt"></i>
+                            </div>
+                            <div class="system-info">
+                                <h4>订单执行</h4>
+                                <p id="order-status">正常</p>
+                            </div>
+                        </div>
+                        <div class="system-card">
+                            <div class="system-icon" id="timer-status-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="system-info">
+                                <h4>定时任务</h4>
+                                <p id="timer-system-status">运行中</p>
+                            </div>
+                        </div>
                     </div>
-                    <div class="countdown-separator">:</div>
-                    <div class="countdown-unit">
-                        <span class="countdown-value" id="countdown-minutes">00</span>
-                        <span class="countdown-label">分钟</span>
+
+                    <div class="system-details">
+                        <h3>系统信息</h3>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="info-label">交易模式:</span>
+                                <span id="trade-mode" class="info-value">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">资金上限:</span>
+                                <span id="equity-cap" class="info-value">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">最后更新:</span>
+                                <span id="last-update" class="info-value">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">运行时长:</span>
+                                <span id="uptime" class="info-value">--</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="countdown-separator">:</div>
-                    <div class="countdown-unit">
-                        <span class="countdown-value" id="countdown-seconds">00</span>
-                        <span class="countdown-label">秒</span>
-                    </div>
                 </div>
-                <div class="timer-info">
-                    <span id="next-run-time">计算中...</span>
-                    <span class="timer-interval" id="timer-interval">每小时执行</span>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="timer-progress"></div>
-                </div>
-            </div>
-        </section>
+            </section>
+        </div>
 
-        <!-- 币种评分 -->
-        <section class="section">
-            <h2>📈 币种评分 (Top 20)</h2>
-            <div class="table-container">
-                <table id="scores-table">
-                    <thead>
-                        <tr>
-                            <th>排名</th>
-                            <th>币种</th>
-                            <th>评分</th>
-                            <th>信号强度</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr><td colspan="4" class="loading">加载中...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- 权益曲线 -->
-        <section class="section">
-            <h2>📉 权益曲线</h2>
-            <div class="chart-container">
-                <canvas id="equity-chart"></canvas>
-            </div>
-        </section>
-
-        <!-- 最近交易 -->
-        <section class="section">
-            <h2>📝 最近交易</h2>
-            <div class="table-container">
-                <table id="trades-table">
-                    <thead>
-                        <tr>
-                            <th>时间</th>
-                            <th>币种</th>
-                            <th>方向</th>
-                            <th>金额</th>
-                            <th>手续费</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr><td colspan="5" class="loading">加载中...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
+        <footer class="main-footer">
+            <p>V5 Trading Bot Dashboard Pro | 最后更新: <span id="footer-update">--</span></p>
+        </footer>
     </div>
 
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
