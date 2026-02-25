@@ -1129,18 +1129,37 @@ def api_cost_calibration():
 def api_ic_diagnostics():
     """IC诊断进度API"""
     try:
-        # 查找最新的IC诊断文件
-        ic_files = sorted(REPORTS_DIR.glob('ic_diagnostics_*.json'))
-        
+        # 查找IC诊断文件（按修改时间，避免文件名排序误判）
+        ic_files = list(REPORTS_DIR.glob('ic_diagnostics_*.json'))
+
         if not ic_files:
             return jsonify({
                 'status': 'no_data',
                 'message': '暂无IC诊断数据'
             })
-        
-        latest_ic = ic_files[-1]
-        with open(latest_ic, 'r') as f:
-            ic_data = json.load(f)
+
+        ic_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        # 优先使用“有可用因子IC”的最新文件；否则回退到最近文件
+        latest_ic = ic_files[0]
+        ic_data = None
+        fallback_reason = None
+        for f in ic_files:
+            try:
+                with open(f, 'r', encoding='utf-8') as fh:
+                    d = json.load(fh)
+                ic_by_factor = (d.get('overall_tradable') or {}).get('ic', {})
+                if isinstance(ic_by_factor, dict) and len(ic_by_factor) > 0:
+                    latest_ic = f
+                    ic_data = d
+                    break
+            except Exception:
+                continue
+
+        if ic_data is None:
+            with open(latest_ic, 'r', encoding='utf-8') as f:
+                ic_data = json.load(f)
+            fallback_reason = 'latest_file_has_no_valid_factor_ic'
         
         # 解析IC数据 - 新版结构在overall_tradable.ic下
         overall_tradable = ic_data.get('overall_tradable', {})
@@ -1159,16 +1178,27 @@ def api_ic_diagnostics():
         overall_ic_mean = sum(all_ic_values) / len(all_ic_values) if all_ic_values else 0
         
         # 计算各因子IC
+        def _num(v, default=0.0):
+            try:
+                if v is None:
+                    return float(default)
+                return float(v)
+            except Exception:
+                return float(default)
+
         factors = []
         for factor_name, factor_data in ic_by_factor.items():
-            mean_ic = factor_data.get('mean', 0)
-            p50_ic = factor_data.get('p50', 0)
-            count = factor_data.get('count', 0)
-            
+            mean_ic = _num(factor_data.get('mean', 0.0), 0.0)
+            p50_ic = _num(factor_data.get('p50', 0.0), 0.0)
+            count = int(_num(factor_data.get('count', 0), 0))
+
             # 简化计算IR (IC / std)，如果std不可用则用近似值
-            std_approx = (factor_data.get('p75', 0) - factor_data.get('p25', 0)) / 1.35 if factor_data.get('p75') else 0.1
-            ir = mean_ic / std_approx if std_approx > 0 else 0
-            
+            p75 = _num(factor_data.get('p75', 0.0), 0.0)
+            p25 = _num(factor_data.get('p25', 0.0), 0.0)
+            std_approx = ((p75 - p25) / 1.35) if (p75 != 0 or p25 != 0) else 0.1
+            std_approx = std_approx if std_approx > 1e-9 else 0.1
+            ir = mean_ic / std_approx
+
             factors.append({
                 'name': factor_name,
                 'ic': round(mean_ic, 4),
@@ -1215,6 +1245,8 @@ def api_ic_diagnostics():
             'lookback_days': ic_data.get('lookback_days', 30),
             'factors': factors,
             'regimes': regimes,
+            'source_file': latest_ic.name,
+            'fallback_reason': fallback_reason,
             'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
