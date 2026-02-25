@@ -19,6 +19,24 @@ from pathlib import Path
 import requests
 
 
+def _load_env_file(env_path: Path):
+    """轻量加载 .env（避免依赖python-dotenv）"""
+    try:
+        if not env_path.exists():
+            return
+        for line in env_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            k, v = line.split('=', 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k and k not in os.environ:
+                os.environ[k] = v
+    except Exception:
+        pass
+
+
 class DeepSeekSentimentFactor:
     """
     DeepSeek情绪分析因子
@@ -33,7 +51,10 @@ class DeepSeekSentimentFactor:
                  model: str = "deepseek-chat"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        # 自动加载项目 .env，避免不同启动方式下环境变量缺失
+        _load_env_file(Path('/home/admin/clawd/v5-trading-bot/.env'))
+
         self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
         self.base_url = "https://api.deepseek.com/v1"
         self.model = model
@@ -181,9 +202,12 @@ class DeepSeekSentimentFactor:
         cache_file = self.cache_dir / f"deepseek_{symbol}_{datetime.now().strftime('%Y%m%d_%H')}.json"
         if cache_file.exists():
             try:
-                with open(cache_file, 'r') as f:
-                    return json.load(f)
-            except:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    cached = json.load(f)
+                # 若缓存是无数据占位且当前有key，尝试刷新一次
+                if not (self.api_key and str(cached.get('f6_sentiment_summary', '')).strip() == '无数据'):
+                    return cached
+            except Exception:
                 pass
         
         # 获取文本（模拟数据，实际接入微博/贴吧/推特API）
@@ -199,7 +223,7 @@ class DeepSeekSentimentFactor:
             'f6_fear_greed_index': float(result['fear_greed_index']),
             'f6_sentiment_summary': result['summary'],
             'f6_sentiment_confidence': round(result['confidence'], 4),
-            'f6_sentiment_source': 'deepseek',
+            'f6_sentiment_source': result.get('source', 'deepseek'),
             'f6_sentiment_key_points': result['key_points'],
             'f6_market_stage': result['market_stage'],
         }
