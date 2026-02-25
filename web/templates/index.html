@@ -1147,10 +1147,34 @@
                         statusText = '被拦截';
                     }
                     
+                    // 格式化时间显示：提取 HH:MM 并计算相对时间
+                    let timeDisplay = round.time;
+                    let relativeTime = '';
+                    if (round.time && round.time.includes(' ')) {
+                        const timePart = round.time.split(' ')[1].slice(0, 5); // HH:MM
+                        const datePart = round.time.split(' ')[0].slice(5); // MM-DD
+                        timeDisplay = `${datePart} ${timePart}`;
+                        
+                        // 计算相对时间
+                        const roundDate = new Date(round.time);
+                        const now = new Date();
+                        const diffMinutes = Math.floor((now - roundDate) / 60000);
+                        if (diffMinutes < 60) {
+                            relativeTime = `${diffMinutes}分钟前`;
+                        } else if (diffMinutes < 1440) {
+                            relativeTime = `${Math.floor(diffMinutes / 60)}小时前`;
+                        } else {
+                            relativeTime = `${Math.floor(diffMinutes / 1440)}天前`;
+                        }
+                    }
+                    
                     html += `
                         <div style="background: rgba(255,255,255,0.03); border-radius: 12px; padding: 15px; border-left: 4px solid ${statusColor};">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                                <div style="font-weight: 600;">${round.time}</div>
+                                <div>
+                                    <div style="font-weight: 600; font-size: 1rem;">${timeDisplay}</div>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">${relativeTime}</div>
+                                </div>
                                 <span style="background: ${statusColor}; color: white; padding: 3px 10px; border-radius: 10px; font-size: 0.75rem;">${statusText}</span>
                             </div>
                             
