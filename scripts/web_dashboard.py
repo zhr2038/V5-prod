@@ -207,32 +207,90 @@ def api_trades():
 
 @app.route('/api/positions')
 def api_positions():
-    """持仓信息API"""
+    """持仓信息API（过滤dust并估算USDT市值）"""
     try:
-        # 读取reconcile状态
         reconcile_file = REPORTS_DIR / 'reconcile_status.json'
         if not reconcile_file.exists():
             return jsonify([])
-        
-        with open(reconcile_file, 'r') as f:
+
+        with open(reconcile_file, 'r', encoding='utf-8') as f:
             reconcile = json.load(f)
-        
-        positions = []
+
         ccy_qty = reconcile.get('local_snapshot', {}).get('ccy_qty', {})
-        
+
+        # 业务黑名单（不在持仓页展示）
+        hidden_symbols = {
+            'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
+        }
+
+        def get_last_price_usdt(symbol: str) -> float:
+            # 1) 优先K线缓存
+            try:
+                cache_dir = WORKSPACE / 'data' / 'cache'
+                files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
+                if files:
+                    df = pd.read_csv(files[-1])
+                    if len(df) > 0 and 'close' in df.columns:
+                        return float(df.iloc[-1]['close'])
+            except Exception:
+                pass
+
+            # 2) 回退：从最近成交均价推断（避免无缓存时持仓全空）
+            try:
+                conn = get_db_connection()
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        SELECT avg_px, notional_usdt, sz
+                        FROM orders
+                        WHERE state='FILLED' AND inst_id=?
+                        ORDER BY created_ts DESC
+                        LIMIT 1
+                        """,
+                        (f'{symbol}-USDT',)
+                    )
+                    row = cur.fetchone()
+                    conn.close()
+                    if row:
+                        avg_px = float(row[0]) if row[0] else 0.0
+                        if avg_px > 0:
+                            return avg_px
+                        notional = float(row[1]) if row[1] else 0.0
+                        sz = float(row[2]) if row[2] else 0.0
+                        if sz > 0:
+                            return notional / sz
+            except Exception:
+                pass
+
+            return 0.0
+
+        positions = []
         for symbol, qty in ccy_qty.items():
             try:
+                if symbol == 'USDT' or symbol in hidden_symbols:
+                    continue
                 qty_float = float(qty)
-                # 只显示有实际持仓的（大于最小精度）
-                if symbol != 'USDT' and qty_float > 0.0001:
-                    positions.append({
-                        'symbol': symbol,
-                        'qty': round(qty_float, 8),
-                        'value_usdt': 0  # TODO: 需要实时价格
-                    })
+                if qty_float <= 0:
+                    continue
+
+                px = get_last_price_usdt(symbol)
+                value = qty_float * px if px > 0 else 0.0
+
+                # 过滤dust：市值小于0.5U不展示
+                if value < 0.5:
+                    continue
+
+                positions.append({
+                    'symbol': symbol,
+                    'qty': round(qty_float, 8),
+                    'value_usdt': round(value, 4),
+                    'last_price': round(px, 6) if px > 0 else 0
+                })
             except (TypeError, ValueError):
                 continue
-        
+
+        positions.sort(key=lambda x: x.get('value_usdt', 0), reverse=True)
         return jsonify(positions)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
