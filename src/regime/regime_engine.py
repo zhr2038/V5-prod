@@ -47,28 +47,35 @@ class RegimeEngine:
     def _load_market_sentiment(self) -> float:
         """读取市场情绪（-1~1），优先 BTC/ETH/SOL/BNB 的最新平均值。
         
-        支持多种数据源：
-        1. funding_rate（资金费率，实时）
-        2. deepseek（AI分析）
-        3. 其他缓存文件
+        支持多种数据源（优先级从高到低）：
+        1. rss_deepseek（RSS新闻+DeepSeek分析，最全面）
+        2. funding_rate（资金费率，最实时）
+        3. deepseek（AI分析）
+        4. 其他缓存文件
         """
         try:
             vals = []
             for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
                 data = None
                 
-                # 1. 优先尝试 funding_rate（资金费率，最实时）
-                funding_files = sorted(self.sentiment_cache_dir.glob(f'funding_{sym}_*.json'))
-                if funding_files:
-                    data = json.loads(funding_files[-1].read_text())
+                # 1. 优先尝试 RSS+DeepSeek（新闻情报）
+                rss_files = sorted(self.sentiment_cache_dir.glob(f'rss_{sym}_*.json'))
+                if rss_files:
+                    data = json.loads(rss_files[-1].read_text())
                 
-                # 2. 尝试 deepseek AI分析
+                # 2. 尝试 funding_rate（资金费率，最实时）
+                if data is None:
+                    funding_files = sorted(self.sentiment_cache_dir.glob(f'funding_{sym}_*.json'))
+                    if funding_files:
+                        data = json.loads(funding_files[-1].read_text())
+                
+                # 3. 尝试 deepseek AI分析
                 if data is None:
                     deepseek_files = sorted(self.sentiment_cache_dir.glob(f'deepseek_{sym}_*.json'))
                     if deepseek_files:
                         data = json.loads(deepseek_files[-1].read_text())
                 
-                # 3. 尝试其他格式
+                # 4. 尝试其他格式
                 if data is None:
                     other_files = sorted(self.sentiment_cache_dir.glob(f'{sym}_*.json'))
                     if other_files:
