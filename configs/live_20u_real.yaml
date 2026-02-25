@@ -79,12 +79,18 @@ alpha:
 regime:
   # Ensemble 方法配置（不用传统MA，用HMM+情绪加权投票）
   use_ensemble: true           # 启用Ensemble方法（HMM+资金费率+RSS）
-  use_hmm: true               # 启用HMM
+  use_hmm: true               # 启用HMM（训练好之前权重为0）
   
   # 三种方法的权重（加起来=1.0）
-  hmm_weight: 0.40            # HMM: 40%（数据驱动）
-  funding_weight: 0.35        # 资金费率: 35%（实时）
-  rss_weight: 0.25            # RSS新闻: 25%（深度）
+  # 注意：HMM训练好之前设为0，避免错误信号
+  hmm_weight: 0.00            # HMM: 0%（训练好之前禁用）
+  funding_weight: 0.60        # 资金费率: 60%（训练好之前提高）
+  rss_weight: 0.40            # RSS新闻: 40%（训练好之前提高）
+  
+  # HMM训练好后的目标权重：
+  # hmm_weight: 0.40          # HMM: 40%
+  # funding_weight: 0.35      # 资金费率: 35%
+  # rss_weight: 0.25          # RSS: 25%
   
   # 传统方法配置（use_ensemble=false时使用）
   atr_threshold: 0.02
