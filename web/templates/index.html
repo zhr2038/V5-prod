@@ -545,7 +545,8 @@
                                 <div style="font-weight: 600; color: ${voteColors[hmmVote.state] || '#fff'}; font-size: 0.9rem;">
                                     ${hmmVote.state === 'DISABLED' ? '禁用' : (hmmVote.state || '--')}
                                 </div>
-                                <div style="font-size: 0.7rem; color: #64748b;">权重 ${(hmmVote.weight || 0) * 100}%</div>
+                                <div style="font-size: 0.75rem; color: #00d4ff;">${hmmVote.sentiment !== undefined ? hmmVote.sentiment.toFixed(3) : 'N/A'}</div>
+                                <div style="font-size: 0.7rem; color: #64748b;">${(hmmVote.weight || 0) * 100}%</div>
                             </div>
                             
                             <!-- 资金费率 -->
@@ -554,7 +555,8 @@
                                 <div style="font-weight: 600; color: ${voteColors[fundingVote.state] || '#fff'}; font-size: 0.9rem;">
                                     ${fundingVote.state || '--'}
                                 </div>
-                                <div style="font-size: 0.7rem; color: #64748b;">权重 ${(fundingVote.weight || 0) * 100}%</div>
+                                <div style="font-size: 0.75rem; color: #00d4ff;">${fundingVote.sentiment !== undefined ? fundingVote.sentiment.toFixed(3) : 'N/A'}</div>
+                                <div style="font-size: 0.7rem; color: #64748b;">${(fundingVote.weight || 0) * 100}%</div>
                             </div>
                             
                             <!-- RSS新闻 -->
@@ -563,7 +565,8 @@
                                 <div style="font-weight: 600; color: ${voteColors[rssVote.state] || '#fff'}; font-size: 0.9rem;">
                                     ${rssVote.state || '--'}
                                 </div>
-                                <div style="font-size: 0.7rem; color: #64748b;">权重 ${(rssVote.weight || 0) * 100}%</div>
+                                <div style="font-size: 0.75rem; color: #00d4ff;">${rssVote.sentiment !== undefined ? rssVote.sentiment.toFixed(3) : 'N/A'}</div>
+                                <div style="font-size: 0.7rem; color: #64748b;">${(rssVote.weight || 0) * 100}%</div>
                             </div>
                         </div>
                         
