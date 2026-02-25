@@ -504,6 +504,22 @@
                     'SIDEWAYS': '#f59e0b'
                 };
                 
+                // 三种判断标准的状态颜色
+                const voteColors = {
+                    'TRENDING': '#22c55e',
+                    'TRENDINGUP': '#22c55e',
+                    'SIDEWAYS': '#f59e0b',
+                    'RISK_OFF': '#ef4444',
+                    'TRENDINGDOWN': '#ef4444',
+                    'N/A': '#64748b',
+                    'DISABLED': '#64748b'
+                };
+                
+                const votes = data.votes || {};
+                const hmmVote = votes.hmm || {};
+                const fundingVote = votes.funding || {};
+                const rssVote = votes.rss || {};
+                
                 const html = `
                     <div class="stats-grid">
                         <div class="stat-item">
@@ -516,15 +532,46 @@
                             <div class="stat-value">${data.position_multiplier}x</div>
                             <div class="stat-label">仓位乘数</div>
                         </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${data.ma20?.toFixed(0) || '--'}</div>
-                            <div class="stat-label">MA20</div>
+                    </div>
+                    
+                    <!-- 三种判断标准 -->
+                    <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+                        <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px;">三种方法判断</div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                            <!-- HMM -->
+                            <div style="text-align: center; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                <div style="font-size: 0.75rem; color: #64748b;">HMM模型</div>
+                                <div style="font-weight: 600; color: ${voteColors[hmmVote.state] || '#fff'}; font-size: 0.9rem;">
+                                    ${hmmVote.state === 'DISABLED' ? '禁用' : (hmmVote.state || '--')}
+                                </div>
+                                <div style="font-size: 0.7rem; color: #64748b;">权重 ${(hmmVote.weight || 0) * 100}%</div>
+                            </div>
+                            
+                            <!-- 资金费率 -->
+                            <div style="text-align: center; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                <div style="font-size: 0.75rem; color: #64748b;">资金费率</div>
+                                <div style="font-weight: 600; color: ${voteColors[fundingVote.state] || '#fff'}; font-size: 0.9rem;">
+                                    ${fundingVote.state || '--'}
+                                </div>
+                                <div style="font-size: 0.7rem; color: #64748b;">权重 ${(fundingVote.weight || 0) * 100}%</div>
+                            </div>
+                            
+                            <!-- RSS新闻 -->
+                            <div style="text-align: center; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                <div style="font-size: 0.75rem; color: #64748b;">RSS新闻</div>
+                                <div style="font-weight: 600; color: ${voteColors[rssVote.state] || '#fff'}; font-size: 0.9rem;">
+                                    ${rssVote.state || '--'}
+                                </div>
+                                <div style="font-size: 0.7rem; color: #64748b;">权重 ${(rssVote.weight || 0) * 100}%</div>
+                            </div>
                         </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${data.ma60?.toFixed(0) || '--'}</div>
-                            <div class="stat-label">MA60</div>
+                        
+                        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); font-size: 0.8rem; color: #64748b; text-align: center;">
+                            方法: ${data.method || '传统MA'} | 综合得分: ${(data.final_score || 0).toFixed(3)}
                         </div>
                     </div>
+                    
                     <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 0.9rem;">
                         ${data.description || '市场状态监控中'}
                     </div>

@@ -549,11 +549,26 @@ def calculate_market_indicators():
 
 @app.route('/api/market_state')
 def api_market_state():
-    """市场状态API"""
+    """市场状态API（显示Ensemble三种方法）"""
     try:
         # 获取评分数据中的regime
         scores_data = api_scores().get_json()
         regime = scores_data.get('regime', 'Risk-Off')
+        
+        # 读取最新的Ensemble决策详情
+        ensemble_data = {}
+        try:
+            runs_dir = REPORTS_DIR / 'runs'
+            if runs_dir.exists():
+                run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+                run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                if run_dirs:
+                    with open(run_dirs[0] / 'decision_audit.json', 'r') as f:
+                        audit = json.load(f)
+                        if 'regime_details' in audit:
+                            ensemble_data = audit['regime_details']
+        except Exception:
+            pass
         
         # 计算市场指标
         indicators = calculate_market_indicators()
@@ -579,17 +594,25 @@ def api_market_state():
             'SIDEWAYS': '震荡行情，正常仓位'
         }
         
-        return jsonify({
+        # 构建响应（显示三种判断标准）
+        response = {
             'state': regime.upper().replace('-', '_'),
-            'ma20': indicators['ma20'],
-            'ma60': indicators['ma60'],
-            'atr_percent': indicators['atr_percent'],
-            'price': indicators['price'],
             'position_multiplier': multiplier,
-            'description': descriptions.get(regime, '市场状态监控中')
-        })
+            'description': descriptions.get(regime, '市场状态监控中'),
+            'method': ensemble_data.get('method', '传统MA'),
+            'votes': {
+                'hmm': ensemble_data.get('votes', {}).get('hmm', {'state': 'N/A', 'weight': 0}),
+                'funding': ensemble_data.get('votes', {}).get('funding', {'state': 'N/A', 'weight': 0}),
+                'rss': ensemble_data.get('votes', {}).get('rss', {'state': 'N/A', 'weight': 0})
+            },
+            'final_score': ensemble_data.get('final_score', 0),
+            'price': indicators['price']
+        }
+        
+        return jsonify(response)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 def _load_equity_points(limit: int = 800):
