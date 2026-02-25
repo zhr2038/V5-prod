@@ -25,8 +25,8 @@ class RegimeResult:
     ma60: float
     multiplier: float
     # 详细投票信息
-    votes: Dict[str, dict]
-    final_score: float
+    votes: Dict[str, dict] = None
+    final_score: float = 0.0
 
 
 class EnsembleRegimeEngine:

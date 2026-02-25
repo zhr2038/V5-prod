@@ -75,6 +75,9 @@ class DecisionAudit:
     # 备注
     notes: List[str] = field(default_factory=list)
     
+    # Ensemble regime详细信息
+    regime_details: Dict[str, Any] = field(default_factory=dict)
+    
     def reject(self, reason: str) -> None:
         """记录拒绝原因"""
         if reason in self.rejects:
@@ -134,5 +137,6 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.universe_config = data.get("universe_config", {})
     audit.exit_signals = data.get("exit_signals", [])
     audit.notes = data.get("notes", [])
+    audit.regime_details = data.get("regime_details", {})
     
     return audit

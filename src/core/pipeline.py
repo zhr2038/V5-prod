@@ -186,6 +186,16 @@ class V5Pipeline:
         if audit:
             audit.regime = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
             audit.regime_multiplier = regime.multiplier
+            # 保存Ensemble详情（如果可用）
+            if hasattr(regime, 'votes') and regime.votes:
+                audit.regime_details = {
+                    'method': 'EnsembleRegimeEngine',
+                    'votes': regime.votes,
+                    'final_score': getattr(regime, 'final_score', 0),
+                    'hmm_weight': getattr(self.cfg.regime, 'hmm_weight', 0),
+                    'funding_weight': getattr(self.cfg.regime, 'funding_weight', 0),
+                    'rss_weight': getattr(self.cfg.regime, 'rss_weight', 0),
+                }
 
         # Optional: override alpha weights by regime (research/shadow only)
         if bool(getattr(self.cfg.alpha, 'dynamic_weights_by_regime_enabled', False)) and getattr(self.cfg.alpha, 'dynamic_weights_by_regime_path', None):
