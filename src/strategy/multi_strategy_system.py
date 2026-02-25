@@ -135,10 +135,21 @@ class TrendFollowingStrategy(BaseStrategy):
             df['adx'] = self._calculate_adx(df)
             
             latest = df.iloc[-1]
+            prev = df.iloc[-2]
             
-            # 趋势判断
-            is_uptrend = latest['ma_fast'] > latest['ma_slow'] and latest['close'] > latest['ma_fast']
-            is_downtrend = latest['ma_fast'] < latest['ma_slow'] and latest['close'] < latest['ma_fast']
+            # 趋势判断（增加二次确认，减少1h假突破）
+            is_uptrend = (
+                latest['ma_fast'] > latest['ma_slow']
+                and latest['close'] > latest['ma_fast']
+                and prev['ma_fast'] > prev['ma_slow']
+                and prev['close'] > prev['ma_fast']
+            )
+            is_downtrend = (
+                latest['ma_fast'] < latest['ma_slow']
+                and latest['close'] < latest['ma_fast']
+                and prev['ma_fast'] < prev['ma_slow']
+                and prev['close'] < prev['ma_fast']
+            )
             strong_trend = latest['adx'] > self.config['adx_threshold']
             
             # 生成信号
@@ -632,12 +643,15 @@ class StrategyOrchestrator:
                 buy_conf = max([s.confidence for s in buy_signals])
                 sell_conf = max([s.confidence for s in sell_signals])
                 
-                if buy_conf > sell_conf * 1.2:  # 买入置信度显著更高
+                # 提高冲突过滤阈值，降低噪声交易
+                if buy_conf > sell_conf * 1.35:  # 买入置信度显著更高
                     best_buy = max(buy_signals, key=lambda s: s.confidence)
-                    fused_signals.append(best_buy)
-                elif sell_conf > buy_conf * 1.2:
+                    if best_buy.confidence >= 0.60:
+                        fused_signals.append(best_buy)
+                elif sell_conf > buy_conf * 1.35:
                     best_sell = max(sell_signals, key=lambda s: s.confidence)
-                    fused_signals.append(best_sell)
+                    if best_sell.confidence >= 0.60:
+                        fused_signals.append(best_sell)
                 else:
                     # 置信度接近，放弃该币种
                     print(f"[Orchestrator] {symbol} 多空冲突且置信度接近，放弃交易")

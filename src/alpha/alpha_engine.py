@@ -100,7 +100,7 @@ class AlphaEngine:
                 'f6_sentiment': 0.15
             },
             'position_size_pct': 0.30,
-            'score_threshold': 0.10
+            'score_threshold': 0.14
         })
         orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.50'))
         
