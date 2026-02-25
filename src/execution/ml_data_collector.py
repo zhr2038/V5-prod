@@ -249,25 +249,26 @@ class MLDataCollector:
         """
         回填6小时后的标签（未来收益率）
         
-        在每个交易周期调用，回填6小时前的记录
+        回填所有在current_timestamp之前6小时以上的未标记记录
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 找到6小时前(±30分钟)未回填标签的记录
+        # 找到所有6小时前以上且未回填标签的记录
         six_hours_ago = current_timestamp - 6 * 3600 * 1000  # 6小时前的毫秒时间戳
-        tolerance = 30 * 60 * 1000  # 30分钟容差
         
         cursor.execute('''
             SELECT id, timestamp, symbol FROM feature_snapshots
             WHERE label_filled = 0
             AND timestamp <= ?
-            AND timestamp >= ?
-        ''', (six_hours_ago + tolerance, six_hours_ago - tolerance))
+            ORDER BY timestamp
+            LIMIT 1000  -- 每次最多处理1000条
+        ''', (six_hours_ago,))
         
         records_to_fill = cursor.fetchall()
         
         filled_count = 0
+        failed_count = 0
         for record_id, record_ts, symbol in records_to_fill:
             # 计算未来6小时收益率
             future_return = self._calculate_future_return(symbol, record_ts, 6)
@@ -279,9 +280,20 @@ class MLDataCollector:
                     WHERE id = ?
                 ''', (future_return, record_id))
                 filled_count += 1
+            else:
+                # 如果无法计算收益，标记为-1表示失败
+                cursor.execute('''
+                    UPDATE feature_snapshots
+                    SET label_filled = -1
+                    WHERE id = ?
+                ''', (record_id,))
+                failed_count += 1
         
         conn.commit()
         conn.close()
+        
+        if filled_count > 0 or failed_count > 0:
+            print(f"[ML] 回填完成: {filled_count}条成功, {failed_count}条失败")
         
         return filled_count
     
@@ -293,39 +305,53 @@ class MLDataCollector:
     ) -> Optional[float]:
         """
         计算未来收益率
-        从orders表或价格数据中获取
+        从K线缓存文件中获取价格数据
         """
         try:
-            # 尝试从已有订单数据计算
-            conn = sqlite3.connect('/home/admin/clawd/v5-trading-bot/reports/orders.sqlite')
+            # 转换symbol格式: BTC/USDT -> BTC_USDT
+            symbol_file = symbol.replace('/', '_').replace('-', '_')
             
-            # 查找start_timestamp之后hours小时内的成交记录
-            end_timestamp = start_timestamp + hours * 3600 * 1000
+            # 查找K线缓存文件
+            cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/cache')
+            pattern = f"{symbol_file}_1H_*.csv"
+            cache_files = list(cache_dir.glob(pattern))
             
-            query = '''
-                SELECT AVG(px) as avg_price
-                FROM orders
-                WHERE inst_id = ?
-                AND state = 'FILLED'
-                AND created_ts BETWEEN ? AND ?
-            '''
+            if not cache_files:
+                return None
             
-            df = pd.read_sql_query(
-                query, conn,
-                params=(symbol.replace('/', '-'), start_timestamp, end_timestamp)
-            )
-            conn.close()
+            # 读取最新的缓存文件
+            latest_file = max(cache_files, key=lambda x: x.stat().st_mtime)
+            df = pd.read_csv(latest_file)
             
-            if not df.empty and df['avg_price'].iloc[0] is not None:
-                # 简化的未来收益计算
-                # 实际应该获取start_timestamp时的价格
-                # 这里返回一个占位值，实际实现需要价格数据
-                return 0.0  # 占位
+            if df.empty or 'close' not in df.columns:
+                return None
             
-            return None
+            # 转换timestamp到datetime
+            start_dt = pd.to_datetime(start_timestamp, unit='ms')
+            end_dt = start_dt + timedelta(hours=hours)
+            
+            # 查找最接近的K线
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            
+            # 获取起始价格（最接近start_timestamp的K线收盘价）
+            start_mask = df['timestamp'] <= start_dt
+            if not start_mask.any():
+                return None
+            start_price = df.loc[start_mask, 'close'].iloc[-1]
+            
+            # 获取结束价格（最接近end_timestamp的K线收盘价）
+            end_mask = df['timestamp'] <= end_dt
+            if not end_mask.any():
+                return None
+            end_price = df.loc[end_mask, 'close'].iloc[-1]
+            
+            # 计算收益率
+            future_return = (end_price - start_price) / start_price
+            
+            return float(future_return)
             
         except Exception as e:
-            print(f"Error calculating future return: {e}")
+            print(f"[ML] Error calculating future return for {symbol}: {e}")
             return None
     
     def export_training_data(

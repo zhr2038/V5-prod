@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.6,
+  "f6_sentiment_magnitude": 0.6,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "SOL市场情绪偏向积极，投资者普遍认为处于吸筹和筑底阶段，建议耐心持有或定投。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论显示SOL正在吸筹，大户买入而散户卖出，表明市场可能处于积累阶段。",
+    "缩量横盘和即将突破的表述暗示技术面看好，投资者预期价格上涨。",
+    "跌不动和筑中的观点反映市场认为底部已近，恐慌情绪较低。",
+    "定投和捡便宜筹码的建议显示长期看好，而非短期投机。",
+    "整体缺乏恐慌或FOMO极端术语，情绪相对稳定中性偏乐观。"
+  ],
+  "f6_market_stage": "accumulation"
+}
