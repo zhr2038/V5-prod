@@ -94,7 +94,7 @@ risk:
   drawdown_delever: 0.60  # 减少 delever
 
 rebalance:
-  deadband_sideways: 0.07
+  deadband_sideways: 0.04
   deadband_trending: 0.03
   deadband_riskoff: 0.07
 
