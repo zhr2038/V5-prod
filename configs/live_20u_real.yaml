@@ -81,7 +81,7 @@ regime:
   atr_very_low: 0.008
   pos_mult_trending: 1.2
   pos_mult_sideways: 0.6
-  pos_mult_risk_off: 0.0  # Risk-Off 只允许减仓，不开新仓
+  pos_mult_risk_off: 0.2  # Risk-Off 允许20%试探仓（防止错过V反）
 
 risk:
   max_single_weight: 0.30  # 提高单币种限制，避免资金不足
