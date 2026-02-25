@@ -621,20 +621,40 @@
                     return;
                 }
                 
+                // 可读性优化：下采样 + 时间格式化 + 动态Y轴
+                const maxPoints = 140;
+                const n = data.dates.length;
+                const step = Math.max(1, Math.floor(n / maxPoints));
+                const sampledDates = [];
+                const sampledValues = [];
+                for (let i = 0; i < n; i += step) {
+                    sampledDates.push(data.dates[i]);
+                    sampledValues.push(data.values[i]);
+                }
+                if (sampledDates[sampledDates.length - 1] !== data.dates[n - 1]) {
+                    sampledDates.push(data.dates[n - 1]);
+                    sampledValues.push(data.values[n - 1]);
+                }
+
+                const vMin = Math.min(...sampledValues);
+                const vMax = Math.max(...sampledValues);
+                const pad = Math.max((vMax - vMin) * 0.15, 0.2);
+                const trendUp = sampledValues[sampledValues.length - 1] >= sampledValues[0];
+
                 equityChart = new Chart(ctx, {
                     type: 'line',
                     data: {
-                        labels: data.dates,
+                        labels: sampledDates,
                         datasets: [{
                             label: '权益曲线',
-                            data: data.values,
-                            borderColor: '#00d4ff',
-                            backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                            borderWidth: 2,
+                            data: sampledValues,
+                            borderColor: trendUp ? '#22c55e' : '#ef4444',
+                            backgroundColor: trendUp ? 'rgba(34, 197, 94, 0.10)' : 'rgba(239, 68, 68, 0.10)',
+                            borderWidth: 2.2,
                             fill: true,
-                            tension: 0.4,
+                            tension: 0.25,
                             pointRadius: 0,
-                            pointHoverRadius: 6
+                            pointHoverRadius: 4
                         }]
                     },
                     options: {
@@ -647,24 +667,38 @@
                         plugins: {
                             legend: { display: false },
                             tooltip: {
-                                backgroundColor: 'rgba(10, 14, 26, 0.9)',
+                                backgroundColor: 'rgba(10, 14, 26, 0.95)',
                                 borderColor: '#2a3142',
                                 borderWidth: 1,
                                 callbacks: {
-                                    label: (context) => `权益: $${context.raw.toFixed(2)}`
+                                    title: (items) => {
+                                        const raw = items?.[0]?.label || '';
+                                        return raw.replace('T', ' ').replace('Z', '').slice(0, 16);
+                                    },
+                                    label: (context) => `权益: $${Number(context.raw).toFixed(4)}`
                                 }
                             }
                         },
                         scales: {
                             x: {
-                                grid: { color: 'rgba(255,255,255,0.05)' },
-                                ticks: { color: '#64748b', maxTicksLimit: 8 }
+                                grid: { color: 'rgba(255,255,255,0.04)' },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    maxTicksLimit: 10,
+                                    callback: function(val) {
+                                        const raw = this.getLabelForValue(val) || '';
+                                        // 展示 HH:MM，避免一屏全是长时间戳
+                                        return raw.includes('T') ? raw.split('T')[1].slice(0,5) : raw.slice(11,16);
+                                    }
+                                }
                             },
                             y: {
-                                grid: { color: 'rgba(255,255,255,0.05)' },
-                                ticks: { 
-                                    color: '#64748b',
-                                    callback: (val) => '$' + val.toFixed(0)
+                                min: vMin - pad,
+                                max: vMax + pad,
+                                grid: { color: 'rgba(255,255,255,0.04)' },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    callback: (val) => '$' + Number(val).toFixed(2)
                                 }
                             }
                         }
