@@ -1149,7 +1149,14 @@ def api_ic_diagnostics():
                 with open(f, 'r', encoding='utf-8') as fh:
                     d = json.load(fh)
                 ic_by_factor = (d.get('overall_tradable') or {}).get('ic', {})
+                # 检查是否有有效的IC数据（count > 0）
+                has_valid_data = False
                 if isinstance(ic_by_factor, dict) and len(ic_by_factor) > 0:
+                    for factor_data in ic_by_factor.values():
+                        if isinstance(factor_data, dict) and factor_data.get('count', 0) > 0:
+                            has_valid_data = True
+                            break
+                if has_valid_data:
                     latest_ic = f
                     ic_data = d
                     break
