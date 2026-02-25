@@ -125,7 +125,7 @@ def api_account():
             placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
             query = f"""
                 SELECT 
-                    COUNT(*) as total_trades,
+                    SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) as total_trades,
                     SUM(CASE WHEN side='buy' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_buy,
                     SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell,
                     SUM(CASE WHEN state='FILLED' THEN fee ELSE 0 END) as total_fees
@@ -809,7 +809,7 @@ def api_dashboard():
                 'totalEquity': account_data.get('cash_usdt', 0),
                 'cash': account_data.get('cash_usdt', 0),
                 'totalPnl': account_data.get('realized_pnl', 0),
-                'totalPnlPercent': round((account_data.get('realized_pnl', 0) / 100) * 100, 2) if account_data.get('cash_usdt', 0) > 0 else 0,
+                'totalPnlPercent': round((account_data.get('realized_pnl', 0) / max(account_data.get('cash_usdt', 1), 1e-9)) * 100, 2) if account_data.get('cash_usdt', 0) > 0 else 0,
                 'todayPnl': 0,
                 'todayPnlPercent': 0,
                 'sharpeRatio': 0,
