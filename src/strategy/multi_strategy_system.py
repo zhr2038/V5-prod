@@ -504,29 +504,44 @@ class Alpha6FactorStrategy(BaseStrategy):
         return 100.0 - 100.0 / (1.0 + rs)
 
     def _load_sentiment_factor(self, symbol: str) -> float:
-        """从本地缓存读取情绪分值（-1~1）；缺失时按币种即时生成一次缓存。"""
+        """从本地缓存读取情绪分值（-1~1）；支持多种数据源。"""
         try:
             s = symbol.replace('/', '-').replace('_', '-')
-            candidates = sorted(self.sentiment_cache_dir.glob(f"deepseek_{s}_*.json"))
-            if not candidates:
-                candidates = sorted(self.sentiment_cache_dir.glob(f"{s}_*.json"))
-
-            # 若该币种没有缓存，补采样一次（按小时缓存，后续复用）
-            if not candidates:
+            data = None
+            
+            # 1. 优先尝试 funding_rate（资金费率，最实时）
+            funding_files = sorted(self.sentiment_cache_dir.glob(f"funding_{s}_*.json"))
+            if funding_files:
+                data = json.loads(funding_files[-1].read_text())
+            
+            # 2. 尝试 deepseek AI分析
+            if data is None:
+                deepseek_files = sorted(self.sentiment_cache_dir.glob(f"deepseek_{s}_*.json"))
+                if deepseek_files:
+                    data = json.loads(deepseek_files[-1].read_text())
+            
+            # 3. 尝试其他格式
+            if data is None:
+                other_files = sorted(self.sentiment_cache_dir.glob(f"{s}_*.json"))
+                if other_files:
+                    data = json.loads(other_files[-1].read_text())
+            
+            # 4. 若该币种没有缓存，尝试用DeepSeek生成一次
+            if data is None:
                 try:
                     from src.factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
                     factor = DeepSeekSentimentFactor(cache_dir=str(self.sentiment_cache_dir))
                     factor.calculate(s)
-                    candidates = sorted(self.sentiment_cache_dir.glob(f"deepseek_{s}_*.json"))
-                    if not candidates:
-                        candidates = sorted(self.sentiment_cache_dir.glob(f"{s}_*.json"))
+                    # 重新尝试读取
+                    funding_files = sorted(self.sentiment_cache_dir.glob(f"funding_{s}_*.json"))
+                    if funding_files:
+                        data = json.loads(funding_files[-1].read_text())
                 except Exception:
-                    return 0.0
-
-            if not candidates:
+                    pass
+            
+            if data is None:
                 return 0.0
-
-            data = json.loads(candidates[-1].read_text())
+                
             v = float(data.get('f6_sentiment', 0.0))
             return max(-1.0, min(1.0, v))
         except Exception:

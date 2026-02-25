@@ -45,18 +45,39 @@ class RegimeEngine:
         self.sentiment_cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
 
     def _load_market_sentiment(self) -> float:
-        """读取市场情绪（-1~1），优先 BTC/ETH/SOL/BNB 的最新平均值。"""
+        """读取市场情绪（-1~1），优先 BTC/ETH/SOL/BNB 的最新平均值。
+        
+        支持多种数据源：
+        1. funding_rate（资金费率，实时）
+        2. deepseek（AI分析）
+        3. 其他缓存文件
+        """
         try:
             vals = []
             for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
-                files = sorted(self.sentiment_cache_dir.glob(f'deepseek_{sym}_*.json'))
-                if not files:
-                    files = sorted(self.sentiment_cache_dir.glob(f'{sym}_*.json'))
-                if not files:
-                    continue
-                data = json.loads(files[-1].read_text())
-                v = float(data.get('f6_sentiment', 0.0))
-                vals.append(max(-1.0, min(1.0, v)))
+                data = None
+                
+                # 1. 优先尝试 funding_rate（资金费率，最实时）
+                funding_files = sorted(self.sentiment_cache_dir.glob(f'funding_{sym}_*.json'))
+                if funding_files:
+                    data = json.loads(funding_files[-1].read_text())
+                
+                # 2. 尝试 deepseek AI分析
+                if data is None:
+                    deepseek_files = sorted(self.sentiment_cache_dir.glob(f'deepseek_{sym}_*.json'))
+                    if deepseek_files:
+                        data = json.loads(deepseek_files[-1].read_text())
+                
+                # 3. 尝试其他格式
+                if data is None:
+                    other_files = sorted(self.sentiment_cache_dir.glob(f'{sym}_*.json'))
+                    if other_files:
+                        data = json.loads(other_files[-1].read_text())
+                
+                if data:
+                    v = float(data.get('f6_sentiment', 0.0))
+                    vals.append(max(-1.0, min(1.0, v)))
+            
             if not vals:
                 return 0.0
             return float(np.mean(vals))
