@@ -208,6 +208,11 @@
         
         <!-- 总览 Tab -->
         <div id="tab-overview" class="tab-content active">
+            <!-- 智能告警横幅 -->
+            <div id="smart-alerts-banner" style="display: none; margin-bottom: 15px;">
+                <!-- 动态插入告警卡片 -->
+            </div>
+            
             <div class="grid">
                 <!-- 账户概览 -->
                 <div class="card">
@@ -1330,6 +1335,47 @@
             }
         }
         
+        // 加载智能告警
+        async function loadSmartAlerts() {
+            try {
+                const res = await fetch('/api/smart_alerts');
+                const data = await res.json();
+                
+                const banner = document.getElementById('smart-alerts-banner');
+                
+                if (data.status === 'alert' && data.alerts && data.alerts.length > 0) {
+                    let html = '';
+                    for (const alert of data.alerts) {
+                        const levelColors = {
+                            'critical': { bg: 'rgba(239,68,68,0.15)', border: '#ef4444', icon: '🚨' },
+                            'high': { bg: 'rgba(245,158,11,0.15)', border: '#f59e0b', icon: '⚠️' },
+                            'medium': { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6', icon: '📊' }
+                        };
+                        const colors = levelColors[alert.level] || levelColors['medium'];
+                        
+                        html += `
+                            <div style="background: ${colors.bg}; border-left: 4px solid ${colors.border}; border-radius: 8px; padding: 12px 15px; margin-bottom: 10px;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-size: 1.2rem;">${colors.icon}</span>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; color: #e2e8f0;">${alert.title}</div>
+                                        <div style="font-size: 0.85rem; color: #94a3b8; margin-top: 3px;">${alert.message}</div>
+                                        <div style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">💡 ${alert.suggestion}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    banner.innerHTML = html;
+                    banner.style.display = 'block';
+                } else {
+                    banner.style.display = 'none';
+                }
+            } catch (e) {
+                console.error('加载智能告警失败:', e);
+            }
+        }
+        
         // 加载所有数据
         async function loadAll() {
             await Promise.all([
@@ -1345,7 +1391,8 @@
                 loadICDiagnostics(),
                 loadReflectionReports(),
                 loadDecisionChain(),
-                loadShadowTest()
+                loadShadowTest(),
+                loadSmartAlerts()
             ]);
             
             document.getElementById('update-time').textContent = 

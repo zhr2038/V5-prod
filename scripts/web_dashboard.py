@@ -1640,6 +1640,25 @@ def api_shadow_test():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/smart_alerts')
+def api_smart_alerts():
+    """智能告警API - 返回当前活跃的告警"""
+    try:
+        from src.monitoring.smart_alert import SmartAlertEngine
+        
+        engine = SmartAlertEngine()
+        alerts = engine.run_all_checks()
+        
+        return jsonify({
+            'alerts': alerts,
+            'count': len(alerts),
+            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'alert' if alerts else 'normal'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'alerts': [], 'status': 'error'}), 500
+
+
 if __name__ == '__main__':
     print("="*60)
     print("V5 Web Dashboard 启动中...")
