@@ -1403,8 +1403,24 @@ def api_decision_chain():
                 run_id = run_dir.name
                 ts = data.get('now_ts') or data.get('window_start_ts')
                 if ts:
-                    # 时间戳已经是本地时间(CST)，直接格式化
-                    run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+                    # 判断是旧数据(UTC)还是新数据(CST)
+                    # 通过比较 run_id 小时和文件修改时间来判断
+                    import os
+                    mtime = os.path.getmtime(run_dir)
+                    mtime_dt = datetime.fromtimestamp(mtime)
+                    
+                    # 如果 run_id 小时与本地修改时间相差很大，说明是旧UTC数据
+                    run_hour = int(run_id.split('_')[-1]) if '_' in run_id else 0
+                    local_hour = mtime_dt.hour
+                    
+                    # UTC数据的特征：run_id小时 = 本地小时 - 8 (或 +16)
+                    hour_diff = (run_hour - local_hour) % 24
+                    if hour_diff >= 16:  # 相差16小时以上，说明是UTC命名的旧数据
+                        # 旧数据：时间戳是UTC，需要+8转为CST
+                        run_time = datetime.fromtimestamp(ts + 8*3600).strftime('%Y-%m-%d %H:%M:%S')
+                    else:
+                        # 新数据：时间戳已经是CST
+                        run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
                 else:
                     run_time = run_id
 
