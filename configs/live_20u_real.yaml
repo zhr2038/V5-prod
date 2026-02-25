@@ -113,7 +113,7 @@ risk:
   drawdown_delever: 0.60  # 减少 delever
 
 rebalance:
-  deadband_sideways: 0.04
+  deadband_sideways: 0.03  # 从0.04降到0.03，增加交易频率
   deadband_trending: 0.03
   deadband_riskoff: 0.07
 
