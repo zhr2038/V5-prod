@@ -28,6 +28,15 @@ app = Flask(__name__,
             template_folder='/home/admin/clawd/v5-trading-bot/web/templates', 
             static_folder='/home/admin/clawd/v5-trading-bot/web/static')
 
+
+@app.after_request
+def add_no_cache_headers(resp):
+    """避免移动端缓存旧前端，确保样式/图表脚本及时生效。"""
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
+
 # 配置路径
 WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
 REPORTS_DIR = WORKSPACE / 'reports'
