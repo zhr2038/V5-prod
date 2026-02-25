@@ -67,29 +67,29 @@ class AlphaEngine:
         # 创建策略编排器
         orchestrator = StrategyOrchestrator(total_capital=total_capital)
         
-        # 注册趋势跟踪策略（保收益模式：低权重、强确认）
+        # 注册趋势跟踪策略 (15%资金，降低熊市噪声影响)
         trend_strategy = TrendFollowingStrategy(config={
             'fast_ma': 20,
             'slow_ma': 60,
-            'adx_threshold': 32,
-            'position_size_pct': 0.20,
-            'trailing_stop': 0.035
+            'adx_threshold': 28,
+            'position_size_pct': 0.35,
+            'trailing_stop': 0.04
         })
-        orchestrator.register_strategy(trend_strategy, allocation=Decimal('0.10'))
+        orchestrator.register_strategy(trend_strategy, allocation=Decimal('0.15'))
         
-        # 注册均值回归策略（保收益主策略）
+        # 注册均值回归策略 (35%资金)
         mean_revert_strategy = MeanReversionStrategy(config={
             'rsi_period': 14,
-            'rsi_oversold': 27,
-            'rsi_overbought': 73,
+            'rsi_oversold': 28,
+            'rsi_overbought': 72,
             'bb_period': 20,
             'bb_std': 2,
-            'position_size_pct': 0.22,
-            'mean_rev_threshold': 0.03
+            'position_size_pct': 0.25,
+            'mean_rev_threshold': 0.025
         })
-        orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal('0.60'))
+        orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal('0.35'))
         
-        # 注册6因子Alpha策略（降噪）
+        # 注册6因子Alpha策略 (50%资金，主策略)
         alpha6_strategy = Alpha6FactorStrategy(config={
             'weights': {
                 'f1_mom_5d': 0.15,
@@ -99,17 +99,17 @@ class AlphaEngine:
                 'f5_rsi_trend_confirm': 0.15,
                 'f6_sentiment': 0.15
             },
-            'position_size_pct': 0.20,
-            'score_threshold': 0.18
+            'position_size_pct': 0.30,
+            'score_threshold': 0.10
         })
-        orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.30'))
+        orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.50'))
         
         # 创建适配器
         self.multi_strategy_adapter = MultiStrategyAdapter(orchestrator)
-        print(f"[AlphaEngine] 多策略融合已启用（保收益模式）:")
-        print(f"              - 趋势跟踪: 10%")
-        print(f"              - 均值回归: 60%")
-        print(f"              - 6因子Alpha: 30%")
+        print(f"[AlphaEngine] 多策略融合已启用:")
+        print(f"              - 趋势跟踪: 15%")
+        print(f"              - 均值回归: 35%")
+        print(f"              - 6因子Alpha: 50%")
     
     def compute_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
         # 如果使用多策略，返回多策略信号
