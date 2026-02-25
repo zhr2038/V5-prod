@@ -28,7 +28,25 @@ class HMMRegimeDetector:
         self.n_components = n_components
         self.model = SimpleGaussianHMM(n_components=n_components)
         self.model_path = model_path or Path('/home/admin/clawd/v5-trading-bot/models/hmm_regime.pkl')
-        self.state_names = {0: 'TrendingUp', 1: 'TrendingDown', 2: 'Sideways'}
+        self.info_path = self.model_path.parent / 'hmm_regime_info.json'
+        
+        # 从info文件加载正确的状态标签
+        self.state_names = self._load_state_labels()
+    
+    def _load_state_labels(self) -> dict:
+        """从info文件加载正确的状态标签"""
+        try:
+            if self.info_path.exists():
+                with open(self.info_path, 'r') as f:
+                    info = json.load(f)
+                labels = info.get('state_labels', {})
+                # 转换为int key
+                return {int(k): v for k, v in labels.items()}
+        except Exception as e:
+            print(f"[HMM] 加载状态标签失败: {e}")
+        
+        # 默认标签
+        return {0: 'TrendingUp', 1: 'Sideways', 2: 'TrendingDown'}
         
     def load_training_data(self, db_path: Path = None, symbol: str = 'BTC/USDT', 
                            lookback_days: int = 60) -> np.ndarray:
@@ -115,7 +133,7 @@ class HMMRegimeDetector:
         return True
     
     def predict(self, features: np.ndarray) -> dict:
-        """预测当前市场状态"""
+        """预测当前市场状态（带正确标签映射）"""
         if self.model.means_ is None:
             if self.model_path.exists():
                 self.model.load(self.model_path)
@@ -128,13 +146,55 @@ class HMMRegimeDetector:
         probs = self.model.predict_proba(features)
         current_probs = probs[-1]
         
+        # 分析每个状态的实际特征，正确映射标签
+        # 基于mom_5d和mom_20d判断真实方向
+        state_characteristics = []
+        for i in range(self.n_components):
+            mean = self.model.means_[i]
+            mom_5d = mean[0]
+            mom_20d = mean[1]
+            volatility = mean[2]
+            
+            # 判断真实状态
+            if mom_5d > 0 and mom_20d > 0:
+                true_state = 'TrendingUp'
+            elif mom_5d < 0 and mom_20d < 0:
+                true_state = 'TrendingDown'
+            elif abs(mom_5d) < 0.001 and abs(mom_20d) < 0.001:
+                true_state = 'Sideways'
+            else:
+                # 混合信号，看波动率
+                if volatility > 0.04:
+                    true_state = 'Sideways'  # 高波动无方向 = 震荡
+                elif mom_5d > 0:
+                    true_state = 'TrendingUp'
+                else:
+                    true_state = 'TrendingDown'
+            
+            state_characteristics.append({
+                'id': i,
+                'true_state': true_state,
+                'mom_5d': mom_5d,
+                'mom_20d': mom_20d,
+                'volatility': volatility
+            })
+        
+        # 获取当前状态的真实标签
+        true_state_name = state_characteristics[current_state]['true_state']
+        
+        # 重新计算概率分布（基于真实状态）
+        true_state_probs = {'TrendingUp': 0, 'TrendingDown': 0, 'Sideways': 0}
+        for i, prob in enumerate(current_probs):
+            true_label = state_characteristics[i]['true_state']
+            true_state_probs[true_label] += prob
+        
         return {
-            'state': self.state_names.get(current_state, f'State{current_state}'),
-            'state_id': int(current_state),
+            'state': true_state_name,
+            'state_id': current_state,
             'probability': float(current_probs[current_state]),
             'probs': current_probs.tolist(),
-            'all_states': {self.state_names.get(i, f'State{i}'): float(p) 
-                          for i, p in enumerate(current_probs)}
+            'all_states': {k: float(v) for k, v in true_state_probs.items()},
+            'state_details': state_characteristics
         }
     
     def detect_regime(self, features_list: list) -> dict:

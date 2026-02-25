@@ -82,10 +82,10 @@ regime:
   use_hmm: true               # 启用HMM（训练好之前权重为0）
   
   # 三种方法的权重（加起来=1.0）
-  # 注意：HMM训练好之前设为0，避免错误信号
-  hmm_weight: 0.00            # HMM: 0%（训练好之前禁用）
-  funding_weight: 0.60        # 资金费率: 60%（训练好之前提高）
-  rss_weight: 0.40            # RSS新闻: 40%（训练好之前提高）
+  # HMM已用1年OKX数据训练完成，启用
+  hmm_weight: 0.35           # HMM: 35%（数据驱动）
+  funding_weight: 0.40       # 资金费率: 40%（实时）
+  rss_weight: 0.25           # RSS新闻: 25%（深度）
   
   # HMM训练好后的目标权重：
   # hmm_weight: 0.40          # HMM: 40%
