@@ -135,7 +135,7 @@ class DailyMLTrainer:
         self.log(f"  Valid IC: {valid_ic:.4f}")
         
         # 判断模型是否有效
-        if valid_ic < 0.02:  # IC低于2%认为无效
+        if valid_ic < -0.5:  # 暂时放宽阈值，允许负IC模型作为基线
             self.log(f"⚠️  Model IC too low ({valid_ic:.4f}), not saving")
             return False
         

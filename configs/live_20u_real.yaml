@@ -253,3 +253,28 @@ sentiment:
     - DOT-USDT
     - AVAX-USDT
     - POL/USDT
+
+# ============================================================
+# ML因子模型配置 (LightGBM)
+# ============================================================
+ml_factor:
+  enabled: true               # 启用ML因子模型
+  model_type: lightgbm        # lightgbm | xgboost | sklearn
+  n_estimators: 100           # 树的数量
+  max_depth: 5                # 树的最大深度
+  learning_rate: 0.05         # 学习率
+  min_train_samples: 200      # 最小训练样本数
+  prediction_horizon: 6       # 预测未来6小时收益
+  
+  # 与传统因子的融合权重
+  blend_with_traditional: true
+  ml_weight: 0.30             # ML模型占30%
+  traditional_weight: 0.70    # 传统因子占70%
+  
+  # 自动重训练
+  auto_retrain: true
+  retrain_interval_hours: 24  # 每天自动重训练
+  
+  # 模型路径
+  model_path: models/ml_factor_model.txt
+  training_data_db: reports/ml_training_data.db
