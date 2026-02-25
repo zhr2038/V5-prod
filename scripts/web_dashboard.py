@@ -1402,7 +1402,13 @@ def api_decision_chain():
                 # 提取决策链信息
                 run_id = run_dir.name
                 ts = data.get('now_ts') or data.get('window_start_ts')
-                run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') if ts else run_id
+                if ts:
+                    # 转换为北京时间 (+8)
+                    from datetime import timezone
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=8)
+                    run_time = dt.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    run_time = run_id
 
                 # 1. 策略层信号
                 selected_scores = data.get('top_scores', [])
