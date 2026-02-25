@@ -379,7 +379,7 @@ class Alpha6FactorStrategy(BaseStrategy):
                 continue
             
             # 计算6个因子
-            factors = self._calculate_factors(df)
+            factors = self._calculate_factors(df, symbol)
             
             # z-score标准化
             z_factors = self._zscore_factors(factors)
@@ -410,7 +410,7 @@ class Alpha6FactorStrategy(BaseStrategy):
         
         return signals
     
-    def _calculate_factors(self, df: pd.DataFrame) -> Dict[str, float]:
+    def _calculate_factors(self, df: pd.DataFrame, symbol: str) -> Dict[str, float]:
         """计算6个原始因子"""
         close = df['close'].values
         volume = df['volume'].values if 'volume' in df.columns else np.ones(len(close))
