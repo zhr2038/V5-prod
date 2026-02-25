@@ -642,38 +642,40 @@
                     sampledValues.push(data.values[n - 1]);
                 }
 
-                const vMin = Math.min(...sampledValues);
-                const vMax = Math.max(...sampledValues);
-                const pad = Math.max((vMax - vMin) * 0.15, 0.2);
-                const trendUp = sampledValues[sampledValues.length - 1] >= sampledValues[0];
+                const base = sampledValues[0] || 1;
+                const pctValues = sampledValues.map(v => ((v - base) / base) * 100); // 相对首点收益率
+                const pMin = Math.min(...pctValues);
+                const pMax = Math.max(...pctValues);
+                const pPad = Math.max((pMax - pMin) * 0.2, 0.05);
+                const trendUp = pctValues[pctValues.length - 1] >= pctValues[0];
 
                 equityChart = new Chart(ctx, {
                     data: {
                         labels: sampledDates,
                         datasets: [{
                             type: 'bar',
-                            label: '权益柱状图',
-                            data: sampledValues,
-                            backgroundColor: sampledValues.map((v, i) => {
+                            label: '相对收益(%)',
+                            data: pctValues,
+                            backgroundColor: pctValues.map((v, i) => {
                                 if (i === 0) return 'rgba(100,116,139,0.45)';
-                                return v >= sampledValues[i - 1] ? 'rgba(34,197,94,0.55)' : 'rgba(239,68,68,0.55)';
+                                return v >= pctValues[i - 1] ? 'rgba(34,197,94,0.6)' : 'rgba(239,68,68,0.6)';
                             }),
-                            borderColor: sampledValues.map((v, i) => {
+                            borderColor: pctValues.map((v, i) => {
                                 if (i === 0) return 'rgba(100,116,139,0.9)';
-                                return v >= sampledValues[i - 1] ? 'rgba(34,197,94,0.95)' : 'rgba(239,68,68,0.95)';
+                                return v >= pctValues[i - 1] ? 'rgba(34,197,94,0.95)' : 'rgba(239,68,68,0.95)';
                             }),
                             borderWidth: 1,
                             borderRadius: 3,
-                            maxBarThickness: 12,
+                            maxBarThickness: 14,
                             yAxisID: 'y'
                         }, {
                             type: 'line',
                             label: '趋势线',
-                            data: sampledValues,
+                            data: pctValues,
                             borderColor: '#38bdf8',
                             backgroundColor: 'transparent',
-                            borderWidth: 1.6,
-                            tension: 0.18,
+                            borderWidth: 1.8,
+                            tension: 0.2,
                             pointRadius: 0,
                             pointHoverRadius: 3,
                             yAxisID: 'y'
@@ -697,7 +699,12 @@
                                         const raw = items?.[0]?.label || '';
                                         return raw.replace('T', ' ').replace('Z', '').slice(0, 16);
                                     },
-                                    label: (context) => `权益: $${Number(context.raw).toFixed(4)}`
+                                    label: (context) => {
+                                        const i = context.dataIndex;
+                                        const pct = Number(context.raw).toFixed(3);
+                                        const eq = Number(sampledValues[i]).toFixed(4);
+                                        return `变化: ${pct}% ｜ 权益: $${eq}`;
+                                    }
                                 }
                             }
                         },
@@ -709,18 +716,17 @@
                                     maxTicksLimit: 6,
                                     callback: function(val) {
                                         const raw = this.getLabelForValue(val) || '';
-                                        // 展示 HH:MM，避免一屏全是长时间戳
                                         return raw.includes('T') ? raw.split('T')[1].slice(0,5) : raw.slice(11,16);
                                     }
                                 }
                             },
                             y: {
-                                min: vMin - pad,
-                                max: vMax + pad,
+                                min: pMin - pPad,
+                                max: pMax + pPad,
                                 grid: { color: 'rgba(255,255,255,0.04)' },
                                 ticks: {
                                     color: '#94a3b8',
-                                    callback: (val) => '$' + Number(val).toFixed(2)
+                                    callback: (val) => Number(val).toFixed(2) + '%'
                                 }
                             }
                         }
