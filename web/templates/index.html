@@ -199,6 +199,7 @@
         
         <div class="nav-tabs">
             <div class="nav-tab active" onclick="switchTab('overview')">📊 总览</div>
+            <div class="nav-tab" onclick="switchTab('decision')">🧠 决策归因</div>
             <div class="nav-tab" onclick="switchTab('equity')">📈 权益曲线</div>
             <div class="nav-tab" onclick="switchTab('positions')">💼 持仓&交易</div>
             <div class="nav-tab" onclick="switchTab('system')">⚙️ 系统状态</div>
@@ -289,6 +290,22 @@
                     <div id="sentiment-display">
                         <div class="loading"><div class="spinner"></div></div>
                     </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 决策归因 Tab -->
+        <div id="tab-decision" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(139,92,246,0.2);">🧠</div>
+                    <div>
+                        <div class="card-title">决策归因分析</div>
+                        <div class="card-subtitle">Strategy → Risk → Execution</div>
+                    </div>
+                </div>
+                <div id="decision-chain-container">
+                    <div class="loading"><div class="spinner"></div></div>
                 </div>
             </div>
         </div>
@@ -1086,6 +1103,87 @@
             }
         }
         
+        // 加载决策归因面板
+        async function loadDecisionChain() {
+            try {
+                const res = await fetch('/api/decision_chain');
+                const data = await res.json();
+                
+                const container = document.getElementById('decision-chain-container');
+                if (!data.rounds || data.rounds.length === 0) {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">暂无决策记录</div>';
+                    return;
+                }
+                
+                let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
+                
+                for (const round of data.rounds) {
+                    const risk = round.risk_state || {};
+                    const exec = round.execution_result || {};
+                    const blocks = round.block_reasons || {};
+                    
+                    // 判断本轮状态颜色
+                    let statusColor = '#22c55e';  // 绿色-正常成交
+                    let statusText = '正常';
+                    if (exec.orders_rebalance === 0 && exec.selected > 0) {
+                        statusColor = '#f59e0b';  // 黄色-有信号但被拦截
+                        statusText = '被拦截';
+                    }
+                    
+                    html += `
+                        <div style="background: rgba(255,255,255,0.03); border-radius: 12px; padding: 15px; border-left: 4px solid ${statusColor};">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <div style="font-weight: 600;">${round.time}</div>
+                                <span style="background: ${statusColor}; color: white; padding: 3px 10px; border-radius: 10px; font-size: 0.75rem;">${statusText}</span>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; font-size: 0.85rem;">
+                                <div style="text-align: center;">
+                                    <div style="color: #64748b;">选中币种</div>
+                                    <div style="font-weight: 600;">${exec.selected || 0}</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="color: #64748b;">实际成交</div>
+                                    <div style="font-weight: 600; color: ${exec.orders_rebalance > 0 ? '#22c55e' : '#ef4444'};">${exec.orders_rebalance || 0}</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="color: #64748b;">风控状态</div>
+                                    <div style="font-weight: 600;">${risk.regime || 'Unknown'}</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="color: #64748b;">回撤降杠杆</div>
+                                    <div style="font-weight: 600; color: ${(risk.dd_multiplier || 1) < 1 ? '#f59e0b' : '#22c55e'};">${risk.dd_multiplier || 1}x</div>
+                                </div>
+                            </div>
+                            
+                            ${blocks.deadband > 0 ? `
+                                <div style="background: rgba(245,158,11,0.1); border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                                    <div style="color: #f59e0b; font-size: 0.8rem; margin-bottom: 5px;">⚠️ Deadband 拦截: ${blocks.deadband} 个币种</div>
+                                    ${round.blocked_top && round.blocked_top.length > 0 ? `
+                                        <div style="font-size: 0.75rem; color: #94a3b8;">
+                                            被拦Top3: ${round.blocked_top.map(b => `${b.symbol}(漂移${b.drift.toFixed(3)})`).join(', ')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            ` : ''}
+                            
+                            <div style="font-size: 0.75rem; color: #64748b;">
+                                策略信号: ${(round.strategy_signals || []).slice(0,3).map(s => `${s.symbol}(${s.score.toFixed(2)})`).join(', ')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+                container.innerHTML = html;
+                
+            } catch (e) {
+                console.error('加载决策归因失败:', e);
+                document.getElementById('decision-chain-container').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
         // 加载所有数据
         async function loadAll() {
             await Promise.all([
@@ -1099,7 +1197,8 @@
                 loadTrades(),
                 loadCostCalibration(),
                 loadICDiagnostics(),
-                loadReflectionReports()
+                loadReflectionReports(),
+                loadDecisionChain()
             ]);
             
             document.getElementById('update-time').textContent = 
