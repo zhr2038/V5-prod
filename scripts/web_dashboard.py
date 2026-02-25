@@ -982,9 +982,12 @@ def api_timers():
 
 @app.route('/api/cost_calibration')
 def api_cost_calibration():
-    """F2成本校准进度API - 从原始数据计算"""
+    """F2成本校准进度API - 从定时任务生成的真实成本数据计算"""
     try:
-        cost_dir = REPORTS_DIR / 'cost_stats'
+        # 优先读取定时任务生成的真实成本数据 (cost_stats_real)
+        cost_dir = REPORTS_DIR / 'cost_stats_real'
+        if not cost_dir.exists():
+            cost_dir = REPORTS_DIR / 'cost_stats'  # 兼容旧路径
         events_dir = REPORTS_DIR / 'cost_events'
         
         calibration_data = []
@@ -993,7 +996,7 @@ def api_cost_calibration():
         avg_fee_bps = 0
         total_trade_count = 0
         
-        # 优先从cost_stats读取已汇总的数据
+        # 优先从cost_stats_real读取已汇总的数据
         if cost_dir.exists():
             stats_files = sorted(cost_dir.glob('daily_cost_stats_*.json'))
             
@@ -1023,12 +1026,18 @@ def api_cost_calibration():
                     
                     avg_day_slippage = sum(day_slippage) / len(day_slippage) if day_slippage else 0
                     avg_day_fee = sum(day_fee) / len(day_fee) if day_fee else 0
+                    total_day_cost = avg_day_slippage + avg_day_fee
+                    
+                    # 过滤异常值（成本 > 1000 bps 或 < 0 视为异常）
+                    if total_day_cost > 1000 or total_day_cost < 0:
+                        print(f"[CostCalibration] Skipping abnormal day {day}: cost={total_day_cost:.2f} bps")
+                        continue
                     
                     calibration_data.append({
                         'date': day,
                         'slippage_bps': round(avg_day_slippage, 4),
                         'fee_bps': round(avg_day_fee, 4),
-                        'total_cost_bps': round(avg_day_slippage + avg_day_fee, 4),
+                        'total_cost_bps': round(total_day_cost, 4),
                         'trade_count': day_trade_count
                     })
                     
