@@ -278,7 +278,14 @@ class EnsembleRegimeEngine:
         closes = list(btc_data.close)
         ma20 = np.mean(closes[-20:]) if len(closes) >= 20 else np.mean(closes)
         ma60 = np.mean(closes[-60:]) if len(closes) >= 60 else np.mean(closes)
-        atrp = np.std(np.diff(closes[-14:]) / closes[-15:-1]) if len(closes) > 14 else 0.01
+        
+        # 计算ATR%
+        if len(closes) > 14:
+            recent = closes[-15:]
+            returns = [(recent[i] - recent[i-1]) / recent[i-1] for i in range(1, len(recent))]
+            atrp = np.std(returns)
+        else:
+            atrp = 0.01
         
         # 6. 根据confidence调整multiplier（可选）
         # 高置信度可以略微提高倍数，低置信度降低倍数

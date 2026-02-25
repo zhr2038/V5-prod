@@ -76,6 +76,13 @@ class RegimeConfig(BaseModel):
     pos_mult_sideways: float = 0.6
     pos_mult_risk_off: float = 0.3
 
+    # Ensemble方法配置
+    use_ensemble: bool = Field(default=False, description="使用Ensemble方法（HMM+情绪）替代传统MA")
+    use_hmm: bool = Field(default=False, description="启用HMM模型")
+    hmm_weight: float = Field(default=0.40, ge=0, le=1, description="HMM权重")
+    funding_weight: float = Field(default=0.35, ge=0, le=1, description="资金费率情绪权重")
+    rss_weight: float = Field(default=0.25, ge=0, le=1, description="RSS新闻情绪权重")
+
     # 情绪驱动的风险状态修正（避免在强反弹初期被长期锁死）
     sentiment_regime_override_enabled: bool = Field(default=True)
     sentiment_riskoff_relax_threshold: float = Field(default=0.65, ge=-1.0, le=1.0)
