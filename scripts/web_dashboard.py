@@ -147,8 +147,29 @@ def api_account():
         else:
             total_trades = total_buy = total_sell = total_fees = realized_pnl = 0
         
+        # 估算持仓市值（用于权益展示）
+        positions_value = 0.0
+        try:
+            pos_db = REPORTS_DIR / 'positions.sqlite'
+            if pos_db.exists():
+                pconn = sqlite3.connect(str(pos_db))
+                pcur = pconn.cursor()
+                pcur.execute("SELECT qty, last_mark_px FROM positions")
+                for q, px in pcur.fetchall():
+                    try:
+                        positions_value += float(q or 0) * float(px or 0)
+                    except Exception:
+                        continue
+                pconn.close()
+        except Exception:
+            pass
+
+        total_equity = float(cash or 0) + positions_value
+
         return jsonify({
             'cash_usdt': round(float(cash), 2),
+            'positions_value_usdt': round(float(positions_value), 4),
+            'total_equity_usdt': round(float(total_equity), 4),
             'total_trades': int(total_trades),
             'total_buy': round(float(total_buy), 2),
             'total_sell': round(float(total_sell), 2),
@@ -207,24 +228,13 @@ def api_trades():
 
 @app.route('/api/positions')
 def api_positions():
-    """持仓信息API（过滤dust并估算USDT市值）"""
+    """持仓信息API（以 positions.sqlite 为准，避免reconcile延迟）"""
     try:
-        reconcile_file = REPORTS_DIR / 'reconcile_status.json'
-        if not reconcile_file.exists():
-            return jsonify([])
-
-        with open(reconcile_file, 'r', encoding='utf-8') as f:
-            reconcile = json.load(f)
-
-        ccy_qty = reconcile.get('local_snapshot', {}).get('ccy_qty', {})
-
-        # 业务黑名单（不在持仓页展示）
         hidden_symbols = {
             'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
         }
 
         def get_last_price_usdt(symbol: str) -> float:
-            # 1) 优先K线缓存
             try:
                 cache_dir = WORKSPACE / 'data' / 'cache'
                 files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
@@ -234,61 +244,48 @@ def api_positions():
                         return float(df.iloc[-1]['close'])
             except Exception:
                 pass
-
-            # 2) 回退：从最近成交均价推断（避免无缓存时持仓全空）
-            try:
-                conn = get_db_connection()
-                if conn:
-                    cur = conn.cursor()
-                    cur.execute(
-                        """
-                        SELECT avg_px, notional_usdt, sz
-                        FROM orders
-                        WHERE state='FILLED' AND inst_id=?
-                        ORDER BY created_ts DESC
-                        LIMIT 1
-                        """,
-                        (f'{symbol}-USDT',)
-                    )
-                    row = cur.fetchone()
-                    conn.close()
-                    if row:
-                        avg_px = float(row[0]) if row[0] else 0.0
-                        if avg_px > 0:
-                            return avg_px
-                        notional = float(row[1]) if row[1] else 0.0
-                        sz = float(row[2]) if row[2] else 0.0
-                        if sz > 0:
-                            return notional / sz
-            except Exception:
-                pass
-
             return 0.0
 
+        pos_db = REPORTS_DIR / 'positions.sqlite'
         positions = []
-        for symbol, qty in ccy_qty.items():
-            try:
-                if symbol == 'USDT' or symbol in hidden_symbols:
-                    continue
-                qty_float = float(qty)
-                if qty_float <= 0:
-                    continue
 
-                px = get_last_price_usdt(symbol)
-                value = qty_float * px if px > 0 else 0.0
+        if pos_db.exists():
+            conn = sqlite3.connect(str(pos_db))
+            cur = conn.cursor()
+            cur.execute("SELECT symbol, qty, avg_px, last_mark_px FROM positions")
+            rows = cur.fetchall()
+            conn.close()
 
-                # 过滤dust：市值小于0.5U不展示
-                if value < 0.5:
+            for symbol_raw, qty, avg_px, last_mark_px in rows:
+                try:
+                    symbol_raw = str(symbol_raw or '')
+                    base = symbol_raw.split('/')[0] if '/' in symbol_raw else symbol_raw.split('-')[0]
+                    if base == 'USDT' or base in hidden_symbols:
+                        continue
+
+                    qty_float = float(qty or 0)
+                    if qty_float <= 0:
+                        continue
+
+                    px = float(last_mark_px or 0) if last_mark_px else 0.0
+                    if px <= 0:
+                        px = get_last_price_usdt(base)
+                    if px <= 0 and avg_px:
+                        px = float(avg_px)
+
+                    value = qty_float * px if px > 0 else 0.0
+                    if value < 0.5:  # 过滤dust
+                        continue
+
+                    positions.append({
+                        'symbol': base,
+                        'qty': round(qty_float, 8),
+                        'avg_px': round(float(avg_px or 0), 6),
+                        'last_price': round(px, 6),
+                        'value_usdt': round(value, 4)
+                    })
+                except Exception:
                     continue
-
-                positions.append({
-                    'symbol': symbol,
-                    'qty': round(qty_float, 8),
-                    'value_usdt': round(value, 4),
-                    'last_price': round(px, 6) if px > 0 else 0
-                })
-            except (TypeError, ValueError):
-                continue
 
         positions.sort(key=lambda x: x.get('value_usdt', 0), reverse=True)
         return jsonify(positions)
@@ -298,112 +295,58 @@ def api_positions():
 
 @app.route('/api/scores')
 def api_scores():
-    """币种评分API - 包含与上次结果的比较"""
+    """币种评分API（当前run vs 上一个run 的排名变化）"""
     try:
-        # 查找最新的决策文件
         runs_dir = REPORTS_DIR / 'runs'
         if not runs_dir.exists():
             return jsonify({'regime': 'Unknown', 'scores': []})
-        
-        # 获取所有run目录并按修改时间排序（最新的在前）
-        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir()]
+
+        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
         run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-        
         if not run_dirs:
             return jsonify({'regime': 'Unknown', 'scores': []})
-        
-        # 尝试找到有decision_audit.json的最近run
-        current_scores = []
-        current_regime = 'Unknown'
-        
-        for run_dir in run_dirs[:10]:  # 检查最近10个
-            decision_file = run_dir / 'decision_audit.json'
-            if decision_file.exists():
+
+        def load_scores(run_dir: Path):
+            with open(run_dir / 'decision_audit.json', 'r', encoding='utf-8') as f:
+                decision = json.load(f)
+            items = []
+            for item in decision.get('top_scores', [])[:20]:
                 try:
-                    with open(decision_file, 'r') as f:
-                        decision = json.load(f)
-                    
-                    current_regime = decision.get('regime', 'Unknown')
-                    top_scores = decision.get('top_scores', [])
-                    
-                    for item in top_scores[:20]:
-                        try:
-                            current_scores.append({
-                                'symbol': item.get('symbol', 'Unknown'),
-                                'score': round(float(item.get('score', 0)), 4)
-                            })
-                        except (TypeError, ValueError):
-                            continue
-                    
-                    break  # 找到了当前数据
-                except (json.JSONDecodeError, KeyError) as e:
+                    items.append({'symbol': item.get('symbol', 'Unknown'), 'score': round(float(item.get('score', 0)), 4)})
+                except Exception:
                     continue
-        
-        # 加载历史评分数据
-        history_file = REPORTS_DIR / 'scores_history.json'
+            regime = decision.get('regime', 'Unknown')
+            return regime, items
+
+        current_run = run_dirs[0]
+        current_regime, current_scores = load_scores(current_run)
+
+        previous_scores = []
+        previous_run_id = None
+        if len(run_dirs) > 1:
+            previous_run_id = run_dirs[1].name
+            _, previous_scores = load_scores(run_dirs[1])
+
         previous_ranking = {}
-        
-        # 初始化历史数据（如果是第一次运行）
-        if not history_file.exists():
-            try:
-                # 创建初始历史记录（所有币当前排名作为基准）
-                initial_history = [{
-                    'timestamp': (datetime.now() - timedelta(hours=1)).isoformat(),
-                    'regime': current_regime,
-                    'scores': current_scores[:15]  # 前15名作为初始
-                }]
-                with open(history_file, 'w') as f:
-                    json.dump(initial_history, f, indent=2)
-                print(f"[Scores] 创建初始历史数据: {len(current_scores)} 个币种")
-            except Exception as e:
-                print(f"[Scores] 创建初始历史失败: {e}")
-        
-        if history_file.exists():
-            try:
-                with open(history_file, 'r') as f:
-                    history = json.load(f)
-                
-                # 获取最近一次的数据（排除当前）
-                current_time = datetime.now().isoformat()
-                for entry in reversed(history):
-                    entry_time = entry.get('timestamp', '')
-                    # 如果这条记录比当前时间早至少30分钟，认为是上一次的数据
-                    if entry_time < current_time:
-                        prev_scores = entry.get('scores', [])
-                        for idx, s in enumerate(prev_scores):
-                            previous_ranking[s.get('symbol')] = {
-                                'rank': idx + 1,
-                                'score': s.get('score', 0)
-                            }
-                        break
-            except Exception as e:
-                print(f"加载历史评分失败: {e}")
-        
-        # 比较排名变化
+        for idx, s in enumerate(previous_scores):
+            previous_ranking[s['symbol']] = {'rank': idx + 1, 'score': s.get('score', 0)}
+
         scores_with_trend = []
         for idx, s in enumerate(current_scores):
             symbol = s['symbol']
             current_rank = idx + 1
             prev_info = previous_ranking.get(symbol)
-            
             if prev_info:
-                rank_change = prev_info['rank'] - current_rank  # 正值表示排名上升
-                score_change = s['score'] - prev_info['score']
-                
-                if rank_change > 0:
-                    trend = 'up'  # 排名上升（数字变小）
-                elif rank_change < 0:
-                    trend = 'down'  # 排名下降（数字变大）
-                else:
-                    trend = 'stable'  # 排名不变
-                
+                rank_change = prev_info['rank'] - current_rank
+                score_change = round(float(s['score']) - float(prev_info['score']), 4)
+                trend = 'up' if rank_change > 0 else 'down' if rank_change < 0 else 'stable'
                 scores_with_trend.append({
                     **s,
                     'rank': current_rank,
                     'previous_rank': prev_info['rank'],
                     'rank_change': rank_change,
-                    'score_change': round(score_change, 4),
-                    'trend': trend
+                    'score_change': score_change,
+                    'trend': trend,
                 })
             else:
                 scores_with_trend.append({
@@ -412,34 +355,13 @@ def api_scores():
                     'previous_rank': None,
                     'rank_change': None,
                     'score_change': None,
-                    'trend': 'new'  # 新上榜
+                    'trend': 'new',
                 })
-        
-        # 保存当前评分到历史
-        try:
-            history = []
-            if history_file.exists():
-                with open(history_file, 'r') as f:
-                    history = json.load(f)
-            
-            # 添加新记录
-            history.append({
-                'timestamp': datetime.now().isoformat(),
-                'regime': current_regime,
-                'scores': current_scores
-            })
-            
-            # 只保留最近100条记录
-            if len(history) > 100:
-                history = history[-100:]
-            
-            with open(history_file, 'w') as f:
-                json.dump(history, f, indent=2)
-        except Exception as e:
-            print(f"保存历史评分失败: {e}")
-        
+
         return jsonify({
             'regime': current_regime,
+            'current_run': current_run.name,
+            'previous_run': previous_run_id,
             'scores': scores_with_trend,
             'last_update': datetime.now().isoformat()
         })
@@ -765,14 +687,20 @@ def api_dashboard():
         # 转换持仓格式
         positions = []
         for pos in positions_data:
+            avg_price = float(pos.get('avg_px', 0) or 0)
+            cur_price = float(pos.get('last_price', 0) or 0)
+            qty = float(pos.get('qty', 0) or 0)
+            value = float(pos.get('value_usdt', 0) or 0)
+            pnl = (cur_price - avg_price) * qty if avg_price > 0 and cur_price > 0 else 0
+            pnl_pct = ((cur_price - avg_price) / avg_price * 100) if avg_price > 0 and cur_price > 0 else 0
             positions.append({
                 'symbol': pos.get('symbol', ''),
-                'qty': pos.get('qty', 0),
-                'avgPrice': 0,
-                'currentPrice': 0,
-                'value': pos.get('value_usdt', 0),
-                'pnl': 0,
-                'pnlPercent': 0
+                'qty': qty,
+                'avgPrice': round(avg_price, 6),
+                'currentPrice': round(cur_price, 6),
+                'value': round(value, 4),
+                'pnl': round(pnl, 4),
+                'pnlPercent': round(pnl_pct, 2)
             })
         
         # 转换交易格式
@@ -804,12 +732,18 @@ def api_dashboard():
                 'weight': 0.1
             })
         
+        positions_value = sum(float(p.get('value', 0) or 0) for p in positions)
+        cash_usdt = float(account_data.get('cash_usdt', 0) or 0)
+        total_equity = cash_usdt + positions_value
+        realized_pnl = float(account_data.get('realized_pnl', 0) or 0)
+
         dashboard_data = {
             'account': {
-                'totalEquity': account_data.get('cash_usdt', 0),
-                'cash': account_data.get('cash_usdt', 0),
-                'totalPnl': account_data.get('realized_pnl', 0),
-                'totalPnlPercent': round((account_data.get('realized_pnl', 0) / max(account_data.get('cash_usdt', 1), 1e-9)) * 100, 2) if account_data.get('cash_usdt', 0) > 0 else 0,
+                'totalEquity': round(total_equity, 4),
+                'cash': round(cash_usdt, 4),
+                'positionsValue': round(positions_value, 4),
+                'totalPnl': round(realized_pnl, 4),
+                'totalPnlPercent': round((realized_pnl / max(total_equity, 1e-9)) * 100, 2) if total_equity > 0 else 0,
                 'todayPnl': 0,
                 'todayPnlPercent': 0,
                 'sharpeRatio': 0,
