@@ -141,8 +141,14 @@
         /* Chart Container */
         .chart-container {
             position: relative;
-            height: 300px;
+            height: 520px;
             margin: 20px 0;
+            width: 100%;
+        }
+
+        /* 权益页图表再放大一档 */
+        #tab-equity .card {
+            padding: 24px;
         }
         
         /* Positions & Trades */
@@ -622,7 +628,7 @@
                 }
                 
                 // 可读性优化：下采样 + 时间格式化 + 动态Y轴
-                const maxPoints = 140;
+                const maxPoints = 90;
                 const n = data.dates.length;
                 const step = Math.max(1, Math.floor(n / maxPoints));
                 const sampledDates = [];
@@ -684,7 +690,7 @@
                                 grid: { color: 'rgba(255,255,255,0.04)' },
                                 ticks: {
                                     color: '#94a3b8',
-                                    maxTicksLimit: 10,
+                                    maxTicksLimit: 6,
                                     callback: function(val) {
                                         const raw = this.getLabelForValue(val) || '';
                                         // 展示 HH:MM，避免一屏全是长时间戳
