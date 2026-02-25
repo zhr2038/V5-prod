@@ -391,35 +391,44 @@ def api_scores():
 
 @app.route('/api/sentiment')
 def api_sentiment():
-    """情绪分析API"""
+    """情绪分析API（优先读取本地缓存，避免阻塞UI）"""
     try:
-        # 导入情绪因子
-        sys.path.insert(0, '/home/admin/clawd/v5-trading-bot/src')
-        from factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
-        
-        factor = DeepSeekSentimentFactor()
-        
-        # 分析主要币种
         symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']
+        cache_dir = WORKSPACE / 'data/sentiment_cache'
         results = {}
-        
+
         for symbol in symbols:
             try:
-                result = factor.calculate(symbol)
+                # 优先 deepseek 缓存；若没有则退回通用缓存
+                files = sorted(cache_dir.glob(f'deepseek_{symbol}_*.json'))
+                if not files:
+                    files = sorted(cache_dir.glob(f'{symbol}_*.json'))
+
+                if not files:
+                    results[symbol] = {'error': 'no_cache'}
+                    continue
+
+                latest = files[-1]
+                with open(latest, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
                 results[symbol] = {
-                    'sentiment': result['f6_sentiment'],
-                    'fear_greed': result['f6_fear_greed_index'],
-                    'stage': result.get('f6_market_stage', 'unknown'),
-                    'summary': result.get('f6_sentiment_summary', '')
+                    'sentiment': float(data.get('f6_sentiment', 0.0)),
+                    'fear_greed': float(data.get('f6_fear_greed_index', 50.0)),
+                    'stage': data.get('f6_market_stage', 'unknown'),
+                    'summary': data.get('f6_sentiment_summary', ''),
+                    'source': data.get('f6_sentiment_source', 'cache'),
+                    'cache_file': latest.name,
+                    'cache_mtime': datetime.fromtimestamp(latest.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
                 }
             except Exception as e:
                 results[symbol] = {'error': str(e)}
-        
-        # 计算平均情绪
+
         valid_scores = [r['sentiment'] for r in results.values() if 'sentiment' in r]
-        avg_sentiment = sum(valid_scores) / len(valid_scores) if valid_scores else 0
-        
-        # 判断整体市场状态
+        valid_fg = [r['fear_greed'] for r in results.values() if 'fear_greed' in r]
+        avg_sentiment = sum(valid_scores) / len(valid_scores) if valid_scores else 0.0
+        avg_fear_greed = sum(valid_fg) / len(valid_fg) if valid_fg else 50.0
+
         if avg_sentiment > 0.5:
             market_mood = '贪婪'
             mood_color = '#22c55e'
@@ -429,11 +438,11 @@ def api_sentiment():
         else:
             market_mood = '中性'
             mood_color = '#64748b'
-        
+
         return jsonify({
             'overall': {
                 'sentiment': round(avg_sentiment, 4),
-                'fear_greed': int((avg_sentiment + 1) * 50),
+                'fear_greed': int(round(avg_fear_greed)),
                 'mood': market_mood,
                 'mood_color': mood_color
             },
