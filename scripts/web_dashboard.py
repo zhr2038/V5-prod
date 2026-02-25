@@ -174,7 +174,7 @@ def api_trades():
         cursor.execute(f"""
             SELECT 
                 inst_id, side, notional_usdt, fee, state,
-                datetime(created_ts/1000, 'unixepoch') as time
+                datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
             FROM orders 
             WHERE state='FILLED'
             AND inst_id NOT IN ({placeholders})
@@ -713,7 +713,7 @@ def api_dashboard():
         for i, trade in enumerate(trades_data[:20]):
             trades.append({
                 'id': str(i),
-                'timestamp': trade.get('time', '') + 'Z' if trade.get('time') else '',
+                'timestamp': trade.get('time', '') if trade.get('time') else '',
                 'symbol': trade.get('symbol', '').replace('-USDT', '/USDT'),
                 'side': trade.get('side', 'buy'),
                 'type': 'REBALANCE',
@@ -1204,72 +1204,69 @@ def api_ic_diagnostics():
 
 @app.route('/api/ml_training')
 def api_ml_training():
-    """机器学习训练进度API"""
+    """机器学习训练进度API（对齐当前项目文件结构）"""
     try:
-        # 检查模型目录
         model_dir = WORKSPACE / 'models'
-        latest_model = None
-        model_files = sorted(model_dir.glob('lgb_model_*.pkl')) if model_dir.exists() else []
-        
-        if model_files:
-            latest_model = model_files[-1]
-            model_time = datetime.fromtimestamp(latest_model.stat().st_mtime)
-        else:
-            model_time = None
-        
-        # 检查数据收集进度
+        model_candidates = []
+        if model_dir.exists():
+            model_candidates += list(model_dir.glob('ml_factor_model.txt'))
+            model_candidates += list(model_dir.glob('lgb_model_*.pkl'))
+        latest_model = max(model_candidates, key=lambda p: p.stat().st_mtime) if model_candidates else None
+        model_time = datetime.fromtimestamp(latest_model.stat().st_mtime) if latest_model else None
+
+        # 优先从 SQLite 统计样本（当前真实路径）
+        total_samples = 0
+        labeled_samples = 0
+        db_path = REPORTS_DIR / 'ml_training_data.db'
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            cur = conn.cursor()
+            cur.execute('SELECT COUNT(*) FROM feature_snapshots')
+            total_samples = int(cur.fetchone()[0] or 0)
+            cur.execute('SELECT COUNT(*) FROM feature_snapshots WHERE label_filled = 1')
+            labeled_samples = int(cur.fetchone()[0] or 0)
+            conn.close()
+
+        # 兼容旧CSV路径
         data_dir = WORKSPACE / 'data' / 'ml_training'
         data_files = list(data_dir.glob('training_data_*.csv')) if data_dir.exists() else []
-        
-        total_samples = 0
-        for df in data_files:
-            try:
-                import pandas as pd
-                data = pd.read_csv(df)
-                total_samples += len(data)
-            except:
-                continue
-        
-        # 检查训练日志
+
+        # 训练日志（支持负数/NaN）
         training_log = WORKSPACE / 'logs' / 'ml_training.log'
-        last_training = None
         last_ic = None
-        
         if training_log.exists():
             try:
-                with open(training_log, 'r') as f:
+                with open(training_log, 'r', encoding='utf-8', errors='ignore') as f:
                     lines = f.readlines()
-                    # 查找最后一行包含IC的
-                    for line in reversed(lines):
-                        if 'IC:' in line or 'ic:' in line:
-                            import re
-                            ic_match = re.search(r'IC[:\s]+([\d.]+)', line)
-                            if ic_match:
-                                last_ic = float(ic_match.group(1))
-                                break
-                    if lines:
-                        last_training = lines[-1][:50]  # 最后一条日志
-            except:
+                import re
+                for line in reversed(lines):
+                    m = re.search(r'Valid IC[:\s]+([+-]?\d*\.?\d+|nan)', line, re.IGNORECASE)
+                    if m:
+                        v = m.group(1).lower()
+                        last_ic = None if v == 'nan' else float(v)
+                        break
+            except Exception:
                 pass
-        
-        # 确定状态
+
+        effective_samples = labeled_samples if labeled_samples > 0 else total_samples
         if model_time and (datetime.now() - model_time).days < 1:
             status = 'trained_today'
-        elif total_samples >= 100:
+        elif effective_samples >= 100:
             status = 'ready_to_train'
-        elif total_samples > 0:
+        elif effective_samples > 0:
             status = 'collecting_data'
         else:
             status = 'no_data'
-        
+
         return jsonify({
             'status': status,
             'total_samples': total_samples,
+            'labeled_samples': labeled_samples,
             'samples_needed': 100,
-            'progress_percent': min(100, int(total_samples / 100 * 100)),
+            'progress_percent': min(100, int((effective_samples / 100) * 100)) if effective_samples else 0,
             'latest_model': latest_model.name if latest_model else None,
             'model_date': model_time.strftime('%Y-%m-%d %H:%M') if model_time else None,
-            'last_ic': round(last_ic, 4) if last_ic else None,
+            'last_ic': round(last_ic, 4) if last_ic is not None else None,
             'data_files': len(data_files),
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
@@ -1279,42 +1276,50 @@ def api_ml_training():
 
 @app.route('/api/reflection_reports')
 def api_reflection_reports():
-    """反思Agent报告列表API"""
+    """反思Agent报告列表API（兼容V1/V2结构）"""
     try:
         reflection_dir = REPORTS_DIR / 'reflection'
-        
+
         if not reflection_dir.exists():
             return jsonify({'reports': [], 'message': '暂无反思报告'})
-        
+
         reports = []
         report_files = sorted(reflection_dir.glob('reflection_*.json'), reverse=True)
-        
-        for report_file in report_files[:10]:  # 最近10份
+
+        for report_file in report_files[:10]:
             try:
-                with open(report_file, 'r') as f:
+                with open(report_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                
-                # 提取关键信息
+
+                # V2: summary/alerts; V1: overall_metrics/insights
+                summary = data.get('summary', {})
                 metrics = data.get('overall_metrics', {})
+                alerts = data.get('alerts', [])
                 insights = data.get('insights', [])
-                
-                # 统计洞察
-                high_severity = sum(1 for i in insights if i.get('severity') == 'high')
-                medium_severity = sum(1 for i in insights if i.get('severity') == 'medium')
-                
+
+                total_pnl = summary.get('total_realized_pnl', metrics.get('total_pnl', 0))
+                trade_count = summary.get('total_trades', metrics.get('total_trades', 0))
+                symbols = summary.get('total_symbols', metrics.get('unique_symbols', 0))
+
+                high_priority = sum(1 for a in alerts if str(a.get('level', '')).lower() in ('high', 'critical'))
+                medium_priority = sum(1 for a in alerts if str(a.get('level', '')).lower() in ('medium', 'warning'))
+                if not alerts and insights:
+                    high_priority = sum(1 for i in insights if str(i.get('severity', '')).lower() == 'high')
+                    medium_priority = sum(1 for i in insights if str(i.get('severity', '')).lower() == 'medium')
+
                 reports.append({
                     'filename': report_file.name,
                     'date': report_file.stem.replace('reflection_', ''),
-                    'total_pnl': round(metrics.get('total_pnl', 0), 2),
-                    'trade_count': metrics.get('total_trades', 0),
-                    'symbols': metrics.get('unique_symbols', 0),
-                    'insights_count': len(insights),
-                    'high_priority': high_severity,
-                    'medium_priority': medium_severity
+                    'total_pnl': round(float(total_pnl or 0), 2),
+                    'trade_count': int(trade_count or 0),
+                    'symbols': int(symbols or 0),
+                    'insights_count': len(alerts) if alerts else len(insights),
+                    'high_priority': high_priority,
+                    'medium_priority': medium_priority
                 })
-            except:
+            except Exception:
                 continue
-        
+
         return jsonify({
             'reports': reports,
             'total_reports': len(report_files),
