@@ -83,7 +83,7 @@ regime:
   pos_mult_sideways: 0.6
   pos_mult_risk_off: 0.0  # Risk-Off 默认只减仓；是否放松由情绪驱动override决定
   sentiment_regime_override_enabled: true
-  sentiment_riskoff_relax_threshold: 0.65   # 情绪>=0.65 时可放松Risk-Off
+  sentiment_riskoff_relax_threshold: 0.55   # 情绪>=0.55 时可放松Risk-Off（适配当前上涨情绪）
   sentiment_riskoff_harden_threshold: -0.65 # 情绪<=-0.65 时强化Risk-Off
   ma_gap_relax_threshold: 0.03              # MA缺口<=3%才允许放松
 
