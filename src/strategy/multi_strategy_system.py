@@ -23,6 +23,7 @@ class StrategyType(Enum):
     """策略类型"""
     TREND_FOLLOWING = "trend"           # 趋势跟踪
     MEAN_REVERSION = "mean_reversion"   # 均值回归
+    ALPHA_6FACTOR = "alpha_6factor"     # 6因子Alpha
     MOMENTUM = "momentum"               # 动量策略
     BREAKOUT = "breakout"               # 突破策略
 
@@ -320,6 +321,177 @@ class MeanReversionStrategy(BaseStrategy):
         upper = middle + self.config['bb_std'] * std
         lower = middle - self.config['bb_std'] * std
         return upper, middle, lower
+
+
+class Alpha6FactorStrategy(BaseStrategy):
+    """
+    6因子Alpha策略
+    
+    核心逻辑:
+    - f1_mom_5d: 5日动量 (短期趋势)
+    - f2_mom_20d: 20日动量 (中期趋势)
+    - f3_vol_adj_ret: 波动率调整收益
+    - f4_volume_expansion: 成交量扩张
+    - f5_rsi_trend_confirm: RSI趋势确认
+    - f6_sentiment: 情绪因子 (AI分析)
+    
+    信号生成:
+    - 计算6因子综合评分 (z-score标准化后加权)
+    - 评分 > threshold: 买入
+    - 评分 < -threshold: 卖出
+    """
+    
+    def __init__(self, config: Dict = None):
+        default_config = {
+            'weights': {
+                'f1_mom_5d': 0.15,
+                'f2_mom_20d': 0.25,
+                'f3_vol_adj_ret': 0.15,
+                'f4_volume_expansion': 0.15,
+                'f5_rsi_trend_confirm': 0.15,
+                'f6_sentiment': 0.15
+            },
+            'position_size_pct': 0.25,
+            'score_threshold': 0.3,  # 评分阈值，超过才产生信号
+            'use_sentiment': True
+        }
+        if config:
+            default_config.update(config)
+        
+        super().__init__(
+            name="Alpha6Factor",
+            strategy_type=StrategyType.ALPHA_6FACTOR,
+            config=default_config
+        )
+        
+        self.factor_weights = self.config['weights']
+    
+    def generate_signals(self, market_data: pd.DataFrame) -> List[Signal]:
+        """生成6因子Alpha信号"""
+        signals = []
+        
+        for symbol in market_data['symbol'].unique():
+            df = market_data[market_data['symbol'] == symbol].copy()
+            if len(df) < 24 * 20 + 1:  # 需要至少20天数据
+                continue
+            
+            # 计算6个因子
+            factors = self._calculate_factors(df)
+            
+            # z-score标准化
+            z_factors = self._zscore_factors(factors)
+            
+            # 加权计算综合评分
+            score = self._calculate_score(z_factors)
+            
+            # 生成信号
+            if abs(score) > self.config['score_threshold']:
+                side = 'buy' if score > 0 else 'sell'
+                confidence = min(abs(score), 1.0)
+                
+                signal = Signal(
+                    symbol=symbol,
+                    side=side,
+                    score=abs(score),
+                    confidence=confidence,
+                    strategy=self.name,
+                    timestamp=datetime.now(),
+                    metadata={
+                        'raw_factors': factors,
+                        'z_factors': z_factors,
+                        'final_score': score
+                    }
+                )
+                signals.append(signal)
+                self.signals_history.append(signal)
+        
+        return signals
+    
+    def _calculate_factors(self, df: pd.DataFrame) -> Dict[str, float]:
+        """计算6个原始因子"""
+        close = df['close'].values
+        volume = df['volume'].values if 'volume' in df.columns else np.ones(len(close))
+        
+        # f1: 5日动量 (5*24=120根1小时K线)
+        f1 = (close[-1] - close[-min(120, len(close))]) / close[-min(120, len(close))]
+        
+        # f2: 20日动量 (20*24=480根1小时K线)
+        f2 = (close[-1] - close[-min(480, len(close))]) / close[-min(480, len(close))]
+        
+        # f3: 波动率调整收益 (20日)
+        returns = np.diff(close[-min(481, len(close)):]) / close[-min(480, len(close)):-1]
+        vol = np.std(returns) if len(returns) > 0 else 1e-12
+        f3 = f2 / (vol + 1e-12)
+        
+        # f4: 成交量扩张 (最近24h vs 前7天平均)
+        if len(volume) >= 24 * 8:
+            vol_recent = np.mean(volume[-24:])
+            vol_prev = np.mean([np.mean(volume[-24*(i+1):-24*i]) for i in range(1, 8)])
+            f4 = (vol_recent / (vol_prev + 1e-12)) - 1.0
+        else:
+            f4 = 0.0
+        
+        # f5: RSI趋势确认 (RSI-50)/50
+        rsi = self._calculate_rsi_single(close)
+        f5 = (rsi - 50.0) / 50.0
+        
+        # f6: 情绪因子 (占位，实际从外部获取)
+        f6 = 0.0  # 默认值，实际运行时应从sentiment模块获取
+        
+        return {
+            'f1_mom_5d': f1,
+            'f2_mom_20d': f2,
+            'f3_vol_adj_ret': f3,
+            'f4_volume_expansion': f4,
+            'f5_rsi_trend_confirm': f5,
+            'f6_sentiment': f6
+        }
+    
+    def _zscore_factors(self, factors: Dict[str, float]) -> Dict[str, float]:
+        """对因子进行z-score标准化 (简化版，实际应该用历史均值/std)"""
+        # 这里使用简化的标准化：除以典型值范围
+        typical_ranges = {
+            'f1_mom_5d': 0.10,  # 10%波动
+            'f2_mom_20d': 0.20,  # 20%波动
+            'f3_vol_adj_ret': 2.0,
+            'f4_volume_expansion': 0.50,
+            'f5_rsi_trend_confirm': 1.0,
+            'f6_sentiment': 1.0
+        }
+        
+        z_factors = {}
+        for name, value in factors.items():
+            z_factors[name] = value / typical_ranges.get(name, 1.0)
+        
+        return z_factors
+    
+    def _calculate_score(self, z_factors: Dict[str, float]) -> float:
+        """计算加权综合评分"""
+        score = 0.0
+        for name, z_value in z_factors.items():
+            weight = self.factor_weights.get(name, 0.0)
+            score += weight * z_value
+        return score
+    
+    def _calculate_rsi_single(self, prices: np.ndarray, period: int = 14) -> float:
+        """计算RSI"""
+        if len(prices) <= period:
+            return 50.0
+        deltas = np.diff(prices[-(period + 1):])
+        gains = np.clip(deltas, 0, None)
+        losses = -np.clip(deltas, None, 0)
+        avg_gain = np.mean(gains)
+        avg_loss = np.mean(losses)
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100.0 - 100.0 / (1.0 + rs)
+    
+    def calculate_position_size(self, signal: Signal, available_capital: Decimal) -> Decimal:
+        """根据信号强度计算仓位"""
+        base_size = available_capital * Decimal(self.config['position_size_pct'])
+        adjusted_size = base_size * Decimal(signal.confidence)
+        return adjusted_size
 
 
 class StrategyOrchestrator:
