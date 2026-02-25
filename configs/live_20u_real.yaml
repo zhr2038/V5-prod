@@ -77,15 +77,28 @@ alpha:
   dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
 
 regime:
+  # Ensemble 方法配置（不用传统MA，用HMM+情绪加权投票）
+  use_ensemble: true           # 启用Ensemble方法（HMM+资金费率+RSS）
+  use_hmm: true               # 启用HMM
+  
+  # 三种方法的权重（加起来=1.0）
+  hmm_weight: 0.40            # HMM: 40%（数据驱动）
+  funding_weight: 0.35        # 资金费率: 35%（实时）
+  rss_weight: 0.25            # RSS新闻: 25%（深度）
+  
+  # 传统方法配置（use_ensemble=false时使用）
   atr_threshold: 0.02
   atr_very_low: 0.008
+  
   pos_mult_trending: 1.2
   pos_mult_sideways: 0.6
-  pos_mult_risk_off: 0.0  # Risk-Off 默认只减仓；是否放松由情绪驱动override决定
+  pos_mult_risk_off: 0.0
+  
+  # 情绪覆盖（用于调整最终multiplier）
   sentiment_regime_override_enabled: true
-  sentiment_riskoff_relax_threshold: 0.55   # 情绪>=0.55 时可放松Risk-Off（适配当前上涨情绪）
-  sentiment_riskoff_harden_threshold: -0.65 # 情绪<=-0.65 时强化Risk-Off
-  ma_gap_relax_threshold: 0.03              # MA缺口<=3%才允许放松
+  sentiment_riskoff_relax_threshold: 0.55
+  sentiment_riskoff_harden_threshold: -0.65
+  ma_gap_relax_threshold: 0.03
 
 risk:
   max_single_weight: 0.30  # 提高单币种限制，避免资金不足

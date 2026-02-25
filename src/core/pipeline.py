@@ -33,7 +33,15 @@ from src.execution.position_store import Position
 from src.execution.position_builder import PositionBuilder  # Phase 2: 分批建仓
 from src.execution.multi_level_stop_loss import MultiLevelStopLoss, StopLossConfig  # Phase 2: 动态止损
 from src.portfolio.portfolio_engine import PortfolioEngine, PortfolioSnapshot
+
+# RegimeEngine选择：Ensemble（推荐）或传统MA
+try:
+    from src.regime.ensemble_regime_engine import EnsembleRegimeEngine
+    ENSEMBLE_AVAILABLE = True
+except ImportError:
+    ENSEMBLE_AVAILABLE = False
 from src.regime.regime_engine import RegimeEngine, RegimeResult
+
 from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
 from src.core.models import PositionState
@@ -97,7 +105,16 @@ class V5Pipeline:
 
         self.clock = clock or SystemClock()
         self.alpha_engine = AlphaEngine(cfg.alpha)
-        self.regime_engine = RegimeEngine(cfg.regime)
+        
+        # RegimeEngine选择：Ensemble（HMM+情绪）或传统MA
+        if ENSEMBLE_AVAILABLE and getattr(cfg.regime, 'use_ensemble', False):
+            print("[Pipeline] 使用EnsembleRegimeEngine (HMM+资金费率+RSS)")
+            self.regime_engine = EnsembleRegimeEngine(cfg.regime)
+        else:
+            print("[Pipeline] 使用传统RegimeEngine (MA+ATR)")
+            self.regime_engine = RegimeEngine(cfg.regime, 
+                                              use_hmm=getattr(cfg.regime, 'use_hmm', False))
+        
         self.portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
         self.risk_engine = RiskEngine(cfg.risk)
         self.exit_policy = ExitPolicy(ExitConfig(), clock=self.clock)
