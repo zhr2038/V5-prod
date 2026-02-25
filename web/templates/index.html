@@ -649,6 +649,8 @@
                 const pPad = Math.max((pMax - pMin) * 0.2, 0.05);
                 const trendUp = pctValues[pctValues.length - 1] >= pctValues[0];
 
+                const dynamicXTicks = Math.max(4, Math.min(10, Math.floor((window.innerWidth || 390) / 70)));
+
                 equityChart = new Chart(ctx, {
                     type: 'line',
                     data: {
@@ -698,7 +700,8 @@
                                 grid: { color: 'rgba(255,255,255,0.04)' },
                                 ticks: {
                                     color: '#94a3b8',
-                                    maxTicksLimit: 6,
+                                    autoSkip: true,
+                                    maxTicksLimit: dynamicXTicks,
                                     callback: function(val) {
                                         const raw = this.getLabelForValue(val) || '';
                                         return raw.includes('T') ? raw.split('T')[1].slice(0,5) : raw.slice(11,16);
@@ -708,6 +711,7 @@
                             y: {
                                 min: pMin - pPad,
                                 max: pMax + pPad,
+                                beginAtZero: false,
                                 grid: { color: 'rgba(255,255,255,0.04)' },
                                 ticks: {
                                     color: '#94a3b8',
