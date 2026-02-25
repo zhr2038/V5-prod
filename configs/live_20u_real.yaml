@@ -116,7 +116,7 @@ execution:
   live_arm_env: V5_LIVE_ARM
   live_arm_value: "YES"
   
-  # 🔧 借币预防机制（基于 PEPE 问题经验）
+  # # 借币预防机制（基于 PEPE 问题经验）
   borrow_prevention: true
   min_trade_value_usdt: 5.0  # 最小交易金额
   max_fee_ratio: 0.05  # 最大手续费比例
