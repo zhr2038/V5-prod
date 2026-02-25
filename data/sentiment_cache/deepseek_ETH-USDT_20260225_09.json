@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.9,
+  "f6_sentiment_magnitude": 0.9,
+  "f6_fear_greed_index": 85.0,
+  "f6_sentiment_summary": "社交媒体评论显示对ETH的极度乐观和贪婪情绪，普遍预期价格大幅上涨，存在明显的FOMO迹象。",
+  "f6_sentiment_confidence": 0.85,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论中频繁出现'梭哈'、'满仓'等术语，表明投资者积极买入或持有ETH，情绪高涨。",
+    "多个评论提到'起飞'、'to the moon'、'必到100万'，反映强烈的看涨预期和贪婪心理。",
+    "有评论指出'ETH突破前高'和'凌晨三点ETH放量，庄家进场了'，暗示技术面突破和市场参与者（如庄家）的积极行动，可能推动FOMO。",
+    "评论如'不要怂，ETH就是干'和'ETH筹码拿稳，钻石手'鼓励坚定持有，显示投资者信心十足，无恐慌迹象。",
+    "整体情绪偏向狂热，缺乏负面或谨慎评论，市场阶段可能处于FOMO驱动的上涨期。"
+  ],
+  "f6_market_stage": "fomo"
+}

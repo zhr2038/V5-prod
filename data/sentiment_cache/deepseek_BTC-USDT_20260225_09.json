@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.9,
+  "f6_sentiment_magnitude": 0.9,
+  "f6_fear_greed_index": 85.0,
+  "f6_sentiment_summary": "社交媒体评论显示极度乐观情绪，普遍看好BTC上涨，存在明显的FOMO迹象。",
+  "f6_sentiment_confidence": 0.85,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论中频繁出现'梭哈'、'满仓'等术语，表明投资者积极买入或持有BTC。",
+    "预测BTC价格将大幅上涨，如'必到100万'，显示强烈看涨预期。",
+    "提及'庄家进场'和'放量'，暗示市场参与者认为有大资金推动上涨。",
+    "鼓励性语言如'不要怂'、'钻石手'，反映投资者信心高涨和持有决心。",
+    "整体情绪偏向贪婪，缺乏恐慌或负面评论，市场处于狂热阶段。"
+  ],
+  "f6_market_stage": "fomo"
+}
