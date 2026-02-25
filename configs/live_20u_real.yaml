@@ -179,7 +179,24 @@ backtest:
   max_stats_age_days: 7
 
 # ============================================================
-# 因子权重配置 (新增情绪因子 f6)
+# Alpha 引擎配置
+# ============================================================
+alpha:
+  # 启用多策略模式 (趋势跟踪60% + 均值回归40%)
+  use_multi_strategy: true
+  
+  # 原有6因子配置（多策略模式下不使用，保留备用）
+  weights:
+    f1_mom_5d: 0.12
+    f2_mom_20d: 0.20
+    f3_vol_adj_ret_20d: 0.12
+    f4_volume_expansion: 0.13
+    f5_rsi_trend_confirm: 0.13
+  long_top_pct: 0.20
+  dynamic_weights_by_regime_enabled: false
+
+# ============================================================
+# 因子权重配置 (IC-based动态权重)
 # ============================================================
 factor_weights:
   scheme: hierarchical  # conservative | dynamic | hierarchical

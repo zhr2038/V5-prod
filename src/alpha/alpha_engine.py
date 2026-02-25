@@ -9,6 +9,18 @@ from src.utils.math import safe_pct_change, zscore_cross_section
 from configs.schema import AlphaConfig
 from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
 
+# 多策略集成
+try:
+    from src.strategy.multi_strategy_system import (
+        StrategyOrchestrator, 
+        TrendFollowingStrategy, 
+        MeanReversionStrategy,
+        MultiStrategyAdapter
+    )
+    MULTI_STRATEGY_AVAILABLE = True
+except ImportError:
+    MULTI_STRATEGY_AVAILABLE = False
+
 
 def _rsi(closes: List[float], period: int = 14) -> float:
     if len(closes) <= period:
@@ -34,10 +46,103 @@ class AlphaSnapshot:
 class AlphaEngine:
     def __init__(self, cfg: AlphaConfig):
         self.cfg = cfg
-
+        
+        # 初始化多策略系统（如果启用）
+        self.use_multi_strategy = getattr(cfg, 'use_multi_strategy', False)
+        self.multi_strategy_adapter = None
+        
+        if self.use_multi_strategy and MULTI_STRATEGY_AVAILABLE:
+            self._init_multi_strategy()
+    
+    def _init_multi_strategy(self):
+        """初始化多策略系统"""
+        from decimal import Decimal
+        
+        # 从配置获取资金限制
+        total_capital = Decimal('20.0')  # 默认20 USDT
+        if hasattr(self.cfg, 'live_equity_cap_usdt'):
+            total_capital = Decimal(str(self.cfg.live_equity_cap_usdt))
+        
+        # 创建策略编排器
+        orchestrator = StrategyOrchestrator(total_capital=total_capital)
+        
+        # 注册趋势跟踪策略 (60%资金)
+        trend_strategy = TrendFollowingStrategy(config={
+            'fast_ma': 20,
+            'slow_ma': 60,
+            'adx_threshold': 25,
+            'position_size_pct': 0.5,
+            'trailing_stop': 0.05
+        })
+        orchestrator.register_strategy(trend_strategy, allocation=Decimal('0.6'))
+        
+        # 注册均值回归策略 (40%资金)
+        mean_revert_strategy = MeanReversionStrategy(config={
+            'rsi_period': 14,
+            'rsi_oversold': 30,
+            'rsi_overbought': 70,
+            'bb_period': 20,
+            'bb_std': 2,
+            'position_size_pct': 0.3,
+            'mean_rev_threshold': 0.02
+        })
+        orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal('0.4'))
+        
+        # 创建适配器
+        self.multi_strategy_adapter = MultiStrategyAdapter(orchestrator)
+        print(f"[AlphaEngine] 多策略系统已启用: 趋势跟踪60% + 均值回归40%")
+    
     def compute_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
+        # 如果使用多策略，返回多策略信号
+        if self.use_multi_strategy and self.multi_strategy_adapter:
+            return self._compute_multi_strategy_scores(market_data)
+        
+        # 否则使用原有的6因子Alpha
         snap = self.compute_snapshot(market_data)
         return snap.scores
+    
+    def _compute_multi_strategy_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
+        """
+        使用多策略系统计算评分
+        """
+        import pandas as pd
+        from datetime import datetime
+        
+        # 将 MarketSeries 转换为 DataFrame
+        all_data = []
+        for sym, series in market_data.items():
+            if len(series.close) < 25:
+                continue
+            
+            # 构建DataFrame
+            df = pd.DataFrame({
+                'symbol': sym,
+                'close': list(series.close),
+                'high': list(series.high) if hasattr(series, 'high') else list(series.close),
+                'low': list(series.low) if hasattr(series, 'low') else list(series.close),
+                'volume': list(series.volume) if hasattr(series, 'volume') else [0] * len(series.close)
+            })
+            all_data.append(df)
+        
+        if not all_data:
+            return {}
+        
+        market_df = pd.concat(all_data, ignore_index=True)
+        
+        # 运行多策略
+        targets = self.multi_strategy_adapter.run_strategy_cycle(market_df)
+        
+        # 转换为评分格式 (0-1之间的分数)
+        scores = {}
+        for target in targets:
+            sym = target['symbol'].replace('-', '/')
+            # 买入信号为正分，卖出为负分
+            score = target['signal_score'] * target['confidence']
+            if target['side'] == 'sell':
+                score = -score
+            scores[sym] = score
+        
+        return scores
 
     def compute_snapshot(self, market_data: Dict[str, MarketSeries], use_robust_zscore: bool = True) -> AlphaSnapshot:
         # Compute raw factors

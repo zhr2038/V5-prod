@@ -64,6 +64,9 @@ class AlphaConfig(BaseModel):
     # Research/ops: optionally override weights by regime from a JSON file.
     dynamic_weights_by_regime_path: Optional[str] = Field(default=None, description="Path to reports/alpha_dynamic_weights_by_regime.json")
     dynamic_weights_by_regime_enabled: bool = Field(default=False)
+    
+    # 多策略模式
+    use_multi_strategy: bool = Field(default=False, description="Enable multi-strategy mode (trend + mean reversion)")
 
 
 class RegimeConfig(BaseModel):
