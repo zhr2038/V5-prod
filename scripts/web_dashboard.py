@@ -1494,6 +1494,138 @@ def api_decision_chain():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/shadow_test')
+def api_shadow_test():
+    """参数A/B影子测试API - 对比当前参数与候选参数的历史表现"""
+    try:
+        import sys
+        sys.path.insert(0, str(WORKSPACE))
+        
+        # 获取最近7天的运行数据用于对比
+        runs_dir = REPORTS_DIR / 'runs'
+        if not runs_dir.exists():
+            return jsonify({'status': 'no_data', 'message': '暂无运行数据'})
+        
+        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        # 取最近7天（最多50轮）
+        recent_runs = run_dirs[:50]
+        
+        current_stats = {
+            'rounds': 0,
+            'total_selected': 0,
+            'total_rebalance': 0,
+            'total_exit': 0,
+            'deadband_blocks': 0,
+            'avg_deadband_skip': 0
+        }
+        
+        # 模拟：新参数效果（deadband从0.04->0.03的预估影响）
+        # 实际实现需要重新跑历史数据，这里用启发式估算
+        simulated_stats = {
+            'rounds': 0,
+            'total_selected': 0,
+            'total_rebalance': 0,
+            'total_exit': 0,
+            'deadband_blocks': 0,
+            'avg_deadband_skip': 0,
+            'estimated_improvement': 0
+        }
+        
+        deadband_skips = []
+        
+        for run_dir in recent_runs:
+            try:
+                with open(run_dir / 'decision_audit.json', 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                counts = data.get('counts', {})
+                current_stats['rounds'] += 1
+                current_stats['total_selected'] += counts.get('selected', 0)
+                current_stats['total_rebalance'] += counts.get('orders_rebalance', 0)
+                current_stats['total_exit'] += counts.get('orders_exit', 0)
+                
+                # 统计deadband拦截
+                router_decisions = data.get('router_decisions', [])
+                deadband_count = sum(1 for rd in router_decisions if rd.get('reason') == 'deadband')
+                current_stats['deadband_blocks'] += deadband_count
+                
+                # 记录被拦漂移值用于模拟
+                for rd in router_decisions:
+                    if rd.get('reason') == 'deadband':
+                        drift = abs(float(rd.get('drift', 0)))
+                        deadband_skips.append(drift)
+                        
+                        # 模拟：如果deadband是0.03而不是0.04，有多少能成交
+                        if drift > 0.03:  # 新阈值下能通过
+                            simulated_stats['estimated_improvement'] += 1
+                            
+            except Exception:
+                continue
+        
+        # 计算当前统计
+        if current_stats['rounds'] > 0:
+            current_stats['avg_selected'] = round(current_stats['total_selected'] / current_stats['rounds'], 2)
+            current_stats['avg_rebalance'] = round(current_stats['total_rebalance'] / current_stats['rounds'], 2)
+            current_stats['conversion_rate'] = round(
+                (current_stats['total_rebalance'] / current_stats['total_selected'] * 100) if current_stats['total_selected'] > 0 else 0, 
+                1
+            )
+        
+        if deadband_skips:
+            current_stats['avg_deadband_skip'] = round(sum(deadband_skips) / len(deadband_skips), 4)
+        
+        # 生成A/B对比报告
+        ab_report = {
+            'status': 'ready',
+            'window_days': 7,
+            'window_rounds': current_stats['rounds'],
+            'current_params': {
+                'deadband_sideways': 0.04,
+                'description': '当前参数'
+            },
+            'proposed_params': {
+                'deadband_sideways': 0.03,
+                'description': '建议参数（更激进）'
+            },
+            'comparison': {
+                'current': {
+                    'avg_selected_per_round': current_stats.get('avg_selected', 0),
+                    'avg_rebalance_per_round': current_stats.get('avg_rebalance', 0),
+                    'conversion_rate': current_stats.get('conversion_rate', 0),
+                    'total_deadband_blocks': current_stats['deadband_blocks'],
+                    'avg_drift_when_blocked': current_stats['avg_deadband_skip']
+                },
+                'estimated_with_proposed': {
+                    'avg_rebalance_per_round': round(
+                        current_stats.get('avg_rebalance', 0) + 
+                        (simulated_stats['estimated_improvement'] / max(current_stats['rounds'], 1)), 
+                        2
+                    ),
+                    'estimated_conversion_rate': round(
+                        ((current_stats['total_rebalance'] + simulated_stats['estimated_improvement']) / 
+                         max(current_stats['total_selected'], 1)) * 100,
+                        1
+                    ),
+                    'additional_trades': simulated_stats['estimated_improvement'],
+                    'risk_note': '成交增加，但可能包含更多弱信号'
+                }
+            },
+            'recommendation': {
+                'action': 'cautious_try' if simulated_stats['estimated_improvement'] > 5 else 'keep_current',
+                'reason': f"过去{current_stats['rounds']}轮中，约{simulated_stats['estimated_improvement']}笔额外交易可成交" if simulated_stats['estimated_improvement'] > 0 else "当前参数下成交率已合理",
+                'suggested_next_step': '将 deadband_sideways 从 0.04 调至 0.03，观察24小时' if simulated_stats['estimated_improvement'] > 5 else '保持当前参数'
+            },
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        return jsonify(ab_report)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print("="*60)
     print("V5 Web Dashboard 启动中...")
