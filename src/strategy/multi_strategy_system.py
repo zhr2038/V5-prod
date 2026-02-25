@@ -420,7 +420,9 @@ class Alpha6FactorStrategy(BaseStrategy):
         f2 = (close[-1] - close[-min(480, len(close))]) / close[-min(480, len(close))]
         
         # f3: 波动率调整收益 (20日)
-        returns = np.diff(close[-min(481, len(close)):]) / close[-min(480, len(close)):-1]
+        window = close[-min(481, len(close)):]
+        # 对齐分母长度，避免广播错误
+        returns = np.diff(window) / window[:-1]
         vol = np.std(returns) if len(returns) > 0 else 1e-12
         f3 = f2 / (vol + 1e-12)
         
