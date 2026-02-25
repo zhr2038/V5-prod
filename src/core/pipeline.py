@@ -287,14 +287,16 @@ class V5Pipeline:
         rebalance_orders: List[Order] = []
         router_decisions = []
 
-        # P0 FIX: Risk-Off + regime_exit 时禁止 rebalance buy，只允许清理不在target的持仓
+        # Risk-Off 下是否进入 close-only：
+        # 仅当策略明确将 risk_off 仓位倍数设为 0 时，才强制禁止 rebalance buy。
+        # 这样可支持“Risk-Off 试探仓”（例如 pos_mult_risk_off=0.2）。
         regime_state_str = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
-        exit_config = ExitConfig()
-        enable_regime_exit = getattr(exit_config, 'enable_regime_exit', True)
-        is_risk_off_close_only = (regime_state_str in ("Risk-Off", "Risk_Off", "RiskOff") 
-                                   and enable_regime_exit)
+        risk_off_mult = float(getattr(self.cfg.regime, 'pos_mult_risk_off', 0.0))
+        is_risk_off_close_only = (
+            regime_state_str in ("Risk-Off", "Risk_Off", "RiskOff") and risk_off_mult <= 0.0
+        )
         if is_risk_off_close_only and audit:
-            audit.add_note("Risk-Off regime: rebalance buy suppressed, only cleanup sells allowed")
+            audit.add_note("Risk-Off close-only: rebalance buy suppressed (pos_mult_risk_off<=0)")
 
         # deadband: adapt by regime
         rstate = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)

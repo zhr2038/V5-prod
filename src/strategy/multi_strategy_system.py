@@ -17,6 +17,7 @@ import numpy as np
 from decimal import Decimal
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 
 class StrategyType(Enum):
@@ -365,6 +366,7 @@ class Alpha6FactorStrategy(BaseStrategy):
         )
         
         self.factor_weights = self.config['weights']
+        self.sentiment_cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
     
     def generate_signals(self, market_data: pd.DataFrame) -> List[Signal]:
         """生成6因子Alpha信号"""
@@ -438,8 +440,8 @@ class Alpha6FactorStrategy(BaseStrategy):
         rsi = self._calculate_rsi_single(close)
         f5 = (rsi - 50.0) / 50.0
         
-        # f6: 情绪因子 (占位，实际从外部获取)
-        f6 = 0.0  # 默认值，实际运行时应从sentiment模块获取
+        # f6: 情绪因子（从缓存读取，失败则回退0）
+        f6 = self._load_sentiment_factor(symbol) if self.config.get('use_sentiment', True) else 0.0
         
         return {
             'f1_mom_5d': f1,
@@ -489,6 +491,22 @@ class Alpha6FactorStrategy(BaseStrategy):
             return 100.0
         rs = avg_gain / avg_loss
         return 100.0 - 100.0 / (1.0 + rs)
+
+    def _load_sentiment_factor(self, symbol: str) -> float:
+        """从本地缓存读取情绪分值（-1~1）。"""
+        try:
+            s = symbol.replace('/', '-').replace('_', '-')
+            candidates = sorted(self.sentiment_cache_dir.glob(f"deepseek_{s}_*.json"))
+            if not candidates:
+                candidates = sorted(self.sentiment_cache_dir.glob(f"{s}_*.json"))
+            if not candidates:
+                return 0.0
+            data = json.loads(candidates[-1].read_text())
+            v = data.get('f6_sentiment', 0.0)
+            v = float(v)
+            return max(-1.0, min(1.0, v))
+        except Exception:
+            return 0.0
     
     def calculate_position_size(self, signal: Signal, available_capital: Decimal) -> Decimal:
         """根据信号强度计算仓位"""
