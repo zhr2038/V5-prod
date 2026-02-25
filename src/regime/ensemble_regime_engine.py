@@ -105,12 +105,19 @@ class EnsembleRegimeEngine:
                 'Sideways': 'SIDEWAYS'
             }
             
+            # 从状态概率计算情绪分数
+            all_states = result.get('all_states', {})
+            sentiment = all_states.get('TrendingUp', 0) - all_states.get('TrendingDown', 0)
+            # 归一化到 [-1, 1]
+            sentiment = max(-1, min(1, sentiment * 2 - 1)) if sentiment != 0 else 0
+            
             return {
                 'state': state_map.get(hmm_state, 'SIDEWAYS'),
                 'confidence': result['probability'],
                 'weight': self.weights['hmm'],
+                'sentiment': sentiment,
                 'raw_state': hmm_state,
-                'probs': result.get('all_states', {})
+                'probs': all_states
             }
         except Exception as e:
             print(f"[EnsembleRegime] HMM投票失败: {e}")
