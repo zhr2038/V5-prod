@@ -117,8 +117,35 @@ class EnsembleRegimeEngine:
             return {'state': None, 'confidence': 0, 'weight': 0}
     
     def _get_funding_vote(self) -> dict:
-        """资金费率投票"""
+        """资金费率投票（使用综合情绪）"""
         try:
+            # 优先读取综合资金费率情绪文件
+            composite_files = sorted(self.sentiment_cache_dir.glob('funding_COMPOSITE_*.json'))
+            
+            if composite_files:
+                data = json.loads(composite_files[-1].read_text())
+                sentiment = float(data.get('f6_sentiment', 0.0))
+                
+                # 映射到状态
+                if sentiment > 0.3:
+                    state = 'TRENDING'
+                elif sentiment < -0.3:
+                    state = 'RISK_OFF'
+                else:
+                    state = 'SIDEWAYS'
+                
+                confidence = min(abs(sentiment) * 2, 1.0)
+                
+                return {
+                    'state': state,
+                    'confidence': confidence,
+                    'weight': self.weights['funding'],
+                    'sentiment': sentiment,
+                    'composite': True,
+                    'details': data.get('tier_breakdown', {})
+                }
+            
+            # 回退：读取旧格式（单个币种）
             vals = []
             for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
                 files = sorted(self.sentiment_cache_dir.glob(f'funding_{sym}_*.json'))
@@ -132,10 +159,6 @@ class EnsembleRegimeEngine:
             
             avg_sentiment = np.mean(vals)
             
-            # 资金费率映射到状态
-            # > 0.3: 多头过热 = TRENDING (fomo)
-            # -0.3 ~ 0.3: 中性 = SIDEWAYS
-            # < -0.3: 空头占优 = RISK_OFF
             if avg_sentiment > 0.3:
                 state = 'TRENDING'
             elif avg_sentiment < -0.3:
@@ -143,14 +166,14 @@ class EnsembleRegimeEngine:
             else:
                 state = 'SIDEWAYS'
             
-            # 置信度基于偏离程度
-            confidence = min(abs(avg_sentiment) * 2, 1.0)  # 0.5 -> 1.0
+            confidence = min(abs(avg_sentiment) * 2, 1.0)
             
             return {
                 'state': state,
                 'confidence': confidence,
                 'weight': self.weights['funding'],
                 'sentiment': avg_sentiment,
+                'composite': False,
                 'details': {sym: v for sym, v in zip(['BTC','ETH','SOL','BNB'], vals)}
             }
         except Exception as e:
