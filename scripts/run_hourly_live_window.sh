@@ -4,15 +4,15 @@ set -euo pipefail
 ROOT="/home/admin/clawd/v5-trading-bot"
 cd "$ROOT"
 
-# UTC hour window id
-WIN_ID="$(date -u +%Y%m%d_%H)"
+# Hour window id (使用本地时间/北京时间)
+WIN_ID="$(date +%Y%m%d_%H)"
 
-# Window: last closed hour [start,end) in UTC seconds
-NOW_EPOCH="$(date -u +%s)"
+# Window: last closed hour [start,end) in local seconds
+NOW_EPOCH="$(date +%s)"
 END_EPOCH=$(( NOW_EPOCH - (NOW_EPOCH % 3600) ))
 START_EPOCH=$(( END_EPOCH - 3600 ))
 
-echo "[V5-LIVE] WIN_ID=${WIN_ID} window=[${START_EPOCH}, ${END_EPOCH}) UTC"
+echo "[V5-LIVE] WIN_ID=${WIN_ID} window=[${START_EPOCH}, ${END_EPOCH}) CST"
 
 # prevent overlap
 LOCK="/tmp/v5_live.lock"
