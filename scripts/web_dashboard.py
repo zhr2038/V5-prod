@@ -451,7 +451,16 @@ def api_scores():
 def api_sentiment():
     """情绪分析API（优先读取本地缓存，避免阻塞UI）"""
     try:
+        # 动态展示：主流币 + 当前评分Top币，避免TRX等未显示
         symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']
+        try:
+            top_scores = api_scores().get_json().get('scores', [])[:8]
+            for row in top_scores:
+                sym = str(row.get('symbol', '')).replace('/USDT', '-USDT')
+                if sym and sym not in symbols:
+                    symbols.append(sym)
+        except Exception:
+            pass
         cache_dir = WORKSPACE / 'data/sentiment_cache'
         results = {}
 

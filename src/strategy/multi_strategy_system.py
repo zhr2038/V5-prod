@@ -504,17 +504,30 @@ class Alpha6FactorStrategy(BaseStrategy):
         return 100.0 - 100.0 / (1.0 + rs)
 
     def _load_sentiment_factor(self, symbol: str) -> float:
-        """从本地缓存读取情绪分值（-1~1）。"""
+        """从本地缓存读取情绪分值（-1~1）；缺失时按币种即时生成一次缓存。"""
         try:
             s = symbol.replace('/', '-').replace('_', '-')
             candidates = sorted(self.sentiment_cache_dir.glob(f"deepseek_{s}_*.json"))
             if not candidates:
                 candidates = sorted(self.sentiment_cache_dir.glob(f"{s}_*.json"))
+
+            # 若该币种没有缓存，补采样一次（按小时缓存，后续复用）
+            if not candidates:
+                try:
+                    from src.factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
+                    factor = DeepSeekSentimentFactor(cache_dir=str(self.sentiment_cache_dir))
+                    factor.calculate(s)
+                    candidates = sorted(self.sentiment_cache_dir.glob(f"deepseek_{s}_*.json"))
+                    if not candidates:
+                        candidates = sorted(self.sentiment_cache_dir.glob(f"{s}_*.json"))
+                except Exception:
+                    return 0.0
+
             if not candidates:
                 return 0.0
+
             data = json.loads(candidates[-1].read_text())
-            v = data.get('f6_sentiment', 0.0)
-            v = float(v)
+            v = float(data.get('f6_sentiment', 0.0))
             return max(-1.0, min(1.0, v))
         except Exception:
             return 0.0
