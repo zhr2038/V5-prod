@@ -560,44 +560,52 @@ def api_market_state():
         return jsonify({'error': str(e)}), 500
 
 
+def _load_equity_points(limit: int = 800):
+    """从 reports/runs/*/equity.jsonl 聚合权益点（真实口径：cash+持仓市值）。"""
+    runs_dir = REPORTS_DIR / 'runs'
+    points = []
+    if not runs_dir.exists():
+        return points
+
+    run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
+    for run_dir in run_dirs:
+        eq_file = run_dir / 'equity.jsonl'
+        if not eq_file.exists():
+            continue
+        try:
+            with open(eq_file, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                        ts = row.get('ts')
+                        eq = row.get('equity')
+                        if ts is None or eq is None:
+                            continue
+                        points.append((str(ts), float(eq)))
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+
+    # 去重并排序
+    dedup = {}
+    for ts, eq in points:
+        dedup[ts] = eq
+    points = sorted(dedup.items(), key=lambda x: x[0])
+    if len(points) > limit:
+        points = points[-limit:]
+    return points
+
+
 @app.route('/api/equity_history')
 def api_equity_history():
-    """权益曲线历史"""
+    """权益曲线历史（基于运行时equity快照）"""
     try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify([])
-        
-        # 按日期汇总盈亏 - 排除异常数据
-        cursor = conn.cursor()
-        placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
-        cursor.execute(f"""
-            SELECT 
-                date(created_ts/1000, 'unixepoch') as date,
-                SUM(CASE WHEN side='sell' THEN notional_usdt ELSE -notional_usdt END) as net_flow,
-                SUM(fee) as fees
-            FROM orders 
-            WHERE state='FILLED'
-            AND inst_id NOT IN ({placeholders})
-            AND notional_usdt < 1000
-            GROUP BY date
-            ORDER BY date
-        """, EXCLUDED_SYMBOLS)
-        
-        data = []
-        cumulative = 100  # 初始权益
-        for row in cursor.fetchall():
-            try:
-                net_flow = float(row[1] or 0)
-                cumulative += net_flow
-                data.append({
-                    'timestamp': str(row[0]) + 'T00:00:00Z',
-                    'value': round(cumulative, 2)
-                })
-            except (TypeError, ValueError):
-                continue
-        
-        conn.close()
+        points = _load_equity_points()
+        data = [{'timestamp': ts, 'value': round(eq, 4)} for ts, eq in points]
         return jsonify(data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -605,55 +613,31 @@ def api_equity_history():
 
 @app.route('/api/equity_curve')
 def api_equity_curve():
-    """权益曲线 - 新版格式（支持图表库）"""
+    """权益曲线 - 新版格式（基于运行时equity快照）"""
     try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({'dates': [], 'values': [], 'pnl': []})
-        
-        cursor = conn.cursor()
-        placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
-        cursor.execute(f"""
-            SELECT 
-                date(created_ts/1000, 'unixepoch') as date,
-                SUM(CASE WHEN side='sell' THEN notional_usdt ELSE -notional_usdt END) as net_flow,
-                SUM(fee) as fees
-            FROM orders 
-            WHERE state='FILLED'
-            AND inst_id NOT IN ({placeholders})
-            AND notional_usdt < 1000
-            GROUP BY date
-            ORDER BY date
-        """, EXCLUDED_SYMBOLS)
-        
-        dates = []
-        values = []
-        pnls = []
-        cumulative = 100
-        
-        for row in cursor.fetchall():
-            try:
-                date_str = str(row[0])
-                net_flow = float(row[1] or 0)
-                fees = float(row[2] or 0)
-                pnl = net_flow - fees
-                cumulative += pnl
-                
-                dates.append(date_str)
-                values.append(round(cumulative, 2))
-                pnls.append(round(pnl, 2))
-            except (TypeError, ValueError):
-                continue
-        
-        conn.close()
-        
+        points = _load_equity_points()
+        if not points:
+            return jsonify({'dates': [], 'values': [], 'pnl': [], 'initial': 0, 'current': 0, 'total_return': 0})
+
+        dates, values, pnls = [], [], []
+        prev = None
+        for ts, eq in points:
+            dates.append(ts)
+            values.append(round(eq, 4))
+            pnls.append(round(eq - prev, 4) if prev is not None else 0.0)
+            prev = eq
+
+        initial = values[0]
+        current = values[-1]
+        total_return = ((current - initial) / initial * 100) if initial else 0
+
         return jsonify({
             'dates': dates,
             'values': values,
             'pnl': pnls,
-            'initial': 100,
-            'current': values[-1] if values else 100,
-            'total_return': round((values[-1] - 100) / 100 * 100, 2) if values else 0
+            'initial': round(initial, 4),
+            'current': round(current, 4),
+            'total_return': round(total_return, 2)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
