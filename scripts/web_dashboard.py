@@ -1381,6 +1381,113 @@ def api_reflection_reports():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/decision_chain')
+def api_decision_chain():
+    """决策归因面板API - 展示策略信号到执行的完整链路"""
+    try:
+        # 获取最近5轮决策记录
+        runs_dir = REPORTS_DIR / 'runs'
+        if not runs_dir.exists():
+            return jsonify({'rounds': [], 'message': '暂无决策记录'})
+
+        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
+        rounds = []
+        for run_dir in run_dirs[:5]:
+            try:
+                with open(run_dir / 'decision_audit.json', 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                # 提取决策链信息
+                run_id = run_dir.name
+                ts = data.get('now_ts') or data.get('window_start_ts')
+                run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') if ts else run_id
+
+                # 1. 策略层信号
+                selected_scores = data.get('top_scores', [])
+                strategy_signals = []
+                for item in selected_scores[:5]:
+                    strategy_signals.append({
+                        'symbol': item.get('symbol'),
+                        'score': round(float(item.get('score', 0)), 4),
+                        'rank': item.get('rank', 0)
+                    })
+
+                # 2. 风控层状态
+                risk_state = {
+                    'regime': data.get('regime', 'Unknown'),
+                    'regime_multiplier': data.get('regime_multiplier', 1.0),
+                    'dd_multiplier': None,
+                    'deadband': data.get('rebalance_deadband_pct')
+                }
+                # 从notes中提取DD multiplier
+                for note in data.get('notes', []):
+                    if 'DD multiplier' in note:
+                        try:
+                            import re
+                            m = re.search(r'DD multiplier:\s*([\d.]+)', note)
+                            if m:
+                                risk_state['dd_multiplier'] = float(m.group(1))
+                        except:
+                            pass
+                    if 'drawdown' in note.lower():
+                        try:
+                            import re
+                            m = re.search(r'drawdown:\s*([\d.]+)%', note, re.IGNORECASE)
+                            if m:
+                                risk_state['drawdown_pct'] = float(m.group(1))
+                        except:
+                            pass
+
+                # 3. 执行层结果
+                counts = data.get('counts', {})
+                execution_result = {
+                    'selected': counts.get('selected', 0),
+                    'targets_pre_risk': counts.get('targets_pre_risk', 0),
+                    'orders_rebalance': counts.get('orders_rebalance', 0),
+                    'orders_exit': counts.get('orders_exit', 0)
+                }
+
+                # 4. 阻塞原因统计
+                router_decisions = data.get('router_decisions', [])
+                block_reasons = {}
+                for rd in router_decisions:
+                    reason = rd.get('reason', 'unknown')
+                    block_reasons[reason] = block_reasons.get(reason, 0) + 1
+
+                # 5. 被拦截的Top信号
+                blocked_signals = []
+                for rd in router_decisions:
+                    if rd.get('reason') == 'deadband':
+                        blocked_signals.append({
+                            'symbol': rd.get('symbol'),
+                            'drift': round(float(rd.get('drift', 0)), 4),
+                            'deadband': round(float(rd.get('deadband', 0)), 4)
+                        })
+                # 按漂移排序
+                blocked_signals.sort(key=lambda x: abs(x.get('drift', 0)), reverse=True)
+
+                rounds.append({
+                    'run_id': run_id,
+                    'time': run_time,
+                    'strategy_signals': strategy_signals,
+                    'risk_state': risk_state,
+                    'execution_result': execution_result,
+                    'block_reasons': block_reasons,
+                    'blocked_top': blocked_signals[:3]
+                })
+            except Exception as e:
+                continue
+
+        return jsonify({
+            'rounds': rounds,
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print("="*60)
     print("V5 Web Dashboard 启动中...")
