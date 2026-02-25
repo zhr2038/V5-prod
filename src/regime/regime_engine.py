@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 import json
 
@@ -9,6 +9,14 @@ import numpy as np
 
 from configs.schema import RegimeConfig, RegimeState
 from src.core.models import MarketSeries
+
+
+# 尝试导入HMM检测器（可选）
+try:
+    from src.regime.hmm_regime_detector import HMMRegimeDetector
+    HMM_AVAILABLE = True
+except ImportError:
+    HMM_AVAILABLE = False
 
 
 def _sma(xs: List[float], n: int) -> float:
@@ -37,22 +45,37 @@ class RegimeResult:
     ma20: float
     ma60: float
     multiplier: float
+    # HMM新增字段
+    hmm_state: Optional[str] = None
+    hmm_probability: Optional[float] = None
+    hmm_probs: Optional[dict] = None
 
 
 class RegimeEngine:
-    def __init__(self, cfg: RegimeConfig):
+    def __init__(self, cfg: RegimeConfig, use_hmm: bool = False):
         self.cfg = cfg
+        self.use_hmm = use_hmm and HMM_AVAILABLE
         self.sentiment_cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
-
-    def _load_market_sentiment(self) -> float:
-        """读取市场情绪（-1~1），优先 BTC/ETH/SOL/BNB 的最新平均值。
         
-        支持多种数据源（优先级从高到低）：
-        1. rss_deepseek（RSS新闻+DeepSeek分析，最全面）
-        2. funding_rate（资金费率，最实时）
-        3. deepseek（AI分析）
-        4. 其他缓存文件
-        """
+        # 初始化HMM检测器
+        self.hmm_detector = None
+        if self.use_hmm:
+            try:
+                self.hmm_detector = HMMRegimeDetector(n_components=3)
+                # 尝试加载预训练模型
+                model_path = Path('/home/admin/clawd/v5-trading-bot/models/hmm_regime.pkl')
+                if model_path.exists():
+                    self.hmm_detector.model.load(model_path)
+                    print("[RegimeEngine] HMM模型已加载")
+                else:
+                    print("[RegimeEngine] HMM模型未找到，将使用MA方法")
+                    self.use_hmm = False
+            except Exception as e:
+                print(f"[RegimeEngine] HMM初始化失败: {e}")
+                self.use_hmm = False
+    
+    def _load_market_sentiment(self) -> float:
+        """读取市场情绪（-1~1），优先 BTC/ETH/SOL/BNB 的最新平均值。"""
         try:
             vals = []
             for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
@@ -90,8 +113,50 @@ class RegimeEngine:
             return float(np.mean(vals))
         except Exception:
             return 0.0
-
-    def detect(self, btc_data: MarketSeries) -> RegimeResult:
+    
+    def _detect_hmm(self, btc_data: MarketSeries) -> Optional[RegimeResult]:
+        """使用HMM检测市场状态"""
+        if not self.use_hmm or self.hmm_detector is None:
+            return None
+        
+        try:
+            prices = np.array(btc_data.close)
+            volumes = np.array(btc_data.volume) if hasattr(btc_data, 'volume') else None
+            
+            result = self.hmm_detector.detect_regime(prices, volumes)
+            
+            # 将HMM状态映射到RegimeState
+            hmm_state = result['state']
+            if hmm_state == 'TrendingUp':
+                state = RegimeState.TRENDING
+                mult = float(self.cfg.pos_mult_trending)
+            elif hmm_state == 'TrendingDown':
+                state = RegimeState.RISK_OFF  # 下跌趋势 = Risk-Off
+                mult = float(self.cfg.pos_mult_risk_off)
+            else:  # Sideways
+                state = RegimeState.SIDEWAYS
+                mult = float(self.cfg.pos_mult_sideways)
+            
+            ma20 = _sma(list(btc_data.close), 20)
+            ma60 = _sma(list(btc_data.close), 60)
+            atrp = _atr_pct(btc_data, 14)
+            
+            return RegimeResult(
+                state=state,
+                atr_pct=float(atrp),
+                ma20=float(ma20),
+                ma60=float(ma60),
+                multiplier=float(mult),
+                hmm_state=hmm_state,
+                hmm_probability=result['probability'],
+                hmm_probs=result['all_states']
+            )
+        except Exception as e:
+            print(f"[RegimeEngine] HMM检测失败: {e}")
+            return None
+    
+    def _detect_ma(self, btc_data: MarketSeries) -> RegimeResult:
+        """使用传统MA方法检测市场状态"""
         closes = list(btc_data.close)
         ma20 = _sma(closes, 20)
         ma60 = _sma(closes, 60)
@@ -107,9 +172,7 @@ class RegimeEngine:
             st = RegimeState.RISK_OFF
             mult = float(self.cfg.pos_mult_risk_off)
 
-        # 情绪驱动的 Risk-Off 修正：
-        # - 强乐观且MA20/MA60缺口不大 -> 放松到 Sideways
-        # - 强悲观 -> 强化 Risk-Off
+        # 情绪驱动的 Risk-Off 修正
         if getattr(self.cfg, 'sentiment_regime_override_enabled', True):
             sent = self._load_market_sentiment()
             ma_gap = ((ma60 - ma20) / ma60) if ma60 else 1.0
@@ -122,4 +185,28 @@ class RegimeEngine:
                 st = RegimeState.RISK_OFF
                 mult = float(self.cfg.pos_mult_risk_off)
 
-        return RegimeResult(state=st, atr_pct=float(atrp), ma20=float(ma20), ma60=float(ma60), multiplier=float(mult))
+        return RegimeResult(
+            state=st,
+            atr_pct=float(atrp),
+            ma20=float(ma20),
+            ma60=float(ma60),
+            multiplier=float(mult),
+            hmm_state=None,
+            hmm_probability=None,
+            hmm_probs=None
+        )
+
+    def detect(self, btc_data: MarketSeries) -> RegimeResult:
+        """
+        检测市场状态
+        
+        优先使用HMM（如果可用且已训练），否则回退到MA方法
+        """
+        # 尝试HMM检测
+        if self.use_hmm:
+            hmm_result = self._detect_hmm(btc_data)
+            if hmm_result is not None:
+                return hmm_result
+        
+        # 回退到MA方法
+        return self._detect_ma(btc_data)
