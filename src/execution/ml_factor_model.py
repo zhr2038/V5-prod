@@ -159,15 +159,32 @@ class MLFactorModel:
         
         return features
     
-    def train(self, market_data: Dict, force_retrain: bool = False):
+    def train(self, X_train=None, y_train=None, X_valid=None, y_valid=None, 
+              market_data: Dict = None, force_retrain: bool = False):
         """
         训练ML模型
+        
+        Args:
+            X_train, y_train: 训练集特征和标签
+            X_valid, y_valid: 验证集特征和标签
+            market_data: 原始市场数据（如果没有提供X_train/y_train）
+            force_retrain: 是否强制重新训练
         """
         if self.is_trained and not force_retrain:
             print("Model already trained. Use force_retrain=True to retrain.")
             return
         
-        print("Building features...")
+        # 方式1: 直接使用提供的训练数据
+        if X_train is not None and y_train is not None:
+            print(f"Training with provided data: {len(X_train)} train, {len(X_valid)} valid")
+            self._train_with_data(X_train, y_train, X_valid, y_valid)
+            return
+        
+        # 方式2: 从market_data构建特征
+        if market_data is None:
+            raise ValueError("Must provide either (X_train, y_train) or market_data")
+        
+        print("Building features from market_data...")
         features = self.feature_engineering(market_data)
         features = self.prepare_target(features, self.config.prediction_horizon)
         
@@ -186,6 +203,13 @@ class MLFactorModel:
         y_train, y_valid = y.iloc[:split_idx], y.iloc[split_idx:]
         
         print(f"Training samples: {len(X_train)}, Validation samples: {len(X_valid)}")
+        self._train_with_data(X_train, y_train, X_valid, y_valid)
+    
+    def _train_with_data(self, X_train, y_train, X_valid, y_valid):
+        """使用提供的数据训练模型"""
+        # 确保feature_names被设置
+        if not self.feature_names:
+            self.feature_names = [c for c in X_train.columns if c not in ['symbol', 'target']]
         
         # 训练LightGBM
         if self.config.model_type == 'lightgbm':
