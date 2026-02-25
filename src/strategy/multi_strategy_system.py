@@ -372,7 +372,8 @@ class Alpha6FactorStrategy(BaseStrategy):
         
         for symbol in market_data['symbol'].unique():
             df = market_data[market_data['symbol'] == symbol].copy()
-            if len(df) < 24 * 20 + 1:  # 需要至少20天数据
+            # 仅要求最低60根K线，避免在小样本阶段完全无信号
+            if len(df) < 60:
                 continue
             
             # 计算6个因子
@@ -693,28 +694,46 @@ class MultiStrategyAdapter:
     
     def run_strategy_cycle(self, market_data: pd.DataFrame) -> List[Dict]:
         """运行一个策略周期，返回目标持仓"""
-        
+
         # 生成融合信号
         signals = self.orchestrator.generate_combined_signals(market_data)
-        
+
         # 转换为V5格式的目标持仓
         targets = []
         for signal in signals:
+            position_size = Decimal('0')
+
+            # 常规单策略信号
             strategy = self.orchestrator.strategies.get(signal.strategy)
-            if strategy:
+            if strategy is not None:
                 capital = self.orchestrator.get_strategy_capital(signal.strategy)
                 position_size = strategy.calculate_position_size(signal, capital)
-                
+
+            # 融合信号：按来源策略分别计算再汇总（修复FUSED信号被丢弃问题）
+            elif signal.strategy == "FUSED":
+                source_names = signal.metadata.get('source_strategies', []) if signal.metadata else []
+                for name in source_names:
+                    src_strategy = self.orchestrator.strategies.get(name)
+                    if src_strategy is None:
+                        continue
+                    src_capital = self.orchestrator.get_strategy_capital(name)
+                    position_size += src_strategy.calculate_position_size(signal, src_capital)
+
+                # 兜底：来源缺失时使用总资金的小比例
+                if position_size <= 0:
+                    position_size = self.orchestrator.total_capital * Decimal(str(max(0.0, min(signal.confidence, 1.0)))) * Decimal('0.1')
+
+            if position_size > 0:
                 targets.append({
                     'symbol': signal.symbol,
                     'side': signal.side,
                     'target_position_usdt': float(position_size),
-                    'signal_score': signal.score,
-                    'confidence': signal.confidence,
+                    'signal_score': float(signal.score),
+                    'confidence': float(signal.confidence),
                     'source_strategy': signal.strategy,
                     'metadata': signal.metadata
                 })
-        
+
         return targets
 
 
