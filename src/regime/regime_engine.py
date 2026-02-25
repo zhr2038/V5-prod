@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List
+from pathlib import Path
+import json
 
 import numpy as np
 
@@ -40,6 +42,26 @@ class RegimeResult:
 class RegimeEngine:
     def __init__(self, cfg: RegimeConfig):
         self.cfg = cfg
+        self.sentiment_cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
+
+    def _load_market_sentiment(self) -> float:
+        """读取市场情绪（-1~1），优先 BTC/ETH/SOL/BNB 的最新平均值。"""
+        try:
+            vals = []
+            for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
+                files = sorted(self.sentiment_cache_dir.glob(f'deepseek_{sym}_*.json'))
+                if not files:
+                    files = sorted(self.sentiment_cache_dir.glob(f'{sym}_*.json'))
+                if not files:
+                    continue
+                data = json.loads(files[-1].read_text())
+                v = float(data.get('f6_sentiment', 0.0))
+                vals.append(max(-1.0, min(1.0, v)))
+            if not vals:
+                return 0.0
+            return float(np.mean(vals))
+        except Exception:
+            return 0.0
 
     def detect(self, btc_data: MarketSeries) -> RegimeResult:
         closes = list(btc_data.close)
@@ -56,5 +78,20 @@ class RegimeEngine:
         else:
             st = RegimeState.RISK_OFF
             mult = float(self.cfg.pos_mult_risk_off)
+
+        # 情绪驱动的 Risk-Off 修正：
+        # - 强乐观且MA20/MA60缺口不大 -> 放松到 Sideways
+        # - 强悲观 -> 强化 Risk-Off
+        if getattr(self.cfg, 'sentiment_regime_override_enabled', True):
+            sent = self._load_market_sentiment()
+            ma_gap = ((ma60 - ma20) / ma60) if ma60 else 1.0
+
+            if st == RegimeState.RISK_OFF and sent >= float(self.cfg.sentiment_riskoff_relax_threshold) and ma_gap <= float(self.cfg.ma_gap_relax_threshold):
+                st = RegimeState.SIDEWAYS
+                mult = float(self.cfg.pos_mult_sideways)
+
+            if sent <= float(self.cfg.sentiment_riskoff_harden_threshold):
+                st = RegimeState.RISK_OFF
+                mult = float(self.cfg.pos_mult_risk_off)
 
         return RegimeResult(state=st, atr_pct=float(atrp), ma20=float(ma20), ma60=float(ma60), multiplier=float(mult))

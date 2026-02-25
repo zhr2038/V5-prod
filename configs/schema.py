@@ -76,6 +76,12 @@ class RegimeConfig(BaseModel):
     pos_mult_sideways: float = 0.6
     pos_mult_risk_off: float = 0.3
 
+    # 情绪驱动的风险状态修正（避免在强反弹初期被长期锁死）
+    sentiment_regime_override_enabled: bool = Field(default=True)
+    sentiment_riskoff_relax_threshold: float = Field(default=0.65, ge=-1.0, le=1.0)
+    sentiment_riskoff_harden_threshold: float = Field(default=-0.65, ge=-1.0, le=1.0)
+    ma_gap_relax_threshold: float = Field(default=0.03, ge=0.0, le=0.2, description="(ma60-ma20)/ma60 小于该值时允许情绪放松Risk-Off")
+
 
 class RiskConfig(BaseModel):
     max_single_weight: float = Field(default=0.25, gt=0, le=1)

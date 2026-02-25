@@ -81,7 +81,11 @@ regime:
   atr_very_low: 0.008
   pos_mult_trending: 1.2
   pos_mult_sideways: 0.6
-  pos_mult_risk_off: 0.2  # Risk-Off 允许20%试探仓（防止错过V反）
+  pos_mult_risk_off: 0.0  # Risk-Off 默认只减仓；是否放松由情绪驱动override决定
+  sentiment_regime_override_enabled: true
+  sentiment_riskoff_relax_threshold: 0.65   # 情绪>=0.65 时可放松Risk-Off
+  sentiment_riskoff_harden_threshold: -0.65 # 情绪<=-0.65 时强化Risk-Off
+  ma_gap_relax_threshold: 0.03              # MA缺口<=3%才允许放松
 
 risk:
   max_single_weight: 0.30  # 提高单币种限制，避免资金不足
