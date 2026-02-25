@@ -612,7 +612,7 @@
                 const returnEl = document.getElementById('equity-return');
                 returnEl.textContent = `${data.total_return >= 0 ? '+' : ''}${data.total_return?.toFixed(2) || 0}%`;
                 returnEl.className = 'stat-value ' + (data.total_return >= 0 ? 'positive' : 'negative');
-                document.getElementById('equity-days').textContent = data.dates?.length || 0;
+                document.getElementById('equity-days').textContent = data.days || 0;
                 
                 // 绘制图表
                 const ctx = document.getElementById('equityChart').getContext('2d');

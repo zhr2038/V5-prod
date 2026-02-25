@@ -613,23 +613,48 @@ def api_equity_history():
 
 @app.route('/api/equity_curve')
 def api_equity_curve():
-    """权益曲线 - 新版格式（基于运行时equity快照）"""
+    """权益曲线 - 新版格式（基于运行时equity快照，默认展示最近48小时并做时间分桶）"""
     try:
         points = _load_equity_points()
         if not points:
-            return jsonify({'dates': [], 'values': [], 'pnl': [], 'initial': 0, 'current': 0, 'total_return': 0})
+            return jsonify({'dates': [], 'values': [], 'pnl': [], 'initial': 0, 'current': 0, 'total_return': 0, 'days': 0})
+
+        # 解析时间，保留最近48小时，避免全历史挤在一起
+        parsed = []
+        for ts, eq in points:
+            try:
+                dt = datetime.fromisoformat(str(ts).replace('Z', '+00:00'))
+                parsed.append((dt, float(eq)))
+            except Exception:
+                continue
+        if not parsed:
+            return jsonify({'dates': [], 'values': [], 'pnl': [], 'initial': 0, 'current': 0, 'total_return': 0, 'days': 0})
+
+        end_dt = parsed[-1][0]
+        start_dt = end_dt - timedelta(hours=48)
+        recent = [(dt, eq) for dt, eq in parsed if dt >= start_dt]
+        if len(recent) < 10:
+            recent = parsed[-200:]  # 回退：至少给一些点
+
+        # 15分钟分桶，取每桶最后一个点
+        bucketed = {}
+        for dt, eq in recent:
+            b = dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
+            bucketed[b] = eq
+        series = sorted(bucketed.items(), key=lambda x: x[0])
 
         dates, values, pnls = [], [], []
         prev = None
-        for ts, eq in points:
-            dates.append(ts)
+        for dt, eq in series:
+            dates.append(dt.isoformat())
             values.append(round(eq, 4))
             pnls.append(round(eq - prev, 4) if prev is not None else 0.0)
             prev = eq
 
-        initial = values[0]
-        current = values[-1]
+        initial = values[0] if values else 0
+        current = values[-1] if values else 0
         total_return = ((current - initial) / initial * 100) if initial else 0
+        days = len({d.split('T')[0] for d in dates})
 
         return jsonify({
             'dates': dates,
@@ -637,7 +662,8 @@ def api_equity_curve():
             'pnl': pnls,
             'initial': round(initial, 4),
             'current': round(current, 4),
-            'total_return': round(total_return, 2)
+            'total_return': round(total_return, 2),
+            'days': int(days)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
