@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.6,
+  "f6_sentiment_magnitude": 0.6,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "当前ETH市场情绪偏向乐观，普遍认为处于吸筹或筑底阶段，有上涨预期。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论显示ETH在吸筹或筑底，价格可能即将突破",
+    "大户买入和散户卖出行为暗示市场可能处于积累阶段",
+    "缩量横盘和跌不动的描述表明价格支撑较强",
+    "建议定投和耐心持有，反映长期看涨情绪",
+    "整体缺乏恐慌或FOMO迹象，偏向中性偏积极"
+  ],
+  "f6_market_stage": "accumulation"
+}

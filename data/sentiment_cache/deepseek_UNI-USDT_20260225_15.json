@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.4,
+  "f6_sentiment_magnitude": 0.4,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "市场情绪偏向乐观，普遍认为UNI处于吸筹或筑底阶段，建议耐心持有或定投。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论显示UNI可能在吸筹或筑底，价格跌不动",
+    "大户买入和散户卖出被视为积极信号",
+    "缩量横盘被解读为即将突破的前兆",
+    "建议定投或捡便宜筹码，反映看涨预期",
+    "整体情绪中性偏贪婪，无明显恐慌迹象"
+  ],
+  "f6_market_stage": "accumulation"
+}

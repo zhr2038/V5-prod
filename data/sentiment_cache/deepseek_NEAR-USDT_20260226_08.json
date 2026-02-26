@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.4,
+  "f6_sentiment_magnitude": 0.4,
+  "f6_fear_greed_index": 60.0,
+  "f6_sentiment_summary": "市场情绪偏向积极，普遍认为NEAR处于吸筹和筑底阶段，有上涨潜力。",
+  "f6_sentiment_confidence": 0.7,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论显示NEAR在吸筹，大户买入而散户卖出，暗示可能处于底部区域。",
+    "缩量横盘和即将突破的表述表明技术面看好，市场预期向上。",
+    "定投和捡便宜筹码的建议反映投资者对长期价值的信心，而非恐慌抛售。",
+    "跌不动和筑中的描述显示下跌动能减弱，市场情绪从恐慌转向稳定。",
+    "整体缺乏FOMO或恐慌迹象，情绪较为理性，偏向积累阶段。"
+  ],
+  "f6_market_stage": "accumulation"
+}

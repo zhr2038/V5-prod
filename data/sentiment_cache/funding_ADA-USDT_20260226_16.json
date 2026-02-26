@@ -1,0 +1,13 @@
+{
+  "f6_sentiment": 0.0508,
+  "f6_sentiment_magnitude": 0.0508,
+  "f6_fear_greed_index": 52,
+  "f6_sentiment_summary": "\u8d44\u91d1\u8d39\u7387\u63a5\u8fd1\u5e73\u8861\uff0c\u60c5\u7eea\u4e2d\u6027",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "funding_rate",
+  "f6_market_stage": "neutral",
+  "raw_funding_rate": 5.08195141337e-05,
+  "tier": "mid",
+  "weight": 0.08,
+  "collected_at": "2026-02-26T16:30:13.726283"
+}

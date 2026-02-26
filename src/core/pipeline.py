@@ -46,6 +46,7 @@ from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
 from src.risk.fixed_stop_loss import FixedStopLossManager, FixedStopLossConfig
 from src.risk.profit_taking import ProfitTakingManager  # 程序化利润管理
+from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard  # 自动风险档位
 from src.core.models import PositionState
 from src.reporting.decision_audit import DecisionAudit
 
@@ -145,6 +146,9 @@ class V5Pipeline:
         
         # 程序化利润管理
         self.profit_taking = ProfitTakingManager()
+        
+        # 自动风险档位守卫
+        self.auto_risk_guard = get_auto_risk_guard()
         
         # Phase 3: 初始化ML数据收集器
         from src.execution.ml_data_collector import MLDataCollector

@@ -2049,7 +2049,22 @@ def api_smart_alerts():
         return jsonify({'error': str(e), 'alerts': [], 'status': 'error'}), 500
 
 
-if __name__ == '__main__':
+@app.route('/api/auto_risk_guard')
+def api_auto_risk_guard():
+    """自动风险档位API - 显示当前风险档位和配置"""
+    try:
+        from src.risk.auto_risk_guard import get_auto_risk_guard
+        guard = get_auto_risk_guard()
+        config = guard.get_current_config()
+        return jsonify({
+            'current_level': guard.current_level,
+            'config': config,
+            'history': guard.history[-5:],  # 最近5次切换
+            'metrics': guard.metrics,
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
     print("="*60)
     print("V5 Web Dashboard 启动中...")
     print("="*60)

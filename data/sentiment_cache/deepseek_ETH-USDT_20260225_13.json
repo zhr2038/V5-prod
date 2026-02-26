@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.6,
+  "f6_sentiment_magnitude": 0.6,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "市场情绪偏向乐观，普遍认为ETH处于吸筹或筑底阶段，建议持有或定投。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "ETH在吸筹，耐心持有",
+    "大户在买ETH，散户在卖",
+    "ETH缩量横盘，即将突破",
+    "捡便宜筹码的机会，ETH定投",
+    "ETH跌不动了，筑底中"
+  ],
+  "f6_market_stage": "accumulation"
+}

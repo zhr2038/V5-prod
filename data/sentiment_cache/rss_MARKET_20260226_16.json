@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.4,
+  "f6_sentiment_magnitude": 0.4,
+  "f6_fear_greed_index": 60,
+  "f6_sentiment_summary": "[RSS\u60c5\u62a5] \u52a0\u5bc6\u8d27\u5e01\u5e02\u573a\u5448\u73b0\u8c28\u614e\u4e50\u89c2\u60c5\u7eea\uff0c\u6bd4\u7279\u5e01\u53cd\u5f39\u4f46\u5206\u6790\u5e08\u8b66\u544a\u98ce\u9669\uff0c\u5c71\u5be8\u5e01\u8868\u73b0\u5f3a\u52b2\uff0c\u673a\u6784\u6d3b\u52a8\u589e\u52a0\uff0c\u4f46\u6295\u8d44\u8005\u4ecd\u5b58\u7591\u8651\u3002",
+  "f6_sentiment_confidence": 0.7,
+  "f6_sentiment_source": "rss_deepseek",
+  "f6_market_stage": "accumulation",
+  "rss_articles_count": 10,
+  "rss_sources": [
+    "CoinDesk",
+    "Cointelegraph"
+  ],
+  "analyzed_texts": 10,
+  "collected_at": "2026-02-26T16:30:24.177422"
+}

@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.6,
+  "f6_sentiment_magnitude": 0.6,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "市场情绪偏向乐观，普遍认为BNB处于吸筹或筑底阶段，有上涨预期。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论提到'BNB在吸筹'和'大户在买BNB'，暗示机构或大户在积累筹码，可能推动价格上涨。",
+    "'BNB缩量横盘，即将突破'和'BNB跌不动了，筑底中'表明技术面看涨，市场预期突破。",
+    "'捡便宜筹码的机会，BNB定投'显示投资者建议长期持有或分批买入，情绪积极。",
+    "整体评论无恐慌或FOMO迹象，偏向中性偏贪婪，但未达到狂热程度。",
+    "市场阶段被识别为'accumulation'，基于吸筹和筑底描述。"
+  ],
+  "f6_market_stage": "accumulation"
+}
