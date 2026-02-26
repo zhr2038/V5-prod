@@ -141,9 +141,11 @@ class SmartTradeAuditor:
         """
         buy_filled = analysis['buy_filled']
         sell_filled = analysis['sell_filled']
-        
+
+        regime_norm = str(regime or '').upper().replace('-', '_')
+
         # 检查1: Risk-Off状态下的买入
-        if regime == 'Risk-Off' and len(buy_filled) > 0:
+        if regime_norm == 'RISK_OFF' and len(buy_filled) > 0:
             self.warnings.append({
                 'level': 'HIGH',
                 'type': 'regime_conflict',
@@ -172,15 +174,16 @@ class SmartTradeAuditor:
         
         # 检查4: 大量REJECTED
         total_rejected = len(analysis['buy_rejected']) + len(analysis['sell_rejected'])
-        if total_rejected > 20:
-            dust_skip_count = sum(1 for o in analysis['sell_rejected'] 
+        if total_rejected >= 15:
+            all_rejected = analysis['buy_rejected'] + analysis['sell_rejected']
+            dust_skip_count = sum(1 for o in all_rejected
                                   if 'dust' in str(o[7]).lower() or '51020' in str(o[6]))
-            if dust_skip_count > 15:
+            if dust_skip_count >= 10:
                 self.insights.append({
                     'level': 'INFO',
                     'type': 'dust_cleanup',
-                    'message': f'🧹 灰尘清理：{dust_skip_count}笔微量持仓清仓',
-                    'interpretation': '正常系统保护行为，清理无法成交的残余余额'
+                    'message': f'🧹 灰尘/最小下单限制：{dust_skip_count}笔被系统拦截',
+                    'interpretation': '多数是交易所最小下单或微量残留导致，属于保护性拒单'
                 })
     
     def check_risk_controls(self):
