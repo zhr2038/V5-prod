@@ -440,6 +440,20 @@
                         <div class="loading"><div class="spinner"></div></div>
                     </div>
                 </div>
+                
+                <!-- 自动风险档位守卫 -->
+                <div class="card" style="grid-column: 1 / -1;">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(239,68,68,0.2);">🛡️</div>
+                        <div>
+                            <div class="card-title">自动风险档位守卫</div>
+                            <div class="card-subtitle">Auto Risk Guard</div>
+                        </div>
+                    </div>
+                    <div id="auto-risk-guard-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -1454,6 +1468,99 @@
             }
         }
         
+        // 加载自动风险档位守卫
+        async function loadAutoRiskGuard() {
+            try {
+                const res = await fetch('/api/auto_risk_guard');
+                const data = await res.json();
+                
+                const container = document.getElementById('auto-risk-guard-container');
+                if (data.error) {
+                    container.innerHTML = `<div style="color: #64748b; text-align: center;">加载失败: ${data.error}</div>`;
+                    return;
+                }
+                
+                const level = data.current_level || 'NEUTRAL';
+                const config = data.config || {};
+                const history = data.history || [];
+                
+                // 档位颜色
+                const levelColors = {
+                    'ATTACK': { bg: 'rgba(239,68,68,0.15)', border: '#ef4444', text: '#fca5a5', desc: '进攻档 - 积极交易' },
+                    'NEUTRAL': { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6', text: '#93c5fd', desc: '中性档 - 标准操作' },
+                    'DEFENSE': { bg: 'rgba(245,158,11,0.15)', border: '#f59e0b', text: '#fcd34d', desc: '防守档 - 降低风险' },
+                    'PROTECT': { bg: 'rgba(34,197,94,0.15)', border: '#22c55e', text: '#86efac', desc: '保护档 - 优先保本' }
+                };
+                const colors = levelColors[level] || levelColors['NEUTRAL'];
+                
+                // 历史记录
+                let historyHtml = '';
+                if (history.length > 0) {
+                    historyHtml = `
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">📜 最近切换记录</div>
+                            ${history.slice(-3).map(h => `
+                                <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">
+                                    <span style="color: ${colors.text}">${h.from} → ${h.to}</span>
+                                    <span style="margin-left: 10px; color: #64748b;">${h.reason || '自动切换'}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+                
+                const html = `
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: start;">
+                        <!-- 左侧档位显示 -->
+                        <div style="background: ${colors.bg}; border: 2px solid ${colors.border}; border-radius: 12px; padding: 20px; text-align: center; min-width: 140px;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: ${colors.text}; margin-bottom: 5px;">${level}</div>
+                            <div style="font-size: 0.75rem; color: ${colors.text}; opacity: 0.8;">${colors.desc}</div>
+                            <div style="font-size: 0.7rem; color: #64748b; margin-top: 10px;">更新: ${data.last_update?.split(' ')[1] || '--'}</div>
+                        </div>
+                        
+                        <!-- 右侧配置参数 -->
+                        <div>
+                            <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 10px;">⚙️ 当前配置参数</div>
+                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">震荡仓位</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${(config.pos_mult_sideways * 100)?.toFixed(0) || '--'}%</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">回撤触发</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${(config.drawdown_trigger * 100)?.toFixed(0) || '--'}%</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">最小下单</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">$${config.min_trade_notional_base || '--'}</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">死区阈值</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${(config.deadband_sideways * 100)?.toFixed(1) || '--'}%</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">最大持仓</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${config.max_positions || '--'}个</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">冷却时间</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${config.cooldown_hours || '--'}小时</div>
+                                </div>
+                            </div>
+                            ${historyHtml}
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+                
+            } catch (e) {
+                console.error('加载自动风险档位失败:', e);
+                document.getElementById('auto-risk-guard-container').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
         // 加载所有数据
         async function loadAll() {
             await Promise.all([
@@ -1470,7 +1577,8 @@
                 loadReflectionReports(),
                 loadDecisionChain(),
                 loadShadowTest(),
-                loadSmartAlerts()
+                loadSmartAlerts(),
+                loadAutoRiskGuard()
             ]);
             
             document.getElementById('update-time').textContent = 
