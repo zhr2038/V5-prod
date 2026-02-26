@@ -2065,6 +2065,9 @@ def api_auto_risk_guard():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+if __name__ == '__main__':
     print("="*60)
     print("V5 Web Dashboard 启动中...")
     print("="*60)
