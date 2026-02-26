@@ -119,13 +119,16 @@ def static_files(filename):
 def api_account():
     """账户信息API"""
     try:
-        # 读取reconcile状态
+        # 读取reconcile状态（优先交易所快照USDT）
         reconcile_file = REPORTS_DIR / 'reconcile_status.json'
         cash = 0
         if reconcile_file.exists():
             with open(reconcile_file, 'r') as f:
                 reconcile = json.load(f)
-            cash = reconcile.get('local_snapshot', {}).get('cash_usdt', 0)
+            cash = (
+                reconcile.get('exchange_snapshot', {}).get('ccy_cashBal', {}).get('USDT')
+                or reconcile.get('local_snapshot', {}).get('cash_usdt', 0)
+            )
         
         # 获取最新权益 - 排除异常数据
         conn = get_db_connection()
@@ -157,20 +160,12 @@ def api_account():
         else:
             total_trades = total_buy = total_sell = total_fees = realized_pnl = 0
         
-        # 估算持仓市值（用于权益展示）
+        # 持仓市值与 /api/positions 保持同口径
         positions_value = 0.0
         try:
-            pos_db = REPORTS_DIR / 'positions.sqlite'
-            if pos_db.exists():
-                pconn = sqlite3.connect(str(pos_db))
-                pcur = pconn.cursor()
-                pcur.execute("SELECT qty, last_mark_px FROM positions")
-                for q, px in pcur.fetchall():
-                    try:
-                        positions_value += float(q or 0) * float(px or 0)
-                    except Exception:
-                        continue
-                pconn.close()
+            pos_rows = api_positions().get_json() or []
+            if isinstance(pos_rows, list):
+                positions_value = sum(float(x.get('value_usdt') or 0.0) for x in pos_rows)
         except Exception:
             pass
 
