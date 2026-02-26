@@ -44,6 +44,7 @@ from src.regime.regime_engine import RegimeEngine, RegimeResult
 
 from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
+from src.risk.fixed_stop_loss import FixedStopLossManager, FixedStopLossConfig  # 固定比例止损
 from src.core.models import PositionState
 from src.reporting.decision_audit import DecisionAudit
 
@@ -130,6 +131,14 @@ class V5Pipeline:
                 tight_pct=0.03,
                 normal_pct=0.05,
                 loose_pct=0.08
+            )
+        )
+        
+        # 固定比例止损（买入后立即生效的硬性止损）
+        self.fixed_stop_loss = FixedStopLossManager(
+            config=FixedStopLossConfig(
+                enabled=True,
+                base_stop_pct=0.05  # 5%硬性止损
             )
         )
         
@@ -288,6 +297,41 @@ class V5Pipeline:
             market_data=market_data_1h,
             regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state),
         )
+        
+        # 6.5 固定比例止损检查（买入后亏损超过X%立即止损）
+        fixed_stop_orders = []
+        for p in positions:
+            s = market_data_1h.get(p.symbol)
+            if not s or not s.close:
+                continue
+            current_price = float(s.close[-1])
+            
+            should_stop, stop_price, loss_pct = self.fixed_stop_loss.should_stop_loss(
+                p.symbol, current_price
+            )
+            
+            if should_stop and float(p.qty) > 0:
+                fixed_stop_orders.append(
+                    Order(
+                        symbol=p.symbol,
+                        side="sell",
+                        intent="CLOSE_LONG",
+                        notional_usdt=float(p.qty) * current_price,
+                        signal_price=current_price,
+                        meta={
+                            "reason": "fixed_stop_loss",
+                            "entry_price": self.fixed_stop_loss.entry_prices.get(p.symbol, p.avg_px),
+                            "stop_price": stop_price,
+                            "loss_pct": loss_pct,
+                        },
+                    )
+                )
+                if audit:
+                    audit.add_note(f"Fixed stop loss: {p.symbol} loss {loss_pct*100:.1f}%")
+        
+        # 合并exit orders
+        exit_orders = exit_orders + fixed_stop_orders
+        
         if audit:
             audit.counts["orders_exit"] = len(exit_orders)
             # capture detailed exit reasons for explainability
@@ -404,10 +448,11 @@ class V5Pipeline:
             try:
                 tw_eps = float(getattr(self.cfg.rebalance, "close_only_weight_eps", 0.001) or 0.001)
                 if abs(float(tw)) <= tw_eps and abs(float(cw)) > tw_eps:
-                    cm = float(getattr(self.cfg.rebalance, "close_only_deadband_multiplier", 0.5) or 0.5)
+                    # 清仓模式：死区大幅降低，确保能卖出
+                    cm = float(getattr(self.cfg.rebalance, "close_only_deadband_multiplier", 0.1) or 0.1)  # 0.5->0.1
                     effective_deadband = min(float(effective_deadband), float(deadband) * float(cm))
                     if audit:
-                        audit.add_note(f"Close-only: {sym} tw≈0, deadband {deadband}→{effective_deadband:.3f}")
+                        audit.add_note(f"Close-only: {sym} tw≈0, deadband {deadband}→{effective_deadband:.3f} (force exit)")
             except Exception:
                 pass
             
@@ -599,6 +644,13 @@ class V5Pipeline:
                     meta=meta,
                 )
             )
+
+            # 买入订单：注册固定比例止损
+            if side == "buy":
+                self.fixed_stop_loss.register_position(sym, px)
+                if audit:
+                    stop_pct = self.fixed_stop_loss.config.get_stop_pct(sym)
+                    audit.add_note(f"Fixed stop registered: {sym} @ {px:.4f}, stop @ {px*(1-stop_pct):.4f}")
 
             # Update batch cash budget.
             if side == "buy":
