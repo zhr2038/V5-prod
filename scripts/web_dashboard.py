@@ -629,6 +629,7 @@ def api_market_state():
         # 优先从最新 decision_audit 读取，避免 scores 接口与 market_state 口径不一致
         regime = 'Risk-Off'
         ensemble_data = {}
+        audit = {}
         try:
             runs_dir = REPORTS_DIR / 'runs'
             if runs_dir.exists():
@@ -653,16 +654,16 @@ def api_market_state():
         # 计算市场指标
         indicators = calculate_market_indicators()
         
-        # 根据regime确定仓位乘数
+        # 仓位乘数：优先使用最新审计中的真实值，回退到配置映射
         multiplier_map = {
             'Risk-Off': 0.0,
             'RISK_OFF': 0.0,
-            'Trending': 1.0,
-            'TRENDING': 1.0,
-            'Sideways': 0.5,
-            'SIDEWAYS': 0.5
+            'Trending': 1.2,
+            'TRENDING': 1.2,
+            'Sideways': 0.8,
+            'SIDEWAYS': 0.8
         }
-        multiplier = multiplier_map.get(regime, 0.3)
+        multiplier = float(audit.get('regime_multiplier', multiplier_map.get(regime, 0.3)))
         
         # 描述
         descriptions = {
