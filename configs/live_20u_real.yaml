@@ -62,7 +62,7 @@ universe:
     - SUI/USDT
 
 alpha:
-  long_top_pct: 0.25  # 选择评分前25%的币
+  long_top_pct: 0.15  # 选择评分前15%的币（约3个，资金更集中）
   
   # 基于 IC 分析的静态权重（IC(1h)=0.5549）
   weights:
@@ -97,7 +97,7 @@ regime:
   atr_very_low: 0.008
   
   pos_mult_trending: 1.2
-  pos_mult_sideways: 0.6
+  pos_mult_sideways: 0.8  # 震荡行情仓位乘数0.8x（从0.6提高，增加成交概率）
   pos_mult_risk_off: 0.0
   
   # 情绪覆盖（用于调整最终multiplier）
@@ -215,7 +215,7 @@ alpha:
     f3_vol_adj_ret_20d: 0.12
     f4_volume_expansion: 0.13
     f5_rsi_trend_confirm: 0.13
-  long_top_pct: 0.20
+  long_top_pct: 0.15  # 多策略模式下：前15%约3个币
   dynamic_weights_by_regime_enabled: false
 
 # ============================================================
