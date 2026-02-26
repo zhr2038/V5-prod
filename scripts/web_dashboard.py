@@ -24,6 +24,7 @@ from flask import Flask, render_template, jsonify, send_from_directory
 import pandas as pd
 import yaml
 import requests
+import subprocess
 
 app = Flask(__name__, 
             template_folder='/home/admin/clawd/v5-trading-bot/web/templates', 
@@ -1949,6 +1950,29 @@ def api_shadow_test():
         if deadband_skips:
             current_stats['avg_deadband_skip'] = round(sum(deadband_skips) / len(deadband_skips), 4)
         
+        # 读取/刷新 A/B gate 评估（建议是否切参）
+        ab_gate = None
+        try:
+            gate_path = REPORTS_DIR / 'ab_gate_status.json'
+            need_refresh = True
+            if gate_path.exists():
+                age_sec = max(0, (datetime.now().timestamp() - gate_path.stat().st_mtime))
+                need_refresh = age_sec > 1800  # 30分钟
+            if need_refresh:
+                subprocess.run(
+                    [str(WORKSPACE / '.venv/bin/python'), str(WORKSPACE / 'scripts/ab_decision_gate.py')],
+                    cwd=str(WORKSPACE),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=12,
+                    check=False,
+                )
+            if gate_path.exists():
+                with open(gate_path, 'r', encoding='utf-8') as f:
+                    ab_gate = json.load(f)
+        except Exception:
+            ab_gate = None
+
         # 生成A/B对比报告
         ab_report = {
             'status': 'ready',
@@ -1990,6 +2014,13 @@ def api_shadow_test():
                 'reason': f"过去{current_stats['rounds']}轮中，约{simulated_stats['estimated_improvement']}笔额外交易可成交" if simulated_stats['estimated_improvement'] > 0 else "当前参数下成交率已合理",
                 'suggested_next_step': '将 deadband_sideways 从 0.04 调至 0.03，观察24小时' if simulated_stats['estimated_improvement'] > 5 else '保持当前参数'
             },
+            'matrix': [
+                {'name': 'A(当前)', 'params': {'deadband_sideways': 0.03, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
+                {'name': 'B1', 'params': {'deadband_sideways': 0.025}},
+                {'name': 'B2', 'params': {'min_trade_notional_base': 2.5}},
+                {'name': 'B3', 'params': {'pos_mult_sideways': 0.7}},
+            ],
+            'ab_gate': ab_gate,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         

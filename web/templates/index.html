@@ -1295,6 +1295,8 @@
                 const current = data.comparison?.current || {};
                 const estimated = data.comparison?.estimated_with_proposed || {};
                 const rec = data.recommendation || {};
+                const matrix = data.matrix || [];
+                const gate = data.ab_gate || null;
                 
                 // 建议颜色
                 let recColor = '#64748b';
@@ -1307,7 +1309,33 @@
                     recBg = 'rgba(34,197,94,0.1)';
                 }
                 
+                const matrixHtml = matrix.length ? `
+                    <div style="background: rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); border-radius:12px; padding:12px; margin-bottom:12px;">
+                        <div style="font-weight:600; margin-bottom:8px; color:#c7d2fe;">🧭 当前A/B测试矩阵</div>
+                        <div style="font-size:0.85rem; color:#94a3b8; line-height:1.7;">
+                            ${matrix.map(m => `<div><b>${m.name}</b>: ${Object.entries(m.params||{}).map(([k,v]) => `${k}=${v}`).join(', ')}</div>`).join('')}
+                        </div>
+                    </div>
+                ` : '';
+
+                const gateHtml = gate ? `
+                    <div style="background: rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:12px; padding:12px; margin-bottom:12px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-weight:600; color:#a7f3d0;">🚦切参守门结论</div>
+                            <span style="font-size:0.8rem; padding:2px 8px; border-radius:10px; background:${gate?.decision?.switch_recommended ? '#10b981' : '#64748b'}; color:white;">
+                                ${gate?.decision?.switch_recommended ? '建议切换' : '继续观察'}
+                            </span>
+                        </div>
+                        <div style="font-size:0.85rem; color:#94a3b8; margin-top:6px;">
+                            样本 ${gate.window_runs || 0} 轮；当前转化 ${((gate.current||{}).conversion||0)*100 ? (((gate.current||{}).conversion||0)*100).toFixed(1) : '--'}%；
+                            候选转化 ${((gate.candidate||{}).conversion||0)*100 ? (((gate.candidate||{}).conversion||0)*100).toFixed(1) : '--'}%。
+                        </div>
+                    </div>
+                ` : '';
+
                 let html = `
+                    ${matrixHtml}
+                    ${gateHtml}
                     <div style="margin-bottom: 20px;">
                         <div style="color: #64748b; font-size: 0.85rem; margin-bottom: 10px;">
                             基于过去 ${data.window_rounds} 轮（约${data.window_days}天）的数据分析
