@@ -593,6 +593,7 @@ class StrategyOrchestrator:
         """生成融合后的交易信号"""
         all_signals = []
         
+        import sys
         # 收集各策略信号
         for name, strategy in self.strategies.items():
             signals = strategy.generate_signals(market_data)
@@ -600,18 +601,22 @@ class StrategyOrchestrator:
             # 详细记录每个策略的信号
             buy_count = len([s for s in signals if s.side == 'buy'])
             sell_count = len([s for s in signals if s.side == 'sell'])
-            print(f"[Orchestrator] {name}: 总信号={len(signals)}, 买={buy_count}, 卖={sell_count}")
+            print(f"[Orchestrator] {name}: 总信号={len(signals)}, 买={buy_count}, 卖={sell_count}", flush=True)
+            sys.stdout.flush()
             # 记录前3个信号详情
             for s in signals[:3]:
-                print(f"[Orchestrator]   -> {s.symbol}: {s.side}, score={s.score:.4f}, conf={s.confidence:.2f}")
+                print(f"[Orchestrator]   -> {s.symbol}: {s.side}, score={s.score:.4f}, conf={s.confidence:.2f}", flush=True)
+                sys.stdout.flush()
         
         # 信号融合（按币种聚合）
         combined = self._fuse_signals(all_signals)
         
         # 记录融合结果
-        print(f"[Orchestrator] 信号融合: 输入={len(all_signals)}, 输出={len(combined)}")
+        print(f"[Orchestrator] 信号融合: 输入={len(all_signals)}, 输出={len(combined)}", flush=True)
+        sys.stdout.flush()
         for s in combined[:5]:
-            print(f"[Orchestrator]   FUSED -> {s.symbol}: {s.side}, score={s.score:.4f}, strategy={s.strategy}")
+            print(f"[Orchestrator]   FUSED -> {s.symbol}: {s.side}, score={s.score:.4f}, strategy={s.strategy}", flush=True)
+            sys.stdout.flush()
     
     def _fuse_signals(self, signals: List[Signal]) -> List[Signal]:
         """信号融合 - 解决冲突、加权汇总"""
