@@ -297,6 +297,24 @@ def api_positions():
             key = os.getenv('EXCHANGE_API_KEY')
             sec = os.getenv('EXCHANGE_API_SECRET')
             pp = os.getenv('EXCHANGE_PASSPHRASE')
+            # fallback: parse .env manually when process env not populated
+            if not (key and sec and pp):
+                try:
+                    envp = WORKSPACE / '.env'
+                    if envp.exists():
+                        for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
+                            if not ln or ln.strip().startswith('#') or '=' not in ln:
+                                continue
+                            k, v = ln.split('=', 1)
+                            k = k.strip(); v = v.strip().strip('"').strip("'")
+                            if k == 'EXCHANGE_API_KEY' and not key:
+                                key = v
+                            elif k == 'EXCHANGE_API_SECRET' and not sec:
+                                sec = v
+                            elif k == 'EXCHANGE_PASSPHRASE' and not pp:
+                                pp = v
+                except Exception:
+                    pass
             if key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
