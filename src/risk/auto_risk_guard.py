@@ -98,7 +98,11 @@ class AutoRiskGuard:
         ),
     }
     
-    def __init__(self, state_path: str = "reports/auto_risk_guard.json"):
+    def __init__(self, state_path: str = None):
+        if state_path is None:
+            # 使用绝对路径，避免工作目录问题
+            base_dir = Path(__file__).parent.parent.parent
+            state_path = base_dir / "reports" / "auto_risk_guard.json"
         self.state_path = Path(state_path)
         self.current_level = 'NEUTRAL'
         self.history: List[Dict] = []
