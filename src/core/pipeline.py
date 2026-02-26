@@ -238,7 +238,7 @@ class V5Pipeline:
             sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
             
             # Add strategy signal audit if multi-strategy is used
-            if self.use_multi_strategy and hasattr(self, 'multi_strategy_adapter') and self.multi_strategy_adapter:
+            if hasattr(self.alpha_engine, 'use_multi_strategy') and self.alpha_engine.use_multi_strategy:
                 try:
                     from datetime import datetime
                     from pathlib import Path
