@@ -252,6 +252,20 @@ class LiveExecutionEngine:
             # OKX expects plain decimal string
             from decimal import Decimal
 
+            # Pre-check against minSz using signal price estimate to avoid predictable rejects.
+            specs = OKXSpotInstrumentsCache().get_spec(inst_id)
+            px_ref = float(getattr(o, "signal_price", 0.0) or 0.0)
+            if specs is not None and float(specs.min_sz or 0.0) > 0 and px_ref > 0:
+                est_base_qty = float(notional) / float(px_ref)
+                if est_base_qty < float(specs.min_sz):
+                    raise DustOrderSkip(
+                        o.symbol,
+                        qty=est_base_qty,
+                        qty_rounded=est_base_qty,
+                        min_sz=float(specs.min_sz),
+                        lot_sz=float(specs.lot_sz or 0.0),
+                    )
+
             payload["sz"] = format(Decimal(str(notional)), "f")
             payload["tgtCcy"] = "quote_ccy"
         else:
