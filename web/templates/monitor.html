@@ -346,12 +346,12 @@
                 const res = await fetch('/api/account');
                 const data = await res.json();
                 
-                const total = data.total_equity || 0;
+                // 注意：API返回的是 total_equity_usdt 而不是 total_equity
+                const total = data.total_equity_usdt || data.total_equity || 0;
                 const cash = data.cash_usdt || 0;
-                const pos = data.positions_value || 0;
+                const pos = data.positions_value_usdt || data.positions_value || 0;
                 const pnl = data.total_pnl_pct || 0;
                 
-                document.getElementById('total-equity').textContent = formatCurrency(total);
                 document.getElementById('total-equity').innerHTML = formatCurrency(total) + '<br>' + formatPercent(pnl);
                 document.getElementById('cash-usdt').textContent = formatCurrency(cash);
                 document.getElementById('cash-ratio').textContent = total > 0 ? formatNumber(cash/total*100, 0) + '%' : '--';
@@ -410,10 +410,10 @@
                 
                 document.getElementById('market-state-val').innerHTML = 
                     `<span class="${stateInfo.class}" style="padding: 4px 10px; border-radius: 4px; font-size: 0.85rem;">${stateInfo.text}</span>`;
-                document.getElementById('market-detail').textContent = `${multiplier}x仓位`;
+                document.getElementById('market-detail').textContent = formatNumber(multiplier, 2) + 'x仓位';
                 document.getElementById('market-state-detail').innerHTML = 
                     `<span class="${stateInfo.class}">${state}</span>`;
-                document.getElementById('position-multiplier').textContent = multiplier + 'x';
+                document.getElementById('position-multiplier').textContent = formatNumber(multiplier, 2) + 'x';
                 
                 // Ensemble votes
                 let votesHtml = '';
