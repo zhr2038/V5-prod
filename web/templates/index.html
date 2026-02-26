@@ -302,16 +302,32 @@
         
         <!-- 决策归因 Tab -->
         <div id="tab-decision" class="tab-content">
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-icon" style="background: rgba(139,92,246,0.2);">🧠</div>
-                    <div>
-                        <div class="card-title">决策归因分析</div>
-                        <div class="card-subtitle">Strategy → Risk → Execution</div>
+            <div class="grid">
+                <!-- 策略信号分析 -->
+                <div class="card" style="grid-column: 1 / -1;">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(245,158,11,0.2);">📊</div>
+                        <div>
+                            <div class="card-title">三策略信号分析</div>
+                            <div class="card-subtitle">TrendFollowing + MeanReversion + Alpha6Factor</div>
+                        </div>
+                    </div>
+                    <div id="strategy-signals-container">
+                        <div class="loading"><div class="spinner"></div></div>
                     </div>
                 </div>
-                <div id="decision-chain-container">
-                    <div class="loading"><div class="spinner"></div></div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(139,92,246,0.2);">🧠</div>
+                        <div>
+                            <div class="card-title">决策归因分析</div>
+                            <div class="card-subtitle">Strategy → Risk → Execution</div>
+                        </div>
+                    </div>
+                    <div id="decision-chain-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1294,6 +1310,107 @@
             }
         }
         
+        // 加载策略信号分析
+        async function loadStrategySignals() {
+            try {
+                const res = await fetch('/api/decision_chain');
+                const data = await res.json();
+                
+                const container = document.getElementById('strategy-signals-container');
+                
+                if (!data.rounds || data.rounds.length === 0) {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">暂无策略信号数据</div>';
+                    return;
+                }
+                
+                const latest = data.rounds[0];
+                const strategies = latest.strategy_signals || [];
+                
+                if (strategies.length === 0) {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">本轮未记录策略信号</div>';
+                    return;
+                }
+                
+                // Strategy colors
+                const strategyColors = {
+                    'TrendFollowing': { bg: 'rgba(239,68,68,0.15)', border: '#ef4444', text: '#fca5a5' },
+                    'MeanReversion': { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6', text: '#93c5fd' },
+                    'Alpha6Factor': { bg: 'rgba(16,185,129,0.15)', border: '#10b981', text: '#86efac' }
+                };
+                
+                let html = `
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px;">
+                `;
+                
+                for (const st of strategies) {
+                    const colors = strategyColors[st.strategy] || { bg: 'rgba(100,100,100,0.1)', border: '#666', text: '#999' };
+                    const signals = st.signals || [];
+                    
+                    html += `
+                        <div style="background: ${colors.bg}; border: 1px solid ${colors.border}; border-radius: 12px; padding: 15px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <div style="font-weight: 600; color: ${colors.text}; font-size: 1.1rem;">
+                                    ${st.strategy}
+                                </div>
+                                <span style="font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; background: ${colors.border}; color: white;">
+                                    ${st.allocation * 100}%
+                                </span>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
+                                <div style="text-align: center;">
+                                    <div style="font-size: 1.2rem; font-weight: 600; color: ${colors.text};">${st.total_signals}</div>
+                                    <div style="font-size: 0.7rem; color: #64748b;">总信号</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 1.2rem; font-weight: 600; color: #22c55e;">${st.buy_signals}</div>
+                                    <div style="font-size: 0.7rem; color: #64748b;">买入</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 1.2rem; font-weight: 600; color: #ef4444;">${st.sell_signals}</div>
+                                    <div style="font-size: 0.7rem; color: #64748b;">卖出</div>
+                                </div>
+                            </div>
+                            
+                            ${signals.length > 0 ? `
+                                <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 8px;">信号详情</div>
+                                    ${signals.map(s => `
+                                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 5px; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                            <span style="color: ${colors.text};">${s.symbol}</span>
+                                            <span style="color: ${s.side === 'buy' ? '#22c55e' : '#ef4444'};">${s.side === 'buy' ? '买入' : '卖出'} ${s.score.toFixed(3)}</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+                
+                // Add fusion summary
+                if (strategies.length > 1) {
+                    const totalInput = strategies.reduce((sum, s) => sum + s.total_signals, 0);
+                    html += `
+                        <div style="margin-top: 15px; background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3); border-radius: 12px; padding: 15px;">
+                            <div style="font-weight: 600; color: #c4b5fd; margin-bottom: 8px;">🔄 信号融合</div>
+                            <div style="font-size: 0.85rem; color: #94a3b8;">
+                                输入: ${totalInput} 个信号 → 输出: ${latest.execution_result?.orders_rebalance || 0} 个交易单
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+                
+            } catch (e) {
+                console.error('加载策略信号失败:', e);
+                document.getElementById('strategy-signals-container').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
         // 加载参数A/B影子测试
         async function loadShadowTest() {
             try {
@@ -1576,6 +1693,7 @@
                 loadICDiagnostics(),
                 loadReflectionReports(),
                 loadDecisionChain(),
+                loadStrategySignals(),
                 loadShadowTest(),
                 loadSmartAlerts(),
                 loadAutoRiskGuard()
