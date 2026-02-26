@@ -120,10 +120,29 @@ class RegimeEngine:
             return None
         
         try:
-            prices = np.array(btc_data.close)
-            volumes = np.array(btc_data.volume) if hasattr(btc_data, 'volume') else None
-            
-            result = self.hmm_detector.detect_regime(prices, volumes)
+            closes = list(btc_data.close)
+            features = []
+            for i in range(len(closes)):
+                if i < 14:
+                    continue
+                ret_1h = (closes[i] - closes[i-1]) / closes[i-1] if closes[i-1] > 0 else 0
+                ret_6h = (closes[i] - closes[max(0, i-6)]) / closes[max(0, i-6)] if closes[max(0, i-6)] > 0 else 0
+
+                window = closes[max(0, i-14):i+1]
+                vol = np.std(np.diff(window) / np.array(window[:-1], dtype=float)) if len(window) > 1 else 0
+
+                gains = [closes[j] - closes[j-1] for j in range(max(0, i-14), i+1) if closes[j] > closes[j-1]]
+                losses = [closes[j-1] - closes[j] for j in range(max(0, i-14), i+1) if closes[j] < closes[j-1]]
+                avg_gain = np.mean(gains) if gains else 0
+                avg_loss = np.mean(losses) if losses else 0.001
+                rsi = 100 - (100 / (1 + avg_gain / avg_loss))
+
+                features.append([ret_1h, ret_6h, vol, rsi])
+
+            if len(features) < 10:
+                return None
+
+            result = self.hmm_detector.predict(np.array(features, dtype=float))
             
             # 将HMM状态映射到RegimeState
             hmm_state = result['state']
