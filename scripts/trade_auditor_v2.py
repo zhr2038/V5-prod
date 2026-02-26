@@ -97,26 +97,41 @@ class SmartTradeAuditor:
         }
     
     def check_market_regime(self):
-        """检查当前市场状态"""
-        # 尝试多个可能的路径
+        """检查当前市场状态（优先最新 decision_audit，回退旧文件）"""
+        # 1) 优先最新 run 的 decision_audit（与实盘执行口径一致）
+        try:
+            runs_dir = REPORTS_DIR / 'runs'
+            if runs_dir.exists():
+                run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+                run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                if run_dirs:
+                    with open(run_dirs[0] / 'decision_audit.json', 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    details = data.get('regime_details') or {}
+                    regime = details.get('final_state') or data.get('regime')
+                    if regime:
+                        return regime
+        except Exception:
+            pass
+
+        # 2) 回退旧路径
         possible_paths = [
             REPORTS_DIR / 'regime_state.json',
             REPORTS_DIR / 'regime.json',
             Path('/home/admin/clawd/v5-trading-bot/reports/regime.json'),
         ]
-        
+
         for regime_file in possible_paths:
             if regime_file.exists():
                 try:
                     with open(regime_file) as f:
                         data = json.load(f)
-                        # 尝试多个可能的字段名
                         regime = data.get('regime') or data.get('state') or data.get('current_regime')
                         if regime:
                             return regime
-                except:
+                except Exception:
                     continue
-        
+
         return 'Unknown'
     
     def validate_logic(self, analysis, regime):
