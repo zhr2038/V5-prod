@@ -1803,10 +1803,10 @@ def api_decision_chain():
                 # 3. 执行层结果
                 counts = data.get('counts', {})
                 execution_result = {
-                    'selected': counts.get('selected', 0),
-                    'targets_pre_risk': counts.get('targets_pre_risk', 0),
-                    'orders_rebalance': counts.get('orders_rebalance', 0),
-                    'orders_exit': counts.get('orders_exit', 0)
+                    'selected': int(counts.get('selected', 0) or 0),
+                    'targets_pre_risk': int(counts.get('targets_pre_risk', 0) or 0),
+                    'orders_rebalance': int(counts.get('orders_rebalance', 0) or 0),
+                    'orders_exit': int(counts.get('orders_exit', 0) or 0)
                 }
 
                 # 4. 阻塞原因统计
@@ -1818,15 +1818,23 @@ def api_decision_chain():
 
                 # 5. 被拦截的Top信号
                 blocked_signals = []
-                for rd in router_decisions:
+                for rd in (router_decisions or []):
                     if rd.get('reason') == 'deadband':
+                        try:
+                            drift_v = float(rd.get('drift') or 0.0)
+                        except Exception:
+                            drift_v = 0.0
+                        try:
+                            deadband_v = float(rd.get('deadband') or 0.0)
+                        except Exception:
+                            deadband_v = 0.0
                         blocked_signals.append({
                             'symbol': rd.get('symbol'),
-                            'drift': round(float(rd.get('drift', 0)), 4),
-                            'deadband': round(float(rd.get('deadband', 0)), 4)
+                            'drift': round(drift_v, 4),
+                            'deadband': round(deadband_v, 4)
                         })
                 # 按漂移排序
-                blocked_signals.sort(key=lambda x: abs(x.get('drift', 0)), reverse=True)
+                blocked_signals.sort(key=lambda x: abs(float(x.get('drift', 0) or 0)), reverse=True)
 
                 rounds.append({
                     'run_id': run_id,
@@ -1838,6 +1846,17 @@ def api_decision_chain():
                     'blocked_top': blocked_signals[:3]
                 })
             except Exception as e:
+                # 保留可观测性，避免静默失败导致前端长期显示空白
+                rounds.append({
+                    'run_id': run_dir.name,
+                    'time': run_dir.name,
+                    'strategy_signals': [],
+                    'risk_state': {'regime': 'Error'},
+                    'execution_result': {'selected': 0, 'targets_pre_risk': 0, 'orders_rebalance': 0, 'orders_exit': 0},
+                    'block_reasons': {'parse_error': 1},
+                    'blocked_top': [],
+                    'error': str(e)
+                })
                 continue
 
         return jsonify({
