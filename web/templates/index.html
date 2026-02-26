@@ -242,6 +242,20 @@
                     </div>
                 </div>
                 
+                <!-- 风险档位 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(239,68,68,0.2);">🛡️</div>
+                        <div>
+                            <div class="card-title">风险档位</div>
+                            <div class="card-subtitle">Risk Guard</div>
+                        </div>
+                    </div>
+                    <div id="risk-guard-state">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
                 <!-- 定时任务 -->
                 <div class="card">
                     <div class="card-header">
@@ -1670,6 +1684,31 @@
                 `;
                 
                 container.innerHTML = html;
+                
+                // 同时更新首页的风险档位显示（简洁版）
+                const miniHtml = `
+                    <div style="text-align: center; padding: 10px;">
+                        <div style="font-size: 1.3rem; font-weight: 700; color: ${colors.text}; margin-bottom: 5px;">
+                            ${level}
+                        </div>
+                        <div style="font-size: 0.8rem; color: ${colors.text}; margin-bottom: 8px;">
+                            ${colors.desc}
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.75rem; color: #64748b;">
+                            <div>仓位: ${(config.pos_mult_sideways * 100)?.toFixed(0) || '--'}%</div>
+                            <div>回撤: ${((data.metrics?.last_dd_pct || 0) * 100).toFixed(1)}%</div>
+                        </div>
+                        ${level === 'PROTECT' ? `
+                            <div style="margin-top: 8px; padding: 6px; background: rgba(239,68,68,0.2); border-radius: 6px; font-size: 0.75rem; color: #fca5a5;">
+                                ⚠️ 保护模式：只减仓，不开新仓
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+                const miniContainer = document.getElementById('risk-guard-state');
+                if (miniContainer) {
+                    miniContainer.innerHTML = miniHtml;
+                }
                 
             } catch (e) {
                 console.error('加载自动风险档位失败:', e);

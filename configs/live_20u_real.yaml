@@ -202,6 +202,11 @@ backtest:
   fee_quantile: p75
   slippage_quantile: p90
   # 小样本阶段先把门槛降下来，尽快让 calibrated 成本模型生效
+
+# 交易执行配置
+trading:
+  position_mode: symbol_only  # 单币种模式，避免跨币种借币
+  prevent_borrow: true        # 禁止借币，确保不超仓
   min_fills_global: 2
   min_fills_bucket: 1
   max_stats_age_days: 7
