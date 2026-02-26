@@ -44,7 +44,8 @@ from src.regime.regime_engine import RegimeEngine, RegimeResult
 
 from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
-from src.risk.fixed_stop_loss import FixedStopLossManager, FixedStopLossConfig  # 固定比例止损
+from src.risk.fixed_stop_loss import FixedStopLossManager, FixedStopLossConfig
+from src.risk.profit_taking import ProfitTakingManager  # 程序化利润管理
 from src.core.models import PositionState
 from src.reporting.decision_audit import DecisionAudit
 
@@ -141,6 +142,9 @@ class V5Pipeline:
                 base_stop_pct=0.05  # 5%硬性止损
             )
         )
+        
+        # 程序化利润管理
+        self.profit_taking = ProfitTakingManager()
         
         # Phase 3: 初始化ML数据收集器
         from src.execution.ml_data_collector import MLDataCollector
@@ -291,12 +295,49 @@ class V5Pipeline:
         
         prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
 
+        # 4.5 排名利润管理 - 检查持仓是否跌出排名
+        ranking_exit_orders = []
+        if hasattr(alpha, 'scores') and alpha.scores:
+            # 计算排名
+            sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
+            symbol_ranks = {sym: idx+1 for idx, (sym, _) in enumerate(sorted_scores)}
+            
+            for p in positions:
+                if p.qty <= 0:
+                    continue
+                current_rank = symbol_ranks.get(p.symbol, 999)
+                should_exit, reason = self.profit_taking.should_exit_by_rank(
+                    p.symbol, current_rank, max_rank=3
+                )
+                if should_exit:
+                    s = market_data_1h.get(p.symbol)
+                    if s and s.close:
+                        current_price = float(s.close[-1])
+                        ranking_exit_orders.append(
+                            Order(
+                                symbol=p.symbol,
+                                side="sell",
+                                intent="CLOSE_LONG",
+                                notional_usdt=float(p.qty) * current_price,
+                                signal_price=current_price,
+                                meta={
+                                    "reason": f"rank_exit_{reason}",
+                                    "current_rank": current_rank,
+                                },
+                            )
+                        )
+                        if audit:
+                            audit.add_note(f"Rank exit: {p.symbol} rank {current_rank}, {reason}")
+        
         # 6. Exit orders审计
         exit_orders = self.exit_policy.evaluate(
             positions=positions,
             market_data=market_data_1h,
             regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state),
         )
+        
+        # 合并排名退出订单
+        exit_orders = exit_orders + ranking_exit_orders
         
         # 6.5 固定比例止损检查（买入后亏损超过X%立即止损）
         fixed_stop_orders = []
@@ -329,8 +370,56 @@ class V5Pipeline:
                 if audit:
                     audit.add_note(f"Fixed stop loss: {p.symbol} loss {loss_pct*100:.1f}%")
         
+        # 6.5 程序化利润管理
+        profit_orders = []
+        for p in positions:
+            s = market_data_1h.get(p.symbol)
+            if not s or not s.close:
+                continue
+            current_price = float(s.close[-1])
+            
+            # 评估利润管理
+            action, value, reason = self.profit_taking.evaluate(p.symbol, current_price)
+            
+            if action == 'sell_all':
+                profit_orders.append(
+                    Order(
+                        symbol=p.symbol,
+                        side="sell",
+                        intent="CLOSE_LONG",
+                        notional_usdt=float(p.qty) * current_price,
+                        signal_price=current_price,
+                        meta={
+                            "reason": f"profit_taking_{reason}",
+                            "profit_action": action,
+                            "target_price": value,
+                        },
+                    )
+                )
+                if audit:
+                    audit.add_note(f"Profit taking: {p.symbol} {reason}")
+                    
+            elif action == 'sell_partial':
+                # 部分减仓
+                sell_qty = float(p.qty) * value
+                profit_orders.append(
+                    Order(
+                        symbol=p.symbol,
+                        side="sell",
+                        intent="REBALANCE",
+                        notional_usdt=sell_qty * current_price,
+                        signal_price=current_price,
+                        meta={
+                            "reason": f"profit_partial_{reason}",
+                            "sell_pct": value,
+                        },
+                    )
+                )
+                if audit:
+                    audit.add_note(f"Profit partial: {p.symbol} sell {value:.0%}, {reason}")
+        
         # 合并exit orders
-        exit_orders = exit_orders + fixed_stop_orders
+        exit_orders = exit_orders + fixed_stop_orders + profit_orders
         
         if audit:
             audit.counts["orders_exit"] = len(exit_orders)
@@ -645,9 +734,10 @@ class V5Pipeline:
                 )
             )
 
-            # 买入订单：注册固定比例止损
+            # 买入订单：注册止损和利润管理
             if side == "buy":
                 self.fixed_stop_loss.register_position(sym, px)
+                self.profit_taking.register_position(sym, px)  # 注册利润管理
                 if audit:
                     stop_pct = self.fixed_stop_loss.config.get_stop_pct(sym)
                     audit.add_note(f"Fixed stop registered: {sym} @ {px:.4f}, stop @ {px*(1-stop_pct):.4f}")
