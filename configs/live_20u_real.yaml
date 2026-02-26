@@ -172,7 +172,7 @@ budget:
   exchange_min_notional_slack_multiplier: 1.05
 
   # Let exchange minSz-based filter be the primary guard; avoid blocking valid small-budget opens.
-  min_trade_notional_base: 0.0
+  min_trade_notional_base: 2.0  # 防止产生<最小下单量的小额订单
   min_trade_notional_multiplier_exceeded: 1.5  # 启用超支惩罚
   min_trade_notional_cap_abs: 100.0
   min_trade_notional_cap_equity_ratio: 0.03  # 合理上限
