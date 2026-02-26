@@ -152,14 +152,24 @@ class AlphaEngine:
         targets = self.multi_strategy_adapter.run_strategy_cycle(market_df)
         
         # 转换为评分格式 (0-1之间的分数)
+        # 同一symbol可能出现多个信号（多策略/多阶段），避免“后写覆盖前写”。
         scores = {}
         for target in targets:
             sym = target['symbol'].replace('-', '/')
             # 买入信号为正分，卖出为负分
-            score = target['signal_score'] * target['confidence']
+            score = float(target['signal_score']) * float(target['confidence'])
             if target['side'] == 'sell':
                 score = -score
-            scores[sym] = score
+
+            prev = scores.get(sym)
+            if prev is None:
+                scores[sym] = score
+            else:
+                # 保留绝对值更强的信号；同强度时偏向卖出（更保守）
+                if abs(score) > abs(prev):
+                    scores[sym] = score
+                elif abs(score) == abs(prev) and score < prev:
+                    scores[sym] = score
         
         return scores
 
