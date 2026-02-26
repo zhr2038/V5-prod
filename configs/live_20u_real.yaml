@@ -97,7 +97,7 @@ regime:
   atr_very_low: 0.008
   
   pos_mult_trending: 1.2
-  pos_mult_sideways: 0.8  # 震荡行情仓位乘数0.8x（从0.6提高，增加成交概率）
+  pos_mult_sideways: 0.7  # 震荡行情仓位乘数0.7x（保守，优先控回撤）
   pos_mult_risk_off: 0.0
   
   # 情绪覆盖（用于调整最终multiplier）
@@ -109,11 +109,11 @@ regime:
 risk:
   max_single_weight: 0.30  # 提高单币种限制，避免资金不足
   max_gross_exposure: 1.0
-  drawdown_trigger: 0.50  # 50%回撤才触发 (小资金账户，避免灰尘干扰)
-  drawdown_delever: 1.00  # 不降仓 (禁用回撤保护，小资金优先交易)
+  drawdown_trigger: 0.12  # 12%回撤触发保护（恢复真实风控）
+  drawdown_delever: 0.60  # 触发后降至60%风险敞口
 
 rebalance:
-  deadband_sideways: 0.03  # 从0.04降到0.03，增加交易频率
+  deadband_sideways: 0.035  # 降低噪声交易，减少震荡磨损
   deadband_trending: 0.03
   deadband_riskoff: 0.07
 
@@ -177,7 +177,7 @@ budget:
   exchange_min_notional_slack_multiplier: 1.05
 
   # Let exchange minSz-based filter be the primary guard; avoid blocking valid small-budget opens.
-  min_trade_notional_base: 2.0  # 防止产生<最小下单量的小额订单
+  min_trade_notional_base: 2.5  # 提高最小下单额，减少小额拒单与磨损
   min_trade_notional_multiplier_exceeded: 1.5  # 启用超支惩罚
   min_trade_notional_cap_abs: 100.0
   min_trade_notional_cap_equity_ratio: 0.03  # 合理上限
@@ -258,9 +258,9 @@ factor_weights:
         position_scale: 0.70    # 减仓30%
         reason: "FOMO预警:市场过热"
       extreme_fear:
-        factor_boost: +0.10     # 提高情绪权重
-        position_scale: 1.20    # 加仓20%
-        reason: "恐慌抄底:市场超跌"
+        factor_boost: +0.05     # 保守提高情绪权重
+        position_scale: 1.00    # 不额外加仓，避免逆势放大风险
+        reason: "恐慌期谨慎观察，不主动放大仓位"
 
 # 数据源配置 (情绪分析)
 sentiment:
