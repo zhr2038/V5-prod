@@ -322,10 +322,11 @@ class LiveExecutionEngine:
             else:
                 px_ref = float(getattr(o, "signal_price", 0.0) or 0.0)
                 if px_ref <= 0:
-                    # fallback: conservative full-qty path if no price available
-                    qty = qty_full
-                else:
-                    qty = min(qty_full, float(o.notional_usdt) / px_ref)
+                    # Safety: for REBALANCE sells, missing signal price must NOT degrade to full liquidation.
+                    raise ValueError(
+                        f"REBALANCE_SAFETY: missing signal_price for {o.symbol}, refusing fallback full-qty sell"
+                    )
+                qty = min(qty_full, float(o.notional_usdt) / px_ref)
 
             # Enforce OKX minSz/lotSz to avoid Parameter sz error.
             specs = OKXSpotInstrumentsCache().get_spec(inst_id)
