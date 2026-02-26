@@ -194,47 +194,109 @@ def api_account():
 
 @app.route('/api/trades')
 def api_trades():
-    """交易历史API（优先DB，回退runs/*/trades.csv，确保最新可见）"""
+    """交易历史API（优先OKX实时成交，回退DB，再回退runs/*/trades.csv）"""
     try:
         trades = []
 
-        # 1) 优先从订单库读取
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
-            cursor.execute(f"""
-                SELECT 
-                    inst_id, side, notional_usdt, fee, state,
-                    datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
-                FROM orders 
-                WHERE state='FILLED'
-                AND inst_id NOT IN ({placeholders})
-                AND notional_usdt < 1000
-                ORDER BY created_ts DESC
-                LIMIT 100
-            """, EXCLUDED_SYMBOLS)
+        # 0) 优先OKX实时成交
+        try:
+            import os, time, hmac, hashlib, base64
+            from dotenv import load_dotenv
+            load_dotenv(str(WORKSPACE / '.env'))
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
+            if not (key and sec and pp):
+                envp = WORKSPACE / '.env'
+                if envp.exists():
+                    for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
+                        if not ln or ln.strip().startswith('#') or '=' not in ln:
+                            continue
+                        k, v = ln.split('=', 1)
+                        k = k.strip(); v = v.strip().strip('"').strip("'")
+                        if k == 'EXCHANGE_API_KEY' and not key:
+                            key = v
+                        elif k == 'EXCHANGE_API_SECRET' and not sec:
+                            sec = v
+                        elif k == 'EXCHANGE_PASSPHRASE' and not pp:
+                            pp = v
 
-            for row in cursor.fetchall():
-                try:
-                    trades.append({
-                        'symbol': str(row[0]),
-                        'side': str(row[1]),
-                        'amount': round(float(row[2]), 4),
-                        'fee': round(float(row[3]), 6),
-                        'state': str(row[4]),
-                        'time': str(row[5])
-                    })
-                except (TypeError, ValueError):
-                    continue
-            conn.close()
+            if key and sec and pp:
+                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+                path = '/api/v5/trade/fills?limit=100'
+                msg = ts + 'GET' + path
+                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
+                headers = {
+                    'OK-ACCESS-KEY': key,
+                    'OK-ACCESS-SIGN': sig,
+                    'OK-ACCESS-TIMESTAMP': ts,
+                    'OK-ACCESS-PASSPHRASE': pp,
+                }
+                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
+                data = resp.json()
+                if data.get('code') == '0':
+                    for r in data.get('data', []):
+                        try:
+                            inst = str(r.get('instId', ''))
+                            if (not inst) or (inst in EXCLUDED_SYMBOLS):
+                                continue
+                            ts_ms = int(r.get('ts') or 0)
+                            t = datetime.utcfromtimestamp(ts_ms / 1000.0) + timedelta(hours=8)
+                            px = float(r.get('fillPx') or 0)
+                            sz = float(r.get('fillSz') or 0)
+                            amount = px * sz
+                            fee = float(r.get('fee') or 0)
+                            trades.append({
+                                'symbol': inst,
+                                'side': str(r.get('side', '')),
+                                'amount': round(amount, 4),
+                                'fee': round(fee, 6),
+                                'state': 'FILLED',
+                                'time': t.strftime('%Y-%m-%d %H:%M:%S')
+                            })
+                        except Exception:
+                            continue
+        except Exception:
+            pass
 
-        # 2) 回退：DB为空时，读取最新 runs 的 trades.csv
+        # 1) 回退订单库
+        if not trades:
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
+                cursor.execute(f"""
+                    SELECT 
+                        inst_id, side, notional_usdt, fee, state,
+                        datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
+                    FROM orders 
+                    WHERE state='FILLED'
+                    AND inst_id NOT IN ({placeholders})
+                    AND notional_usdt < 1000
+                    ORDER BY created_ts DESC
+                    LIMIT 100
+                """, EXCLUDED_SYMBOLS)
+
+                for row in cursor.fetchall():
+                    try:
+                        trades.append({
+                            'symbol': str(row[0]),
+                            'side': str(row[1]),
+                            'amount': round(float(row[2]), 4),
+                            'fee': round(float(row[3]), 6),
+                            'state': str(row[4]),
+                            'time': str(row[5])
+                        })
+                    except (TypeError, ValueError):
+                        continue
+                conn.close()
+
+        # 2) 回退 runs/*/trades.csv
         if not trades:
             runs_dir = REPORTS_DIR / 'runs'
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
-                for run_dir in run_dirs[:24]:  # 最近24轮
+                for run_dir in run_dirs[:24]:
                     p = run_dir / 'trades.csv'
                     if not p.exists():
                         continue
