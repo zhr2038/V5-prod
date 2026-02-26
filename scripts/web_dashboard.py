@@ -171,11 +171,26 @@ def api_account():
             pass
 
         total_equity = float(cash or 0) + positions_value
+        
+        # 计算盈亏百分比（假设初始资金为120 USDT）
+        initial_capital = 120.0
+        total_pnl_pct = (total_equity - initial_capital) / initial_capital if initial_capital > 0 else 0
+        
+        # 获取持仓数量
+        positions_count = 0
+        try:
+            pos_rows = api_positions().get_json() or []
+            if isinstance(pos_rows, list):
+                positions_count = len([p for p in pos_rows if (p.get('value_usdt') or 0) > 1])
+        except Exception:
+            pass
 
         return jsonify({
             'cash_usdt': round(float(cash), 2),
             'positions_value_usdt': round(float(positions_value), 4),
             'total_equity_usdt': round(float(total_equity), 4),
+            'total_pnl_pct': round(float(total_pnl_pct), 4),
+            'positions_count': positions_count,
             'total_trades': int(total_trades),
             'total_buy': round(float(total_buy), 2),
             'total_sell': round(float(total_sell), 2),
@@ -319,10 +334,10 @@ def api_trades():
                     if len(trades) >= 100:
                         break
 
-        return jsonify(trades[:100])
+        return jsonify({'trades': trades[:100]})
     except Exception as e:
         import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e), 'trades': []}), 500
 
 
 @app.route('/api/positions')
@@ -508,9 +523,22 @@ def api_positions():
                         break
 
         positions.sort(key=lambda x: x.get('value_usdt', 0), reverse=True)
-        return jsonify(positions)
+        
+        # 计算持仓盈亏（简化计算：使用已实现盈亏作为参考）
+        for p in positions:
+            avg_px = p.get('avg_px', 0)
+            last_px = p.get('last_price', 0)
+            if avg_px > 0 and last_px > 0:
+                p['pnl_pct'] = round((last_px - avg_px) / avg_px, 4)
+            else:
+                p['pnl_pct'] = 0.0
+            p['price'] = last_px  # 前端期望的字段名
+            p['value'] = p.get('value_usdt', 0)
+            p['quantity'] = p.get('qty', 0)
+        
+        return jsonify({'positions': positions})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'positions': []}), 500
 
 
 @app.route('/api/scores')
