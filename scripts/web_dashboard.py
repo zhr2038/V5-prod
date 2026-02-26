@@ -551,11 +551,8 @@ def calculate_market_indicators():
 def api_market_state():
     """市场状态API（显示Ensemble三种方法）"""
     try:
-        # 获取评分数据中的regime
-        scores_data = api_scores().get_json()
-        regime = scores_data.get('regime', 'Risk-Off')
-        
-        # 读取最新的Ensemble决策详情
+        # 优先从最新 decision_audit 读取，避免 scores 接口与 market_state 口径不一致
+        regime = 'Risk-Off'
         ensemble_data = {}
         try:
             runs_dir = REPORTS_DIR / 'runs'
@@ -565,10 +562,18 @@ def api_market_state():
                 if run_dirs:
                     with open(run_dirs[0] / 'decision_audit.json', 'r') as f:
                         audit = json.load(f)
+                        regime = audit.get('regime', regime)
                         if 'regime_details' in audit:
                             ensemble_data = audit['regime_details']
+                            # 若有final_state，优先使用它作为最终状态
+                            regime = ensemble_data.get('final_state', regime)
         except Exception:
-            pass
+            # 回退到 scores 口径
+            try:
+                scores_data = api_scores().get_json()
+                regime = scores_data.get('regime', regime)
+            except Exception:
+                pass
         
         # 计算市场指标
         indicators = calculate_market_indicators()
