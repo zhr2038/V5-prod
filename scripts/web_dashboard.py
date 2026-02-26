@@ -68,19 +68,19 @@ def load_config():
 @app.route('/')
 def index():
     """主页面 - 新版监控面板"""
-    return render_template('monitor.html')
+    return render_template('monitor_v2.html')
 
 
 @app.route('/monitor')
 def monitor():
     """旧版监控页面（保留兼容）"""
-    return render_template('monitor.html')
+    return render_template('monitor_v2.html')
 
 
 @app.route('/simple')
 def simple_dashboard():
     """简洁版监控页"""
-    return render_template('monitor.html')
+    return render_template('monitor_v2.html')
 
 
 @app.route('/<path:filename>')
