@@ -236,6 +236,26 @@ class V5Pipeline:
         alpha = self.alpha_engine.compute_snapshot(market_data_1h)
         if audit:
             sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
+            
+            # Add strategy signal audit if multi-strategy is used
+            if self.use_multi_strategy and hasattr(self, 'multi_strategy_adapter') and self.multi_strategy_adapter:
+                try:
+                    from datetime import datetime
+                    from pathlib import Path
+                    # Load strategy signals from audit file
+                    strategy_audit_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
+                    if strategy_audit_file.exists():
+                        with open(strategy_audit_file, 'r') as f:
+                            strategy_data = json.load(f)
+                        audit.strategy_signals = strategy_data.get('strategies', [])
+                        # Add note about multi-strategy
+                        total_signals = sum(s.get('total_signals', 0) for s in audit.strategy_signals)
+                        audit.add_note(f"Multi-strategy: {len(audit.strategy_signals)} strategies, {total_signals} total signals")
+                        for s in audit.strategy_signals:
+                            audit.add_note(f"  {s['strategy']}: {s['total_signals']} signals ({s['buy_signals']} buy, {s['sell_signals']} sell)")
+                except Exception as e:
+                    audit.add_note(f"Strategy signal audit error: {str(e)[:50]}")
+            
             audit.top_scores = [{"symbol": sym, "score": score} for sym, score in sorted_scores[:10]]
             audit.counts["scored"] = len(alpha.scores)
 

@@ -593,20 +593,57 @@ class StrategyOrchestrator:
         """生成融合后的交易信号"""
         all_signals = []
         
+        # 策略信号审计记录
+        strategy_signal_audit = []
+        
         import sys
         # 收集各策略信号
         for name, strategy in self.strategies.items():
             signals = strategy.generate_signals(market_data)
             all_signals.extend(signals)
+            
             # 详细记录每个策略的信号
             buy_count = len([s for s in signals if s.side == 'buy'])
             sell_count = len([s for s in signals if s.side == 'sell'])
             print(f"[Orchestrator] {name}: 总信号={len(signals)}, 买={buy_count}, 卖={sell_count}", flush=True)
             sys.stdout.flush()
-            # 记录前3个信号详情
-            for s in signals[:3]:
+            
+            # 记录策略信号到审计
+            audit_entry = {
+                'strategy': name,
+                'type': strategy.strategy_type.value,
+                'allocation': float(self.strategy_allocations.get(name, 0)),
+                'total_signals': len(signals),
+                'buy_signals': buy_count,
+                'sell_signals': sell_count,
+                'signals': []
+            }
+            
+            # 记录前5个信号详情
+            for s in signals[:5]:
                 print(f"[Orchestrator]   -> {s.symbol}: {s.side}, score={s.score:.4f}, conf={s.confidence:.2f}", flush=True)
                 sys.stdout.flush()
+                audit_entry['signals'].append({
+                    'symbol': s.symbol,
+                    'side': s.side,
+                    'score': float(s.score),
+                    'confidence': float(s.confidence),
+                    'metadata': s.metadata
+                })
+            
+            strategy_signal_audit.append(audit_entry)
+        
+        # 保存策略信号审计到文件（供decision_audit引用）
+        try:
+            audit_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
+            audit_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(audit_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'timestamp': datetime.now().isoformat(),
+                    'strategies': strategy_signal_audit
+                }, f, indent=2, ensure_ascii=False, default=str)
+        except Exception as e:
+            print(f"[Orchestrator] 审计记录失败: {e}")
         
         # 信号融合（按币种聚合）
         combined = self._fuse_signals(all_signals)
@@ -617,6 +654,8 @@ class StrategyOrchestrator:
         for s in combined[:5]:
             print(f"[Orchestrator]   FUSED -> {s.symbol}: {s.side}, score={s.score:.4f}, strategy={s.strategy}", flush=True)
             sys.stdout.flush()
+        
+        return combined
     
     def _fuse_signals(self, signals: List[Signal]) -> List[Signal]:
         """信号融合 - 解决冲突、加权汇总"""

@@ -78,6 +78,9 @@ class DecisionAudit:
     # Ensemble regime详细信息
     regime_details: Dict[str, Any] = field(default_factory=dict)
     
+    # 多策略信号详情
+    strategy_signals: List[Dict[str, Any]] = field(default_factory=list)
+    
     def reject(self, reason: str) -> None:
         """记录拒绝原因"""
         if reason in self.rejects:
