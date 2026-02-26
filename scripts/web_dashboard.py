@@ -193,43 +193,74 @@ def api_account():
 
 @app.route('/api/trades')
 def api_trades():
-    """交易历史API"""
+    """交易历史API（优先DB，回退runs/*/trades.csv，确保最新可见）"""
     try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify([])
-        
-        cursor = conn.cursor()
-        placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
-        cursor.execute(f"""
-            SELECT 
-                inst_id, side, notional_usdt, fee, state,
-                datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
-            FROM orders 
-            WHERE state='FILLED'
-            AND inst_id NOT IN ({placeholders})
-            AND notional_usdt < 1000
-            ORDER BY created_ts DESC
-            LIMIT 100
-        """, EXCLUDED_SYMBOLS)
-        
         trades = []
-        for row in cursor.fetchall():
-            try:
-                trades.append({
-                    'symbol': str(row[0]),
-                    'side': str(row[1]),
-                    'amount': round(float(row[2]), 4),
-                    'fee': round(float(row[3]), 6),
-                    'state': str(row[4]),
-                    'time': str(row[5])
-                })
-            except (TypeError, ValueError) as e:
-                # 跳过异常数据
-                continue
-        
-        conn.close()
-        return jsonify(trades)
+
+        # 1) 优先从订单库读取
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
+            cursor.execute(f"""
+                SELECT 
+                    inst_id, side, notional_usdt, fee, state,
+                    datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
+                FROM orders 
+                WHERE state='FILLED'
+                AND inst_id NOT IN ({placeholders})
+                AND notional_usdt < 1000
+                ORDER BY created_ts DESC
+                LIMIT 100
+            """, EXCLUDED_SYMBOLS)
+
+            for row in cursor.fetchall():
+                try:
+                    trades.append({
+                        'symbol': str(row[0]),
+                        'side': str(row[1]),
+                        'amount': round(float(row[2]), 4),
+                        'fee': round(float(row[3]), 6),
+                        'state': str(row[4]),
+                        'time': str(row[5])
+                    })
+                except (TypeError, ValueError):
+                    continue
+            conn.close()
+
+        # 2) 回退：DB为空时，读取最新 runs 的 trades.csv
+        if not trades:
+            runs_dir = REPORTS_DIR / 'runs'
+            if runs_dir.exists():
+                run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
+                for run_dir in run_dirs[:24]:  # 最近24轮
+                    p = run_dir / 'trades.csv'
+                    if not p.exists():
+                        continue
+                    try:
+                        import csv
+                        with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                            reader = csv.DictReader(f)
+                            for r in reader:
+                                sym = str(r.get('symbol', '') or '')
+                                if not sym:
+                                    continue
+                                if any(ex in sym for ex in EXCLUDED_SYMBOLS):
+                                    continue
+                                trades.append({
+                                    'symbol': sym.replace('/USDT', '-USDT'),
+                                    'side': str(r.get('side', '')),
+                                    'amount': round(float(r.get('notional_usdt') or 0), 4),
+                                    'fee': round(float(r.get('fee_usdt') or 0), 6),
+                                    'state': 'FILLED',
+                                    'time': str(r.get('ts', '')),
+                                })
+                    except Exception:
+                        continue
+                    if len(trades) >= 100:
+                        break
+
+        return jsonify(trades[:100])
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
@@ -237,7 +268,7 @@ def api_trades():
 
 @app.route('/api/positions')
 def api_positions():
-    """持仓信息API（以 positions.sqlite 为准，避免reconcile延迟）"""
+    """持仓信息API（优先 positions.sqlite，回退最新 run 的 positions.jsonl）"""
     try:
         hidden_symbols = {
             'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
@@ -258,6 +289,7 @@ def api_positions():
         pos_db = REPORTS_DIR / 'positions.sqlite'
         positions = []
 
+        # 1) 优先 positions.sqlite
         if pos_db.exists():
             conn = sqlite3.connect(str(pos_db))
             cur = conn.cursor()
@@ -283,7 +315,7 @@ def api_positions():
                         px = float(avg_px)
 
                     value = qty_float * px if px > 0 else 0.0
-                    if value < 0.5:  # 过滤dust
+                    if value < 0.5:
                         continue
 
                     positions.append({
@@ -295,6 +327,49 @@ def api_positions():
                     })
                 except Exception:
                     continue
+
+        # 2) 回退：DB为空时读取最新 runs/*/positions.jsonl
+        if not positions:
+            runs_dir = REPORTS_DIR / 'runs'
+            if runs_dir.exists():
+                run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
+                for run_dir in run_dirs[:12]:
+                    p = run_dir / 'positions.jsonl'
+                    if not p.exists():
+                        continue
+                    try:
+                        with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                            for line in f:
+                                try:
+                                    row = json.loads(line)
+                                    symbol_raw = str(row.get('symbol', '') or '')
+                                    base = symbol_raw.split('/')[0] if '/' in symbol_raw else symbol_raw.split('-')[0]
+                                    if base == 'USDT' or base in hidden_symbols:
+                                        continue
+                                    qty_float = float(row.get('qty') or 0)
+                                    if qty_float <= 0:
+                                        continue
+                                    px = float(row.get('mark_px') or 0)
+                                    if px <= 0:
+                                        px = get_last_price_usdt(base)
+                                    if px <= 0:
+                                        px = float(row.get('avg_px') or 0)
+                                    value = qty_float * px if px > 0 else 0.0
+                                    if value < 0.5:
+                                        continue
+                                    positions.append({
+                                        'symbol': base,
+                                        'qty': round(qty_float, 8),
+                                        'avg_px': round(float(row.get('avg_px') or 0), 6),
+                                        'last_price': round(px, 6),
+                                        'value_usdt': round(value, 4)
+                                    })
+                                except Exception:
+                                    continue
+                    except Exception:
+                        continue
+                    if positions:
+                        break
 
         positions.sort(key=lambda x: x.get('value_usdt', 0), reverse=True)
         return jsonify(positions)
