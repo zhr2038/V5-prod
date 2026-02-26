@@ -295,6 +295,19 @@ class V5Pipeline:
         
         prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
 
+        # 4.4 确保已有持仓都注册到止损/利润管理（避免重启后状态丢失）
+        for p in positions:
+            if float(p.qty) <= 0:
+                continue
+            px = float(prices.get(p.symbol, 0.0) or 0.0)
+            if px <= 0:
+                continue
+            entry_ref = float(p.avg_px) if float(getattr(p, 'avg_px', 0.0) or 0.0) > 0 else px
+            if p.symbol not in self.fixed_stop_loss.entry_prices:
+                self.fixed_stop_loss.register_position(p.symbol, entry_ref)
+            if p.symbol not in self.profit_taking.positions:
+                self.profit_taking.register_position(p.symbol, entry_ref, current_price=px)
+
         # 4.5 排名利润管理 - 检查持仓是否跌出排名
         ranking_exit_orders = []
         if hasattr(alpha, 'scores') and alpha.scores:

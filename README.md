@@ -15,6 +15,31 @@ V5 横截面趋势轮动系统（OKX 现货），**先 dry-run**。
 
 ---
 
+## 🔎 Code Review Update (2026-02-26)
+
+This repository received a deep runtime-focused review over the live path (Alpha → Regime → Portfolio → Risk → Execution). Key production fixes:
+
+1. **Dust positions interfering with rebalance**
+   - Added dust filtering in pipeline (`qty < 0.01` or `value < $1`) before drift/deadband checks.
+
+2. **Slow exits when symbol leaves target set**
+   - Tightened close-only deadband behavior to force faster cleanup of removed holdings.
+
+3. **Small-account over-deleveraging**
+   - Relaxed drawdown throttle for 20U mode to avoid excessive exposure reduction from noisy equity snapshots.
+
+4. **Missing staged take-profit logic**
+   - Added `src/risk/profit_taking.py` and integrated staged profit management:
+     - breakeven shift,
+     - partial take-profit,
+     - trailing protection,
+     - rank-based exits.
+
+5. **Restart continuity for risk state**
+   - Pipeline now auto-registers existing positions into stop/profit managers on runtime bootstrap.
+
+---
+
 ## 快速开始
 
 ```bash
