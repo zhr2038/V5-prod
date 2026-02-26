@@ -109,8 +109,8 @@ regime:
 risk:
   max_single_weight: 0.30  # 提高单币种限制，避免资金不足
   max_gross_exposure: 1.0
-  drawdown_trigger: 0.10  # 提高回撤触发
-  drawdown_delever: 0.60  # 减少 delever
+  drawdown_trigger: 0.50  # 50%回撤才触发 (小资金账户，避免灰尘干扰)
+  drawdown_delever: 1.00  # 不降仓 (禁用回撤保护，小资金优先交易)
 
 rebalance:
   deadband_sideways: 0.03  # 从0.04降到0.03，增加交易频率
