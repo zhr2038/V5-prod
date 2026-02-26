@@ -174,6 +174,17 @@ class AlphaEngine:
         return scores
 
     def compute_snapshot(self, market_data: Dict[str, MarketSeries], use_robust_zscore: bool = True) -> AlphaSnapshot:
+        # 如果使用多策略，直接返回多策略结果
+        if self.use_multi_strategy and self.multi_strategy_adapter:
+            scores = self._compute_multi_strategy_scores(market_data)
+            # 构建简化的AlphaSnapshot（多策略模式下部分字段为空）
+            return AlphaSnapshot(
+                raw_factors={},
+                z_factors={},
+                scores=scores
+            )
+        
+        # 否则使用传统的5因子Alpha计算
         # Compute raw factors
         f1: Dict[str, float] = {}
         f2: Dict[str, float] = {}
