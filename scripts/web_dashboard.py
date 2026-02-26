@@ -2067,6 +2067,47 @@ def api_auto_risk_guard():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/decision_audit')
+def api_decision_audit():
+    """获取最新决策审计数据"""
+    try:
+        # 找到最新的决策审计文件
+        runs_dir = REPORTS_DIR / 'runs'
+        if not runs_dir.exists():
+            return jsonify({'error': 'No runs directory'}), 404
+        
+        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+        if not run_dirs:
+            return jsonify({'error': 'No audit files found'}), 404
+        
+        # 按修改时间排序，取最新的
+        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        latest_audit_file = run_dirs[0] / 'decision_audit.json'
+        
+        with open(latest_audit_file, 'r') as f:
+            audit_data = json.load(f)
+        
+        # 同时尝试读取策略信号审计
+        strategy_signals = []
+        strategy_file = run_dirs[0] / 'strategy_signals.json'
+        if strategy_file.exists():
+            with open(strategy_file, 'r') as f:
+                strategy_data = json.load(f)
+                strategy_signals = strategy_data.get('strategies', [])
+        
+        return jsonify({
+            'run_id': audit_data.get('run_id'),
+            'timestamp': audit_data.get('now_ts'),
+            'regime': audit_data.get('regime'),
+            'regime_details': audit_data.get('regime_details', {}),
+            'counts': audit_data.get('counts', {}),
+            'strategy_signals': strategy_signals,
+            'notes': audit_data.get('notes', [])[:10]  # 只返回前10条
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print("="*60)
     print("V5 Web Dashboard 启动中...")
