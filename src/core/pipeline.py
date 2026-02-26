@@ -312,16 +312,76 @@ class V5Pipeline:
             if p.symbol not in self.profit_taking.positions:
                 self.profit_taking.register_position(p.symbol, entry_ref, current_price=px)
 
-        # 4.5 排名利润管理 - 检查持仓是否跌出排名
+        # 4.5 Profit-first exit priority (profit-taking > fixed stop > rank exit)
+        profit_orders = []
+        fixed_stop_orders = []
+        profit_symbols = set()  # Track symbols already handled by profit-taking
+        
+        for p in positions:
+            s = market_data_1h.get(p.symbol)
+            if not s or not s.close:
+                continue
+            current_price = float(s.close[-1])
+            
+            # 1st priority: 程序化利润管理（利润回撤锁盈）
+            action, value, reason = self.profit_taking.evaluate(p.symbol, current_price)
+            
+            if action == 'sell_all' and float(p.qty) > 0:
+                profit_orders.append(
+                    Order(
+                        symbol=p.symbol,
+                        side="sell",
+                        intent="CLOSE_LONG",
+                        notional_usdt=float(p.qty) * current_price,
+                        signal_price=current_price,
+                        meta={
+                            "reason": f"profit_taking_{reason}",
+                            "action": action,
+                            "value": value,
+                        },
+                    )
+                )
+                profit_symbols.add(p.symbol)
+                if audit:
+                    audit.add_note(f"Profit taking: {p.symbol} {reason}")
+                continue  # Skip other exit checks for this symbol
+            
+            # 2nd priority: 固定比例止损
+            should_stop, stop_price, loss_pct = self.fixed_stop_loss.should_stop_loss(
+                p.symbol, current_price
+            )
+            
+            if should_stop and float(p.qty) > 0:
+                fixed_stop_orders.append(
+                    Order(
+                        symbol=p.symbol,
+                        side="sell",
+                        intent="CLOSE_LONG",
+                        notional_usdt=float(p.qty) * current_price,
+                        signal_price=current_price,
+                        meta={
+                            "reason": "fixed_stop_loss",
+                            "entry_price": self.fixed_stop_loss.entry_prices.get(p.symbol, p.avg_px),
+                            "stop_price": stop_price,
+                            "loss_pct": loss_pct,
+                        },
+                    )
+                )
+                profit_symbols.add(p.symbol)  # Also skip rank exit
+                if audit:
+                    audit.add_note(f"Fixed stop loss: {p.symbol} loss {loss_pct*100:.1f}%")
+                continue  # Skip rank exit for this symbol
+        
+        # 3rd priority: 排名退出（只在未被利润/止损处理时）
         ranking_exit_orders = []
         if hasattr(alpha, 'scores') and alpha.scores:
-            # 计算排名
             sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
             symbol_ranks = {sym: idx+1 for idx, (sym, _) in enumerate(sorted_scores)}
             
             for p in positions:
-                if p.qty <= 0:
-                    continue
+                if p.qty <= 0 or p.symbol in profit_symbols:
+                    continue  # Skip if already handled by profit-taking or stop loss
+                
                 current_rank = symbol_ranks.get(p.symbol, 999)
                 should_exit, reason = self.profit_taking.should_exit_by_rank(
                     p.symbol, current_rank, max_rank=3
@@ -346,99 +406,19 @@ class V5Pipeline:
                         if audit:
                             audit.add_note(f"Rank exit: {p.symbol} rank {current_rank}, {reason}")
         
-        # 6. Exit orders审计
+        # 4. Policy-based exits (if not already handled)
         exit_orders = self.exit_policy.evaluate(
             positions=positions,
             market_data=market_data_1h,
             regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state),
         )
+        # Filter out symbols already handled by profit/stop
+        exit_orders = [o for o in exit_orders if o.symbol not in profit_symbols]
         
-        # 合并排名退出订单
-        exit_orders = exit_orders + ranking_exit_orders
-        
-        # 6.5 固定比例止损检查（买入后亏损超过X%立即止损）
-        fixed_stop_orders = []
-        for p in positions:
-            s = market_data_1h.get(p.symbol)
-            if not s or not s.close:
-                continue
-            current_price = float(s.close[-1])
-            
-            should_stop, stop_price, loss_pct = self.fixed_stop_loss.should_stop_loss(
-                p.symbol, current_price
-            )
-            
-            if should_stop and float(p.qty) > 0:
-                fixed_stop_orders.append(
-                    Order(
-                        symbol=p.symbol,
-                        side="sell",
-                        intent="CLOSE_LONG",
-                        notional_usdt=float(p.qty) * current_price,
-                        signal_price=current_price,
-                        meta={
-                            "reason": "fixed_stop_loss",
-                            "entry_price": self.fixed_stop_loss.entry_prices.get(p.symbol, p.avg_px),
-                            "stop_price": stop_price,
-                            "loss_pct": loss_pct,
-                        },
-                    )
-                )
-                if audit:
-                    audit.add_note(f"Fixed stop loss: {p.symbol} loss {loss_pct*100:.1f}%")
-        
-        # 6.5 程序化利润管理
-        profit_orders = []
-        for p in positions:
-            s = market_data_1h.get(p.symbol)
-            if not s or not s.close:
-                continue
-            current_price = float(s.close[-1])
-            
-            # 评估利润管理
-            action, value, reason = self.profit_taking.evaluate(p.symbol, current_price)
-            
-            if action == 'sell_all':
-                profit_orders.append(
-                    Order(
-                        symbol=p.symbol,
-                        side="sell",
-                        intent="CLOSE_LONG",
-                        notional_usdt=float(p.qty) * current_price,
-                        signal_price=current_price,
-                        meta={
-                            "reason": f"profit_taking_{reason}",
-                            "profit_action": action,
-                            "target_price": value,
-                        },
-                    )
-                )
-                if audit:
-                    audit.add_note(f"Profit taking: {p.symbol} {reason}")
-                    
-            elif action == 'sell_partial':
-                # 部分减仓
-                sell_qty = float(p.qty) * value
-                profit_orders.append(
-                    Order(
-                        symbol=p.symbol,
-                        side="sell",
-                        intent="REBALANCE",
-                        notional_usdt=sell_qty * current_price,
-                        signal_price=current_price,
-                        meta={
-                            "reason": f"profit_partial_{reason}",
-                            "sell_pct": value,
-                        },
-                    )
-                )
-                if audit:
-                    audit.add_note(f"Profit partial: {p.symbol} sell {value:.0%}, {reason}")
-        
-        # 合并exit orders
-        exit_orders = exit_orders + fixed_stop_orders + profit_orders
+        # Merge all exit orders: profit first, then stop, then rank, then policy
+        exit_orders = profit_orders + fixed_stop_orders + ranking_exit_orders + exit_orders
 
-        # 去重：同一symbol同一轮只保留一个退出单，优先级 sell_all > fixed_stop > atr > partial
+        # Deduplicate: keep only one exit per symbol per round, priority: sell_all > fixed_stop > atr > partial
         if exit_orders:
             prio_map = {
                 'profit_taking_stop_loss_hit': 100,
