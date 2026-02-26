@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 
 import requests
@@ -360,6 +361,37 @@ class LiveExecutionEngine:
 
     def place(self, o: Order) -> LiveExecutionResult:
         gate, reconcile_ok, kill_switch = submit_gate_for_live(self.cfg)
+
+        # Manual approval required for liability-repair intents.
+        repair_intents = {
+            "REPAY_LIABILITY",
+            "REPAY_SOL_LIABILITY",
+            "EMERGENCY_MERL_REPAYMENT",
+            "IMMEDIATE_LIABILITY_REPAYMENT",
+        }
+        if str(o.intent or "").upper() in repair_intents and os.getenv("V5_REPAIR_ARM") != "YES":
+            inst_id = symbol_to_inst_id(o.symbol)
+            dh = self._decision_hash_for_order(o)
+            clid = make_cl_ord_id(self.run_id, inst_id, o.intent, dh, o.side, "market", "cash")
+            self.order_store.upsert_new(
+                cl_ord_id=clid,
+                run_id=self.run_id,
+                inst_id=inst_id,
+                side=o.side,
+                intent=o.intent,
+                decision_hash=dh,
+                td_mode="cash",
+                ord_type="market",
+                notional_usdt=float(o.notional_usdt),
+                window_start_ts=(o.meta or {}).get("window_start_ts"),
+                window_end_ts=(o.meta or {}).get("window_end_ts"),
+                req={"blocked_by_policy": True, "reason": "repair_intent_requires_manual_arm", "env": "V5_REPAIR_ARM"},
+                reconcile_ok_at_submit=reconcile_ok,
+                kill_switch_at_submit=kill_switch,
+                submit_gate=gate,
+            )
+            self.order_store.update_state(clid, new_state="REJECTED", last_error_code="POLICY", last_error_msg="repair_intent_requires_manual_arm")
+            return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         # Gate: block all buys (OPEN/REBALANCE) in SELL_ONLY mode.
         if gate == "SELL_ONLY" and o.side == "buy" and o.intent in {"OPEN_LONG", "REBALANCE"}:

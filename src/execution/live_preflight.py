@@ -135,14 +135,22 @@ class LivePreflight:
                 except Exception:
                     pass
 
-                return LivePreflightResult(
-                    decision="ABORT",
-                    reconcile_ok=False,
-                    ledger_ok=ledger_ok,
-                    kill_switch_enabled=False,
-                    reason="borrow_detected",
-                    details=details,
-                )
+                # borrow_block_mode:
+                # - global_abort (default): keep historical strict behavior
+                # - symbol_only: freeze only affected symbols via blacklist, continue preflight
+                borrow_block_mode = str(getattr(self.cfg, "borrow_block_mode", "global_abort") or "global_abort").lower()
+                details["borrow_check"]["block_mode"] = borrow_block_mode
+                if borrow_block_mode == "symbol_only":
+                    details["borrow_check"]["action"] = "symbol_blacklist_only"
+                else:
+                    return LivePreflightResult(
+                        decision="ABORT",
+                        reconcile_ok=False,
+                        ledger_ok=ledger_ok,
+                        kill_switch_enabled=False,
+                        reason="borrow_detected",
+                        details=details,
+                    )
         except Exception as e:
             details["borrow_check"] = {"ok": False, "reason": f"error:{e}"}
             # Conservative: do not allow buys when borrow check is unavailable
