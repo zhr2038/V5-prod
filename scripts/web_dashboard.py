@@ -67,8 +67,8 @@ def load_config():
 
 @app.route('/')
 def index():
-    """主页面 - 综合监控面板"""
-    return render_template('index.html')
+    """主页面 - 新版监控面板"""
+    return render_template('monitor.html')
 
 
 @app.route('/monitor')
