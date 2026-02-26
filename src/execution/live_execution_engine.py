@@ -299,7 +299,20 @@ class LiveExecutionEngine:
             # 3. Log sell attempt for audit
             log.info(f"SELL_SAFETY_CHECK: Selling {o.symbol}, local_qty={p.qty}, intent={o.intent}")
 
-            qty = float(p.qty)
+            # Determine sell quantity.
+            # - CLOSE_LONG: sell full local position
+            # - REBALANCE: sell partial by requested notional (capped by local qty)
+            qty_full = float(p.qty)
+            if str(o.intent).upper() == "CLOSE_LONG":
+                qty = qty_full
+            else:
+                px_ref = float(getattr(o, "signal_price", 0.0) or 0.0)
+                if px_ref <= 0:
+                    # fallback: conservative full-qty path if no price available
+                    qty = qty_full
+                else:
+                    qty = min(qty_full, float(o.notional_usdt) / px_ref)
+
             # Enforce OKX minSz/lotSz to avoid Parameter sz error.
             specs = OKXSpotInstrumentsCache().get_spec(inst_id)
             if specs is not None and float(specs.lot_sz or 0.0) > 0:
