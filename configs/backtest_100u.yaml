@@ -1,0 +1,78 @@
+
+# 100 USDT 回测配置
+# 基于 live_20u_real.yaml 修改
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+  - ADA/USDT
+  - DOGE/USDT
+  - XRP/USDT
+  - DOT/USDT
+  - LINK/USDT
+  - AVAX/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  testnet: false
+
+universe:
+  enabled: true
+  top_n: 20
+  min_volume_24h_usdt: 10000000
+  max_spread_bps: 20
+  exclude:
+    - PROMPT
+    - XAUT
+    - WLFI
+    - SPACE
+    - KITE
+    - AGLD
+    - MERL
+    - USDG
+    - J
+
+alpha:
+  long_top_pct: 0.15
+  weights:
+    f1_mom_5d: 0.25
+    f2_mom_20d: 0.20
+    f3_vol_adj_ret_20d: 0.20
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.10
+    f6_sentiment: 0.10
+
+regime:
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  pos_mult_trending: 1.0
+  pos_mult_sideways: 0.7
+  pos_mult_risk_off: 0.4
+  deadband_sideways: 0.035
+  deadband_trending: 0.025
+  deadband_riskoff: 0.05
+
+risk:
+  max_single_weight: 0.25
+  max_gross_exposure: 0.9
+  drawdown_trigger: 0.12
+  drawdown_delever: 0.60
+
+rebalance:
+  interval_minutes: 60
+  min_trade_notional_base: 2.5
+
+trading:
+  equity_cap_usdt: 100.0
+  position_mode: symbol_only
+  prevent_borrow: true
+
+execution:
+  mode: backtest
+  fee_bps: 6
+  slippage_bps: 5
