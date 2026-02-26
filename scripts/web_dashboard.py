@@ -284,10 +284,19 @@ def api_positions():
                         return float(df.iloc[-1]['close'])
             except Exception:
                 pass
+            # fallback: OKX public ticker
+            try:
+                r = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol}-USDT", timeout=5)
+                j = r.json()
+                if j.get('code') == '0' and j.get('data'):
+                    return float(j['data'][0].get('last') or 0)
+            except Exception:
+                pass
             return 0.0
 
         pos_db = REPORTS_DIR / 'positions.sqlite'
         positions = []
+        live_okx_used = False
 
         # 0) 优先实时OKX余额（与用户手动操作一致）
         try:
@@ -329,6 +338,7 @@ def api_positions():
                 resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
                 data = resp.json()
                 if data.get('code') == '0' and data.get('data'):
+                    live_okx_used = True
                     details = data['data'][0].get('details', [])
                     for d in details:
                         try:
@@ -356,8 +366,8 @@ def api_positions():
         except Exception:
             pass
 
-        # 1) 回退 positions.sqlite
-        if not positions and pos_db.exists():
+        # 1) 回退 positions.sqlite（仅当实时OKX不可用）
+        if not live_okx_used and not positions and pos_db.exists():
             conn = sqlite3.connect(str(pos_db))
             cur = conn.cursor()
             cur.execute("SELECT symbol, qty, avg_px, last_mark_px FROM positions")
