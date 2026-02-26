@@ -349,13 +349,18 @@
                 const res = await fetch('/api/account');
                 const data = await res.json();
                 
-                // 注意：API返回的是 total_equity_usdt 而不是 total_equity
-                const total = data.total_equity_usdt || data.total_equity || 0;
+                const total = data.total_equity_usdt || 0;
                 const cash = data.cash_usdt || 0;
-                const pos = data.positions_value_usdt || data.positions_value || 0;
+                const pos = data.positions_value_usdt || 0;
                 const pnl = data.total_pnl_pct || 0;
                 
-                document.getElementById('total-equity').innerHTML = formatCurrency(total) + '<br>' + formatPercent(pnl);
+                // 分开设置，避免innerHTML问题
+                const equityEl = document.getElementById('total-equity');
+                const pnlEl = document.getElementById('total-pnl');
+                
+                if (equityEl) equityEl.textContent = formatCurrency(total);
+                if (pnlEl) pnlEl.innerHTML = formatPercent(pnl);
+                
                 document.getElementById('cash-usdt').textContent = formatCurrency(cash);
                 document.getElementById('cash-ratio').textContent = total > 0 ? formatNumber(cash/total*100, 0) + '%' : '--';
                 document.getElementById('positions-value').textContent = formatCurrency(pos);
