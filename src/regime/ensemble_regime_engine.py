@@ -106,10 +106,10 @@ class EnsembleRegimeEngine:
             }
             
             # 从状态概率计算情绪分数
+            # 正确口径：sentiment = P(TrendingUp) - P(TrendingDown)，天然在[-1, 1]
             all_states = result.get('all_states', {})
             sentiment = all_states.get('TrendingUp', 0) - all_states.get('TrendingDown', 0)
-            # 归一化到 [-1, 1]
-            sentiment = max(-1, min(1, sentiment * 2 - 1)) if sentiment != 0 else 0
+            sentiment = max(-1.0, min(1.0, float(sentiment)))
             
             return {
                 'state': state_map.get(hmm_state, 'SIDEWAYS'),
