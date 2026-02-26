@@ -10,6 +10,7 @@ from configs.loader import load_config
 from src.execution.account_store import AccountStore
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import Position, PositionStore
+from src.execution.highest_px_tracker import get_highest_price_tracker
 from src.reporting.spread_snapshot_store import SpreadSnapshotStore
 
 
@@ -75,8 +76,13 @@ def main() -> None:
         now_ms = int(time.time() * 1000)
 
         # Overwrite local positions if requested
+        # IMPORTANT: Preserve highest_px before clearing
+        tracker = get_highest_price_tracker()
         if args.overwrite:
+            # Save current highest_px values before clearing
             for p in ps.list():
+                if float(p.qty) > 0 and float(p.highest_px) > 0:
+                    tracker.update(p.symbol, float(p.highest_px), float(p.avg_px), source="bootstrap_backup")
                 ps.close_long(p.symbol)
 
         # Set local USDT cash
@@ -97,18 +103,23 @@ def main() -> None:
             now_ts = _iso_utc_now()
             avg_px = mid if mid > 0 else 0.0
 
+            # Preserve historical highest_px from tracker (anti-reset)
+            tracked_high = tracker.get_highest_px(symbol, float(avg_px))
+            highest_px = max(float(avg_px), float(tracked_high or 0.0))
+
             pos = Position(
                 symbol=symbol,
                 qty=float(qty),
                 avg_px=float(avg_px),
                 entry_ts=now_ts,
-                highest_px=float(avg_px),
+                highest_px=float(highest_px),
                 last_update_ts=now_ts,
                 last_mark_px=float(avg_px),
                 unrealized_pnl_pct=0.0,
                 tags_json=json.dumps({"bootstrap": True, "source": "okx_balance"}, ensure_ascii=False),
             )
             ps.upsert_position(pos)
+            tracker.update(symbol, float(highest_px), float(avg_px), source="bootstrap_restore")
             created += 1
 
         log.info(json.dumps({"event": "BOOTSTRAP", "usdt": usdt, "non_usdt_positions": created, "overwrite": bool(args.overwrite)}, ensure_ascii=False))

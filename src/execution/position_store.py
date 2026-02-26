@@ -118,28 +118,50 @@ class PositionStore:
         cur_pos = self.get(symbol)
 
         # If existing position is only dust (very small notional), treat as flat.
-        # This avoids stale trailing-stop state (e.g. highest_px from an old position)
-        # causing immediate exits right after a fresh re-entry.
         dust_reset_notional_usdt = 0.01
         if cur_pos and float(cur_pos.qty) > 0 and float(cur_pos.qty) * float(px) < dust_reset_notional_usdt:
             cur_pos = None
 
+        # Import here to avoid circular import
+        try:
+            from src.execution.highest_px_tracker import get_highest_price_tracker
+            tracker = get_highest_price_tracker()
+        except Exception:
+            tracker = None
+
         if not cur_pos or cur_pos.qty <= 0:
+            # New position: check tracker for existing highest_px
+            highest = px
+            if tracker:
+                tracked_high = tracker.get_highest_px(symbol, px)
+                if tracked_high > px:
+                    highest = tracked_high
+            
             pos = Position(
                 symbol=symbol,
                 qty=qty,
                 avg_px=px,
                 entry_ts=now,
-                highest_px=px,
+                highest_px=highest,
                 last_update_ts=now,
                 last_mark_px=px,
                 unrealized_pnl_pct=0.0,
                 tags_json="{}",
             )
+            # Update tracker with new position
+            if tracker:
+                tracker.update(symbol, highest, px, source="new_position")
         else:
             new_qty = cur_pos.qty + qty
             avg = (cur_pos.avg_px * cur_pos.qty + px * qty) / new_qty if new_qty else px
+            
+            # Merge with tracker for highest_px
             hi = max(cur_pos.highest_px, px)
+            if tracker:
+                tracked_high = tracker.get_highest_px(symbol, hi)
+                hi = max(hi, tracked_high)
+                tracker.update(symbol, hi, avg, source="add_position")
+            
             pos = Position(
                 symbol=symbol,
                 qty=new_qty,
@@ -168,6 +190,7 @@ class PositionStore:
         - update last_mark_px
         - update unrealized_pnl_pct
         - update highest_px = max(existing, high_px or mark_px)
+        - sync with HighestPriceTracker
         """
         p = self.get(symbol)
         if not p:
@@ -175,6 +198,21 @@ class PositionStore:
         mp = float(mark_px)
         hp = float(high_px) if high_px is not None else mp
         hi = max(float(p.highest_px), hp)
+        
+        # Sync with tracker
+        try:
+            from src.execution.highest_px_tracker import get_highest_price_tracker
+            tracker = get_highest_price_tracker()
+            # Check if tracker has higher value
+            tracked_high = tracker.get_highest_px(symbol, hi)
+            if tracked_high > hi:
+                hi = tracked_high
+            else:
+                # Update tracker with new high
+                tracker.update(symbol, hi, p.avg_px, source="mark_to_market")
+        except Exception:
+            pass
+        
         pnl = (mp - float(p.avg_px)) / float(p.avg_px) if float(p.avg_px) > 0 else 0.0
         self.upsert_position(
             Position(
