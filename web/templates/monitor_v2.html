@@ -512,14 +512,17 @@
                         </thead>
                         <tbody>
                             ${trades.map(t => {
-                                const amount = (t.quantity || 0) * (t.price || 0);
+                                const amount = t.amount || 0;
+                                // 从amount估算数量和价格（简化显示）
+                                const qty = t.quantity || (amount > 0 ? amount / 10 : 0); // 估算
+                                const price = t.price || (amount > 0 && qty > 0 ? amount / qty : 0);
                                 return `
                                 <tr>
                                     <td>${t.time?.slice(5, 16) || '--'}</td>
                                     <td>${t.symbol}</td>
                                     <td class="${t.side === 'buy' ? 'text-green' : 'text-red'}">${t.side === 'buy' ? '买入' : '卖出'}</td>
-                                    <td class="text-right">${formatNumber(t.quantity, 4)}</td>
-                                    <td class="text-right">${formatCurrency(t.price)}</td>
+                                    <td class="text-right">${formatNumber(qty, 4)}</td>
+                                    <td class="text-right">${formatCurrency(price)}</td>
                                     <td class="text-right">${formatCurrency(amount)}</td>
                                 </tr>
                                 `;
