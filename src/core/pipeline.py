@@ -355,14 +355,25 @@ class V5Pipeline:
             else:
                 audit.budget_action = {"enabled": False}
 
-        # current weights
+        # current weights (with dust filtering)
         current_w: Dict[str, float] = {}
+        DUST_QTY_THRESHOLD = 0.01  # 数量小于0.01视为灰尘
+        DUST_VALUE_THRESHOLD = 1.0  # 价值小于$1视为灰尘
+        
         if equity > 0:
             for p in positions:
                 pxp = float(prices.get(p.symbol, 0.0) or 0.0)
                 if pxp <= 0:
                     continue
-                current_w[p.symbol] = float(p.qty) * pxp / float(equity)
+                
+                # 灰尘过滤：数量太小或价值太低视为无持仓
+                position_value = float(p.qty) * pxp
+                if float(p.qty) < DUST_QTY_THRESHOLD or position_value < DUST_VALUE_THRESHOLD:
+                    if audit and float(p.qty) > 0:
+                        audit.add_note(f"Dust filter: {p.symbol} qty={p.qty:.8f} value=${position_value:.4f} treated as 0")
+                    continue  # 跳过灰尘持仓
+                
+                current_w[p.symbol] = position_value / float(equity)
 
         cash_remaining = float(cash_usdt)
 
