@@ -289,8 +289,57 @@ def api_positions():
         pos_db = REPORTS_DIR / 'positions.sqlite'
         positions = []
 
-        # 1) 优先 positions.sqlite
-        if pos_db.exists():
+        # 0) 优先实时OKX余额（与用户手动操作一致）
+        try:
+            import os, time, hmac, hashlib, base64
+            from dotenv import load_dotenv
+            load_dotenv(str(WORKSPACE / '.env'))
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
+            if key and sec and pp:
+                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+                path = '/api/v5/account/balance'
+                msg = ts + 'GET' + path
+                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
+                headers = {
+                    'OK-ACCESS-KEY': key,
+                    'OK-ACCESS-SIGN': sig,
+                    'OK-ACCESS-TIMESTAMP': ts,
+                    'OK-ACCESS-PASSPHRASE': pp,
+                }
+                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
+                data = resp.json()
+                if data.get('code') == '0' and data.get('data'):
+                    details = data['data'][0].get('details', [])
+                    for d in details:
+                        try:
+                            ccy = str(d.get('ccy') or '')
+                            if not ccy or ccy == 'USDT' or ccy in hidden_symbols:
+                                continue
+                            qty_float = float(d.get('eq') or 0)
+                            if qty_float <= 0:
+                                continue
+                            px = get_last_price_usdt(ccy)
+                            if px <= 0:
+                                continue
+                            value = qty_float * px
+                            if value < 0.5:
+                                continue
+                            positions.append({
+                                'symbol': ccy,
+                                'qty': round(qty_float, 8),
+                                'avg_px': 0.0,
+                                'last_price': round(px, 6),
+                                'value_usdt': round(value, 4)
+                            })
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+
+        # 1) 回退 positions.sqlite
+        if not positions and pos_db.exists():
             conn = sqlite3.connect(str(pos_db))
             cur = conn.cursor()
             cur.execute("SELECT symbol, qty, avg_px, last_mark_px FROM positions")
