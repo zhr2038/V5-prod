@@ -433,6 +433,28 @@ class V5Pipeline:
         
         # 合并exit orders
         exit_orders = exit_orders + fixed_stop_orders + profit_orders
+
+        # 去重：同一symbol同一轮只保留一个退出单，优先级 sell_all > fixed_stop > atr > partial
+        if exit_orders:
+            prio_map = {
+                'profit_taking_stop_loss_hit': 100,
+                'fixed_stop_loss': 90,
+                'atr_trailing': 80,
+                'regime_exit': 70,
+                'profit_partial': 60,
+            }
+            best = {}
+            for o in exit_orders:
+                reason = str((o.meta or {}).get('reason', ''))
+                prio = 10
+                for k, v in prio_map.items():
+                    if reason.startswith(k):
+                        prio = v
+                        break
+                cur = best.get(o.symbol)
+                if cur is None or prio > cur[0]:
+                    best[o.symbol] = (prio, o)
+            exit_orders = [v[1] for v in best.values()]
         
         if audit:
             audit.counts["orders_exit"] = len(exit_orders)
