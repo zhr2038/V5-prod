@@ -14,6 +14,7 @@ def _now_ms() -> int:
 
 @dataclass
 class FillRow:
+    """FillRow类"""
     inst_id: str
     trade_id: str
     ts_ms: int
@@ -108,6 +109,7 @@ class FillStore:
         con.close()
 
     def get_state(self, key: str) -> Optional[str]:
+        """Get state"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute("SELECT v FROM sync_state WHERE k=?", (str(key),))
@@ -116,6 +118,7 @@ class FillStore:
         return str(row[0]) if row else None
 
     def set_state(self, key: str, value: str) -> None:
+        """Set state"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(
@@ -175,6 +178,7 @@ class FillStore:
         return inserted, total
 
     def count(self) -> int:
+        """Count"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute("SELECT COUNT(*) FROM fills")
@@ -183,6 +187,7 @@ class FillStore:
         return n
 
     def mark_processed(self, inst_id: str, trade_id: str) -> None:
+        """Mark processed"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(
@@ -232,6 +237,7 @@ class FillStore:
         return out
 
     def list_recent(self, limit: int = 50) -> List[FillRow]:
+        """List recent"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(
@@ -268,6 +274,7 @@ class FillStore:
 
 
 def parse_okx_fills(resp_data: Dict[str, Any], *, source: str = "fills") -> List[FillRow]:
+    """Parse okx fills"""
     rows = []
     data = (resp_data or {}).get("data")
     if not isinstance(data, list):

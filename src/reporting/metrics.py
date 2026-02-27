@@ -11,6 +11,7 @@ import numpy as np
 
 
 def read_equity_jsonl(path: str) -> List[Dict[str, Any]]:
+    """Read equity jsonl"""
     p = Path(path)
     if not p.exists():
         return []
@@ -27,6 +28,7 @@ def read_equity_jsonl(path: str) -> List[Dict[str, Any]]:
 
 
 def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float = math.sqrt(24 * 365)) -> Dict[str, Any]:
+    """Compute equity metrics"""
     if not equity_rows:
         return {
             "equity_start": None,
@@ -64,6 +66,7 @@ def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float 
 
 
 def read_trades_csv(path: str) -> List[Dict[str, Any]]:
+    """Read trades csv"""
     p = Path(path)
     if not p.exists():
         return []
@@ -97,6 +100,7 @@ def _to_opt_f(x: Any) -> Optional[float]:
 
 
 def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[float] = None) -> Dict[str, Any]:
+    """Compute trade metrics"""
     if not trades:
         return {
             "num_trades": 0,

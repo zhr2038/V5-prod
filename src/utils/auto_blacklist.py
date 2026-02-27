@@ -12,6 +12,7 @@ DEFAULT_PATH = "reports/auto_blacklist.json"
 
 @dataclass
 class AutoBlacklistEntry:
+    """AutoBlacklistEntry类"""
     symbol: str
     reason: str
     ts_ms: int
@@ -43,6 +44,7 @@ def _write(path: str, obj: Dict[str, Any]) -> None:
 
 
 def prune(obj: Dict[str, Any], *, now_ms: Optional[int] = None, max_entries: int = 500) -> Dict[str, Any]:
+    """Prune"""
     now_ms = int(now_ms or _now_ms())
     entries = obj.get("entries")
     if not isinstance(entries, list):
@@ -86,6 +88,7 @@ def prune(obj: Dict[str, Any], *, now_ms: Optional[int] = None, max_entries: int
 
 
 def add_symbol(
+    """Add symbol"""
     symbol: str,
     *,
     reason: str,
@@ -135,6 +138,7 @@ def add_symbol(
 
 
 def read_symbols(path: str = DEFAULT_PATH) -> List[str]:
+    """Read symbols"""
     obj = prune(_read(path))
     syms = obj.get("symbols")
     if isinstance(syms, list):

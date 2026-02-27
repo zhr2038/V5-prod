@@ -12,12 +12,14 @@ from src.portfolio.portfolio_engine import PortfolioSnapshot
 
 
 def write_json(path: str, obj: Any) -> None:
+    """Write json"""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def dump_run_artifacts(
+    """Dump run artifacts"""
     reports_dir: str,
     alpha: AlphaSnapshot,
     regime: RegimeResult,

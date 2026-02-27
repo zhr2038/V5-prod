@@ -39,11 +39,13 @@ def _parse_okx_ack(ack_data: Any) -> Tuple[bool, Optional[str], Optional[str]]:
 
 @dataclass
 class RepairStats:
+    """RepairStats类"""
     scanned: int = 0
     repaired: int = 0
     skipped: int = 0
 
     def as_dict(self) -> Dict[str, int]:
+        """As dict"""
         return {"scanned": int(self.scanned), "repaired": int(self.repaired), "skipped": int(self.skipped)}
 
 

@@ -18,6 +18,7 @@ def _dec(x: Optional[str]) -> Decimal:
 
 
 def inst_id_to_symbol(inst_id: str) -> str:
+    """Inst id to symbol"""
     return str(inst_id).replace("-", "/")
 
 
@@ -65,6 +66,7 @@ def fee_cost_usdt(*, fee: str, fee_ccy: str, inst_id: str, fill_px: str) -> Opti
 
 @dataclass
 class ExportResult:
+    """ExportResult类"""
     trade_written: bool
     cost_event_written: bool
 

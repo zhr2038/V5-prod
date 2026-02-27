@@ -21,6 +21,7 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
 
 @dataclass
 class BudgetState:
+    """BudgetState类"""
     ymd_utc: str
 
     turnover_budget_per_day: Optional[float] = None
@@ -45,11 +46,13 @@ class BudgetState:
     small_trade_notional_cutoff: Optional[float] = None
 
     def cost_used_bps(self) -> Optional[float]:
+        """Cost used bps"""
         if not self.avg_equity_est or self.avg_equity_est <= 0:
             return None
         return float(self.cost_used_usdt) / float(self.avg_equity_est) * 10_000.0
 
     def exceeded(self) -> bool:
+        """Exceeded"""
         if self.turnover_budget_per_day is not None and self.turnover_used > float(self.turnover_budget_per_day):
             return True
         bps = self.cost_used_bps()
@@ -58,6 +61,7 @@ class BudgetState:
         return False
 
     def reason(self) -> Optional[str]:
+        """Reason"""
         reasons = []
         if self.turnover_budget_per_day is not None and self.turnover_used > float(self.turnover_budget_per_day):
             reasons.append("exceeded_turnover")
@@ -69,6 +73,7 @@ class BudgetState:
         return "+".join(reasons)
 
     def to_dict(self) -> Dict[str, Any]:
+        """To dict"""
         d = asdict(self)
         d["cost_used_bps"] = self.cost_used_bps()
         d["exceeded"] = self.exceeded()
@@ -77,6 +82,7 @@ class BudgetState:
 
 
 def load_budget_state(path: str) -> Optional[BudgetState]:
+    """Load budget state"""
     p = Path(path)
     if not p.exists():
         return None
@@ -99,6 +105,7 @@ def load_budget_state(path: str) -> Optional[BudgetState]:
 
 
 def update_daily_budget_state(
+    """Update daily budget state"""
     *,
     base_dir: str = "reports/budget_state",
     ymd_utc: str,
@@ -191,6 +198,7 @@ def update_daily_budget_state(
 
 
 def derive_ymd_utc_from_summary(summary: Dict[str, Any]) -> str:
+    """Derive ymd utc from summary"""
     # Prefer window_end_ts if present else end_ts else now.
     ts = summary.get("window_end_ts") or summary.get("end_ts")
     if ts is None:

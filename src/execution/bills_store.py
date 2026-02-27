@@ -14,6 +14,7 @@ def _now_ms() -> int:
 
 @dataclass
 class BillRow:
+    """BillRow类"""
     bill_id: str
     ts_ms: int
     ccy: str
@@ -98,6 +99,7 @@ class BillsStore:
         con.close()
 
     def get_state(self, key: str) -> Optional[str]:
+        """Get state"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute("SELECT v FROM sync_state WHERE k=?", (str(key),))
@@ -106,6 +108,7 @@ class BillsStore:
         return str(row[0]) if row else None
 
     def set_state(self, key: str, value: str) -> None:
+        """Set state"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(
@@ -116,6 +119,7 @@ class BillsStore:
         con.close()
 
     def upsert_many(self, rows: Iterable[BillRow]) -> Tuple[int, int]:
+        """Upsert many"""
         rows_list = list(rows)
         if not rows_list:
             return 0, 0
@@ -164,6 +168,7 @@ class BillsStore:
         return ins, total
 
     def count(self) -> int:
+        """Count"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute("SELECT COUNT(*) FROM bills")
@@ -172,6 +177,7 @@ class BillsStore:
         return n
 
     def last_bill(self) -> Optional[Tuple[str, int]]:
+        """Last bill"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute("SELECT bill_id, ts_ms FROM bills ORDER BY ts_ms DESC LIMIT 1")
@@ -182,6 +188,7 @@ class BillsStore:
         return str(row[0]), int(row[1])
 
     def list_by_ts(self, *, begin_ts_ms: int, end_ts_ms: int, limit: int = 50000) -> List[BillRow]:
+        """List by ts"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(
@@ -222,6 +229,7 @@ class BillsStore:
 
 
 def parse_okx_bills(resp_data: Dict[str, Any], *, source: str = "bills") -> List[BillRow]:
+    """Parse okx bills"""
     data = (resp_data or {}).get("data")
     if not isinstance(data, list):
         return []

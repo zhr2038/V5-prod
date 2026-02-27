@@ -19,6 +19,7 @@ class OKXCCXTProvider(MarketDataProvider):
             pass
 
     def fetch_ohlcv(
+        """Fetch ohlcv"""
         self,
         symbols: List[str],
         timeframe: str,

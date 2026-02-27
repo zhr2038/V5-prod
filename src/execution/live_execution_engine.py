@@ -63,6 +63,7 @@ def load_reconcile_ok(path: str) -> bool:
 
 
 def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
+    """Submit gate for live"""
     ks = load_kill_switch_enabled(getattr(cfg, "kill_switch_path", "reports/kill_switch.json"))
     rc_ok = load_reconcile_ok(getattr(cfg, "reconcile_status_path", "reports/reconcile_status.json"))
     if ks or not rc_ok:
@@ -100,6 +101,7 @@ def _parse_okx_order_ack(ack_data: Any) -> Tuple[bool, Optional[str], Optional[s
 
 
 class DustOrderSkip(Exception):
+    """DustOrderSkip类"""
     def __init__(self, symbol: str, *, qty: float, qty_rounded: float, min_sz: float, lot_sz: float):
         super().__init__(f"dust_skip {symbol}: qty={qty} rounded={qty_rounded} minSz={min_sz} lotSz={lot_sz}")
         self.symbol = symbol
@@ -110,6 +112,7 @@ class DustOrderSkip(Exception):
 
 
 def map_okx_state(okx_state: Optional[str]) -> str:
+    """Map okx state"""
     s = str(okx_state or "").lower()
     if s in {"live", "new", "submitted"}:
         return "OPEN"
@@ -126,6 +129,7 @@ def map_okx_state(okx_state: Optional[str]) -> str:
 
 @dataclass
 class LiveExecutionResult:
+    """LiveExecutionResult类"""
     cl_ord_id: str
     state: str
     ord_id: Optional[str] = None
@@ -413,6 +417,7 @@ class LiveExecutionEngine:
         return payload
 
     def place(self, o: Order) -> LiveExecutionResult:
+        """Place"""
         gate, reconcile_ok, kill_switch = submit_gate_for_live(self.cfg)
 
         # Manual approval required for liability-repair intents.
@@ -664,6 +669,7 @@ class LiveExecutionEngine:
         return st, (str(ord_id) if ord_id else None)
 
     def cancel(self, *, symbol: str, cl_ord_id: str) -> bool:
+        """Cancel"""
         inst_id = symbol_to_inst_id(symbol)
         try:
             ack = self.okx.cancel_order(inst_id=inst_id, cl_ord_id=cl_ord_id)
@@ -674,6 +680,7 @@ class LiveExecutionEngine:
             return False
 
     def poll_open(self, limit: int = 200) -> List[LiveExecutionResult]:
+        """Poll open"""
         # 0) Optional: sync fills into FillStore then reconcile into OrderStore.
         try:
             from src.execution.fill_store import FillStore
@@ -693,6 +700,7 @@ class LiveExecutionEngine:
         return out
 
     def execute(self, order_batch: List[Order]) -> ExecutionReport:
+        """Execute"""
         # Minimal batch executor; used by main() once wired.
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         placed: List[Order] = []

@@ -12,6 +12,7 @@ from src.backtest.cost_factory import make_cost_model_from_cfg
 
 @dataclass
 class WalkForwardFold:
+    """WalkForwardFold类"""
     train_range: Tuple[int, int]
     test_range: Tuple[int, int]
     result: BacktestResult
@@ -49,6 +50,7 @@ def build_walk_forward_report(folds: List[WalkForwardFold], cost_meta: Optional[
 
 
 def build_folds(n: int, folds: int = 4) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    """Build folds"""
     folds = int(folds)
     if folds <= 0:
         return []
@@ -64,6 +66,7 @@ def build_folds(n: int, folds: int = 4) -> List[Tuple[Tuple[int, int], Tuple[int
 
 
 def run_walk_forward(market_data: Dict[str, MarketSeries], folds: int = 4, cfg: Optional[AppConfig] = None) -> List[WalkForwardFold]:
+    """Run walk forward"""
     syms = list(market_data.keys())
     if not syms:
         return []

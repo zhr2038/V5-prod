@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 
 class OKXPrivateClientError(Exception):
+    """OKXPrivateClientError类"""
     pass
 
 
@@ -29,6 +30,7 @@ class OKXRateLimitError(OKXPrivateClientError):
 
 @dataclass
 class OKXResponse:
+    """OKXResponse类"""
     data: Dict[str, Any]
     http_status: int
     okx_code: Optional[str] = None
@@ -108,6 +110,7 @@ class OKXPrivateClient:
         return False
 
     def close(self) -> None:
+        """Close"""
         try:
             self._client.close()
         except Exception:
@@ -147,6 +150,7 @@ class OKXPrivateClient:
         return p
 
     def request(
+        """Request"""
         self,
         method: str,
         path: str,
@@ -203,9 +207,11 @@ class OKXPrivateClient:
 
     # --- Convenience wrappers (G0.2) ---
     def place_order(self, payload: Dict[str, Any], *, exp_time_ms: Optional[int] = None) -> OKXResponse:
+        """Place order"""
         return self.request("POST", "/api/v5/trade/order", json_body=payload, exp_time_ms=exp_time_ms)
 
     def get_order(
+        """Get order"""
         self,
         *,
         inst_id: str,
@@ -220,6 +226,7 @@ class OKXPrivateClient:
         return self.request("GET", "/api/v5/trade/order", params=params)
 
     def cancel_order(
+        """Cancel order"""
         self,
         *,
         inst_id: str,
@@ -234,6 +241,7 @@ class OKXPrivateClient:
         return self.request("POST", "/api/v5/trade/cancel-order", json_body=payload)
 
     def get_fills(
+        """Get fills"""
         self,
         *,
         inst_type: str = "SPOT",
@@ -258,6 +266,7 @@ class OKXPrivateClient:
         return self.request("GET", "/api/v5/trade/fills", params=params)
 
     def get_bills(
+        """Get bills"""
         self,
         *,
         ccy: Optional[str] = None,
@@ -282,6 +291,7 @@ class OKXPrivateClient:
         return self.request("GET", "/api/v5/account/bills", params=params)
 
     def get_bills_archive(
+        """Get bills archive"""
         self,
         *,
         ccy: Optional[str] = None,
@@ -307,5 +317,6 @@ class OKXPrivateClient:
 
     # Minimal self-check helper
     def get_balance(self, ccy: Optional[str] = None) -> OKXResponse:
+        """Get balance"""
         params = {"ccy": ccy} if ccy else None
         return self.request("GET", "/api/v5/account/balance", params=params)

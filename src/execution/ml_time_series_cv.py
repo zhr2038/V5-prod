@@ -58,6 +58,7 @@ class TimeSeriesSplit(BaseCrossValidator):
             yield train_indices, test_indices
     
     def get_n_splits(self, X=None, y=None, groups=None):
+        """Get n splits"""
         return self.n_splits
 
 
@@ -97,6 +98,7 @@ class PurgedKFold(BaseCrossValidator):
             yield np.array(train_indices), np.array(test_indices)
     
     def get_n_splits(self, X=None, y=None, groups=None):
+        """Get n splits"""
         return self.n_splits
 
 

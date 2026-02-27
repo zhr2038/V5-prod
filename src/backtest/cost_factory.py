@@ -10,6 +10,7 @@ from .cost_calibration import CalibratedCostModel, FixedCostModel, load_latest_c
 
 @dataclass
 class CostModelMeta:
+    """CostModelMeta类"""
     mode: str  # calibrated|default
     source_day: Optional[str]
     fee_quantile: str
@@ -22,6 +23,7 @@ class CostModelMeta:
     reason: Optional[str]
 
     def to_dict(self) -> Dict[str, Any]:
+        """To dict"""
         return {
             "mode": self.mode,
             "source_day": self.source_day,
@@ -37,6 +39,7 @@ class CostModelMeta:
 
 
 def make_cost_model_from_cfg(cfg: AppConfig):
+    """Make cost model from cfg"""
     bt = cfg.backtest
     default_model = FixedCostModel(fee_bps=float(bt.fee_bps), slippage_bps=float(bt.slippage_bps))
 

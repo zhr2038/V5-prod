@@ -63,10 +63,12 @@ def _notional_bucket(x: float) -> str:
 
 @dataclass
 class FixedCostModel:
+    """FixedCostModel类"""
     fee_bps: float = 6.0
     slippage_bps: float = 5.0
 
     def resolve(self, symbol: str, regime: str, router_action: str, notional_usdt: float):
+        """Resolve"""
         return float(self.fee_bps), float(self.slippage_bps), {
             "mode": "default",
             "fallback_level": "DEFAULT",
@@ -76,6 +78,7 @@ class FixedCostModel:
 
 @dataclass
 class CalibratedCostModel:
+    """CalibratedCostModel类"""
     stats: Dict[str, Any]
     fee_quantile: str = "p75"
     slippage_quantile: str = "p90"
@@ -124,6 +127,7 @@ class CalibratedCostModel:
         return fee, slp
 
     def resolve(self, symbol: str, regime: str, router_action: str, notional_usdt: float):
+        """Resolve"""
         # global guard
         if self._global_fills() < int(self.min_fills_global):
             return float(self.default_fee_bps), float(self.default_slippage_bps), {

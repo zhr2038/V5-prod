@@ -36,6 +36,7 @@ def _read_json(path: str) -> Optional[Dict[str, Any]]:
 
 @dataclass
 class GuardConfig:
+    """GuardConfig类"""
     reconcile_status_path: str = "reports/reconcile_status.json"
     failure_state_path: str = "reports/reconcile_failure_state.json"
     kill_switch_path: str = "reports/kill_switch.json"
@@ -123,6 +124,7 @@ class KillSwitchGuard:
         return ks
 
     def apply(self) -> Dict[str, Any]:
+        """Apply"""
         now = _now_ms()
         status = _read_json(self.cfg.reconcile_status_path) or {}
 

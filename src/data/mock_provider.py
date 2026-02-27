@@ -20,6 +20,7 @@ class MockProvider(MarketDataProvider):
         self.rng = np.random.default_rng(seed)
 
     def fetch_ohlcv(self, symbols: List[str], timeframe: str, limit: int, end_ts_ms: int | None = None) -> Dict[str, MarketSeries]:
+        """Fetch ohlcv"""
         now = int(time.time() * 1000)
         step = 3600_000 if timeframe.endswith("h") else 3600_000
         out: Dict[str, MarketSeries] = {}
@@ -40,6 +41,7 @@ class MockProvider(MarketDataProvider):
         return out
 
     def fetch_top_of_book(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
+        """Fetch top of book"""
         # Use last close from a small 1h sample and apply ±5bps synthetic spread
         md = self.fetch_ohlcv(symbols, timeframe="1h", limit=2)
         out: Dict[str, Dict[str, float]] = {}

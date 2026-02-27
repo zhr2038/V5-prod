@@ -1,0 +1,247 @@
+1:#!/usr/bin/env python3
+2:"""
+3:Daily ML Model Training Script
+4:每天自动导出训练数据并训练/更新ML模型
+5:"""
+7:import sys
+8:sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+10:import os
+11:import json
+12:import sqlite3
+13:import pandas as pd
+14:from datetime import datetime, timedelta
+15:from pathlib import Path
+17:from src.execution.ml_data_collector import MLDataCollector
+18:from src.execution.ml_factor_model import MLFactorModel, MLFactorConfig
+20:class DailyMLTrainer:
+21:    """每日ML训练器"""
+22:    
+23:    def __init__(self):
+24:        self.collector = MLDataCollector()
+25:        self.model_path = Path("models/ml_factor_model")
+26:        self.model_path.parent.mkdir(parents=True, exist_ok=True)
+27:        self.log_file = Path("logs/ml_training.log")
+28:        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+29:        
+30:    def log(self, message):
+31:        """记录日志"""
+32:        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+33:        log_line = f"[{timestamp}] {message}"
+34:        print(log_line)
+35:        
+36:        with open(self.log_file, 'a') as f:
+37:            f.write(log_line + '\n')
+38:    
+39:    def check_data_sufficiency(self, min_samples=100):
+40:        """检查数据是否足够"""
+41:        stats = self.collector.get_statistics()
+42:        
+43:        self.log(f"Data Statistics:")
+44:        self.log(f"  Total records: {stats['total_records']}")
+45:        self.log(f"  Labeled records: {stats['labeled_records']}")
+46:        self.log(f"  Unique symbols: {stats['num_symbols']}")
+47:        
+48:        return stats['labeled_records'] >= min_samples, stats
+49:    
+50:    def export_and_train(self):
+51:        """导出数据并训练模型"""
+52:        self.log("="*60)
+53:        self.log("Starting Daily ML Training")
+54:        self.log("="*60)
+55:        
+56:        # 1. 检查数据充足性
+57:        is_ready, stats = self.check_data_sufficiency(min_samples=100)
+58:        
+59:        if not is_ready:
+60:            self.log(f"⚠️  Insufficient data: {stats['labeled_records']} < 100 samples")
+61:            self.log("Waiting for more data...")
+62:            return False
+63:        
+64:        # 2. 导出训练数据
+65:        self.log("\nExporting training data...")
+66:        csv_path = "reports/ml_training_data.csv"
+67:        
+68:        success = self.collector.export_training_data(csv_path, min_samples=100)
+69:        if not success:
+70:            self.log("❌ Failed to export training data")
+71:            return False
+72:        
+73:        # 3. 加载数据
+74:        self.log("\nLoading training data...")
+75:        df = pd.read_csv(csv_path)
+76:        
+77:        # 准备特征和目标 - 使用清理后的特征（移除泄露和高相关特征）
+78:        feature_cols = [
+79:            'returns_24h',      # 只保留长周期收益
+80:            'momentum_5d',
+81:            'momentum_20d',
+82:            'volatility_24h',   # 只保留长周期波动率
+83:            'volume_ratio',
+84:            'obv',
+85:            'rsi',
+86:            'macd',
+87:            'macd_signal',
+88:            'bb_position',
+89:            'price_position',
+90:        ]
+91:        
+92:        # 只保留存在的列
+93:        feature_cols = [c for c in feature_cols if c in df.columns]
+94:        
+95:        # 删除NaN
+96:        df = df.dropna(subset=feature_cols + ['future_return_6h'])
+97:        
+98:        if len(df) < 100:
+99:            self.log(f"❌ Insufficient valid samples after cleaning: {len(df)}")
+100:            return False
+101:        
+102:        X = df[feature_cols]
+103:        y = df['future_return_6h']
+104:        
+105:        self.log(f"Training samples: {len(X)}")
+106:        self.log(f"Features: {len(feature_cols)}")
+107:        
+108:        # 4. 时间序列分割 - 确保按时间顺序分割
+109:        df = df.sort_values('timestamp').reset_index(drop=True)
+110:        split_idx = int(len(df) * 0.8)
+111:        X_train, X_valid = X.iloc[:split_idx], X.iloc[split_idx:]
+112:        y_train, y_valid = y.iloc[:split_idx], y.iloc[split_idx:]
+113:        
+114:        # 检查时间分割是否合理
+115:        train_time_end = df.iloc[split_idx-1]['timestamp']
+116:        valid_time_start = df.iloc[split_idx]['timestamp']
+117:        self.log(f"Train time range: {df.iloc[0]['timestamp']} - {train_time_end}")
+118:        self.log(f"Valid time range: {valid_time_start} - {df.iloc[-1]['timestamp']}")
+119:        
+120:        self.log(f"Train: {len(X_train)}, Valid: {len(X_valid)}")
+121:        
+122:        # 5. 训练模型 - 使用Ridge回归防过拟合
+123:        self.log("\nTraining Ridge Regression model...")
+124:        
+125:        config = MLFactorConfig(
+126:            model_type='ridge',
+127:            alpha=10.0
+128:        )
+129:        
+130:        model = MLFactorModel(config)
+131:        
+132:        try:
+133:            model.train(X_train, y_train, X_valid, y_valid)
+134:        except Exception as e:
+135:            self.log(f"❌ Training failed: {e}")
+136:            return False
+137:        
+138:        # 6. 评估模型
+139:        train_pred = model.predict_batch(X_train)
+140:        valid_pred = model.predict_batch(X_valid)
+141:        
+142:        train_ic = df.iloc[:split_idx]['future_return_6h'].corr(train_pred)
+143:        valid_ic = df.iloc[split_idx:]['future_return_6h'].corr(valid_pred)
+144:        
+145:        self.log(f"\nModel Performance:")
+146:        self.log(f"  Train IC: {train_ic:.4f}")
+147:        self.log(f"  Valid IC: {valid_ic:.4f}")
+148:        
+149:        # 判断模型是否有效 - 对于小数据集适当放宽
+150:        ic_gap = train_ic - valid_ic
+151:        if valid_ic < -0.1:  # 验证IC不能太差
+152:            self.log(f"⚠️  Model validation IC too low ({valid_ic:.4f}), not saving")
+153:            return False
+154:        if ic_gap > 0.9:  # 训练/验证差距过大才认为是严重过拟合
+155:            self.log(f"⚠️  Model overfitting detected (gap={ic_gap:.4f}), not saving")
+156:            return False
+157:        
+158:        # 7. 保存模型
+159:        self.log(f"\nSaving model to {self.model_path}...")
+160:        model.save_model(str(self.model_path))
+161:        
+162:        # 8. 记录训练历史
+163:        history = {
+164:            'timestamp': datetime.now().isoformat(),
+165:            'samples': len(df),
+166:            'train_ic': float(train_ic),
+167:            'valid_ic': float(valid_ic),
+168:            'config': config.__dict__
+169:        }
+170:        
+171:        history_file = Path("reports/ml_training_history.json")
+172:        histories = []
+173:        if history_file.exists():
+174:            with open(history_file, 'r') as f:
+175:                histories = json.load(f)
+176:        
+177:        histories.append(history)
+178:        
+179:        with open(history_file, 'w') as f:
+180:            json.dump(histories, f, indent=2)
+181:        
+182:        self.log(f"\n✅ Training completed successfully!")
+183:        self.log(f"   Model saved: {self.model_path}")
+184:        self.log(f"   Valid IC: {valid_ic:.4f}")
+185:        
+186:        return True
+187:    
+188:    def generate_report(self):
+189:        """生成训练报告"""
+190:        self.log("\n" + "="*60)
+191:        self.log("Generating Training Report")
+192:        self.log("="*60)
+193:        
+194:        # 加载历史
+195:        history_file = Path("reports/ml_training_history.json")
+196:        if not history_file.exists():
+197:            self.log("No training history found")
+198:            return
+199:        
+200:        with open(history_file, 'r') as f:
+201:            histories = json.load(f)
+202:        
+203:        if not histories:
+204:            self.log("Empty training history")
+205:            return
+206:        
+207:        # 最近5次训练
+208:        self.log("\nRecent Training History:")
+209:        for h in histories[-5:]:
+210:            ts = h['timestamp'][:16]  # 截取日期时间
+211:            self.log(f"  {ts}: IC={h['valid_ic']:.4f}, Samples={h['samples']}")
+212:        
+213:        # IC趋势
+214:        ics = [h['valid_ic'] for h in histories]
+215:        avg_ic = sum(ics) / len(ics)
+216:        latest_ic = ics[-1]
+217:        
+218:        self.log(f"\nIC Statistics:")
+219:        self.log(f"  Average: {avg_ic:.4f}")
+220:        self.log(f"  Latest: {latest_ic:.4f}")
+221:        self.log(f"  Best: {max(ics):.4f}")
+222:        
+223:        if latest_ic > avg_ic:
+224:            self.log(f"  ✅ Latest model better than average")
+225:        else:
+226:            self.log(f"  ⚠️  Latest model worse than average")
+228:def main():
+229:    """主函数"""
+230:    trainer = DailyMLTrainer()
+231:    
+232:    try:
+233:        # 训练模型
+234:        success = trainer.export_and_train()
+235:        
+236:        # 生成报告
+237:        trainer.generate_report()
+238:        
+239:        if success:
+240:            print("\n✅ Daily ML training completed successfully")
+241:            return 0
+242:        else:
+243:            print("\n⚠️  Training skipped or failed")
+244:            return 1
+245:            
+246:    except Exception as e:
+247:        trainer.log(f"❌ Fatal error: {e}")
+248:        import traceback
+249:        trainer.log(traceback.format_exc())
+250:        return 1
+252:if __name__ == '__main__':
+253:    sys.exit(main())

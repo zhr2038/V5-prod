@@ -65,6 +65,7 @@ class FeatureRecord:
     future_return_6h: Optional[float] = None
 
     def to_dict(self) -> dict:
+        """To dict"""
         return asdict(self)
 
 class MLDataCollector:

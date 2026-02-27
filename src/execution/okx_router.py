@@ -6,6 +6,7 @@ from typing import Dict, Optional
 
 @dataclass
 class RouterDecision:
+    """RouterDecision类"""
     order_type: str  # market|limit|post_only
     reason: str
     params: Dict[str, str]
@@ -25,6 +26,7 @@ class OKXOrderRouter:
         self.max_spread_pct = float(max_spread_pct)
 
     def decide(self, best_bid: float, best_ask: float, force_market: bool = False) -> RouterDecision:
+        """Decide"""
         bid = float(best_bid)
         ask = float(best_ask)
         mid = (bid + ask) / 2.0 if (bid > 0 and ask > 0) else 0.0

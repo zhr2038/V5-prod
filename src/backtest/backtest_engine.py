@@ -11,6 +11,7 @@ from src.core.models import MarketSeries
 
 @dataclass
 class BacktestResult:
+    """BacktestResult类"""
     sharpe: float
     cagr: float
     max_dd: float
@@ -52,6 +53,7 @@ class BacktestEngine:
         return ca
 
     def run(self, market_data: Dict[str, MarketSeries], pipeline=None) -> BacktestResult:
+        """Run"""
         syms = list(market_data.keys())
         if not syms:
             return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self._cost_assumption())
@@ -207,6 +209,7 @@ class BacktestEngine:
         return BacktestResult(sharpe=sharpe, cagr=cagr, max_dd=max_dd, profit_factor=pf, turnover=turnover, cost_assumption=ca)
 
     def walk_forward(self, market_data: Dict[str, MarketSeries], folds: int = 4) -> List[BacktestResult]:
+        """Walk forward"""
         # Placeholder: split time into folds and run run()
         syms = list(market_data.keys())
         if not syms:

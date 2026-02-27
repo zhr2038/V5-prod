@@ -41,6 +41,7 @@ def _dec(x: Optional[str]) -> Decimal:
 
 @dataclass
 class LedgerThresholds:
+    """LedgerThresholds类"""
     abs_usdt_tol: Decimal = Decimal("1")
     abs_base_tol: Decimal = Decimal("1e-8")
 
@@ -104,6 +105,7 @@ class LedgerEngine:
         _atomic_write_json(self.state_path, obj)
 
     def run(self, *, out_path: str = "reports/ledger_status.json") -> Dict[str, Any]:
+        """Run"""
         now = _now_ms()
 
         baseline = self._load_baseline()

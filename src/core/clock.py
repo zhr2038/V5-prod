@@ -8,6 +8,7 @@ from typing import Protocol
 class TradingClock(Protocol):
     """交易时钟协议"""
     def now(self) -> datetime: ...
+        """Now"""
 
 
 @dataclass

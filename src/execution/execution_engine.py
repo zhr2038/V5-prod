@@ -23,6 +23,7 @@ def _to_decimal(value: float | str | Decimal) -> Decimal:
 
 
 class ExecutionEngine:
+    """ExecutionEngine类"""
     def __init__(
         self,
         cfg: ExecutionConfig,
@@ -63,6 +64,7 @@ class ExecutionEngine:
             raise
 
     def execute(self, order_batch: List[Order]) -> ExecutionReport:
+        """Execute"""
         ts = datetime.utcnow().isoformat() + "Z"
 
         fee_bps = float(getattr(self.cfg, 'fee_bps', 6.0) or 6.0)

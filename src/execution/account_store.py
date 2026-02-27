@@ -8,11 +8,13 @@ from typing import Optional
 
 @dataclass
 class AccountState:
+    """AccountState类"""
     cash_usdt: float
     equity_peak_usdt: float
 
 
 class AccountStore:
+    """AccountStore类"""
     def __init__(self, path: str = "reports/positions.sqlite"):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,6 +39,7 @@ class AccountStore:
         con.close()
 
     def get(self) -> AccountState:
+        """Get"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute("SELECT cash_usdt, equity_peak_usdt FROM account_state WHERE k='default'")
@@ -47,6 +50,7 @@ class AccountStore:
         return AccountState(cash_usdt=float(row[0]), equity_peak_usdt=float(row[1]))
 
     def set(self, st: AccountState) -> None:
+        """Set"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(

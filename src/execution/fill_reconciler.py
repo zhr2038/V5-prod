@@ -23,6 +23,7 @@ def _dec(x: Optional[str]) -> Decimal:
 
 @dataclass
 class FillAgg:
+    """FillAgg类"""
     inst_id: str
     cl_ord_id: Optional[str]
     ord_id: Optional[str]
@@ -94,6 +95,7 @@ class FillReconciler:
         return aggs
 
     def reconcile(self, *, limit: int = 2000, max_get_order_per_run: int = 20) -> Dict[str, Any]:
+        """Reconcile"""
         fills = self._load_unprocessed_fills(limit=limit)
         if not fills:
             return {"new_fills": 0, "updated_orders": 0, "get_order_calls": 0, "fills_exported": 0, "export_errors": 0}

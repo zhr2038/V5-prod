@@ -25,6 +25,7 @@ TRADE_COLUMNS = [
 
 @dataclass
 class Fill:
+    """Fill类"""
     ts: str
     run_id: str
     symbol: str
@@ -39,6 +40,7 @@ class Fill:
     realized_pnl_pct: Optional[float] = None
 
     def to_row(self) -> Dict[str, Any]:
+        """To row"""
         return {
             "ts": self.ts,
             "run_id": self.run_id,
@@ -56,6 +58,7 @@ class Fill:
 
 
 class TradeLogWriter:
+    """TradeLogWriter类"""
     def __init__(self, run_dir: str, filename: str = "trades.csv"):
         self.run_dir = Path(run_dir)
         self.path = self.run_dir / filename
@@ -66,10 +69,12 @@ class TradeLogWriter:
                 w.writeheader()
 
     def append_fill(self, fill: Fill) -> None:
+        """Append fill"""
         with self.path.open("a", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=TRADE_COLUMNS)
             w.writerow(fill.to_row())
 
 
 def iso_utc_now() -> str:
+    """Iso utc now"""
     return datetime.utcnow().isoformat() + "Z"

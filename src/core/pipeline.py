@@ -85,6 +85,7 @@ def _min_price_usdt(*, rules: Dict[str, Any]) -> Optional[float]:
 
 @dataclass
 class PipelineOutput:
+    """PipelineOutput类"""
     alpha: AlphaSnapshot
     regime: RegimeResult
     portfolio: PortfolioSnapshot

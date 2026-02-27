@@ -12,6 +12,7 @@ import requests
 
 @dataclass
 class SpotSpec:
+    """SpotSpec类"""
     inst_id: str
     base_ccy: str
     quote_ccy: str
@@ -29,6 +30,7 @@ def round_down_to_lot(sz: float, lot_sz: float) -> float:
 
 
 class OKXSpotInstrumentsCache:
+    """OKXSpotInstrumentsCache类"""
     def __init__(
         self,
         *,
@@ -72,6 +74,7 @@ class OKXSpotInstrumentsCache:
         return {"ts": time.time(), "data": data or []}
 
     def get_spec(self, inst_id: str) -> Optional[SpotSpec]:
+        """Get spec"""
         inst_id_u = str(inst_id or "").upper()
         if not inst_id_u:
             return None

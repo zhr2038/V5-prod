@@ -19,6 +19,7 @@ except ImportError:
 
 @dataclass
 class RegimeResult:
+    """RegimeResult类"""
     state: RegimeState
     atr_pct: float
     ma20: float

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class BorrowItem:
+    """BorrowItem类"""
     ccy: str
     eq: float
     liab: float
@@ -15,6 +16,7 @@ class BorrowItem:
 
 @dataclass
 class BorrowCheckResult:
+    """BorrowCheckResult类"""
     ok: bool
     items: List[BorrowItem]
     reason: Optional[str] = None

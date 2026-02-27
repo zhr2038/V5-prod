@@ -33,11 +33,13 @@ def _looks_not_found(last_query_json: str) -> bool:
 
 @dataclass
 class GCStats:
+    """GCStats类"""
     scanned: int = 0
     gc_rejected: int = 0
     skipped: int = 0
 
     def as_dict(self) -> Dict[str, int]:
+        """As dict"""
         return {"scanned": int(self.scanned), "gc_rejected": int(self.gc_rejected), "skipped": int(self.skipped)}
 
 

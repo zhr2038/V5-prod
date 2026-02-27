@@ -22,6 +22,7 @@ OKX_PUBLIC = "https://www.okx.com"
 
 @dataclass
 class UniverseItem:
+    """UniverseItem类"""
     symbol: str  # e.g. BTC/USDT
     inst_id: str  # e.g. BTC-USDT
     quote_volume_usdt_24h: float
@@ -68,6 +69,7 @@ class OKXUniverseProvider:
         self.refine_single_ticker_sleep_sec = float(refine_single_ticker_sleep_sec)
 
     def get_universe(self, now_ts: Optional[float] = None) -> List[str]:
+        """Get universe"""
         now_ts = float(now_ts or time.time())
         cached = self._load_cache(now_ts)
         if cached is not None:

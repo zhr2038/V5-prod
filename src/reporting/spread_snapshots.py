@@ -52,6 +52,7 @@ def compute_spread_stats(symbol_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {"count": 0}
 
     def q(p: float) -> float:
+        """Q"""
         if len(xs) == 1:
             return float(xs[0])
         idx = int(round(p * (len(xs) - 1)))

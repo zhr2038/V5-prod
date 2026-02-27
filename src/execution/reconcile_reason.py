@@ -11,6 +11,7 @@ Category = str  # OK|AUTH|HARD|SOFT
 
 @dataclass
 class FailureContext:
+    """FailureContext类"""
     ok: bool
     reason: Optional[str]
     error: Optional[Dict[str, Any]] = None

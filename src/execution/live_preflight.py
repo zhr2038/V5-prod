@@ -34,6 +34,7 @@ def _read_json(path: str) -> Optional[Dict[str, Any]]:
 
 @dataclass
 class LivePreflightResult:
+    """LivePreflightResult类"""
     decision: str  # ALLOW|SELL_ONLY|ABORT
     reconcile_ok: bool
     ledger_ok: bool
@@ -89,6 +90,7 @@ class LivePreflight:
         return age_ms <= int(max_age_sec) * 1000
 
     def run(self, *, max_pages: int = 5, max_status_age_sec: int = 180) -> LivePreflightResult:
+        """Run"""
         details: Dict[str, Any] = {"ts_ms": _now_ms()}
 
         # 1) Catch-up bills (source of truth)

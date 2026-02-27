@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 @dataclass
 class SpreadSnapshot:
+    """SpreadSnapshot类"""
     ts_ms: int
     symbol: str
     bid: float

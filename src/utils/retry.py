@@ -11,6 +11,7 @@ T = TypeVar("T")
 
 @dataclass
 class RetryConfig:
+    """RetryConfig类"""
     max_attempts: int = 5
     base_delay_sec: float = 0.25
     max_delay_sec: float = 5.0
