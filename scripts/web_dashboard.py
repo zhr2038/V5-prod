@@ -385,6 +385,7 @@ def api_positions():
         live_okx_used = False
 
         # 0) 优先实时OKX余额（与用户手动操作一致）
+        okx_error = None
         try:
             import os, time, hmac, hashlib, base64
             from dotenv import load_dotenv
@@ -408,8 +409,8 @@ def api_positions():
                                 sec = v
                             elif k == 'EXCHANGE_PASSPHRASE' and not pp:
                                 pp = v
-                except Exception:
-                    pass
+                except Exception as e:
+                    okx_error = f"env_parse_error: {e}"
             if key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
@@ -449,11 +450,16 @@ def api_positions():
                             })
                         except Exception:
                             continue
-        except Exception:
-            pass
+        except Exception as e:
+            import traceback
+            okx_error = f"{e}\n{traceback.format_exc()}"
+            print(f"[positions] OKX API错误: {okx_error}")
 
-        # 1) 回退 positions.sqlite（仅当实时OKX不可用）
+        # 1) 回退 positions.sqlite（仅当实时OKX不可用且positions为空）
+        # 注意：如果OKX API成功调用但返回空持仓，说明真的没持仓，不应回退到缓存
+        fallback_source = None
         if not live_okx_used and not positions and pos_db.exists():
+            fallback_source = "positions.sqlite"
             conn = sqlite3.connect(str(pos_db))
             cur = conn.cursor()
             cur.execute("SELECT symbol, qty, avg_px, last_mark_px FROM positions")
@@ -466,6 +472,7 @@ def api_positions():
                     base = symbol_raw.split('/')[0] if '/' in symbol_raw else symbol_raw.split('-')[0]
                     if base == 'USDT' or base in hidden_symbols:
                         continue
+                    print(f"[positions] sqlite: {base}, qty={qty}")
 
                     qty_float = float(qty or 0)
                     if qty_float <= 0:
@@ -491,8 +498,8 @@ def api_positions():
                 except Exception:
                     continue
 
-        # 2) 回退：DB为空时读取最新 runs/*/positions.jsonl
-        if not positions:
+        # 2) 回退：DB为空且OKX不可用时读取最新 runs/*/positions.jsonl
+        if not live_okx_used and not positions:
             runs_dir = REPORTS_DIR / 'runs'
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
