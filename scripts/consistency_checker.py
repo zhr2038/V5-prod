@@ -111,7 +111,7 @@ class BacktestLiveConsistencyChecker:
             return
         
         # 计算实盘平均成本
-        total_fee = sum(t['fee'] for t in live_trades)
+        total_fee = sum(float(t['fee'] or 0) for t in live_trades)
         total_notional = sum(float(t.get('fill_px', 0) or 0) * float(t.get('fill_sz', 0) or 0) for t in live_trades)
         
         if total_notional > 0:
