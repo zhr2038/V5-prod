@@ -398,7 +398,7 @@
                 const data = await res.json();
                 
                 const state = data.state || 'SIDEWAYS';
-                const multiplier = data.position_multiplier || 0.7;
+                const multiplier = typeof data.position_multiplier === 'number' ? data.position_multiplier : 0.7;
                 const votes = data.votes || {};
                 
                 const stateMap = {
