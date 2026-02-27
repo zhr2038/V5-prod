@@ -536,7 +536,7 @@ def api_positions():
 
         positions.sort(key=lambda x: x.get('value_usdt', 0), reverse=True)
         
-        # 从交易记录计算真实成本价和盈亏
+        # 从交易记录计算真实成本价和盈亏（使用FIFO方法）
         try:
             conn = get_db_connection()
             if conn:
@@ -546,44 +546,74 @@ def api_positions():
                     if not symbol:
                         continue
                     
-                    # 查询该币种的成交记录
+                    current_qty = float(p.get('qty', 0))
+                    if current_qty <= 0:
+                        continue
+                    
+                    # 查询该币种所有成交记录（按时间正序，FIFO）
                     cursor.execute("""
-                        SELECT side, notional_usdt, sz, avg_px
+                        SELECT side, notional_usdt, sz, avg_px, created_ts
                         FROM orders 
                         WHERE inst_id LIKE ? AND state='FILLED'
-                        ORDER BY created_ts DESC
+                        ORDER BY created_ts ASC
                     """, (f"%{symbol}%",))
                     
                     rows = cursor.fetchall()
-                    total_buy_cost = 0.0
-                    total_buy_qty = 0.0
+                    
+                    # 构建买入队列（FIFO）
+                    buy_queue = []  # [(qty, cost_per_unit), ...]
                     
                     for row in rows:
-                        side, notional, sz, avg_px = row
+                        side, notional, sz, avg_px, ts = row
                         notional_val = float(notional or 0)
-                        # sz可能为NULL，从notional/avg_px计算
-                        if sz:
+                        
+                        # 计算数量
+                        if sz and float(sz) > 0:
                             qty_val = float(sz)
                         elif avg_px and float(avg_px) > 0:
                             qty_val = notional_val / float(avg_px)
                         else:
-                            qty_val = 0
-                            
-                        if side == 'buy' and qty_val > 0:
-                            total_buy_cost += notional_val
-                            total_buy_qty += qty_val
-                    
-                    # 计算平均成本
-                    if total_buy_qty > 0:
-                        avg_cost = total_buy_cost / total_buy_qty
-                        current_qty = float(p.get('qty', 0))
+                            continue
                         
-                        if avg_cost > 0:
-                            p['avg_px'] = round(avg_cost, 6)
+                        cost_per_unit = notional_val / qty_val if qty_val > 0 else 0
+                        
+                        if side == 'buy':
+                            # 买入加入队列
+                            buy_queue.append([qty_val, cost_per_unit])
+                        elif side == 'sell':
+                            # 卖出按FIFO减少买入队列
+                            sell_qty = qty_val
+                            while sell_qty > 0 and buy_queue:
+                                first_buy = buy_queue[0]
+                                if first_buy[0] <= sell_qty:
+                                    # 第一笔买入全部卖出
+                                    sell_qty -= first_buy[0]
+                                    buy_queue.pop(0)
+                                else:
+                                    # 第一笔买入部分卖出
+                                    first_buy[0] -= sell_qty
+                                    sell_qty = 0
+                    
+                    # 计算剩余持仓的成本
+                    total_cost = 0.0
+                    total_qty = 0.0
+                    for qty, cost in buy_queue:
+                        total_cost += qty * cost
+                        total_qty += qty
+                    
+                    # 当前持仓应该和队列剩余匹配
+                    if total_qty > 0 and abs(total_qty - current_qty) < 0.001:
+                        avg_cost = total_cost / total_qty
+                        p['avg_px'] = round(avg_cost, 6)
+                    elif current_qty > 0:
+                        # 如果不匹配，用当前市值反推（fallback）
+                        p['avg_px'] = round(float(p.get('value_usdt', 0)) / current_qty, 6)
                 
                 conn.close()
         except Exception as e:
-            print(f"[positions] 成本计算错误: {e}")
+            import traceback
+            print(f"[positions] FIFO成本计算错误: {e}")
+            print(traceback.format_exc())
         
         # 计算持仓盈亏
         for p in positions:
