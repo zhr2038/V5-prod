@@ -180,6 +180,42 @@ class LiveExecutionEngine:
         self.position_store = position_store or PositionStore(path="reports/positions.sqlite")
         self.run_id = str(run_id or "")
         self.exp_time_ms = exp_time_ms
+        self._closed = False  # 跟踪资源状态
+
+    def close(self):
+        """关闭执行引擎，释放资源"""
+        if self._closed:
+            return
+        self._closed = True
+        
+        # 关闭OKX客户端（如果支持）
+        try:
+            if hasattr(self.okx, 'close'):
+                self.okx.close()
+        except Exception as e:
+            log.warning(f"Error closing OKX client: {e}")
+        
+        # 关闭数据存储
+        try:
+            if hasattr(self.order_store, 'close'):
+                self.order_store.close()
+        except Exception as e:
+            log.warning(f"Error closing order store: {e}")
+        
+        try:
+            if hasattr(self.position_store, 'close'):
+                self.position_store.close()
+        except Exception as e:
+            log.warning(f"Error closing position store: {e}")
+
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器出口，确保关闭资源"""
+        self.close()
+        return False  # 不吞掉异常
 
     def _decision_hash_for_order(self, o: Order) -> str:
         # Prefer upstream decision hash if present

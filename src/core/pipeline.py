@@ -539,8 +539,9 @@ class V5Pipeline:
 
         # current weights (with dust filtering)
         current_w: Dict[str, float] = {}
-        DUST_QTY_THRESHOLD = 0.01  # 数量小于0.01视为灰尘
-        DUST_VALUE_THRESHOLD = 1.0  # 价值小于$1视为灰尘
+        # 灰尘阈值配置（提取到类级别常量）
+        DUST_QTY_THRESHOLD = getattr(self.cfg.execution, 'dust_qty_threshold', 0.01)
+        DUST_VALUE_THRESHOLD = getattr(self.cfg.execution, 'dust_value_threshold', 1.0)
         
         if equity > 0:
             for p in positions:
