@@ -33,7 +33,7 @@ def _to_f(x: Any) -> float:
 def check_okx_borrows(
     balance_resp: Dict[str, Any],
     *,
-    liab_eps: float = 1e-6,
+    liab_eps: float = 0.01,  # 提高到 0.01，只检测真正有意义的借贷
     neg_eq_eps: float = 1e-6,
 ) -> BorrowCheckResult:
     """Parse OKX /api/v5/account/balance response.
