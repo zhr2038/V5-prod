@@ -163,10 +163,15 @@ def api_account():
         
         # 持仓市值与 /api/positions 保持同口径
         positions_value = 0.0
+        positions_rows = []
         try:
-            pos_rows = api_positions().get_json() or []
-            if isinstance(pos_rows, list):
-                positions_value = sum(float(x.get('value_usdt') or 0.0) for x in pos_rows)
+            pos_payload = api_positions().get_json() or {}
+            if isinstance(pos_payload, dict):
+                positions_rows = pos_payload.get('positions', []) or []
+            elif isinstance(pos_payload, list):
+                # 兼容旧格式
+                positions_rows = pos_payload
+            positions_value = sum(float(x.get('value_usdt') or x.get('value') or 0.0) for x in positions_rows)
         except Exception:
             pass
 
@@ -179,9 +184,8 @@ def api_account():
         # 获取持仓数量
         positions_count = 0
         try:
-            pos_rows = api_positions().get_json() or []
-            if isinstance(pos_rows, list):
-                positions_count = len([p for p in pos_rows if (p.get('value_usdt') or 0) > 1])
+            rows = positions_rows if isinstance(positions_rows, list) else []
+            positions_count = len([p for p in rows if float(p.get('value_usdt') or p.get('value') or 0) > 1])
         except Exception:
             pass
 
