@@ -501,6 +501,31 @@ systemctl --user restart v5-web-dashboard.service
 
 **提交**: `16a44db`, `26ec009`, `185f5a8`
 
+#### 代码审查修复（24个问题）
+**Critical (3)**
+- ✅ ML数据泄露风险 - 添加缓存文件时间戳验证
+- ✅ 订单精度丢失 - 全程使用Decimal计算
+- ✅ 多策略信号合并 - 加权平均替代简单取最大
+
+**High (8)**
+- ✅ Pipeline类型检查 - 严谨的positions验证
+- ✅ 时间戳处理 - 明确阈值判断替代相对接近度
+- ✅ 配置验证 - AlphaWeights总和=1.0, RiskConfig逻辑校验
+- ✅ 价格无效告警 - 记录并汇总无效价格symbols
+- ✅ NaN传播修复 - 改进RSI/MACD/布林带计算
+- ✅ 硬编码路径 - 7个脚本改为动态路径检测
+
+**Medium (13)**
+- ✅ 数据库连接池 - MLDataCollector连接管理
+- ✅ 异常处理细化 - 区分可恢复/致命错误
+- ✅ 硬编码魔数 - 灰尘阈值提取到配置
+- ✅ 资源管理 - LiveExecutionEngine.close()和上下文管理器
+- ✅ 日志格式统一 - print改为logging
+- ✅ httpx.Client上下文管理器支持
+- ✅ 类型注解完善 - MLDataCollector方法
+
+**提交**: `d8b17a9`, `9fd4b23`, `0489e8a`, `a505a6e`
+
 ### 2026-02-27
 - ✅ Web面板：持仓盈亏显示修复，与交易所同步
 - ✅ 实时价格：优先OKX API，缓存15分钟过期
