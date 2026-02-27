@@ -2226,14 +2226,18 @@ def api_decision_audit():
         
         # 按修改时间排序，取最新的
         run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-        latest_audit_file = run_dirs[0] / 'decision_audit.json'
+        latest_run_dir = run_dirs[0]
+        latest_audit_file = latest_run_dir / 'decision_audit.json'
         
         with open(latest_audit_file, 'r') as f:
             audit_data = json.load(f)
         
+        # 使用文件修改时间作为时间戳（now_ts可能不正确）
+        file_mtime = latest_run_dir.stat().st_mtime
+        
         # 同时尝试读取策略信号审计
         strategy_signals = []
-        strategy_file = run_dirs[0] / 'strategy_signals.json'
+        strategy_file = latest_run_dir / 'strategy_signals.json'
         if strategy_file.exists():
             with open(strategy_file, 'r') as f:
                 strategy_data = json.load(f)
@@ -2241,7 +2245,7 @@ def api_decision_audit():
         
         return jsonify({
             'run_id': audit_data.get('run_id'),
-            'timestamp': audit_data.get('now_ts'),
+            'timestamp': file_mtime,  # 使用文件修改时间
             'regime': audit_data.get('regime'),
             'regime_details': audit_data.get('regime_details', {}),
             'counts': audit_data.get('counts', {}),
