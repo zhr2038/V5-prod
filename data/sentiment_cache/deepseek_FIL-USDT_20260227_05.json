@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.4,
+  "f6_sentiment_magnitude": 0.4,
+  "f6_fear_greed_index": 60.0,
+  "f6_sentiment_summary": "市场情绪偏向乐观，普遍认为FIL处于吸筹和筑底阶段，有突破预期。",
+  "f6_sentiment_confidence": 0.7,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论显示FIL在吸筹，大户买入而散户卖出，暗示可能处于底部区域。",
+    "缩量横盘和即将突破的表述，反映市场对价格反弹的期待。",
+    "定投和捡便宜筹码的建议，表明投资者认为当前是买入机会，而非恐慌抛售。",
+    "跌不动和筑中的描述，指向价格可能已触底，情绪从恐慌转向中性或贪婪。",
+    "整体缺乏极端恐慌或狂热术语，情绪相对稳定，偏向积累阶段。"
+  ],
+  "f6_market_stage": "accumulation"
+}

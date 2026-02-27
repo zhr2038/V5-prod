@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.6,
+  "f6_sentiment_magnitude": 0.6,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "市场情绪偏向乐观，普遍认为XRP处于吸筹或筑底阶段，有上涨预期。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论显示XRP在吸筹或筑底，价格可能即将突破",
+    "大户买入和散户卖出被视为积极信号",
+    "缩量横盘和跌不动表明市场可能触底",
+    "定投和捡便宜筹码建议反映长期看好",
+    "整体情绪偏向贪婪，但未出现极端FOMO"
+  ],
+  "f6_market_stage": "accumulation"
+}

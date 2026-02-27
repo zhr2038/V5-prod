@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.6,
+  "f6_sentiment_magnitude": 0.6,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "市场情绪偏向乐观，普遍认为OKB处于吸筹或筑底阶段，有上涨潜力。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论提到'吸筹'和'筑底中'，暗示市场可能处于积累阶段",
+    "有观点认为'大户在买OKB，散户在卖'，显示机构或大户可能看好后市",
+    "'OKB缩量横盘，即将突破'和'捡便宜筹码的机会'表明投资者预期价格将上涨",
+    "整体情绪积极，无恐慌或FOMO迹象，偏向耐心持有和定投策略",
+    "评论中未出现'瀑布'、'跑路'等负面术语，恐慌情绪较低"
+  ],
+  "f6_market_stage": "accumulation"
+}

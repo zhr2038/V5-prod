@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.6,
+  "f6_sentiment_magnitude": 0.6,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "市场情绪偏向乐观，普遍认为AAVE处于吸筹和筑底阶段，有突破预期。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论提到AAVE在吸筹和筑底，暗示价格可能接近底部。",
+    "大户买入和散户卖出被视为积极信号，表明机构或大资金看好。",
+    "缩量横盘和即将突破的表述反映技术面看涨预期。",
+    "定投和捡便宜筹码的建议显示长期信心。",
+    "整体缺乏恐慌或FOMO迹象，情绪相对稳定。"
+  ],
+  "f6_market_stage": "accumulation"
+}

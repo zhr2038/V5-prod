@@ -59,10 +59,20 @@ class AlphaEngine:
         from decimal import Decimal
         from src.strategy.multi_strategy_system import Alpha6FactorStrategy
         
-        # 从配置获取资金限制
+        # 从配置获取资金限制 - 修复：尝试多种方式获取 live_equity_cap_usdt
         total_capital = Decimal('20.0')  # 默认20 USDT
-        if hasattr(self.cfg, 'live_equity_cap_usdt'):
+        
+        # 尝试从 AlphaConfig 读取（旧方式，保持兼容）
+        if hasattr(self.cfg, 'live_equity_cap_usdt') and self.cfg.live_equity_cap_usdt:
             total_capital = Decimal(str(self.cfg.live_equity_cap_usdt))
+        # 尝试从 budget 配置读取（正确路径）
+        elif hasattr(self.cfg, 'budget') and hasattr(self.cfg.budget, 'live_equity_cap_usdt'):
+            if self.cfg.budget.live_equity_cap_usdt:
+                total_capital = Decimal(str(self.cfg.budget.live_equity_cap_usdt))
+        # 尝试从 account 配置读取（备选路径）
+        elif hasattr(self.cfg, 'account') and hasattr(self.cfg.account, 'live_equity_cap_usdt'):
+            if self.cfg.account.live_equity_cap_usdt:
+                total_capital = Decimal(str(self.cfg.account.live_equity_cap_usdt))
         
         # 创建策略编排器
         orchestrator = StrategyOrchestrator(total_capital=total_capital)

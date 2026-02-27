@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.6,
+  "f6_sentiment_magnitude": 0.6,
+  "f6_fear_greed_index": 65.0,
+  "f6_sentiment_summary": "市场情绪偏向乐观，普遍认为HYPE-USDT处于吸筹或筑底阶段，有突破预期。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论显示HYPE在吸筹或筑底，价格跌不动，暗示底部支撑较强。",
+    "大户买入和散户卖出行为被提及，可能表明筹码正在从散户向大户转移。",
+    "缩量横盘和即将突破的表述反映市场对后续上涨的期待，存在FOMO迹象。",
+    "定投和捡便宜筹码的建议显示投资者对长期持有或逢低买入持积极态度。",
+    "整体情绪中性偏贪婪，但未出现极端狂热或恐慌割肉迹象。"
+  ],
+  "f6_market_stage": "accumulation"
+}

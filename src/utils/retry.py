@@ -27,18 +27,18 @@ def _sleep_with_jitter(delay: float, jitter_frac: float) -> None:
 def retry(
     fn: Callable[[], T],
     *,
-    should_retry: Callable[[BaseException], bool],
+    should_retry: Callable[[Exception], bool],
     cfg: Optional[RetryConfig] = None,
 ) -> T:
     """Generic retry with exponential backoff + jitter."""
     c = cfg or RetryConfig()
     attempt = 0
-    last_exc: Optional[BaseException] = None
+    last_exc: Optional[Exception] = None
 
     while attempt < int(c.max_attempts):
         try:
             return fn()
-        except BaseException as e:  # noqa: BLE001 - deliberate
+        except Exception as e:  # 修复：从 BaseException 改为 Exception，避免捕获 KeyboardInterrupt/SystemExit
             last_exc = e
             attempt += 1
             if attempt >= int(c.max_attempts) or not should_retry(e):

@@ -1,0 +1,24 @@
+{
+  "f6_sentiment": 0.0261,
+  "f6_sentiment_magnitude": 0.0261,
+  "f6_fear_greed_index": 51,
+  "f6_sentiment_summary": "\u8d44\u91d1\u8d39\u7387\u7efc\u5408\u60c5\u7eea: 0.026 (\u5927\u76d82\u4e2a+\u4e2d\u76d84\u4e2a+\u5c0f\u76d84\u4e2a)",
+  "f6_sentiment_confidence": 0.85,
+  "f6_sentiment_source": "funding_rate_composite",
+  "f6_market_stage": "neutral",
+  "tier_breakdown": {
+    "large": {
+      "avg": 0.027950000000000003,
+      "count": 2
+    },
+    "mid": {
+      "avg": 0.03975,
+      "count": 4
+    },
+    "small": {
+      "avg": 0.0009000000000000015,
+      "count": 4
+    }
+  },
+  "collected_at": "2026-02-27T11:30:15.422117"
+}

@@ -1,0 +1,16 @@
+{
+  "f6_sentiment": 0.4,
+  "f6_sentiment_magnitude": 0.4,
+  "f6_fear_greed_index": 60.0,
+  "f6_sentiment_summary": "市场对LINK持谨慎乐观态度，普遍认为处于吸筹或筑底阶段，建议耐心持有或定投。",
+  "f6_sentiment_confidence": 0.8,
+  "f6_sentiment_source": "deepseek",
+  "f6_sentiment_key_points": [
+    "评论显示LINK可能在吸筹或筑底，价格跌不动，暗示支撑较强。",
+    "大户买入和散户卖出行为被提及，可能表明市场存在分歧但偏向积极。",
+    "缩量横盘和即将突破的表述暗示技术面看好，有上涨预期。",
+    "建议定投和捡便宜筹码，反映投资者对长期价值有信心，无恐慌迹象。",
+    "整体情绪中性偏贪婪，但未出现狂热FOMO或恐慌割肉迹象。"
+  ],
+  "f6_market_stage": "accumulation"
+}
