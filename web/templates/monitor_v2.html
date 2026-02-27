@@ -301,6 +301,17 @@
                     </div>
                 </div>
                 
+                <!-- Health Status -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">🩺 系统健康</div>
+                        <div class="card-subtitle" id="health-update-time">加载中...</div>
+                    </div>
+                    <div id="health-content">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+                
                 <!-- Strategy Signals -->
                 <div class="card">
                     <div class="card-header">
@@ -648,6 +659,57 @@
             }
         }
         
+        // Load health status
+        async function loadHealthStatus() {
+            try {
+                const res = await fetch('/api/health');
+                const data = await res.json();
+                
+                const status = data.status || 'unknown';
+                const checks = data.checks || [];
+                
+                const statusColors = {
+                    'healthy': '#22c55e',
+                    'warning': '#f59e0b',
+                    'critical': '#ef4444',
+                    'unknown': '#64748b'
+                };
+                
+                const statusText = {
+                    'healthy': '健康',
+                    'warning': '警告',
+                    'critical': '严重',
+                    'unknown': '未知'
+                };
+                
+                const html = `
+                    <div style="margin-bottom: 12px; padding: 10px; background: ${statusColors[status]}22; border-radius: 6px; border-left: 3px solid ${statusColors[status]};">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: ${statusColors[status]};">
+                            ${statusText[status]}
+                        </div>
+                    </div>
+                    <div style="font-size: 0.85rem;">
+                        ${checks.map(c => {
+                            const color = c.status === 'healthy' ? '#22c55e' : (c.status === 'critical' ? '#ef4444' : '#f59e0b');
+                            return `
+                                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1e293b;">
+                                    <span>${c.name}</span>
+                                    <span style="color: ${color};">${c.detail}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+                
+                document.getElementById('health-content').innerHTML = html;
+                document.getElementById('health-update-time').textContent = 
+                    '更新于 ' + new Date().toLocaleString('zh-CN', {hour: '2-digit', minute: '2-digit'});
+            } catch (e) {
+                console.error('健康检查加载失败:', e);
+                document.getElementById('health-content').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+        
         // Load all
         async function loadAll() {
             await Promise.all([
@@ -657,7 +719,8 @@
                 loadPositions(),
                 loadTrades(),
                 loadStrategySignals(),
-                loadSystemStatus()
+                loadSystemStatus(),
+                loadHealthStatus()
             ]);
             
             document.getElementById('update-time').textContent = 

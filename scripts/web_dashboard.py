@@ -2291,6 +2291,113 @@ def api_decision_audit():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/health')
+def api_health():
+    """系统健康检查API"""
+    try:
+        checks = []
+        overall_status = 'healthy'
+        
+        # 1. 检查定时任务
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['systemctl', '--user', 'is-active', 'v5-live-20u.user.timer'],
+                capture_output=True, text=True, timeout=5
+            )
+            timer_active = result.returncode == 0
+            
+            if timer_active:
+                checks.append({'name': '定时任务', 'status': 'healthy', 'detail': 'v5-live-20u运行中'})
+            else:
+                checks.append({'name': '定时任务', 'status': 'critical', 'detail': 'v5-live-20u未运行'})
+                overall_status = 'critical'
+        except Exception as e:
+            checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(e)})
+            overall_status = 'warning'
+        
+        # 2. 检查数据库
+        try:
+            orders_db = REPORTS_DIR / 'orders.sqlite'
+            if orders_db.exists():
+                conn = sqlite3.connect(str(orders_db))
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM orders")
+                count = cursor.fetchone()[0]
+                conn.close()
+                checks.append({'name': '数据库', 'status': 'healthy', 'detail': f'{count}条订单记录'})
+            else:
+                checks.append({'name': '数据库', 'status': 'critical', 'detail': 'orders.sqlite不存在'})
+                overall_status = 'critical'
+        except Exception as e:
+            checks.append({'name': '数据库', 'status': 'warning', 'detail': str(e)})
+        
+        # 3. 检查OKX API
+        try:
+            import os, time, hmac, hashlib, base64, requests
+            from dotenv import load_dotenv
+            load_dotenv(str(WORKSPACE / '.env'))
+            
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
+            
+            if key and sec and pp:
+                start = time.time()
+                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+                path = '/api/v5/account/balance'
+                msg = ts + 'GET' + path
+                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
+                
+                headers = {
+                    'OK-ACCESS-KEY': key,
+                    'OK-ACCESS-SIGN': sig,
+                    'OK-ACCESS-TIMESTAMP': ts,
+                    'OK-ACCESS-PASSPHRASE': pp,
+                }
+                
+                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
+                latency = (time.time() - start) * 1000
+                
+                if resp.status_code == 200 and resp.json().get('code') == '0':
+                    checks.append({'name': 'OKX API', 'status': 'healthy', 'detail': f'{latency:.0f}ms'})
+                else:
+                    checks.append({'name': 'OKX API', 'status': 'critical', 'detail': 'API响应异常'})
+                    overall_status = 'critical'
+            else:
+                checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'API密钥未配置'})
+        except Exception as e:
+            checks.append({'name': 'OKX API', 'status': 'warning', 'detail': str(e)})
+        
+        # 4. 检查磁盘空间
+        try:
+            import shutil
+            total, used, free = shutil.disk_usage(WORKSPACE)
+            free_gb = free / (1024**3)
+            used_percent = used / total * 100
+            
+            if free_gb < 1:
+                checks.append({'name': '磁盘空间', 'status': 'critical', 'detail': f'仅剩{free_gb:.1f}GB'})
+                overall_status = 'critical'
+            elif used_percent > 90:
+                checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': f'已用{used_percent:.1f}%'})
+                if overall_status == 'healthy':
+                    overall_status = 'warning'
+            else:
+                checks.append({'name': '磁盘空间', 'status': 'healthy', 'detail': f'{free_gb:.1f}GB可用'})
+        except Exception as e:
+            checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': str(e)})
+        
+        return jsonify({
+            'status': overall_status,
+            'checks': checks,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print("="*60)
     print("V5 Web Dashboard 启动中...")
