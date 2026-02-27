@@ -8,3 +8,9 @@ v4_export/
 
 # 归档脚本（本地保留，不上传GitHub）
 scripts/archive/
+
+# 归档文件
+*.zip
+*.tar.gz
+*.tar
+reports*.zip
