@@ -515,7 +515,7 @@ systemctl --user restart v5-web-dashboard.service
 - ✅ NaN传播修复 - 改进RSI/MACD/布林带计算
 - ✅ 硬编码路径 - 7个脚本改为动态路径检测
 
-**Medium (13)**
+**Medium (15)**
 - ✅ 数据库连接池 - MLDataCollector连接管理
 - ✅ 异常处理细化 - 区分可恢复/致命错误
 - ✅ 硬编码魔数 - 灰尘阈值提取到配置
@@ -523,8 +523,9 @@ systemctl --user restart v5-web-dashboard.service
 - ✅ 日志格式统一 - print改为logging
 - ✅ httpx.Client上下文管理器支持
 - ✅ 类型注解完善 - MLDataCollector方法
+- ✅ **代码重复消除 - 提取src/utils/features.py**
 
-**提交**: `d8b17a9`, `9fd4b23`, `0489e8a`, `a505a6e`
+**提交**: `d8b17a9`, `9fd4b23`, `0489e8a`, `a505a6e`, `4537b51`
 
 ### 2026-02-27
 - ✅ Web面板：持仓盈亏显示修复，与交易所同步
