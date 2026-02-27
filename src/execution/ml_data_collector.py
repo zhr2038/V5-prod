@@ -5,12 +5,16 @@ ML训练数据收集系统
 
 import sqlite3
 import json
+import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
+
+# 设置日志
+logger = logging.getLogger(__name__)
 
 
 class MLDataCollectorError(Exception):
@@ -95,7 +99,7 @@ class MLDataCollector:
             try:
                 self._conn.close()
             except Exception as e:
-                print(f"[ML] Warning: error closing connection: {e}")
+                logger.warning(f"[ML] Warning: error closing connection: {e}")
             finally:
                 self._conn = None
     
@@ -204,17 +208,15 @@ class MLDataCollector:
             
         except FeatureCalculationError as e:
             # 可恢复错误，记录警告
-            print(f"[ML Warning] Feature calculation failed for {symbol}: {e}")
+            logger.warning(f"[ML Warning] Feature calculation failed for {symbol}: {e}")
             return False
         except MLDataCollectorError as e:
             # 数据库错误，可能需要重试
-            print(f"[ML Error] Database error for {symbol}: {e}")
+            logger.error(f"[ML Error] Database error for {symbol}: {e}")
             return False
         except Exception as e:
             # 意外错误，记录详细堆栈
-            import traceback
-            print(f"[ML Critical] Unexpected error collecting features for {symbol}: {e}")
-            traceback.print_exc()
+            logger.exception(f"[ML Critical] Unexpected error collecting features for {symbol}: {e}")
             return False
     
     def _calculate_features(self, data: Dict) -> Dict:
@@ -392,13 +394,13 @@ class MLDataCollector:
                         ''', (record_id,))
                         failed_count += 1
                 except Exception as e:
-                    print(f"[ML] Error processing record {record_id}: {e}")
+                    logger.error(f"[ML] Error processing record {record_id}: {e}")
                     failed_count += 1
             
             conn.commit()
             
             if filled_count > 0 or failed_count > 0:
-                print(f"[ML] 回填完成: {filled_count}条成功, {failed_count}条失败")
+                logger.info(f"[ML] 回填完成: {filled_count}条成功, {failed_count}条失败")
             
             return filled_count
             
@@ -453,7 +455,7 @@ class MLDataCollector:
             if not valid_files:
                 # 如果没有包含足够数据的文件，使用最新的（但有泄露风险警告）
                 latest_file = max(cache_files, key=lambda x: x.stat().st_mtime)
-                print(f"[ML Warning] 可能使用不完整数据计算 {symbol} 的未来收益")
+                logger.warning(f"[ML Warning] 可能使用不完整数据计算 {symbol} 的未来收益")
             else:
                 # 使用包含足够数据的最早文件（最接近start_timestamp的文件）
                 latest_file = min(valid_files, key=lambda x: x.stat().st_mtime)
@@ -473,7 +475,7 @@ class MLDataCollector:
             # 关键验证：确保数据不包含未来时间
             max_data_time = df['timestamp'].max()
             if max_data_time < end_dt:
-                print(f"[ML Warning] 缓存数据不足: 需要{end_dt}, 实际{max_data_time}")
+                logger.warning(f"[ML Warning] 缓存数据不足: 需要{end_dt}, 实际{max_data_time}")
                 return None
             
             # 获取起始价格（最接近start_timestamp的K线收盘价）
@@ -529,20 +531,20 @@ class MLDataCollector:
             df = pd.read_sql_query(query, conn)
             
             if len(df) < min_samples:
-                print(f"Insufficient samples: {len(df)} < {min_samples}")
+                logger.warning(f"Insufficient samples: {len(df)} < {min_samples}")
                 return False
             
             # 保存到CSV
             df.to_csv(output_path, index=False)
-            print(f"Exported {len(df)} samples to {output_path}")
+            logger.info(f"Exported {len(df)} samples to {output_path}")
             
             # 打印统计
-            print(f"\nTraining Data Statistics:")
-            print(f"  Total samples: {len(df)}")
-            print(f"  Symbols: {df['symbol'].nunique()}")
-            print(f"  Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
-            print(f"  Avg future return: {df['future_return_6h'].mean():.4f}")
-            print(f"  Return std: {df['future_return_6h'].std():.4f}")
+            logger.info(f"\nTraining Data Statistics:")
+            logger.info(f"  Total samples: {len(df)}")
+            logger.info(f"  Symbols: {df['symbol'].nunique()}")
+            logger.info(f"  Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+            logger.info(f"  Avg future return: {df['future_return_6h'].mean():.4f}")
+            logger.info(f"  Return std: {df['future_return_6h'].std():.4f}")
             
             return True
             
@@ -605,7 +607,7 @@ def on_trading_cycle(timestamp, market_data, regime):
     
     # 2. 回填6小时前的标签
     filled_count = data_collector.fill_labels(timestamp)
-    print(f"Filled {filled_count} labels")
+    logger.info(f"Filled {filled_count} labels")
 
 # 定期导出训练数据（每天一次）
 def daily_export():
