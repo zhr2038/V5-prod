@@ -155,6 +155,12 @@ class V5Pipeline:
         self.data_collector = MLDataCollector()
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
+        """按市值计价更新持仓
+        
+        Args:
+            store: 持仓存储
+            market_data_1h: 市场数据
+        """
         now_ts = self.clock.now().isoformat().replace("+00:00", "Z")
         for p in store.list():
             s = market_data_1h.get(p.symbol)
@@ -165,6 +171,16 @@ class V5Pipeline:
             store.mark_position(symbol=p.symbol, now_ts=now_ts, mark_px=mark, high_px=hi)
 
     def compute_equity(self, cash_usdt: float, positions: List[Position], market_data_1h: Dict[str, MarketSeries]) -> float:
+        """计算总权益
+        
+        Args:
+            cash_usdt: 现金余额
+            positions: 持仓列表
+            market_data_1h: 市场数据
+            
+        Returns:
+            总权益 (现金 + 持仓市值)
+        """
         eq = float(cash_usdt)
         for p in positions:
             s = market_data_1h.get(p.symbol)
@@ -182,6 +198,27 @@ class V5Pipeline:
         run_logger=None,
         audit: Optional[DecisionAudit] = None,
     ) -> PipelineOutput:
+        """运行完整的交易流水线
+        
+        Pipeline流程:
+        1. 市场状态检测 (Regime)
+        2. Alpha因子计算
+        3. 投资组合分配
+        4. 风控检查
+        5. 退出策略评估
+        6. 订单生成
+        
+        Args:
+            market_data_1h: 1小时K线数据
+            positions: 当前持仓
+            cash_usdt: 现金余额
+            equity_peak_usdt: 权益峰值
+            run_logger: 运行日志记录器
+            audit: 决策审计对象
+            
+        Returns:
+            流水线输出 (Alpha, Regime, Portfolio, Orders)
+        """
         # mark first
         store = None
         # 严谨的类型检查：确保positions是列表且元素有symbol属性

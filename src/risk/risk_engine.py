@@ -10,7 +10,17 @@ log = logging.getLogger(__name__)
 
 
 class RiskEngine:
+    """风险引擎
+    
+    基于回撤计算风险调整系数，控制仓位暴露
+    """
+    
     def __init__(self, cfg: RiskConfig):
+        """初始化风险引擎
+        
+        Args:
+            cfg: 风险配置
+        """
         self.cfg = cfg
         self._validate_config()
 
@@ -56,6 +66,14 @@ class RiskEngine:
         return RiskDecision(delever_mult=1.0, reason="ok")
 
     def exposure_multiplier(self, drawdown_pct: float) -> float:
+        """计算风险调整后的暴露乘数
+        
+        Args:
+            drawdown_pct: 回撤百分比 (0-1)
+            
+        Returns:
+            暴露乘数 (0-1)，回撤超过阈值时降低
+        """
         try:
             dd = float(drawdown_pct)
             # Clamp to reasonable range

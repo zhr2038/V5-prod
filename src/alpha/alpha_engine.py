@@ -38,13 +38,29 @@ def _rsi(closes: List[float], period: int = 14) -> float:
 
 @dataclass
 class AlphaSnapshot:
+    """Alpha因子快照
+    
+    包含原始因子、标准化因子和最终评分
+    """
     raw_factors: Dict[str, Dict[str, float]]  # symbol -> factor -> value
     z_factors: Dict[str, Dict[str, float]]
     scores: Dict[str, float]
 
 
 class AlphaEngine:
+    """Alpha因子引擎
+    
+    计算多因子Alpha评分，支持：
+    - 传统5因子Alpha (动量、波动率、成交量、RSI等)
+    - 多策略模式 (趋势跟踪 + 均值回归 + 6因子Alpha)
+    """
+    
     def __init__(self, cfg: AlphaConfig):
+        """初始化Alpha引擎
+        
+        Args:
+            cfg: Alpha配置
+        """
         self.cfg = cfg
 
         # 初始化多策略系统（如果启用）
@@ -122,6 +138,14 @@ class AlphaEngine:
         print(f"              - 6因子Alpha: 50%")
 
     def compute_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
+        """计算Alpha评分
+        
+        Args:
+            market_data: 市场数据 {symbol: MarketSeries}
+            
+        Returns:
+            评分字典 {symbol: score}
+        """
         # 如果使用多策略，返回多策略信号
         if self.use_multi_strategy and self.multi_strategy_adapter:
             return self._compute_multi_strategy_scores(market_data)
@@ -212,6 +236,15 @@ class AlphaEngine:
         return scores
 
     def compute_snapshot(self, market_data: Dict[str, MarketSeries], use_robust_zscore: bool = True) -> AlphaSnapshot:
+        """计算完整的Alpha快照（包含原始因子、标准化因子和评分）
+        
+        Args:
+            market_data: 市场数据 {symbol: MarketSeries}
+            use_robust_zscore: 是否使用稳健标准化（去极值）
+            
+        Returns:
+            Alpha快照
+        """
         # 如果使用多策略，直接返回多策略结果
         if self.use_multi_strategy and self.multi_strategy_adapter:
             scores = self._compute_multi_strategy_scores(market_data)

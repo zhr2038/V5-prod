@@ -40,6 +40,18 @@ def _atr_pct(series: MarketSeries, n: int = 14) -> float:
 
 @dataclass
 class RegimeResult:
+    """市场状态检测结果
+    
+    Attributes:
+        state: 市场状态 (Trending/Sideways/Risk-Off)
+        atr_pct: ATR百分比
+        ma20: 20日均线
+        ma60: 60日均线
+        multiplier: 仓位乘数
+        hmm_state: HMM状态 (可选)
+        hmm_probability: HMM概率 (可选)
+        hmm_probs: HMM各状态概率分布 (可选)
+    """
     state: RegimeState
     atr_pct: float
     ma20: float
@@ -52,7 +64,21 @@ class RegimeResult:
 
 
 class RegimeEngine:
+    """市场状态引擎
+    
+    检测市场状态 (趋势/震荡/风险)，支持：
+    - 传统MA+ATR方法
+    - HMM隐马尔可夫模型 (可选)
+    - 情绪数据融合
+    """
+    
     def __init__(self, cfg: RegimeConfig, use_hmm: bool = False):
+        """初始化市场状态引擎
+        
+        Args:
+            cfg: 市场状态配置
+            use_hmm: 是否使用HMM模型
+        """
         self.cfg = cfg
         self.use_hmm = use_hmm and HMM_AVAILABLE
         self.sentiment_cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
