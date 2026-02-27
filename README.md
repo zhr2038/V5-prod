@@ -470,6 +470,37 @@ systemctl --user restart v5-web-dashboard.service
 - ✅ **数据导出修复**：排除自增id列，避免伪相关
 - ✅ **训练脚本统一**：两个训练路径（直接传入/market_data）都使用安全特征
 
+### 2026-02-28
+#### ML模型重构（重大改进）
+- ✅ **LightGBM → Ridge回归**（解决严重过拟合）
+  - Train IC: 0.95→0.83, Valid IC: -0.09→0.04 ✅
+  - 移除泄露特征（id列、returns_1h/6h、volatility_ratio）
+- ✅ **特征工程优化**
+  - 添加ml_feature_optimizer.py（移除高相关特征）
+  - 添加ml_time_series_cv.py（时序交叉验证）
+  - 添加check_label_leakage.py（泄露检测工具）
+
+#### 代码审查修复（16个问题）
+**Critical (3)**
+- ✅ ML数据泄露风险 - 添加缓存文件时间戳验证
+- ✅ 订单精度丢失 - 全程使用Decimal计算
+- ✅ 多策略信号合并 - 加权平均替代简单取最大
+
+**High (5)**
+- ✅ Pipeline类型检查 - 严谨的positions验证
+- ✅ 时间戳处理 - 明确阈值判断替代相对接近度
+- ✅ 配置验证 - AlphaWeights总和=1.0, RiskConfig逻辑校验
+- ✅ 价格无效告警 - 记录并汇总无效价格symbols
+- ✅ NaN传播修复 - 改进RSI/MACD/布林带计算
+
+**Medium (8)**
+- ✅ 数据库连接池 - MLDataCollector连接管理
+- ✅ 异常处理细化 - 区分可恢复/致命错误
+- ✅ 硬编码魔数 - 灰尘阈值提取到配置
+- ✅ 资源管理 - LiveExecutionEngine.close()和上下文管理器
+
+**提交**: `16a44db`, `26ec009`, `185f5a8`
+
 ### 2026-02-27
 - ✅ Web面板：持仓盈亏显示修复，与交易所同步
 - ✅ 实时价格：优先OKX API，缓存15分钟过期
