@@ -67,12 +67,24 @@ class MLFactorModel:
         """
         特征工程 - 从原始数据构建ML特征
         
+        使用 src/utils/features.py 中的公共函数
+        
         Features:
         - 价格动量特征
         - 波动率特征
         - 成交量特征
         - 技术指标特征
         """
+        from src.utils.features import (
+            calculate_price_features,
+            calculate_volatility_features,
+            calculate_volume_features,
+            calculate_rsi,
+            calculate_macd,
+            calculate_bollinger_position,
+            calculate_price_position
+        )
+        
         features = pd.DataFrame()
         
         for symbol, data in market_data.items():
@@ -84,65 +96,69 @@ class MLFactorModel:
             high = pd.Series(data.get('high', close))
             low = pd.Series(data.get('low', close))
             
-            # 1. 收益率特征
-            returns_1h = close.pct_change(1)
-            returns_6h = close.pct_change(6)
-            returns_24h = close.pct_change(24)
+            # 计算所有特征（逐点计算，保留时间序列）
+            n = len(close)
             
-            # 2. 动量特征
-            momentum_5d = (close - close.shift(5*24)) / close.shift(5*24)
-            momentum_20d = (close - close.shift(20*24)) / close.shift(20*24)
+            # 价格特征（逐点）
+            price_features = {
+                'returns_1h': close.pct_change(1),
+                'returns_6h': close.pct_change(6),
+                'returns_24h': close.pct_change(24),
+                'momentum_5d': (close - close.shift(5*24)) / close.shift(5*24),
+                'momentum_20d': (close - close.shift(20*24)) / close.shift(20*24),
+            }
             
-            # 3. 波动率特征
-            volatility_6h = returns_1h.rolling(6).std()
-            volatility_24h = returns_1h.rolling(24).std()
-            volatility_ratio = volatility_6h / volatility_24h
+            # 波动率特征
+            returns_1h_series = close.pct_change(1)
+            vol_features = {
+                'volatility_6h': returns_1h_series.rolling(6).std(),
+                'volatility_24h': returns_1h_series.rolling(24).std(),
+            }
+            vol_features['volatility_ratio'] = (
+                vol_features['volatility_6h'] / vol_features['volatility_24h']
+            ).replace([np.inf, -np.inf], 1.0).fillna(1.0)
             
-            # 4. 成交量特征
+            # 成交量特征
             volume_sma = volume.rolling(24).mean()
-            volume_ratio = volume / volume_sma
-            obv = (np.sign(returns_1h) * volume).cumsum()
+            vol_calc_features = {
+                'volume_ratio': (volume / volume_sma).replace([np.inf, -np.inf], 1.0).fillna(1.0),
+                'obv': (np.sign(returns_1h_series) * volume).cumsum(),
+            }
             
-            # 5. 技术指标
+            # 技术指标
             # RSI
             delta = close.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
+            rs = (gain / loss).replace([np.inf, -np.inf], 1.0)
             rsi = 100 - (100 / (1 + rs))
+            rsi = rsi.fillna(50.0)  # NaN时用中性值
             
             # MACD
             exp1 = close.ewm(span=12).mean()
             exp2 = close.ewm(span=26).mean()
-            macd = exp1 - exp2
-            macd_signal = macd.ewm(span=9).mean()
+            macd_line = exp1 - exp2
+            macd_signal_line = macd_line.ewm(span=9).mean()
             
-            # 布林带位置
+            # 布林带
             bb_middle = close.rolling(20).mean()
             bb_std = close.rolling(20).std()
-            bb_position = (close - bb_middle) / (2 * bb_std)
+            bb_position = ((close - bb_middle) / (2 * bb_std)).fillna(0.5)
             
-            # 6. 价格位置特征
+            # 价格位置
             high_20d = high.rolling(20*24).max()
             low_20d = low.rolling(20*24).min()
-            price_position = (close - low_20d) / (high_20d - low_20d)
+            price_position = ((close - low_20d) / (high_20d - low_20d)).fillna(0.5)
             
             # 组装特征
             symbol_features = pd.DataFrame({
-                'symbol': symbol,
-                'returns_1h': returns_1h,
-                'returns_6h': returns_6h,
-                'returns_24h': returns_24h,
-                'momentum_5d': momentum_5d,
-                'momentum_20d': momentum_20d,
-                'volatility_6h': volatility_6h,
-                'volatility_24h': volatility_24h,
-                'volatility_ratio': volatility_ratio,
-                'volume_ratio': volume_ratio,
-                'obv': obv,
+                'symbol': [symbol] * n,
+                **price_features,
+                **vol_features,
+                **vol_calc_features,
                 'rsi': rsi,
-                'macd': macd,
-                'macd_signal': macd_signal,
+                'macd': macd_line,
+                'macd_signal': macd_signal_line,
                 'bb_position': bb_position,
                 'price_position': price_position,
             })
