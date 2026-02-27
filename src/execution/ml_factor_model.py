@@ -203,15 +203,37 @@ class MLFactorModel:
         if len(features) < self.config.min_train_samples:
             raise ValueError(f"Insufficient samples: {len(features)} < {self.config.min_train_samples}")
         
-        X = features[self.feature_names]
+        # 按时间排序（关键！防止未来数据泄露）
+        if 'timestamp' in features.columns:
+            features = features.sort_values('timestamp').reset_index(drop=True)
+        
+        # 清理特征 - 移除泄露和高相关特征
+        safe_features = [
+            'returns_24h',      # 只保留长周期收益
+            'momentum_5d',
+            'momentum_20d',
+            'volatility_24h',   # 只保留长周期波动率
+            'volume_ratio',
+            'obv',
+            'rsi',
+            'macd',
+            'macd_signal',
+            'bb_position',
+            'price_position',
+        ]
+        # 只保留实际存在的列
+        safe_features = [c for c in safe_features if c in features.columns]
+        
+        X = features[safe_features]
         y = features['target']
         
-        # 时间序列分割（避免未来数据泄露）
+        # 更新时间序列分割（避免未来数据泄露）
         split_idx = int(len(features) * 0.8)
         X_train, X_valid = X.iloc[:split_idx], X.iloc[split_idx:]
         y_train, y_valid = y.iloc[:split_idx], y.iloc[split_idx:]
         
         print(f"Training samples: {len(X_train)}, Validation samples: {len(X_valid)}")
+        print(f"Features used: {safe_features}")
         self._train_with_data(X_train, y_train, X_valid, y_valid)
     
     def _train_with_data(self, X_train, y_train, X_valid, y_valid):
