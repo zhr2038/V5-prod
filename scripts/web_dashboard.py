@@ -528,15 +528,63 @@ def api_positions():
 
         positions.sort(key=lambda x: x.get('value_usdt', 0), reverse=True)
         
-        # 计算持仓盈亏（简化计算：使用已实现盈亏作为参考）
+        # 从交易记录计算真实成本价和盈亏
+        try:
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                for p in positions:
+                    symbol = p.get('symbol', '')
+                    if not symbol:
+                        continue
+                    
+                    # 查询该币种的成交记录
+                    cursor.execute("""
+                        SELECT side, notional_usdt, sz, fill_px
+                        FROM orders 
+                        WHERE inst_id LIKE ? AND state='FILLED'
+                        ORDER BY created_ts DESC
+                    """, (f"%{symbol}%",))
+                    
+                    rows = cursor.fetchall()
+                    total_buy_cost = 0.0
+                    total_buy_qty = 0.0
+                    
+                    for row in rows:
+                        side, notional, sz, fill_px = row
+                        if side == 'buy':
+                            total_buy_cost += float(notional or 0)
+                            total_buy_qty += float(sz or 0)
+                    
+                    # 计算平均成本
+                    if total_buy_qty > 0:
+                        avg_cost = total_buy_cost / total_buy_qty
+                        current_qty = float(p.get('qty', 0))
+                        
+                        # 按比例估算当前持仓成本
+                        if current_qty > 0 and total_buy_qty > 0:
+                            ratio = min(current_qty / total_buy_qty, 1.0)
+                            adjusted_cost = avg_cost * (current_qty / (current_qty * ratio))
+                            if adjusted_cost > 0:
+                                p['avg_px'] = round(adjusted_cost, 6)
+                
+                conn.close()
+        except Exception as e:
+            print(f"[positions] 成本计算错误: {e}")
+        
+        # 计算持仓盈亏
         for p in positions:
-            avg_px = p.get('avg_px', 0)
-            last_px = p.get('last_price', 0)
+            avg_px = float(p.get('avg_px', 0))
+            last_px = float(p.get('last_price', 0))
             if avg_px > 0 and last_px > 0:
                 p['pnl_pct'] = round((last_px - avg_px) / avg_px, 4)
+                # 盈亏金额
+                qty = float(p.get('qty', 0))
+                p['pnl_value'] = round((last_px - avg_px) * qty, 4)
             else:
                 p['pnl_pct'] = 0.0
-            p['price'] = last_px  # 前端期望的字段名
+                p['pnl_value'] = 0.0
+            p['price'] = last_px
             p['value'] = p.get('value_usdt', 0)
             p['quantity'] = p.get('qty', 0)
         
