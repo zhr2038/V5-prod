@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""
+V5 风控自动恢复机制
+
+功能：
+- 监控回撤状态
+- 自动降级风险档位（PROTECT → DEFENSE → NEUTRAL）
+- 可配置是否启用自动恢复
+- 提供手动暂停开关
+"""
+
+import json
+import sqlite3
+from pathlib import Path
+from datetime import datetime, timedelta
+
+REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
+RISK_STATE_FILE = REPORTS_DIR / 'auto_risk_guard.json'
+ORDERS_DB = REPORTS_DIR / 'orders.sqlite'
+
+# 自动恢复阈值配置
+RECOVERY_THRESHOLDS = {
+    'PROTECT': {
+        'drawdown_exit': 0.15,   # 回撤从24%→15%时退出PROTECT
+        'target_level': 'DEFENSE'
+    },
+    'DEFENSE': {
+        'drawdown_exit': 0.08,   # 回撤从15%→8%时退出DEFENSE
+        'target_level': 'NEUTRAL'
+    }
+}
+
+
+class RiskAutoRecovery:
+    """风控自动恢复管理器"""
+    
+    def __init__(self):
+        self.config = self.load_config()
+    
+    def load_config(self):
+        """加载配置"""
+        config_file = REPORTS_DIR / 'risk_recovery_config.json'
+        default_config = {
+            'enabled': True,           # 是否启用自动恢复
+            'cooldown_hours': 24,      # 档位切换冷却期
+            'require_consecutive': 2,   # 需要连续N次检查满足条件才降级
+            'min_time_in_level_hours': 4,  # 在档位至少停留4小时
+            'manual_override_until': None   # 手动暂停截止时间
+        }
+        
+        if config_file.exists():
+            try:
+                with open(config_file) as f:
+                    saved = json.load(f)
+                    default_config.update(saved)
+            except:
+                pass
+        
+        return default_config
+    
+    def save_config(self):
+        """保存配置"""
+        config_file = REPORTS_DIR / 'risk_recovery_config.json'
+        with open(config_file, 'w') as f:
+            json.dump(self.config, f, indent=2)
+    
+    def get_current_risk_state(self):
+        """获取当前风险状态"""
+        if RISK_STATE_FILE.exists():
+            try:
+                with open(RISK_STATE_FILE) as f:
+                    return json.load(f)
+            except:
+                pass
+        return {'level': 'NEUTRAL', 'since': datetime.now().isoformat()}
+    
+    def get_drawdown_history(self, hours=24):
+        """获取回撤历史"""
+        try:
+            # 从equity曲线计算回撤
+            equity_file = REPORTS_DIR / 'equity_history.jsonl'
+            if not equity_file.exists():
+                return []
+            
+            points = []
+            cutoff = datetime.now() - timedelta(hours=hours)
+            
+            with open(equity_file) as f:
+                for line in f:
+                    try:
+                        data = json.loads(line)
+                        ts = datetime.fromisoformat(data.get('ts', '').replace('Z', '+00:00'))
+                        if ts > cutoff:
+                            points.append({
+                                'ts': ts,
+                                'equity': data.get('equity', 0),
+                                'peak': data.get('peak', 0),
+                                'drawdown': data.get('drawdown', 0)
+                            })
+                    except:
+                        continue
+            
+            return points
+        except:
+            return []
+    
+    def calculate_avg_drawdown(self, hours=6):
+        """计算最近N小时平均回撤"""
+        history = self.get_drawdown_history(hours=hours)
+        if not history:
+            return 0
+        
+        drawdowns = [h['drawdown'] for h in history if h['drawdown'] is not None]
+        if not drawdowns:
+            return 0
+        
+        return sum(drawdowns) / len(drawdowns)
+    
+    def check_recovery_conditions(self, current_level):
+        """检查是否满足降级条件"""
+        if current_level not in RECOVERY_THRESHOLDS:
+            return False, None
+        
+        threshold = RECOVERY_THRESHOLDS[current_level]
+        avg_drawdown = self.calculate_avg_drawdown(hours=6)
+        
+        # 检查回撤是否低于退出阈值
+        if avg_drawdown <= threshold['drawdown_exit']:
+            return True, threshold['target_level']
+        
+        return False, None
+    
+    def time_in_current_level(self, state):
+        """计算在当前档位停留的时间"""
+        try:
+            since = datetime.fromisoformat(state.get('since', datetime.now().isoformat()))
+            return (datetime.now() - since).total_seconds() / 3600  # 小时
+        except:
+            return 999  # 如果解析失败，假设已停留很久
+    
+    def evaluate_recovery(self):
+        """评估是否执行自动恢复"""
+        # 检查是否被手动暂停
+        if self.config.get('manual_override_until'):
+            until = datetime.fromisoformat(self.config['manual_override_until'])
+            if datetime.now() < until:
+                return {'action': 'paused', 'reason': f'手动暂停至 {until}'}
+        
+        # 检查是否启用
+        if not self.config.get('enabled', True):
+            return {'action': 'disabled', 'reason': '自动恢复已禁用'}
+        
+        # 获取当前状态
+        state = self.get_current_risk_state()
+        current_level = state.get('level', 'NEUTRAL')
+        
+        # NEUTRAL不需要恢复
+        if current_level == 'NEUTRAL':
+            return {'action': 'none', 'reason': '已在NEUTRAL档位'}
+        
+        # 检查停留时间
+        hours_in_level = self.time_in_current_level(state)
+        if hours_in_level < self.config.get('min_time_in_level_hours', 4):
+            return {'action': 'wait', 'reason': f'在当前档位仅{hours_in_level:.1f}小时，需至少{self.config["min_time_in_level_hours"]}小时'}
+        
+        # 检查降级条件
+        should_recover, target_level = self.check_recovery_conditions(current_level)
+        
+        if should_recover:
+            return {
+                'action': 'recover',
+                'from_level': current_level,
+                'to_level': target_level,
+                'reason': f'回撤已恢复至阈值以下，建议降级至{target_level}'
+            }
+        
+        avg_dd = self.calculate_avg_drawdown(hours=6)
+        return {
+            'action': 'hold',
+            'reason': f'当前档位{current_level}，最近6小时平均回撤{avg_dd:.1%}，未满足降级条件'
+        }
+    
+    def execute_recovery(self, target_level):
+        """执行恢复（修改风险状态文件）"""
+        try:
+            state = self.get_current_risk_state()
+            old_level = state.get('level', 'NEUTRAL')
+            
+            # 更新状态
+            state['level'] = target_level
+            state['since'] = datetime.now().isoformat()
+            state['recovered_from'] = old_level
+            state['recovery_reason'] = 'auto'
+            
+            with open(RISK_STATE_FILE, 'w') as f:
+                json.dump(state, f, indent=2)
+            
+            return True, f"已从{old_level}降级至{target_level}"
+        except Exception as e:
+            return False, str(e)
+    
+    def print_report(self):
+        """打印评估报告"""
+        print("=" * 60)
+        print("🛡️  V5 风控自动恢复评估")
+        print("=" * 60)
+        print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"自动恢复: {'✅ 启用' if self.config.get('enabled') else '❌ 禁用'}")
+        print()
+        
+        # 当前状态
+        state = self.get_current_risk_state()
+        print(f"当前档位: {state.get('level', 'UNKNOWN')}")
+        print(f"进入时间: {state.get('since', 'N/A')}")
+        hours_in = self.time_in_current_level(state)
+        print(f"已停留: {hours_in:.1f} 小时")
+        print()
+        
+        # 回撤情况
+        avg_dd = self.calculate_avg_drawdown(hours=6)
+        print(f"最近6小时平均回撤: {avg_dd:.1%}")
+        
+        if state.get('level') in RECOVERY_THRESHOLDS:
+            threshold = RECOVERY_THRESHOLDS[state['level']]
+            print(f"降级阈值: {threshold['drawdown_exit']:.1%}")
+        print()
+        
+        # 评估结果
+        result = self.evaluate_recovery()
+        print(f"建议操作: {result['action'].upper()}")
+        print(f"原因: {result['reason']}")
+        
+        if result['action'] == 'recover':
+            print(f"建议降级至: {result['to_level']}")
+        
+        print("=" * 60)
+        return result
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='V5 风控自动恢复')
+    parser.add_argument('--execute', action='store_true', help='执行恢复（默认仅评估）')
+    parser.add_argument('--enable', action='store_true', help='启用自动恢复')
+    parser.add_argument('--disable', action='store_true', help='禁用自动恢复')
+    parser.add_argument('--pause-hours', type=int, help='暂停自动恢复N小时')
+    args = parser.parse_args()
+    
+    manager = RiskAutoRecovery()
+    
+    # 处理配置命令
+    if args.enable:
+        manager.config['enabled'] = True
+        manager.save_config()
+        print("✅ 已启用自动恢复")
+        return
+    
+    if args.disable:
+        manager.config['enabled'] = False
+        manager.save_config()
+        print("❌ 已禁用自动恢复")
+        return
+    
+    if args.pause_hours:
+        until = datetime.now() + timedelta(hours=args.pause_hours)
+        manager.config['manual_override_until'] = until.isoformat()
+        manager.save_config()
+        print(f"⏸️  已暂停自动恢复至 {until.strftime('%Y-%m-%d %H:%M')}")
+        return
+    
+    # 评估并打印报告
+    result = manager.print_report()
+    
+    # 执行恢复
+    if args.execute and result['action'] == 'recover':
+        print()
+        print("🔄 执行恢复...")
+        success, msg = manager.execute_recovery(result['to_level'])
+        if success:
+            print(f"✅ {msg}")
+        else:
+            print(f"❌ 失败: {msg}")
+
+
+if __name__ == '__main__':
+    main()
