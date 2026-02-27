@@ -353,16 +353,8 @@ def api_positions():
         }
 
         def get_last_price_usdt(symbol: str) -> float:
-            try:
-                cache_dir = WORKSPACE / 'data' / 'cache'
-                files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
-                if files:
-                    df = pd.read_csv(files[-1])
-                    if len(df) > 0 and 'close' in df.columns:
-                        return float(df.iloc[-1]['close'])
-            except Exception:
-                pass
-            # fallback: OKX public ticker
+            """获取币种最新价格，优先OKX实时API"""
+            # 1) 优先OKX实时API
             try:
                 r = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol}-USDT", timeout=5)
                 j = r.json()
@@ -370,6 +362,22 @@ def api_positions():
                     return float(j['data'][0].get('last') or 0)
             except Exception:
                 pass
+            
+            # 2) Fallback: 缓存文件（检查时间，超过15分钟废弃）
+            try:
+                import time
+                cache_dir = WORKSPACE / 'data' / 'cache'
+                files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
+                if files:
+                    # 检查文件修改时间
+                    file_mtime = files[-1].stat().st_mtime
+                    if time.time() - file_mtime < 900:  # 15分钟内
+                        df = pd.read_csv(files[-1])
+                        if len(df) > 0 and 'close' in df.columns:
+                            return float(df.iloc[-1]['close'])
+            except Exception:
+                pass
+            
             return 0.0
 
         pos_db = REPORTS_DIR / 'positions.sqlite'
