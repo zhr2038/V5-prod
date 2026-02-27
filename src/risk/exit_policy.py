@@ -14,6 +14,7 @@ from src.core.models import MarketSeries
 
 @dataclass
 class ExitConfig:
+    """退出策略配置"""
     atr_mult: float = 2.2
     atr_n: int = 14
     time_stop_days: int = 20
@@ -29,6 +30,12 @@ class ExitPolicy:
     """
 
     def __init__(self, cfg: ExitConfig, clock: Optional[TradingClock] = None):
+        """初始化退出策略
+
+        Args:
+            cfg: 退出策略配置
+            clock: 交易时钟
+        """
         self.cfg = cfg
         self.clock = clock or SystemClock()
 
@@ -47,6 +54,16 @@ class ExitPolicy:
         market_data: Dict[str, MarketSeries],
         regime_state: str,
     ) -> List[Order]:
+        """评估退出条件
+
+        Args:
+            positions: 持仓列表
+            market_data: 市场数据
+            regime_state: 市场状态
+
+        Returns:
+            退出订单列表
+        """
         orders: List[Order] = []
 
         # Regime exit (scaffold): if Risk-Off and enabled => close all
