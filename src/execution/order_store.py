@@ -302,6 +302,7 @@ class OrderStore:
               updated_ts=?,
               last_poll_ts=COALESCE(?, last_poll_ts),
               acc_fill_sz=COALESCE(?, acc_fill_sz),
+              sz=COALESCE(?, sz),
               avg_px=COALESCE(?, avg_px),
               fee=COALESCE(?, fee)
             WHERE cl_ord_id=?
@@ -315,6 +316,7 @@ class OrderStore:
                 str(last_error_msg) if last_error_msg is not None else None,
                 now,
                 now,
+                str(acc_fill_sz) if acc_fill_sz is not None else None,
                 str(acc_fill_sz) if acc_fill_sz is not None else None,
                 str(avg_px) if avg_px is not None else None,
                 str(fee) if fee is not None else None,
