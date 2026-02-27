@@ -241,31 +241,66 @@ class MLDataCollector:
         
         # 成交量
         volume_sma = volume.rolling(24).mean()
-        volume_ratio = volume.iloc[-1] / volume_sma.iloc[-1] if volume_sma.iloc[-1] > 0 else 1
-        obv = (np.sign(returns_series) * volume).cumsum().iloc[-1]
+        volume_sma_val = volume_sma.iloc[-1] if not volume_sma.empty else 0
+        volume_ratio = volume.iloc[-1] / volume_sma_val if volume_sma_val > 0 else 1
         
-        # RSI
+        # OBV - 处理可能的NaN
+        obv_series = (np.sign(returns_series) * volume).cumsum()
+        obv = obv_series.iloc[-1] if not obv_series.empty and not pd.isna(obv_series.iloc[-1]) else 0
+        
+        # RSI - 改进的NaN处理
         delta = close.diff()
         gain = delta.where(delta > 0, 0).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss
-        rsi = (100 - (100 / (1 + rs))).iloc[-1] if not rs.iloc[-1] != rs.iloc[-1] else 50
         
-        # MACD
+        # 避免除以零和NaN
+        loss_val = loss.iloc[-1]
+        gain_val = gain.iloc[-1]
+        if pd.isna(loss_val) or loss_val == 0:
+            rsi = 50.0  # 默认中性值
+        else:
+            rs_val = gain_val / loss_val
+            if pd.isna(rs_val):
+                rsi = 50.0
+            else:
+                rsi = 100 - (100 / (1 + rs_val))
+                if pd.isna(rsi):
+                    rsi = 50.0
+        
+        # MACD - 改进的NaN处理
         exp1 = close.ewm(span=12).mean()
         exp2 = close.ewm(span=26).mean()
-        macd = (exp1 - exp2).iloc[-1]
-        macd_signal = (exp1 - exp2).ewm(span=9).mean().iloc[-1]
+        macd_line = exp1 - exp2
+        macd_signal_line = macd_line.ewm(span=9).mean()
         
-        # 布林带位置
+        macd = macd_line.iloc[-1] if not pd.isna(macd_line.iloc[-1]) else 0
+        macd_signal = macd_signal_line.iloc[-1] if not pd.isna(macd_signal_line.iloc[-1]) else 0
+        
+        # 布林带位置 - 改进的NaN处理
         bb_middle = close.rolling(20).mean()
         bb_std = close.rolling(20).std()
-        bb_position = ((close.iloc[-1] - bb_middle.iloc[-1]) / (2 * bb_std.iloc[-1])) if bb_std.iloc[-1] > 0 else 0
+        bb_middle_val = bb_middle.iloc[-1]
+        bb_std_val = bb_std.iloc[-1]
         
-        # 价格位置
+        if pd.isna(bb_middle_val) or pd.isna(bb_std_val) or bb_std_val <= 0:
+            bb_position = 0.5  # 默认中间位置
+        else:
+            bb_position = (close.iloc[-1] - bb_middle_val) / (2 * bb_std_val)
+            if pd.isna(bb_position):
+                bb_position = 0.5
+        
+        # 价格位置 - 改进的NaN处理
         high_20d = high.rolling(20*24).max()
         low_20d = low.rolling(20*24).min()
-        price_position = ((close.iloc[-1] - low_20d.iloc[-1]) / (high_20d.iloc[-1] - low_20d.iloc[-1])) if (high_20d.iloc[-1] - low_20d.iloc[-1]) > 0 else 0.5
+        high_val = high_20d.iloc[-1]
+        low_val = low_20d.iloc[-1]
+        
+        if pd.isna(high_val) or pd.isna(low_val) or (high_val - low_val) <= 0:
+            price_position = 0.5
+        else:
+            price_position = (close.iloc[-1] - low_val) / (high_val - low_val)
+            if pd.isna(price_position):
+                price_position = 0.5
         
         return {
             'returns_1h': returns_1h,

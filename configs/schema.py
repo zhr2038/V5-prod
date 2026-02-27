@@ -56,6 +56,20 @@ class AlphaWeights(BaseModel):
             raise ValueError("weight must be finite")
         return v
 
+    @model_validator(mode='after')
+    def _check_sum(self):
+        """验证权重总和为1.0（允许0.01的浮点误差）"""
+        total = (
+            self.f1_mom_5d + 
+            self.f2_mom_20d + 
+            self.f3_vol_adj_ret_20d + 
+            self.f4_volume_expansion + 
+            self.f5_rsi_trend_confirm
+        )
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(f"Alpha weights must sum to 1.0, got {total:.4f}")
+        return self
+
 
 class AlphaConfig(BaseModel):
     weights: AlphaWeights = Field(default_factory=AlphaWeights)
@@ -95,6 +109,15 @@ class RiskConfig(BaseModel):
     max_gross_exposure: float = Field(default=1.0, gt=0, le=1.0)
     drawdown_trigger: float = Field(default=0.08, gt=0, le=1)
     drawdown_delever: float = Field(default=0.50, gt=0, le=1)
+
+    @model_validator(mode='after')
+    def _check_drawdown_logic(self):
+        """验证回撤参数的逻辑合理性"""
+        if self.drawdown_delever >= 1.0:
+            raise ValueError("drawdown_delever must be < 1.0 (it's a reduction ratio, not leverage)")
+        if self.drawdown_trigger >= self.max_gross_exposure:
+            raise ValueError("drawdown_trigger should be less than max_gross_exposure")
+        return self
 
 
 class RebalanceConfig(BaseModel):

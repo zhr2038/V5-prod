@@ -43,20 +43,34 @@ def setup_logging(level: str = "INFO") -> None:
 
 
 def _get_env_epoch_sec(name: str) -> Optional[int]:
-    """从环境变量读取时间戳（秒/毫秒兼容）"""
+    """从环境变量读取时间戳（秒/毫秒兼容）
+    
+    改进版：使用明确的阈值判断，而非相对接近度
+    """
     v = os.getenv(name)
     if not v:
         return None
     try:
         x = int(v)
-        # 判断是否为毫秒时间戳（13位）或微秒（16位）
-        # 秒级时间戳通常是10位（2001-09-09之后）
-        now_sec = int(datetime.utcnow().timestamp())
-        now_ms = now_sec * 1000
         
-        # 如果数值接近当前毫秒时间戳，则认为是毫秒
-        if abs(x - now_ms) < abs(x - now_sec):
+        # 明确的时间戳范围判断
+        # 秒级时间戳（10位）：2001-09-09 ~ 2286-11-20
+        # 毫秒级（13位）：2001-09-09 ~ 2286-11-20
+        # 微秒级（16位）：1973-03-03 ~ 2318-06-04
+        
+        if x > 1_000_000_000_000_000:  # 16位+ = 微秒
+            x //= 1_000_000
+        elif x > 1_000_000_000_000:  # 13-15位 = 毫秒
             x //= 1000
+        # 10位或更少 = 秒，保持不变
+        
+        # 验证结果合理性（必须在2000-2050年之间）
+        if x < 946684800 or x > 2524608000:  # 2000-01-01 to 2050-01-01
+            logging.getLogger(__name__).warning(
+                "Timestamp %s out of reasonable range (2000-2050)", name
+            )
+            return None
+            
         return x
     except (ValueError, TypeError) as e:
         logging.getLogger(__name__).warning("Invalid timestamp for %s: %s - %s", name, v, e)

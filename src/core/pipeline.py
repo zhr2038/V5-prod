@@ -184,8 +184,17 @@ class V5Pipeline:
     ) -> PipelineOutput:
         # mark first
         store = None
-        if positions and hasattr(positions[0], 'symbol'):
-            pass
+        # 严谨的类型检查：确保positions是列表且元素有symbol属性
+        if positions is not None and isinstance(positions, (list, tuple)) and len(positions) > 0:
+            first_pos = positions[0]
+            if hasattr(first_pos, 'symbol'):
+                pass  # 正常情况
+            elif isinstance(first_pos, dict) and 'symbol' in first_pos:
+                pass  # dict格式也接受
+            else:
+                # 类型不匹配，记录警告
+                if run_logger:
+                    run_logger.warning(f"[Pipeline] positions格式异常: {type(first_pos)}")
         # caller can pass store via run_logger hook if desired; for now, marking is done by main.
 
         # 1) Regime detection (needed early if we want regime-aware alpha weights)
@@ -485,6 +494,7 @@ class V5Pipeline:
         # 7. Rebalance orders生成（deadband + 拒绝原因审计）
         rebalance_orders: List[Order] = []
         router_decisions = []
+        invalid_price_warnings: List[Dict] = []  # 记录价格无效的告警
 
         # Risk-Off 下是否进入 close-only：
         # 仅当策略明确将 risk_off 仓位倍数设为 0 时，才强制禁止 rebalance buy。
@@ -607,6 +617,12 @@ class V5Pipeline:
             if px <= 0:
                 if audit:
                     audit.reject("no_closed_bar")
+                # 记录价格无效告警
+                invalid_price_warnings.append({
+                    "symbol": sym,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "reason": "price_invalid_or_missing"
+                })
                 continue
             
             held = next((p for p in positions if p.symbol == sym and p.qty > 0), None)
@@ -870,4 +886,10 @@ class V5Pipeline:
                 audit.add_note(f"ML data collection skipped: {str(e)[:50]}")
 
         orders = exit_orders + rebalance_orders
+        
+        # 输出价格无效警告（如果有）
+        if invalid_price_warnings and run_logger:
+            run_logger.warning(f"[Pipeline] {len(invalid_price_warnings)} symbols have invalid prices: " + 
+                             ", ".join([w['symbol'] for w in invalid_price_warnings[:5]]))
+        
         return PipelineOutput(alpha=alpha, regime=regime, portfolio=portfolio, orders=orders)
