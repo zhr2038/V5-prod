@@ -74,15 +74,23 @@ class DailyMLTrainer:
         self.log("\nLoading training data...")
         df = pd.read_csv(csv_path)
         
-        # 准备特征和目标
+        # 准备特征和目标 - 使用清理后的特征（移除泄露和高相关特征）
         feature_cols = [
-            'returns_1h', 'returns_6h', 'returns_24h',
-            'momentum_5d', 'momentum_20d',
-            'volatility_6h', 'volatility_24h', 'volatility_ratio',
-            'volume_ratio', 'obv',
-            'rsi', 'macd', 'macd_signal',
-            'bb_position', 'price_position'
+            'returns_24h',      # 只保留长周期收益
+            'momentum_5d',
+            'momentum_20d',
+            'volatility_24h',   # 只保留长周期波动率
+            'volume_ratio',
+            'obv',
+            'rsi',
+            'macd',
+            'macd_signal',
+            'bb_position',
+            'price_position',
         ]
+        
+        # 只保留存在的列
+        feature_cols = [c for c in feature_cols if c in df.columns]
         
         # 删除NaN
         df = df.dropna(subset=feature_cols + ['future_return_6h'])
@@ -97,27 +105,26 @@ class DailyMLTrainer:
         self.log(f"Training samples: {len(X)}")
         self.log(f"Features: {len(feature_cols)}")
         
-        # 4. 时间序列分割
+        # 4. 时间序列分割 - 确保按时间顺序分割
+        df = df.sort_values('timestamp').reset_index(drop=True)
         split_idx = int(len(df) * 0.8)
         X_train, X_valid = X.iloc[:split_idx], X.iloc[split_idx:]
         y_train, y_valid = y.iloc[:split_idx], y.iloc[split_idx:]
         
+        # 检查时间分割是否合理
+        train_time_end = df.iloc[split_idx-1]['timestamp']
+        valid_time_start = df.iloc[split_idx]['timestamp']
+        self.log(f"Train time range: {df.iloc[0]['timestamp']} - {train_time_end}")
+        self.log(f"Valid time range: {valid_time_start} - {df.iloc[-1]['timestamp']}")
+        
         self.log(f"Train: {len(X_train)}, Valid: {len(X_valid)}")
         
-        # 5. 训练模型 - 使用优化后的防过拟合配置
-        self.log("\nTraining LightGBM model...")
+        # 5. 训练模型 - 使用Ridge回归防过拟合
+        self.log("\nTraining Ridge Regression model...")
         
         config = MLFactorConfig(
-            n_estimators=100,      # 减少树数量
-            max_depth=4,           # 限制深度（原来是6）
-            learning_rate=0.05,
-            subsample=0.7,         # 降低采样率
-            colsample_bytree=0.7,  # 降低特征采样率
-            num_leaves=15,         # 限制叶子节点
-            min_data_in_leaf=50,   # 最小样本数
-            reg_alpha=0.1,         # L1正则化
-            reg_lambda=0.1,        # L2正则化
-            early_stopping_rounds=20  # 早停
+            model_type='ridge',
+            alpha=10.0
         )
         
         model = MLFactorModel(config)
@@ -139,9 +146,13 @@ class DailyMLTrainer:
         self.log(f"  Train IC: {train_ic:.4f}")
         self.log(f"  Valid IC: {valid_ic:.4f}")
         
-        # 判断模型是否有效
-        if valid_ic < -0.5:  # 暂时放宽阈值，允许负IC模型作为基线
-            self.log(f"⚠️  Model IC too low ({valid_ic:.4f}), not saving")
+        # 判断模型是否有效 - 对于小数据集适当放宽
+        ic_gap = train_ic - valid_ic
+        if valid_ic < -0.1:  # 验证IC不能太差
+            self.log(f"⚠️  Model validation IC too low ({valid_ic:.4f}), not saving")
+            return False
+        if ic_gap > 0.9:  # 训练/验证差距过大才认为是严重过拟合
+            self.log(f"⚠️  Model overfitting detected (gap={ic_gap:.4f}), not saving")
             return False
         
         # 7. 保存模型

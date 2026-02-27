@@ -364,8 +364,19 @@ class MLDataCollector:
         """
         conn = sqlite3.connect(self.db_path)
         
+        # 明确指定需要的列，排除id（会导致泄露）和label_filled/created_at（非特征）
         query = '''
-            SELECT * FROM feature_snapshots
+            SELECT 
+                timestamp, symbol,
+                returns_1h, returns_6h, returns_24h,
+                momentum_5d, momentum_20d,
+                volatility_6h, volatility_24h, volatility_ratio,
+                volume_ratio, obv,
+                rsi, macd, macd_signal,
+                bb_position, price_position,
+                regime,
+                future_return_6h
+            FROM feature_snapshots
             WHERE label_filled = 1
             AND future_return_6h IS NOT NULL
             ORDER BY timestamp

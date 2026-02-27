@@ -21,25 +21,27 @@ except ImportError:
 @dataclass
 class MLFactorConfig:
     """ML因子模型配置 - 优化后减少过拟合"""
-    model_type: str = 'lightgbm'  # lightgbm, xgboost, sklearn
-    n_estimators: int = 100       # 保持
-    max_depth: int = 4            # 降低从5到4，限制树深度
-    learning_rate: float = 0.05   # 保持
-    subsample: float = 0.7        # 降低从0.8到0.7，增加样本随机性
-    colsample_bytree: float = 0.7 # 降低从0.8到0.7，增加特征随机性
-    random_state: int = 42
+    model_type: str = 'ridge'  # ridge, lightgbm, xgboost, sklearn - 默认改用ridge避免过拟合
     
-    # 新增正则化参数
-    num_leaves: int = 15          # 限制叶子节点数（默认31太大）
-    min_data_in_leaf: int = 50    # 增加最小样本数（防止过拟合小样本）
-    reg_alpha: float = 0.1        # L1正则化
-    reg_lambda: float = 0.1       # L2正则化
+    # Ridge/Lasso参数
+    alpha: float = 10.0       # L2正则化强度
+    
+    # LightGBM参数（保留但不默认使用）
+    n_estimators: int = 30
+    max_depth: int = 3
+    learning_rate: float = 0.05
+    subsample: float = 0.5
+    colsample_bytree: float = 0.5
+    num_leaves: int = 7
+    min_data_in_leaf: int = 50
+    reg_alpha: float = 1.0
+    reg_lambda: float = 1.0
     
     # 训练参数
     train_lookback_days: int = 60
-    prediction_horizon: int = 6  # 预测未来6小时收益
+    prediction_horizon: int = 6
     min_train_samples: int = 100
-    early_stopping_rounds: int = 20  # 增加早停轮数
+    early_stopping_rounds: int = 10
 
 class MLFactorModel:
     """
@@ -218,18 +220,52 @@ class MLFactorModel:
         if not self.feature_names:
             self.feature_names = [c for c in X_train.columns if c not in ['symbol', 'target']]
         
-        # 训练LightGBM
-        if self.config.model_type == 'lightgbm':
+        from sklearn.preprocessing import StandardScaler
+        
+        # Ridge回归（默认，防过拟合）
+        if self.config.model_type == 'ridge':
+            from sklearn.linear_model import Ridge
+            
+            # 标准化
+            self.scaler = StandardScaler()
+            X_train_scaled = self.scaler.fit_transform(X_train)
+            X_valid_scaled = self.scaler.transform(X_valid)
+            
+            self.model = Ridge(alpha=self.config.alpha)
+            self.model.fit(X_train_scaled, y_train)
+            
+            # 评估
+            train_pred = self.model.predict(X_train_scaled)
+            valid_pred = self.model.predict(X_valid_scaled)
+            
+            train_ic = np.corrcoef(y_train, train_pred)[0, 1]
+            valid_ic = np.corrcoef(y_valid, valid_pred)[0, 1]
+            
+            print(f"\nRidge Model Performance:")
+            print(f"  Train IC: {train_ic:.4f}")
+            print(f"  Valid IC: {valid_ic:.4f}")
+            
+            # 打印系数
+            print(f"\nTop Coefficients:")
+            coef_df = pd.DataFrame({
+                'feature': self.feature_names,
+                'coef': self.model.coef_
+            }).sort_values('coef', key=abs, ascending=False)
+            for _, row in coef_df.head(5).iterrows():
+                print(f"  {row['feature']}: {row['coef']:.6f}")
+        
+        # LightGBM（可能过拟合）
+        elif self.config.model_type == 'lightgbm':
             self.model = lgb.LGBMRegressor(
                 n_estimators=self.config.n_estimators,
                 max_depth=self.config.max_depth,
                 learning_rate=self.config.learning_rate,
                 subsample=self.config.subsample,
                 colsample_bytree=self.config.colsample_bytree,
-                num_leaves=self.config.num_leaves,           # 新增：限制叶子节点
-                min_data_in_leaf=self.config.min_data_in_leaf,  # 新增：最小样本数
-                reg_alpha=self.config.reg_alpha,              # 新增：L1正则化
-                reg_lambda=self.config.reg_lambda,            # 新增：L2正则化
+                num_leaves=self.config.num_leaves,
+                min_data_in_leaf=self.config.min_data_in_leaf,
+                reg_alpha=self.config.reg_alpha,
+                reg_lambda=self.config.reg_lambda,
                 random_state=self.config.random_state,
                 verbose=-1
             )
@@ -238,26 +274,29 @@ class MLFactorModel:
                 X_train, y_train,
                 eval_set=[(X_valid, y_valid)],
                 callbacks=[
-                    lgb.early_stopping(stopping_rounds=self.config.early_stopping_rounds),  # 使用配置中的早停轮数
+                    lgb.early_stopping(stopping_rounds=self.config.early_stopping_rounds),
                     lgb.log_evaluation(period=0)
                 ]
             )
+            
+            # 评估
+            train_pred = self.model.predict(X_train)
+            valid_pred = self.model.predict(X_valid)
+            
+            train_ic = np.corrcoef(y_train, train_pred)[0, 1]
+            valid_ic = np.corrcoef(y_valid, valid_pred)[0, 1]
+            
+            print(f"\nLightGBM Model Performance:")
+            print(f"  Train IC: {train_ic:.4f}")
+            print(f"  Valid IC: {valid_ic:.4f}")
+            
+            # 打印特征重要性
+            self.print_feature_importance()
+        
+        else:
+            raise ValueError(f"Unknown model_type: {self.config.model_type}")
         
         self.is_trained = True
-        
-        # 打印特征重要性
-        self.print_feature_importance()
-        
-        # 评估
-        train_pred = self.model.predict(X_train)
-        valid_pred = self.model.predict(X_valid)
-        
-        train_ic = np.corrcoef(y_train, train_pred)[0, 1]
-        valid_ic = np.corrcoef(y_valid, valid_pred)[0, 1]
-        
-        print(f"\nModel Performance:")
-        print(f"  Train IC: {train_ic:.4f}")
-        print(f"  Valid IC: {valid_ic:.4f}")
     
     def predict(self, symbol_features: Dict[str, float]) -> float:
         """
@@ -270,6 +309,10 @@ class MLFactorModel:
         X = pd.DataFrame([symbol_features])
         X = X[self.feature_names]
         
+        # Ridge需要标准化
+        if self.config.model_type == 'ridge':
+            X = self.scaler.transform(X)
+        
         prediction = self.model.predict(X)[0]
         return prediction
     
@@ -281,6 +324,11 @@ class MLFactorModel:
             raise RuntimeError("Model not trained. Call train() first.")
         
         X = features_df[self.feature_names]
+        
+        # Ridge需要标准化
+        if self.config.model_type == 'ridge':
+            X = self.scaler.transform(X)
+        
         predictions = self.model.predict(X)
         
         return pd.Series(predictions, index=features_df.index)
