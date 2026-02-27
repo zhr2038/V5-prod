@@ -30,7 +30,6 @@ def _base_ccy_from_symbol(symbol: str) -> str:
 
 @dataclass
 class ReconcileThresholds:
-    """ReconcileThresholds类"""
     abs_usdt_tol: float = 1.0
     abs_base_tol: float = 1e-8
     dust_usdt_ignore: float = 0.0  # 0 => strict
@@ -101,7 +100,6 @@ class ReconcileEngine:
         return cash_usdt, ccy_qty
 
     def reconcile(
-        """Reconcile"""
         self,
         *,
         out_path: str = "reports/reconcile_status.json",

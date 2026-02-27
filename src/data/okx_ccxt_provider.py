@@ -19,13 +19,13 @@ class OKXCCXTProvider(MarketDataProvider):
             pass
 
     def fetch_ohlcv(
-        """Fetch ohlcv"""
         self,
         symbols: List[str],
         timeframe: str,
         limit: int = 200,
         end_ts_ms: int | None = None,
     ) -> Dict[str, MarketSeries]:
+        """Fetch ohlcv"""
         out: Dict[str, MarketSeries] = {}
         
         # 辅助函数：切片MarketSeries

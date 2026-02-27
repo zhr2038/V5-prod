@@ -88,7 +88,6 @@ def prune(obj: Dict[str, Any], *, now_ms: Optional[int] = None, max_entries: int
 
 
 def add_symbol(
-    """Add symbol"""
     symbol: str,
     *,
     reason: str,
@@ -96,6 +95,7 @@ def add_symbol(
     ttl_sec: Optional[int] = 7 * 24 * 3600,
     meta: Optional[Dict[str, Any]] = None,
 ) -> None:
+    """Add symbol to blacklist"""
     s = str(symbol).strip()
     if not s:
         return

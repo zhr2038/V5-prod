@@ -51,7 +51,6 @@ def _mid(symbol: str, ts_ms: int) -> Optional[float]:
 
 @dataclass
 class PatchResult:
-    """PatchResult类"""
     applied: bool
     reason: str
     est_total_drift_usdt: float
@@ -60,7 +59,6 @@ class PatchResult:
 
 
 def estimate_total_drift_usdt(
-    """Estimate total drift usdt"""
     *,
     exchange_ccy_cash: Dict[str, float],
     local_ccy_qty: Dict[str, float],

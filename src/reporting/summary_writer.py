@@ -13,7 +13,6 @@ from src.reporting.metrics import (
 
 
 def write_summary(
-    """Write summary"""
     run_dir: str,
     window_start_ts: int | None = None,
     window_end_ts: int | None = None,

@@ -10,11 +10,11 @@ class MarketDataProvider(ABC):
     """MarketDataProvider类"""
     @abstractmethod
     def fetch_ohlcv(
-        """Fetch ohlcv"""
         self,
         symbols: List[str],
         timeframe: str,
         limit: int,
         end_ts_ms: int | None = None,
     ) -> Dict[str, MarketSeries]:
+        """Fetch ohlcv"""
         raise NotImplementedError

@@ -19,13 +19,13 @@ def write_json(path: str, obj: Any) -> None:
 
 
 def dump_run_artifacts(
-    """Dump run artifacts"""
     reports_dir: str,
     alpha: AlphaSnapshot,
     regime: RegimeResult,
     portfolio: PortfolioSnapshot,
     execution: ExecutionReport,
 ) -> None:
+    """Dump run artifacts"""
     import os
 
     # Shadow/research mode: avoid overwriting top-level artifacts (alpha_snapshot.json etc)
