@@ -7,8 +7,9 @@ from typing import Protocol
 
 class TradingClock(Protocol):
     """交易时钟协议"""
-    def now(self) -> datetime: ...
-        """Now"""
+    def now(self) -> datetime:
+        """获取当前时间"""
+        ...
 
 
 @dataclass
