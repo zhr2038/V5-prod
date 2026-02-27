@@ -540,7 +540,7 @@ def api_positions():
                     
                     # 查询该币种的成交记录
                     cursor.execute("""
-                        SELECT side, notional_usdt, sz, fill_px
+                        SELECT side, notional_usdt, sz, avg_px
                         FROM orders 
                         WHERE inst_id LIKE ? AND state='FILLED'
                         ORDER BY created_ts DESC
@@ -551,22 +551,27 @@ def api_positions():
                     total_buy_qty = 0.0
                     
                     for row in rows:
-                        side, notional, sz, fill_px = row
-                        if side == 'buy':
-                            total_buy_cost += float(notional or 0)
-                            total_buy_qty += float(sz or 0)
+                        side, notional, sz, avg_px = row
+                        notional_val = float(notional or 0)
+                        # sz可能为NULL，从notional/avg_px计算
+                        if sz:
+                            qty_val = float(sz)
+                        elif avg_px and float(avg_px) > 0:
+                            qty_val = notional_val / float(avg_px)
+                        else:
+                            qty_val = 0
+                            
+                        if side == 'buy' and qty_val > 0:
+                            total_buy_cost += notional_val
+                            total_buy_qty += qty_val
                     
                     # 计算平均成本
                     if total_buy_qty > 0:
                         avg_cost = total_buy_cost / total_buy_qty
                         current_qty = float(p.get('qty', 0))
                         
-                        # 按比例估算当前持仓成本
-                        if current_qty > 0 and total_buy_qty > 0:
-                            ratio = min(current_qty / total_buy_qty, 1.0)
-                            adjusted_cost = avg_cost * (current_qty / (current_qty * ratio))
-                            if adjusted_cost > 0:
-                                p['avg_px'] = round(adjusted_cost, 6)
+                        if avg_cost > 0:
+                            p['avg_px'] = round(avg_cost, 6)
                 
                 conn.close()
         except Exception as e:
