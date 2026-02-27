@@ -12,6 +12,7 @@ from src.utils.math import clamp
 
 @dataclass
 class PortfolioSnapshot:
+    """投资组合快照"""
     target_weights: Dict[str, float]
     selected: List[str]
     volatilities: Dict[str, float]
@@ -19,7 +20,18 @@ class PortfolioSnapshot:
 
 
 class PortfolioEngine:
+    """投资组合引擎
+    
+    根据Alpha评分分配目标权重
+    """
+    
     def __init__(self, alpha_cfg: AlphaConfig, risk_cfg: RiskConfig):
+        """初始化投资组合引擎
+        
+        Args:
+            alpha_cfg: Alpha配置
+            risk_cfg: 风险配置
+        """
         self.alpha_cfg = alpha_cfg
         self.risk_cfg = risk_cfg
 
@@ -30,6 +42,17 @@ class PortfolioEngine:
         regime_mult: float,
         audit: Optional[Any] = None,
     ) -> PortfolioSnapshot:
+        """分配目标权重
+        
+        Args:
+            scores: Alpha评分 {symbol: score}
+            market_data: 市场数据
+            regime_mult: 市场状态乘数
+            audit: 审计对象
+            
+        Returns:
+            投资组合快照
+        """
         if not scores:
             return PortfolioSnapshot(target_weights={}, selected=[], volatilities={}, notes="no_scores")
 
