@@ -12,6 +12,19 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Position:
+    """持仓数据类
+    
+    Attributes:
+        symbol: 交易对符号
+        qty: 持仓数量
+        avg_px: 平均持仓价格
+        entry_ts: 入场时间戳
+        highest_px: 最高价
+        last_update_ts: 最后更新时间
+        last_mark_px: 最后标记价格
+        unrealized_pnl_pct: 未实现盈亏百分比
+        tags_json: 标签JSON字符串
+    """
     symbol: str
     qty: float
     avg_px: float
@@ -82,6 +95,11 @@ class PositionStore:
             log.warning("Failed to migrate position columns: %s", e)
 
     def list(self) -> List[Position]:
+        """获取所有持仓列表
+
+        Returns:
+            持仓列表
+        """
         try:
             con = sqlite3.connect(str(self.path))
             cur = con.cursor()
@@ -96,6 +114,14 @@ class PositionStore:
             return []
 
     def get(self, symbol: str) -> Optional[Position]:
+        """获取指定symbol的持仓
+
+        Args:
+            symbol: 交易对符号
+
+        Returns:
+            持仓对象，如果不存在返回None
+        """
         try:
             con = sqlite3.connect(str(self.path))
             cur = con.cursor()
@@ -111,6 +137,17 @@ class PositionStore:
             return None
 
     def upsert_buy(self, symbol: str, qty: float, px: float, now_ts: Optional[str] = None) -> Position:
+        """买入时更新或创建持仓
+
+        Args:
+            symbol: 交易对符号
+            qty: 买入数量
+            px: 买入价格
+            now_ts: 当前时间戳(可选)
+
+        Returns:
+            更新后的持仓对象
+        """
         qty = float(qty)
         px = float(px)
         now = now_ts or (datetime.utcnow().isoformat() + "Z")
@@ -229,13 +266,23 @@ class PositionStore:
         )
 
     def update_highest(self, symbol: str, highest_px: float) -> None:
+        """更新持仓最高价
+
+        Args:
+            symbol: 交易对符号
+            highest_px: 新的最高价
+        """
         p = self.get(symbol)
         if not p:
             return
         self.mark_position(symbol=symbol, now_ts=p.last_update_ts or p.entry_ts, mark_px=p.last_mark_px or p.avg_px, high_px=highest_px)
 
     def upsert_position(self, pos: Position) -> None:
-        """Insert/update a full position row (used for migrations/tests)."""
+        """Insert/update a full position row (used for migrations/tests).
+
+        Args:
+            pos: 持仓对象
+        """
         try:
             con = sqlite3.connect(str(self.path))
             c = con.cursor()
@@ -263,7 +310,13 @@ class PositionStore:
             raise
 
     def set_qty(self, symbol: str, *, qty: float, now_ts: Optional[str] = None) -> None:
-        """Update qty only (avg_px unchanged)."""
+        """Update qty only (avg_px unchanged).
+
+        Args:
+            symbol: 交易对符号
+            qty: 新的数量
+            now_ts: 当前时间戳(可选)
+        """
         p = self.get(symbol)
         if not p:
             return
@@ -283,6 +336,11 @@ class PositionStore:
         )
 
     def close_long(self, symbol: str) -> None:
+        """关闭多头持仓
+
+        Args:
+            symbol: 交易对符号
+        """
         try:
             con = sqlite3.connect(str(self.path))
             c = con.cursor()
