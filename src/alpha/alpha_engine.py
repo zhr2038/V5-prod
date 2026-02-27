@@ -12,8 +12,8 @@ from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_
 # 多策略集成
 try:
     from src.strategy.multi_strategy_system import (
-        StrategyOrchestrator, 
-        TrendFollowingStrategy, 
+        StrategyOrchestrator,
+        TrendFollowingStrategy,
         MeanReversionStrategy,
         MultiStrategyAdapter
     )
@@ -46,22 +46,22 @@ class AlphaSnapshot:
 class AlphaEngine:
     def __init__(self, cfg: AlphaConfig):
         self.cfg = cfg
-        
+
         # 初始化多策略系统（如果启用）
         self.use_multi_strategy = getattr(cfg, 'use_multi_strategy', False)
         self.multi_strategy_adapter = None
-        
+
         if self.use_multi_strategy and MULTI_STRATEGY_AVAILABLE:
             self._init_multi_strategy()
-    
+
     def _init_multi_strategy(self):
         """初始化多策略系统 (趋势跟踪 + 均值回归 + 6因子Alpha)"""
         from decimal import Decimal
         from src.strategy.multi_strategy_system import Alpha6FactorStrategy
-        
+
         # 从配置获取资金限制 - 修复：尝试多种方式获取 live_equity_cap_usdt
         total_capital = Decimal('20.0')  # 默认20 USDT
-        
+
         # 尝试从 AlphaConfig 读取（旧方式，保持兼容）
         if hasattr(self.cfg, 'live_equity_cap_usdt') and self.cfg.live_equity_cap_usdt:
             total_capital = Decimal(str(self.cfg.live_equity_cap_usdt))
@@ -73,10 +73,10 @@ class AlphaEngine:
         elif hasattr(self.cfg, 'account') and hasattr(self.cfg.account, 'live_equity_cap_usdt'):
             if self.cfg.account.live_equity_cap_usdt:
                 total_capital = Decimal(str(self.cfg.account.live_equity_cap_usdt))
-        
+
         # 创建策略编排器
         orchestrator = StrategyOrchestrator(total_capital=total_capital)
-        
+
         # 注册趋势跟踪策略 (15%资金，降低熊市噪声影响)
         trend_strategy = TrendFollowingStrategy(config={
             'fast_ma': 20,
@@ -86,7 +86,7 @@ class AlphaEngine:
             'trailing_stop': 0.04
         })
         orchestrator.register_strategy(trend_strategy, allocation=Decimal('0.15'))
-        
+
         # 注册均值回归策略 (35%资金)
         mean_revert_strategy = MeanReversionStrategy(config={
             'rsi_period': 14,
@@ -98,7 +98,7 @@ class AlphaEngine:
             'mean_rev_threshold': 0.025
         })
         orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal('0.35'))
-        
+
         # 注册6因子Alpha策略 (50%资金，主策略)
         alpha6_strategy = Alpha6FactorStrategy(config={
             'weights': {
@@ -113,36 +113,36 @@ class AlphaEngine:
             'score_threshold': 0.10
         })
         orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.50'))
-        
+
         # 创建适配器
         self.multi_strategy_adapter = MultiStrategyAdapter(orchestrator)
         print(f"[AlphaEngine] 多策略融合已启用:")
         print(f"              - 趋势跟踪: 15%")
         print(f"              - 均值回归: 35%")
         print(f"              - 6因子Alpha: 50%")
-    
+
     def compute_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
         # 如果使用多策略，返回多策略信号
         if self.use_multi_strategy and self.multi_strategy_adapter:
             return self._compute_multi_strategy_scores(market_data)
-        
+
         # 否则使用原有的6因子Alpha
         snap = self.compute_snapshot(market_data)
         return snap.scores
-    
+
     def _compute_multi_strategy_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
         """
         使用多策略系统计算评分
         """
         import pandas as pd
         from datetime import datetime
-        
+
         # 将 MarketSeries 转换为 DataFrame
         all_data = []
         for sym, series in market_data.items():
             if len(series.close) < 25:
                 continue
-            
+
             # 构建DataFrame
             df = pd.DataFrame({
                 'symbol': sym,
@@ -152,34 +152,62 @@ class AlphaEngine:
                 'volume': list(series.volume) if hasattr(series, 'volume') else [0] * len(series.close)
             })
             all_data.append(df)
-        
+
         if not all_data:
             return {}
-        
+
         market_df = pd.concat(all_data, ignore_index=True)
-        
+
         # 运行多策略
         targets = self.multi_strategy_adapter.run_strategy_cycle(market_df)
         
         # 转换为评分格式 (0-1之间的分数)
-        # 同一symbol可能出现多个信号（多策略/多阶段），避免“后写覆盖前写”。
-        scores = {}
+        # 同一symbol可能出现多个信号（多策略/多阶段），使用加权平均而非简单覆盖
+        from collections import defaultdict
+        
+        symbol_signals = defaultdict(list)  # symbol -> [(score, weight, side), ...]
+        
         for target in targets:
             sym = target['symbol'].replace('-', '/')
             # 买入信号为正分，卖出为负分
             score = float(target['signal_score']) * float(target['confidence'])
             if target['side'] == 'sell':
                 score = -score
-
-            prev = scores.get(sym)
-            if prev is None:
-                scores[sym] = score
+            
+            # 获取策略权重（如果可用），否则默认使用confidence作为权重
+            strategy_weight = float(target.get('strategy_weight', target['confidence']))
+            symbol_signals[sym].append({
+                'score': score,
+                'weight': strategy_weight,
+                'side': target['side']
+            })
+        
+        # 加权平均合并同symbol的多个信号
+        scores = {}
+        for sym, signals in symbol_signals.items():
+            if len(signals) == 1:
+                scores[sym] = signals[0]['score']
             else:
-                # 保留绝对值更强的信号；同强度时偏向卖出（更保守）
-                if abs(score) > abs(prev):
-                    scores[sym] = score
-                elif abs(score) == abs(prev) and score < prev:
-                    scores[sym] = score
+                # 分离买入和卖出信号
+                buy_signals = [s for s in signals if s['side'] == 'buy']
+                sell_signals = [s for s in signals if s['side'] == 'sell']
+                
+                # 计算加权平均
+                if buy_signals and sell_signals:
+                    # 有冲突信号时，按权重加权平均
+                    total_weight = sum(s['weight'] for s in signals)
+                    weighted_score = sum(s['score'] * s['weight'] for s in signals) / total_weight
+                    scores[sym] = weighted_score
+                elif buy_signals:
+                    # 只有买入信号
+                    total_weight = sum(s['weight'] for s in buy_signals)
+                    weighted_score = sum(s['score'] * s['weight'] for s in buy_signals) / total_weight
+                    scores[sym] = weighted_score
+                else:
+                    # 只有卖出信号
+                    total_weight = sum(s['weight'] for s in sell_signals)
+                    weighted_score = sum(s['score'] * s['weight'] for s in sell_signals) / total_weight
+                    scores[sym] = weighted_score
         
         return scores
 
@@ -193,7 +221,7 @@ class AlphaEngine:
                 z_factors={},
                 scores=scores
             )
-        
+
         # 否则使用传统的5因子Alpha计算
         # Compute raw factors
         f1: Dict[str, float] = {}
@@ -223,7 +251,7 @@ class AlphaEngine:
             if len(v) >= 24 and len(c) >= 24:
                 # 计算最近24小时的quote volume
                 vol_1d = compute_quote_volume(v[-24:], c[-24:])
-                
+
                 # 计算过去7天的平均daily quote volume
                 daily_quote = []
                 if len(v) >= 24 * 8 and len(c) >= 24 * 8:
@@ -231,7 +259,7 @@ class AlphaEngine:
                         start = -24 * (k + 1)
                         end = -24 * k
                         daily_quote.append(compute_quote_volume(v[start:end], c[start:end]))
-                
+
                 avg_7d = float(np.mean(daily_quote)) if daily_quote else vol_1d
                 vol_exp = (vol_1d / (avg_7d + 1e-12)) - 1.0
             else:

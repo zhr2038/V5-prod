@@ -317,9 +317,12 @@ class LiveExecutionEngine:
             # Determine sell quantity.
             # - CLOSE_LONG: sell full local position
             # - REBALANCE: sell partial by requested notional (capped by local qty)
-            qty_full = float(p.qty)
+            # CRITICAL: 全程使用Decimal避免精度丢失
+            from decimal import Decimal
+            
+            qty_full_dec = Decimal(str(p.qty))
             if str(o.intent).upper() == "CLOSE_LONG":
-                qty = qty_full
+                qty_dec = qty_full_dec
             else:
                 px_ref = float(getattr(o, "signal_price", 0.0) or 0.0)
                 if px_ref <= 0:
@@ -327,7 +330,13 @@ class LiveExecutionEngine:
                     raise ValueError(
                         f"REBALANCE_SAFETY: missing signal_price for {o.symbol}, refusing fallback full-qty sell"
                     )
-                qty = min(qty_full, float(o.notional_usdt) / px_ref)
+                # 使用Decimal计算: min(qty_full, notional / px_ref)
+                notional_dec = Decimal(str(o.notional_usdt))
+                px_dec = Decimal(str(px_ref))
+                qty_from_notional = notional_dec / px_dec
+                qty_dec = min(qty_full_dec, qty_from_notional)
+            
+            qty = float(qty_dec)  # 转换回float用于后续检查
 
             # Enforce OKX minSz/lotSz to avoid Parameter sz error.
             specs = OKXSpotInstrumentsCache().get_spec(inst_id)

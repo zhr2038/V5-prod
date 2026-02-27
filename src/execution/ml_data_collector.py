@@ -12,6 +12,17 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 
+
+class MLDataCollectorError(Exception):
+    """ML数据收集器自定义异常"""
+    pass
+
+
+class FeatureCalculationError(MLDataCollectorError):
+    """特征计算错误"""
+    pass
+
+
 @dataclass
 class FeatureRecord:
     """特征记录"""
@@ -63,9 +74,39 @@ class MLDataCollector:
     4. 定期导出为CSV供模型训练
     """
     
+    # 类级别的连接池
+    _connection_pool = {}
+    
     def __init__(self, db_path: str = "reports/ml_training_data.db"):
         self.db_path = db_path
         self._init_database()
+        self._conn = None  # 实例连接缓存
+    
+    def _get_connection(self):
+        """获取数据库连接（使用连接池）"""
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.db_path)
+            self._conn.row_factory = sqlite3.Row
+        return self._conn
+    
+    def _close_connection(self):
+        """关闭数据库连接"""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception as e:
+                print(f"[ML] Warning: error closing connection: {e}")
+            finally:
+                self._conn = None
+    
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器出口，确保关闭连接"""
+        self._close_connection()
+        return False
     
     def _init_database(self):
         """初始化数据库"""
@@ -134,8 +175,20 @@ class MLDataCollector:
             是否成功
         """
         try:
+            # 验证输入数据
+            if not market_data or 'close' not in market_data:
+                raise FeatureCalculationError(f"Invalid market_data for {symbol}: missing 'close'")
+            
+            if len(market_data['close']) < 2:
+                raise FeatureCalculationError(f"Insufficient data for {symbol}: need at least 2 bars")
+            
             # 计算特征
             features = self._calculate_features(market_data)
+            
+            # 验证特征有效性
+            for key, value in features.items():
+                if pd.isna(value) or np.isinf(value):
+                    raise FeatureCalculationError(f"Invalid feature {key}={value} for {symbol}")
             
             record = FeatureRecord(
                 timestamp=timestamp,
@@ -149,8 +202,19 @@ class MLDataCollector:
             self._save_record(record)
             return True
             
+        except FeatureCalculationError as e:
+            # 可恢复错误，记录警告
+            print(f"[ML Warning] Feature calculation failed for {symbol}: {e}")
+            return False
+        except MLDataCollectorError as e:
+            # 数据库错误，可能需要重试
+            print(f"[ML Error] Database error for {symbol}: {e}")
+            return False
         except Exception as e:
-            print(f"Error collecting features for {symbol}: {e}")
+            # 意外错误，记录详细堆栈
+            import traceback
+            print(f"[ML Critical] Unexpected error collecting features for {symbol}: {e}")
+            traceback.print_exc()
             return False
     
     def _calculate_features(self, data: Dict) -> Dict:
@@ -222,80 +286,90 @@ class MLDataCollector:
         }
     
     def _save_record(self, record: FeatureRecord):
-        """保存记录到数据库"""
-        conn = sqlite3.connect(self.db_path)
+        """保存记录到数据库（使用连接池）"""
+        conn = self._get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
-            INSERT INTO feature_snapshots (
-                timestamp, symbol, returns_1h, returns_6h, returns_24h,
-                momentum_5d, momentum_20d, volatility_6h, volatility_24h,
-                volatility_ratio, volume_ratio, obv, rsi, macd, macd_signal,
-                bb_position, price_position, regime, future_return_6h, label_filled
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-        ''', (
-            record.timestamp, record.symbol, record.returns_1h, record.returns_6h,
-            record.returns_24h, record.momentum_5d, record.momentum_20d,
-            record.volatility_6h, record.volatility_24h, record.volatility_ratio,
-            record.volume_ratio, record.obv, record.rsi, record.macd,
-            record.macd_signal, record.bb_position, record.price_position,
-            record.regime, record.future_return_6h
-        ))
-        
-        conn.commit()
-        conn.close()
-    
+        try:
+            cursor.execute('''
+                INSERT INTO feature_snapshots (
+                    timestamp, symbol, returns_1h, returns_6h, returns_24h,
+                    momentum_5d, momentum_20d, volatility_6h, volatility_24h,
+                    volatility_ratio, volume_ratio, obv, rsi, macd, macd_signal,
+                    bb_position, price_position, regime, future_return_6h, label_filled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ''', (
+                record.timestamp, record.symbol, record.returns_1h, record.returns_6h,
+                record.returns_24h, record.momentum_5d, record.momentum_20d,
+                record.volatility_6h, record.volatility_24h, record.volatility_ratio,
+                record.volume_ratio, record.obv, record.rsi, record.macd,
+                record.macd_signal, record.bb_position, record.price_position,
+                record.regime, record.future_return_6h
+            ))
+            conn.commit()
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise MLDataCollectorError(f"Database error saving record: {e}") from e
+
     def fill_labels(self, current_timestamp: int):
         """
         回填6小时后的标签（未来收益率）
         
         回填所有在current_timestamp之前6小时以上的未标记记录
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
         
-        # 找到所有6小时前以上且未回填标签的记录
-        six_hours_ago = current_timestamp - 6 * 3600 * 1000  # 6小时前的毫秒时间戳
-        
-        cursor.execute('''
-            SELECT id, timestamp, symbol FROM feature_snapshots
-            WHERE label_filled = 0
-            AND timestamp <= ?
-            ORDER BY timestamp
-            LIMIT 1000  -- 每次最多处理1000条
-        ''', (six_hours_ago,))
-        
-        records_to_fill = cursor.fetchall()
-        
-        filled_count = 0
-        failed_count = 0
-        for record_id, record_ts, symbol in records_to_fill:
-            # 计算未来6小时收益率
-            future_return = self._calculate_future_return(symbol, record_ts, 6)
+        try:
+            # 找到所有6小时前以上且未回填标签的记录
+            six_hours_ago = current_timestamp - 6 * 3600 * 1000  # 6小时前的毫秒时间戳
             
-            if future_return is not None:
-                cursor.execute('''
-                    UPDATE feature_snapshots
-                    SET future_return_6h = ?, label_filled = 1
-                    WHERE id = ?
-                ''', (future_return, record_id))
-                filled_count += 1
-            else:
-                # 如果无法计算收益，标记为-1表示失败
-                cursor.execute('''
-                    UPDATE feature_snapshots
-                    SET label_filled = -1
-                    WHERE id = ?
-                ''', (record_id,))
-                failed_count += 1
-        
-        conn.commit()
-        conn.close()
-        
-        if filled_count > 0 or failed_count > 0:
-            print(f"[ML] 回填完成: {filled_count}条成功, {failed_count}条失败")
-        
-        return filled_count
+            cursor.execute('''
+                SELECT id, timestamp, symbol FROM feature_snapshots
+                WHERE label_filled = 0
+                AND timestamp <= ?
+                ORDER BY timestamp
+                LIMIT 1000  -- 每次最多处理1000条
+            ''', (six_hours_ago,))
+            
+            records_to_fill = cursor.fetchall()
+            
+            filled_count = 0
+            failed_count = 0
+            for record_id, record_ts, symbol in records_to_fill:
+                try:
+                    # 计算未来6小时收益率
+                    future_return = self._calculate_future_return(symbol, record_ts, 6)
+                    
+                    if future_return is not None:
+                        cursor.execute('''
+                            UPDATE feature_snapshots
+                            SET future_return_6h = ?, label_filled = 1
+                            WHERE id = ?
+                        ''', (future_return, record_id))
+                        filled_count += 1
+                    else:
+                        # 如果无法计算收益，标记为-1表示失败
+                        cursor.execute('''
+                            UPDATE feature_snapshots
+                            SET label_filled = -1
+                            WHERE id = ?
+                        ''', (record_id,))
+                        failed_count += 1
+                except Exception as e:
+                    print(f"[ML] Error processing record {record_id}: {e}")
+                    failed_count += 1
+            
+            conn.commit()
+            
+            if filled_count > 0 or failed_count > 0:
+                print(f"[ML] 回填完成: {filled_count}条成功, {failed_count}条失败")
+            
+            return filled_count
+            
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise MLDataCollectorError(f"Database error filling labels: {e}") from e
     
     def _calculate_future_return(
         self,
@@ -306,21 +380,49 @@ class MLDataCollector:
         """
         计算未来收益率
         从K线缓存文件中获取价格数据
+        
+        重要：确保不使用未来数据！只使用start_timestamp时刻已经存在的数据
         """
         try:
             # 转换symbol格式: BTC/USDT -> BTC_USDT
             symbol_file = symbol.replace('/', '_').replace('-', '_')
             
             # 查找K线缓存文件
-            cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/cache')
+            cache_dir = Path(self.db_path).parent.parent / 'data' / 'cache'
             pattern = f"{symbol_file}_1H_*.csv"
             cache_files = list(cache_dir.glob(pattern))
             
             if not cache_files:
                 return None
             
-            # 读取最新的缓存文件
-            latest_file = max(cache_files, key=lambda x: x.stat().st_mtime)
+            # 关键修复：筛选缓存文件，只使用不包含未来数据的文件
+            # 文件命名格式: BTC_USDT_1H_YYYYMMDDHHMMSS.csv
+            # 只使用数据截止时间 <= start_timestamp + hours 的文件
+            end_timestamp = start_timestamp + hours * 3600 * 1000
+            
+            valid_files = []
+            for f in cache_files:
+                # 从文件名解析数据截止时间
+                try:
+                    ts_str = f.stem.split('_')[-1]  # 获取YYYYMMDDHHMMSS部分
+                    file_end_ts = pd.to_datetime(ts_str, format='%Y%m%d%H%M%S').timestamp() * 1000
+                    # 只使用数据截止时间 >= 需要的结束时间的文件
+                    if file_end_ts >= end_timestamp:
+                        valid_files.append(f)
+                except:
+                    # 如果解析失败，使用文件修改时间作为fallback
+                    file_mtime = f.stat().st_mtime * 1000
+                    if file_mtime >= end_timestamp:
+                        valid_files.append(f)
+            
+            if not valid_files:
+                # 如果没有包含足够数据的文件，使用最新的（但有泄露风险警告）
+                latest_file = max(cache_files, key=lambda x: x.stat().st_mtime)
+                print(f"[ML Warning] 可能使用不完整数据计算 {symbol} 的未来收益")
+            else:
+                # 使用包含足够数据的最早文件（最接近start_timestamp的文件）
+                latest_file = min(valid_files, key=lambda x: x.stat().st_mtime)
+            
             df = pd.read_csv(latest_file)
             
             if df.empty or 'close' not in df.columns:
@@ -332,6 +434,12 @@ class MLDataCollector:
             
             # 查找最接近的K线
             df['timestamp'] = pd.to_datetime(df['timestamp'])
+            
+            # 关键验证：确保数据不包含未来时间
+            max_data_time = df['timestamp'].max()
+            if max_data_time < end_dt:
+                print(f"[ML Warning] 缓存数据不足: 需要{end_dt}, 实际{max_data_time}")
+                return None
             
             # 获取起始价格（最接近start_timestamp的K线收盘价）
             start_mask = df['timestamp'] <= start_dt
@@ -362,78 +470,83 @@ class MLDataCollector:
         """
         导出训练数据到CSV
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         
-        # 明确指定需要的列，排除id（会导致泄露）和label_filled/created_at（非特征）
-        query = '''
-            SELECT 
-                timestamp, symbol,
-                returns_1h, returns_6h, returns_24h,
-                momentum_5d, momentum_20d,
-                volatility_6h, volatility_24h, volatility_ratio,
-                volume_ratio, obv,
-                rsi, macd, macd_signal,
-                bb_position, price_position,
-                regime,
-                future_return_6h
-            FROM feature_snapshots
-            WHERE label_filled = 1
-            AND future_return_6h IS NOT NULL
-            ORDER BY timestamp
-        '''
-        
-        df = pd.read_sql_query(query, conn)
-        conn.close()
-        
-        if len(df) < min_samples:
-            print(f"Insufficient samples: {len(df)} < {min_samples}")
-            return False
-        
-        # 保存到CSV
-        df.to_csv(output_path, index=False)
-        print(f"Exported {len(df)} samples to {output_path}")
-        
-        # 打印统计
-        print(f"\nTraining Data Statistics:")
-        print(f"  Total samples: {len(df)}")
-        print(f"  Symbols: {df['symbol'].nunique()}")
-        print(f"  Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
-        print(f"  Avg future return: {df['future_return_6h'].mean():.4f}")
-        print(f"  Return std: {df['future_return_6h'].std():.4f}")
-        
-        return True
+        try:
+            # 明确指定需要的列，排除id（会导致泄露）和label_filled/created_at（非特征）
+            query = '''
+                SELECT 
+                    timestamp, symbol,
+                    returns_1h, returns_6h, returns_24h,
+                    momentum_5d, momentum_20d,
+                    volatility_6h, volatility_24h, volatility_ratio,
+                    volume_ratio, obv,
+                    rsi, macd, macd_signal,
+                    bb_position, price_position,
+                    regime,
+                    future_return_6h
+                FROM feature_snapshots
+                WHERE label_filled = 1
+                AND future_return_6h IS NOT NULL
+                ORDER BY timestamp
+            '''
+            
+            df = pd.read_sql_query(query, conn)
+            
+            if len(df) < min_samples:
+                print(f"Insufficient samples: {len(df)} < {min_samples}")
+                return False
+            
+            # 保存到CSV
+            df.to_csv(output_path, index=False)
+            print(f"Exported {len(df)} samples to {output_path}")
+            
+            # 打印统计
+            print(f"\nTraining Data Statistics:")
+            print(f"  Total samples: {len(df)}")
+            print(f"  Symbols: {df['symbol'].nunique()}")
+            print(f"  Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+            print(f"  Avg future return: {df['future_return_6h'].mean():.4f}")
+            print(f"  Return std: {df['future_return_6h'].std():.4f}")
+            
+            return True
+            
+        except sqlite3.Error as e:
+            raise MLDataCollectorError(f"Database error exporting data: {e}") from e
     
     def get_statistics(self) -> Dict:
         """获取数据收集统计"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
         
-        # 总记录数
-        cursor.execute('SELECT COUNT(*) FROM feature_snapshots')
-        total_records = cursor.fetchone()[0]
-        
-        # 已回填标签的记录数
-        cursor.execute('SELECT COUNT(*) FROM feature_snapshots WHERE label_filled = 1')
-        labeled_records = cursor.fetchone()[0]
-        
-        # 币种数量
-        cursor.execute('SELECT COUNT(DISTINCT symbol) FROM feature_snapshots')
-        num_symbols = cursor.fetchone()[0]
-        
-        # 时间范围
-        cursor.execute('SELECT MIN(timestamp), MAX(timestamp) FROM feature_snapshots')
-        min_ts, max_ts = cursor.fetchone()
-        
-        conn.close()
-        
-        return {
-            'total_records': total_records,
-            'labeled_records': labeled_records,
-            'unlabeled_records': total_records - labeled_records,
-            'num_symbols': num_symbols,
-            'time_range': (min_ts, max_ts) if min_ts else None,
-            'ready_for_training': labeled_records >= 100
-        }
+        try:
+            # 总记录数
+            cursor.execute('SELECT COUNT(*) FROM feature_snapshots')
+            total_records = cursor.fetchone()[0]
+            
+            # 已回填标签的记录数
+            cursor.execute('SELECT COUNT(*) FROM feature_snapshots WHERE label_filled = 1')
+            labeled_records = cursor.fetchone()[0]
+            
+            # 币种数量
+            cursor.execute('SELECT COUNT(DISTINCT symbol) FROM feature_snapshots')
+            num_symbols = cursor.fetchone()[0]
+            
+            # 时间范围
+            cursor.execute('SELECT MIN(timestamp), MAX(timestamp) FROM feature_snapshots')
+            min_ts, max_ts = cursor.fetchone()
+            
+            return {
+                'total_records': total_records,
+                'labeled_records': labeled_records,
+                'unlabeled_records': total_records - labeled_records,
+                'num_symbols': num_symbols,
+                'time_range': (min_ts, max_ts) if min_ts else None,
+                'ready_for_training': labeled_records >= 100
+            }
+            
+        except sqlite3.Error as e:
+            raise MLDataCollectorError(f"Database error getting statistics: {e}") from e
 
 # 集成到V5 Pipeline的用法
 """
