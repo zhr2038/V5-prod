@@ -283,31 +283,41 @@ class MLDataCollector:
 
             records_to_fill = cursor.fetchall()
 
-            filled_count = 0
-            failed_count = 0
+            # 批量更新优化
+            filled_updates = []
+            failed_updates = []
+            
             for record_id, record_ts, symbol in records_to_fill:
                 try:
                     # 计算未来6小时收益率
                     future_return = self._calculate_future_return(symbol, record_ts, 6)
 
                     if future_return is not None:
-                        cursor.execute('''
-                            UPDATE feature_snapshots
-                            SET future_return_6h = ?, label_filled = 1
-                            WHERE id = ?
-                        ''', (future_return, record_id))
-                        filled_count += 1
+                        filled_updates.append((future_return, record_id))
                     else:
                         # 如果无法计算收益，标记为-1表示失败
-                        cursor.execute('''
-                            UPDATE feature_snapshots
-                            SET label_filled = -1
-                            WHERE id = ?
-                        ''', (record_id,))
-                        failed_count += 1
+                        failed_updates.append((record_id,))
                 except Exception as e:
                     logger.error(f"[ML] Error processing record {record_id}: {e}")
-                    failed_count += 1
+                    failed_updates.append((record_id,))
+            
+            # 批量执行更新
+            if filled_updates:
+                cursor.executemany('''
+                    UPDATE feature_snapshots
+                    SET future_return_6h = ?, label_filled = 1
+                    WHERE id = ?
+                ''', filled_updates)
+            
+            if failed_updates:
+                cursor.executemany('''
+                    UPDATE feature_snapshots
+                    SET label_filled = -1
+                    WHERE id = ?
+                ''', [(r[0],) for r in failed_updates])
+            
+            filled_count = len(filled_updates)
+            failed_count = len(failed_updates)
 
             conn.commit()
 
