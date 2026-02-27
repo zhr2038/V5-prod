@@ -32,6 +32,39 @@ def _rank(state: str) -> int:
 
 @dataclass
 class OrderRow:
+    """订单数据类
+    
+    Attributes:
+        cl_ord_id: 客户端订单ID
+        run_id: 运行ID
+        window_start_ts: 窗口开始时间戳
+        window_end_ts: 窗口结束时间戳
+        inst_id: 合约ID
+        side: 买卖方向
+        intent: 订单意图
+        decision_hash: 决策哈希
+        td_mode: 交易模式
+        ord_type: 订单类型
+        px: 价格
+        sz: 数量
+        notional_usdt: 名义价值(USDT)
+        state: 订单状态
+        ord_id: 交易所订单ID
+        req_json: 请求JSON
+        ack_json: 确认JSON
+        last_query_json: 最后查询JSON
+        last_error_code: 最后错误码
+        last_error_msg: 最后错误信息
+        created_ts: 创建时间戳
+        updated_ts: 更新时间戳
+        last_poll_ts: 最后轮询时间戳
+        acc_fill_sz: 累计成交数量
+        avg_px: 平均成交价格
+        fee: 手续费
+        reconcile_ok_at_submit: 提交时对账状态
+        kill_switch_at_submit: 提交时kill switch状态
+        submit_gate: 提交网关
+    """
     cl_ord_id: str
     run_id: str
     window_start_ts: Optional[int]
@@ -64,7 +97,17 @@ class OrderRow:
 
 
 class OrderStore:
+    """订单存储类
+    
+    使用SQLite存储订单信息，支持订单状态跟踪和查询
+    """
+    
     def __init__(self, path: str = "reports/orders.sqlite"):
+        """初始化订单存储
+        
+        Args:
+            path: 数据库文件路径
+        """
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -152,6 +195,27 @@ class OrderStore:
         kill_switch_at_submit: Optional[bool] = None,
         submit_gate: Optional[str] = None,
     ) -> None:
+        """插入或更新新订单
+
+        Args:
+            cl_ord_id: 客户端订单ID
+            run_id: 运行ID
+            inst_id: 合约ID
+            side: 买卖方向
+            intent: 订单意图
+            decision_hash: 决策哈希
+            td_mode: 交易模式
+            ord_type: 订单类型
+            notional_usdt: 名义价值
+            window_start_ts: 窗口开始时间戳
+            window_end_ts: 窗口结束时间戳
+            px: 价格
+            sz: 数量
+            req: 请求数据
+            reconcile_ok_at_submit: 提交时对账状态
+            kill_switch_at_submit: 提交时kill switch状态
+            submit_gate: 提交网关
+        """
         now = _now_ms()
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
@@ -211,6 +275,14 @@ class OrderStore:
         return OrderRow(*row) if row else None
 
     def get(self, cl_ord_id: str) -> Optional[OrderRow]:
+        """根据cl_ord_id获取订单
+
+        Args:
+            cl_ord_id: 客户端订单ID
+
+        Returns:
+            订单对象，不存在返回None
+        """
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(
@@ -234,6 +306,14 @@ class OrderStore:
         return self._row_from_sql(row)
 
     def get_by_ord_id(self, ord_id: str) -> Optional[OrderRow]:
+        """根据ord_id获取订单
+
+        Args:
+            ord_id: 交易所订单ID
+
+        Returns:
+            订单对象，不存在返回None
+        """
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(
@@ -271,6 +351,21 @@ class OrderStore:
         fee: Optional[str] = None,
         event_type: str = "STATE",
     ) -> None:
+        """更新订单状态
+
+        Args:
+            cl_ord_id: 客户端订单ID
+            new_state: 新状态
+            ord_id: 交易所订单ID
+            ack: 确认数据
+            last_query: 最后查询数据
+            last_error_code: 错误码
+            last_error_msg: 错误信息
+            acc_fill_sz: 累计成交数量
+            avg_px: 平均成交价格
+            fee: 手续费
+            event_type: 事件类型
+        """
         new_state_u = str(new_state).upper()
         now = _now_ms()
 
@@ -340,6 +435,14 @@ class OrderStore:
         con.close()
 
     def list_open(self, limit: int = 200) -> List[OrderRow]:
+        """获取未完成订单列表
+
+        Args:
+            limit: 返回数量限制
+
+        Returns:
+            未完成订单列表
+        """
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
         cur.execute(
