@@ -7,9 +7,13 @@
 from __future__ import annotations
 
 import os
+import sys
 import sqlite3
 import time
 from datetime import datetime
+
+sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+
 from configs.loader import load_config
 from src.execution.okx_private_client import OKXPrivateClient
 
