@@ -148,8 +148,8 @@ execution:
   max_status_age_sec: 180
   preflight_fail_action: sell_only
   # Borrow detection thresholds (strict)
-  borrow_liab_eps: 0.000001
-  borrow_neg_eq_eps: 0.000001
+  borrow_liab_eps: 0.01
+  borrow_neg_eq_eps: 0.01
   # Borrow block scope: symbol_only = freeze only affected symbols (no global ABORT)
   borrow_block_mode: symbol_only
 
