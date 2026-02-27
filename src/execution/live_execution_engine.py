@@ -23,11 +23,15 @@ log = logging.getLogger(__name__)
 
 
 def symbol_to_inst_id(symbol: str) -> str:
-    # V5 internal symbols are like "BTC/USDT"; OKX instId is "BTC-USDT".
+    """将V5内部symbol转换为OKX instId格式
+    
+    V5 internal symbols are like "BTC/USDT"; OKX instId is "BTC-USDT".
+    """
     return str(symbol).replace("/", "-")
 
 
 def _load_json(path: str) -> Optional[Dict[str, Any]]:
+    """加载JSON文件"""
     try:
         p = Path(path)
         if not p.exists():
@@ -38,12 +42,16 @@ def _load_json(path: str) -> Optional[Dict[str, Any]]:
 
 
 def load_kill_switch_enabled(path: str) -> bool:
+    """检查是否启用kill switch"""
     d = _load_json(path) or {}
     return bool(d.get("enabled") or d.get("kill_switch") or d.get("active"))
 
 
 def load_reconcile_ok(path: str) -> bool:
-    # Placeholder before G1.0: assume OK unless file exists and says not ok.
+    """检查对账状态是否正常
+    
+    Placeholder before G1.0: assume OK unless file exists and says not ok.
+    """
     d = _load_json(path)
     if d is None:
         return True
