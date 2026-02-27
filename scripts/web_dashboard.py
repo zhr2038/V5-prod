@@ -118,18 +118,53 @@ def static_files(filename):
 
 @app.route('/api/account')
 def api_account():
-    """账户信息API"""
+    """账户信息API - 优先OKX实时数据"""
     try:
-        # 读取reconcile状态（优先交易所快照USDT）
-        reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+        # 优先从OKX获取实时余额
         cash = 0
-        if reconcile_file.exists():
-            with open(reconcile_file, 'r') as f:
-                reconcile = json.load(f)
-            cash = (
-                reconcile.get('exchange_snapshot', {}).get('ccy_cashBal', {}).get('USDT')
-                or reconcile.get('local_snapshot', {}).get('cash_usdt', 0)
-            )
+        try:
+            import os, time, hmac, hashlib, base64, requests
+            from dotenv import load_dotenv
+            load_dotenv(str(WORKSPACE / '.env'))
+            
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
+            
+            if key and sec and pp:
+                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+                path = '/api/v5/account/balance'
+                msg = ts + 'GET' + path
+                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
+                headers = {
+                    'OK-ACCESS-KEY': key,
+                    'OK-ACCESS-SIGN': sig,
+                    'OK-ACCESS-TIMESTAMP': ts,
+                    'OK-ACCESS-PASSPHRASE': pp,
+                }
+                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
+                data = resp.json()
+                if data.get('code') == '0' and data.get('data'):
+                    for d in data['data'][0].get('details', []):
+                        if d.get('ccy') == 'USDT':
+                            cash = float(d.get('eq', 0))
+                            break
+        except Exception as e:
+            print(f"[account] OKX API错误: {e}")
+        
+        # 如果OKX获取失败，回退到reconcile文件
+        if cash <= 0:
+            reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+            if reconcile_file.exists():
+                try:
+                    with open(reconcile_file, 'r') as f:
+                        reconcile = json.load(f)
+                    cash = (
+                        reconcile.get('exchange_snapshot', {}).get('ccy_cashBal', {}).get('USDT')
+                        or reconcile.get('local_snapshot', {}).get('cash_usdt', 0)
+                    )
+                except Exception:
+                    pass
         
         # 获取最新权益 - 排除异常数据
         conn = get_db_connection()
