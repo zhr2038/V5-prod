@@ -2,6 +2,29 @@
 
 V5 横截面趋势轮动系统（OKX 现货），**先 dry-run**。
 
+---
+
+## 📋 最近更新 (2026-02-27)
+
+### Web监控面板修复
+- ✅ **持仓盈亏显示**：改用最新买入价格计算成本，与交易所APP一致
+- ✅ **实时价格**：优先OKX API，缓存仅作为fallback（15分钟内有效）
+- ✅ **持仓同步**：OKX API成功但返回空持仓时，不再回退到缓存数据
+- ✅ **策略信号时间**：修复时间戳显示错误，使用文件修改时间
+
+### 数据库修复
+- ✅ **订单数量字段**：修复`sz`字段为空的问题，已校准123笔历史订单
+- ✅ **成本计算**：新增FIFO成本计算方法（后续启用）
+
+### 生产环境修复 (2026-02-26)
+- ✅ **粉尘持仓过滤**：小于$1或0.01个的持仓自动过滤
+- ✅ **退出加速**：收紧close-only死区，加快清理移除的持仓
+- ✅ **小账户去杠杆**：20U模式放宽回撤限制
+- ✅ **分阶段止盈**：新增`profit_taking.py`，支持保本/部分止盈/追踪保护/排名退出
+- ✅ **重启连续性**：启动时自动注册现有持仓到止损/止盈管理器
+
+---
+
 本仓库包含：
 - **信号流水线**（Alpha → Regime → Portfolio → Risk → Orders）
 - **多策略并行系统**（趋势跟踪 + 均值回归 + 信号融合）
@@ -12,31 +35,6 @@ V5 横截面趋势轮动系统（OKX 现货），**先 dry-run**。
 - 成本校准与回灌（F2）
 - 日级预算监控 + 预算驱动的换手抑制（F3）
 - 市场微观结构快照：bid/ask/mid/spread（F1.2）
-
----
-
-## 🔎 Code Review Update (2026-02-26)
-
-This repository received a deep runtime-focused review over the live path (Alpha → Regime → Portfolio → Risk → Execution). Key production fixes:
-
-1. **Dust positions interfering with rebalance**
-   - Added dust filtering in pipeline (`qty < 0.01` or `value < $1`) before drift/deadband checks.
-
-2. **Slow exits when symbol leaves target set**
-   - Tightened close-only deadband behavior to force faster cleanup of removed holdings.
-
-3. **Small-account over-deleveraging**
-   - Relaxed drawdown throttle for 20U mode to avoid excessive exposure reduction from noisy equity snapshots.
-
-4. **Missing staged take-profit logic**
-   - Added `src/risk/profit_taking.py` and integrated staged profit management:
-     - breakeven shift,
-     - partial take-profit,
-     - trailing protection,
-     - rank-based exits.
-
-5. **Restart continuity for risk state**
-   - Pipeline now auto-registers existing positions into stop/profit managers on runtime bootstrap.
 
 ---
 
