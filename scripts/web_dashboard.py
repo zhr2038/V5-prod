@@ -606,8 +606,22 @@ def api_positions():
                         avg_cost = total_cost / total_qty
                         p['avg_px'] = round(avg_cost, 6)
                     elif current_qty > 0:
-                        # 如果不匹配，用当前市值反推（fallback）
-                        p['avg_px'] = round(float(p.get('value_usdt', 0)) / current_qty, 6)
+                        # 如果不匹配，用最新一次买入价格
+                        # 查询最近买入记录
+                        cursor.execute("""
+                            SELECT avg_px, notional_usdt, sz
+                            FROM orders 
+                            WHERE inst_id LIKE ? AND state='FILLED' AND side='buy'
+                            ORDER BY created_ts DESC
+                            LIMIT 1
+                        """, (f"%{symbol}%",))
+                        last_buy = cursor.fetchone()
+                        if last_buy:
+                            px, notional, sz = last_buy
+                            if px:
+                                p['avg_px'] = round(float(px), 6)
+                            elif notional and sz and float(sz) > 0:
+                                p['avg_px'] = round(float(notional) / float(sz), 6)
                 
                 conn.close()
         except Exception as e:
