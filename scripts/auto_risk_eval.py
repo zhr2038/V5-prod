@@ -15,11 +15,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+# 自动检测项目根目录
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.risk.auto_risk_guard import get_auto_risk_guard
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
+REPORTS_DIR = PROJECT_ROOT / 'reports'
 RUNS_DIR = REPORTS_DIR / 'runs'
 
 

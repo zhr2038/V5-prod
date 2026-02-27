@@ -17,8 +17,10 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from scipy import stats
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
-WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
+# 自动检测项目根目录
+SCRIPT_DIR = Path(__file__).parent.resolve()
+WORKSPACE = SCRIPT_DIR.parent
+REPORTS_DIR = WORKSPACE / 'reports'
 
 
 class ICAnalyzer:

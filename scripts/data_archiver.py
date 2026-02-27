@@ -20,7 +20,11 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import json
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
+# 自动检测项目根目录
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+
+REPORTS_DIR = PROJECT_ROOT / 'reports'
 RUNS_DIR = REPORTS_DIR / 'runs'
 ARCHIVE_DIR = REPORTS_DIR / 'archive'
 

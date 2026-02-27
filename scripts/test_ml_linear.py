@@ -4,16 +4,20 @@ ML训练 - 线性回归版（避免树模型过拟合）
 """
 
 import sys
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+from pathlib import Path
+
+# 自动检测项目根目录
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
-from pathlib import Path
 
 # 加载数据
-df = pd.read_csv('/home/admin/clawd/v5-trading-bot/reports/ml_training_data.csv')
+df = pd.read_csv(PROJECT_ROOT / 'reports' / 'ml_training_data.csv')
 print(f"Loaded {len(df)} samples")
 
 # 使用更保守的特征

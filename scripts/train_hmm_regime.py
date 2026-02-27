@@ -15,9 +15,16 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+# 自动检测项目根目录
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.regime.hmm_regime_detector import HMMRegimeDetector
+
+# 模型保存路径
+MODEL_DIR = PROJECT_ROOT / 'models'
+INFO_PATH = MODEL_DIR / 'hmm_regime_info.json'
 
 
 def analyze_and_label_states(detector):
@@ -112,7 +119,7 @@ def main():
         'transition_matrix': detector.model.transmat_.tolist()
     }
     
-    info_path = Path('/home/admin/clawd/v5-trading-bot/models/hmm_regime_info.json')
+    info_path = MODEL_DIR / 'hmm_regime_info.json'
     with open(info_path, 'w') as f:
         json.dump(model_info, f, indent=2)
     

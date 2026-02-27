@@ -4,15 +4,19 @@ ML训练 - 修复版（移除泄露特征和高相关特征）
 """
 
 import sys
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+from pathlib import Path
+
+# 自动检测项目根目录
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
-from pathlib import Path
 
 # 加载数据
-df = pd.read_csv('/home/admin/clawd/v5-trading-bot/reports/ml_training_data.csv')
+df = pd.read_csv(PROJECT_ROOT / 'reports' / 'ml_training_data.csv')
 print(f"Loaded {len(df)} samples")
 
 # 修复后的特征列表 - 移除问题特征
