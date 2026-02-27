@@ -104,15 +104,20 @@ class DailyMLTrainer:
         
         self.log(f"Train: {len(X_train)}, Valid: {len(X_valid)}")
         
-        # 5. 训练模型
+        # 5. 训练模型 - 使用优化后的防过拟合配置
         self.log("\nTraining LightGBM model...")
         
         config = MLFactorConfig(
-            n_estimators=200,  # 更多树
-            max_depth=6,
+            n_estimators=100,      # 减少树数量
+            max_depth=4,           # 限制深度（原来是6）
             learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.8
+            subsample=0.7,         # 降低采样率
+            colsample_bytree=0.7,  # 降低特征采样率
+            num_leaves=15,         # 限制叶子节点
+            min_data_in_leaf=50,   # 最小样本数
+            reg_alpha=0.1,         # L1正则化
+            reg_lambda=0.1,        # L2正则化
+            early_stopping_rounds=20  # 早停
         )
         
         model = MLFactorModel(config)

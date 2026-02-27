@@ -20,19 +20,26 @@ except ImportError:
 
 @dataclass
 class MLFactorConfig:
-    """ML因子模型配置"""
+    """ML因子模型配置 - 优化后减少过拟合"""
     model_type: str = 'lightgbm'  # lightgbm, xgboost, sklearn
-    n_estimators: int = 100
-    max_depth: int = 5
-    learning_rate: float = 0.05
-    subsample: float = 0.8
-    colsample_bytree: float = 0.8
+    n_estimators: int = 100       # 保持
+    max_depth: int = 4            # 降低从5到4，限制树深度
+    learning_rate: float = 0.05   # 保持
+    subsample: float = 0.7        # 降低从0.8到0.7，增加样本随机性
+    colsample_bytree: float = 0.7 # 降低从0.8到0.7，增加特征随机性
     random_state: int = 42
+    
+    # 新增正则化参数
+    num_leaves: int = 15          # 限制叶子节点数（默认31太大）
+    min_data_in_leaf: int = 50    # 增加最小样本数（防止过拟合小样本）
+    reg_alpha: float = 0.1        # L1正则化
+    reg_lambda: float = 0.1       # L2正则化
     
     # 训练参数
     train_lookback_days: int = 60
     prediction_horizon: int = 6  # 预测未来6小时收益
     min_train_samples: int = 100
+    early_stopping_rounds: int = 20  # 增加早停轮数
 
 class MLFactorModel:
     """
@@ -219,6 +226,10 @@ class MLFactorModel:
                 learning_rate=self.config.learning_rate,
                 subsample=self.config.subsample,
                 colsample_bytree=self.config.colsample_bytree,
+                num_leaves=self.config.num_leaves,           # 新增：限制叶子节点
+                min_data_in_leaf=self.config.min_data_in_leaf,  # 新增：最小样本数
+                reg_alpha=self.config.reg_alpha,              # 新增：L1正则化
+                reg_lambda=self.config.reg_lambda,            # 新增：L2正则化
                 random_state=self.config.random_state,
                 verbose=-1
             )
@@ -226,7 +237,10 @@ class MLFactorModel:
             self.model.fit(
                 X_train, y_train,
                 eval_set=[(X_valid, y_valid)],
-                callbacks=[lgb.early_stopping(stopping_rounds=10), lgb.log_evaluation(period=0)]
+                callbacks=[
+                    lgb.early_stopping(stopping_rounds=self.config.early_stopping_rounds),  # 使用配置中的早停轮数
+                    lgb.log_evaluation(period=0)
+                ]
             )
         
         self.is_trained = True
