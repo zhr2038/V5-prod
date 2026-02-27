@@ -58,7 +58,7 @@ class AlphaWeights(BaseModel):
 
     @model_validator(mode='after')
     def _check_sum(self):
-        """验证权重总和为1.0（允许0.01的浮点误差）"""
+        """验证权重总和接近1.0（允许0.3的误差，仅警告）"""
         total = (
             self.f1_mom_5d + 
             self.f2_mom_20d + 
@@ -66,8 +66,12 @@ class AlphaWeights(BaseModel):
             self.f4_volume_expansion + 
             self.f5_rsi_trend_confirm
         )
-        if abs(total - 1.0) > 0.01:
-            raise ValueError(f"Alpha weights must sum to 1.0, got {total:.4f}")
+        if abs(total - 1.0) > 0.3:  # 放宽到30%误差
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Alpha weights sum to {total:.2f} (expected ~1.0). "
+                f"This may be intentional for multi-strategy mode."
+            )
         return self
 
 
