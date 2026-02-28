@@ -185,5 +185,16 @@
     "current_action": "hold",
     "partial_sold": false,
     "partial_sell_time": null
+  },
+  "PAXG/USDT": {
+    "symbol": "PAXG/USDT",
+    "entry_price": 5429.5,
+    "entry_time": "2026-03-01T01:01:10.687216",
+    "highest_price": 5429.5,
+    "profit_high": 0.0,
+    "current_stop": 5158.025,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
   }
 }

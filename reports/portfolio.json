@@ -1,6 +1,27 @@
 {
-  "target_weights": {},
-  "selected": [],
-  "volatilities": {},
+  "target_weights": {
+    "PAXG/USDT": 0.0,
+    "DOT/USDT": 0.0,
+    "NEAR/USDT": 0.0,
+    "CC/USDT": 0.0,
+    "UNI/USDT": 0.0,
+    "TRX/USDT": 0.0
+  },
+  "selected": [
+    "PAXG/USDT",
+    "DOT/USDT",
+    "NEAR/USDT",
+    "CC/USDT",
+    "UNI/USDT",
+    "TRX/USDT"
+  ],
+  "volatilities": {
+    "PAXG/USDT": 0.0029382920720313023,
+    "DOT/USDT": 0.011502967229676923,
+    "NEAR/USDT": 0.009493671373312342,
+    "CC/USDT": 0.008013629574542443,
+    "UNI/USDT": 0.009812072999974022,
+    "TRX/USDT": 0.002100765143773676
+  },
   "notes": ""
 }

@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-02-28T17:01:20.538000Z,20260301_01,PAXG/USDT,OPEN_LONG,buy,0.001104,5430.4,5.9951616,0.0059951616,0.0003864,,

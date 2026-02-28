@@ -99,7 +99,7 @@ regime:
   
   pos_mult_trending: 1.2
   pos_mult_sideways: 0.7  # 震荡行情仓位乘数0.7x（保守，优先控回撤）
-  pos_mult_risk_off: 0.3  # Risk-Off允许30%仓位试探
+  pos_mult_risk_off: 0.0  # Risk-Off严格空仓
   
   # 情绪覆盖（用于调整最终multiplier）
   sentiment_regime_override_enabled: true

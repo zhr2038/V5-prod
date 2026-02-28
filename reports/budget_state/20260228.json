@@ -2,9 +2,9 @@
   "ymd_utc": "20260228",
   "turnover_budget_per_day": null,
   "cost_budget_bps_per_day": null,
-  "turnover_used": 32.57334021,
-  "cost_used_usdt": 0.0449376217099997,
-  "avg_equity_est": 103.19328499065517,
+  "turnover_used": 44.561618610000004,
+  "cost_used_usdt": 0.057918400110000705,
+  "avg_equity_est": 108.83845398631918,
   "runs": {
     "20260228_08": {
       "turnover": 0.0,
@@ -98,15 +98,43 @@
         2.26277503,
         3.6641364
       ]
+    },
+    "20260301_01": {
+      "turnover": 5.9951616,
+      "cost_usdt": 0.0063815616,
+      "fills_count": 1,
+      "notionals": [
+        5.9951616
+      ]
+    },
+    "20260301_02": {
+      "turnover": 5.9931168,
+      "cost_usdt": 0.006599216800001,
+      "fills_count": 1,
+      "notionals": [
+        5.9931168
+      ]
+    },
+    "20260301_03": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260301_04": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
     }
   },
-  "fills_count_today": 12,
-  "median_notional_usdt_today": 2.90636308,
-  "p25_notional_usdt_today": 1.85687909,
-  "p75_notional_usdt_today": 3.6641364,
-  "small_trade_ratio_today": 0.4166666666666667,
+  "fills_count_today": 14,
+  "median_notional_usdt_today": 3.22662076,
+  "p25_notional_usdt_today": 1.96234896,
+  "p75_notional_usdt_today": 4.27614217,
+  "small_trade_ratio_today": 0.35714285714285715,
   "small_trade_notional_cutoff": 2.5,
-  "cost_used_bps": 4.35470405986873,
+  "cost_used_bps": 5.321501545518182,
   "exceeded": false,
   "reason": null
 }

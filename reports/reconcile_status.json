@@ -1,17 +1,18 @@
 {
   "schema_version": 1,
-  "ts_ms": 1772294445259,
+  "ts_ms": 1772308839096,
   "ok": true,
   "reason": null,
   "exchange_snapshot": {
     "source": "okx_account_balance",
-    "uTime_max_ms": 1772294439581,
+    "uTime_max_ms": 1772308837965,
     "ccy_cashBal": {
-      "USDT": "100.75885252288829",
-      "ETH": "0.0023319982",
-      "HYPE": "0.1301697",
+      "USDT": "108.82809664867828",
+      "PAXG": "0.000000896",
       "XAUT": "0.000000831",
       "PROMPT": "0.0821",
+      "HYPE": "0.0000697",
+      "ETH": "0.0000009982",
       "SPACE": "0.154",
       "POL": "0.00754",
       "KITE": "0.00235",
@@ -37,10 +38,11 @@
     },
     "ccy_ordFrozen": {
       "USDT": "0",
-      "ETH": "0",
-      "HYPE": "0",
+      "PAXG": "0",
       "XAUT": "0",
       "PROMPT": "0",
+      "HYPE": "0",
+      "ETH": "0",
       "SPACE": "0",
       "POL": "0",
       "KITE": "0",
@@ -66,9 +68,9 @@
     }
   },
   "local_snapshot": {
-    "cash_usdt": "100.758852523",
+    "cash_usdt": "108.828096649",
     "ccy_qty": {
-      "USDT": "100.758852523",
+      "USDT": "108.828096649",
       "XAUT": "8.31e-07",
       "PROMPT": "0.0821",
       "SPACE": "0.154",
@@ -90,10 +92,11 @@
       "DOGE": "9.912e-07",
       "TRX": "4.28e-08",
       "USDG": "9.298e-09",
-      "ETH": "0.0023319982",
-      "HYPE": "0.1301697",
       "SOL": "3.401596659e-07",
-      "UNI": "7.08e-07"
+      "UNI": "7.08e-07",
+      "HYPE": "6.97e-05",
+      "ETH": "9.982e-07",
+      "PAXG": "8.96e-07"
     }
   },
   "diffs": [
@@ -155,8 +158,8 @@
     },
     {
       "ccy": "ETH",
-      "exchange": "0.0023319982",
-      "local": "0.0023319982",
+      "exchange": "0.0000009982",
+      "local": "9.982e-07",
       "delta": "0",
       "delta_usdt": null
     },
@@ -169,8 +172,8 @@
     },
     {
       "ccy": "HYPE",
-      "exchange": "0.1301697",
-      "local": "0.1301697",
+      "exchange": "0.0000697",
+      "local": "6.97e-05",
       "delta": "0",
       "delta_usdt": null
     },
@@ -206,6 +209,13 @@
       "ccy": "NEAR",
       "exchange": "0",
       "local": "0",
+      "delta": "0",
+      "delta_usdt": null
+    },
+    {
+      "ccy": "PAXG",
+      "exchange": "0.000000896",
+      "local": "8.96e-07",
       "delta": "0",
       "delta_usdt": null
     },
@@ -267,10 +277,10 @@
     },
     {
       "ccy": "USDT",
-      "exchange": "100.75885252288829",
-      "local": "100.758852523",
-      "delta": "-1.11711528916e-10",
-      "delta_usdt": "-1.11711528916e-10"
+      "exchange": "108.82809664867828",
+      "local": "108.828096649",
+      "delta": "-3.21719539897e-10",
+      "delta_usdt": "-3.21719539897e-10"
     },
     {
       "ccy": "WLFI",
@@ -293,7 +303,7 @@
     "dust_usdt_ignore": 1.0
   },
   "stats": {
-    "max_abs_usdt_delta": 1.1171152891620295e-10,
+    "max_abs_usdt_delta": 3.2171953989745816e-10,
     "max_abs_base_delta": 1.767197499447093e-13
   },
   "error": {
@@ -304,5 +314,5 @@
   "open_orders": {
     "note": "using cashBal avoids false mismatch from ordFrozen"
   },
-  "generated_ts_ms": 1772294445259
+  "generated_ts_ms": 1772308839096
 }

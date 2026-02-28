@@ -1,1 +1,18 @@
-{"schema_version":1,"symbols":[],"entries":[]}
+{
+  "schema_version": 1,
+  "symbols": [
+    "SAHARA/USDT"
+  ],
+  "entries": [
+    {
+      "symbol": "SAHARA/USDT",
+      "reason": "spread_too_wide>20.0bps",
+      "ts_ms": 1772297845922,
+      "expires_ts_ms": 1772902645922,
+      "meta": {
+        "spread_bps": 20.314880650075356
+      }
+    }
+  ],
+  "updated_ts_ms": 1772297845922
+}

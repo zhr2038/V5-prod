@@ -1,164 +1,284 @@
 {
-  "timestamp": "2026-02-28T16:00:45Z",
+  "timestamp": "2026-02-28T20:00:39Z",
   "dry_run": false,
   "orders": [
-    {
-      "symbol": "POL/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 0.0007877037999999999,
-      "signal_price": 0.10447,
-      "meta": {
-        "reason": "profit_taking_stop_loss_hit_hold",
-        "action": "sell_all",
-        "value": 0.10447
-      }
-    },
-    {
-      "symbol": "BTC/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 0.0001693545052,
-      "signal_price": 64837.1,
-      "meta": {
-        "reason": "profit_taking_stop_loss_hit_hold",
-        "action": "sell_all",
-        "value": 64837.1
-      }
-    },
     {
       "symbol": "AAVE/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 5.2195700000000006e-05,
-      "signal_price": 107.62,
+      "notional_usdt": 5.3796200000000005e-05,
+      "signal_price": 110.92,
       "meta": {
         "reason": "profit_taking_stop_loss_hit_hold",
         "action": "sell_all",
-        "value": 107.62
-      }
-    },
-    {
-      "symbol": "LTC/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 4.3464594786448e-05,
-      "signal_price": 52.58,
-      "meta": {
-        "reason": "profit_taking_stop_loss_hit_hold",
-        "action": "sell_all",
-        "value": 52.58
+        "value": 110.92
       }
     },
     {
       "symbol": "ETC/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 6.350265e-06,
-      "signal_price": 8.301,
+      "notional_usdt": 6.539985e-06,
+      "signal_price": 8.549,
       "meta": {
         "reason": "profit_taking_stop_loss_hit_hold",
         "action": "sell_all",
-        "value": 8.301
+        "value": 8.549
       }
     },
     {
       "symbol": "AVAX/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 4.1006749999999995e-06,
-      "signal_price": 8.633,
+      "notional_usdt": 4.2427e-06,
+      "signal_price": 8.932,
       "meta": {
         "reason": "profit_taking_stop_loss_hit_hold",
         "action": "sell_all",
-        "value": 8.633
+        "value": 8.932
+      }
+    },
+    {
+      "symbol": "FIL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 1.980408e-07,
+      "signal_price": 0.9804,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 0.9804
       }
     },
     {
       "symbol": "DOGE/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 8.9981136e-08,
-      "signal_price": 0.09078,
+      "notional_usdt": 9.203292e-08,
+      "signal_price": 0.09285,
       "meta": {
         "reason": "profit_taking_stop_loss_hit_hold",
         "action": "sell_all",
-        "value": 0.09078
+        "value": 0.09285
+      }
+    },
+    {
+      "symbol": "SOL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 2.7967927730297998e-05,
+      "signal_price": 82.22,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 82.22
       }
     },
     {
       "symbol": "ETH/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 4.4314957800000006,
-      "signal_price": 1898.67,
+      "notional_usdt": 0.001943784878,
+      "signal_price": 1947.29,
       "meta": {
         "reason": "profit_taking_stop_loss_hit_hold",
         "action": "sell_all",
-        "value": 1898.67
+        "value": 1947.29
       }
     },
     {
-      "symbol": "DOT/USDT",
+      "symbol": "POL/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 3.0996e-07,
-      "signal_price": 1.512,
+      "notional_usdt": 0.000803764,
+      "signal_price": 0.1066,
       "meta": {
         "reason": "fixed_stop_loss",
-        "entry_price": 1.615,
-        "stop_price": 1.53425,
-        "loss_pct": -0.06377708978328173
+        "entry_price": 0.11639,
+        "stop_price": 0.11057049999999999,
+        "loss_pct": -0.08411375547727462
       }
     },
     {
       "symbol": "BNB/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 0.00039320399999999997,
-      "signal_price": 604.0,
+      "notional_usdt": 0.0003991932,
+      "signal_price": 613.2,
       "meta": {
-        "reason": "atr_trailing",
-        "last": 604.0,
-        "stop": 619.2542857142856,
-        "highest": 633.9,
-        "atr": 6.657142857142868,
-        "atr_mult": 2.2,
-        "atr_n": 14
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "BTC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0001733289244,
+      "signal_price": 66358.7,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "LTC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 4.4704550894848e-05,
+      "signal_price": 54.08,
+      "meta": {
+        "reason": "regime_exit"
       }
     },
     {
       "symbol": "TRX/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 1.1997696e-08,
-      "signal_price": 0.28032,
+      "notional_usdt": 1.2072168e-08,
+      "signal_price": 0.28206,
       "meta": {
-        "reason": "atr_trailing",
-        "last": 0.28032,
-        "stop": 0.284985,
-        "highest": 0.28691,
-        "atr": 0.0008749999999999948,
-        "atr_mult": 2.2,
-        "atr_n": 14
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "UNI/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 2.685444e-06,
+      "signal_price": 3.793,
+      "meta": {
+        "reason": "regime_exit"
       }
     },
     {
       "symbol": "HYPE/USDT",
       "side": "sell",
-      "intent": "REBALANCE",
-      "notional_usdt": 3.6717237,
-      "signal_price": 28.179,
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0020555227,
+      "signal_price": 29.491,
       "meta": {
-        "target_w": 0.0,
-        "dd_mult": 1.0,
-        "regime": "Sideways",
-        "window_start_ts": 1772290800,
-        "window_end_ts": 1772294400,
-        "deadband_pct": 0.035,
-        "drift": -0.18358618499999999
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "XAUT/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "PROMPT/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "KITE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "WLFI/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "MERL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "J/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "PEPE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "DOT/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 3.27385e-07,
+      "signal_price": 1.597,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "AGLD/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "USDG/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0,
+      "signal_price": 0.0,
+      "meta": {
+        "reason": "regime_exit"
+      }
+    },
+    {
+      "symbol": "PAXG/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0048411776000000005,
+      "signal_price": 5403.1,
+      "meta": {
+        "reason": "regime_exit"
       }
     }
   ],
-  "notes": "regime=RegimeState.SIDEWAYS selected=[] orders=12"
+  "notes": "regime=RegimeState.RISK_OFF selected=['PAXG/USDT', 'DOT/USDT', 'NEAR/USDT', 'CC/USDT', 'UNI/USDT', 'TRX/USDT'] orders=26"
 }

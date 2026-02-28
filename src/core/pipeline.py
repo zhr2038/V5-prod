@@ -254,8 +254,11 @@ class V5Pipeline:
         # 2) Alpha计算（用于短线覆盖判断）
         alpha = self.alpha_engine.compute_snapshot(market_data_1h)
         
-        # 3) 短线交易增强：Risk-Off 机会覆盖
+        # 3) 短线交易增强：Risk-Off 机会覆盖 (已禁用 - HMM标签已修复)
         # 当Alpha评分很高时，覆盖Risk-Off状态，允许短线交易
+        # 注意：此功能已禁用，因为HMM模型已修复(TrendingUp标签)
+        # 如果市场确实是Risk-Off(TrendingDown)，不应该强行买入
+        """
         if regime.state.value == "Risk-Off":
             try:
                 from src.regime.short_term_override import check_short_term_opportunity
@@ -279,6 +282,7 @@ class V5Pipeline:
             except Exception as e:
                 if audit:
                     audit.add_note(f"[ShortTermOverride] error: {e}")
+        """
         
         if audit:
             audit.regime = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
