@@ -57,13 +57,45 @@ class EnsembleRegimeEngine:
         self.hmm_detector = None
         if HMM_AVAILABLE:
             try:
-                self.hmm_detector = HMMRegimeDetector(n_components=3)
+                # 尝试加载GMM模型（新的训练方式）
                 model_path = Path('/home/admin/clawd/v5-trading-bot/models/hmm_regime.pkl')
                 if model_path.exists():
-                    self.hmm_detector.model.load(model_path)
-                    print(f"[EnsembleRegime] HMM模型已加载")
+                    import pickle
+                    with open(model_path, 'rb') as f:
+                        model = pickle.load(f)
+                    # 检查模型类型
+                    if type(model).__name__ == 'GaussianMixture':
+                        # 使用GMM包装器
+                        from dataclasses import dataclass
+                        @dataclass
+                        class GMMWrapper:
+                            gmm: any
+                            def predict(self, features):
+                                # GMM predict返回状态ID
+                                state_id = self.gmm.predict(features[-1:])[0]  # 取最后一个
+                                # 获取概率
+                                probs = self.gmm.predict_proba(features[-1:])[0]
+                                # 映射状态
+                                state_map = {0: 'Sideways', 1: 'TrendingUp', 2: 'TrendingDown'}
+                                return {
+                                    'state': state_map.get(state_id, 'Sideways'),
+                                    'probability': float(max(probs)),
+                                    'all_states': {
+                                        'Sideways': float(probs[0]),
+                                        'TrendingUp': float(probs[1]), 
+                                        'TrendingDown': float(probs[2])
+                                    }
+                                }
+                        self.hmm_detector = GMMWrapper(gmm=model)
+                        print(f"[EnsembleRegime] GMM模型已加载")
+                    else:
+                        # 传统HMM方式
+                        from src.regime.hmm_regime_detector import HMMRegimeDetector
+                        self.hmm_detector = HMMRegimeDetector(n_components=3)
+                        self.hmm_detector.model.load(model_path)
+                        print(f"[EnsembleRegime] HMM模型已加载")
             except Exception as e:
-                print(f"[EnsembleRegime] HMM初始化失败: {e}")
+                print(f"[EnsembleRegime] HMM/GMM初始化失败: {e}")
     
     def _get_hmm_vote(self, btc_data: MarketSeries) -> dict:
         """HMM投票"""
