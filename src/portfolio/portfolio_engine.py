@@ -59,7 +59,7 @@ class PortfolioEngine:
         # Select top pct by score
         items = sorted(scores.items(), key=lambda kv: float(kv[1]), reverse=True)
         k = max(1, int(np.ceil(len(items) * float(self.alpha_cfg.long_top_pct))))
-        selected = [s for s, _ in items[:k]]
+        selected = [s for s, score in items[:k] if score >= float(getattr(self.alpha_cfg, "min_score_threshold", 0.0))]
 
         # Compute vol for inverse-vol weights (20d realized vol on 1h bars approx)
         vols: Dict[str, float] = {}

@@ -78,6 +78,9 @@ class AlphaWeights(BaseModel):
 class AlphaConfig(BaseModel):
     weights: AlphaWeights = Field(default_factory=AlphaWeights)
     long_top_pct: float = Field(default=0.20, gt=0, le=1)
+    
+    # 最低分阈值：避免买入负分币种
+    min_score_threshold: float = Field(default=0.0, description="Minimum alpha score required to enter a position (0=disabled)")
 
     # Research/ops: optionally override weights by regime from a JSON file.
     dynamic_weights_by_regime_path: Optional[str] = Field(default=None, description="Path to reports/alpha_dynamic_weights_by_regime.json")
