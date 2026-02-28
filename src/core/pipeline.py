@@ -330,13 +330,24 @@ class V5Pipeline:
         # Otherwise small-budget equity caps (e.g. 20U) will create a fake massive drawdown and permanently throttle.
         # ALSO: track scale_basis for proper drawdown calculation when budget changes.
         from src.portfolio.portfolio_state import PortfolioState
+        from src.execution.account_store import AccountStore
 
-        # 获取资金规模基准（从配置或数据库）
+        # 获取资金规模基准（优先从数据库读取历史记录）
         cap_eq = getattr(self.cfg.budget, "live_equity_cap_usdt", None)
-        scale_basis = float(cap_eq) if cap_eq else float(equity_peak_usdt)
+        
+        # 读取数据库中的历史 scale_basis
+        acc_store = AccountStore(path=str(REPORTS_DIR / 'positions.sqlite'))
+        acc_state = acc_store.get()
+        old_scale_basis = float(acc_state.scale_basis_usdt or 0)
+        
+        # 如果数据库没有记录，使用当前 budget_cap 或 peak
+        if old_scale_basis <= 0:
+            old_scale_basis = float(cap_eq) if cap_eq else float(equity_peak_usdt)
+        
+        # 新的 scale_basis 来自配置
+        scale_basis = float(cap_eq) if cap_eq else old_scale_basis
         
         # 检测资金规模变化
-        old_scale_basis = float(equity_peak_usdt)  # 旧逻辑使用 peak 作为基准
         if scale_basis > 0 and old_scale_basis > 0:
             scale_ratio = scale_basis / old_scale_basis
             if scale_ratio < 0.5 or scale_ratio > 2.0:
@@ -346,6 +357,13 @@ class V5Pipeline:
                     audit.add_note(f"Scale basis changed: {old_scale_basis:.2f} -> {scale_basis:.2f}, "
                                  f"peak adjusted: {equity_peak_usdt:.2f} -> {new_peak:.2f}")
                 equity_peak_usdt = new_peak
+                
+                # 更新数据库中的 scale_basis
+                acc_store.update_scale_basis(scale_basis, propagate_to_peak=False)
+            elif abs(scale_ratio - 1.0) < 0.01:
+                # scale_basis 没有变化，确保数据库记录正确
+                if acc_state.scale_basis_usdt != scale_basis:
+                    acc_store.update_scale_basis(scale_basis, propagate_to_peak=False)
 
         pst = PortfolioState(
             cash_usdt=float(cash_raw),
