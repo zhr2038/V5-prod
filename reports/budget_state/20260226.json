@@ -1,0 +1,106 @@
+{
+  "ymd_utc": "20260226",
+  "turnover_budget_per_day": null,
+  "cost_budget_bps_per_day": null,
+  "turnover_used": 19.63644772679,
+  "cost_used_usdt": 0.02615670406179,
+  "avg_equity_est": 109.10709269476325,
+  "runs": {
+    "20260226_18": {
+      "turnover": 10.22076083679,
+      "cost_usdt": 0.01409690017179,
+      "fills_count": 4,
+      "notionals": [
+        1.99576396,
+        3.233999451,
+        2.16299999979,
+        2.827997426
+      ]
+    },
+    "20260226_19": {
+      "turnover": 4.021953664,
+      "cost_usdt": 0.004940638664,
+      "fills_count": 2,
+      "notionals": [
+        2.191175661,
+        1.830778003
+      ]
+    },
+    "20260226_21": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260226_23": {
+      "turnover": 2.73099869,
+      "cost_usdt": 0.0035941461900000004,
+      "fills_count": 4,
+      "notionals": [
+        1.78179869,
+        0.4746,
+        0.2373,
+        0.2373
+      ]
+    },
+    "20260227_00": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260227_01": {
+      "turnover": 2.662734536,
+      "cost_usdt": 0.0035250190359999998,
+      "fills_count": 1,
+      "notionals": [
+        2.662734536
+      ]
+    },
+    "20260227_02": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260227_03": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260227_04": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260227_05": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260227_06": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260227_07": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    }
+  },
+  "fills_count_today": 11,
+  "median_notional_usdt_today": 1.99576396,
+  "p25_notional_usdt_today": 0.4746,
+  "p75_notional_usdt_today": 2.191175661,
+  "small_trade_ratio_today": 0.7272727272727273,
+  "small_trade_notional_cutoff": 2.5,
+  "cost_used_bps": 2.3973422273257428,
+  "exceeded": false,
+  "reason": null
+}

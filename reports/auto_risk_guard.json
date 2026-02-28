@@ -1,0 +1,49 @@
+{
+  "current_level": "PROTECT",
+  "current_config": {
+    "name": "PROTECT",
+    "pos_mult_sideways": 0.2,
+    "pos_mult_trending": 0.5,
+    "deadband_sideways": 0.05,
+    "min_trade_notional_base": 5.0,
+    "drawdown_trigger": 0.05,
+    "drawdown_delever": 0.3,
+    "score_threshold_pct": 0.3,
+    "max_positions": 2,
+    "cooldown_hours": 6,
+    "description": "\u5229\u6da6\u56de\u5410\uff0c\u4e25\u683c\u9632\u5b88"
+  },
+  "metrics": {
+    "consecutive_loss_rounds": 0,
+    "consecutive_noise_rounds": 0,
+    "last_dd_pct": 0.1993,
+    "last_conversion_rate": 1.1914893617021276
+  },
+  "history": [
+    {
+      "ts": "2026-02-26T20:16:41.978025",
+      "from": "NEUTRAL",
+      "to": "PROTECT",
+      "reason": "\u5927\u5e45\u56de\u64a424.1%\uff0c\u8fdb\u5165\u4fdd\u62a4\u6a21\u5f0f",
+      "metrics": {
+        "consecutive_loss_rounds": 0,
+        "consecutive_noise_rounds": 0,
+        "last_dd_pct": 0.2408,
+        "last_conversion_rate": 1.1914893617021276
+      }
+    },
+    {
+      "ts": "2026-02-27T18:20:00",
+      "from": "PROTECT",
+      "to": "DEFENSE",
+      "reason": "\u56de\u64a4\u4ece24%\u4fee\u590d\u81f319.9%\uff0cPROTECT\u8fc7\u5ea6\u62e6\u622a\u7b56\u7565\u4fe1\u53f7\uff0c\u7cfb\u7edf\u81ea\u4e3b\u5207\u81f3DEFENSE"
+    },
+    {
+      "ts": "2026-02-27T18:25:00",
+      "from": "DEFENSE",
+      "to": "PROTECT",
+      "reason": "\u5229\u6da6\u8dcc\u6ca1\uff0c\u5e02\u573a\u8868\u73b0\u4e00\u822c\uff0c\u7cfb\u7edf\u7ea0\u6b63\u9519\u8bef\uff0c\u6062\u590d\u4e25\u683c\u9632\u5b88"
+    }
+  ],
+  "last_update": "2026-02-27 18:25:00"
+}

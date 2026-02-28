@@ -1,0 +1,22 @@
+{
+  "run_id": "20260214_22",
+  "start_ts": 1771102800,
+  "end_ts": 1771106400,
+  "window_start_ts": 1771102800,
+  "window_end_ts": 1771106400,
+  "avg_equity": 100.0,
+  "equity_start": 100.0,
+  "equity_end": 100.0,
+  "total_return_pct": 0.0,
+  "max_drawdown_pct": 0.0,
+  "sharpe": 0.0,
+  "num_trades": 1,
+  "num_round_trips": 0,
+  "turnover_ratio": 0.25,
+  "fees_usdt_total": 0.015,
+  "slippage_usdt_total": 0.0125,
+  "cost_usdt_total": 0.0275,
+  "cost_ratio": 0.000275,
+  "win_rate": null,
+  "profit_factor": null
+}

@@ -1,0 +1,53 @@
+{
+  "run_id": "20260222_22",
+  "start_ts": 1771794000,
+  "end_ts": 1771797600,
+  "window_start_ts": 1771794000,
+  "window_end_ts": 1771797600,
+  "avg_equity": 108.09923426927035,
+  "equity_start": 109.20650635189239,
+  "equity_end": 105.88468899129418,
+  "total_return_ratio": -0.03041776054894041,
+  "total_return_pct": -3.041776054894041,
+  "max_drawdown_pct": 3.041776054894041,
+  "sharpe": -35.3755572892697,
+  "num_trades": 1,
+  "num_round_trips": 1,
+  "turnover_ratio": 1.4036750678735792e-05,
+  "fees_usdt_total": 9.104172e-07,
+  "slippage_usdt_total": 7.58681e-07,
+  "slippage_coverage": 1.0,
+  "cost_usdt_total": 1.6690982e-06,
+  "cost_ratio": 1.544042574660937e-08,
+  "win_rate": 1.0,
+  "profit_factor": 1515692901.8,
+  "budget": {
+    "ymd_utc": "20260222",
+    "avg_equity_est": 108.09923426927035,
+    "turnover_used": 68.2861580092528,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.07511477381026807,
+    "cost_used_bps": 6.9486869465847025,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 15,
+    "median_notional_usdt_today": 0.001517362,
+    "small_trade_ratio_today": 1.0,
+    "small_trade_notional_cutoff": 25.0
+  },
+  "exit_signals": [
+    {
+      "symbol": "SPACE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "atr_trailing",
+      "last": 0.009853,
+      "stop": 0.010188885714285714,
+      "highest": 0.011639,
+      "atr": 0.0006591428571428572,
+      "atr_mult": 2.2,
+      "atr_n": 14
+    }
+  ]
+}

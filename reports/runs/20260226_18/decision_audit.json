@@ -1,0 +1,395 @@
+{
+  "run_id": "20260226_18",
+  "now_ts": 1772071217,
+  "window_start_ts": 1772096400,
+  "window_end_ts": 1772100000,
+  "regime": "Sideways",
+  "regime_multiplier": 0.7387311958157176,
+  "counts": {
+    "universe": 22,
+    "scored": 22,
+    "selected": 4,
+    "targets_pre_risk": 4,
+    "orders_exit": 12,
+    "orders_rebalance": 5
+  },
+  "top_scores": [
+    {
+      "symbol": "DOT/USDT",
+      "score": 1.5585566119764909
+    },
+    {
+      "symbol": "UNI/USDT",
+      "score": 1.5057528264669306
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "score": 0.6305771755079492
+    },
+    {
+      "symbol": "ADA/USDT",
+      "score": 0.6053555600641926
+    },
+    {
+      "symbol": "LINK/USDT",
+      "score": 0.3522250764075526
+    },
+    {
+      "symbol": "SOL/USDT",
+      "score": 0.2060399768113255
+    },
+    {
+      "symbol": "POL/USDT",
+      "score": 0.19097999113599248
+    },
+    {
+      "symbol": "FIL/USDT",
+      "score": 0.1623568612451682
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": 0.14871211664366618
+    },
+    {
+      "symbol": "XRP/USDT",
+      "score": 0.021634040683980768
+    }
+  ],
+  "targets_pre_risk": {
+    "DOT/USDT": 0.265049902606214,
+    "UNI/USDT": 0.2575510765589034,
+    "NEAR/USDT": 0.10815403152695573,
+    "ADA/USDT": 0.1079761851236444
+  },
+  "targets_post_risk": {
+    "DOT/USDT": 0.265049902606214,
+    "UNI/USDT": 0.2575510765589034,
+    "NEAR/USDT": 0.10815403152695573,
+    "ADA/USDT": 0.1079761851236444
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "rebalance_effective_deadband_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "ADA/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 2.159523702472888,
+      "cash_after": 17.84047629752711
+    },
+    {
+      "symbol": "DOT/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 3.2342815066442805,
+      "cash_after": 14.606194790882832
+    },
+    {
+      "symbol": "LTC/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "sell",
+      "notional": 1.9965187858169278,
+      "cash_after": 16.60271357669976
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 2.1630806305391146,
+      "cash_after": 14.439632946160645
+    },
+    {
+      "symbol": "UNI/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 2.828748755551068,
+      "cash_after": 11.610884190609577
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 0,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 0,
+    "provider_error": 0,
+    "exchange_min_notional": 0
+  },
+  "budget": {
+    "ymd_utc": "20260226",
+    "avg_equity_est": 111.32864767926515,
+    "turnover_used": 10.22076083679,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.01409690017179,
+    "cost_used_bps": 1.2662419301456704,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 4,
+    "median_notional_usdt_today": 2.495498712895,
+    "small_trade_ratio_today": 0.25,
+    "small_trade_notional_cutoff": 2.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 22,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "BNB/USDT",
+      "ADA/USDT",
+      "DOT/USDT",
+      "AVAX/USDT",
+      "POL/USDT",
+      "ATOM/USDT",
+      "NEAR/USDT"
+    ]
+  },
+  "exit_signals": [
+    {
+      "symbol": "ETH/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_9_exceeds_3",
+      "last": 2075.02,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "BNB/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_15_exceeds_3",
+      "last": 629.7,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "POL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_7_exceeds_3",
+      "last": 0.11118,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "BTC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_17_exceeds_3",
+      "last": 68580.9,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_19_exceeds_3",
+      "last": 116.83,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "SOL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_6_exceeds_3",
+      "last": 88.34,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "ETC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_16_exceeds_3",
+      "last": 9.049,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_11_exceeds_3",
+      "last": 9.38,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "FIL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "profit_taking_stop_loss_hit_hold",
+      "last": 1.0172,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_13_exceeds_3",
+      "last": 0.10023,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "TRX/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_12_exceeds_3",
+      "last": 0.28652,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "LTC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "rank_exit_rank_14_exceeds_3",
+      "last": 56.38,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    }
+  ],
+  "notes": [
+    "2026-02-26T10:00:44.250773: Rank exit: ETH/USDT rank 9, rank_9_exceeds_3",
+    "2026-02-26T10:00:44.251421: Rank exit: BNB/USDT rank 15, rank_15_exceeds_3",
+    "2026-02-26T10:00:44.251522: Rank exit: POL/USDT rank 7, rank_7_exceeds_3",
+    "2026-02-26T10:00:44.251532: Rank exit: BTC/USDT rank 17, rank_17_exceeds_3",
+    "2026-02-26T10:00:44.251543: Rank exit: AAVE/USDT rank 19, rank_19_exceeds_3",
+    "2026-02-26T10:00:44.251556: Rank exit: SOL/USDT rank 6, rank_6_exceeds_3",
+    "2026-02-26T10:00:44.251566: Rank exit: ETC/USDT rank 16, rank_16_exceeds_3",
+    "2026-02-26T10:00:44.251581: Rank exit: AVAX/USDT rank 11, rank_11_exceeds_3",
+    "2026-02-26T10:00:44.251593: Rank exit: FIL/USDT rank 8, rank_8_exceeds_3",
+    "2026-02-26T10:00:44.251604: Rank exit: DOGE/USDT rank 13, rank_13_exceeds_3",
+    "2026-02-26T10:00:44.251616: Rank exit: TRX/USDT rank 12, rank_12_exceeds_3",
+    "2026-02-26T10:00:44.251625: Rank exit: LTC/USDT rank 14, rank_14_exceeds_3",
+    "2026-02-26T10:00:44.264551: Fixed stop loss: FIL/USDT loss -6.8%",
+    "2026-02-26T10:00:44.264610: Profit taking: FIL/USDT stop_loss_hit_hold",
+    "2026-02-26T10:00:44.264693: Dust filter: ETH/USDT qty=0.00000160 value=$0.0033 treated as 0",
+    "2026-02-26T10:00:44.264699: Dust filter: BNB/USDT qty=0.00000065 value=$0.0004 treated as 0",
+    "2026-02-26T10:00:44.264703: Dust filter: POL/USDT qty=0.00257000 value=$0.0003 treated as 0",
+    "2026-02-26T10:00:44.264708: Dust filter: BTC/USDT qty=0.00000000 value=$0.0002 treated as 0",
+    "2026-02-26T10:00:44.264718: Dust filter: AAVE/USDT qty=0.00000049 value=$0.0001 treated as 0",
+    "2026-02-26T10:00:44.264723: Dust filter: SOL/USDT qty=0.00000028 value=$0.0000 treated as 0",
+    "2026-02-26T10:00:44.264727: Dust filter: ETC/USDT qty=0.00000076 value=$0.0000 treated as 0",
+    "2026-02-26T10:00:44.264732: Dust filter: AVAX/USDT qty=0.00000048 value=$0.0000 treated as 0",
+    "2026-02-26T10:00:44.264736: Dust filter: FIL/USDT qty=0.00000020 value=$0.0000 treated as 0",
+    "2026-02-26T10:00:44.264741: Dust filter: DOGE/USDT qty=0.00000099 value=$0.0000 treated as 0",
+    "2026-02-26T10:00:44.264745: Dust filter: TRX/USDT qty=0.00000004 value=$0.0000 treated as 0",
+    "2026-02-26T10:00:44.265419: Banding: ADA/USDT is new position, deadband 0.03→0.030",
+    "2026-02-26T10:00:44.272687: Fixed stop registered: ADA/USDT @ 0.2949, stop @ 0.2802",
+    "2026-02-26T10:00:44.274760: Fixed stop registered: DOT/USDT @ 1.6200, stop @ 1.5390",
+    "2026-02-26T10:00:44.274909: Close-only: LTC/USDT tw≈0, deadband 0.03→0.007 (force exit)",
+    "2026-02-26T10:00:44.275016: Banding: NEAR/USDT is new position, deadband 0.03→0.030",
+    "2026-02-26T10:00:44.276186: Fixed stop registered: NEAR/USDT @ 1.1350, stop @ 1.0782",
+    "2026-02-26T10:00:44.277345: Fixed stop registered: UNI/USDT @ 4.0410, stop @ 3.8390",
+    "2026-02-26T10:00:44.516605: ML data: filled 6 labels"
+  ],
+  "regime_details": {
+    "method": "EnsembleRegimeEngine",
+    "votes": {
+      "hmm": {
+        "state": "SIDEWAYS",
+        "confidence": 0.7828284967092418,
+        "weight": 0.35,
+        "sentiment": 0.18013531389393736,
+        "raw_state": "Sideways",
+        "probs": {
+          "TrendingUp": 0.19865340854234778,
+          "TrendingDown": 0.01851809464841041,
+          "Sideways": 0.7828284967092418
+        }
+      },
+      "funding": {
+        "state": "SIDEWAYS",
+        "confidence": 0.1702,
+        "weight": 0.4,
+        "sentiment": 0.0851,
+        "composite": true,
+        "details": {
+          "large": {
+            "avg": 0.1,
+            "count": 2
+          },
+          "mid": {
+            "avg": 0.0767,
+            "count": 4
+          },
+          "small": {
+            "avg": 0.06040000000000001,
+            "count": 4
+          }
+        }
+      },
+      "rss": {
+        "state": "TRENDING",
+        "confidence": 0.9000000000000001,
+        "weight": 0.25,
+        "sentiment": 0.4,
+        "summary": "[RSS情报] 市场呈现谨慎乐观情绪，比特币高位震荡，山寨币轮动反弹，但分析师警告风险未完全消除。"
+      }
+    },
+    "final_score": 0.34206997384823457,
+    "hmm_weight": 0.35,
+    "funding_weight": 0.4,
+    "rss_weight": 0.25
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "run_id": "v4",
+  "start_ts": 1771830000000,
+  "end_ts": 1771833600000,
+  "window_start_ts": 1771830000000,
+  "window_end_ts": 1771833600000,
+  "data_quality": "no_data",
+  "equity_points": 0,
+  "trade_events": 0,
+  "equity_start": null,
+  "equity_end": null,
+  "total_return_pct": null,
+  "max_drawdown_pct": null,
+  "sharpe": null,
+  "num_trades": null,
+  "num_round_trips": null,
+  "win_rate": null,
+  "profit_factor": null
+}

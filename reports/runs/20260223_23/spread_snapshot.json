@@ -1,0 +1,184 @@
+{
+  "ts": "2026-02-23T23:58:22.451781Z",
+  "run_id": "20260223_23",
+  "window_start_ts": 1771884000,
+  "window_end_ts": 1771887600,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 64642.9,
+      "ask": 64643.0,
+      "mid": 64642.95,
+      "spread_bps": 0.01546959103793141,
+      "selected": true
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 1856.39,
+      "ask": 1856.4,
+      "mid": 1856.395,
+      "spread_bps": 0.05386784601332639,
+      "selected": true
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 77.83,
+      "ask": 77.84,
+      "mid": 77.83500000000001,
+      "spread_bps": 1.2847690627616257,
+      "selected": true
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 596.3,
+      "ask": 596.4,
+      "mid": 596.3499999999999,
+      "spread_bps": 1.6768676113024692,
+      "selected": true
+    },
+    {
+      "symbol": "ADA/USDT",
+      "bid": 0.2622,
+      "ask": 0.2623,
+      "mid": 0.26225,
+      "spread_bps": 3.8131553860815632,
+      "selected": false
+    },
+    {
+      "symbol": "DOT/USDT",
+      "bid": 1.264,
+      "ask": 1.265,
+      "mid": 1.2645,
+      "spread_bps": 7.908264136021272,
+      "selected": false
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "bid": 8.366,
+      "ask": 8.367,
+      "mid": 8.3665,
+      "spread_bps": 1.1952429331276186,
+      "selected": false
+    },
+    {
+      "symbol": "POL/USDT",
+      "bid": 0.10678,
+      "ask": 0.10679,
+      "mid": 0.10678499999999999,
+      "spread_bps": 0.936461113451901,
+      "selected": true
+    },
+    {
+      "symbol": "ATOM/USDT",
+      "bid": 2.118,
+      "ask": 2.119,
+      "mid": 2.1185,
+      "spread_bps": 4.7203209818283405,
+      "selected": false
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "bid": 0.98,
+      "ask": 0.981,
+      "mid": 0.9804999999999999,
+      "spread_bps": 10.198878123406434,
+      "selected": false
+    },
+    {
+      "symbol": "LINK/USDT",
+      "bid": 8.269,
+      "ask": 8.27,
+      "mid": 8.2695,
+      "spread_bps": 1.209262954228727,
+      "selected": false
+    },
+    {
+      "symbol": "UNI/USDT",
+      "bid": 3.346,
+      "ask": 3.348,
+      "mid": 3.347,
+      "spread_bps": 5.975500448161875,
+      "selected": false
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "bid": 114.65,
+      "ask": 114.66,
+      "mid": 114.655,
+      "spread_bps": 0.8721817626785492,
+      "selected": false
+    },
+    {
+      "symbol": "LTC/USDT",
+      "bid": 51.33,
+      "ask": 51.34,
+      "mid": 51.335,
+      "spread_bps": 1.947988701666527,
+      "selected": false
+    },
+    {
+      "symbol": "BCH/USDT",
+      "bid": 495.3,
+      "ask": 495.4,
+      "mid": 495.35,
+      "spread_bps": 2.0187746038147956,
+      "selected": false
+    },
+    {
+      "symbol": "ETC/USDT",
+      "bid": 8.36,
+      "ask": 8.361,
+      "mid": 8.3605,
+      "spread_bps": 1.1961007116813853,
+      "selected": false
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.3523,
+      "ask": 1.3524,
+      "mid": 1.35235,
+      "spread_bps": 0.7394535438310273,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.09255,
+      "ask": 0.09256,
+      "mid": 0.092555,
+      "spread_bps": 1.0804386580962673,
+      "selected": false
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28185,
+      "ask": 0.28186,
+      "mid": 0.28185499999999997,
+      "spread_bps": 0.35479235777296847,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 0.8798,
+      "ask": 0.8799,
+      "mid": 0.87985,
+      "spread_bps": 1.1365573677330112,
+      "selected": false
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 26.361,
+      "ask": 26.362,
+      "mid": 26.3615,
+      "spread_bps": 0.3793410845352766,
+      "selected": false
+    },
+    {
+      "symbol": "FIL/USDT",
+      "bid": 0.8904,
+      "ask": 0.8905,
+      "mid": 0.89045,
+      "spread_bps": 1.1230276826322534,
+      "selected": true
+    }
+  ]
+}

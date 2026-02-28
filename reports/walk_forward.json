@@ -1,0 +1,66 @@
+{
+  "schema_version": 2,
+  "cost_assumption_meta": {
+    "mode": "fixed",
+    "fee_quantile": "p75",
+    "slippage_quantile": "p90",
+    "min_fills_global": 1,
+    "min_fills_bucket": 1,
+    "max_stats_age_days": 365,
+    "cost_stats_dir": ""
+  },
+  "cost_assumption_aggregate": {
+    "fallback_level_counts": {
+      "DEFAULT": 2743
+    }
+  },
+  "folds": [
+    {
+      "train_range": [
+        0,
+        0
+      ],
+      "test_range": [
+        0,
+        2880
+      ],
+      "result": {
+        "sharpe": 2.1720654174849647,
+        "cagr": 0.08414643802410926,
+        "max_dd": 0.01984820801957221,
+        "profit_factor": 1.002114826919999,
+        "turnover": 0.24406028455314185,
+        "cost_assumption": {
+          "mode": "default",
+          "source_day": null,
+          "fee_quantile": "p75",
+          "slippage_quantile": "p90",
+          "min_fills_global": 1,
+          "min_fills_bucket": 1,
+          "max_stats_age_days": 365,
+          "stats_path": null,
+          "global_fills": null,
+          "reason": "cost_model_disabled",
+          "fallback_level_counts": {
+            "DEFAULT": 2743
+          }
+        }
+      },
+      "cost_assumption": {
+        "mode": "default",
+        "source_day": null,
+        "fee_quantile": "p75",
+        "slippage_quantile": "p90",
+        "min_fills_global": 1,
+        "min_fills_bucket": 1,
+        "max_stats_age_days": 365,
+        "stats_path": null,
+        "global_fills": null,
+        "reason": "cost_model_disabled",
+        "fallback_level_counts": {
+          "DEFAULT": 2743
+        }
+      }
+    }
+  ]
+}

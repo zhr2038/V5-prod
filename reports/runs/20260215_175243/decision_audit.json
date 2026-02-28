@@ -1,0 +1,239 @@
+{
+  "run_id": "20260215_175243",
+  "now_ts": 1771149163,
+  "window_start_ts": null,
+  "window_end_ts": null,
+  "regime": "Sideways",
+  "regime_multiplier": 0.6,
+  "counts": {
+    "universe": 27,
+    "scored": 27,
+    "selected": 6,
+    "targets_pre_risk": 6,
+    "orders_exit": 0,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "SPACE/USDT",
+      "score": 2.1739543836495083
+    },
+    {
+      "symbol": "KITE/USDT",
+      "score": 1.788226715371818
+    },
+    {
+      "symbol": "MERL/USDT",
+      "score": 1.1672523474866972
+    },
+    {
+      "symbol": "PI/USDT",
+      "score": 0.8736973923257406
+    },
+    {
+      "symbol": "PEPE/USDT",
+      "score": 0.5427298007340574
+    },
+    {
+      "symbol": "ZEC/USDT",
+      "score": 0.33838877609384654
+    },
+    {
+      "symbol": "XAUT/USDT",
+      "score": 0.2569687358936936
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "score": 0.0985675429233292
+    },
+    {
+      "symbol": "XRP/USDT",
+      "score": 0.03266221671240255
+    },
+    {
+      "symbol": "TRX/USDT",
+      "score": -0.16918645488425932
+    }
+  ],
+  "targets_pre_risk": {
+    "SPACE/USDT": 0.13712650960678674,
+    "KITE/USDT": 0.21573290170047074,
+    "MERL/USDT": 0.10089538691407207,
+    "PI/USDT": 0.10470418462621378,
+    "PEPE/USDT": 0.04154101715245675,
+    "ZEC/USDT": 0.0
+  },
+  "targets_post_risk": {
+    "SPACE/USDT": 0.06856325480339337,
+    "KITE/USDT": 0.10786645085023537,
+    "MERL/USDT": 0.050447693457036036,
+    "PI/USDT": 0.05235209231310689,
+    "PEPE/USDT": 0.020770508576228374,
+    "ZEC/USDT": 0.0
+  },
+  "portfolio_debug": {
+    "inv_vol_norm": {
+      "SPACE/USDT": 0.0821440199696576,
+      "KITE/USDT": 0.1636143410279892,
+      "MERL/USDT": 0.1338482508242372,
+      "PI/USDT": 0.21507218538956954,
+      "PEPE/USDT": 0.2235352417825258,
+      "ZEC/USDT": 0.18178596100602062
+    },
+    "confidence_raw": {
+      "SPACE/USDT": 1.0,
+      "KITE/USDT": 0.7898589586283729,
+      "MERL/USDT": 0.45155758420240294,
+      "PI/USDT": 0.29163142631809275,
+      "PEPE/USDT": 0.11132319313408928,
+      "ZEC/USDT": 0.0
+    },
+    "score_stats": {
+      "min": 0.33838877609384654,
+      "max": 2.1739543836495083,
+      "std": 0.6531851730022468,
+      "count": 6
+    },
+    "zero_reason_by_symbol": {
+      "ZEC/USDT": "confidence_zero"
+    },
+    "weight_pre_clip": {
+      "SPACE/USDT": 0.2285441826779779,
+      "KITE/USDT": 0.35955483616745126,
+      "MERL/USDT": 0.16815897819012013,
+      "PI/USDT": 0.17450697437702298,
+      "PEPE/USDT": 0.06923502858742792,
+      "ZEC/USDT": 0.0
+    }
+  },
+  "rebalance_deadband_pct": 0.05,
+  "rebalance_skipped_deadband_count": 8,
+  "rebalance_skipped_deadband_by_symbol": {
+    "BNB/USDT": 6.602783576573057e-07,
+    "BTC/USDT": 1.6379732894411946e-07,
+    "DOGE/USDT": 1.07423285994604e-09,
+    "ETH/USDT": 1.0911349523667282e-05,
+    "PEPE/USDT": 0.020770508576228374,
+    "SOL/USDT": 5.090727835349533e-07,
+    "TRX/USDT": 6.207562462133635e-10,
+    "ZEC/USDT": 0.0
+  },
+  "rebalance_drift_by_symbol": {
+    "BNB/USDT": -6.602783576573057e-07,
+    "BTC/USDT": -1.6379732894411946e-07,
+    "DOGE/USDT": -1.07423285994604e-09,
+    "ETH/USDT": -1.0911349523667282e-05,
+    "KITE/USDT": 0.10786645085023537,
+    "MERL/USDT": 0.050447693457036036,
+    "PEPE/USDT": 0.020770508576228374,
+    "PI/USDT": 0.05235209231310689,
+    "SOL/USDT": -5.090727835349533e-07,
+    "SPACE/USDT": 0.06856325480339337,
+    "TRX/USDT": -6.207562462133635e-10,
+    "ZEC/USDT": 0.0
+  },
+  "router_decisions": [
+    {
+      "symbol": "BNB/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -6.602783576573057e-07,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "BTC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -1.6379732894411946e-07,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -1.07423285994604e-09,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "ETH/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -1.0911349523667282e-05,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "KITE/USDT",
+      "action": "skip",
+      "reason": "min_notional",
+      "notional": 10.019182597649902,
+      "min_notional": 25.0
+    },
+    {
+      "symbol": "MERL/USDT",
+      "action": "skip",
+      "reason": "min_notional",
+      "notional": 4.68583742574496,
+      "min_notional": 25.0
+    },
+    {
+      "symbol": "PEPE/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.020770508576228374,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "PI/USDT",
+      "action": "skip",
+      "reason": "min_notional",
+      "notional": 4.862727642557799,
+      "min_notional": 25.0
+    },
+    {
+      "symbol": "SOL/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -5.090727835349533e-07,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "action": "skip",
+      "reason": "min_notional",
+      "notional": 6.368502569146094,
+      "min_notional": 25.0
+    },
+    {
+      "symbol": "TRX/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -6.207562462133635e-10,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "ZEC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.05
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 4,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 8,
+    "provider_error": 0,
+    "portfolio_confidence_zero": 1
+  },
+  "budget": {},
+  "budget_action": {
+    "enabled": false
+  },
+  "notes": [
+    "2026-02-15T17:52:43.153222: DD multiplier: 0.5 (drawdown: 9.67%)"
+  ]
+}

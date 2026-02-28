@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+1771231004418,20260216_08,ETH/USDT,CLOSE_LONG,sell,0.0076,1971.8,14.98568,29.548763823999998,0,0,0

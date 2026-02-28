@@ -1,0 +1,13 @@
+{
+  "ETH/USDT": {
+    "symbol": "ETH/USDT",
+    "entry_price": 2000.0,
+    "entry_time": "2026-02-24T05:11:40.702713",
+    "highest_price": 2000.0,
+    "current_stop_price": 1940.0,
+    "current_stop_type": "initial_tight",
+    "is_breakeven": false,
+    "is_trailing": false,
+    "profit_high_watermark": 0.0
+  }
+}

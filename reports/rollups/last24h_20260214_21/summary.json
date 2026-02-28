@@ -1,0 +1,19 @@
+{
+  "run_id": "last24h_20260214_21",
+  "start_ts": null,
+  "end_ts": null,
+  "avg_equity": null,
+  "equity_start": null,
+  "equity_end": null,
+  "total_return_pct": null,
+  "max_drawdown_pct": null,
+  "sharpe": null,
+  "num_trades": 0,
+  "turnover_ratio": 0.0,
+  "fees_usdt_total": 0.0,
+  "slippage_usdt_total": 0.0,
+  "cost_usdt_total": 0.0,
+  "cost_ratio": 0.0,
+  "win_rate": null,
+  "profit_factor": null
+}

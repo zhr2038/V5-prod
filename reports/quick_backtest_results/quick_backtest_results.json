@@ -1,0 +1,38 @@
+[
+  {
+    "group_name": "\u4f18\u5316\u524d_F2_25%_\u56fa\u5b9a\u6210\u672c",
+    "f2_weight": 0.25,
+    "cost_model": "fixed",
+    "sharpe": 0.6620618905339097,
+    "cagr": 10.236636721292616,
+    "max_dd": 7.388161855390082,
+    "profit_factor": 1.131030945266955,
+    "turnover": 17.5,
+    "cost_note": "\u4f7f\u7528\u56fa\u5b9a\u6210\u672c\u5047\u8bbe(11bps)",
+    "timestamp": "2026-02-26T23:16:13.252176"
+  },
+  {
+    "group_name": "\u4f18\u5316\u540e_F2_20%_\u6821\u51c6\u6210\u672c",
+    "f2_weight": 0.2,
+    "cost_model": "calibrated",
+    "sharpe": 0.8764643622719573,
+    "cagr": 14.754066605002945,
+    "max_dd": 7.553503402967204,
+    "profit_factor": 1.2382321811359787,
+    "turnover": 15.0,
+    "cost_note": "\u4f7f\u7528\u6821\u51c6\u6210\u672c(1.15bps)",
+    "timestamp": "2026-02-26T23:16:13.252395"
+  },
+  {
+    "group_name": "\u6fc0\u8fdb_F2_15%_\u6821\u51c6\u6210\u672c",
+    "f2_weight": 0.15,
+    "cost_model": "calibrated",
+    "sharpe": 0.8448425360539432,
+    "cagr": 15.651331607939571,
+    "max_dd": 8.998732857053733,
+    "profit_factor": 1.2224212680269715,
+    "turnover": 12.5,
+    "cost_note": "\u4f7f\u7528\u6821\u51c6\u6210\u672c(1.15bps)",
+    "timestamp": "2026-02-26T23:16:13.252497"
+  }
+]

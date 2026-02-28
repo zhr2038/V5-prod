@@ -1,0 +1,176 @@
+{
+  "ts": "2026-02-28T08:00:37.714790Z",
+  "run_id": "20260228_16",
+  "window_start_ts": 1772262000,
+  "window_end_ts": 1772265600,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 63742.0,
+      "ask": 63742.1,
+      "mid": 63742.05,
+      "spread_bps": 0.01568823092425562,
+      "selected": false
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 1863.25,
+      "ask": 1863.4,
+      "mid": 1863.325,
+      "spread_bps": 0.8050125447793108,
+      "selected": false
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 78.52,
+      "ask": 78.53,
+      "mid": 78.525,
+      "spread_bps": 1.273479783509088,
+      "selected": false
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 596.3,
+      "ask": 596.4,
+      "mid": 596.3499999999999,
+      "spread_bps": 1.6768676113024692,
+      "selected": true
+    },
+    {
+      "symbol": "ADA/USDT",
+      "bid": 0.2643,
+      "ask": 0.2644,
+      "mid": 0.26435,
+      "spread_bps": 3.7828636277679024,
+      "selected": false
+    },
+    {
+      "symbol": "DOT/USDT",
+      "bid": 1.501,
+      "ask": 1.502,
+      "mid": 1.5015,
+      "spread_bps": 6.660006660007405,
+      "selected": true
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "bid": 8.599,
+      "ask": 8.6,
+      "mid": 8.599499999999999,
+      "spread_bps": 1.1628583057148043,
+      "selected": false
+    },
+    {
+      "symbol": "POL/USDT",
+      "bid": 0.10306,
+      "ask": 0.10308,
+      "mid": 0.10307,
+      "spread_bps": 1.940428834773079,
+      "selected": true
+    },
+    {
+      "symbol": "ATOM/USDT",
+      "bid": 1.809,
+      "ask": 1.811,
+      "mid": 1.81,
+      "spread_bps": 11.049723756906086,
+      "selected": false
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "bid": 1.054,
+      "ask": 1.055,
+      "mid": 1.0545,
+      "spread_bps": 9.483167377903175,
+      "selected": false
+    },
+    {
+      "symbol": "LINK/USDT",
+      "bid": 8.325,
+      "ask": 8.326,
+      "mid": 8.3255,
+      "spread_bps": 1.2011290613191066,
+      "selected": true
+    },
+    {
+      "symbol": "UNI/USDT",
+      "bid": 3.625,
+      "ask": 3.626,
+      "mid": 3.6254999999999997,
+      "spread_bps": 2.758240242724838,
+      "selected": false
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "bid": 106.6,
+      "ask": 106.61,
+      "mid": 106.60499999999999,
+      "spread_bps": 0.9380423057084675,
+      "selected": false
+    },
+    {
+      "symbol": "LTC/USDT",
+      "bid": 52.31,
+      "ask": 52.32,
+      "mid": 52.315,
+      "spread_bps": 1.9114976584149883,
+      "selected": false
+    },
+    {
+      "symbol": "BCH/USDT",
+      "bid": 445.7,
+      "ask": 445.8,
+      "mid": 445.75,
+      "spread_bps": 2.243409983174935,
+      "selected": false
+    },
+    {
+      "symbol": "ETC/USDT",
+      "bid": 8.271,
+      "ask": 8.272,
+      "mid": 8.2715,
+      "spread_bps": 1.208970561566156,
+      "selected": false
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.3004,
+      "ask": 1.3005,
+      "mid": 1.30045,
+      "spread_bps": 0.7689645891805834,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.08906,
+      "ask": 0.08907,
+      "mid": 0.089065,
+      "spread_bps": 1.122775501038132,
+      "selected": false
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28052,
+      "ask": 0.28053,
+      "mid": 0.280525,
+      "spread_bps": 0.35647446751662065,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 0.8474,
+      "ask": 0.8475,
+      "mid": 0.84745,
+      "spread_bps": 1.1800106200954508,
+      "selected": false
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 26.618,
+      "ask": 26.619,
+      "mid": 26.618499999999997,
+      "spread_bps": 0.3756785694164669,
+      "selected": false
+    }
+  ]
+}

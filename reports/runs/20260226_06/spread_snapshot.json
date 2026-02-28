@@ -1,0 +1,184 @@
+{
+  "ts": "2026-02-25T22:00:16.248119Z",
+  "run_id": "20260226_06",
+  "window_start_ts": 1772053200,
+  "window_end_ts": 1772056800,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 69024.9,
+      "ask": 69025.0,
+      "mid": 69024.95,
+      "spread_bps": 0.014487515022585423,
+      "selected": false
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 2107.43,
+      "ask": 2107.44,
+      "mid": 2107.435,
+      "spread_bps": 0.047451048313320594,
+      "selected": false
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 90.14,
+      "ask": 90.15,
+      "mid": 90.14500000000001,
+      "spread_bps": 1.1093238671035681,
+      "selected": false
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 636.1,
+      "ask": 636.2,
+      "mid": 636.1500000000001,
+      "spread_bps": 1.5719562996152279,
+      "selected": false
+    },
+    {
+      "symbol": "ADA/USDT",
+      "bid": 0.3104,
+      "ask": 0.3105,
+      "mid": 0.31045,
+      "spread_bps": 3.221130616846158,
+      "selected": true
+    },
+    {
+      "symbol": "DOT/USDT",
+      "bid": 1.735,
+      "ask": 1.736,
+      "mid": 1.7355,
+      "spread_bps": 5.762028233937712,
+      "selected": true
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "bid": 9.718,
+      "ask": 9.719,
+      "mid": 9.718499999999999,
+      "spread_bps": 1.0289653753145505,
+      "selected": false
+    },
+    {
+      "symbol": "POL/USDT",
+      "bid": 0.11703,
+      "ask": 0.11707,
+      "mid": 0.11704999999999999,
+      "spread_bps": 3.4173430158050726,
+      "selected": false
+    },
+    {
+      "symbol": "ATOM/USDT",
+      "bid": 1.991,
+      "ask": 1.993,
+      "mid": 1.992,
+      "spread_bps": 10.04016064257029,
+      "selected": false
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "bid": 1.237,
+      "ask": 1.238,
+      "mid": 1.2375,
+      "spread_bps": 8.080808080807191,
+      "selected": true
+    },
+    {
+      "symbol": "LINK/USDT",
+      "bid": 9.506,
+      "ask": 9.507,
+      "mid": 9.506499999999999,
+      "spread_bps": 1.0519118497864048,
+      "selected": false
+    },
+    {
+      "symbol": "UNI/USDT",
+      "bid": 4.125,
+      "ask": 4.126,
+      "mid": 4.125500000000001,
+      "spread_bps": 2.4239486122902285,
+      "selected": true
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "bid": 122.46,
+      "ask": 122.47,
+      "mid": 122.465,
+      "spread_bps": 0.8165598334222117,
+      "selected": false
+    },
+    {
+      "symbol": "LTC/USDT",
+      "bid": 58.34,
+      "ask": 58.35,
+      "mid": 58.345,
+      "spread_bps": 1.713942925700233,
+      "selected": false
+    },
+    {
+      "symbol": "BCH/USDT",
+      "bid": 511.8,
+      "ask": 512.0,
+      "mid": 511.9,
+      "spread_bps": 3.9070130884936245,
+      "selected": false
+    },
+    {
+      "symbol": "ETC/USDT",
+      "bid": 9.591,
+      "ask": 9.592,
+      "mid": 9.5915,
+      "spread_bps": 1.0425897930472003,
+      "selected": false
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.4794,
+      "ask": 1.4795,
+      "mid": 1.47945,
+      "spread_bps": 0.6759268647131637,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.10568,
+      "ask": 0.10569,
+      "mid": 0.105685,
+      "spread_bps": 0.9462080711557933,
+      "selected": false
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28625,
+      "ask": 0.28626,
+      "mid": 0.28625500000000004,
+      "spread_bps": 0.3493388761771847,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 1.0126,
+      "ask": 1.0127,
+      "mid": 1.0126499999999998,
+      "spread_bps": 0.9875080235025824,
+      "selected": false
+    },
+    {
+      "symbol": "FIL/USDT",
+      "bid": 1.0944,
+      "ask": 1.0946,
+      "mid": 1.0945,
+      "spread_bps": 1.8273184102327817,
+      "selected": true
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 28.704,
+      "ask": 28.705,
+      "mid": 28.7045,
+      "spread_bps": 0.348377432109136,
+      "selected": false
+    }
+  ]
+}

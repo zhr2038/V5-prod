@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-02-16T23:00:04.942377Z,20260216_23,SOL/USDT,OPEN_LONG,buy,0.328797343738,85.72,28.1845083052,0.0169107049831,0.0140922541526,,

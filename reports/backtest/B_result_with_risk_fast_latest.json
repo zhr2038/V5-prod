@@ -1,0 +1,27 @@
+{
+  "window_points": 60,
+  "start": "2026-01-26 01:00:00",
+  "end": "2026-02-24 13:00:00",
+  "results": {
+    "trend": {
+      "ret_pct": -1.68,
+      "trades": 18,
+      "final": 19.6649
+    },
+    "mean": {
+      "ret_pct": -0.37,
+      "trades": 2,
+      "final": 19.9258
+    },
+    "alpha6": {
+      "ret_pct": -0.84,
+      "trades": 8,
+      "final": 19.8329
+    },
+    "fused": {
+      "ret_pct": -0.87,
+      "trades": 16,
+      "final": 19.8264
+    }
+  }
+}

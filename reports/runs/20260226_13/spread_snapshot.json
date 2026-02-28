@@ -1,0 +1,184 @@
+{
+  "ts": "2026-02-26T05:00:21.297153Z",
+  "run_id": "20260226_13",
+  "window_start_ts": 1772078400,
+  "window_end_ts": 1772082000,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 68546.0,
+      "ask": 68546.1,
+      "mid": 68546.05,
+      "spread_bps": 0.014588732684935275,
+      "selected": false
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 2074.71,
+      "ask": 2074.72,
+      "mid": 2074.715,
+      "spread_bps": 0.048199391240548846,
+      "selected": false
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 88.67,
+      "ask": 88.68,
+      "mid": 88.67500000000001,
+      "spread_bps": 1.1277135607561448,
+      "selected": false
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 630.7,
+      "ask": 630.8,
+      "mid": 630.75,
+      "spread_bps": 1.5854141894555538,
+      "selected": false
+    },
+    {
+      "symbol": "ADA/USDT",
+      "bid": 0.2972,
+      "ask": 0.2973,
+      "mid": 0.29725,
+      "spread_bps": 3.36417157274984,
+      "selected": true
+    },
+    {
+      "symbol": "DOT/USDT",
+      "bid": 1.609,
+      "ask": 1.61,
+      "mid": 1.6095000000000002,
+      "spread_bps": 6.213109661386218,
+      "selected": true
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "bid": 9.504,
+      "ask": 9.505,
+      "mid": 9.5045,
+      "spread_bps": 1.052133200064414,
+      "selected": false
+    },
+    {
+      "symbol": "POL/USDT",
+      "bid": 0.11322,
+      "ask": 0.11323,
+      "mid": 0.11322499999999999,
+      "spread_bps": 0.8831971737687015,
+      "selected": false
+    },
+    {
+      "symbol": "ATOM/USDT",
+      "bid": 1.944,
+      "ask": 1.946,
+      "mid": 1.9449999999999998,
+      "spread_bps": 10.282776349614405,
+      "selected": false
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "bid": 1.153,
+      "ask": 1.154,
+      "mid": 1.1535,
+      "spread_bps": 8.669267446899783,
+      "selected": true
+    },
+    {
+      "symbol": "LINK/USDT",
+      "bid": 9.304,
+      "ask": 9.305,
+      "mid": 9.3045,
+      "spread_bps": 1.0747487774726698,
+      "selected": false
+    },
+    {
+      "symbol": "UNI/USDT",
+      "bid": 4.053,
+      "ask": 4.054,
+      "mid": 4.0535,
+      "spread_bps": 2.4670038238567513,
+      "selected": true
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "bid": 118.71,
+      "ask": 118.72,
+      "mid": 118.715,
+      "spread_bps": 0.8423535357793973,
+      "selected": false
+    },
+    {
+      "symbol": "LTC/USDT",
+      "bid": 56.84,
+      "ask": 56.85,
+      "mid": 56.845,
+      "spread_bps": 1.7591696719145062,
+      "selected": false
+    },
+    {
+      "symbol": "BCH/USDT",
+      "bid": 502.2,
+      "ask": 502.3,
+      "mid": 502.25,
+      "spread_bps": 1.9910403185669039,
+      "selected": false
+    },
+    {
+      "symbol": "ETC/USDT",
+      "bid": 9.11,
+      "ask": 9.111,
+      "mid": 9.1105,
+      "spread_bps": 1.0976345974438528,
+      "selected": false
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.4576,
+      "ask": 1.4577,
+      "mid": 1.4576500000000001,
+      "spread_bps": 0.6860357424621066,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.10112,
+      "ask": 0.10113,
+      "mid": 0.10112499999999999,
+      "spread_bps": 0.9888751545113597,
+      "selected": false
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28721,
+      "ask": 0.28722,
+      "mid": 0.287215,
+      "spread_bps": 0.34817123060963007,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 0.9691,
+      "ask": 0.9692,
+      "mid": 0.96915,
+      "spread_bps": 1.0318320177473972,
+      "selected": false
+    },
+    {
+      "symbol": "FIL/USDT",
+      "bid": 1.0139,
+      "ask": 1.014,
+      "mid": 1.01395,
+      "spread_bps": 0.9862419251441293,
+      "selected": false
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 28.22,
+      "ask": 28.221,
+      "mid": 28.2205,
+      "spread_bps": 0.3543523325246619,
+      "selected": false
+    }
+  ]
+}

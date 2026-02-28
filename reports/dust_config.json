@@ -1,0 +1,21 @@
+{
+  "dust_symbols": [
+    "WLFI",
+    "SPACE",
+    "J",
+    "PEPE",
+    "MERL",
+    "KITE",
+    "PROMPT",
+    "XAUT"
+  ],
+  "dust_criteria": {
+    "max_qty": 0.1,
+    "max_value_usdt": 0.5,
+    "max_price": 0.1
+  },
+  "excluded_from_equity": true,
+  "excluded_from_rebalance": true,
+  "excluded_from_borrow_check": true,
+  "updated_at": "2026-02-27T23:44:54.278808"
+}

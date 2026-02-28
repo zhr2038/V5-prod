@@ -1,0 +1,112 @@
+{
+  "ts": "2026-02-20T01:02:09.389833Z",
+  "run_id": "20260220_01",
+  "window_start_ts": 1771545600,
+  "window_end_ts": 1771549200,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 67260.9,
+      "ask": 67261.0,
+      "mid": 67260.95,
+      "spread_bps": 0.01486746767713224,
+      "selected": true
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 1958.55,
+      "ask": 1958.56,
+      "mid": 1958.5549999999998,
+      "spread_bps": 0.051058050450413214,
+      "selected": false
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 82.98,
+      "ask": 82.99,
+      "mid": 82.985,
+      "spread_bps": 1.2050370548883418,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.09871,
+      "ask": 0.09872,
+      "mid": 0.098715,
+      "spread_bps": 1.013017271944094,
+      "selected": false
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.4164,
+      "ask": 1.4165,
+      "mid": 1.4164500000000002,
+      "spread_bps": 0.7059903279324294,
+      "selected": false
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "bid": 0.010154,
+      "ask": 0.010162,
+      "mid": 0.010158,
+      "spread_bps": 7.875566056309634,
+      "selected": false
+    },
+    {
+      "symbol": "XAUT/USDT",
+      "bid": 4992.3,
+      "ask": 4992.4,
+      "mid": 4992.35,
+      "spread_bps": 0.20030646889631995,
+      "selected": true
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 29.273,
+      "ask": 29.274,
+      "mid": 29.2735,
+      "spread_bps": 0.3416058892859488,
+      "selected": false
+    },
+    {
+      "symbol": "OP/USDT",
+      "bid": 0.1369,
+      "ask": 0.137,
+      "mid": 0.13695000000000002,
+      "spread_bps": 7.301935012779609,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 0.9351,
+      "ask": 0.9352,
+      "mid": 0.93515,
+      "spread_bps": 1.0693471635565308,
+      "selected": false
+    },
+    {
+      "symbol": "LIT/USDT",
+      "bid": 1.482,
+      "ask": 1.484,
+      "mid": 1.483,
+      "spread_bps": 13.486176668914373,
+      "selected": false
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28515,
+      "ask": 0.28516,
+      "mid": 0.28515500000000005,
+      "spread_bps": 0.35068646876295345,
+      "selected": true
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 608.4,
+      "ask": 608.5,
+      "mid": 608.45,
+      "spread_bps": 1.6435204207416012,
+      "selected": false
+    }
+  ]
+}

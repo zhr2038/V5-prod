@@ -1,0 +1,164 @@
+{
+  "timestamp": "2026-02-28T16:00:45Z",
+  "dry_run": false,
+  "orders": [
+    {
+      "symbol": "POL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0007877037999999999,
+      "signal_price": 0.10447,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 0.10447
+      }
+    },
+    {
+      "symbol": "BTC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.0001693545052,
+      "signal_price": 64837.1,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 64837.1
+      }
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 5.2195700000000006e-05,
+      "signal_price": 107.62,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 107.62
+      }
+    },
+    {
+      "symbol": "LTC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 4.3464594786448e-05,
+      "signal_price": 52.58,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 52.58
+      }
+    },
+    {
+      "symbol": "ETC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 6.350265e-06,
+      "signal_price": 8.301,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 8.301
+      }
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 4.1006749999999995e-06,
+      "signal_price": 8.633,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 8.633
+      }
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 8.9981136e-08,
+      "signal_price": 0.09078,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 0.09078
+      }
+    },
+    {
+      "symbol": "ETH/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 4.4314957800000006,
+      "signal_price": 1898.67,
+      "meta": {
+        "reason": "profit_taking_stop_loss_hit_hold",
+        "action": "sell_all",
+        "value": 1898.67
+      }
+    },
+    {
+      "symbol": "DOT/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 3.0996e-07,
+      "signal_price": 1.512,
+      "meta": {
+        "reason": "fixed_stop_loss",
+        "entry_price": 1.615,
+        "stop_price": 1.53425,
+        "loss_pct": -0.06377708978328173
+      }
+    },
+    {
+      "symbol": "BNB/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 0.00039320399999999997,
+      "signal_price": 604.0,
+      "meta": {
+        "reason": "atr_trailing",
+        "last": 604.0,
+        "stop": 619.2542857142856,
+        "highest": 633.9,
+        "atr": 6.657142857142868,
+        "atr_mult": 2.2,
+        "atr_n": 14
+      }
+    },
+    {
+      "symbol": "TRX/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "notional_usdt": 1.1997696e-08,
+      "signal_price": 0.28032,
+      "meta": {
+        "reason": "atr_trailing",
+        "last": 0.28032,
+        "stop": 0.284985,
+        "highest": 0.28691,
+        "atr": 0.0008749999999999948,
+        "atr_mult": 2.2,
+        "atr_n": 14
+      }
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "side": "sell",
+      "intent": "REBALANCE",
+      "notional_usdt": 3.6717237,
+      "signal_price": 28.179,
+      "meta": {
+        "target_w": 0.0,
+        "dd_mult": 1.0,
+        "regime": "Sideways",
+        "window_start_ts": 1772290800,
+        "window_end_ts": 1772294400,
+        "deadband_pct": 0.035,
+        "drift": -0.18358618499999999
+      }
+    }
+  ],
+  "notes": "regime=RegimeState.SIDEWAYS selected=[] orders=12"
+}

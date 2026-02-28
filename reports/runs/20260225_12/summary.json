@@ -1,0 +1,51 @@
+{
+  "run_id": "20260225_12",
+  "start_ts": 1772017200,
+  "end_ts": 1772020800,
+  "window_start_ts": 1772017200,
+  "window_end_ts": 1772020800,
+  "avg_equity": 111.33336338204695,
+  "equity_start": 112.61309152726703,
+  "equity_end": 108.77390709160679,
+  "total_return_ratio": -0.03409181280429252,
+  "total_return_pct": -3.409181280429252,
+  "max_drawdown_pct": 3.409181280429252,
+  "sharpe": -93.59487164888998,
+  "num_trades": 0,
+  "turnover_ratio": 0.0,
+  "fees_usdt_total": 0.0,
+  "slippage_usdt_total": 0.0,
+  "cost_usdt_total": 0.0,
+  "cost_ratio": 0.0,
+  "win_rate": null,
+  "profit_factor": null,
+  "budget": {
+    "ymd_utc": "20260225",
+    "avg_equity_est": 111.33336338204695,
+    "turnover_used": 17.749322600430002,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.020417900235430102,
+    "cost_used_bps": 1.833942639940274,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 9,
+    "median_notional_usdt_today": 1.8299424,
+    "small_trade_ratio_today": 0.0,
+    "small_trade_notional_cutoff": 0.0
+  },
+  "exit_signals": [
+    {
+      "symbol": "AAVE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "atr_trailing",
+      "last": 115.88,
+      "stop": 115.96942857142858,
+      "highest": 119.7,
+      "atr": 1.6957142857142864,
+      "atr_mult": 2.2,
+      "atr_n": 14
+    }
+  ]
+}

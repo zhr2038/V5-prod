@@ -1,0 +1,40 @@
+{
+  "ts": "2026-02-17T05:00:04.805787Z",
+  "run_id": "20260217_05",
+  "window_start_ts": 1771300800,
+  "window_end_ts": 1771304400,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 68486.1,
+      "ask": 68486.2,
+      "mid": 68486.15,
+      "spread_bps": 0.014601492417265221,
+      "selected": false
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 1989.75,
+      "ask": 1989.76,
+      "mid": 1989.755,
+      "spread_bps": 0.05025744375559255,
+      "selected": false
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 86.37,
+      "ask": 86.38,
+      "mid": 86.375,
+      "spread_bps": 1.1577424023144318,
+      "selected": true
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 626.3,
+      "ask": 626.4,
+      "mid": 626.3499999999999,
+      "spread_bps": 1.596551448870803,
+      "selected": false
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+{
+  "run_id": "20260217_14",
+  "now_ts": 1771308123,
+  "window_start_ts": 1771333200,
+  "window_end_ts": 1771336800,
+  "regime": "Sideways",
+  "regime_multiplier": 0.6,
+  "counts": {
+    "universe": 19,
+    "scored": 19,
+    "selected": 4,
+    "targets_pre_risk": 4,
+    "orders_exit": 0,
+    "orders_rebalance": 2
+  },
+  "top_scores": [
+    {
+      "symbol": "SPACE/USDT",
+      "score": 3.1623168007321896
+    },
+    {
+      "symbol": "MERL/USDT",
+      "score": 2.628281213628762
+    },
+    {
+      "symbol": "PI/USDT",
+      "score": 1.7719422415140371
+    },
+    {
+      "symbol": "ZEC/USDT",
+      "score": 1.4348661073418438
+    },
+    {
+      "symbol": "PEPE/USDT",
+      "score": 0.8841767213487061
+    },
+    {
+      "symbol": "LIT/USDT",
+      "score": 0.786196837728087
+    },
+    {
+      "symbol": "BCH/USDT",
+      "score": 0.5782563105650077
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "score": 0.1504824222377807
+    },
+    {
+      "symbol": "SNX/USDT",
+      "score": -0.00914345605165514
+    },
+    {
+      "symbol": "SUI/USDT",
+      "score": -0.13974648633185685
+    }
+  ],
+  "targets_pre_risk": {
+    "SPACE/USDT": 0.25,
+    "MERL/USDT": 0.21340286255282026,
+    "PI/USDT": 0.05502252528610559,
+    "ZEC/USDT": 0.025476593518839147
+  },
+  "targets_post_risk": {
+    "SPACE/USDT": 0.125,
+    "MERL/USDT": 0.10670143127641013,
+    "PI/USDT": 0.027511262643052797,
+    "ZEC/USDT": 0.012738296759419574
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "BNB/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -1.2166049999999998e-06,
+      "deadband": 0.07
+    },
+    {
+      "symbol": "BTC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -7.5638175e-07,
+      "deadband": 0.07
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -4.8027456e-09,
+      "deadband": 0.07
+    },
+    {
+      "symbol": "ETH/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -0.00015886579550000002,
+      "deadband": 0.07
+    },
+    {
+      "symbol": "MERL/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 2.1340286255282024,
+      "cash_after": 17.865971374471798
+    },
+    {
+      "symbol": "PI/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.027511262643052797,
+      "deadband": 0.07
+    },
+    {
+      "symbol": "SOL/USDT",
+      "action": "skip",
+      "reason": "insufficient_cash",
+      "notional": 26.13249640370831,
+      "cash_available": 17.865971374471798,
+      "cash_initial": 20.0
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 2.5,
+      "cash_after": 15.365971374471798
+    },
+    {
+      "symbol": "TRX/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -2.8905639e-09,
+      "deadband": 0.07
+    },
+    {
+      "symbol": "ZEC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.012738296759419574,
+      "deadband": 0.07
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 1,
+    "deadband_skip": 7,
+    "provider_error": 0
+  },
+  "budget": {
+    "ymd_utc": "20260217",
+    "avg_equity_est": 89.5764672675241,
+    "turnover_used": 190.7055659630562,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.2097761225594378,
+    "cost_used_bps": 23.418664405789983,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 12,
+    "median_notional_usdt_today": 14.31298356047,
+    "small_trade_ratio_today": 0.4166666666666667,
+    "small_trade_notional_cutoff": 1.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 19,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "SPACE/USDT",
+      "DOGE/USDT",
+      "XRP/USDT",
+      "XAUT/USDT",
+      "SUI/USDT",
+      "PEPE/USDT",
+      "HYPE/USDT"
+    ]
+  },
+  "notes": [
+    "2026-02-17T14:02:10.726476: DD multiplier: 0.5 (drawdown: 82.33%)"
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "timestamp": "2026-02-27T23:44:54.280599",
+  "dust_criteria": {
+    "max_qty": 0.1,
+    "max_value_usdt": 0.5,
+    "max_price": 0.1
+  },
+  "dust_symbols": [
+    "WLFI",
+    "SPACE",
+    "J",
+    "PEPE",
+    "MERL",
+    "KITE",
+    "PROMPT",
+    "XAUT"
+  ],
+  "marked_positions": [
+    {
+      "symbol": "PROMPT/USDT",
+      "qty": 0.0821,
+      "value": 0.003732266,
+      "reason": "\u5728\u7c89\u5c18\u5e01\u79cd\u5217\u8868\u4e2d"
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "qty": 0.154,
+      "value": 0.001299452,
+      "reason": "\u5728\u7c89\u5c18\u5e01\u79cd\u5217\u8868\u4e2d"
+    },
+    {
+      "symbol": "POL/USDT",
+      "qty": 0.00754,
+      "value": 0.000826384,
+      "reason": "\u4ef7\u503c$0.0008 < $0.5"
+    },
+    {
+      "symbol": "KITE/USDT",
+      "qty": 0.00235,
+      "value": 0.0005734000000000001,
+      "reason": "\u5728\u7c89\u5c18\u5e01\u79cd\u5217\u8868\u4e2d"
+    },
+    {
+      "symbol": "WLFI/USDT",
+      "qty": 0.00144,
+      "value": 0.00016416000000000003,
+      "reason": "\u5728\u7c89\u5c18\u5e01\u79cd\u5217\u8868\u4e2d"
+    },
+    {
+      "symbol": "MERL/USDT",
+      "qty": 0.000639,
+      "value": 2.773899e-05,
+      "reason": "\u5728\u7c89\u5c18\u5e01\u79cd\u5217\u8868\u4e2d"
+    },
+    {
+      "symbol": "J/USDT",
+      "qty": 0.000744,
+      "value": 1.0170479999999999e-05,
+      "reason": "\u5728\u7c89\u5c18\u5e01\u79cd\u5217\u8868\u4e2d"
+    },
+    {
+      "symbol": "PEPE/USDT",
+      "qty": 0.2331658553331767,
+      "value": 8.594493427580893e-07,
+      "reason": "\u5728\u7c89\u5c18\u5e01\u79cd\u5217\u8868\u4e2d"
+    }
+  ],
+  "stats": {
+    "marked": 8,
+    "already_excluded": 0,
+    "errors": 0
+  }
+}

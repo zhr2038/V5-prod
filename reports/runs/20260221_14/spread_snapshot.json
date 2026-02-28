@@ -1,0 +1,184 @@
+{
+  "ts": "2026-02-21T14:02:11.978098Z",
+  "run_id": "20260221_14",
+  "window_start_ts": 1771678800,
+  "window_end_ts": 1771682400,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 68223.0,
+      "ask": 68223.1,
+      "mid": 68223.05,
+      "spread_bps": 0.014657802605691297,
+      "selected": false
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 1979.74,
+      "ask": 1979.75,
+      "mid": 1979.745,
+      "spread_bps": 0.0505115557811279,
+      "selected": false
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 85.75,
+      "ask": 85.76,
+      "mid": 85.755,
+      "spread_bps": 1.1661127631047887,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.10033,
+      "ask": 0.10034,
+      "mid": 0.10033500000000001,
+      "spread_bps": 0.9966611850297625,
+      "selected": false
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.4471,
+      "ask": 1.4472,
+      "mid": 1.4471500000000002,
+      "spread_bps": 0.6910133711086548,
+      "selected": false
+    },
+    {
+      "symbol": "XAUT/USDT",
+      "bid": 5105.0,
+      "ask": 5105.1,
+      "mid": 5105.05,
+      "spread_bps": 0.1958844673418748,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 0.9609,
+      "ask": 0.961,
+      "mid": 0.96095,
+      "spread_bps": 1.0406368697641812,
+      "selected": false
+    },
+    {
+      "symbol": "WLFI/USDT",
+      "bid": 0.1218,
+      "ask": 0.1219,
+      "mid": 0.12185,
+      "spread_bps": 8.206811653671645,
+      "selected": true
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "bid": 0.01028,
+      "ask": 0.010284,
+      "mid": 0.010282,
+      "spread_bps": 3.890293717176163,
+      "selected": true
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28597,
+      "ask": 0.28598,
+      "mid": 0.285975,
+      "spread_bps": 0.3496809161643501,
+      "selected": false
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 633.3,
+      "ask": 633.4,
+      "mid": 633.3499999999999,
+      "spread_bps": 1.5789058182682996,
+      "selected": false
+    },
+    {
+      "symbol": "KITE/USDT",
+      "bid": 0.22633,
+      "ask": 0.22647,
+      "mid": 0.2264,
+      "spread_bps": 6.183745583038924,
+      "selected": true
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 29.975,
+      "ask": 29.976,
+      "mid": 29.9755,
+      "spread_bps": 0.3336057780512984,
+      "selected": false
+    },
+    {
+      "symbol": "OP/USDT",
+      "bid": 0.1308,
+      "ask": 0.1309,
+      "mid": 0.13085,
+      "spread_bps": 7.6423385555971715,
+      "selected": false
+    },
+    {
+      "symbol": "ADA/USDT",
+      "bid": 0.283,
+      "ask": 0.2831,
+      "mid": 0.28305,
+      "spread_bps": 3.5329447094168693,
+      "selected": false
+    },
+    {
+      "symbol": "FIL/USDT",
+      "bid": 0.9986,
+      "ask": 0.9989,
+      "mid": 0.99875,
+      "spread_bps": 3.003754693366378,
+      "selected": true
+    },
+    {
+      "symbol": "ALLO/USDT",
+      "bid": 0.13637,
+      "ask": 0.13655,
+      "mid": 0.13646,
+      "spread_bps": 13.19067858713275,
+      "selected": true
+    },
+    {
+      "symbol": "BCH/USDT",
+      "bid": 569.7,
+      "ask": 569.8,
+      "mid": 569.75,
+      "spread_bps": 1.7551557700729976,
+      "selected": false
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "bid": 123.24,
+      "ask": 123.25,
+      "mid": 123.245,
+      "spread_bps": 0.8113919428784223,
+      "selected": false
+    },
+    {
+      "symbol": "LINK/USDT",
+      "bid": 8.966,
+      "ask": 8.967,
+      "mid": 8.9665,
+      "spread_bps": 1.1152623654728402,
+      "selected": false
+    },
+    {
+      "symbol": "ZAMA/USDT",
+      "bid": 0.02526,
+      "ask": 0.02527,
+      "mid": 0.025265000000000003,
+      "spread_bps": 3.958044725905241,
+      "selected": false
+    },
+    {
+      "symbol": "LTC/USDT",
+      "bid": 55.32,
+      "ask": 55.33,
+      "mid": 55.325,
+      "spread_bps": 1.8075011296878465,
+      "selected": false
+    }
+  ]
+}

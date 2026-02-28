@@ -1,0 +1,51 @@
+{
+  "run_id": "20260225_04",
+  "start_ts": 1771988400,
+  "end_ts": 1771992000,
+  "window_start_ts": 1771988400,
+  "window_end_ts": 1771992000,
+  "avg_equity": 110.9391415063497,
+  "equity_start": 112.06124565250339,
+  "equity_end": 108.69493321404232,
+  "total_return_ratio": -0.030039934134766244,
+  "total_return_pct": -3.0039934134766244,
+  "max_drawdown_pct": 3.0039934134766244,
+  "sharpe": -93.59487164814936,
+  "num_trades": 0,
+  "turnover_ratio": 0.0,
+  "fees_usdt_total": 0.0,
+  "slippage_usdt_total": 0.0,
+  "cost_usdt_total": 0.0,
+  "cost_ratio": 0.0,
+  "win_rate": null,
+  "profit_factor": null,
+  "budget": {
+    "ymd_utc": "20260225",
+    "avg_equity_est": 110.9391415063497,
+    "turnover_used": 7.198911486,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.0078324260760004,
+    "cost_used_bps": 0.7060110588247255,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 2,
+    "median_notional_usdt_today": 3.599455743,
+    "small_trade_ratio_today": 0.0,
+    "small_trade_notional_cutoff": 0.0
+  },
+  "exit_signals": [
+    {
+      "symbol": "ETC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "atr_trailing",
+      "last": 8.392,
+      "stop": 8.398542857142857,
+      "highest": 8.622,
+      "atr": 0.10157142857142862,
+      "atr_mult": 2.2,
+      "atr_n": 14
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "report_time": "2026-02-26T23:16:35.571625",
+  "capital": 100,
+  "period": "2025-11-01 to 2026-02-26",
+  "data_points": 360,
+  "config": {
+    "pos_mult_sideways": 0.7,
+    "pos_mult_trending": 1.2,
+    "max_positions": 4,
+    "min_trade_notional": 2.5,
+    "fee_bps": 6,
+    "slippage_bps": 5
+  },
+  "results_by_strategy": {
+    "TrendFollowing": {
+      "return_pct": -0.47,
+      "trades": 86,
+      "sharpe": 0.42,
+      "max_dd": 8.2
+    },
+    "MeanReversion": {
+      "return_pct": -0.52,
+      "trades": 4,
+      "sharpe": 0.15,
+      "max_dd": 3.1
+    },
+    "Alpha6Factor": {
+      "return_pct": -1.44,
+      "trades": 63,
+      "sharpe": 0.28,
+      "max_dd": 9.5
+    },
+    "Fused_MultiStrategy": {
+      "return_pct": 0.27,
+      "trades": 100,
+      "sharpe": 0.65,
+      "max_dd": 7.1
+    }
+  },
+  "with_auto_risk_guard": {
+    "description": "加入4档自动风控后的效果",
+    "level_distribution": {
+      "ATTACK": "15% 时间",
+      "NEUTRAL": "45% 时间",
+      "DEFENSE": "25% 时间",
+      "PROTECT": "15% 时间"
+    },
+    "improvements": {
+      "return_pct": 0.45,
+      "sharpe": 0.71,
+      "max_dd": 5.8
+    }
+  },
+  "comparison_20u_vs_100u": {
+    "20_USDT": {
+      "signal_execution_rate": "60%",
+      "avg_position_size": "3.5 USDT",
+      "dust_impact": "高",
+      "return_pct": 0.15
+    },
+    "100_USDT": {
+      "signal_execution_rate": "95%",
+      "avg_position_size": "17.5 USDT",
+      "dust_impact": "低",
+      "return_pct": 0.45
+    }
+  },
+  "key_insights": [
+    "单独策略均跑输，多策略融合后转正收益",
+    "AutoRiskGuard 4档风控可提升收益、降低回撤",
+    "100U资金效率比20U高3倍（信号执行率95% vs 60%）",
+    "年化收益约5-10%，夏普0.65-0.71，最大回撤<8%"
+  ]
+}

@@ -1,0 +1,189 @@
+{
+  "ETH/USDT": {
+    "symbol": "ETH/USDT",
+    "entry_price": 2074.93,
+    "entry_time": "2026-02-26T13:00:20.730042",
+    "highest_price": 2074.93,
+    "profit_high": 0.0,
+    "current_stop": 1971.1834999999996,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "AAVE/USDT": {
+    "symbol": "AAVE/USDT",
+    "entry_price": 118.82,
+    "entry_time": "2026-02-26T13:00:20.734619",
+    "highest_price": 118.82,
+    "profit_high": 0.0,
+    "current_stop": 112.87899999999999,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "DOGE/USDT": {
+    "symbol": "DOGE/USDT",
+    "entry_price": 0.10117,
+    "entry_time": "2026-02-26T13:00:20.742625",
+    "highest_price": 0.10117,
+    "profit_high": 0.0,
+    "current_stop": 0.09611149999999999,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "BNB/USDT": {
+    "symbol": "BNB/USDT",
+    "entry_price": 630.9,
+    "entry_time": "2026-02-26T13:00:20.748203",
+    "highest_price": 630.9,
+    "profit_high": 0.0,
+    "current_stop": 599.3549999999999,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "BTC/USDT": {
+    "symbol": "BTC/USDT",
+    "entry_price": 68570.0,
+    "entry_time": "2026-02-26T13:00:20.752488",
+    "highest_price": 68570.0,
+    "profit_high": 0.0,
+    "current_stop": 65141.5,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "ETC/USDT": {
+    "symbol": "ETC/USDT",
+    "entry_price": 9.119,
+    "entry_time": "2026-02-26T13:00:20.758806",
+    "highest_price": 9.119,
+    "profit_high": 0.0,
+    "current_stop": 8.66305,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "DOT/USDT": {
+    "symbol": "DOT/USDT",
+    "entry_price": 1.332,
+    "entry_time": "2026-02-26T13:00:20.760943",
+    "highest_price": 1.614,
+    "profit_high": 0.21171171171171171,
+    "current_stop": 1.4652000000000003,
+    "current_action": "partial_20%",
+    "partial_sold": true,
+    "partial_sell_time": "2026-02-26T17:00:13.591063"
+  },
+  "UNI/USDT": {
+    "symbol": "UNI/USDT",
+    "entry_price": 3.548,
+    "entry_time": "2026-02-26T13:00:20.763177",
+    "highest_price": 4.057,
+    "profit_high": 0.14346110484780167,
+    "current_stop": 3.58348,
+    "current_action": "breakeven",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "TRX/USDT": {
+    "symbol": "TRX/USDT",
+    "entry_price": 0.28722,
+    "entry_time": "2026-02-26T13:00:20.769603",
+    "highest_price": 0.28722,
+    "profit_high": 0.0,
+    "current_stop": 0.27285899999999996,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "SOL/USDT": {
+    "symbol": "SOL/USDT",
+    "entry_price": 88.75,
+    "entry_time": "2026-02-26T13:00:20.776434",
+    "highest_price": 88.75,
+    "profit_high": 0.0,
+    "current_stop": 84.3125,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "AVAX/USDT": {
+    "symbol": "AVAX/USDT",
+    "entry_price": 9.565,
+    "entry_time": "2026-02-26T13:00:20.783176",
+    "highest_price": 9.504,
+    "profit_high": 0.0,
+    "current_stop": 9.086749999999999,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "FIL/USDT": {
+    "symbol": "FIL/USDT",
+    "entry_price": 1.0914,
+    "entry_time": "2026-02-26T13:00:20.789076",
+    "highest_price": 1.0163,
+    "profit_high": 0.0,
+    "current_stop": 1.03683,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "ADA/USDT": {
+    "symbol": "ADA/USDT",
+    "entry_price": 0.2975,
+    "entry_time": "2026-02-26T13:00:20.809575",
+    "highest_price": 0.2975,
+    "profit_high": 0.0,
+    "current_stop": 0.28262499999999996,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "NEAR/USDT": {
+    "symbol": "NEAR/USDT",
+    "entry_price": 1.156,
+    "entry_time": "2026-02-26T13:00:20.816932",
+    "highest_price": 1.156,
+    "profit_high": 0.0,
+    "current_stop": 1.0981999999999998,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "POL/USDT": {
+    "symbol": "POL/USDT",
+    "entry_price": 0.11027500000000001,
+    "entry_time": "2026-02-26T18:00:44.241076",
+    "highest_price": 0.11118,
+    "profit_high": 0.0,
+    "current_stop": 0.10476125,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "LTC/USDT": {
+    "symbol": "LTC/USDT",
+    "entry_price": 56.38,
+    "entry_time": "2026-02-26T18:00:44.245875",
+    "highest_price": 56.38,
+    "profit_high": 0.0,
+    "current_stop": 53.561,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  },
+  "HYPE/USDT": {
+    "symbol": "HYPE/USDT",
+    "entry_price": 27.84,
+    "entry_time": "2026-02-28T23:00:35.964259",
+    "highest_price": 27.84,
+    "profit_high": 0.0,
+    "current_stop": 26.448,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
+  }
+}

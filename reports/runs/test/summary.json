@@ -1,0 +1,19 @@
+{
+  "run_id": "test",
+  "start_ts": "2026-02-14T21:47:39.450130Z",
+  "end_ts": "2026-02-14T21:47:39.450130Z",
+  "avg_equity": 100.0,
+  "equity_start": 100.0,
+  "equity_end": 100.0,
+  "total_return_pct": 0.0,
+  "max_drawdown_pct": 0.0,
+  "sharpe": null,
+  "num_trades": 0,
+  "turnover_ratio": 0.0,
+  "fees_usdt_total": 0.0,
+  "slippage_usdt_total": 0.0,
+  "cost_usdt_total": 0.0,
+  "cost_ratio": 0.0,
+  "win_rate": null,
+  "profit_factor": null
+}

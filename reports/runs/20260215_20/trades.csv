@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-02-15T20:00:05.416663Z,20260215_20,ETH/USDT,CLOSE_LONG,sell,5.152e-07,1942.33,0.001000688416,6.004130496e-07,5.00344208e-07,-3.65851572576e-05,-0.0342456388086

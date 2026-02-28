@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+1771325554103,20260217_10,ETH/USDT,REBALANCE,sell,0.001246,1964,2.4471439999999998,4.806190816,0,0,0

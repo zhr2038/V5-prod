@@ -1,0 +1,99 @@
+{
+  "run_id": "20260215_23",
+  "now_ts": 1771167606,
+  "window_start_ts": 1771192800,
+  "window_end_ts": 1771196400,
+  "regime": "Sideways",
+  "regime_multiplier": 0.6,
+  "counts": {
+    "universe": 4,
+    "scored": 4,
+    "selected": 1,
+    "targets_pre_risk": 1,
+    "orders_exit": 0,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "SOL/USDT",
+      "score": 0.5893233714032649
+    },
+    {
+      "symbol": "BTC/USDT",
+      "score": 0.2847168659568687
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": -0.1515695228213413
+    },
+    {
+      "symbol": "BNB/USDT",
+      "score": -0.7224707145387921
+    }
+  ],
+  "targets_pre_risk": {
+    "SOL/USDT": 0.25
+  },
+  "targets_post_risk": {
+    "SOL/USDT": 0.125
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "BNB/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -6.63723572903197e-07,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "BTC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -1.649025124934067e-07,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "SOL/USDT",
+      "action": "skip",
+      "reason": "min_notional",
+      "notional": 11.610631766914723,
+      "min_notional": 25.0
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 1,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 2,
+    "provider_error": 0
+  },
+  "budget": {
+    "ymd_utc": "20260215",
+    "avg_equity_est": 92.88505413531779,
+    "turnover_used": 98.976186161016,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.10887380477705759,
+    "cost_used_bps": 11.721348045773532,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 2,
+    "median_notional_usdt_today": 49.488093080508,
+    "small_trade_ratio_today": 0.5,
+    "small_trade_notional_cutoff": 25.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "notes": [
+    "2026-02-15T23:00:06.777880: DD multiplier: 0.5 (drawdown: 9.67%)"
+  ]
+}

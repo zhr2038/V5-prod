@@ -1,0 +1,3691 @@
+{
+  "schema_version": 2,
+  "generated_ts": 1772022836,
+  "lookback_days": 3,
+  "horizon": "1h",
+  "target_notional_usdt": 20.0,
+  "slack": 1.05,
+  "coverage": {
+    "rows_total": 7912,
+    "rows_with_fwd_ret_col": 0,
+    "fwd_ret_col_distinct": 0,
+    "rows_with_close": 0,
+    "rows_tradable": 0,
+    "closes_points": 616
+  },
+  "overall_raw": {
+    "used_points": 0,
+    "used_timestamps": 0,
+    "missing_close_pairs": 7912,
+    "ic": {
+      "f1_mom_5d": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      },
+      "f2_mom_20d": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      },
+      "f3_vol_adj_ret_20d": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      },
+      "f4_volume_expansion": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      },
+      "f5_rsi_trend_confirm": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      }
+    }
+  },
+  "overall_tradable": {
+    "used_points": 0,
+    "used_timestamps": 0,
+    "missing_close_pairs": 0,
+    "ic": {
+      "f1_mom_5d": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      },
+      "f2_mom_20d": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      },
+      "f3_vol_adj_ret_20d": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      },
+      "f4_volume_expansion": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      },
+      "f5_rsi_trend_confirm": {
+        "count": 0,
+        "mean": null,
+        "p25": null,
+        "p50": null,
+        "p75": null,
+        "p90": null
+      }
+    }
+  },
+  "by_regime_raw": {
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.0036365219650079253, ma20=67852.38, ma60=67923.345, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 10,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.003554900926332353, ma20=67824.87999999999, ma60=67915.25499999999, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 45,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.003672956814759086, ma20=67796.99000000002, ma60=67905.14333333334, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 32,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.0038400346572153004, ma20=67784.58499999999, ma60=67900.495, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 26,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.0039659189074449895, ma20=67764.04500000001, ma60=67905.64833333333, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 41,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.004910359738410999, ma20=67701.54000000001, ma60=67892.16833333333, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 37,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.0076809314278175785, ma20=67523.80500000002, ma60=67852.395, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 30,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007923020286821689, ma20=67360.85, ma60=67814.21333333333, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 38,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007798445788839298, ma20=67207.18500000001, ma60=67770.145, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 23,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007826568807371835, ma20=67049.89499999999, ma60=67720.43333333333, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 29,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007695302088277926, ma20=66900.16500000001, ma60=67677.96666666667, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 31,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008222440047672502, ma20=66781.47, ma60=67641.77166666668, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 9,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008222440047672502, ma20=66781.47, ma60=67641.77166666668, multiplier=0.3)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 23,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008112261141323789, ma20=66668.67000000001, ma60=67613.71333333333, multiplier=0.3)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 50,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.011256830873127222, ma20=55.86798321951791, ma60=55.33410700538305, multiplier=0.3)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 12,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007551146245508529, ma20=65856.345, ma60=67289.00833333333, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 4,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.0075601442193113004, ma20=65855.29000000001, ma60=67288.65666666666, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 4,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007559554144374645, ma20=65855.54500000001, ma60=67288.74166666667, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 4,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007568919235254088, ma20=65853.39, ma60=67288.02333333333, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 4,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.00785829555060324, ma20=65841.69, ma60=67284.12333333334, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 28,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007862417078254783, ma20=65844.845, ma60=67285.175, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 4,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007867490688707502, ma20=65842.74500000001, ma60=67284.475, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 4,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007997956265937812, ma20=65837.395, ma60=67282.69166666667, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 20,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00828582447248085, ma20=65829.69, ma60=67280.12333333334, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 25,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008292092309320908, ma20=65827.24, ma60=67279.30666666667, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 25,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008299925833032297, ma20=65825.345, ma60=67278.675, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 25,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008297759687613745, ma20=65826.19, ma60=67278.95666666667, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 25,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008355153178175534, ma20=65829.81, ma60=67280.16333333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 22,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008369548397578596, ma20=65824.235, ma60=67278.305, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 22,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00848945727863536, ma20=65817.445, ma60=67276.04166666667, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 22,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00888167437152432, ma20=65828.82, ma60=67279.83333333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 22,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009179817796233636, ma20=65676.87000000001, ma60=67227.03, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 22,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009626343269470285, ma20=65509.52500000001, ma60=67167.55, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 22,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009398846082263176, ma20=65396.57500000001, ma60=67107.93333333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 660,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00934011571515501, ma20=65404.33500000001, ma60=67048.655, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 660,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009400781689856417, ma20=65401.435, ma60=66990.52166666667, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 660,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008962417038899329, ma20=65387.585, ma60=66933.275, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 660,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00888848169796561, ma20=65394.155000000006, ma60=66878.85, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 631,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.010265503237771043, ma20=65348.83, ma60=66810.56166666668, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 630,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.010131677491422679, ma20=65266.425000000025, ma60=66738.29666666668, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 630,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.010717644104127606, ma20=65148.045000000006, ma60=66654.60333333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 630,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.010761545183478534, ma20=65033.26000000001, ma60=66572.07333333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 630,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.011009942770211528, ma20=64867.94, ma60=66483.06, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 630,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.010869550447903423, ma20=64705.854999999996, ma60=66391.46, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 63,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00989496097484895, ma20=64555.33, ma60=66302.23833333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009673024001197137, ma20=64410.895, ma60=66221.68833333334, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00936195720693403, ma20=64266.744999999995, ma60=66135.97166666666, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00897389011544695, ma20=64134.625, ma60=66057.75333333334, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008896656438806811, ma20=64012.925, ma60=65978.56833333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008843640042922244, ma20=63893.235, ma60=65895.62, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00910792066166752, ma20=63798.155000000006, ma60=65807.98833333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009840086631935845, ma20=63739.465000000004, ma60=65733.64, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008879498926769312, ma20=63723.579999999994, ma60=65665.71666666666, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009081906540186388, ma20=63713.15499999999, ma60=65603.75666666667, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008762869627079466, ma20=63694.829999999994, ma60=65540.99, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00852844210996871, ma20=63679.715000000004, ma60=65480.666666666664, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 20,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008144358857756589, ma20=63668.365000000005, ma60=65421.045000000006, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 20,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007965327138817544, ma20=63644.62000000001, ma60=65362.89000000001, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 20,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.00823760126904613, ma20=63638.57000000001, ma60=65295.855, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008038288982270502, ma20=63639.06, ma60=65228.985, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.007950768415568856, ma20=63662.270000000004, ma60=65159.66166666667, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.008095057164479861, ma20=63704.125, ma60=65097.74833333333, multiplier=1.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009960689674758178, ma20=63843.77, ma60=65068.465, multiplier=0.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 42,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.009960689674758178, ma20=63843.77, ma60=65068.465, multiplier=0.2)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.010033161975857885, ma20=63983.715000000004, ma60=65042.38166666667, multiplier=0.2)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.RISK_OFF: 'Risk-Off'>, atr_pct=0.010033161975857885, ma20=63983.715000000004, ma60=65042.38166666667, multiplier=0.0)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.010033161975857885, ma20=63983.715000000004, ma60=65042.38166666667, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.010106499869152448, ma20=64093.55500000001, ma60=65004.156666666655, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.009512549486337167, ma20=64197.369999999995, ma60=64968.063333333324, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.009637832140594826, ma20=64279.009999999995, ma60=64926.39666666666, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.009124599358974366, ma20=64359.71, ma60=64884.32999999999, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.009032182236389725, ma20=64449.759999999995, ma60=64844.361666666664, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.009014168641497835, ma20=64577.56, ma60=64813.18, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.008783366933352982, ma20=64709.965000000004, ma60=64778.979999999996, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 21,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.008851195018373736, ma20=64806.880000000005, ma60=64741.071666666656, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 20,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    },
+    "RegimeResult(state=<RegimeState.SIDEWAYS: 'Sideways'>, atr_pct=0.008465944076404764, ma20=64879.56000000001, ma60=64704.22166666666, multiplier=0.6)": {
+      "used_points": 0,
+      "used_timestamps": 0,
+      "missing_close_pairs": 20,
+      "ic": {
+        "f1_mom_5d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f2_mom_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f3_vol_adj_ret_20d": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f4_volume_expansion": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        },
+        "f5_rsi_trend_confirm": {
+          "count": 0,
+          "mean": null,
+          "p25": null,
+          "p50": null,
+          "p75": null,
+          "p90": null
+        }
+      }
+    }
+  },
+  "by_regime_tradable": {},
+  "by_symbol": {
+    "symbols": 0,
+    "key_factor": "f2_mom_20d",
+    "top10": [],
+    "bottom10": []
+  }
+}

@@ -1,0 +1,184 @@
+{
+  "ts": "2026-02-26T10:00:44.968124Z",
+  "run_id": "20260226_18",
+  "window_start_ts": 1772096400,
+  "window_end_ts": 1772100000,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 68570.9,
+      "ask": 68571.0,
+      "mid": 68570.95,
+      "spread_bps": 0.014583435114406431,
+      "selected": false
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 2075.08,
+      "ask": 2075.09,
+      "mid": 2075.085,
+      "spread_bps": 0.04819079700454814,
+      "selected": false
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 88.36,
+      "ask": 88.37,
+      "mid": 88.36500000000001,
+      "spread_bps": 1.1316697787591372,
+      "selected": false
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 629.6,
+      "ask": 629.7,
+      "mid": 629.6500000000001,
+      "spread_bps": 1.5881839116973353,
+      "selected": false
+    },
+    {
+      "symbol": "ADA/USDT",
+      "bid": 0.2947,
+      "ask": 0.2948,
+      "mid": 0.29475,
+      "spread_bps": 3.3927056827816453,
+      "selected": true
+    },
+    {
+      "symbol": "DOT/USDT",
+      "bid": 1.619,
+      "ask": 1.62,
+      "mid": 1.6195,
+      "spread_bps": 6.174745291757406,
+      "selected": true
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "bid": 9.372,
+      "ask": 9.373,
+      "mid": 9.372499999999999,
+      "spread_bps": 1.0669511869826043,
+      "selected": false
+    },
+    {
+      "symbol": "POL/USDT",
+      "bid": 0.11115,
+      "ask": 0.11119,
+      "mid": 0.11116999999999999,
+      "spread_bps": 3.5980930107041806,
+      "selected": false
+    },
+    {
+      "symbol": "ATOM/USDT",
+      "bid": 1.935,
+      "ask": 1.936,
+      "mid": 1.9355,
+      "spread_bps": 5.166623611469335,
+      "selected": false
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "bid": 1.136,
+      "ask": 1.137,
+      "mid": 1.1364999999999998,
+      "spread_bps": 8.79894412670578,
+      "selected": true
+    },
+    {
+      "symbol": "LINK/USDT",
+      "bid": 9.293,
+      "ask": 9.294,
+      "mid": 9.2935,
+      "spread_bps": 1.0760208748062863,
+      "selected": false
+    },
+    {
+      "symbol": "UNI/USDT",
+      "bid": 4.039,
+      "ask": 4.04,
+      "mid": 4.0395,
+      "spread_bps": 2.4755539051871116,
+      "selected": true
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "bid": 116.89,
+      "ask": 116.9,
+      "mid": 116.89500000000001,
+      "spread_bps": 0.85546858291673,
+      "selected": false
+    },
+    {
+      "symbol": "LTC/USDT",
+      "bid": 56.35,
+      "ask": 56.36,
+      "mid": 56.355000000000004,
+      "spread_bps": 1.7744654422851585,
+      "selected": false
+    },
+    {
+      "symbol": "BCH/USDT",
+      "bid": 502.3,
+      "ask": 502.4,
+      "mid": 502.35,
+      "spread_bps": 1.9906439733246917,
+      "selected": false
+    },
+    {
+      "symbol": "ETC/USDT",
+      "bid": 9.046,
+      "ask": 9.048,
+      "mid": 9.047,
+      "spread_bps": 2.2106775726767633,
+      "selected": false
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.4518,
+      "ask": 1.4519,
+      "mid": 1.4518499999999999,
+      "spread_bps": 0.6887763887453181,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.1002,
+      "ask": 0.10021,
+      "mid": 0.10020499999999999,
+      "spread_bps": 0.997954193902113,
+      "selected": false
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28652,
+      "ask": 0.28653,
+      "mid": 0.28652500000000003,
+      "spread_bps": 0.34900968501910823,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 0.9644,
+      "ask": 0.9645,
+      "mid": 0.96445,
+      "spread_bps": 1.03686038674881,
+      "selected": false
+    },
+    {
+      "symbol": "FIL/USDT",
+      "bid": 1.0166,
+      "ask": 1.0167,
+      "mid": 1.0166499999999998,
+      "spread_bps": 0.9836226823389466,
+      "selected": false
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 29.192,
+      "ask": 29.193,
+      "mid": 29.192500000000003,
+      "spread_bps": 0.3425537381180858,
+      "selected": false
+    }
+  ]
+}

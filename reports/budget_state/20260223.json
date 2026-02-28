@@ -1,0 +1,154 @@
+{
+  "ymd_utc": "20260223",
+  "turnover_budget_per_day": null,
+  "cost_budget_bps_per_day": null,
+  "turnover_used": 32.66085855704026,
+  "cost_used_usdt": 0.09210300298816418,
+  "avg_equity_est": 108.7179537857548,
+  "runs": {
+    "20260223_00": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260223_01": {
+      "turnover": 0.0037329589056109003,
+      "cost_usdt": 4.1062547961721e-06,
+      "fills_count": 4,
+      "notionals": [
+        0.003079484812,
+        2.36457e-05,
+        6.84535736109e-05,
+        0.00056137482
+      ]
+    },
+    "20260223_02": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260223_03": {
+      "turnover": 9.1824768e-08,
+      "cost_usdt": 1.0100724480000001e-10,
+      "fills_count": 1,
+      "notionals": [
+        9.1824768e-08
+      ]
+    },
+    "20260223_04": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260223_05": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260223_06": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260223_07": {
+      "turnover": 10.2581907218,
+      "cost_usdt": 0.0667269698218,
+      "fills_count": 3,
+      "notionals": [
+        3.3872788,
+        3.6093599218,
+        3.261552
+      ]
+    },
+    "20260223_08": {
+      "turnover": 2.803140260509876,
+      "cost_usdt": 0.0030834542865608634,
+      "fills_count": 5,
+      "notionals": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.003009252012,
+        0.0,
+        0.000554863932,
+        6.67796658758e-05,
+        2.33649e-05,
+        0.0,
+        0.0,
+        2.799486
+      ]
+    },
+    "20260223_18": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260223_19": {
+      "turnover": 9.018119328,
+      "cost_usdt": 0.010283734328000099,
+      "fills_count": 9,
+      "notionals": [
+        3.39963,
+        2.499490224,
+        0.152285076,
+        0.846114633,
+        0.1269,
+        0.19035,
+        0.19035,
+        1.25685,
+        0.356149395
+      ]
+    },
+    "20260223_20": {
+      "turnover": 10.577675196000001,
+      "cost_usdt": 0.0120047381959998,
+      "fills_count": 6,
+      "notionals": [
+        0.722207736,
+        0.769244356,
+        3.3631038,
+        2.4813238,
+        1.64137504,
+        1.600420464
+      ]
+    },
+    "20260223_21": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260223_22": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260223_23": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    }
+  },
+  "fills_count_today": 28,
+  "median_notional_usdt_today": 0.5391785655,
+  "p25_notional_usdt_today": 0.00056137482,
+  "p75_notional_usdt_today": 2.4813238,
+  "small_trade_ratio_today": 0.0,
+  "small_trade_notional_cutoff": 0.0,
+  "cost_used_bps": 8.471738087498142,
+  "exceeded": false,
+  "reason": null
+}

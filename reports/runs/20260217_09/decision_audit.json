@@ -1,0 +1,85 @@
+{
+  "run_id": "20260217_09",
+  "now_ts": 1771290006,
+  "window_start_ts": 1771315200,
+  "window_end_ts": 1771318800,
+  "regime": "Sideways",
+  "regime_multiplier": 0.6,
+  "counts": {
+    "universe": 4,
+    "scored": 4,
+    "selected": 1,
+    "targets_pre_risk": 1,
+    "orders_exit": 0,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "SOL/USDT",
+      "score": 1.3114674383251497
+    },
+    {
+      "symbol": "BTC/USDT",
+      "score": -0.07133773992229966
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": -0.45604371831243506
+    },
+    {
+      "symbol": "BNB/USDT",
+      "score": -0.7840859800904146
+    }
+  ],
+  "targets_pre_risk": {
+    "SOL/USDT": 0.25
+  },
+  "targets_post_risk": {
+    "SOL/USDT": 0.125
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "SOL/USDT",
+      "action": "skip",
+      "reason": "min_notional",
+      "notional": 14.113027628529874,
+      "min_notional": 25.0
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 1,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 0,
+    "provider_error": 0
+  },
+  "budget": {
+    "ymd_utc": "20260217",
+    "avg_equity_est": 112.90422102823898,
+    "turnover_used": 164.5730043832582,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.18103030482163002,
+    "cost_used_bps": 16.033971376176602,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 9,
+    "median_notional_usdt_today": 28.2281252457,
+    "small_trade_ratio_today": 0.4444444444444444,
+    "small_trade_notional_cutoff": 25.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "notes": [
+    "2026-02-17T09:00:06.627304: DD multiplier: 0.5 (drawdown: 57.56%)"
+  ]
+}

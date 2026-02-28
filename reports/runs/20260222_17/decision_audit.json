@@ -1,0 +1,156 @@
+{
+  "run_id": "20260222_17",
+  "now_ts": 1771750922,
+  "window_start_ts": 1771776000,
+  "window_end_ts": 1771779600,
+  "regime": "Sideways",
+  "regime_multiplier": 0.6,
+  "counts": {
+    "universe": 4,
+    "scored": 4,
+    "selected": 1,
+    "targets_pre_risk": 1,
+    "orders_exit": 1,
+    "orders_rebalance": 1
+  },
+  "top_scores": [
+    {
+      "symbol": "BTC/USDT",
+      "score": 0.9533413622599415
+    },
+    {
+      "symbol": "SOL/USDT",
+      "score": 0.2546093404991367
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "score": -0.042905372136540054
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": -0.46573883197910076
+    }
+  ],
+  "targets_pre_risk": {
+    "BTC/USDT": 0.25
+  },
+  "targets_post_risk": {
+    "BTC/USDT": 0.125
+  },
+  "portfolio_debug": {
+    "inv_vol_norm": {
+      "BTC/USDT": 1.0
+    },
+    "confidence_raw": {
+      "BTC/USDT": 1.0
+    },
+    "score_stats": {
+      "min": 0.9533413622599415,
+      "max": 0.9533413622599415,
+      "std": 0.0,
+      "count": 1
+    },
+    "zero_reason_by_symbol": {},
+    "weight_pre_clip": {
+      "BTC/USDT": 1.0
+    }
+  },
+  "rebalance_deadband_pct": 0.07,
+  "rebalance_skipped_deadband_count": 3,
+  "rebalance_skipped_deadband_by_symbol": {
+    "BTC/USDT": 0.050023658098600016,
+    "ETH/USDT": 0.0001558497756,
+    "SOL/USDT": 2.8256712437961e-06
+  },
+  "rebalance_drift_by_symbol": {
+    "BTC/USDT": -0.050023658098600016,
+    "DOGE/USDT": -0.2923526113122876,
+    "ETH/USDT": -0.0001558497756,
+    "SOL/USDT": -2.8256712437961e-06
+  },
+  "rebalance_effective_deadband_by_symbol": {
+    "BTC/USDT": 0.07,
+    "DOGE/USDT": 0.07,
+    "ETH/USDT": 0.14,
+    "SOL/USDT": 0.14
+  },
+  "router_decisions": [
+    {
+      "symbol": "BTC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -0.050023658098600016,
+      "deadband": 0.07,
+      "is_new_position": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "sell",
+      "notional": 5.8470522262457525,
+      "cash_after": 25.84705222624575
+    },
+    {
+      "symbol": "ETH/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -0.0001558497756,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "SOL/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -2.8256712437961e-06,
+      "deadband": 0.14,
+      "is_new_position": true
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 3,
+    "provider_error": 0
+  },
+  "budget": {
+    "ymd_utc": "20260222",
+    "avg_equity_est": 104.91142730047495,
+    "turnover_used": 68.2846167987528,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.07511307847871806,
+    "cost_used_bps": 7.159666054641315,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 13,
+    "median_notional_usdt_today": 0.003113835036,
+    "small_trade_ratio_today": 0.6153846153846154,
+    "small_trade_notional_cutoff": 1.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 4,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "DOGE/USDT"
+    ]
+  },
+  "notes": [
+    "2026-02-22T17:02:04.607373: DD multiplier: 0.5 (drawdown: 86.92%)",
+    "2026-02-22T17:02:04.607691: Banding: ETH/USDT is new position, deadband 0.07→0.140",
+    "2026-02-22T17:02:04.607699: Banding: SOL/USDT is new position, deadband 0.07→0.140"
+  ]
+}

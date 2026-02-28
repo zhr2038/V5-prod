@@ -1,0 +1,184 @@
+{
+  "ts": "2026-02-23T19:00:55.899526Z",
+  "run_id": "20260223_19",
+  "window_start_ts": 1771869600,
+  "window_end_ts": 1771873200,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 64679.0,
+      "ask": 64679.1,
+      "mid": 64679.05,
+      "spread_bps": 0.01546095683201049,
+      "selected": true
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 1858.91,
+      "ask": 1858.92,
+      "mid": 1858.915,
+      "spread_bps": 0.05379482117251679,
+      "selected": false
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 78.63,
+      "ask": 78.64,
+      "mid": 78.63499999999999,
+      "spread_bps": 1.2716983531512835,
+      "selected": true
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 598.0,
+      "ask": 598.1,
+      "mid": 598.05,
+      "spread_bps": 1.6721009949004721,
+      "selected": true
+    },
+    {
+      "symbol": "ADA/USDT",
+      "bid": 0.2637,
+      "ask": 0.2638,
+      "mid": 0.26375,
+      "spread_bps": 3.791469194312379,
+      "selected": false
+    },
+    {
+      "symbol": "DOT/USDT",
+      "bid": 1.268,
+      "ask": 1.269,
+      "mid": 1.2685,
+      "spread_bps": 7.883326763893495,
+      "selected": true
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "bid": 8.424,
+      "ask": 8.425,
+      "mid": 8.4245,
+      "spread_bps": 1.1870140661181343,
+      "selected": false
+    },
+    {
+      "symbol": "POL/USDT",
+      "bid": 0.10655,
+      "ask": 0.10656,
+      "mid": 0.10655500000000001,
+      "spread_bps": 0.9384824738394371,
+      "selected": true
+    },
+    {
+      "symbol": "ATOM/USDT",
+      "bid": 2.128,
+      "ask": 2.129,
+      "mid": 2.1285,
+      "spread_bps": 4.698144233027437,
+      "selected": false
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "bid": 0.98,
+      "ask": 0.981,
+      "mid": 0.9804999999999999,
+      "spread_bps": 10.198878123406434,
+      "selected": false
+    },
+    {
+      "symbol": "LINK/USDT",
+      "bid": 8.268,
+      "ask": 8.269,
+      "mid": 8.2685,
+      "spread_bps": 1.2094092036033692,
+      "selected": false
+    },
+    {
+      "symbol": "UNI/USDT",
+      "bid": 3.33,
+      "ask": 3.331,
+      "mid": 3.3305,
+      "spread_bps": 3.0025521693436117,
+      "selected": false
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "bid": 114.34,
+      "ask": 114.35,
+      "mid": 114.345,
+      "spread_bps": 0.8745463290909882,
+      "selected": false
+    },
+    {
+      "symbol": "LTC/USDT",
+      "bid": 51.42,
+      "ask": 51.44,
+      "mid": 51.43,
+      "spread_bps": 3.88878086719736,
+      "selected": false
+    },
+    {
+      "symbol": "BCH/USDT",
+      "bid": 526.3,
+      "ask": 526.4,
+      "mid": 526.3499999999999,
+      "spread_bps": 1.8998765080274107,
+      "selected": false
+    },
+    {
+      "symbol": "ETC/USDT",
+      "bid": 8.379,
+      "ask": 8.38,
+      "mid": 8.3795,
+      "spread_bps": 1.193388627007843,
+      "selected": true
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.3665,
+      "ask": 1.3666,
+      "mid": 1.3665500000000002,
+      "spread_bps": 0.7317697852254873,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.09343,
+      "ask": 0.09344,
+      "mid": 0.09343499999999999,
+      "spread_bps": 1.0702627495045887,
+      "selected": false
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28217,
+      "ask": 0.28218,
+      "mid": 0.28217499999999995,
+      "spread_bps": 0.3543900062021796,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 0.8762,
+      "ask": 0.8763,
+      "mid": 0.87625,
+      "spread_bps": 1.141226818830117,
+      "selected": false
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 26.501,
+      "ask": 26.504,
+      "mid": 26.5025,
+      "spread_bps": 1.1319686821998354,
+      "selected": false
+    },
+    {
+      "symbol": "FIL/USDT",
+      "bid": 0.8867,
+      "ask": 0.8868,
+      "mid": 0.88675,
+      "spread_bps": 1.1277135607554438,
+      "selected": false
+    }
+  ]
+}

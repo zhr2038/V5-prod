@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+1771170849254,20260215_155408,SOL/USDT,CLOSE_LONG,sell,0.165672,87.13,14.435001360000001,1.2577216684968,0,0,0

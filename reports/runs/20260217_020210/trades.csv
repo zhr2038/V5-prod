@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-02-17T02:02:10.389291Z,20260217_020210,BNB/USDT,CLOSE_LONG,sell,0.141245443995,470.388508986,66.4402338019,0.0398641402812,0.033220116901,-0.0730842571821,0

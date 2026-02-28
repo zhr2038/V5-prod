@@ -1,0 +1,163 @@
+{
+  "run_id": "20260217_21",
+  "now_ts": 1771333323,
+  "window_start_ts": 1771358400,
+  "window_end_ts": 1771362000,
+  "regime": "Risk-Off",
+  "regime_multiplier": 0.3,
+  "counts": {
+    "universe": 18,
+    "scored": 18,
+    "selected": 4,
+    "targets_pre_risk": 4,
+    "orders_exit": 0,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "JTO/USDT",
+      "score": 2.5936016311508956
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "score": 2.068982686173809
+    },
+    {
+      "symbol": "BCH/USDT",
+      "score": 1.1539746679690783
+    },
+    {
+      "symbol": "XRP/USDT",
+      "score": 0.6669772772897898
+    },
+    {
+      "symbol": "LIT/USDT",
+      "score": 0.5976183847654667
+    },
+    {
+      "symbol": "PUMP/USDT",
+      "score": 0.4206823935972366
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "score": 0.21975515392709094
+    },
+    {
+      "symbol": "ADA/USDT",
+      "score": 0.11209930202406487
+    },
+    {
+      "symbol": "TRX/USDT",
+      "score": -0.2248596684337539
+    },
+    {
+      "symbol": "SNX/USDT",
+      "score": -0.27955119462735295
+    }
+  ],
+  "targets_pre_risk": {
+    "JTO/USDT": 0.15531665740539988,
+    "SPACE/USDT": 0.04229676014186344,
+    "BCH/USDT": 0.06995513456331048,
+    "XRP/USDT": 0.03243144788942622
+  },
+  "targets_post_risk": {
+    "JTO/USDT": 0.07765832870269994,
+    "SPACE/USDT": 0.02114838007093172,
+    "BCH/USDT": 0.03497756728165524,
+    "XRP/USDT": 0.01621572394471311
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "rebalance_effective_deadband_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "BCH/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.03497756728165524,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "JTO/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.07765832870269994,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.02114838007093172,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "XRP/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.01621572394471311,
+      "deadband": 0.14,
+      "is_new_position": true
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 4,
+    "provider_error": 0
+  },
+  "budget": {
+    "ymd_utc": "20260217",
+    "avg_equity_est": 114.38865618042175,
+    "turnover_used": 231.054952199531,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.2541604474195601,
+    "cost_used_bps": 22.219025549061488,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 18,
+    "median_notional_usdt_today": 1.249934219025,
+    "small_trade_ratio_today": 0.5,
+    "small_trade_notional_cutoff": 1.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 18,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "DOGE/USDT",
+      "XAUT/USDT",
+      "XRP/USDT",
+      "SPACE/USDT",
+      "SUI/USDT",
+      "HYPE/USDT",
+      "TRX/USDT"
+    ]
+  },
+  "notes": [
+    "2026-02-17T21:02:09.484193: DD multiplier: 0.5 (drawdown: 86.92%)",
+    "2026-02-17T21:02:09.484790: Banding: BCH/USDT is new position, deadband 0.07→0.140",
+    "2026-02-17T21:02:09.484809: Banding: JTO/USDT is new position, deadband 0.07→0.140",
+    "2026-02-17T21:02:09.484818: Banding: SPACE/USDT is new position, deadband 0.07→0.140",
+    "2026-02-17T21:02:09.484826: Banding: XRP/USDT is new position, deadband 0.07→0.140"
+  ]
+}

@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-02-14T23:00:06.009918Z,20260214_23,SOL/USDT,REBALANCE,buy,0.282784992252,88.49,25.0236439643,0.0150141863786,0.0125118219822,,

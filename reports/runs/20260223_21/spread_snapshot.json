@@ -1,0 +1,184 @@
+{
+  "ts": "2026-02-23T21:58:52.839170Z",
+  "run_id": "20260223_21",
+  "window_start_ts": 1771876800,
+  "window_end_ts": 1771880400,
+  "symbols": [
+    {
+      "symbol": "BTC/USDT",
+      "bid": 64573.0,
+      "ask": 64573.1,
+      "mid": 64573.05,
+      "spread_bps": 0.015486336791981298,
+      "selected": true
+    },
+    {
+      "symbol": "ETH/USDT",
+      "bid": 1863.09,
+      "ask": 1863.1,
+      "mid": 1863.0949999999998,
+      "spread_bps": 0.053674128265015504,
+      "selected": true
+    },
+    {
+      "symbol": "SOL/USDT",
+      "bid": 78.28,
+      "ask": 78.29,
+      "mid": 78.285,
+      "spread_bps": 1.2773839177371293,
+      "selected": true
+    },
+    {
+      "symbol": "BNB/USDT",
+      "bid": 595.8,
+      "ask": 595.9,
+      "mid": 595.8499999999999,
+      "spread_bps": 1.678274733574268,
+      "selected": true
+    },
+    {
+      "symbol": "ADA/USDT",
+      "bid": 0.2633,
+      "ask": 0.2634,
+      "mid": 0.26335,
+      "spread_bps": 3.7972280235445037,
+      "selected": false
+    },
+    {
+      "symbol": "DOT/USDT",
+      "bid": 1.269,
+      "ask": 1.27,
+      "mid": 1.2694999999999999,
+      "spread_bps": 7.877116975187964,
+      "selected": false
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "bid": 8.401,
+      "ask": 8.402,
+      "mid": 8.401499999999999,
+      "spread_bps": 1.190263643396353,
+      "selected": false
+    },
+    {
+      "symbol": "POL/USDT",
+      "bid": 0.10626,
+      "ask": 0.1063,
+      "mid": 0.10628,
+      "spread_bps": 3.7636432066251646,
+      "selected": false
+    },
+    {
+      "symbol": "ATOM/USDT",
+      "bid": 2.118,
+      "ask": 2.119,
+      "mid": 2.1185,
+      "spread_bps": 4.7203209818283405,
+      "selected": false
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "bid": 0.979,
+      "ask": 0.98,
+      "mid": 0.9795,
+      "spread_bps": 10.209290454313434,
+      "selected": false
+    },
+    {
+      "symbol": "LINK/USDT",
+      "bid": 8.302,
+      "ask": 8.303,
+      "mid": 8.3025,
+      "spread_bps": 1.2044564890108065,
+      "selected": false
+    },
+    {
+      "symbol": "UNI/USDT",
+      "bid": 3.368,
+      "ask": 3.369,
+      "mid": 3.3685,
+      "spread_bps": 2.968680421553611,
+      "selected": false
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "bid": 115.01,
+      "ask": 115.02,
+      "mid": 115.015,
+      "spread_bps": 0.8694518106326048,
+      "selected": false
+    },
+    {
+      "symbol": "LTC/USDT",
+      "bid": 51.67,
+      "ask": 51.68,
+      "mid": 51.675,
+      "spread_bps": 1.9351717464921163,
+      "selected": false
+    },
+    {
+      "symbol": "BCH/USDT",
+      "bid": 500.6,
+      "ask": 500.7,
+      "mid": 500.65,
+      "spread_bps": 1.9974033756110237,
+      "selected": false
+    },
+    {
+      "symbol": "ETC/USDT",
+      "bid": 8.322,
+      "ask": 8.323,
+      "mid": 8.3225,
+      "spread_bps": 1.2015620306413002,
+      "selected": true
+    },
+    {
+      "symbol": "XRP/USDT",
+      "bid": 1.3604,
+      "ask": 1.3605,
+      "mid": 1.3604500000000002,
+      "spread_bps": 0.7350509022749014,
+      "selected": false
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "bid": 0.09326,
+      "ask": 0.09327,
+      "mid": 0.093265,
+      "spread_bps": 1.0722135849471934,
+      "selected": false
+    },
+    {
+      "symbol": "TRX/USDT",
+      "bid": 0.28146,
+      "ask": 0.28147,
+      "mid": 0.28146499999999997,
+      "spread_bps": 0.3552839607059493,
+      "selected": false
+    },
+    {
+      "symbol": "SUI/USDT",
+      "bid": 0.8791,
+      "ask": 0.8793,
+      "mid": 0.8792,
+      "spread_bps": 2.274795268425591,
+      "selected": false
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "bid": 26.407,
+      "ask": 26.408,
+      "mid": 26.4075,
+      "spread_bps": 0.37868029915789914,
+      "selected": false
+    },
+    {
+      "symbol": "FIL/USDT",
+      "bid": 0.8892,
+      "ask": 0.8893,
+      "mid": 0.88925,
+      "spread_bps": 1.1245431543434241,
+      "selected": true
+    }
+  ]
+}

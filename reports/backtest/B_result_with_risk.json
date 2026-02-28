@@ -1,0 +1,34 @@
+{
+  "window_points": 360,
+  "start": "2025-11-27 01:00:00",
+  "end": "2026-02-24 19:00:00",
+  "risk_params": {
+    "max_single": 0.2,
+    "max_daily": 6,
+    "sl": -0.025,
+    "tp": 0.05,
+    "max_dd": 0.08
+  },
+  "results": {
+    "trend": {
+      "ret_pct": -0.47,
+      "trades": 86,
+      "final": 19.9063
+    },
+    "mean": {
+      "ret_pct": -0.52,
+      "trades": 4,
+      "final": 19.8952
+    },
+    "alpha6": {
+      "ret_pct": -1.44,
+      "trades": 63,
+      "final": 19.7128
+    },
+    "fused": {
+      "ret_pct": 0.27,
+      "trades": 100,
+      "final": 20.0535
+    }
+  }
+}

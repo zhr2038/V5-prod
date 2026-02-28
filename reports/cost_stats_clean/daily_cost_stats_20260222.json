@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "day": "20260222",
+  "coverage": {
+    "events_total": 8,
+    "fills": 8,
+    "missing_bidask": 8,
+    "source": "okx_fill"
+  },
+  "buckets": {
+    "BTC/USDT|Unknown|fill|100_250": {
+      "count": 8,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "fee_bps": {
+        "count": 8,
+        "mean": 0.0,
+        "max": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p90": 0.0,
+        "p95": 0.0
+      },
+      "cost_bps_total": {
+        "count": 8,
+        "mean": 0.0,
+        "max": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p90": 0.0,
+        "p95": 0.0
+      }
+    }
+  }
+}

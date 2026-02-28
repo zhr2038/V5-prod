@@ -1,0 +1,23 @@
+{
+  "run_id": "last24h_20260218_16",
+  "start_ts": 1771344000,
+  "end_ts": 1771430400,
+  "window_start_ts": 1771344000,
+  "window_end_ts": 1771430400,
+  "avg_equity": 89.12196237776068,
+  "equity_start": 112.5647410763582,
+  "equity_end": 110.96266125167512,
+  "total_return_pct": -0.014232519076256,
+  "max_drawdown_pct": 0.8691697200123585,
+  "sharpe": 44.822683094725534,
+  "num_trades": 25,
+  "num_round_trips": 24,
+  "turnover_ratio": 0.8816730058110532,
+  "fees_usdt_total": 0.04714585707202791,
+  "slippage_usdt_total": 0.03928821422668992,
+  "slippage_coverage": 1.0,
+  "cost_usdt_total": 0.08643407129871783,
+  "cost_ratio": 0.0009698403063921584,
+  "win_rate": 0.2916666666666667,
+  "profit_factor": 0.28843223060174134
+}

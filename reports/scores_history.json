@@ -1,0 +1,4602 @@
+[
+  {
+    "timestamp": "2026-02-25T04:29:37.182203",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.8985
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.8862
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.6922
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6143
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.584
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.4761
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.2104
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.175
+      },
+      {
+        "symbol": "BNB/USDT",
+        "score": 0.1746
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1457
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T04:30:01.709754",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.8985
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.8862
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.6922
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6143
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.584
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.4761
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.2104
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.175
+      },
+      {
+        "symbol": "BNB/USDT",
+        "score": 0.1746
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1457
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T04:30:01.802560",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.8985
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.8862
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.6922
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6143
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.584
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.4761
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.2104
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.175
+      },
+      {
+        "symbol": "BNB/USDT",
+        "score": 0.1746
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1457
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T04:30:31.745355",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.8985
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.8862
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.6922
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6143
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.584
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.4761
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.2104
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.175
+      },
+      {
+        "symbol": "BNB/USDT",
+        "score": 0.1746
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1457
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T04:30:31.764589",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.8985
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.8862
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.6922
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6143
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.584
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.4761
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.2104
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.175
+      },
+      {
+        "symbol": "BNB/USDT",
+        "score": 0.1746
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1457
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:10:24.723676",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:10:24.836258",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:50:13.239805",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:50:43.207981",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:50:43.290179",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:57:37.319573",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:57:40.191024",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:57:42.184594",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:58:10.181949",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:58:10.271512",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:58:40.321469",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:59:34.395203",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T08:59:34.423592",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.7066
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.4543
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.8618
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.7847
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.6781
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3049
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.1303
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.1197
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1168
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0607
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T09:04:26.228974",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.0296
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.9517
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3807
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3233
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.2905
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.2797
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.1453
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.1007
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1001
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0258
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T09:04:26.313631",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.0296
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.9517
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3807
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3233
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.2905
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.2797
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.1453
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.1007
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1001
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0258
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T09:04:41.152288",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.0296
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.9517
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3807
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3233
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.2905
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.2797
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.1453
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.1007
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1001
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0258
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T09:04:41.199378",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 1.0296
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.9517
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.3807
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3233
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.2905
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.2797
+      },
+      {
+        "symbol": "ETC/USDT",
+        "score": 0.1453
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.1007
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1001
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0258
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T11:14:50.817983",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0277
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6525
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.5142
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.4397
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3929
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3204
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2779
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.2623
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.115
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1139
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T11:14:51.185347",
+    "regime": "Risk-Off",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0277
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6525
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.5142
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.4397
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3929
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3204
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2779
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.2623
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.115
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1139
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T11:24:24.832746",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0277
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6525
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.5142
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.4397
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3929
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3204
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2779
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.2623
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.115
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1139
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T11:25:15.663066",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0277
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6525
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.5142
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.4397
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3929
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3204
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2779
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.2623
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.115
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1139
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T11:25:15.760107",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0277
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6525
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.5142
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.4397
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3929
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.3204
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2779
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.2623
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": 0.115
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.1139
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T12:57:43.648253",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0007
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7764
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6622
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5847
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3567
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2959
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2823
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.1953
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.1272
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.0885
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T12:57:43.728560",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0007
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7764
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6622
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5847
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3567
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2959
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2823
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.1953
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.1272
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.0885
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T12:58:13.698054",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0007
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7764
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6622
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5847
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3567
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2959
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2823
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.1953
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.1272
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.0885
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T12:58:13.746367",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 1.0007
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7764
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.6622
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5847
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.3567
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2959
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2823
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.1953
+      },
+      {
+        "symbol": "BTC/USDT",
+        "score": 0.1272
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.0885
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T13:24:53.766646",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 0.9121
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.859
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.801
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.7553
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2951
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2604
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2574
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.1397
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.058
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0553
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T13:24:54.118093",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 0.9121
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.859
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.801
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.7553
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2951
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2604
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2574
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.1397
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.058
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0553
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T13:24:55.131396",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 0.9121
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.859
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.801
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.7553
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2951
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2604
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2574
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.1397
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.058
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0553
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T13:27:50.470802",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "POL/USDT",
+        "score": 0.9121
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.859
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.801
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.7553
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2951
+      },
+      {
+        "symbol": "AAVE/USDT",
+        "score": 0.2604
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2574
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.1397
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": 0.058
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0553
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:20:46.444314",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:20:46.524380",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:49:09.934440",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:49:10.097421",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:51:55.117320",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:51:55.709128",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:51:57.740468",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:51:57.829743",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:52:40.746173",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:52:40.883663",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:52:45.171023",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:53:10.604878",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:53:10.632564",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:53:57.867577",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:53:57.907398",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:55:28.351707",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:55:28.399313",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:55:31.656229",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:55:31.690955",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:55:52.532403",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:55:52.654546",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:56:07.111994",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:56:07.173360",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:57:30.954352",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:57:31.547058",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:57:33.779440",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:57:34.104219",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:58:16.283743",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:58:16.341619",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:59:05.169097",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:59:05.211988",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:59:41.196082",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T14:59:41.242677",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.9503
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.8667
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8331
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.7976
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2267
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.2052
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0934
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": 0.0239
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.008
+      },
+      {
+        "symbol": "ETH/USDT",
+        "score": -0.0099
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:06:30.012913",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:06:31.148110",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:06:31.182981",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:06:32.232916",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:33:51.957726",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:35:20.061669",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:35:20.142735",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:35:20.501368",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:35:20.523555",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:35:20.585338",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:36:22.157713",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:36:27.814624",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:46:35.326808",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:46:35.396099",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:47:05.403484",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:47:05.437802",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:47:05.472715",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:51:42.464810",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:51:42.538745",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:51:42.905201",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:51:42.936487",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:56:30.373529",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:56:31.048328",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:56:33.216077",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:56:33.307880",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:57:05.106797",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T15:57:05.198204",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.8063
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.7496
+      },
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.724
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7024
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.2097
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": 0.1764
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.0295
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.0287
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0275
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0376
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T19:54:01.784446",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.8334
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7207
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5604
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.5424
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.3634
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.3359
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1339
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": -0.0457
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0935
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0969
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T19:54:01.834409",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.8334
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7207
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5604
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.5424
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.3634
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.3359
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1339
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": -0.0457
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0935
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0969
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T19:54:01.867276",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.8334
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7207
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5604
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.5424
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.3634
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.3359
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1339
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": -0.0457
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0935
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0969
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T19:55:10.082858",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.8334
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7207
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5604
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.5424
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.3634
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.3359
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1339
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": -0.0457
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0935
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0969
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-25T19:55:10.188685",
+    "regime": "Sideways",
+    "scores": [
+      {
+        "symbol": "UNI/USDT",
+        "score": 0.8334
+      },
+      {
+        "symbol": "POL/USDT",
+        "score": 0.7207
+      },
+      {
+        "symbol": "SOL/USDT",
+        "score": 0.5604
+      },
+      {
+        "symbol": "DOT/USDT",
+        "score": 0.5424
+      },
+      {
+        "symbol": "NEAR/USDT",
+        "score": 0.3634
+      },
+      {
+        "symbol": "TRX/USDT",
+        "score": 0.3359
+      },
+      {
+        "symbol": "LINK/USDT",
+        "score": 0.1339
+      },
+      {
+        "symbol": "LTC/USDT",
+        "score": -0.0457
+      },
+      {
+        "symbol": "ADA/USDT",
+        "score": -0.0935
+      },
+      {
+        "symbol": "XRP/USDT",
+        "score": -0.0969
+      }
+    ]
+  }
+]

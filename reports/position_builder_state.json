@@ -1,0 +1,10 @@
+{
+  "BTC/USDT": {
+    "stage": 2,
+    "target_pct": 0.4,
+    "filled": true,
+    "filled_notional": 40.0,
+    "filled_price": 49500,
+    "filled_time": "2026-02-24T05:11:40.699087"
+  }
+}

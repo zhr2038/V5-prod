@@ -1,0 +1,143 @@
+[
+  {
+    "timestamp": "2026-02-25T08:39:49.199164",
+    "samples": 1130,
+    "train_ic": NaN,
+    "valid_ic": NaN,
+    "config": {
+      "model_type": "lightgbm",
+      "n_estimators": 200,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100
+    }
+  },
+  {
+    "timestamp": "2026-02-26T01:57:53.562167",
+    "samples": 1924,
+    "train_ic": 0.9999780487256498,
+    "valid_ic": -0.11992574966940636,
+    "config": {
+      "model_type": "lightgbm",
+      "n_estimators": 200,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100
+    }
+  },
+  {
+    "timestamp": "2026-02-27T00:32:53.468411",
+    "samples": 2057,
+    "train_ic": 0.9996986399795235,
+    "valid_ic": -0.08167701343592972,
+    "config": {
+      "model_type": "lightgbm",
+      "n_estimators": 200,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100
+    }
+  },
+  {
+    "timestamp": "2026-02-28T00:34:55.539939",
+    "samples": 2086,
+    "train_ic": 0.9988413595797662,
+    "valid_ic": -0.10707671013366502,
+    "config": {
+      "model_type": "lightgbm",
+      "n_estimators": 200,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100
+    }
+  },
+  {
+    "timestamp": "2026-02-28T00:52:25.075556",
+    "samples": 2086,
+    "train_ic": 0.8758010871181159,
+    "valid_ic": -0.021275788005055352,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 30,
+      "max_depth": 3,
+      "learning_rate": 0.05,
+      "subsample": 0.5,
+      "colsample_bytree": 0.5,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "reg_alpha": 1.0,
+      "reg_lambda": 1.0,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100,
+      "early_stopping_rounds": 10
+    }
+  },
+  {
+    "timestamp": "2026-02-28T00:52:45.349769",
+    "samples": 2086,
+    "train_ic": 0.8255392894045501,
+    "valid_ic": 0.0397273771781694,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 30,
+      "max_depth": 3,
+      "learning_rate": 0.05,
+      "subsample": 0.5,
+      "colsample_bytree": 0.5,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "reg_alpha": 1.0,
+      "reg_lambda": 1.0,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100,
+      "early_stopping_rounds": 10
+    }
+  },
+  {
+    "timestamp": "2026-03-01T00:33:15.852455",
+    "samples": 2088,
+    "train_ic": 0.8257688830061634,
+    "valid_ic": 0.040569580915181334,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 30,
+      "max_depth": 3,
+      "learning_rate": 0.05,
+      "subsample": 0.5,
+      "colsample_bytree": 0.5,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "reg_alpha": 1.0,
+      "reg_lambda": 1.0,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100,
+      "early_stopping_rounds": 10
+    }
+  }
+]

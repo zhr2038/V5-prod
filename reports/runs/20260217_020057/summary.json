@@ -1,0 +1,23 @@
+{
+  "run_id": "20260217_020057",
+  "start_ts": "2026-02-17T02:00:57.494890Z",
+  "end_ts": "2026-02-17T02:00:57.504816Z",
+  "window_start_ts": null,
+  "window_end_ts": null,
+  "avg_equity": 265.80971253682975,
+  "equity_start": 265.83410120136074,
+  "equity_end": 265.7609352077677,
+  "total_return_pct": -0.0002752317827636741,
+  "max_drawdown_pct": 0.0002752317827636741,
+  "sharpe": -93.594870974264,
+  "num_trades": 1,
+  "num_round_trips": 1,
+  "turnover_ratio": 0.25023366902322636,
+  "fees_usdt_total": 0.039908723778,
+  "slippage_usdt_total": 0.033257269815,
+  "slippage_coverage": 1.0,
+  "cost_usdt_total": 0.073165993593,
+  "cost_ratio": 0.00027525703592513515,
+  "win_rate": 0.0,
+  "profit_factor": 0.0
+}

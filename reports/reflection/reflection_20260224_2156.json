@@ -1,0 +1,142 @@
+{
+  "report_type": "daily_reflection",
+  "generated_at": "2026-02-24T21:56:42.728247",
+  "analysis_period_days": 7,
+  "overall_metrics": {
+    "total_trades": 59,
+    "unique_symbols": 17,
+    "total_pnl": 37.31,
+    "winning_symbols": 6,
+    "losing_symbols": 11,
+    "win_rate_symbols": 0.35294117647058826,
+    "symbol_pnl": {
+      "ETC-USDT": -0.0,
+      "SOL-USDT": 3.27,
+      "BTC-USDT": 4.11,
+      "BNB-USDT": 3.04,
+      "DOT-USDT": -0.02,
+      "POL-USDT": 1.5,
+      "PROMPT-USDT": -0.69,
+      "TRX-USDT": -0.01,
+      "XAUT-USDT": -0.01,
+      "WLFI-USDT": -0.04,
+      "AGLD-USDT": -0.02,
+      "KITE-USDT": -0.34,
+      "DOGE-USDT": 9.86,
+      "J-USDT": -0.17,
+      "PEPE-USDT": 19.09,
+      "SPACE-USDT": -1.85,
+      "MERL-USDT": -0.42
+    },
+    "symbol_fees": {
+      "ETC-USDT": 0.0038,
+      "SOL-USDT": 0.0066,
+      "BTC-USDT": 0.0084,
+      "BNB-USDT": 0.0068,
+      "DOT-USDT": 0.0027,
+      "POL-USDT": 0.0497,
+      "PROMPT-USDT": 0.0945,
+      "TRX-USDT": 0.01,
+      "XAUT-USDT": 0.006,
+      "WLFI-USDT": 0.0319,
+      "AGLD-USDT": 0.0129,
+      "KITE-USDT": 0.031,
+      "DOGE-USDT": 0.1499,
+      "J-USDT": 0.1713,
+      "PEPE-USDT": 0.1352,
+      "SPACE-USDT": 1.846,
+      "MERL-USDT": 0.4241
+    },
+    "avg_trade_size": 5.835472281258626,
+    "total_fees": 2.9908,
+    "period_days": 7
+  },
+  "top_performers": [
+    {
+      "symbol": "SOL-USDT",
+      "pnl": 4.68,
+      "trades": 7
+    },
+    {
+      "symbol": "BTC-USDT",
+      "pnl": 3.99,
+      "trades": 6
+    },
+    {
+      "symbol": "DOGE-USDT",
+      "pnl": 2.06,
+      "trades": 7
+    },
+    {
+      "symbol": "POL-USDT",
+      "pnl": 1.66,
+      "trades": 4
+    },
+    {
+      "symbol": "ETC-USDT",
+      "pnl": 0.2,
+      "trades": 4
+    }
+  ],
+  "worst_performers": [
+    {
+      "symbol": "BNB-USDT",
+      "pnl": -0.03,
+      "trades": 4
+    },
+    {
+      "symbol": "WLFI-USDT",
+      "pnl": -0.03,
+      "trades": 2
+    },
+    {
+      "symbol": "KITE-USDT",
+      "pnl": -0.03,
+      "trades": 3
+    },
+    {
+      "symbol": "PROMPT-USDT",
+      "pnl": -0.09,
+      "trades": 3
+    },
+    {
+      "symbol": "PEPE-USDT",
+      "pnl": -0.14,
+      "trades": 8
+    }
+  ],
+  "insights": [
+    {
+      "type": "strong_performer",
+      "title": "\u6574\u4f53\u76c8\u5229",
+      "description": "\u6700\u8fd17\u5929\u603b\u76c8\u5229 $37.31",
+      "severity": "low",
+      "recommendation": "\u4fdd\u6301\u5f53\u524d\u7b56\u7565\uff0c\u5173\u6ce8\u76c8\u5229\u6700\u5927\u56de\u64a4"
+    },
+    {
+      "type": "strong_performer",
+      "title": "\u6700\u4f73\u8868\u73b0: SOL-USDT",
+      "description": "\u76c8\u5229 $4.68, 7\u7b14\u4ea4\u6613",
+      "severity": "low",
+      "recommendation": "\u8003\u8651\u589e\u52a0SOL-USDT\u7684\u6743\u91cd\u6216\u5173\u6ce8\u7c7b\u4f3c\u5e01\u79cd"
+    },
+    {
+      "type": "under_performer",
+      "title": "\u6700\u5dee\u8868\u73b0: PEPE-USDT",
+      "description": "\u4e8f\u635f $0.14, 8\u7b14\u4ea4\u6613",
+      "severity": "medium",
+      "recommendation": "\u8003\u8651\u5c06PEPE-USDT\u52a0\u5165\u9ed1\u540d\u5355\u6216\u964d\u4f4e\u6743\u91cd"
+    },
+    {
+      "type": "risk_concentration",
+      "title": "\u76c8\u4e8f\u8fc7\u5ea6\u96c6\u4e2d",
+      "description": "\u524d3\u4e2a\u5e01\u79cd\u8d21\u732e\u4e8687.7%\u7684\u76c8\u4e8f",
+      "severity": "medium",
+      "recommendation": "\u8003\u8651\u5206\u6563\u6301\u4ed3\uff0c\u964d\u4f4e\u5355\u4e00\u5e01\u79cd\u98ce\u9669\u655e\u53e3"
+    }
+  ],
+  "recommendations": [
+    "\u3010\u5efa\u8bae\u3011\u8003\u8651\u5c06PEPE-USDT\u52a0\u5165\u9ed1\u540d\u5355\u6216\u964d\u4f4e\u6743\u91cd",
+    "\u3010\u5efa\u8bae\u3011\u8003\u8651\u5206\u6563\u6301\u4ed3\uff0c\u964d\u4f4e\u5355\u4e00\u5e01\u79cd\u98ce\u9669\u655e\u53e3"
+  ]
+}

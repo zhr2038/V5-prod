@@ -1,0 +1,518 @@
+{
+  "schema_version": 1,
+  "day": "20260218",
+  "coverage": {
+    "events_total": 17,
+    "fills": 17,
+    "missing_bidask": 17
+  },
+  "buckets": {
+    "SOL/USDT|Sideways|fill|lt25": {
+      "count": 2,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 2,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 2,
+        "mean": 6.0,
+        "max": 6.000000000000001,
+        "p50": 5.999999999999999,
+        "p75": 6.000000000000001,
+        "p90": 6.000000000000001,
+        "p95": 6.000000000000001
+      },
+      "cost_bps_total": {
+        "count": 2,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "ETH/USDT|Sideways|fill|lt25": {
+      "count": 2,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 2,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 2,
+        "mean": 5.999999999999999,
+        "max": 5.999999999999999,
+        "p50": 5.999999999999999,
+        "p75": 5.999999999999999,
+        "p90": 5.999999999999999,
+        "p95": 5.999999999999999
+      },
+      "cost_bps_total": {
+        "count": 2,
+        "mean": 10.999999999999998,
+        "max": 10.999999999999998,
+        "p50": 10.999999999999998,
+        "p75": 10.999999999999998,
+        "p90": 10.999999999999998,
+        "p95": 10.999999999999998
+      }
+    },
+    "BTC/USDT|Sideways|fill|lt25": {
+      "count": 3,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 3,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 3,
+        "mean": 6.0,
+        "max": 6.000000000000001,
+        "p50": 6.000000000000001,
+        "p75": 6.000000000000001,
+        "p90": 6.000000000000001,
+        "p95": 6.000000000000001
+      },
+      "cost_bps_total": {
+        "count": 3,
+        "mean": 11.0,
+        "max": 11.000000000000004,
+        "p50": 11.0,
+        "p75": 11.000000000000004,
+        "p90": 11.000000000000004,
+        "p95": 11.000000000000004
+      }
+    },
+    "SPACE/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 6.0,
+        "max": 6.0,
+        "p50": 6.0,
+        "p75": 6.0,
+        "p90": 6.0,
+        "p95": 6.0
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "AAVE/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 6.0,
+        "max": 6.0,
+        "p50": 6.0,
+        "p75": 6.0,
+        "p90": 6.0,
+        "p95": 6.0
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "MERL/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 6.0,
+        "max": 6.0,
+        "p50": 6.0,
+        "p75": 6.0,
+        "p90": 6.0,
+        "p95": 6.0
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "BNB/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 5.999999999999999,
+        "max": 5.999999999999999,
+        "p50": 5.999999999999999,
+        "p75": 5.999999999999999,
+        "p90": 5.999999999999999,
+        "p95": 5.999999999999999
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "PEPE/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 6.0,
+        "max": 6.0,
+        "p50": 6.0,
+        "p75": 6.0,
+        "p90": 6.0,
+        "p95": 6.0
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "DOT/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 6.0,
+        "max": 6.0,
+        "p50": 6.0,
+        "p75": 6.0,
+        "p90": 6.0,
+        "p95": 6.0
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "DOGE/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 6.0,
+        "max": 6.0,
+        "p50": 6.0,
+        "p75": 6.0,
+        "p90": 6.0,
+        "p95": 6.0
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "TRX/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 6.0,
+        "max": 6.0,
+        "p50": 6.0,
+        "p75": 6.0,
+        "p90": 6.0,
+        "p95": 6.0
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "USDG/USDT|Sideways|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 6.0,
+        "max": 6.0,
+        "p50": 6.0,
+        "p75": 6.0,
+        "p90": 6.0,
+        "p95": 6.0
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 11.0,
+        "max": 11.0,
+        "p50": 11.0,
+        "p75": 11.0,
+        "p90": 11.0,
+        "p95": 11.0
+      }
+    },
+    "BTC/USDT|Risk-Off|fill|lt25": {
+      "count": 1,
+      "spread_bps": {
+        "p50": null,
+        "p75": null,
+        "p90": null,
+        "p95": null,
+        "mean": null,
+        "max": null,
+        "count": 0
+      },
+      "slippage_bps": {
+        "count": 1,
+        "mean": 5.0,
+        "max": 5.0,
+        "p50": 5.0,
+        "p75": 5.0,
+        "p90": 5.0,
+        "p95": 5.0
+      },
+      "fee_bps": {
+        "count": 1,
+        "mean": 5.999999999999999,
+        "max": 5.999999999999999,
+        "p50": 5.999999999999999,
+        "p75": 5.999999999999999,
+        "p90": 5.999999999999999,
+        "p95": 5.999999999999999
+      },
+      "cost_bps_total": {
+        "count": 1,
+        "mean": 10.999999999999998,
+        "max": 10.999999999999998,
+        "p50": 10.999999999999998,
+        "p75": 10.999999999999998,
+        "p90": 10.999999999999998,
+        "p95": 10.999999999999998
+      }
+    }
+  }
+}

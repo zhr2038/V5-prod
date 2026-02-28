@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-02-22T22:54:29.307171Z,20260222_22,SPACE/USDT,CLOSE_LONG,sell,0.154,0.009853,0.001517362,9.104172e-07,7.58681e-07,0.0015156929018,0

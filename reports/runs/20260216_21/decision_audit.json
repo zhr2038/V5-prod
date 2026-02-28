@@ -1,0 +1,84 @@
+{
+  "run_id": "20260216_21",
+  "now_ts": 1771246805,
+  "window_start_ts": 1771272000,
+  "window_end_ts": 1771275600,
+  "regime": "Risk-Off",
+  "regime_multiplier": 0.3,
+  "counts": {
+    "universe": 4,
+    "scored": 4,
+    "selected": 1,
+    "targets_pre_risk": 1,
+    "orders_exit": 0,
+    "orders_rebalance": 1
+  },
+  "top_scores": [
+    {
+      "symbol": "SOL/USDT",
+      "score": 0.8097457160013127
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": 0.03630128550531184
+    },
+    {
+      "symbol": "BTC/USDT",
+      "score": -0.11331939182994485
+    },
+    {
+      "symbol": "BNB/USDT",
+      "score": -0.7327276096766797
+    }
+  ],
+  "targets_pre_risk": {
+    "SOL/USDT": 0.25
+  },
+  "targets_post_risk": {
+    "SOL/USDT": 0.25
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "SOL/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 28.14729383728525,
+      "cash_after": 84.44188151185575
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 0,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 0,
+    "provider_error": 0
+  },
+  "budget": {
+    "ymd_utc": "20260216",
+    "avg_equity_est": 112.57885467473399,
+    "turnover_used": 253.08684140419058,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.2783955255447996,
+    "cost_used_bps": 24.728935673501727,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 17,
+    "median_notional_usdt_today": 27.8109479013,
+    "small_trade_ratio_today": 0.47058823529411764,
+    "small_trade_notional_cutoff": 25.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "notes": []
+}

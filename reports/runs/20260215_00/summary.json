@@ -1,0 +1,22 @@
+{
+  "run_id": "20260215_00",
+  "start_ts": 1771110000,
+  "end_ts": 1771113600,
+  "window_start_ts": 1771110000,
+  "window_end_ts": 1771113600,
+  "avg_equity": 99.8177096216213,
+  "equity_start": 99.8177096216213,
+  "equity_end": 99.8177096216213,
+  "total_return_pct": 0.0,
+  "max_drawdown_pct": 0.0,
+  "sharpe": null,
+  "num_trades": 1,
+  "num_round_trips": 0,
+  "turnover_ratio": 0.24999999999994665,
+  "fees_usdt_total": 0.0149726564432,
+  "slippage_usdt_total": 0.0124772137027,
+  "cost_usdt_total": 0.0274498701459,
+  "cost_ratio": 0.0002749999999995406,
+  "win_rate": null,
+  "profit_factor": null
+}

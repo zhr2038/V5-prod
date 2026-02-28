@@ -1,0 +1,25 @@
+{
+  "ts": "2026-02-27T00:10:40.650344",
+  "window_runs": 120,
+  "current": {
+    "selected": 463,
+    "rebalance": 144,
+    "deadband_blocks": 654,
+    "conversion": 0.311
+  },
+  "candidate": {
+    "rebalance": 177,
+    "deadband_blocks": 621,
+    "conversion": 0.3823,
+    "estimated_opened_from_deadband": 33
+  },
+  "decision": {
+    "switch_recommended": true,
+    "reason": "meets_gate",
+    "current_conversion": 0.311,
+    "candidate_conversion": 0.3823,
+    "uplift_abs": 0.0713,
+    "uplift_rel": 0.2292
+  },
+  "note": "advisory_only_no_auto_apply"
+}

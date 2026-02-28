@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-02-18T02:47:50.155493",
+  "pepe_borrow": 4357782.429,
+  "pepe_needed": 4353,
+  "estimated_cost_usdt": 0.019588500000000002,
+  "estimated_cost_cny": 0.14103720000000003,
+  "steps": [
+    "\u4ece\u5176\u4ed6\u4ea4\u6613\u6240\u8d2d\u4e70 4,353 PEPE",
+    "\u8f6c\u8d26\u5230 OKX",
+    "\u7b49\u5f85\u5230\u8d26",
+    "\u8fd8\u6b3e 4,357,782 PEPE",
+    "\u9a8c\u8bc1\u8fd8\u6b3e\u7ed3\u679c"
+  ],
+  "notes": [
+    "\u6210\u672c\u6781\u4f4e\uff08\u7ea6 $0.02\uff09",
+    "\u907f\u514d\u5229\u606f\u4ea7\u751f",
+    "\u5904\u7406\u540e PEPE \u5c06\u4fdd\u6301\u9ed1\u540d\u5355\u72b6\u6001"
+  ]
+}

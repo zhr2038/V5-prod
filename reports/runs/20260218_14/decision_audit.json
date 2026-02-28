@@ -1,0 +1,217 @@
+{
+  "run_id": "20260218_14",
+  "now_ts": 1771394523,
+  "window_start_ts": 1771419600,
+  "window_end_ts": 1771423200,
+  "regime": "Sideways",
+  "regime_multiplier": 0.6,
+  "counts": {
+    "universe": 16,
+    "scored": 16,
+    "selected": 4,
+    "targets_pre_risk": 4,
+    "orders_exit": 6,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "SPACE/USDT",
+      "score": 5.215268312417987
+    },
+    {
+      "symbol": "KITE/USDT",
+      "score": 3.799095057308621
+    },
+    {
+      "symbol": "WLFI/USDT",
+      "score": 2.0116005758257303
+    },
+    {
+      "symbol": "SNX/USDT",
+      "score": 1.2941729075147088
+    },
+    {
+      "symbol": "XRP/USDT",
+      "score": 0.7613412789490613
+    },
+    {
+      "symbol": "XAUT/USDT",
+      "score": 0.4981163439571471
+    },
+    {
+      "symbol": "PUMP/USDT",
+      "score": 0.4403259294659391
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "score": 0.41916214703007
+    },
+    {
+      "symbol": "TRX/USDT",
+      "score": 0.1731913823199246
+    },
+    {
+      "symbol": "SOL/USDT",
+      "score": -0.13157515087468813
+    }
+  ],
+  "targets_pre_risk": {
+    "SPACE/USDT": 0.25,
+    "KITE/USDT": 0.1714351192758107,
+    "WLFI/USDT": 0.030224160750326988,
+    "SNX/USDT": 0.01965237338551718
+  },
+  "targets_post_risk": {
+    "SPACE/USDT": 0.125,
+    "KITE/USDT": 0.08571755963790535,
+    "WLFI/USDT": 0.015112080375163494,
+    "SNX/USDT": 0.00982618669275859
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "rebalance_effective_deadband_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "BNB/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -1.1920349999999999e-06,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "BTC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -7.463751000000001e-07,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -4.7702688e-09,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "ETH/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -0.000157289548,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "KITE/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.08571755963790535,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "SNX/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.00982618669275859,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "SOL/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -0.00031107872981933176,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.1249056673,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "TRX/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -2.8805826000000004e-09,
+      "deadband": 0.14,
+      "is_new_position": true
+    },
+    {
+      "symbol": "WLFI/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.015112080375163494,
+      "deadband": 0.14,
+      "is_new_position": true
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 10,
+    "provider_error": 0
+  },
+  "budget": {
+    "ymd_utc": "20260218",
+    "avg_equity_est": 80.64178859677497,
+    "turnover_used": 0.00958980090505,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 1.0548780995549998e-05,
+    "cost_used_bps": 0.0013081035501700002,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 4,
+    "median_notional_usdt_today": 0.001593462931,
+    "small_trade_ratio_today": 1.0,
+    "small_trade_notional_cutoff": 1.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 16,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "DOGE/USDT",
+      "XRP/USDT",
+      "XAUT/USDT",
+      "SPACE/USDT",
+      "WLFI/USDT",
+      "SUI/USDT",
+      "PUMP/USDT"
+    ]
+  },
+  "notes": [
+    "2026-02-18T14:02:09.735043: DD multiplier: 0.5 (drawdown: 86.92%)",
+    "2026-02-18T14:02:09.735610: Banding: BNB/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735621: Banding: BTC/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735625: Banding: DOGE/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735629: Banding: ETH/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735633: Banding: KITE/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735636: Banding: SNX/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735640: Banding: SOL/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735643: Banding: SPACE/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735647: Banding: TRX/USDT is new position, deadband 0.07→0.140",
+    "2026-02-18T14:02:09.735651: Banding: WLFI/USDT is new position, deadband 0.07→0.140"
+  ]
+}

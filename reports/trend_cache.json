@@ -1,0 +1,26 @@
+{
+  "timestamp": 1772237509.6910372,
+  "timestamp_iso": "2026-02-28T00:11:49.691037Z",
+  "symbols": [
+    "BTC/USDT",
+    "ETH/USDT"
+  ],
+  "alpha": {
+    "scores": {
+      "BTC/USDT": 0.5,
+      "ETH/USDT": 0.3
+    },
+    "ranks": {
+      "BTC/USDT": 1,
+      "ETH/USDT": 2
+    },
+    "raw": {}
+  },
+  "regime": {
+    "state": "SIDEWAYS",
+    "multiplier": 0.7,
+    "atr_pct": 0.02,
+    "ma20": 100.0,
+    "ma60": 95.0
+  }
+}

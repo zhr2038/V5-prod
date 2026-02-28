@@ -1,0 +1,275 @@
+{
+  "run_id": "20260228_04",
+  "now_ts": 1772197102,
+  "window_start_ts": 1772218800,
+  "window_end_ts": 1772222400,
+  "regime": "Risk-Off",
+  "regime_multiplier": 0.0,
+  "counts": {
+    "universe": 28,
+    "scored": 28,
+    "selected": 5,
+    "targets_pre_risk": 5,
+    "orders_exit": 0,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "SAHARA/USDT",
+      "score": 6.9717392622667855
+    },
+    {
+      "symbol": "CC/USDT",
+      "score": 2.23889499358726
+    },
+    {
+      "symbol": "WET/USDT",
+      "score": 1.9613806377583647
+    },
+    {
+      "symbol": "DOT/USDT",
+      "score": 0.8651440848090838
+    },
+    {
+      "symbol": "FIL/USDT",
+      "score": -0.022423331552536344
+    },
+    {
+      "symbol": "LTC/USDT",
+      "score": -0.5617339793364897
+    },
+    {
+      "symbol": "ETC/USDT",
+      "score": -0.5765161270181942
+    },
+    {
+      "symbol": "UNI/USDT",
+      "score": -0.6116181083223978
+    },
+    {
+      "symbol": "BNB/USDT",
+      "score": -0.6187475216720472
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "score": -0.6336355369782839
+    }
+  ],
+  "targets_pre_risk": {
+    "SAHARA/USDT": 0.0,
+    "CC/USDT": 0.0,
+    "WET/USDT": 0.0,
+    "DOT/USDT": 0.0,
+    "FIL/USDT": 0.0
+  },
+  "targets_post_risk": {
+    "SAHARA/USDT": 0.0,
+    "CC/USDT": 0.0,
+    "WET/USDT": 0.0,
+    "DOT/USDT": 0.0,
+    "FIL/USDT": 0.0
+  },
+  "portfolio_debug": {
+    "inv_vol_norm": {
+      "SAHARA/USDT": 0.11041132517280677,
+      "CC/USDT": 0.30731208317202885,
+      "WET/USDT": 0.1126069359644431,
+      "DOT/USDT": 0.22624716999835154,
+      "FIL/USDT": 0.24342248569236974
+    },
+    "confidence_raw": {
+      "SAHARA/USDT": 0.9895348604141428,
+      "CC/USDT": 0.0051475410810566035,
+      "WET/USDT": 0.0037816856765790887,
+      "DOT/USDT": 0.0011186574288528583,
+      "FIL/USDT": 0.0004172553993686493
+    },
+    "score_stats": {
+      "min": -0.022423331552536344,
+      "max": 6.9717392622667855,
+      "std": 2.422519997852033,
+      "count": 5
+    },
+    "zero_reason_by_symbol": {},
+    "weight_pre_clip": {
+      "SAHARA/USDT": 0.978834932884084,
+      "CC/USDT": 0.014172425966820912,
+      "WET/USDT": 0.0038151824291049554,
+      "DOT/USDT": 0.0022674880440340314,
+      "FIL/USDT": 0.0009099706759561187
+    }
+  },
+  "rebalance_deadband_pct": 0.07,
+  "rebalance_skipped_deadband_count": 5,
+  "rebalance_skipped_deadband_by_symbol": {
+    "CC/USDT": 0.0,
+    "DOT/USDT": 0.0,
+    "FIL/USDT": 0.0,
+    "SAHARA/USDT": 0.0,
+    "WET/USDT": 0.0
+  },
+  "rebalance_drift_by_symbol": {
+    "CC/USDT": 0.0,
+    "DOT/USDT": 0.0,
+    "FIL/USDT": 0.0,
+    "SAHARA/USDT": 0.0,
+    "WET/USDT": 0.0
+  },
+  "rebalance_effective_deadband_by_symbol": {
+    "CC/USDT": 0.07,
+    "DOT/USDT": 0.07,
+    "FIL/USDT": 0.07,
+    "SAHARA/USDT": 0.07,
+    "WET/USDT": 0.07
+  },
+  "router_decisions": [
+    {
+      "symbol": "CC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "DOT/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "FIL/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "SAHARA/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "WET/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 5,
+    "provider_error": 0,
+    "exchange_min_notional": 0
+  },
+  "budget": {
+    "ymd_utc": "20260227",
+    "avg_equity_est": 106.98699052343818,
+    "turnover_used": 14.981494816849999,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.025665170466849997,
+    "cost_used_bps": 2.398905730620341,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 5,
+    "median_notional_usdt_today": 2.8695,
+    "small_trade_ratio_today": 0.0,
+    "small_trade_notional_cutoff": 2.5
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 28,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "BNB/USDT",
+      "ADA/USDT",
+      "DOT/USDT",
+      "AVAX/USDT",
+      "POL/USDT",
+      "ATOM/USDT",
+      "NEAR/USDT"
+    ]
+  },
+  "exit_signals": [],
+  "notes": [
+    "2026-02-27T20:58:34.464693: Strategy signal audit error: cannot access local variable 'json' where it is no",
+    "2026-02-27T20:58:34.465805: DD multiplier: 0.6 (drawdown: 28.20%)",
+    "2026-02-27T20:58:34.467081: Risk-Off close-only: rebalance buy suppressed (pos_mult_risk_off<=0)",
+    "2026-02-27T20:58:34.467159: Banding: CC/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T20:58:34.467173: Banding: DOT/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T20:58:34.467181: Banding: FIL/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T20:58:34.467199: Banding: SAHARA/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T20:58:34.467206: Banding: WET/USDT is new position, deadband 0.07→0.070"
+  ],
+  "regime_details": {
+    "method": "EnsembleRegimeEngine",
+    "votes": {
+      "hmm": {
+        "state": "RISK_OFF",
+        "confidence": 0.9698341216944544,
+        "weight": 0.35,
+        "sentiment": -0.9696507682934532,
+        "raw_state": "TrendingDown",
+        "probs": {
+          "TrendingUp": 0.0001833534010011513,
+          "TrendingDown": 0.9698341216944544,
+          "Sideways": 0.02998252480454443
+        }
+      },
+      "funding": {
+        "state": "SIDEWAYS",
+        "confidence": 0.0086,
+        "weight": 0.4,
+        "sentiment": -0.0043,
+        "composite": true,
+        "details": {
+          "large": {
+            "avg": 0.058499999999999996,
+            "count": 2
+          },
+          "mid": {
+            "avg": -0.0789,
+            "count": 4
+          },
+          "small": {
+            "avg": -0.049249999999999995,
+            "count": 4
+          }
+        }
+      },
+      "rss": {
+        "state": "SIDEWAYS",
+        "confidence": 0.75,
+        "weight": 0.25,
+        "sentiment": 0.3,
+        "summary": "[RSS情报] 加密货币市场情绪谨慎乐观，机构采用和监管行动带来积极信号，但宏观风险和价格波动引发担忧。"
+      }
+    },
+    "final_score": 0.339441942593059,
+    "hmm_weight": 0.35,
+    "funding_weight": 0.4,
+    "rss_weight": 0.25
+  },
+  "strategy_signals": []
+}

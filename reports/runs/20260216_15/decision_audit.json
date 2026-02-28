@@ -1,0 +1,105 @@
+{
+  "run_id": "20260216_15",
+  "now_ts": 1771225204,
+  "window_start_ts": 1771250400,
+  "window_end_ts": 1771254000,
+  "regime": "Risk-Off",
+  "regime_multiplier": 0.3,
+  "counts": {
+    "universe": 4,
+    "scored": 4,
+    "selected": 1,
+    "targets_pre_risk": 1,
+    "orders_exit": 9,
+    "orders_rebalance": 1
+  },
+  "top_scores": [
+    {
+      "symbol": "SOL/USDT",
+      "score": 0.47258627362899375
+    },
+    {
+      "symbol": "BTC/USDT",
+      "score": 0.18172363572644806
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": 0.15655097504028298
+    },
+    {
+      "symbol": "BNB/USDT",
+      "score": -0.8108608843957251
+    }
+  ],
+  "targets_pre_risk": {
+    "SOL/USDT": 0.25
+  },
+  "targets_post_risk": {
+    "SOL/USDT": 0.25
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "BNB/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -5.439425482483179e-07,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "BTC/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -1.346204582428683e-07,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "ETH/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": -3.222955498154277e-05,
+      "deadband": 0.05
+    },
+    {
+      "symbol": "SOL/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 28.210699915673406,
+      "cash_after": 84.62834027707483
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 0,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 3,
+    "provider_error": 0
+  },
+  "budget": {
+    "ymd_utc": "20260216",
+    "avg_equity_est": 112.8324543609189,
+    "turnover_used": 84.23986079119061,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.09266384687039966,
+    "cost_used_bps": 8.212517169394754,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 11,
+    "median_notional_usdt_today": 6.161e-05,
+    "small_trade_ratio_today": 0.7272727272727273,
+    "small_trade_notional_cutoff": 25.0
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "notes": []
+}

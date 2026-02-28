@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-02-18T02:47:26.951066",
+  "pepe_borrow": 4357782.429,
+  "pepe_needed": 4353.428999999538,
+  "space_needed": 50,
+  "estimated_cost_usdt": 0.01959043049999792,
+  "steps": [
+    "\u767b\u5f55 OKX",
+    "\u5356\u51fa 50.00 SPACE",
+    "\u8d2d\u4e70 4353 PEPE",
+    "\u8fd8\u6b3e 4357782.429 PEPE",
+    "\u9a8c\u8bc1\u8fd8\u6b3e\u7ed3\u679c"
+  ]
+}

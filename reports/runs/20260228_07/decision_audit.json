@@ -1,0 +1,520 @@
+{
+  "run_id": "20260228_07",
+  "now_ts": 1772204409,
+  "window_start_ts": 1772229600,
+  "window_end_ts": 1772233200,
+  "regime": "Risk-Off",
+  "regime_multiplier": 0.0,
+  "counts": {
+    "universe": 21,
+    "scored": 20,
+    "selected": 3,
+    "targets_pre_risk": 3,
+    "orders_exit": 24,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "DOT/USDT",
+      "score": 1.731416837881839
+    },
+    {
+      "symbol": "LINK/USDT",
+      "score": -0.31820372047031115
+    },
+    {
+      "symbol": "ADA/USDT",
+      "score": -0.3221571379074521
+    },
+    {
+      "symbol": "ETC/USDT",
+      "score": -0.3765174901229449
+    },
+    {
+      "symbol": "BNB/USDT",
+      "score": -0.3926655831400353
+    },
+    {
+      "symbol": "LTC/USDT",
+      "score": -0.4221704566558846
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "score": -0.6628616724742462
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": -0.732202846650882
+    },
+    {
+      "symbol": "BTC/USDT",
+      "score": -0.7466856875210522
+    },
+    {
+      "symbol": "POL/USDT",
+      "score": -0.7740926952850483
+    }
+  ],
+  "targets_pre_risk": {
+    "DOT/USDT": 0.0,
+    "LINK/USDT": 0.0,
+    "ADA/USDT": 0.0
+  },
+  "targets_post_risk": {
+    "DOT/USDT": 0.0,
+    "LINK/USDT": 0.0,
+    "ADA/USDT": 0.0
+  },
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "rebalance_effective_deadband_by_symbol": {},
+  "router_decisions": [
+    {
+      "symbol": "ADA/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "DOT/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "LINK/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 3,
+    "provider_error": 0,
+    "exchange_min_notional": 0
+  },
+  "budget": {
+    "ymd_utc": "20260227",
+    "avg_equity_est": 109.01435151523849,
+    "turnover_used": 14.981494816849999,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.025665170466849997,
+    "cost_used_bps": 2.354292816507046,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 5,
+    "median_notional_usdt_today": 2.8695,
+    "small_trade_ratio_today": 0.0,
+    "small_trade_notional_cutoff": 2.5
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 21,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "BNB/USDT",
+      "ADA/USDT",
+      "DOT/USDT",
+      "AVAX/USDT",
+      "POL/USDT",
+      "ATOM/USDT",
+      "NEAR/USDT"
+    ]
+  },
+  "exit_signals": [
+    {
+      "symbol": "ETH/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "profit_taking_stop_loss_hit_hold",
+      "last": 1921.48,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "profit_taking_stop_loss_hit_hold",
+      "last": 112.07,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "SOL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "profit_taking_stop_loss_hit_hold",
+      "last": 81.42,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "ETC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "profit_taking_stop_loss_hit_hold",
+      "last": 8.593,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "profit_taking_stop_loss_hit_hold",
+      "last": 8.891,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "profit_taking_stop_loss_hit_hold",
+      "last": 0.09314,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "POL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "fixed_stop_loss",
+      "last": 0.10811,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "BTC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "fixed_stop_loss",
+      "last": 65650.9,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "UNI/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "fixed_stop_loss",
+      "last": 3.732,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "BNB/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 611.8,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "LTC/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 54.1,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "TRX/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.28286,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "XAUT/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "PROMPT/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "KITE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "WLFI/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "MERL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "J/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "PEPE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "DOT/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 1.585,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "FIL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "AGLD/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "USDG/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.0,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    }
+  ],
+  "notes": [
+    "2026-02-27T23:00:21.551431: Strategy signal audit error: cannot access local variable 'json' where it is no",
+    "2026-02-27T23:00:21.556541: DD multiplier: 0.6 (drawdown: 24.13%)",
+    "2026-02-27T23:00:21.557773: Profit taking: ETH/USDT stop_loss_hit_hold",
+    "2026-02-27T23:00:21.557904: Fixed stop loss: POL/USDT loss -7.1%",
+    "2026-02-27T23:00:21.557925: Fixed stop loss: BTC/USDT loss -4.3%",
+    "2026-02-27T23:00:21.557932: Profit taking: AAVE/USDT stop_loss_hit_hold",
+    "2026-02-27T23:00:21.557943: Profit taking: SOL/USDT stop_loss_hit_hold",
+    "2026-02-27T23:00:21.557950: Profit taking: ETC/USDT stop_loss_hit_hold",
+    "2026-02-27T23:00:21.557956: Profit taking: AVAX/USDT stop_loss_hit_hold",
+    "2026-02-27T23:00:21.557964: Fixed stop loss: UNI/USDT loss -7.6%",
+    "2026-02-27T23:00:21.557974: Profit taking: DOGE/USDT stop_loss_hit_hold",
+    "2026-02-27T23:00:21.558103: Rank exit: BNB/USDT rank 5, rank_5_exceeds_3",
+    "2026-02-27T23:00:21.558111: Rank exit: LTC/USDT rank 6, rank_6_exceeds_3",
+    "2026-02-27T23:00:21.558123: Rank exit: TRX/USDT rank 14, rank_14_exceeds_3",
+    "2026-02-27T23:00:21.558243: Risk-Off close-only: rebalance buy suppressed (pos_mult_risk_off<=0)",
+    "2026-02-27T23:00:21.558308: Dust filter: ETH/USDT qty=0.00000160 value=$0.0031 treated as 0",
+    "2026-02-27T23:00:21.558312: Dust filter: POL/USDT qty=0.00754000 value=$0.0008 treated as 0",
+    "2026-02-27T23:00:21.558315: Dust filter: BNB/USDT qty=0.00000065 value=$0.0004 treated as 0",
+    "2026-02-27T23:00:21.558318: Dust filter: BTC/USDT qty=0.00000000 value=$0.0002 treated as 0",
+    "2026-02-27T23:00:21.558323: Dust filter: AAVE/USDT qty=0.00000049 value=$0.0001 treated as 0",
+    "2026-02-27T23:00:21.558325: Dust filter: LTC/USDT qty=0.00000083 value=$0.0000 treated as 0",
+    "2026-02-27T23:00:21.558332: Dust filter: SOL/USDT qty=0.00000028 value=$0.0000 treated as 0",
+    "2026-02-27T23:00:21.558335: Dust filter: ETC/USDT qty=0.00000076 value=$0.0000 treated as 0",
+    "2026-02-27T23:00:21.558338: Dust filter: AVAX/USDT qty=0.00000048 value=$0.0000 treated as 0",
+    "2026-02-27T23:00:21.558340: Dust filter: UNI/USDT qty=0.00000009 value=$0.0000 treated as 0",
+    "2026-02-27T23:00:21.558343: Dust filter: DOT/USDT qty=0.00000020 value=$0.0000 treated as 0",
+    "2026-02-27T23:00:21.558346: Dust filter: DOGE/USDT qty=0.00000099 value=$0.0000 treated as 0",
+    "2026-02-27T23:00:21.558349: Dust filter: TRX/USDT qty=0.00000004 value=$0.0000 treated as 0",
+    "2026-02-27T23:00:21.558366: Banding: ADA/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T23:00:21.558377: Banding: DOT/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T23:00:21.558383: Banding: LINK/USDT is new position, deadband 0.07→0.070"
+  ],
+  "regime_details": {
+    "method": "EnsembleRegimeEngine",
+    "votes": {
+      "hmm": {
+        "state": "RISK_OFF",
+        "confidence": 0.9317480319427398,
+        "weight": 0.35,
+        "sentiment": -0.9307142446329055,
+        "raw_state": "TrendingDown",
+        "probs": {
+          "TrendingUp": 0.0010337873098342388,
+          "TrendingDown": 0.9317480319427398,
+          "Sideways": 0.06721818064742602
+        }
+      },
+      "funding": {
+        "state": "SIDEWAYS",
+        "confidence": 0.0354,
+        "weight": 0.4,
+        "sentiment": 0.0177,
+        "composite": true,
+        "details": {
+          "large": {
+            "avg": 0.062200000000000005,
+            "count": 2
+          },
+          "mid": {
+            "avg": -0.030900000000000004,
+            "count": 4
+          },
+          "small": {
+            "avg": -0.020575000000000003,
+            "count": 4
+          }
+        }
+      },
+      "rss": {
+        "state": "RISK_OFF",
+        "confidence": 0.75,
+        "weight": 0.25,
+        "sentiment": -0.3,
+        "summary": "[RSS情报] 加密货币市场情绪偏负面，监管压力、宏观风险和价格回调引发担忧，但机构采用和技术创新提供部分支撑。"
+      }
+    },
+    "final_score": 0.5136118111799589,
+    "hmm_weight": 0.35,
+    "funding_weight": 0.4,
+    "rss_weight": 0.25
+  },
+  "strategy_signals": []
+}

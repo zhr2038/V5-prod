@@ -1,0 +1,195 @@
+{
+  "ymd_utc": "20260218",
+  "turnover_budget_per_day": null,
+  "cost_budget_bps_per_day": null,
+  "turnover_used": 27.768345041442352,
+  "cost_used_usdt": 0.03054517954560658,
+  "avg_equity_est": 80.64168949811953,
+  "runs": {
+    "20260218_00": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_01": {
+      "turnover": 0.00958980090505,
+      "cost_usdt": 1.0548780995549998e-05,
+      "fills_count": 4,
+      "notionals": [
+        0.00638793490925,
+        0.003162886262,
+        0.0,
+        0.0,
+        0.0,
+        2.40396e-05,
+        1.49401338e-05,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "20260218_02": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_03": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_04": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_05": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_06": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_07": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_08": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_09": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_10": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_11": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_12": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_13": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_14": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_15": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_16": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_17": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_18": {
+      "turnover": 13.87944921742894,
+      "cost_usdt": 0.015267394139151829,
+      "fills_count": 4,
+      "notionals": [
+        0.00618694756294,
+        0.003151441508,
+        1.4915958e-05,
+        13.8700959124
+      ]
+    },
+    "20260218_19": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_20": {
+      "turnover": 13.87930602310836,
+      "cost_usdt": 0.0152672366254592,
+      "fills_count": 5,
+      "notionals": [
+        0.0,
+        0.0,
+        0.0,
+        2.35326e-05,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.46922486e-05,
+        0.00609209960176,
+        0.003098367858,
+        13.8700773308
+      ]
+    },
+    "20260218_21": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_22": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260218_23": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    }
+  },
+  "fills_count_today": 13,
+  "median_notional_usdt_today": 0.003151441508,
+  "p25_notional_usdt_today": 2.35326e-05,
+  "p75_notional_usdt_today": 0.00618694756294,
+  "small_trade_ratio_today": 0.8461538461538461,
+  "small_trade_notional_cutoff": 1.0,
+  "cost_used_bps": 3.787765327798453,
+  "exceeded": false,
+  "reason": null
+}

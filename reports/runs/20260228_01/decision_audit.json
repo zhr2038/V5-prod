@@ -1,0 +1,358 @@
+{
+  "run_id": "20260228_01",
+  "now_ts": 1772182810,
+  "window_start_ts": 1772208000,
+  "window_end_ts": 1772211600,
+  "regime": "Risk-Off",
+  "regime_multiplier": 0.0,
+  "counts": {
+    "universe": 21,
+    "scored": 21,
+    "selected": 4,
+    "targets_pre_risk": 4,
+    "orders_exit": 8,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "DOT/USDT",
+      "score": 1.085697104284921
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "score": 0.3129188419204788
+    },
+    {
+      "symbol": "LINK/USDT",
+      "score": -0.27315982785117654
+    },
+    {
+      "symbol": "POL/USDT",
+      "score": -0.3298153147483571
+    },
+    {
+      "symbol": "LTC/USDT",
+      "score": -0.3573671690916445
+    },
+    {
+      "symbol": "ETC/USDT",
+      "score": -0.4623913255847507
+    },
+    {
+      "symbol": "BNB/USDT",
+      "score": -0.46466733958955037
+    },
+    {
+      "symbol": "UNI/USDT",
+      "score": -0.4800709325814474
+    },
+    {
+      "symbol": "ADA/USDT",
+      "score": -0.5167520918912722
+    },
+    {
+      "symbol": "TRX/USDT",
+      "score": -0.5590670219759939
+    }
+  ],
+  "targets_pre_risk": {
+    "DOT/USDT": 0.0,
+    "NEAR/USDT": 0.0,
+    "LINK/USDT": 0.0,
+    "POL/USDT": 0.0
+  },
+  "targets_post_risk": {
+    "DOT/USDT": 0.0,
+    "NEAR/USDT": 0.0,
+    "LINK/USDT": 0.0,
+    "POL/USDT": 0.0
+  },
+  "portfolio_debug": {
+    "inv_vol_norm": {
+      "DOT/USDT": 0.20803359013170847,
+      "NEAR/USDT": 0.24652027404083296,
+      "LINK/USDT": 0.2859128401542932,
+      "POL/USDT": 0.2595332956731654
+    },
+    "confidence_raw": {
+      "DOT/USDT": 0.5399138829817156,
+      "NEAR/USDT": 0.22878143995616831,
+      "LINK/USDT": 0.11929132554356105,
+      "POL/USDT": 0.11201335151855521
+    },
+    "score_stats": {
+      "min": -0.3298153147483571,
+      "max": 1.085697104284921,
+      "std": 0.5704800095500963,
+      "count": 4
+    },
+    "zero_reason_by_symbol": {},
+    "weight_pre_clip": {
+      "DOT/USDT": 0.484352671778866,
+      "NEAR/USDT": 0.24320761672789493,
+      "LINK/USDT": 0.14707750876816827,
+      "POL/USDT": 0.12536220272507084
+    }
+  },
+  "rebalance_deadband_pct": 0.07,
+  "rebalance_skipped_deadband_count": 4,
+  "rebalance_skipped_deadband_by_symbol": {
+    "DOT/USDT": 0.0,
+    "LINK/USDT": 0.0,
+    "NEAR/USDT": 0.0,
+    "POL/USDT": 0.0
+  },
+  "rebalance_drift_by_symbol": {
+    "DOT/USDT": 0.0,
+    "LINK/USDT": 0.0,
+    "NEAR/USDT": 0.0,
+    "POL/USDT": 0.0
+  },
+  "rebalance_effective_deadband_by_symbol": {
+    "DOT/USDT": 0.07,
+    "LINK/USDT": 0.07,
+    "NEAR/USDT": 0.07,
+    "POL/USDT": 0.07
+  },
+  "router_decisions": [
+    {
+      "symbol": "DOT/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "LINK/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    },
+    {
+      "symbol": "POL/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.0,
+      "deadband": 0.07,
+      "is_new_position": true
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 1,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 4,
+    "provider_error": 0,
+    "exchange_min_notional": 0
+  },
+  "budget": {
+    "ymd_utc": "20260227",
+    "avg_equity_est": 106.98699052343818,
+    "turnover_used": 14.981494816849999,
+    "turnover_budget_per_day": null,
+    "cost_used_usdt": 0.025665170466849997,
+    "cost_used_bps": 2.398905730620341,
+    "cost_budget_bps_per_day": null,
+    "exceeded": false,
+    "reason": null,
+    "fills_count_today": 5,
+    "median_notional_usdt_today": 2.8695,
+    "small_trade_ratio_today": 0.0,
+    "small_trade_notional_cutoff": 2.5
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 21,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "BNB/USDT",
+      "ADA/USDT",
+      "DOT/USDT",
+      "AVAX/USDT",
+      "POL/USDT",
+      "ATOM/USDT",
+      "NEAR/USDT"
+    ]
+  },
+  "exit_signals": [
+    {
+      "symbol": "POL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "fixed_stop_loss",
+      "last": 0.1078,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "PROMPT/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.04546,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "SPACE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.008438,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "KITE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.244,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "WLFI/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.114,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "MERL/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.04341,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "J/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 0.01367,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    },
+    {
+      "symbol": "PEPE/USDT",
+      "side": "sell",
+      "intent": "CLOSE_LONG",
+      "reason": "regime_exit",
+      "last": 3.686e-06,
+      "stop": null,
+      "highest": null,
+      "atr": null,
+      "atr_mult": null,
+      "atr_n": null
+    }
+  ],
+  "notes": [
+    "2026-02-27T17:00:22.409362: Strategy signal audit error: cannot access local variable 'json' where it is no",
+    "2026-02-27T17:00:22.415602: DD multiplier: 0.6 (drawdown: 28.20%)",
+    "2026-02-27T17:00:22.418062: Fixed stop loss: POL/USDT loss -7.4%",
+    "2026-02-27T17:00:22.418309: Risk-Off close-only: rebalance buy suppressed (pos_mult_risk_off<=0)",
+    "2026-02-27T17:00:22.418377: Dust filter: POL/USDT qty=0.00754000 value=$0.0008 treated as 0",
+    "2026-02-27T17:00:22.418416: Banding: DOT/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T17:00:22.418439: Banding: LINK/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T17:00:22.418449: Banding: NEAR/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T17:00:22.418458: Banding: POL/USDT is new position, deadband 0.07→0.070",
+    "2026-02-27T17:00:22.596885: ML data: filled 2 labels"
+  ],
+  "regime_details": {
+    "method": "EnsembleRegimeEngine",
+    "votes": {
+      "hmm": {
+        "state": "RISK_OFF",
+        "confidence": 0.9838045320641868,
+        "weight": 0.35,
+        "sentiment": -0.9837656633051219,
+        "raw_state": "TrendingDown",
+        "probs": {
+          "TrendingUp": 3.886875906490146e-05,
+          "TrendingDown": 0.9838045320641868,
+          "Sideways": 0.016156599076748393
+        }
+      },
+      "funding": {
+        "state": "SIDEWAYS",
+        "confidence": 0.0024,
+        "weight": 0.4,
+        "sentiment": -0.0012,
+        "composite": true,
+        "details": {
+          "large": {
+            "avg": 0.02665,
+            "count": 2
+          },
+          "mid": {
+            "avg": -0.0348,
+            "count": 4
+          },
+          "small": {
+            "avg": -0.020399999999999995,
+            "count": 4
+          }
+        }
+      },
+      "rss": {
+        "state": "RISK_OFF",
+        "confidence": 0.75,
+        "weight": 0.25,
+        "sentiment": -0.3,
+        "summary": "[RSS情报] 市场情绪偏向谨慎悲观，主要受价格下跌、监管压力和熊市预期影响。"
+      }
+    },
+    "final_score": 0.5318315862224654,
+    "hmm_weight": 0.35,
+    "funding_weight": 0.4,
+    "rss_weight": 0.25
+  },
+  "strategy_signals": []
+}
