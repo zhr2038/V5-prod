@@ -26,7 +26,7 @@ universe:
 
   # 动态选股参数（历史优化配置）
   top_n_market_cap: 30              # 选市值前30
-  min_24h_quote_volume_usdt: 10000000  # 24h成交额 > 1000万 USDT
+  min_24h_quote_volume_usdt: 5000000   # 24h成交额 > 500万 USDT (从1000万放宽)
   max_spread_bps: 20                 # 点差 < 20bps
   
   # 点差过大的币自动拉黑7天
