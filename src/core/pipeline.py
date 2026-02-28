@@ -290,13 +290,14 @@ class V5Pipeline:
             # Add strategy signal audit if multi-strategy is used
             if hasattr(self.alpha_engine, 'use_multi_strategy') and self.alpha_engine.use_multi_strategy:
                 try:
+                    import json as _json
                     from datetime import datetime
                     from pathlib import Path
                     # Load strategy signals from audit file
                     strategy_audit_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
                     if strategy_audit_file.exists():
                         with open(strategy_audit_file, 'r') as f:
-                            strategy_data = json.load(f)
+                            strategy_data = _json.load(f)
                         audit.strategy_signals = strategy_data.get('strategies', [])
                         # Add note about multi-strategy
                         total_signals = sum(s.get('total_signals', 0) for s in audit.strategy_signals)
