@@ -6,6 +6,9 @@ from typing import Dict, List, Optional, Tuple, Any
 import json
 from pathlib import Path
 
+# 定义报告目录
+REPORTS_DIR = Path(__file__).parent.parent.parent / 'reports'
+
 
 def _effective_deadband(base: float, cfg: AppConfig, audit: Optional[DecisionAudit]) -> float:
     """F3.1: widen deadband when daily budget exceeded (monitor-driven, controlled).
