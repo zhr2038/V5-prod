@@ -223,12 +223,53 @@ def api_account():
             positions_count = len([p for p in rows if float(p.get('value_usdt') or p.get('value') or 0) > 1])
         except Exception:
             pass
+        
+        # 计算回撤（基于资金上限）
+        # 修复：小资金测试时，不应使用历史大资金峰值
+        budget_cap = float(cfg.get('budget', {}).get('live_equity_cap_usdt', 0) or 0)
+        drawdown_pct = 0.0
+        peak_equity = initial_capital  # 默认使用初始资金作为峰值
+        
+        if budget_cap > 0:
+            # 如果设置了资金上限，使用上限作为峰值基准
+            peak_equity = budget_cap
+            drawdown_pct = (peak_equity - total_equity) / peak_equity if peak_equity > 0 else 0
+            # 如果当前权益超过峰值，回撤为0（不更新峰值，只是计算）
+            if total_equity > peak_equity:
+                drawdown_pct = 0.0
+        else:
+            # 未设置资金上限，使用传统计算方式
+            # 从数据库读取峰值
+            try:
+                conn2 = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
+                cursor2 = conn2.cursor()
+                cursor2.execute("SELECT equity_peak_usdt FROM account_state WHERE k='default'")
+                row2 = cursor2.fetchone()
+                if row2 and row2[0]:
+                    db_peak = float(row2[0])
+                    # 如果数据库峰值超过当前权益太多（超过2倍），可能是历史数据
+                    # 使用当前权益和初始资金的较大值
+                    if db_peak > total_equity * 2:
+                        peak_equity = max(total_equity, initial_capital)
+                    else:
+                        peak_equity = db_peak
+                conn2.close()
+            except Exception:
+                peak_equity = max(total_equity, initial_capital)
+            
+            drawdown_pct = (peak_equity - total_equity) / peak_equity if peak_equity > 0 else 0
+        
+        # 确保回撤在合理范围
+        drawdown_pct = max(0.0, min(1.0, drawdown_pct))
 
         return jsonify({
             'cash_usdt': round(float(cash), 2),
             'positions_value_usdt': round(float(positions_value), 4),
             'total_equity_usdt': round(float(total_equity), 4),
             'total_pnl_pct': round(float(total_pnl_pct), 4),
+            'drawdown_pct': round(float(drawdown_pct), 4),
+            'peak_equity_usdt': round(float(peak_equity), 2),
+            'budget_cap_usdt': round(float(budget_cap), 2) if budget_cap > 0 else None,
             'positions_count': positions_count,
             'total_trades': int(total_trades),
             'total_buy': round(float(total_buy), 2),

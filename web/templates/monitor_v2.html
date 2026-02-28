@@ -405,13 +405,33 @@
         // Load risk level
         async function loadRiskLevel() {
             try {
-                const res = await fetch('/api/auto_risk_guard');
-                const data = await res.json();
+                // 同时获取风险档位和账户数据（账户数据有修正后的回撤）
+                const [riskRes, accountRes] = await Promise.all([
+                    fetch('/api/auto_risk_guard'),
+                    fetch('/api/account')
+                ]);
+                
+                const data = await riskRes.json();
+                const accountData = await accountRes.json();
                 
                 const level = data.current_level || 'NEUTRAL';
                 const config = data.config || {};
                 const metrics = data.metrics || {};
-                const dd = metrics.last_dd_pct || 0;
+                
+                // 优先使用账户API的修正回撤（基于资金上限）
+                let dd = accountData.drawdown_pct;
+                if (dd === undefined || dd === null) {
+                    // 回退到旧数据
+                    dd = metrics.last_dd_pct || 0;
+                }
+                
+                // 显示预算上限提示（如果有）
+                const budgetCap = accountData.budget_cap_usdt;
+                const peakEquity = accountData.peak_equity_usdt;
+                let drawdownLabel = '当前回撤';
+                if (budgetCap) {
+                    drawdownLabel = `当前回撤 (基于${budgetCap}U上限)`;
+                }
                 
                 const badgeHtml = `<span class="risk-badge ${getRiskClass(level)}">${level}</span>`;
                 document.getElementById('risk-level').innerHTML = badgeHtml;
@@ -420,6 +440,12 @@
                 document.getElementById('current-drawdown').innerHTML = formatPercent(dd);
                 document.getElementById('conversion-rate').textContent = 
                     metrics.last_conversion_rate ? (metrics.last_conversion_rate*100).toFixed(0) + '%' : '--';
+                
+                // 更新标签
+                const ddLabelEl = document.querySelector('#current-drawdown').previousElementSibling;
+                if (ddLabelEl && budgetCap) {
+                    ddLabelEl.textContent = drawdownLabel;
+                }
                 
                 return data;
             } catch (e) {
