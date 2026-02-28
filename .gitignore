@@ -1,16 +1,44 @@
+# V5 Trading Bot - Git Ignore
+
+# Runtime cache files
+data/sentiment_cache/
+*.cache
+.cache/
+
+# Database files (runtime generated)
+*.sqlite
+*.sqlite3
+*.db
+reports/*.sqlite
+reports/*.db
+
+# Log files
+*.log
+logs/
+.backup/
+
+# Environment files
+.env
+.venv/
+venv/
 __pycache__/
 *.pyc
-logs/
-reports/
-v4_export/
-.env
-.env.deepseek
+*.pyo
+*.pyd
+.Python
 
-# 归档脚本（本地保留，不上传GitHub）
-scripts/archive/
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# 归档文件
-*.zip
-*.tar.gz
-*.tar
-reports*.zip
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
