@@ -328,12 +328,24 @@ class V5Pipeline:
         # Risk: drawdown-based exposure multiplier
         # IMPORTANT: drawdown must be computed on *raw* equity (accounting truth), not capped sizing equity.
         # Otherwise small-budget equity caps (e.g. 20U) will create a fake massive drawdown and permanently throttle.
+        # ALSO: if budget cap changed, reset peak to avoid historical large peak affecting small-budget drawdown.
         from src.portfolio.portfolio_state import PortfolioState
+
+        # 检查资金上限变化，如果当前峰值远大于上限，则重置
+        cap_eq = getattr(self.cfg.budget, "live_equity_cap_usdt", None)
+        peak_equity_for_dd = float(equity_peak_usdt)
+        if cap_eq is not None:
+            cap_eq_f = float(cap_eq)
+            # 如果历史峰值超过资金上限的2倍，说明切换了小资金模式，重置峰值
+            if peak_equity_for_dd > cap_eq_f * 2:
+                peak_equity_for_dd = max(cap_eq_f, float(equity_raw))
+                if audit:
+                    audit.add_note(f"Peak equity reset to {peak_equity_for_dd:.2f} (budget cap: {cap_eq_f:.2f})")
 
         pst = PortfolioState(
             cash_usdt=float(cash_raw),
             equity_usdt=float(equity_raw),
-            peak_equity_usdt=float(equity_peak_usdt),
+            peak_equity_usdt=peak_equity_for_dd,
         )
         pst.update_equity(equity_raw)
         dd_mult = self.risk_engine.exposure_multiplier(pst.drawdown_pct)
