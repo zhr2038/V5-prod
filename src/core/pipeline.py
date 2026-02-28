@@ -250,6 +250,36 @@ class V5Pipeline:
         if btc is None:
             btc = next(iter(market_data_1h.values()))
         regime = self.regime_engine.detect(btc)
+        
+        # 2) Alpha计算（用于短线覆盖判断）
+        alpha = self.alpha_engine.compute_snapshot(market_data_1h)
+        
+        # 3) 短线交易增强：Risk-Off 机会覆盖
+        # 当Alpha评分很高时，覆盖Risk-Off状态，允许短线交易
+        if regime.state.value == "Risk-Off":
+            try:
+                from src.regime.short_term_override import check_short_term_opportunity
+                override = check_short_term_opportunity(
+                    alpha_scores=alpha.scores
+                )
+                if override.should_override:
+                    from configs.schema import RegimeState
+                    from dataclasses import replace
+                    old_state = regime.state
+                    regime = replace(regime, state=RegimeState.SIDEWAYS, multiplier=override.new_multiplier)
+                    if audit:
+                        audit.add_note(f"[ShortTermOverride] {old_state.value} → Sideways: {override.reason}")
+                        audit.regime_override = {
+                            'from': 'Risk-Off',
+                            'to': 'Sideways',
+                            'reason': override.reason,
+                            'confidence': override.confidence,
+                            'new_multiplier': override.new_multiplier
+                        }
+            except Exception as e:
+                if audit:
+                    audit.add_note(f"[ShortTermOverride] error: {e}")
+        
         if audit:
             audit.regime = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
             audit.regime_multiplier = regime.multiplier
@@ -282,8 +312,7 @@ class V5Pipeline:
             except Exception:
                 pass
 
-        # 2) Alpha计算后审计
-        alpha = self.alpha_engine.compute_snapshot(market_data_1h)
+        # 2) Alpha计算后审计 (alpha已在前面计算)
         if audit:
             sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
             
