@@ -245,7 +245,7 @@ class RegimeEngine:
         """
         检测市场状态
         
-        优先使用HMM（如果可用且已训练），否则回退到MA方法
+        优先使用HMM（如果可用且已训练），否则返回SIDEWAYS（禁用MA方法）
         """
         # 尝试HMM检测
         if self.use_hmm:
@@ -253,5 +253,20 @@ class RegimeEngine:
             if hmm_result is not None:
                 return hmm_result
         
-        # 回退到MA方法
-        return self._detect_ma(btc_data)
+        # 禁用MA fallback，返回SIDEWAYS状态
+        print("[RegimeEngine] HMM不可用，返回SIDEWAYS（MA方法已禁用）")
+        closes = list(btc_data.close)
+        ma20 = _sma(closes, 20)
+        ma60 = _sma(closes, 60)
+        atrp = _atr_pct(btc_data, 14)
+        
+        return RegimeResult(
+            state=RegimeState.SIDEWAYS,
+            atr_pct=float(atrp),
+            ma20=float(ma20),
+            ma60=float(ma60),
+            multiplier=float(self.cfg.pos_mult_sideways),
+            hmm_state=None,
+            hmm_probability=None,
+            hmm_probs=None
+        )
