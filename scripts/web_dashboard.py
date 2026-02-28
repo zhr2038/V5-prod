@@ -30,6 +30,15 @@ app = Flask(__name__,
             template_folder='/home/admin/clawd/v5-trading-bot/web/templates', 
             static_folder='/home/admin/clawd/v5-trading-bot/web/static')
 
+# 注册健康检查蓝图
+try:
+    sys.path.insert(0, "/home/admin/clawd/v5-trading-bot")
+    from src.reporting.health import health_bp
+    app.register_blueprint(health_bp)
+    print("[WebDashboard] Health check endpoints registered: /health, /ready, /liveness")
+except Exception as e:
+    print(f"[WebDashboard] Failed to register health blueprint: {e}")
+
 
 @app.after_request
 def add_no_cache_headers(resp):

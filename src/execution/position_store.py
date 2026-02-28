@@ -335,18 +335,31 @@ class PositionStore:
             )
         )
 
-    def close_long(self, symbol: str) -> None:
+    def close_long(self, symbol: str) -> bool:
         """关闭多头持仓
 
         Args:
             symbol: 交易对符号
+
+        Returns:
+            bool: True表示成功关闭，False表示持仓不存在
         """
         try:
             con = sqlite3.connect(str(self.path))
             c = con.cursor()
+            
+            # 先检查持仓是否存在
+            c.execute("SELECT symbol FROM positions WHERE symbol=?", (symbol,))
+            if not c.fetchone():
+                con.close()
+                log.warning("Attempted to close non-existent position: %s", symbol)
+                return False
+            
             c.execute("DELETE FROM positions WHERE symbol=?", (symbol,))
             con.commit()
             con.close()
+            log.info("Position closed: %s", symbol)
+            return True
         except Exception as e:
             log.exception("Failed to close position for %s: %s", symbol, e)
             raise
