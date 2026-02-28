@@ -26,5 +26,6 @@ export V5_LIVE_ARM="${V5_LIVE_ARM:-YES}"
 export V5_RUN_ID="$WIN_ID"
 export V5_WINDOW_START_TS="${START_EPOCH}"
 export V5_WINDOW_END_TS="${END_EPOCH}"
+export V5_USE_CACHED_TREND="1"  # 使用 :57 预计算的趋势缓存
 
 /home/admin/clawd/v5-trading-bot/.venv/bin/python main.py

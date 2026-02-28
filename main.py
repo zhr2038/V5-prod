@@ -42,9 +42,106 @@ def setup_logging(level: str = "INFO") -> None:
     )
 
 
+# ========== 趋势缓存功能 ==========
+TREND_CACHE_PATH = Path("reports/trend_cache.json")
+
+
+def save_trend_cache(alpha_snapshot, regime_result, symbols: list, timestamp: float = None) -> None:
+    """保存趋势计算结果到缓存文件
+
+    用于趋势更新程序在 :57 计算，交易程序在 :00 读取
+    """
+    if timestamp is None:
+        timestamp = time.time()
+
+    cache_data = {
+        "timestamp": timestamp,
+        "timestamp_iso": datetime.utcfromtimestamp(timestamp).isoformat() + "Z",
+        "symbols": symbols,
+        "alpha": {
+            "scores": alpha_snapshot.scores if alpha_snapshot else {},
+            "ranks": alpha_snapshot.ranks if alpha_snapshot else {},
+            "raw": alpha_snapshot.raw if alpha_snapshot else {},
+        },
+        "regime": {
+            "state": regime_result.state.value if regime_result else "UNKNOWN",
+            "multiplier": regime_result.multiplier if regime_result else 1.0,
+            "atr_pct": regime_result.atr_pct if regime_result else 0.0,
+            "ma20": regime_result.ma20 if regime_result else 0.0,
+            "ma60": regime_result.ma60 if regime_result else 0.0,
+        }
+    }
+
+    TREND_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TREND_CACHE_PATH.write_text(json.dumps(cache_data, indent=2, default=str), encoding="utf-8")
+    logging.getLogger("v5").info(f"[TrendCache] Saved to {TREND_CACHE_PATH}")
+
+
+def load_trend_cache(max_age_sec: int = 300) -> Optional[dict]:
+    """从缓存文件读取趋势计算结果
+
+    Args:
+        max_age_sec: 缓存最大有效时间（秒），默认5分钟
+
+    Returns:
+        缓存数据或None（如果缓存不存在或已过期）
+    """
+    if not TREND_CACHE_PATH.exists():
+        return None
+
+    try:
+        data = json.loads(TREND_CACHE_PATH.read_text(encoding="utf-8"))
+        cache_time = data.get("timestamp", 0)
+        age_sec = time.time() - cache_time
+
+        if age_sec > max_age_sec:
+            logging.getLogger("v5").warning(
+                f"[TrendCache] Cache expired: {age_sec:.0f}s > {max_age_sec}s"
+            )
+            return None
+
+        logging.getLogger("v5").info(
+            f"[TrendCache] Loaded from {TREND_CACHE_PATH}, age={age_sec:.0f}s"
+        )
+        return data
+    except Exception as e:
+        logging.getLogger("v5").warning(f"[TrendCache] Load failed: {e}")
+        return None
+
+
+class TrendCacheAlphaSnapshot:
+    """从缓存创建的 Alpha 快照对象"""
+    def __init__(self, cache_data: dict):
+        self.scores = cache_data.get("alpha", {}).get("scores", {})
+        self.ranks = cache_data.get("alpha", {}).get("ranks", {})
+        self.raw = cache_data.get("alpha", {}).get("raw", {})
+
+
+class TrendCacheRegimeResult:
+    """从缓存创建的 Regime 结果对象"""
+    def __init__(self, cache_data: dict, cfg):
+        from configs.schema import RegimeState
+        regime_data = cache_data.get("regime", {})
+        state_str = regime_data.get("state", "SIDEWAYS")
+        try:
+            self.state = RegimeState[state_str]
+        except KeyError:
+            self.state = RegimeState.SIDEWAYS
+        self.multiplier = regime_data.get("multiplier", 1.0)
+        self.atr_pct = regime_data.get("atr_pct", 0.0)
+        self.ma20 = regime_data.get("ma20", 0.0)
+        self.ma60 = regime_data.get("ma60", 0.0)
+        self.hmm_state = None
+        self.hmm_probability = None
+        self.hmm_probs = None
+
+
+# ========== 趋势缓存功能结束 ==========
+
+
 def _get_env_epoch_sec(name: str) -> Optional[int]:
     """从环境变量读取时间戳（秒/毫秒兼容）
-    
+
     改进版：使用明确的阈值判断，而非相对接近度
     """
     v = os.getenv(name)
@@ -227,6 +324,28 @@ def main() -> None:
 
     regime_engine = RegimeEngine(cfg.regime)
     regime = regime_engine.detect(btc)
+
+    # ========== 趋势缓存：保存或读取 ==========
+    is_trend_update_only = str(os.getenv("V5_TREND_UPDATE_ONLY") or "").upper() == "1"
+    use_cached_trend = str(os.getenv("V5_USE_CACHED_TREND") or "").upper() == "1"
+
+    if is_trend_update_only:
+        # 趋势更新模式：计算并保存趋势
+        save_trend_cache(alpha_snap, regime, symbols)
+        log.info("[TrendUpdate] Trend cache saved, exiting (V5_TREND_UPDATE_ONLY=1)")
+        return  # 只更新趋势，不执行交易
+
+    if use_cached_trend:
+        # 交易模式：尝试读取缓存的趋势
+        cached = load_trend_cache(max_age_sec=300)  # 5分钟有效期
+        if cached:
+            log.info("[TrendCache] Using cached trend data")
+            # 使用缓存的 alpha 和 regime
+            alpha_snap = TrendCacheAlphaSnapshot(cached)
+            regime = TrendCacheRegimeResult(cached, cfg)
+        else:
+            log.warning("[TrendCache] No valid cache found, using freshly computed trend")
+    # ========== 趋势缓存结束 ==========
 
     portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
     portfolio = portfolio_engine.allocate(scores=alpha_snap.scores, market_data=md_1h, regime_mult=regime.multiplier)
