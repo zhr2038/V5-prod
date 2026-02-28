@@ -226,7 +226,8 @@ def api_account():
         
         # 计算回撤（基于资金上限）
         # 修复：小资金测试时，不应使用历史大资金峰值
-        budget_cap = float(cfg.get('budget', {}).get('live_equity_cap_usdt', 0) or 0)
+        config = load_config()
+        budget_cap = float(config.get('budget', {}).get('live_equity_cap_usdt', 0) or 0)
         drawdown_pct = 0.0
         peak_equity = initial_capital  # 默认使用初始资金作为峰值
         
