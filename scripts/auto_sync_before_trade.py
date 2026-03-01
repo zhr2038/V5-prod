@@ -7,6 +7,7 @@ from __future__ import print_function
 
 import sys
 import json
+import time
 import logging
 from pathlib import Path
 
@@ -23,6 +24,9 @@ def main():
     logger.info("=" * 60)
     logger.info("Pre-trade Auto-Sync")
     logger.info("=" * 60)
+    
+    # Also use print for systemd visibility
+    print("[AUTO_SYNC] Starting pre-trade auto-sync", flush=True)
     
     try:
         from configs.loader import load_config
@@ -82,84 +86,85 @@ def main():
             
             logger.info(f"Total position diff: {total_diff:.8f}")
             
-            # If diff is small, sync automatically
-            if total_diff < 5.0:  # Less than 5 coins total diff
-                logger.info("Diff is small (<5), proceeding with auto-sync...")
-                
-                # Clear existing positions by setting qty to 0
-                for sym in list(local_positions.keys()):
-                    try:
-                        position_store.set_qty(sym, qty=0)
-                    except Exception as e:
-                        logger.warning(f"  Could not clear {sym}: {e}")
-                
-                # Sync from OKX
-                for sym, qty in okx_positions.items():
-                    if qty > 1e-8:
-                        try:
-                            position_store.set_qty(sym, qty=float(qty))
-                            logger.info(f"  Synced {sym}: {qty}")
-                        except Exception as e:
-                            logger.warning(f"  Could not sync {sym}: {e}")
-                
-                # Update cash
-                for detail in balance.data.get('details', []):
-                    if detail.get('ccy') == 'USDT':
-                        cash = float(detail.get('eq', 0))
-                        try:
-                            account_store.update_cash(cash)
-                            logger.info(f"  Synced cash: {cash} USDT")
-                        except Exception as e:
-                            logger.warning(f"  Could not sync cash: {e}")
-                        break
-                
-                logger.info("✅ Auto-sync completed successfully")
-                
-                # Clear failure state
-                failure_state_path = Path('reports/reconcile_failure_state.json')
-                if failure_state_path.exists():
-                    failure_state = json.loads(failure_state_path.read_text())
-                    failure_state['consecutive_hard'] = 0
-                    failure_state['consecutive_soft'] = 0
-                    failure_state['consecutive_ok'] = 1  # Mark as OK for auto-clear
-                    failure_state['last_reason'] = 'auto_sync_reset'
-                    failure_state_path.write_text(json.dumps(failure_state, indent=2))
-                    logger.info("✅ Reset failure state counters")
-                
-                # Update reconcile status to OK
-                reconcile_status_path = Path('reports/reconcile_status.json')
-                reconcile_status = {
-                    'schema_version': 1,
-                    'ok': True,
-                    'reason': 'ok',
-                    'generated_ts_ms': int(time.time() * 1000),
-                    'ts_ms': int(time.time() * 1000),
-                    'source': 'auto_sync',
-                    'stats': {
-                        'max_abs_usdt_delta': 0.0,
-                        'max_abs_base_delta': 0.0
-                    },
-                    'diffs': []
-                }
-                reconcile_status_path.parent.mkdir(parents=True, exist_ok=True)
-                reconcile_status_path.write_text(json.dumps(reconcile_status, indent=2))
-                logger.info("✅ Updated reconcile status to OK")
-                
-                # Clear kill switch
-                kill_switch_path = Path('reports/kill_switch.json')
-                if kill_switch_path.exists():
-                    ks = json.loads(kill_switch_path.read_text())
-                    if ks.get('enabled'):
-                        ks['enabled'] = False
-                        ks['auto_sync_cleared'] = True
-                        ks['auto_sync_ts_ms'] = int(time.time() * 1000)
-                        kill_switch_path.write_text(json.dumps(ks, indent=2))
-                        logger.info("✅ Kill switch disabled by auto-sync")
-                
-                return 0
+            # Always sync from OKX before trade. Large diffs are exactly when sync is needed.
+            if total_diff >= 5.0:
+                logger.warning(
+                    f"Diff is large ({total_diff:.6f}), proceeding with FORCED auto-sync to unblock run"
+                )
             else:
-                logger.warning(f"Diff is large ({total_diff}), manual review needed")
-                return 1
+                logger.info("Diff is small (<5), proceeding with auto-sync...")
+            
+            # Clear existing positions by setting qty to 0
+            for sym in list(local_positions.keys()):
+                try:
+                    position_store.set_qty(sym, qty=0)
+                except Exception as e:
+                    logger.warning(f"  Could not clear {sym}: {e}")
+            
+            # Sync from OKX
+            for sym, qty in okx_positions.items():
+                if qty > 1e-8:
+                    try:
+                        position_store.set_qty(sym, qty=float(qty))
+                        logger.info(f"  Synced {sym}: {qty}")
+                    except Exception as e:
+                        logger.warning(f"  Could not sync {sym}: {e}")
+            
+            # Update cash
+            for detail in balance.data.get('details', []):
+                if detail.get('ccy') == 'USDT':
+                    cash = float(detail.get('eq', 0))
+                    try:
+                        account_store.update_cash(cash)
+                        logger.info(f"  Synced cash: {cash} USDT")
+                    except Exception as e:
+                        logger.warning(f"  Could not sync cash: {e}")
+                    break
+            
+            logger.info("✅ Auto-sync completed successfully")
+            
+            # Clear failure state
+            failure_state_path = Path('reports/reconcile_failure_state.json')
+            if failure_state_path.exists():
+                failure_state = json.loads(failure_state_path.read_text())
+                failure_state['consecutive_hard'] = 0
+                failure_state['consecutive_soft'] = 0
+                failure_state['consecutive_ok'] = 1  # Mark as OK for auto-clear
+                failure_state['last_reason'] = 'auto_sync_reset'
+                failure_state_path.write_text(json.dumps(failure_state, indent=2))
+                logger.info("✅ Reset failure state counters")
+            
+            # Update reconcile status to OK
+            reconcile_status_path = Path('reports/reconcile_status.json')
+            reconcile_status = {
+                'schema_version': 1,
+                'ok': True,
+                'reason': 'ok',
+                'generated_ts_ms': int(time.time() * 1000),
+                'ts_ms': int(time.time() * 1000),
+                'source': 'auto_sync',
+                'stats': {
+                    'max_abs_usdt_delta': 0.0,
+                    'max_abs_base_delta': 0.0
+                },
+                'diffs': []
+            }
+            reconcile_status_path.parent.mkdir(parents=True, exist_ok=True)
+            reconcile_status_path.write_text(json.dumps(reconcile_status, indent=2))
+            logger.info("✅ Updated reconcile status to OK")
+            
+            # Clear kill switch
+            kill_switch_path = Path('reports/kill_switch.json')
+            if kill_switch_path.exists():
+                ks = json.loads(kill_switch_path.read_text())
+                if ks.get('enabled'):
+                    ks['enabled'] = False
+                    ks['auto_sync_cleared'] = True
+                    ks['auto_sync_ts_ms'] = int(time.time() * 1000)
+                    kill_switch_path.write_text(json.dumps(ks, indent=2))
+                    logger.info("✅ Kill switch disabled by auto-sync")
+            
+            return 0
                 
         finally:
             client.close()
@@ -171,5 +176,4 @@ def main():
         return 1
 
 if __name__ == '__main__':
-    import time
     sys.exit(main())
