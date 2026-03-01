@@ -39,6 +39,7 @@ universe:
   refine_single_ticker_sleep_sec: 0.02
   
   # 保底币种（确保这些主流币始终在池子里）
+  # ⚠️ 排除黄金/白银等非加密货币（PAXG在加密牛市表现不佳）
   include_symbols:
     - BTC/USDT
     - ETH/USDT
@@ -60,6 +61,12 @@ universe:
     - DOGE/USDT
     - TRX/USDT
     - SUI/USDT
+  
+  # 明确排除非加密货币
+  exclude_symbols:
+    - PAXG/USDT  # 黄金，非加密货币
+    - XAUT/USDT  # 黄金
+    - PAX/USDT   # 美元稳定币
 
 alpha:
   long_top_pct: 0.25
