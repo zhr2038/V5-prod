@@ -533,7 +533,7 @@
         // Load strategy signals
         async function loadStrategySignals() {
             try {
-                const res = await fetch('/api/decision_audit');
+                const res = await fetch(`/api/decision_audit?_=${Date.now()}`);
                 const data = await res.json();
                 
                 const strategies = data.strategy_signals || [];

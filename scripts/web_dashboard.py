@@ -2376,23 +2376,26 @@ def api_decision_audit():
             except Exception:
                 strategy_signals = []
 
-        # 回退：最近一个有 strategy_signals.json 的run
+        # 回退：按时间倒序遍历，找到第一个可成功解析的 strategy_signals.json
         if not strategy_signals:
             strategy_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'strategy_signals.json').exists()]
             strategy_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-            if strategy_dirs:
-                fallback_dir = strategy_dirs[0]
+            for fallback_dir in strategy_dirs:
                 fallback_file = fallback_dir / 'strategy_signals.json'
                 try:
-                    strategy_signals = _load_strategy_signals(fallback_file)
-                    strategy_source_run = fallback_dir.name
-                    ts = fallback_file.stat().st_mtime
+                    parsed = _load_strategy_signals(fallback_file)
+                    if parsed:
+                        strategy_signals = parsed
+                        strategy_source_run = fallback_dir.name
+                        ts = fallback_file.stat().st_mtime
+                        break
                 except Exception:
-                    strategy_signals = []
+                    continue
 
         return jsonify({
             'run_id': audit_data.get('run_id') or latest_run_dir.name,
             'strategy_run_id': strategy_source_run,
+            'strategy_signals_count': len(strategy_signals or []),
             'timestamp': ts,
             'regime': audit_data.get('regime'),
             'regime_details': audit_data.get('regime_details', {}),
