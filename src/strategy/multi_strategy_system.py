@@ -633,18 +633,6 @@ class StrategyOrchestrator:
             
             strategy_signal_audit.append(audit_entry)
         
-        # 保存策略信号审计到文件（供decision_audit引用）
-        try:
-            audit_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
-            audit_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(audit_file, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'timestamp': datetime.now().isoformat(),
-                    'strategies': strategy_signal_audit
-                }, f, indent=2, ensure_ascii=False, default=str)
-        except Exception as e:
-            print(f"[Orchestrator] 审计记录失败: {e}")
-        
         # 信号融合（按币种聚合）
         combined = self._fuse_signals(all_signals)
         
@@ -654,6 +642,32 @@ class StrategyOrchestrator:
         for s in combined[:5]:
             print(f"[Orchestrator]   FUSED -> {s.symbol}: {s.side}, score={s.score:.4f}, strategy={s.strategy}", flush=True)
             sys.stdout.flush()
+        
+        # 保存策略信号审计到文件（包括融合结果）
+        try:
+            audit_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
+            audit_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 构建融合信号审计
+            fused_audit = []
+            for s in combined:
+                fused_audit.append({
+                    'symbol': s.symbol,
+                    'direction': s.side,
+                    'score': float(s.score),
+                    'confidence': float(s.confidence),
+                    'strategy': s.strategy,
+                    'rank': 0  # Will be calculated later
+                })
+            
+            with open(audit_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'timestamp': datetime.now().isoformat(),
+                    'strategies': strategy_signal_audit,
+                    'fused': {s['symbol']: s for s in fused_audit}  # Add fused signals
+                }, f, indent=2, ensure_ascii=False, default=str)
+        except Exception as e:
+            print(f"[Orchestrator] 审计记录失败: {e}")
         
         return combined
     
