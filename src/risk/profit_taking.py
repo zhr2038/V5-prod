@@ -109,8 +109,25 @@ class ProfitTakingManager:
             print(f"[ProfitTaking] 保存状态失败: {e}")
     
     def register_position(self, symbol: str, entry_price: float, current_price: float = None):
-        """注册新持仓"""
-        if symbol not in self.positions:
+        """注册新持仓，如果已存在则更新入场价（避免使用旧价格）"""
+        if symbol in self.positions:
+            # 已有持仓，检查是否需要更新（价格变化超过1%视为新交易）
+            old_entry = self.positions[symbol].entry_price
+            price_diff_pct = abs(entry_price - old_entry) / old_entry
+            
+            if price_diff_pct > 0.01:  # 价格变化超过1%，视为新交易
+                print(f"[ProfitTaking] {symbol} 更新入场价: {old_entry:.4f} -> {entry_price:.4f} (变化 {price_diff_pct:.2%})")
+                self.positions[symbol].entry_price = entry_price
+                self.positions[symbol].entry_time = datetime.now()
+                self.positions[symbol].highest_price = current_price or entry_price
+                self.positions[symbol].profit_high = 0.0
+                self.positions[symbol].current_stop = entry_price * 0.95  # 重新计算止损
+                self.positions[symbol].current_action = 'hold'
+                self.positions[symbol].partial_sold = False
+                self.positions[symbol].partial_sell_time = None
+                self._save_state()
+        else:
+            # 新持仓
             self.positions[symbol] = PositionProfitState(
                 symbol=symbol,
                 entry_price=entry_price,
