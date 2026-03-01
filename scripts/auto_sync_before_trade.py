@@ -19,6 +19,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger('auto_sync')
 
+
+def _as_float(v):
+    try:
+        if v is None:
+            return 0.0
+        if isinstance(v, str) and not v.strip():
+            return 0.0
+        return float(v)
+    except Exception:
+        return 0.0
+
+
+def _extract_spot_qty(detail):
+    """Extract best-effort spot quantity from OKX balance detail."""
+    # Prefer cash/available balances; fall back to eq.
+    vals = [
+        _as_float(detail.get('cashBal')),
+        _as_float(detail.get('availBal')),
+        _as_float(detail.get('spotBal')),
+        _as_float(detail.get('eq')),
+    ]
+    qty = max(vals)
+    return qty if qty > 0 else 0.0
+
+
 def main():
     """Auto-sync positions from OKX to local store."""
     logger.info("=" * 60)
@@ -58,18 +83,68 @@ def main():
             local_positions = {}
             for pos in local_positions_list:
                 if hasattr(pos, 'symbol') and hasattr(pos, 'qty'):
-                    local_positions[pos.symbol] = pos.qty
+                    sym = pos.symbol
+                    qty = float(pos.qty or 0)
                 elif isinstance(pos, dict):
-                    local_positions[pos.get('symbol')] = pos.get('qty', 0)
-            
+                    sym = pos.get('symbol')
+                    qty = float(pos.get('qty', 0) or 0)
+                else:
+                    continue
+                # Ignore zero/dust records left in store history
+                if sym and abs(qty) > 1e-8:
+                    local_positions[sym] = qty
+
+            # Primary sync targets
+            tracked_symbols = set(getattr(cfg, 'symbols', []) or [])
+            tracked_symbols |= set(getattr(getattr(cfg, 'universe', None), 'symbols', []) or [])
+            # Core pairs (defensive fallback when config schema varies)
+            tracked_symbols |= {'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT'}
+            min_sync_value_usd = 0.5
+
             okx_positions = {}
-            
+
+            # 1) Bulk balance parse
             for detail in balance.data.get('details', []):
-                ccy = detail.get('ccy', '')
-                eq = float(detail.get('eq', 0))
-                if eq > 0 and ccy != 'USDT':
-                    okx_positions[f"{ccy}/USDT"] = eq
-            
+                ccy = str(detail.get('ccy') or '').upper()
+                if not ccy or ccy == 'USDT':
+                    continue
+                sym = f"{ccy}/USDT"
+                qty = _extract_spot_qty(detail)
+                eq_usd = _as_float(detail.get('eqUsd'))
+                if qty > 1e-8 and (sym in tracked_symbols or eq_usd >= min_sync_value_usd):
+                    okx_positions[sym] = qty
+
+            # 2) Per-ccy verification for local symbols missing from bulk response
+            #    (bulk details can occasionally omit small spot positions)
+            ccy_check_candidates = set(tracked_symbols)
+            for sym in sorted(ccy_check_candidates):
+                if not sym or '/USDT' not in sym:
+                    continue
+                if sym in okx_positions:
+                    continue
+                ccy = sym.split('/')[0].upper()
+                local_qty = float(local_positions.get(sym, 0.0) or 0.0)
+                try:
+                    one = client.get_balance(ccy=ccy)
+                    qty = 0.0
+                    for d in one.data.get('data', [{}])[0].get('details', []):
+                        if str(d.get('ccy') or '').upper() == ccy:
+                            qty = max(qty, _extract_spot_qty(d))
+                    if qty > 1e-8:
+                        okx_positions[sym] = qty
+                        logger.info(f"  [ccy-check] {sym}: recovered qty={qty:.8f}")
+                    else:
+                        logger.info(f"  [ccy-check] {sym}: confirmed zero")
+                except Exception as e:
+                    # Avoid false-zero wipe when single-ccy query fails transiently
+                    if local_qty > 1e-8:
+                        okx_positions[sym] = local_qty
+                        logger.warning(
+                            f"  [ccy-check] {sym}: query failed ({e}), keep local={local_qty:.8f}"
+                        )
+                    else:
+                        logger.warning(f"  [ccy-check] {sym}: query failed ({e}), no local fallback")
+
             # Calculate diff
             total_diff = 0
             for sym, local_qty in local_positions.items():
@@ -78,7 +153,7 @@ def main():
                 if diff > 1e-8:
                     total_diff += diff
                     logger.info(f"  {sym}: local={local_qty:.8f}, okx={okx_qty:.8f}, diff={diff:.8f}")
-            
+
             for sym, okx_qty in okx_positions.items():
                 if sym not in local_positions and okx_qty > 1e-8:
                     total_diff += okx_qty

@@ -345,7 +345,9 @@ ml_factor:
 # Event-Driven Trading Configuration
 event_driven:
   enabled: true  # 启用事件驱动交易
-  active_mode: true  # true=有动作时直接触发v5-live执行
+  active_mode: true  # true=有动作时触发v5-live执行（事件触发模式）
+  force_full_run: true  # 强制全量：每15分钟触发完整v5-live执行（受最小间隔保护）
+  force_full_min_interval_minutes: 12  # 防止与整点任务叠加导致重复下单
   check_interval_minutes: 15
   global_cooldown_p2_minutes: 30
   symbol_cooldown_minutes: 60

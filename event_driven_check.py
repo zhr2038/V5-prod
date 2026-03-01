@@ -7,6 +7,7 @@ Phase 2: Active mode (event-driven trading)
 """
 import sys
 import json
+import time
 import logging
 import subprocess
 from pathlib import Path
@@ -177,6 +178,22 @@ def trigger_live_execution_service():
         }
 
 
+def get_last_live_run_age_sec():
+    """Return (age_seconds, run_name) for latest run with decision_audit.json."""
+    try:
+        runs_dir = Path('/home/admin/clawd/v5-trading-bot/reports/runs')
+        if not runs_dir.exists():
+            return None, None
+        cands = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+        if not cands:
+            return None, None
+        latest = max(cands, key=lambda d: d.stat().st_mtime)
+        age = max(0.0, time.time() - latest.stat().st_mtime)
+        return age, latest.name
+    except Exception:
+        return None, None
+
+
 def main():
     """Main entry point."""
     logger.info("=" * 60)
@@ -187,6 +204,8 @@ def main():
     config_path = Path('/home/admin/clawd/v5-trading-bot/configs/live_20u_real.yaml')
     event_driven_enabled = False
     active_mode = False
+    force_full_mode = False
+    force_full_min_interval_minutes = 12
     ev_cfg = {}
     cfg = {}
     
@@ -198,6 +217,8 @@ def main():
             event_driven_enabled = bool(ev_cfg.get('enabled', False))
             mode = str(ev_cfg.get('mode', '')).strip().lower()
             active_mode = bool(ev_cfg.get('active_mode', mode == 'active'))
+            force_full_mode = bool(ev_cfg.get('force_full_run', mode in ('force_full', 'full')))
+            force_full_min_interval_minutes = int(ev_cfg.get('force_full_min_interval_minutes', 12) or 12)
     except Exception as e:
         logger.warning(f"Could not read config: {e}")
     
@@ -236,7 +257,13 @@ def main():
     logger.info(f"Positions: {list(state['positions'].keys())}")
     logger.info(f"Selected: {state['selected_symbols']}")
     
-    logger.info(f"Event-driven mode: {'ACTIVE' if active_mode else 'PASSIVE'}")
+    if force_full_mode:
+        mode_text = 'FORCE_FULL'
+    elif active_mode:
+        mode_text = 'ACTIVE'
+    else:
+        mode_text = 'PASSIVE'
+    logger.info(f"Event-driven mode: {mode_text}")
 
     # Build trader config from YAML (with safe defaults)
     trader = create_event_driven_trader({
@@ -270,13 +297,47 @@ def main():
     # Active-mode execution (trigger full live run)
     execution = {
         'active_mode': active_mode,
+        'force_full_mode': force_full_mode,
+        'force_full_min_interval_minutes': force_full_min_interval_minutes,
         'live_service_triggered': False,
         'live_service_ok': None,
         'live_service_returncode': None,
-        'live_service_stderr': ''
+        'live_service_stderr': '',
+        'trigger_reason': None,
+        'last_run_age_sec': None,
+        'last_run_id': None,
     }
 
-    if result['should_trade'] and result['actions']:
+    if force_full_mode:
+        age_sec, last_run_id = get_last_live_run_age_sec()
+        execution['last_run_age_sec'] = age_sec
+        execution['last_run_id'] = last_run_id
+
+        min_interval_sec = max(0, int(force_full_min_interval_minutes) * 60)
+        if age_sec is not None and age_sec < min_interval_sec:
+            logger.info(
+                f"FORCE_FULL throttled: last run {last_run_id} {age_sec:.1f}s ago < {min_interval_sec}s"
+            )
+            execution.update({
+                'trigger_reason': 'force_full_throttled',
+            })
+        else:
+            logger.info("FORCE_FULL mode: starting v5-live-20u.user.service")
+            exec_res = trigger_live_execution_service()
+            execution.update({
+                'live_service_triggered': True,
+                'live_service_ok': exec_res.get('ok'),
+                'live_service_returncode': exec_res.get('returncode'),
+                'live_service_stderr': exec_res.get('stderr', ''),
+                'trigger_reason': 'force_full_run',
+            })
+            if exec_res.get('ok'):
+                logger.info("FORCE_FULL mode: live service start request accepted")
+            else:
+                logger.error(
+                    f"FORCE_FULL mode: failed to start live service rc={exec_res.get('returncode')} err={exec_res.get('stderr')}"
+                )
+    elif result['should_trade'] and result['actions']:
         logger.info("Event-driven trading triggered - actions generated")
         if active_mode:
             logger.info("ACTIVE mode: starting v5-live-20u.user.service")
@@ -286,6 +347,7 @@ def main():
                 'live_service_ok': exec_res.get('ok'),
                 'live_service_returncode': exec_res.get('returncode'),
                 'live_service_stderr': exec_res.get('stderr', ''),
+                'trigger_reason': 'event_actions',
             })
             if exec_res.get('ok'):
                 logger.info("ACTIVE mode: live service start request accepted")
