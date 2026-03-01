@@ -1,15 +1,15 @@
 {
-  "ts": "2026-03-01T04:30:12.769381",
+  "ts": "2026-03-01T13:00:02.230417",
   "current_level": "PROTECT",
   "metrics": {
     "dd_pct": 0.0,
-    "conversion_rate": 0.16666666666666666,
-    "dust_reject_rate": 0.003389830508474576,
+    "conversion_rate": 0.12162162162162163,
+    "dust_reject_rate": 0.12318840579710146,
     "pnl_trend": "flat",
     "consecutive_losses": 0,
     "sample_size": 12,
-    "total_selected": 48,
-    "total_rebalance": 8
+    "total_selected": 74,
+    "total_rebalance": 9
   },
   "reason": "维持当前档位"
 }

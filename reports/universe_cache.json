@@ -1,5 +1,5 @@
 {
-  "ts": 1772308646.9156792,
+  "ts": 1772337612.1372037,
   "ttl_sec": 3600,
   "symbols": [
     "BTC/USDT",
@@ -8,20 +8,27 @@
     "DOGE/USDT",
     "XRP/USDT",
     "SUI/USDT",
+    "HYPE/USDT",
     "ADA/USDT",
     "LINK/USDT",
-    "HYPE/USDT",
     "BNB/USDT",
-    "TRX/USDT",
     "AVAX/USDT",
-    "PAXG/USDT",
+    "TRX/USDT",
     "DOT/USDT",
-    "PI/USDT",
     "LTC/USDT",
     "FIL/USDT",
-    "UNI/USDT",
-    "OKB/USDT",
     "BCH/USDT",
-    "CC/USDT"
+    "PI/USDT",
+    "OKB/USDT",
+    "ZEC/USDT",
+    "UNI/USDT",
+    "PUMP/USDT",
+    "CC/USDT",
+    "XPL/USDT",
+    "NEAR/USDT",
+    "BARD/USDT",
+    "AAVE/USDT",
+    "PENGU/USDT",
+    "ASTER/USDT"
   ]
 }

@@ -75,7 +75,7 @@ def main():
     
     # 加载训练数据（使用120天，包含更多市场周期）
     print("\n[1] 加载训练数据（120天）...")
-    X = detector.load_training_data(lookback_days=120)
+    X = detector.load_training_data(lookback_days=400)
     
     if X is None or len(X) < 100:
         print("❌ 训练数据不足，需要至少100条记录")

@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-03-01T03:00:57.032000Z,20260301_11,DOT/USDT,REBALANCE,buy,2.124847,1.634,3.471999998,0.003471999998,0.0010624235,,

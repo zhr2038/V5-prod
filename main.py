@@ -468,11 +468,21 @@ def main() -> None:
 
     # ========== 预算限制检查（20 USDT 硬限制）==========
     try:
-        eq_now = float(acc.cash_usdt)
-        for p in held:
-            s = md_1h.get(p.symbol)
-            if s and s.close:
-                eq_now += float(p.qty) * float(s.close[-1])
+        # 从OKX实时获取权益，而不是从本地store（避免缓存旧数据）
+        from src.data.okx_ccxt_provider import OKXCCXTProvider
+        provider = OKXCCXTProvider(rate_limit=True)
+        account_info = provider.fetch_balance()
+        
+        # 计算总权益（USDT + 持仓价值）
+        eq_now = float(account_info.get('USDT', {}).get('total', 0))
+        for coin, amount in account_info.items():
+            if coin != 'USDT' and amount.get('total', 0) > 0:
+                try:
+                    ticker = provider.fetch_ticker(f"{coin}/USDT")
+                    price = ticker.get('last', 0)
+                    eq_now += float(amount['total']) * float(price)
+                except:
+                    pass  # 忽略价格获取失败
         
         # 从配置读取预算上限，默认20 USDT
         equity_cap = float(getattr(cfg.budget, 'live_equity_cap_usdt', 20.0) or 20.0)

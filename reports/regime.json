@@ -1,9 +1,9 @@
 {
-  "state": "Risk-Off",
-  "atr_pct": 0.013849082981691073,
-  "ma20": 64898.479999999996,
-  "ma60": 66288.12333333334,
-  "multiplier": 0.0,
+  "state": "Sideways",
+  "atr_pct": 0.012677536835328724,
+  "ma20": 65659.755,
+  "ma60": 66171.16833333335,
+  "multiplier": 0.7,
   "hmm_state": null,
   "hmm_probability": null,
   "hmm_probs": null
