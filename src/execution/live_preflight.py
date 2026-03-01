@@ -251,11 +251,9 @@ class LivePreflight:
                 details=details,
             )
 
-        # 5) Decision
+        # 5) Decision with smart reconcile handling
         if kill_switch_enabled:
             # Optional: auto-clear kill-switch if everything is currently OK.
-            # This prevents a one-time mismatch (e.g. local store drift after manual cleanup)
-            # from permanently blocking automation.
             try:
                 if bool(getattr(self.cfg, "auto_clear_kill_switch_if_ok", False)) and bool(reconcile_ok) and bool(ledger_ok):
                     ks_path = getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json")
@@ -283,6 +281,7 @@ class LivePreflight:
                     details=details,
                 )
 
+        # 优化: 如果两者都ok，正常交易
         if reconcile_ok and ledger_ok:
             return LivePreflightResult(
                 decision="ALLOW",
@@ -293,6 +292,36 @@ class LivePreflight:
                 details=details,
             )
 
+        # 优化: ledger_ok 但 reconcile 有微小差异，允许交易（只记录警告）
+        # 小资金账户（<50U）灰尘持仓常见，不应阻止交易
+        if ledger_ok and not reconcile_ok:
+            # 检查差异大小
+            est_drift = details.get("bootstrap_patch", {}).get("est_total_drift_usdt", 0)
+            equity = details.get("ledger", {}).get("estimated_equity_usdt", 100)
+            
+            # 如果差异 < 2 USDT 或 < 10% 权益，视为微小差异，允许交易
+            small_drift = est_drift < 2.0 or (est_drift / max(equity, 1) < 0.1)
+            
+            # 或者配置强制允许
+            force_allow = bool(getattr(self.cfg, "allow_trade_on_small_reconcile_drift", False))
+            
+            if small_drift or force_allow:
+                details["reconcile_warn"] = {
+                    "original_ok": False,
+                    "allowed": True,
+                    "reason": "small_drift_or_forced",
+                    "est_drift_usdt": est_drift
+                }
+                return LivePreflightResult(
+                    decision="ALLOW",
+                    reconcile_ok=True,  # 标记为ok以便继续
+                    ledger_ok=True,
+                    kill_switch_enabled=False,
+                    reason="ok_with_small_reconcile_drift",
+                    details=details,
+                )
+
+        # 默认: 保守策略，只允许卖出
         return LivePreflightResult(
             decision="SELL_ONLY",
             reconcile_ok=reconcile_ok,

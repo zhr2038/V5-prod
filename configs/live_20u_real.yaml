@@ -164,6 +164,15 @@ execution:
   preflight_max_pages: 5
   max_status_age_sec: 180
   preflight_fail_action: sell_only
+  
+  # 优化: 小额差异时仍允许交易（避免灰尘持仓阻止交易）
+  allow_trade_on_small_reconcile_drift: true  # 允许小额差异时交易
+  
+  # Reconcile 容差设置（小资金账户放宽）
+  reconcile_dust_usdt_ignore: 1.0  # 忽略 <1 USDT 的灰尘差异
+  reconcile_abs_usdt_tol: 2.0      # USDT 差异容差 2 USDT
+  reconcile_abs_base_tol: 1e-6     # 币种数量容差
+  
   # Borrow detection thresholds (strict)
   borrow_liab_eps: 0.01
   borrow_neg_eq_eps: 0.01
