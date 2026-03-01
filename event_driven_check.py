@@ -75,46 +75,51 @@ def load_current_state(cfg=None):
             # Fallback: empty prices (disable breakout detection)
             logger.warning("No prices available - breakout detection disabled")
         
-        # Load signals from alpha snapshot (more reliable)
+        # Load signals - PRIORITY: fused signals > alpha snapshot
         signals = {}
-        alpha_path = Path('/home/admin/clawd/v5-trading-bot/reports/alpha_snapshot.json')
-        if alpha_path.exists():
-            with open(alpha_path) as f:
-                alpha = json.load(f)
-                for sym, score in alpha.get('scores', {}).items():
-                    # Convert score to signal direction
-                    # Negative score = sell (lower rank), Positive = buy (higher rank)
-                    direction = 'buy' if score > 0 else 'sell' if score < 0 else 'hold'
-                    # Estimate rank based on score magnitude
-                    rank = 50 - int(score * 50)  # Simple ranking approximation
-                    signals[sym] = SignalState(
-                        symbol=sym,
-                        direction=direction,
-                        score=abs(score),
-                        rank=max(1, min(99, rank)),
-                        timestamp_ms=int(datetime.now().timestamp() * 1000)
-                    )
-                logger.info(f"Loaded {len(signals)} signals from alpha snapshot")
         
-        # Also try strategy signals as backup
-        if not signals:
-            runs_dir = Path('/home/admin/clawd/v5-trading-bot/reports/runs')
-            if runs_dir.exists():
-                run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], reverse=True)
-                if run_dirs:
-                    latest = run_dirs[0]
-                    signals_path = latest / 'strategy_signals.json'
-                    if signals_path.exists():
+        # 1. Try to load FUSED signals from strategy_signals.json (highest priority)
+        runs_dir = Path('/home/admin/clawd/v5-trading-bot/reports/runs')
+        if runs_dir.exists():
+            run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], reverse=True)
+            if run_dirs:
+                latest = run_dirs[0]
+                signals_path = latest / 'strategy_signals.json'
+                if signals_path.exists():
+                    try:
                         with open(signals_path) as f:
                             sig_data = json.load(f)
-                            for sym, data in sig_data.get('fused', {}).items():
-                                signals[sym] = SignalState(
-                                    symbol=sym,
-                                    direction=data.get('direction', 'hold'),
-                                    score=data.get('score', 0),
-                                    rank=data.get('rank', 99),
-                                    timestamp_ms=int(datetime.now().timestamp() * 1000)
-                                )
+                            fused_signals = sig_data.get('fused', {})
+                            if fused_signals:
+                                for sym, data in fused_signals.items():
+                                    signals[sym] = SignalState(
+                                        symbol=sym,
+                                        direction=data.get('direction', 'hold'),
+                                        score=data.get('score', 0),
+                                        rank=data.get('rank', 99),
+                                        timestamp_ms=int(datetime.now().timestamp() * 1000)
+                                    )
+                                logger.info(f"Loaded {len(signals)} FUSED signals from {latest.name}")
+                    except Exception as e:
+                        logger.warning(f"Could not load fused signals: {e}")
+        
+        # 2. Fallback to alpha snapshot if no fused signals
+        if not signals:
+            alpha_path = Path('/home/admin/clawd/v5-trading-bot/reports/alpha_snapshot.json')
+            if alpha_path.exists():
+                with open(alpha_path) as f:
+                    alpha = json.load(f)
+                    for sym, score in alpha.get('scores', {}).items():
+                        direction = 'buy' if score > 0 else 'sell' if score < 0 else 'hold'
+                        rank = 50 - int(score * 50)
+                        signals[sym] = SignalState(
+                            symbol=sym,
+                            direction=direction,
+                            score=abs(score),
+                            rank=max(1, min(99, rank)),
+                            timestamp_ms=int(datetime.now().timestamp() * 1000)
+                        )
+                    logger.info(f"Loaded {len(signals)} signals from alpha snapshot (fallback)")
         
         # Load selected symbols
         selected = list(signals.keys())[:5]  # Top 5
