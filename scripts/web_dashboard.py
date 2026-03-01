@@ -518,21 +518,37 @@ def api_positions():
                             ccy = str(d.get('ccy') or '')
                             if not ccy or ccy == 'USDT' or ccy in hidden_symbols:
                                 continue
-                            # OKX API: 'eq' = equity value (数量 × 价格), 'cashBal' = 数量
-                            eq_value = float(d.get('eq') or 0)  # 权益价值 (USDT)
-                            cash_bal = float(d.get('cashBal') or 0)  # 实际数量
-                            if eq_value <= 0 or cash_bal <= 0:
+                            # OKX API semantics for spot:
+                            # - eq / cashBal are base quantity (not USDT value)
+                            # - eqUsd is USDT-equivalent value
+                            cash_bal = float(d.get('cashBal') or 0)
+                            avail_bal = float(d.get('availBal') or 0)
+                            spot_bal = float(d.get('spotBal') or 0)
+                            eq_qty = float(d.get('eq') or 0)
+                            qty = max(cash_bal, avail_bal, spot_bal, eq_qty)
+                            if qty <= 0:
                                 continue
+
                             px = get_last_price_usdt(ccy)
+                            eq_usd = float(d.get('eqUsd') or 0)
+                            # fallback: if eqUsd missing, infer from qty*px
+                            if eq_usd <= 0 and px > 0:
+                                eq_usd = qty * px
+                            if eq_usd <= 0:
+                                continue
+
+                            # fallback: if ticker unavailable, infer a synthetic last price
+                            if px <= 0 and qty > 0:
+                                px = eq_usd / qty
                             if px <= 0:
                                 continue
-                            # value 直接使用 eq (权益价值)
-                            value = eq_value
+
+                            value = eq_usd
                             if value < 0.5:
                                 continue
                             positions.append({
                                 'symbol': ccy,
-                                'qty': round(cash_bal, 8),  # 使用 cashBal 作为数量
+                                'qty': round(qty, 8),
                                 'avg_px': round(px, 6),
                                 'last_price': round(px, 6),
                                 'value_usdt': round(value, 4)
