@@ -197,6 +197,7 @@ execution:
   split_orders: 3
   split_interval_sec: 3
   max_hourly_volume_pct: 0.05
+  open_long_cooldown_minutes: 10  # 同币种10分钟内已OPEN_LONG成交则禁止再次OPEN_LONG
   slippage_db_path: reports/slippage.sqlite
   fee_bps: 6
   slippage_bps: 5

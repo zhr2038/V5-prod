@@ -419,6 +419,9 @@ class LiveExecutionEngine:
     def place(self, o: Order) -> LiveExecutionResult:
         """Place"""
         gate, reconcile_ok, kill_switch = submit_gate_for_live(self.cfg)
+        inst_id = symbol_to_inst_id(o.symbol)
+        dh = self._decision_hash_for_order(o)
+        clid = make_cl_ord_id(self.run_id, inst_id, o.intent, dh, o.side, "market", "cash")
 
         # Manual approval required for liability-repair intents.
         repair_intents = {
@@ -428,9 +431,6 @@ class LiveExecutionEngine:
             "IMMEDIATE_LIABILITY_REPAYMENT",
         }
         if str(o.intent or "").upper() in repair_intents and os.getenv("V5_REPAIR_ARM") != "YES":
-            inst_id = symbol_to_inst_id(o.symbol)
-            dh = self._decision_hash_for_order(o)
-            clid = make_cl_ord_id(self.run_id, inst_id, o.intent, dh, o.side, "market", "cash")
             self.order_store.upsert_new(
                 cl_ord_id=clid,
                 run_id=self.run_id,
@@ -453,9 +453,6 @@ class LiveExecutionEngine:
 
         # Gate: block all buys (OPEN/REBALANCE) in SELL_ONLY mode.
         if gate == "SELL_ONLY" and o.side == "buy" and o.intent in {"OPEN_LONG", "REBALANCE"}:
-            dh = self._decision_hash_for_order(o)
-            inst_id = symbol_to_inst_id(o.symbol)
-            clid = make_cl_ord_id(self.run_id, inst_id, o.intent, dh, o.side, "market", "cash")
             self.order_store.upsert_new(
                 cl_ord_id=clid,
                 run_id=self.run_id,
@@ -476,10 +473,6 @@ class LiveExecutionEngine:
             self.order_store.update_state(clid, new_state="REJECTED", last_error_code="GATE", last_error_msg="SELL_ONLY")
             return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
-        inst_id = symbol_to_inst_id(o.symbol)
-        dh = self._decision_hash_for_order(o)
-        clid = make_cl_ord_id(self.run_id, inst_id, o.intent, dh, o.side, "market", "cash")
-
         existing = self.order_store.get(clid)
         if existing:
             st0 = str(existing.state).upper()
@@ -488,6 +481,61 @@ class LiveExecutionEngine:
             # Idempotency: if we already have a record for this clOrdId, do not resubmit.
             st, ord_id = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
             return LiveExecutionResult(cl_ord_id=clid, state=st, ord_id=ord_id)
+
+        # Hard safety: if same symbol has FILLED OPEN_LONG within cooldown window,
+        # reject new OPEN_LONG to avoid repeated entries from overlapping triggers.
+        if str(o.side).lower() == "buy" and str(o.intent or "").upper() == "OPEN_LONG":
+            cooldown_min = int(getattr(self.cfg, "open_long_cooldown_minutes", 10) or 0)
+            if cooldown_min > 0:
+                now_ms = int(time.time() * 1000)
+                since_ts = now_ms - cooldown_min * 60 * 1000
+                latest = self.order_store.get_latest_filled(
+                    inst_id=inst_id,
+                    side="buy",
+                    intent="OPEN_LONG",
+                    since_ts=since_ts,
+                )
+                if latest is not None:
+                    elapsed_sec = max(0.0, (now_ms - int(latest.updated_ts)) / 1000.0)
+                    remain_sec = max(0.0, cooldown_min * 60.0 - elapsed_sec)
+                    self.order_store.upsert_new(
+                        cl_ord_id=clid,
+                        run_id=self.run_id,
+                        inst_id=inst_id,
+                        side=o.side,
+                        intent=o.intent,
+                        decision_hash=dh,
+                        td_mode="cash",
+                        ord_type="market",
+                        notional_usdt=float(o.notional_usdt),
+                        window_start_ts=(o.meta or {}).get("window_start_ts"),
+                        window_end_ts=(o.meta or {}).get("window_end_ts"),
+                        req={
+                            "blocked_by_cooldown": True,
+                            "cooldown_minutes": cooldown_min,
+                            "latest_filled_cl_ord_id": str(latest.cl_ord_id),
+                            "latest_filled_run_id": str(latest.run_id),
+                            "latest_filled_updated_ts": int(latest.updated_ts),
+                            "elapsed_sec": float(round(elapsed_sec, 3)),
+                            "remain_sec": float(round(remain_sec, 3)),
+                        },
+                        reconcile_ok_at_submit=reconcile_ok,
+                        kill_switch_at_submit=kill_switch,
+                        submit_gate=gate,
+                    )
+                    msg = (
+                        f"OPEN_LONG cooldown active for {o.symbol}: "
+                        f"latest fill {elapsed_sec:.1f}s ago (< {cooldown_min * 60:.0f}s)"
+                    )
+                    self.order_store.update_state(
+                        clid,
+                        new_state="REJECTED",
+                        last_error_code="OPEN_LONG_COOLDOWN",
+                        last_error_msg=msg,
+                        event_type="COOLDOWN_BLOCK",
+                    )
+                    log.warning(msg)
+                    return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         try:
             payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)

@@ -164,6 +164,7 @@ class OrderStore:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_state ON orders(state)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_run_id ON orders(run_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_ord_id ON orders(ord_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_openlong_recent ON orders(inst_id, side, intent, state, updated_ts)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_order_events_clid ON order_events(cl_ord_id)")
         con.commit()
         con.close()
@@ -433,6 +434,52 @@ class OrderStore:
 
         con.commit()
         con.close()
+
+    def get_latest_filled(
+        self,
+        *,
+        inst_id: str,
+        side: Optional[str] = None,
+        intent: Optional[str] = None,
+        since_ts: Optional[int] = None,
+    ) -> Optional[OrderRow]:
+        """获取最近一笔已成交订单（可按方向/意图/时间过滤）。"""
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+
+        sql = [
+            """
+            SELECT
+              cl_ord_id, run_id, window_start_ts, window_end_ts,
+              inst_id, side, intent, decision_hash, td_mode, ord_type,
+              px, sz, notional_usdt,
+              state, ord_id,
+              req_json, ack_json, last_query_json,
+              last_error_code, last_error_msg,
+              created_ts, updated_ts, last_poll_ts,
+              acc_fill_sz, avg_px, fee,
+              reconcile_ok_at_submit, kill_switch_at_submit, submit_gate
+            FROM orders
+            WHERE inst_id=? AND state='FILLED'
+            """
+        ]
+        params: List[Any] = [str(inst_id)]
+
+        if side is not None:
+            sql.append(" AND side=?")
+            params.append(str(side))
+        if intent is not None:
+            sql.append(" AND intent=?")
+            params.append(str(intent))
+        if since_ts is not None:
+            sql.append(" AND updated_ts>=?")
+            params.append(int(since_ts))
+
+        sql.append(" ORDER BY updated_ts DESC LIMIT 1")
+        cur.execute("".join(sql), params)
+        row = cur.fetchone()
+        con.close()
+        return self._row_from_sql(row)
 
     def list_open(self, limit: int = 200) -> List[OrderRow]:
         """获取未完成订单列表
