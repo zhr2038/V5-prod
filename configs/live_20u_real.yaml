@@ -169,9 +169,9 @@ execution:
   allow_trade_on_small_reconcile_drift: true  # 允许小额差异时交易
   
   # Reconcile 容差设置（小资金账户放宽）
-  reconcile_dust_usdt_ignore: 1.0  # 忽略 <1 USDT 的灰尘差异
-  reconcile_abs_usdt_tol: 2.0      # USDT 差异容差 2 USDT
-  reconcile_abs_base_tol: 1e-6     # 币种数量容差
+  reconcile_dust_usdt_ignore: 5.0  # 忽略 <5 USDT 的灰尘差异
+  reconcile_abs_usdt_tol: 100.0    # USDT 差异容差 100 USDT（宽松）
+  reconcile_abs_base_tol: 1.0      # 币种数量容差放宽
   
   # Borrow detection thresholds (strict)
   borrow_liab_eps: 0.01

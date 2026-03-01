@@ -292,32 +292,23 @@ class LivePreflight:
                 details=details,
             )
 
-        # 优化: ledger_ok 但 reconcile 有微小差异，允许交易（只记录警告）
-        # 小资金账户（<50U）灰尘持仓常见，不应阻止交易
+        # 优化: ledger_ok 但 reconcile 有差异，允许交易（配置强制允许时）
         if ledger_ok and not reconcile_ok:
-            # 检查差异大小
-            est_drift = details.get("bootstrap_patch", {}).get("est_total_drift_usdt", 0)
-            equity = details.get("ledger", {}).get("estimated_equity_usdt", 100)
-            
-            # 如果差异 < 2 USDT 或 < 10% 权益，视为微小差异，允许交易
-            small_drift = est_drift < 2.0 or (est_drift / max(equity, 1) < 0.1)
-            
-            # 或者配置强制允许
+            # 配置强制允许
             force_allow = bool(getattr(self.cfg, "allow_trade_on_small_reconcile_drift", False))
             
-            if small_drift or force_allow:
+            if force_allow:
                 details["reconcile_warn"] = {
                     "original_ok": False,
                     "allowed": True,
-                    "reason": "small_drift_or_forced",
-                    "est_drift_usdt": est_drift
+                    "reason": "forced_by_config"
                 }
                 return LivePreflightResult(
                     decision="ALLOW",
-                    reconcile_ok=True,  # 标记为ok以便继续
+                    reconcile_ok=True,
                     ledger_ok=True,
                     kill_switch_enabled=False,
-                    reason="ok_with_small_reconcile_drift",
+                    reason="ok_with_forced_config",
                     details=details,
                 )
 
