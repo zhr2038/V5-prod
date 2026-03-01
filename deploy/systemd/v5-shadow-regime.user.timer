@@ -6,7 +6,7 @@ OnCalendar=hourly
 Persistent=true
 AccuracySec=30s
 RandomizedDelaySec=25s
-Unit=v5-shadow-regime.service
+Unit=v5-shadow-regime.user.service
 
 [Install]
 WantedBy=timers.target

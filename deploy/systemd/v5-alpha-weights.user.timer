@@ -6,7 +6,7 @@ OnCalendar=*-*-* 00,06,12,18:05:00
 Persistent=true
 AccuracySec=30s
 RandomizedDelaySec=90s
-Unit=v5-alpha-weights.service
+Unit=v5-alpha-weights.user.service
 
 [Install]
 WantedBy=timers.target
