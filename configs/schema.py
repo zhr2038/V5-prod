@@ -216,6 +216,10 @@ class ExecutionConfig(BaseModel):
         ge=0,
         description="Block new OPEN_LONG buy if same symbol had FILLED OPEN_LONG within this many minutes (0=disable)",
     )
+    order_state_machine_path: str = Field(
+        default="reports/order_state_machine.json",
+        description="Path for execution arbitration state machine persistence",
+    )
 
     # dry-run cost model (bps)
     fee_bps: float = Field(default=6.0, ge=0)

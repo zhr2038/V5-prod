@@ -600,39 +600,33 @@ def main() -> None:
 
     orders = out.orders
 
-    # Hard anti-churn rule: within the same run, if a symbol has CLOSE_LONG sell,
-    # block all buy intents (OPEN_LONG/REBALANCE) for that symbol.
+    # Order arbitration layer: unified priority + per-symbol state machine
+    # to avoid cross-module conflicts (close vs rebalance/open in same run, cooldown churn, etc.).
     try:
-        close_symbols = {
-            str(o.symbol)
-            for o in (orders or [])
-            if str(getattr(o, "side", "")).lower() == "sell"
-            and str(getattr(o, "intent", "")).upper() == "CLOSE_LONG"
-        }
-        if close_symbols:
-            filtered = []
-            blocked = []
-            for o in (orders or []):
-                is_buy = str(getattr(o, "side", "")).lower() == "buy"
-                intent_u = str(getattr(o, "intent", "")).upper()
-                sym = str(getattr(o, "symbol", ""))
-                if sym in close_symbols and is_buy and intent_u in {"OPEN_LONG", "REBALANCE"}:
-                    blocked.append(o)
-                    continue
-                filtered.append(o)
-            if blocked:
-                orders = filtered
-                msg = (
-                    f"CLOSE_DOMINATES_BUY_BLOCK: blocked {len(blocked)} buy orders "
-                    f"for symbols with same-run CLOSE_LONG: {sorted(close_symbols)}"
-                )
-                log.warning(msg)
-                try:
-                    audit.add_note(msg)
-                except Exception:
-                    pass
+        from src.execution.order_arbitrator import arbitrate_orders
+
+        orders_before = len(orders or [])
+        sm_path = str(getattr(cfg.execution, "order_state_machine_path", "reports/order_state_machine.json") or "reports/order_state_machine.json")
+        cooldown_min = int(getattr(cfg.execution, "open_long_cooldown_minutes", 10) or 10)
+        orders, arb_decisions = arbitrate_orders(
+            orders=(orders or []),
+            positions=store.list(),
+            run_id=run_id,
+            cooldown_minutes=cooldown_min,
+            state_path=sm_path,
+        )
+        blocked_n = len([d for d in (arb_decisions or []) if d.get("action") == "blocked"])
+        if blocked_n > 0:
+            msg = f"ORDER_ARBITRATION: before={orders_before} after={len(orders)} blocked={blocked_n}"
+            log.warning(msg)
+            try:
+                audit.add_note(msg)
+                # Keep only first N decision details to control artifact size
+                audit.add_note("ORDER_ARBITRATION_DETAILS: " + json.dumps(arb_decisions[:20], ensure_ascii=False))
+            except Exception:
+                pass
     except Exception as e:
-        log.warning(f"close-dominance filter skipped: {e}")
+        log.warning(f"order arbitration skipped: {e}")
 
     from src.reporting.trade_log import TradeLogWriter
 
