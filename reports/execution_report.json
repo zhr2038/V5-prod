@@ -1,46 +1,39 @@
 {
-  "timestamp": "2026-03-01T06:00:55Z",
+  "timestamp": "2026-03-01T16:15:55Z",
   "dry_run": false,
   "orders": [
-    {
-      "symbol": "DOGE/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 9.510563999999998e-08,
-      "signal_price": 0.09595,
-      "meta": {
-        "reason": "profit_taking_stop_loss_hit_hold",
-        "action": "sell_all",
-        "value": 0.09595
-      }
-    },
-    {
-      "symbol": "SOL/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 2.9682332446434e-05,
-      "signal_price": 87.26,
-      "meta": {
-        "reason": "rank_exit_rank_4_exceeds_3",
-        "current_rank": 4
-      }
-    },
     {
       "symbol": "ETH/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 0.002007340272,
-      "signal_price": 2010.96,
+      "notional_usdt": 9.02073708644,
+      "signal_price": 1999.7,
       "meta": {
         "reason": "atr_trailing",
-        "last": 2010.96,
-        "stop": 2015.5457142857142,
+        "last": 1999.7,
+        "stop": 2030.6565714285712,
         "highest": 2083.62,
-        "atr": 30.942857142857147,
+        "atr": 24.07428571428573,
         "atr_mult": 2.2,
         "atr_n": 14
       }
+    },
+    {
+      "symbol": "ETH/USDT",
+      "side": "buy",
+      "intent": "REBALANCE",
+      "notional_usdt": 9.0,
+      "signal_price": 1999.7,
+      "meta": {
+        "target_w": 0.3,
+        "dd_mult": 1.0,
+        "regime": "Sideways",
+        "window_start_ts": null,
+        "window_end_ts": null,
+        "deadband_pct": 0.035,
+        "drift": 0.3
+      }
     }
   ],
-  "notes": "regime=RegimeState.SIDEWAYS selected=['XRP/USDT'] orders=3"
+  "notes": "regime=RegimeState.SIDEWAYS selected=['ETH/USDT'] orders=2"
 }

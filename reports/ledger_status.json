@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "ts_ms": 1772355643883,
+  "ts_ms": 1772364212676,
   "ok": true,
   "reason": null,
   "window": {
-    "begin_ts_ms": 1772348439191,
-    "end_ts_ms": 1772355639056
+    "begin_ts_ms": 1772362838537,
+    "end_ts_ms": 1772362838537
   },
   "baseline": {
-    "ts_ms": 1772352036704,
-    "last_bill_id": "3350277132533620736",
-    "last_bill_ts_ms": 1772348439191,
+    "ts_ms": 1772364078950,
+    "last_bill_id": "3350760294409822208",
+    "last_bill_ts_ms": 1772362838537,
     "balances": {
       "USDT": "20.292001295282283",
       "XAUT": "0.000000831",
@@ -43,9 +43,9 @@
     }
   },
   "current": {
-    "ts_ms": 1772355643883,
-    "last_bill_id": "3350518719914172416",
-    "last_bill_ts_ms": 1772355639056,
+    "ts_ms": 1772364212676,
+    "last_bill_id": "3350760294409822208",
+    "last_bill_ts_ms": 1772362838537,
     "balances": {
       "USDT": "20.292001295282283",
       "XAUT": "0.000000831",
@@ -78,10 +78,8 @@
     }
   },
   "bills_aggregate": {
-    "count": 4,
-    "sum_bal_chg": {
-      "NEAR": "0E-16"
-    }
+    "count": 0,
+    "sum_bal_chg": {}
   },
   "diffs": {
     "AAVE": {
@@ -160,9 +158,9 @@
       "delta": "0.000000"
     },
     "NEAR": {
-      "expected": "0E-16",
+      "expected": "0",
       "actual": "0",
-      "delta": "0E-16"
+      "delta": "0"
     },
     "PAXG": {
       "expected": "2.02E-7",

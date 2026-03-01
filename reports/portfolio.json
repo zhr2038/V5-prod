@@ -1,12 +1,12 @@
 {
   "target_weights": {
-    "XRP/USDT": 0.3
+    "ETH/USDT": 0.3
   },
   "selected": [
-    "XRP/USDT"
+    "ETH/USDT"
   ],
   "volatilities": {
-    "XRP/USDT": 0.007391517532771237
+    "ETH/USDT": 0.007203253581969525
   },
   "notes": ""
 }

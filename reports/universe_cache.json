@@ -1,11 +1,10 @@
 {
-  "ts": 1772355620.4432442,
+  "ts": 1772380825.194128,
   "ttl_sec": 3600,
   "symbols": [
     "BTC/USDT",
     "ETH/USDT",
     "SOL/USDT",
-    "DOGE/USDT",
-    "XRP/USDT"
+    "DOGE/USDT"
   ]
 }

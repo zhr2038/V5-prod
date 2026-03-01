@@ -1,11 +1,11 @@
 {
   "ETH/USDT": {
     "symbol": "ETH/USDT",
-    "entry_price": 2074.93,
-    "entry_time": "2026-02-26T13:00:20.730042",
-    "highest_price": 2074.93,
-    "profit_high": 0.0,
-    "current_stop": 1971.1834999999996,
+    "entry_price": 2001.94,
+    "entry_time": "2026-03-01T22:48:39.972021",
+    "highest_price": 2005.35,
+    "profit_high": 0.0017033477526798278,
+    "current_stop": 1901.843,
     "current_action": "hold",
     "partial_sold": false,
     "partial_sell_time": null
@@ -45,11 +45,11 @@
   },
   "BTC/USDT": {
     "symbol": "BTC/USDT",
-    "entry_price": 68570.0,
-    "entry_time": "2026-02-26T13:00:20.752488",
-    "highest_price": 68570.0,
-    "profit_high": 0.0,
-    "current_stop": 65141.5,
+    "entry_price": 66916.0,
+    "entry_time": "2026-03-01T22:48:39.968366",
+    "highest_price": 66970.8,
+    "profit_high": 0.000818937174965672,
+    "current_stop": 63570.2,
     "current_action": "hold",
     "partial_sold": false,
     "partial_sell_time": null
@@ -100,11 +100,11 @@
   },
   "SOL/USDT": {
     "symbol": "SOL/USDT",
-    "entry_price": 88.75,
-    "entry_time": "2026-02-26T13:00:20.776434",
-    "highest_price": 88.75,
+    "entry_price": 86.11,
+    "entry_time": "2026-03-01T23:03:26.880220",
+    "highest_price": 86.11,
     "profit_high": 0.0,
-    "current_stop": 84.3125,
+    "current_stop": 81.80449999999999,
     "current_action": "hold",
     "partial_sold": false,
     "partial_sell_time": null

@@ -178,6 +178,20 @@ class ExecutionConfig(BaseModel):
     borrow_liab_eps: float = Field(default=1e-6, ge=0)
     borrow_neg_eq_eps: float = Field(default=1e-6, ge=0)
 
+    # Account config safety (OKX API): enforce account mode/settings before allowing buys.
+    enforce_account_config_check: bool = Field(default=True)
+    required_acct_lv: str = Field(default="1", description="Expected account mode. '1'=Spot mode")
+    required_pos_mode: str = Field(default="net_mode", description="Expected posMode from /account/config")
+    require_auto_loan_false: bool = Field(default=True, description="Reject buys if account config shows autoLoan=true")
+    auto_fix_auto_loan: bool = Field(default=False, description="Try set-auto-loan=false before rejecting (acctLv 3/4 only)")
+    require_spot_borrow_disabled: bool = Field(default=False, description="Reject buys if enableSpotBorrow=true")
+    ensure_spot_auto_repay_true: bool = Field(default=True, description="When spot borrow is enabled, ensure auto repay=true")
+
+    # Per-order quote balance guard: never submit buy larger than available quote balance.
+    buy_quote_balance_safety_check: bool = Field(default=True)
+    buy_quote_reserve_usdt: float = Field(default=0.5, ge=0)
+    buy_quote_slack_ratio: float = Field(default=0.001, ge=0, le=0.1)
+
     # Ops convenience: allow controlled auto-clear of kill-switch when reconcile/ledger are OK.
     # Default False for safety.
     auto_clear_kill_switch_if_ok: bool = Field(default=False)

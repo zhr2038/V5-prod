@@ -309,3 +309,15 @@ class OKXPrivateClient:
     def get_balance(self, ccy: Optional[str] = None) -> OKXResponse:
         params = {"ccy": ccy} if ccy else None
         return self.request("GET", "/api/v5/account/balance", params=params)
+
+    def get_account_config(self) -> OKXResponse:
+        """Get account configuration (acctLv/posMode/autoLoan/enableSpotBorrow...)."""
+        return self.request("GET", "/api/v5/account/config")
+
+    def set_auto_repay(self, auto_repay: bool) -> OKXResponse:
+        """Set spot auto-repay flag (only applicable when spot borrowing is enabled)."""
+        return self.request("POST", "/api/v5/account/set-auto-repay", json_body={"autoRepay": bool(auto_repay)})
+
+    def set_auto_loan(self, auto_loan: bool) -> OKXResponse:
+        """Set auto-loan flag (only applicable to multi-currency/portfolio margin)."""
+        return self.request("POST", "/api/v5/account/set-auto-loan", json_body={"autoLoan": bool(auto_loan)})
