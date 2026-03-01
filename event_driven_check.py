@@ -31,9 +31,14 @@ except Exception as e:
     sys.exit(1)
 
 
-def load_current_state():
+def load_current_state(cfg=None):
     """Load current market state from V5 reports."""
     try:
+        # Load config if not provided
+        if cfg is None:
+            from configs.loader import load_config
+            cfg = load_config('configs/live_20u_real.yaml', env_path='/home/admin/clawd/v5-trading-bot/.env')
+        
         # Load regime
         regime_path = Path('/home/admin/clawd/v5-trading-bot/reports/regime.json')
         regime = 'SIDEWAYS'
@@ -54,14 +59,32 @@ def load_current_state():
                         'quantity': data.get('quantity', 0)
                     }
         
-        # Load prices
+        # Load prices - use OKX API via existing client
         prices = {}
-        alpha_path = Path('/home/admin/clawd/v5-trading-bot/reports/alpha_snapshot.json')
-        if alpha_path.exists():
-            with open(alpha_path) as f:
-                alpha = json.load(f)
-                for sym, data in alpha.get('scores', {}).items():
-                    prices[sym] = data.get('price', 0)
+        try:
+            # Use private client to get balance (includes prices)
+            from src.execution.okx_private_client import OKXPrivateClient
+            client = OKXPrivateClient(exchange=cfg.exchange)
+            balance = client.get_balance()
+            for detail in balance.data.get('details', []):
+                ccy = detail.get('ccy', '')
+                price = detail.get('eqUsd', 0)
+                if ccy and ccy != 'USDT':
+                    qty = float(detail.get('eq', 0))
+                    if qty > 0 and price:
+                        prices[f"{ccy}/USDT"] = float(price) / qty
+            client.close()
+        except Exception as e:
+            logger.warning(f"Could not load prices: {e}")
+        
+        if not prices:
+            # Fallback: empty prices (will disable breakout detection)
+            alpha_path = Path('/home/admin/clawd/v5-trading-bot/reports/alpha_snapshot.json')
+            if alpha_path.exists():
+                with open(alpha_path) as f:
+                    alpha = json.load(f)
+                    for sym in alpha.get('scores', {}).keys():
+                        prices[sym] = 0.0  # Unknown price - breakout won't trigger
         
         # Load signals from last run
         signals = {}
@@ -128,7 +151,7 @@ def main():
     
     # Load current state
     logger.info("Loading current market state...")
-    state = load_current_state()
+    state = load_current_state(cfg)
     
     if not state:
         logger.error("Failed to load state, falling back to standard execution")
@@ -138,12 +161,13 @@ def main():
     logger.info(f"Positions: {list(state['positions'].keys())}")
     logger.info(f"Selected: {state['selected_symbols']}")
     
-    # Create event-driven trader
+    # Create event-driven trader with breakout disabled (price data unreliable)
     trader = create_event_driven_trader({
         'enabled': True,
         'check_interval_minutes': 15,
         'global_cooldown_p2_minutes': 30,
-        'symbol_cooldown_minutes': 60
+        'symbol_cooldown_minutes': 60,
+        'breakout_enabled': False  # Disable breakout detection - no reliable price source
     })
     
     # Check if should trade
