@@ -1,0 +1,12 @@
+[Unit]
+Description=V5 Event-Driven Trading Check (every 15 minutes)
+
+[Timer]
+# Check every 15 minutes
+OnCalendar=*:0/15:00
+
+# If system was down, run immediately when back up
+Persistent=true
+
+[Install]
+WantedBy=timers.target
