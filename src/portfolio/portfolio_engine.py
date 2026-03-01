@@ -35,6 +35,43 @@ class PortfolioEngine:
         self.alpha_cfg = alpha_cfg
         self.risk_cfg = risk_cfg
 
+    def _load_fused_signals(self) -> Optional[Dict[str, float]]:
+        """Load fused signals from strategy_signals.json if available"""
+        try:
+            from pathlib import Path
+            from datetime import datetime
+            import json
+            
+            strategy_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
+            if not strategy_file.exists():
+                # Try to find latest run
+                runs_dir = Path("reports/runs")
+                if runs_dir.exists():
+                    run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], reverse=True)
+                    if run_dirs:
+                        strategy_file = run_dirs[0] / "strategy_signals.json"
+            
+            if strategy_file.exists():
+                with open(strategy_file) as f:
+                    data = json.load(f)
+                    fused = data.get("fused", {})
+                    if fused:
+                        # Convert to score format (buy=positive, sell=negative)
+                        scores = {}
+                        for sym, sig in fused.items():
+                            direction = sig.get("direction", "hold")
+                            score = sig.get("score", 0)
+                            if direction == "buy":
+                                scores[sym] = float(score)
+                            elif direction == "sell":
+                                scores[sym] = -float(score)
+                            else:
+                                scores[sym] = 0.0
+                        return scores if scores else None
+        except Exception:
+            pass
+        return None
+
     def allocate(
         self,
         scores: Dict[str, float],
@@ -53,15 +90,27 @@ class PortfolioEngine:
         Returns:
             投资组合快照
         """
-        if not scores:
+        # Try to use fused signals from multi-strategy if available
+        fused_scores = self._load_fused_signals()
+        if fused_scores:
+            # Use fused signals for selection, but keep original scores for weight calculation
+            # This ensures we select symbols that multi-strategy wants to trade
+            selection_scores = fused_scores
+            if audit:
+                audit.add_note(f"Using fused signals for selection: {list(fused_scores.keys())[:5]}")
+        else:
+            selection_scores = scores
+        
+        if not selection_scores:
             return PortfolioSnapshot(target_weights={}, selected=[], volatilities={}, notes="no_scores")
 
-        # Select top pct by score
-        items = sorted(scores.items(), key=lambda kv: float(kv[1]), reverse=True)
+        # Select top pct by score (using fused signals if available)
+        items = sorted(selection_scores.items(), key=lambda kv: float(kv[1]), reverse=True)
         k = max(1, int(np.ceil(len(items) * float(self.alpha_cfg.long_top_pct))))
         selected = [s for s, score in items[:k] if score >= float(getattr(self.alpha_cfg, "min_score_threshold", 0.0))]
 
-        # Compute vol for inverse-vol weights (20d realized vol on 1h bars approx)
+        # For weight calculation, use original scores (or fused if no original)
+        weights_scores = scores if scores else fused_scores
         vols: Dict[str, float] = {}
         inv: Dict[str, float] = {}
         for sym in selected:
@@ -83,7 +132,7 @@ class PortfolioEngine:
         base_w = {sym: float(inv[sym]) / inv_sum for sym in selected}
 
         # Confidence weighting: softmax with temperature (更平滑的映射)
-        sel_scores = np.array([scores[s] for s in selected], dtype=float)
+        sel_scores = np.array([weights_scores[s] for s in selected], dtype=float)
         
         # 方法1: softmax with temperature (避免0权重)
         # temperature 参数优化：0.5→0.9 降低集中度，减少换手
