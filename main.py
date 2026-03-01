@@ -600,6 +600,40 @@ def main() -> None:
 
     orders = out.orders
 
+    # Hard anti-churn rule: within the same run, if a symbol has CLOSE_LONG sell,
+    # block all buy intents (OPEN_LONG/REBALANCE) for that symbol.
+    try:
+        close_symbols = {
+            str(o.symbol)
+            for o in (orders or [])
+            if str(getattr(o, "side", "")).lower() == "sell"
+            and str(getattr(o, "intent", "")).upper() == "CLOSE_LONG"
+        }
+        if close_symbols:
+            filtered = []
+            blocked = []
+            for o in (orders or []):
+                is_buy = str(getattr(o, "side", "")).lower() == "buy"
+                intent_u = str(getattr(o, "intent", "")).upper()
+                sym = str(getattr(o, "symbol", ""))
+                if sym in close_symbols and is_buy and intent_u in {"OPEN_LONG", "REBALANCE"}:
+                    blocked.append(o)
+                    continue
+                filtered.append(o)
+            if blocked:
+                orders = filtered
+                msg = (
+                    f"CLOSE_DOMINATES_BUY_BLOCK: blocked {len(blocked)} buy orders "
+                    f"for symbols with same-run CLOSE_LONG: {sorted(close_symbols)}"
+                )
+                log.warning(msg)
+                try:
+                    audit.add_note(msg)
+                except Exception:
+                    pass
+    except Exception as e:
+        log.warning(f"close-dominance filter skipped: {e}")
+
     from src.reporting.trade_log import TradeLogWriter
 
     trade_log = TradeLogWriter(run_dir=f"reports/runs/{run_id}")
