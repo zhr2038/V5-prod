@@ -2302,44 +2302,103 @@ def api_auto_risk_guard():
 
 @app.route('/api/decision_audit')
 def api_decision_audit():
-    """获取最新决策审计数据"""
+    """获取最新决策审计数据（策略信号带回退，避免前端空白）"""
     try:
-        # 找到最新的决策审计文件
         runs_dir = REPORTS_DIR / 'runs'
         if not runs_dir.exists():
             return jsonify({'error': 'No runs directory'}), 404
-        
+
         run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
         if not run_dirs:
             return jsonify({'error': 'No audit files found'}), 404
-        
-        # 按修改时间排序，取最新的
+
         run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         latest_run_dir = run_dirs[0]
         latest_audit_file = latest_run_dir / 'decision_audit.json'
-        
+
         with open(latest_audit_file, 'r') as f:
             audit_data = json.load(f)
-        
-        # 使用文件修改时间作为时间戳（now_ts可能不正确）
-        file_mtime = latest_run_dir.stat().st_mtime
-        
-        # 同时尝试读取策略信号审计
+
+        # 默认时间戳：决策文件目录时间
+        ts = latest_run_dir.stat().st_mtime
+
+        def _load_strategy_signals(path: Path):
+            """兼容多种 strategy_signals.json 结构。"""
+            with open(path, 'r') as sf:
+                strategy_data = json.load(sf)
+
+            strategies = strategy_data.get('strategies')
+            if isinstance(strategies, list) and strategies:
+                return strategies
+
+            # 兼容旧字段
+            legacy = strategy_data.get('strategy_signals')
+            if isinstance(legacy, list) and legacy:
+                return legacy
+
+            # 仅有 fused 时，合成一个摘要，避免前端显示空白
+            fused = strategy_data.get('fused')
+            if isinstance(fused, dict) and fused:
+                rows = list(fused.values())
+                buy_cnt = sum(1 for r in rows if str(r.get('direction', '')).lower() == 'buy')
+                sell_cnt = sum(1 for r in rows if str(r.get('direction', '')).lower() == 'sell')
+                synth_signals = []
+                for sym, r in fused.items():
+                    synth_signals.append({
+                        'symbol': sym,
+                        'side': r.get('direction', 'hold'),
+                        'score': float(r.get('score', 0.0) or 0.0),
+                        'confidence': float(r.get('confidence', r.get('score', 0.0)) or 0.0),
+                        'metadata': {'strategy': r.get('strategy', 'FUSED')}
+                    })
+                return [{
+                    'strategy': 'FUSED',
+                    'type': 'fused',
+                    'allocation': 1.0,
+                    'total_signals': len(rows),
+                    'buy_signals': buy_cnt,
+                    'sell_signals': sell_cnt,
+                    'signals': synth_signals
+                }]
+
+            return []
+
         strategy_signals = []
+        strategy_source_run = None
+
+        # 优先：同一run目录
         strategy_file = latest_run_dir / 'strategy_signals.json'
         if strategy_file.exists():
-            with open(strategy_file, 'r') as f:
-                strategy_data = json.load(f)
-                strategy_signals = strategy_data.get('strategies', [])
-        
+            try:
+                strategy_signals = _load_strategy_signals(strategy_file)
+                strategy_source_run = latest_run_dir.name
+                ts = strategy_file.stat().st_mtime
+            except Exception:
+                strategy_signals = []
+
+        # 回退：最近一个有 strategy_signals.json 的run
+        if not strategy_signals:
+            strategy_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'strategy_signals.json').exists()]
+            strategy_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            if strategy_dirs:
+                fallback_dir = strategy_dirs[0]
+                fallback_file = fallback_dir / 'strategy_signals.json'
+                try:
+                    strategy_signals = _load_strategy_signals(fallback_file)
+                    strategy_source_run = fallback_dir.name
+                    ts = fallback_file.stat().st_mtime
+                except Exception:
+                    strategy_signals = []
+
         return jsonify({
-            'run_id': audit_data.get('run_id'),
-            'timestamp': file_mtime,  # 使用文件修改时间
+            'run_id': audit_data.get('run_id') or latest_run_dir.name,
+            'strategy_run_id': strategy_source_run,
+            'timestamp': ts,
             'regime': audit_data.get('regime'),
             'regime_details': audit_data.get('regime_details', {}),
             'counts': audit_data.get('counts', {}),
             'strategy_signals': strategy_signals,
-            'notes': audit_data.get('notes', [])[:10]  # 只返回前10条
+            'notes': audit_data.get('notes', [])[:10]
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
