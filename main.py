@@ -24,6 +24,7 @@ from src.risk.risk_engine import RiskEngine
 # 预算限制（20 USDT硬限制）
 try:
     from src.risk.budget_guard import BudgetGuard
+    from src.risk.live_equity_fetcher import get_live_equity_from_okx, check_budget_limit
     BUDGET_GUARD_ENABLED = True
 except ImportError:
     BUDGET_GUARD_ENABLED = False
@@ -468,30 +469,21 @@ def main() -> None:
 
     # ========== 预算限制检查（20 USDT 硬限制）==========
     try:
-        # 从OKX实时获取权益，而不是从本地store（避免缓存旧数据）
-        from src.data.okx_ccxt_provider import OKXCCXTProvider
-        provider = OKXCCXTProvider(rate_limit=True)
-        account_info = provider.fetch_balance()
-        
-        # 计算总权益（USDT + 持仓价值）
-        eq_now = float(account_info.get('USDT', {}).get('total', 0))
-        for coin, amount in account_info.items():
-            if coin != 'USDT' and amount.get('total', 0) > 0:
-                try:
-                    ticker = provider.fetch_ticker(f"{coin}/USDT")
-                    price = ticker.get('last', 0)
-                    eq_now += float(amount['total']) * float(price)
-                except:
-                    pass  # 忽略价格获取失败
-        
-        # 从配置读取预算上限，默认20 USDT
+        # 使用实时权益获取（直接从OKX API，不依赖本地缓存）
         equity_cap = float(getattr(cfg.budget, 'live_equity_cap_usdt', 20.0) or 20.0)
         
-        if BUDGET_GUARD_ENABLED and BudgetGuard:
-            budget_guard = BudgetGuard(equity_cap_usdt=equity_cap)
-            check_result = budget_guard.check_equity(eq_now)
+        # 获取实时权益
+        eq_now = get_live_equity_from_okx()
+        
+        if eq_now is None:
+            log.error("❌ 无法从OKX获取实时权益，跳过预算检查")
+        else:
+            log.info(f"💰 实时权益检测: {eq_now:.2f} USDT (上限: {equity_cap:.2f} USDT)")
             
-            if not check_result['allowed']:
+            # 检查预算
+            budget_result = check_budget_limit(equity_cap)
+            
+            if not budget_result['ok']:
                 log.error(f"🚨 BUDGET EXCEEDED: {eq_now:.2f} USDT > {equity_cap:.2f} USDT. STOPPING ALL TRADING.")
                 # 创建空的输出，不执行任何交易
                 from types import SimpleNamespace
@@ -503,19 +495,19 @@ def main() -> None:
                 )
                 # 跳过后续执行，直接保存审计
                 audit.add_note(f"BUDGET_LIMIT_EXCEEDED: {eq_now:.2f} > {equity_cap:.2f}")
-                dump_run_artifacts(run_id, audit, out)
+                dump_run_artifacts(run_id, audit, out, None, None)  # 需要补充参数
                 log.info("V5 live run completed (BUDGET LIMITED)")
                 return
-            elif check_result['action'] == 'warning':
-                log.warning(f"⚠️ BUDGET WARNING: {eq_now:.2f} / {equity_cap:.2f} USDT ({check_result['utilization']*100:.0f}%)")
+            elif budget_result['utilization'] > 90:
+                log.warning(f"⚠️ BUDGET WARNING: {eq_now:.2f} / {equity_cap:.2f} USDT ({budget_result['utilization']:.0f}%)")
             else:
-                log.info(f"✅ BUDGET OK: {eq_now:.2f} / {equity_cap:.2f} USDT ({check_result['utilization']*100:.0f}%)")
-        
-        # 将预算信息添加到audit
-        audit.budget = getattr(audit, 'budget', {}) or {}
-        audit.budget['equity_cap_usdt'] = equity_cap
-        audit.budget['current_equity_usdt'] = eq_now
-        audit.budget['utilization_pct'] = (eq_now / equity_cap * 100) if equity_cap > 0 else 0
+                log.info(f"✅ BUDGET OK: {eq_now:.2f} / {equity_cap:.2f} USDT ({budget_result['utilization']:.0f}%)")
+            
+            # 将预算信息添加到audit
+            audit.budget = getattr(audit, 'budget', {}) or {}
+            audit.budget['equity_cap_usdt'] = equity_cap
+            audit.budget['current_equity_usdt'] = eq_now
+            audit.budget['utilization_pct'] = budget_result['utilization']
         
     except Exception as e:
         log.warning(f"Budget check skipped: {e}")
