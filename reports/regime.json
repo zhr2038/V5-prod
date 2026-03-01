@@ -1,8 +1,8 @@
 {
   "state": "Sideways",
-  "atr_pct": 0.012677536835328724,
-  "ma20": 65659.755,
-  "ma60": 66171.16833333335,
+  "atr_pct": 0.011666843924318819,
+  "ma20": 66035.11000000002,
+  "ma60": 66190.63,
   "multiplier": 0.7,
   "hmm_state": null,
   "hmm_probability": null,

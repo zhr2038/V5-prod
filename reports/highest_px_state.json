@@ -17,7 +17,7 @@
     "symbol": "ETH/USDT",
     "highest_px": 2083.62,
     "entry_px": 0.0,
-    "updated_at": "2026-03-01T12:00:58.426784",
+    "updated_at": "2026-03-01T17:00:23.979507",
     "source": "mark_to_market"
   },
   "BNB/USDT": {
@@ -38,7 +38,7 @@
     "symbol": "BTC/USDT",
     "highest_px": 68714.2,
     "entry_px": 0.0,
-    "updated_at": "2026-03-01T12:00:58.366647",
+    "updated_at": "2026-03-01T17:00:23.960396",
     "source": "mark_to_market"
   },
   "AAVE/USDT": {
@@ -52,7 +52,7 @@
     "symbol": "SOL/USDT",
     "highest_px": 88.91,
     "entry_px": 0.0,
-    "updated_at": "2026-03-01T12:00:58.410806",
+    "updated_at": "2026-03-01T17:00:23.972699",
     "source": "mark_to_market"
   },
   "ETC/USDT": {
@@ -80,7 +80,7 @@
     "symbol": "DOGE/USDT",
     "highest_px": 0.10056,
     "entry_px": 0.0,
-    "updated_at": "2026-03-01T12:00:58.398571",
+    "updated_at": "2026-03-01T17:00:23.966576",
     "source": "mark_to_market"
   },
   "TRX/USDT": {

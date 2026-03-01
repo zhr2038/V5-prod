@@ -112,7 +112,7 @@ def main() -> None:
     gcfg = GuardConfig(
         reconcile_status_path=args.out,
         auto_clear_enabled=getattr(ks_cfg, 'auto_clear_enabled', True),
-        auto_clear_after_ok_count=getattr(ks_cfg, 'auto_clear_after_ok_count', 2),
+        auto_clear_after_ok_count=getattr(ks_cfg, 'auto_clear_after_ok_count', 1),
         hard_fail_threshold=getattr(ks_cfg, 'hard_fail_threshold', 5),
         stale_soft_threshold=getattr(ks_cfg, 'stale_soft_threshold', 3),
     )

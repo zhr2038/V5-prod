@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "ts_ms": 1772337664498,
+  "ts_ms": 1772355645916,
   "ok": false,
   "reason": "base_mismatch",
   "exchange_snapshot": {
     "source": "okx_account_balance",
-    "uTime_max_ms": 1772337637871,
+    "uTime_max_ms": 1772355639056,
     "ccy_cashBal": {
-      "USDT": "108.29200129528229",
+      "USDT": "20.292001295282283",
       "XAUT": "0.000000831",
       "PROMPT": "0.0821",
       "HYPE": "0.0000697",
@@ -277,10 +277,10 @@
     },
     {
       "ccy": "USDT",
-      "exchange": "108.29200129528229",
+      "exchange": "20.292001295282283",
       "local": "72.8424104487",
-      "delta": "35.4495908466",
-      "delta_usdt": "35.4495908466"
+      "delta": "-52.5504091534",
+      "delta_usdt": "-52.5504091534"
     },
     {
       "ccy": "WLFI",
@@ -303,7 +303,7 @@
     "dust_usdt_ignore": 1.0
   },
   "stats": {
-    "max_abs_usdt_delta": 35.449590846582296,
+    "max_abs_usdt_delta": 52.55040915341771,
     "max_abs_base_delta": 2.124846642
   },
   "error": {
@@ -314,5 +314,5 @@
   "open_orders": {
     "note": "using cashBal avoids false mismatch from ordFrozen"
   },
-  "generated_ts_ms": 1772337664498
+  "generated_ts_ms": 1772355645916
 }

@@ -1,185 +1,46 @@
 {
-  "timestamp": "2026-03-01T04:01:04Z",
+  "timestamp": "2026-03-01T06:00:55Z",
   "dry_run": false,
   "orders": [
-    {
-      "symbol": "FIL/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 2.0189900000000003e-07,
-      "signal_price": 0.9995,
-      "meta": {
-        "reason": "profit_taking_stop_loss_hit_hold",
-        "action": "sell_all",
-        "value": 0.9995
-      }
-    },
     {
       "symbol": "DOGE/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 9.523449599999999e-08,
-      "signal_price": 0.09608,
+      "notional_usdt": 9.510563999999998e-08,
+      "signal_price": 0.09595,
       "meta": {
         "reason": "profit_taking_stop_loss_hit_hold",
         "action": "sell_all",
-        "value": 0.09608
-      }
-    },
-    {
-      "symbol": "POL/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 0.0008300785999999999,
-      "signal_price": 0.11009,
-      "meta": {
-        "reason": "fixed_stop_loss",
-        "entry_price": 0.11639,
-        "stop_price": 0.11057049999999999,
-        "loss_pct": -0.0541283615430879
-      }
-    },
-    {
-      "symbol": "BNB/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 0.0004094139,
-      "signal_price": 628.9,
-      "meta": {
-        "reason": "rank_exit_rank_12_exceeds_3",
-        "current_rank": 12
-      }
-    },
-    {
-      "symbol": "BTC/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 0.00017632070920000002,
-      "signal_price": 67504.1,
-      "meta": {
-        "reason": "rank_exit_rank_999_exceeds_3",
-        "current_rank": 999
-      }
-    },
-    {
-      "symbol": "AAVE/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 5.63473e-05,
-      "signal_price": 116.18,
-      "meta": {
-        "reason": "atr_trailing",
-        "last": 116.18,
-        "stop": 117.0052857142857,
-        "highest": 121.63,
-        "atr": 2.1021428571428586,
-        "atr_mult": 2.2,
-        "atr_n": 14
-      }
-    },
-    {
-      "symbol": "LTC/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 4.536586081932801e-05,
-      "signal_price": 54.88,
-      "meta": {
-        "reason": "rank_exit_rank_17_exceeds_3",
-        "current_rank": 17
-      }
-    },
-    {
-      "symbol": "ETC/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 6.71058e-06,
-      "signal_price": 8.772,
-      "meta": {
-        "reason": "atr_trailing",
-        "last": 8.772,
-        "stop": 8.773085714285713,
-        "highest": 9.088,
-        "atr": 0.143142857142857,
-        "atr_mult": 2.2,
-        "atr_n": 14
-      }
-    },
-    {
-      "symbol": "AVAX/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 4.39945e-06,
-      "signal_price": 9.262,
-      "meta": {
-        "reason": "rank_exit_rank_15_exceeds_3",
-        "current_rank": 15
-      }
-    },
-    {
-      "symbol": "TRX/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 1.2070456e-08,
-      "signal_price": 0.28202,
-      "meta": {
-        "reason": "atr_trailing",
-        "last": 0.28202,
-        "stop": 0.285216,
-        "highest": 0.28691,
-        "atr": 0.0007699999999999929,
-        "atr_mult": 2.2,
-        "atr_n": 14
+        "value": 0.09595
       }
     },
     {
       "symbol": "SOL/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 2.9937452195859e-05,
-      "signal_price": 88.01,
+      "notional_usdt": 2.9682332446434e-05,
+      "signal_price": 87.26,
       "meta": {
-        "reason": "rank_exit_rank_10_exceeds_3",
-        "current_rank": 10
-      }
-    },
-    {
-      "symbol": "UNI/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 2.7314640000000003e-06,
-      "signal_price": 3.858,
-      "meta": {
-        "reason": "atr_trailing",
-        "last": 3.858,
-        "stop": 3.9333142857142853,
-        "highest": 4.087,
-        "atr": 0.06985714285714291,
-        "atr_mult": 2.2,
-        "atr_n": 14
-      }
-    },
-    {
-      "symbol": "HYPE/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 0.0021549149000000003,
-      "signal_price": 30.917,
-      "meta": {
-        "reason": "rank_exit_rank_6_exceeds_3",
-        "current_rank": 6
+        "reason": "rank_exit_rank_4_exceeds_3",
+        "current_rank": 4
       }
     },
     {
       "symbol": "ETH/USDT",
       "side": "sell",
       "intent": "CLOSE_LONG",
-      "notional_usdt": 0.0020193086900000003,
-      "signal_price": 2022.95,
+      "notional_usdt": 0.002007340272,
+      "signal_price": 2010.96,
       "meta": {
-        "reason": "rank_exit_rank_14_exceeds_3",
-        "current_rank": 14
+        "reason": "atr_trailing",
+        "last": 2010.96,
+        "stop": 2015.5457142857142,
+        "highest": 2083.62,
+        "atr": 30.942857142857147,
+        "atr_mult": 2.2,
+        "atr_n": 14
       }
     }
   ],
-  "notes": "regime=RegimeState.SIDEWAYS selected=['BARD/USDT', 'DOT/USDT', 'NEAR/USDT', 'UNI/USDT', 'CC/USDT', 'HYPE/USDT', 'PUMP/USDT'] orders=14"
+  "notes": "regime=RegimeState.SIDEWAYS selected=['XRP/USDT'] orders=3"
 }

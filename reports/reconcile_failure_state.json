@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "updated_ts_ms": 1772337664501,
-  "consecutive_hard": 2,
+  "updated_ts_ms": 1772355645921,
+  "consecutive_hard": 10,
   "consecutive_soft": 0,
   "consecutive_stale": 0,
   "last_stale_ts_ms": 0,
   "last_reason": "base_mismatch",
   "last_ok_ts_ms": 1772334052917,
-  "last_reconcile_ts_ms": 1772337664498
+  "last_reconcile_ts_ms": 1772355645916
 }

@@ -51,7 +51,7 @@ class GuardConfig:
     
     # Auto-clear kill switch when conditions improve
     auto_clear_enabled: bool = True
-    auto_clear_after_ok_count: int = 2  # Clear after N consecutive OK reconciles
+    auto_clear_after_ok_count: int = 1  # Clear after 1 consecutive OK reconcile
 
 
 def classify_reason(reason: Optional[str], *, okx_code: Optional[str] = None) -> Tuple[str, str]:

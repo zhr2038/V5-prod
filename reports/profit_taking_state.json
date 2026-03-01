@@ -207,5 +207,16 @@
     "current_action": "hold",
     "partial_sold": false,
     "partial_sell_time": null
+  },
+  "XRP/USDT": {
+    "symbol": "XRP/USDT",
+    "entry_price": 1.4096,
+    "entry_time": "2026-03-01T14:00:50.964082",
+    "highest_price": 1.4096,
+    "profit_high": 0.0,
+    "current_stop": 1.3391199999999999,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null
   }
 }
