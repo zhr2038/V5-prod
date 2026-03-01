@@ -59,53 +59,62 @@ def load_current_state(cfg=None):
                         'quantity': data.get('quantity', 0)
                     }
         
-        # Load prices - use OKX API via existing client
+        # Load prices from OKX API
         prices = {}
         try:
-            # Use private client to get balance (includes prices)
-            from src.execution.okx_private_client import OKXPrivateClient
-            client = OKXPrivateClient(exchange=cfg.exchange)
-            balance = client.get_balance()
-            for detail in balance.data.get('details', []):
-                ccy = detail.get('ccy', '')
-                price = detail.get('eqUsd', 0)
-                if ccy and ccy != 'USDT':
-                    qty = float(detail.get('eq', 0))
-                    if qty > 0 and price:
-                        prices[f"{ccy}/USDT"] = float(price) / qty
-            client.close()
+            from src.execution.price_fetcher import fetch_prices
+            prices = fetch_prices()
+            logger.info(f"Loaded {len(prices)} prices")
+            # Show sample
+            for sym, px in list(prices.items())[:3]:
+                logger.info(f"  {sym}: {px}")
         except Exception as e:
-            logger.warning(f"Could not load prices: {e}")
+            logger.error(f"Failed to fetch prices: {e}")
         
         if not prices:
-            # Fallback: empty prices (will disable breakout detection)
-            alpha_path = Path('/home/admin/clawd/v5-trading-bot/reports/alpha_snapshot.json')
-            if alpha_path.exists():
-                with open(alpha_path) as f:
-                    alpha = json.load(f)
-                    for sym in alpha.get('scores', {}).keys():
-                        prices[sym] = 0.0  # Unknown price - breakout won't trigger
+            # Fallback: empty prices (disable breakout detection)
+            logger.warning("No prices available - breakout detection disabled")
         
-        # Load signals from last run
+        # Load signals from alpha snapshot (more reliable)
         signals = {}
-        runs_dir = Path('/home/admin/clawd/v5-trading-bot/reports/runs')
-        if runs_dir.exists():
-            # Get latest run
-            run_dirs = sorted(runs_dir.iterdir(), reverse=True)
-            if run_dirs:
-                latest = run_dirs[0]
-                signals_path = latest / 'strategy_signals.json'
-                if signals_path.exists():
-                    with open(signals_path) as f:
-                        sig_data = json.load(f)
-                        for sym, data in sig_data.get('fused', {}).items():
-                            signals[sym] = SignalState(
-                                symbol=sym,
-                                direction=data.get('direction', 'hold'),
-                                score=data.get('score', 0),
-                                rank=data.get('rank', 99),
-                                timestamp_ms=int(datetime.now().timestamp() * 1000)
-                            )
+        alpha_path = Path('/home/admin/clawd/v5-trading-bot/reports/alpha_snapshot.json')
+        if alpha_path.exists():
+            with open(alpha_path) as f:
+                alpha = json.load(f)
+                for sym, score in alpha.get('scores', {}).items():
+                    # Convert score to signal direction
+                    # Negative score = sell (lower rank), Positive = buy (higher rank)
+                    direction = 'buy' if score > 0 else 'sell' if score < 0 else 'hold'
+                    # Estimate rank based on score magnitude
+                    rank = 50 - int(score * 50)  # Simple ranking approximation
+                    signals[sym] = SignalState(
+                        symbol=sym,
+                        direction=direction,
+                        score=abs(score),
+                        rank=max(1, min(99, rank)),
+                        timestamp_ms=int(datetime.now().timestamp() * 1000)
+                    )
+                logger.info(f"Loaded {len(signals)} signals from alpha snapshot")
+        
+        # Also try strategy signals as backup
+        if not signals:
+            runs_dir = Path('/home/admin/clawd/v5-trading-bot/reports/runs')
+            if runs_dir.exists():
+                run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], reverse=True)
+                if run_dirs:
+                    latest = run_dirs[0]
+                    signals_path = latest / 'strategy_signals.json'
+                    if signals_path.exists():
+                        with open(signals_path) as f:
+                            sig_data = json.load(f)
+                            for sym, data in sig_data.get('fused', {}).items():
+                                signals[sym] = SignalState(
+                                    symbol=sym,
+                                    direction=data.get('direction', 'hold'),
+                                    score=data.get('score', 0),
+                                    rank=data.get('rank', 99),
+                                    timestamp_ms=int(datetime.now().timestamp() * 1000)
+                                )
         
         # Load selected symbols
         selected = list(signals.keys())[:5]  # Top 5
@@ -157,6 +166,24 @@ def main():
         logger.error("Failed to load state, falling back to standard execution")
         return 0
     
+    # Load last signal history for comparison
+    last_state = None
+    history_path = Path('/home/admin/clawd/v5-trading-bot/reports/event_driven_signals.json')
+    if history_path.exists():
+        try:
+            with open(history_path) as f:
+                last_data = json.load(f)
+                last_state = {
+                    'timestamp_ms': last_data.get('timestamp', 0),
+                    'regime': last_data.get('regime', 'SIDEWAYS'),
+                    'prices': last_data.get('prices', {}),
+                    'signals': last_data.get('signals', {}),
+                    'selected_symbols': list(last_data.get('signals', {}).keys())[:5]
+                }
+                logger.info(f"Loaded signal history from {last_data.get('timestamp', 0)}")
+        except Exception as e:
+            logger.warning(f"Could not load signal history: {e}")
+    
     logger.info(f"Regime: {state['regime']}")
     logger.info(f"Positions: {list(state['positions'].keys())}")
     logger.info(f"Selected: {state['selected_symbols']}")
@@ -170,9 +197,9 @@ def main():
         'breakout_enabled': False  # Disable breakout detection - no reliable price source
     })
     
-    # Check if should trade
+    # Check if should trade (with last state for comparison)
     logger.info("Checking for trading events...")
-    result = trader.should_trade(state)
+    result = trader.should_trade(state, last_state)
     
     logger.info(f"Should trade: {result['should_trade']}")
     logger.info(f"Reason: {result['reason']}")
@@ -190,7 +217,9 @@ def main():
         'should_trade': result['should_trade'],
         'reason': result['reason'],
         'actions': result['actions'],
-        'regime': state['regime']
+        'regime': state['regime'],
+        'events_processed': result.get('events_processed', 0),
+        'events_blocked': result.get('events_blocked', 0)
     }
     
     log_path = Path('/home/admin/clawd/v5-trading-bot/reports/event_driven_log.jsonl')
@@ -198,6 +227,18 @@ def main():
     
     with open(log_path, 'a') as f:
         f.write(json.dumps(log_entry) + '\n')
+    
+    # Save signal history for next comparison
+    history_path = Path('/home/admin/clawd/v5-trading-bot/reports/event_driven_signals.json')
+    signal_history = {
+        'timestamp': int(datetime.now().timestamp() * 1000),
+        'signals': {sym: sig.to_dict() if hasattr(sig, 'to_dict') else sig 
+                   for sym, sig in state['signals'].items()},
+        'prices': state['prices'],
+        'regime': state['regime']
+    }
+    history_path.write_text(json.dumps(signal_history, indent=2))
+    logger.info(f"Saved signal history ({len(signal_history['signals'])} signals)")
     
     # Return exit code
     # 0 = Continue with standard V5 (or no action needed)
