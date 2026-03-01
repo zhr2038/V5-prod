@@ -158,6 +158,24 @@ def load_current_state(cfg=None):
 def trigger_live_execution_service():
     """Start full live execution service (active mode)."""
     try:
+        # Skip if service is already running/starting (avoid overlap starts)
+        st = subprocess.run(
+            ['systemctl', '--user', 'is-active', 'v5-live-20u.user.service'],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        state = (st.stdout or '').strip().lower()
+        if state in ('active', 'activating'):
+            return {
+                'ok': True,
+                'returncode': 0,
+                'stdout': state,
+                'stderr': '',
+                'cmd': 'systemctl --user start v5-live-20u.user.service',
+                'skipped_already_running': True,
+            }
+
         cmd = ['systemctl', '--user', 'start', 'v5-live-20u.user.service']
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
         ok = proc.returncode == 0
@@ -167,6 +185,7 @@ def trigger_live_execution_service():
             'stdout': (proc.stdout or '').strip(),
             'stderr': (proc.stderr or '').strip(),
             'cmd': ' '.join(cmd),
+            'skipped_already_running': False,
         }
     except Exception as e:
         return {
@@ -175,6 +194,7 @@ def trigger_live_execution_service():
             'stdout': '',
             'stderr': str(e),
             'cmd': 'systemctl --user start v5-live-20u.user.service',
+            'skipped_already_running': False,
         }
 
 

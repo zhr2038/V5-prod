@@ -221,7 +221,7 @@ budget:
   min_fills_for_second_stage: 3  # 合理要求
   deadband_multiplier_exceeded: 1.5  # 启用超支惩罚
   deadband_cap: 0.15  # 合理上限
-  action_enabled: true  # ✅ 启用 budget 限制（安全运行）
+  action_enabled: false  # 关闭预算硬拦截，避免因转入资金触发误阻断
   turnover_budget_per_day: null
   cost_budget_bps_per_day: null
 

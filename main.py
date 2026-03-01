@@ -477,48 +477,51 @@ def main() -> None:
     except Exception as e:
         log.debug("equity peak check skipped: %s", e)
 
-    # ========== 预算限制检查（20 USDT 硬限制）==========
+    # ========== 预算限制检查（可开关）==========
     try:
-        # 使用实时权益获取（直接从OKX API，不依赖本地缓存）
+        budget_enabled = bool(getattr(cfg.budget, 'action_enabled', True))
         equity_cap = float(getattr(cfg.budget, 'live_equity_cap_usdt', 20.0) or 20.0)
-        
-        # 获取实时权益
+
+        # 获取实时权益（直接从OKX API，不依赖本地缓存）
         eq_now = get_live_equity_from_okx()
-        
+
         if eq_now is None:
             log.error("❌ 无法从OKX获取实时权益，跳过预算检查")
+        elif not budget_enabled:
+            log.warning(f"⚠️ Budget action disabled: equity={eq_now:.2f} cap={equity_cap:.2f}, skip budget blocking")
+            audit.budget = getattr(audit, 'budget', {}) or {}
+            audit.budget['equity_cap_usdt'] = equity_cap
+            audit.budget['current_equity_usdt'] = eq_now
+            audit.budget['utilization_pct'] = (eq_now / equity_cap * 100.0) if equity_cap > 0 else None
+            audit.budget['action_enabled'] = False
         else:
             log.info(f"💰 实时权益检测: {eq_now:.2f} USDT (上限: {equity_cap:.2f} USDT)")
-            
-            # 检查预算
+
             budget_result = check_budget_limit(equity_cap)
-            
+
             if not budget_result['ok']:
                 log.error(f"🚨 BUDGET EXCEEDED: {eq_now:.2f} USDT > {equity_cap:.2f} USDT. STOPPING ALL TRADING.")
-                # 创建空的输出，不执行任何交易
-                from types import SimpleNamespace
-                out = SimpleNamespace(
-                    orders=[],
-                    portfolio=SimpleNamespace(selected=[], targets={}),
-                    router_decisions=[],
-                    regime=regime,
-                )
-                # 跳过后续执行，直接保存审计
+                # 预算超限时直接终止本轮，避免继续进入交易流程
                 audit.add_note(f"BUDGET_LIMIT_EXCEEDED: {eq_now:.2f} > {equity_cap:.2f}")
-                dump_run_artifacts(run_id, audit, out, None, None)  # 需要补充参数
+                audit.budget = getattr(audit, 'budget', {}) or {}
+                audit.budget['equity_cap_usdt'] = equity_cap
+                audit.budget['current_equity_usdt'] = eq_now
+                audit.budget['utilization_pct'] = budget_result.get('utilization')
+                audit.budget['action_enabled'] = True
+                audit.save(f"reports/runs/{run_id}")
                 log.info("V5 live run completed (BUDGET LIMITED)")
                 return
             elif budget_result['utilization'] > 90:
                 log.warning(f"⚠️ BUDGET WARNING: {eq_now:.2f} / {equity_cap:.2f} USDT ({budget_result['utilization']:.0f}%)")
             else:
                 log.info(f"✅ BUDGET OK: {eq_now:.2f} / {equity_cap:.2f} USDT ({budget_result['utilization']:.0f}%)")
-            
-            # 将预算信息添加到audit
+
             audit.budget = getattr(audit, 'budget', {}) or {}
             audit.budget['equity_cap_usdt'] = equity_cap
             audit.budget['current_equity_usdt'] = eq_now
             audit.budget['utilization_pct'] = budget_result['utilization']
-        
+            audit.budget['action_enabled'] = True
+
     except Exception as e:
         log.warning(f"Budget check skipped: {e}")
     # ========== 预算限制检查结束 ==========
