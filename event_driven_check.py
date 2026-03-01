@@ -81,15 +81,20 @@ def load_current_state(cfg=None):
         # 1. Try to load FUSED signals from strategy_signals.json (highest priority)
         runs_dir = Path('/home/admin/clawd/v5-trading-bot/reports/runs')
         if runs_dir.exists():
-            run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], reverse=True)
+            # Sort by modification time (newest first) instead of name
+            run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], 
+                             key=lambda x: x.stat().st_mtime, reverse=True)
+            logger.info(f"Found {len(run_dirs)} run directories")
             if run_dirs:
                 latest = run_dirs[0]
                 signals_path = latest / 'strategy_signals.json'
+                logger.info(f"Looking for signals at: {signals_path}")
                 if signals_path.exists():
                     try:
                         with open(signals_path) as f:
                             sig_data = json.load(f)
-                            fused_signals = sig_data.get('fused', {})
+                            fused_signals = sig_data.get("fused", {})
+                            logger.info(f"Found {len(fused_signals)} fused signals in file")
                             if fused_signals:
                                 for sym, data in fused_signals.items():
                                     signals[sym] = SignalState(
@@ -100,8 +105,16 @@ def load_current_state(cfg=None):
                                         timestamp_ms=int(datetime.now().timestamp() * 1000)
                                     )
                                 logger.info(f"Loaded {len(signals)} FUSED signals from {latest.name}")
+                            else:
+                                logger.warning("fused_signals is empty")
                     except Exception as e:
-                        logger.warning(f"Could not load fused signals: {e}")
+                        logger.error(f"Could not load fused signals: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    logger.warning(f"Signals file not found: {signals_path}")
+        else:
+            logger.warning(f"Runs directory not found: {runs_dir}")
         
         # 2. Fallback to alpha snapshot if no fused signals
         if not signals:
