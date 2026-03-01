@@ -650,23 +650,32 @@ class V5Pipeline:
 
         # current weights (with dust filtering)
         current_w: Dict[str, float] = {}
-        # 灰尘阈值配置（提取到类级别常量）
-        DUST_QTY_THRESHOLD = getattr(self.cfg.execution, 'dust_qty_threshold', 0.01)
-        DUST_VALUE_THRESHOLD = getattr(self.cfg.execution, 'dust_value_threshold', 1.0)
-        
+        # Small-account-safe dust thresholds:
+        # - value threshold is primary
+        # - qty threshold only applies to tiny-value positions (to avoid wiping valid low-price holdings)
+        DUST_QTY_THRESHOLD = float(getattr(self.cfg.execution, 'dust_qty_threshold', 1e-6) or 1e-6)
+        DUST_VALUE_THRESHOLD = float(getattr(self.cfg.execution, 'dust_value_threshold', 0.5) or 0.5)
+
         if equity > 0:
             for p in positions:
                 pxp = float(prices.get(p.symbol, 0.0) or 0.0)
                 if pxp <= 0:
                     continue
-                
-                # 灰尘过滤：数量太小或价值太低视为无持仓
-                position_value = float(p.qty) * pxp
-                if float(p.qty) < DUST_QTY_THRESHOLD or position_value < DUST_VALUE_THRESHOLD:
-                    if audit and float(p.qty) > 0:
-                        audit.add_note(f"Dust filter: {p.symbol} qty={p.qty:.8f} value=${position_value:.4f} treated as 0")
-                    continue  # 跳过灰尘持仓
-                
+
+                qty = float(p.qty or 0.0)
+                position_value = qty * pxp
+
+                # Treat as dust only when value is truly tiny.
+                # qty gate is secondary and only meaningful in tiny-value zone.
+                is_dust = (position_value < DUST_VALUE_THRESHOLD) and (qty < DUST_QTY_THRESHOLD or position_value < DUST_VALUE_THRESHOLD)
+                if is_dust:
+                    if audit and qty > 0:
+                        audit.add_note(
+                            f"Dust filter: {p.symbol} qty={qty:.8f} value=${position_value:.4f} "
+                            f"(qty_th={DUST_QTY_THRESHOLD}, val_th={DUST_VALUE_THRESHOLD}) treated as 0"
+                        )
+                    continue
+
                 current_w[p.symbol] = position_value / float(equity)
 
         cash_remaining = float(cash_usdt)

@@ -192,6 +192,11 @@ class ExecutionConfig(BaseModel):
     buy_quote_reserve_usdt: float = Field(default=0.5, ge=0)
     buy_quote_slack_ratio: float = Field(default=0.001, ge=0, le=0.1)
 
+    # Dust thresholds used by pipeline current-position recognition.
+    # For small accounts, keep qty threshold tiny and rely on value threshold.
+    dust_qty_threshold: float = Field(default=1e-6, ge=0)
+    dust_value_threshold: float = Field(default=0.5, ge=0)
+
     # Ops convenience: allow controlled auto-clear of kill-switch when reconcile/ledger are OK.
     # Default False for safety.
     auto_clear_kill_switch_if_ok: bool = Field(default=False)

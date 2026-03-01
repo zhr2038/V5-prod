@@ -179,6 +179,10 @@ execution:
   # Borrow block scope: symbol_only = freeze only affected symbols (no global ABORT)
   borrow_block_mode: symbol_only
 
+  # Dust thresholds (small-account safe): do not wipe valid ~9U positions as dust.
+  dust_qty_threshold: 0.000001
+  dust_value_threshold: 0.5
+
   # Ops: allow kill-switch to auto-clear when reconcile+ledger OK (prevents stuck automation)
   auto_clear_kill_switch_if_ok: true
 
