@@ -116,26 +116,35 @@ class EventDrivenTrader:
         }
     
     def _build_market_state(self, state_dict: Dict[str, Any]) -> MarketState:
-        """Build MarketState from dictionary."""
-        # Convert signals
+        """Build MarketState from dictionary.
+
+        Accept both dict-form signals (from JSON/history) and SignalState objects
+        (from in-memory loaders) to avoid dropping signals silently.
+        """
         signals = {}
-        for sym, sig in state_dict.get('signals', {}).items():
-            if isinstance(sig, dict):
+        raw_signals = state_dict.get('signals', {}) or {}
+
+        for sym, sig in raw_signals.items():
+            if isinstance(sig, SignalState):
+                signals[sym] = sig
+            elif isinstance(sig, dict):
                 signals[sym] = SignalState(
-                    symbol=sym,
+                    symbol=sig.get('symbol', sym),
                     direction=sig.get('direction', 'hold'),
-                    score=sig.get('score', 0.0),
-                    rank=sig.get('rank', 99),
-                    timestamp_ms=sig.get('timestamp_ms', 0)
+                    score=float(sig.get('score', 0.0) or 0.0),
+                    rank=int(sig.get('rank', 99) or 99),
+                    timestamp_ms=int(sig.get('timestamp_ms', 0) or 0)
                 )
-        
+
+        selected = state_dict.get('selected_symbols', []) or list(signals.keys())[:5]
+
         return MarketState(
-            timestamp_ms=state_dict.get('timestamp_ms', 0),
+            timestamp_ms=int(state_dict.get('timestamp_ms', 0) or 0),
             regime=state_dict.get('regime', 'SIDEWAYS'),
-            prices=state_dict.get('prices', {}),
-            positions=state_dict.get('positions', {}),
+            prices=state_dict.get('prices', {}) or {},
+            positions=state_dict.get('positions', {}) or {},
             signals=signals,
-            selected_symbols=state_dict.get('selected_symbols', [])
+            selected_symbols=selected
         )
     
     def get_status(self) -> Dict[str, Any]:

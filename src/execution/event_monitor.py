@@ -429,6 +429,33 @@ class EventMonitor:
                 self.price_high_24h = data.get('price_high_24h', {})
                 self.price_low_24h = data.get('price_low_24h', {})
                 self.last_trade_time_ms = data.get('last_trade_time_ms', 0)
+                # Load last_state for signal change detection
+                last_state_data = data.get('last_state')
+                if last_state_data:
+                    from src.execution.event_types import MarketState, SignalState
+                    # Reconstruct MarketState
+                    signals = {}
+                    for sym, sig_data in last_state_data.get('signals', {}).items():
+                        if isinstance(sig_data, SignalState):
+                            signals[sym] = sig_data
+                            continue
+                        if not isinstance(sig_data, dict):
+                            continue
+                        signals[sym] = SignalState(
+                            symbol=sig_data.get('symbol', sym),
+                            direction=sig_data.get('direction', 'hold'),
+                            score=float(sig_data.get('score', 0.0) or 0.0),
+                            rank=int(sig_data.get('rank', 99) or 99),
+                            timestamp_ms=int(sig_data.get('timestamp_ms', 0) or 0)
+                        )
+                    self.last_state = MarketState(
+                        timestamp_ms=last_state_data.get('timestamp_ms', 0),
+                        regime=last_state_data.get('regime', 'SIDEWAYS'),
+                        prices=last_state_data.get('prices', {}),
+                        signals=signals,
+                        positions=last_state_data.get('positions', {}),
+                        selected_symbols=last_state_data.get('selected_symbols', [])
+                    )
         except Exception as e:
             logger.warning(f"Failed to load monitor state: {e}")
     
@@ -437,10 +464,38 @@ class EventMonitor:
         try:
             path = Path(self.config.state_path)
             path.parent.mkdir(parents=True, exist_ok=True)
+
+            last_state_data = None
+            if self.last_state:
+                signals_data = {}
+                for sym, sig in self.last_state.signals.items():
+                    if hasattr(sig, 'to_dict'):
+                        signals_data[sym] = sig.to_dict()
+                    elif isinstance(sig, dict):
+                        signals_data[sym] = sig
+                    else:
+                        signals_data[sym] = {
+                            'symbol': sym,
+                            'direction': getattr(sig, 'direction', 'hold'),
+                            'score': getattr(sig, 'score', 0.0),
+                            'rank': getattr(sig, 'rank', 99),
+                            'timestamp_ms': getattr(sig, 'timestamp_ms', 0)
+                        }
+
+                last_state_data = {
+                    'timestamp_ms': self.last_state.timestamp_ms,
+                    'regime': self.last_state.regime,
+                    'prices': self.last_state.prices,
+                    'signals': signals_data,
+                    'positions': self.last_state.positions,
+                    'selected_symbols': self.last_state.selected_symbols
+                }
+
             data = {
                 'price_high_24h': self.price_high_24h,
                 'price_low_24h': self.price_low_24h,
                 'last_trade_time_ms': self.last_trade_time_ms,
+                'last_state': last_state_data,
                 'saved_at_ms': int(time.time() * 1000)
             }
             path.write_text(json.dumps(data, indent=2))
