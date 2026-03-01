@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__ import print_function
 
 import argparse
 import json
@@ -107,9 +107,20 @@ def main() -> None:
     finally:
         client.close()
 
-    # Apply guard
-    gcfg = GuardConfig(reconcile_status_path=args.out)
+    # Apply guard with config
+    ks_cfg = getattr(cfg.execution, 'kill_switch', {})
+    gcfg = GuardConfig(
+        reconcile_status_path=args.out,
+        auto_clear_enabled=getattr(ks_cfg, 'auto_clear_enabled', True),
+        auto_clear_after_ok_count=getattr(ks_cfg, 'auto_clear_after_ok_count', 2),
+        hard_fail_threshold=getattr(ks_cfg, 'hard_fail_threshold', 5),
+        stale_soft_threshold=getattr(ks_cfg, 'stale_soft_threshold', 3),
+    )
     out = KillSwitchGuard(gcfg).apply()
+    
+    # Log auto-clear event
+    if out.get('auto_cleared'):
+        log.warning(f"Kill switch was AUTO-CLEARED after {out.get('failure_state', {}).get('consecutive_ok')} OK reconciles")
 
     payload = {
         "event": "RECON_GUARD",

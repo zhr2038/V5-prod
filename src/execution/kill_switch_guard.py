@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__ import print_function
 
 import json
 import logging
@@ -48,6 +48,10 @@ class GuardConfig:
 
     # G1.2.4: only stale_status triggers a SOFT-kill threshold
     stale_soft_threshold: int = 3
+    
+    # Auto-clear kill switch when conditions improve
+    auto_clear_enabled: bool = True
+    auto_clear_after_ok_count: int = 2  # Clear after N consecutive OK reconciles
 
 
 def classify_reason(reason: Optional[str], *, okx_code: Optional[str] = None) -> Tuple[str, str]:
@@ -173,7 +177,10 @@ class KillSwitchGuard:
             st["consecutive_hard"] = 0
             st["consecutive_soft"] = 0
             st["last_ok_ts_ms"] = int(gen_ts_ms or now)
+            # Track consecutive OKs for auto-clear
+            st["consecutive_ok"] = int(st.get("consecutive_ok") or 0) + 1
         else:
+            st["consecutive_ok"] = 0
             if category == "HARD":
                 st["consecutive_hard"] = int(st.get("consecutive_hard") or 0) + 1
                 st["consecutive_soft"] = 0
@@ -190,6 +197,24 @@ class KillSwitchGuard:
         _atomic_write_json(self.cfg.failure_state_path, st)
 
         ks = self._load_kill_switch()
+
+        # Auto-clear kill switch if enabled and conditions improve
+        if (bool(ks.get("enabled")) and 
+            self.cfg.auto_clear_enabled and 
+            int(st.get("consecutive_ok") or 0) >= self.cfg.auto_clear_after_ok_count):
+            
+            ks_cleared = {
+                "enabled": False,
+                "ts_ms": int(now),
+                "auto_cleared": True,
+                "auto_cleared_reason": f"consecutive_ok_{st.get('consecutive_ok')}",
+                "previous_trigger": ks.get("trigger"),
+                "previous_reason": ks.get("reason"),
+            }
+            _atomic_write_json(self.cfg.kill_switch_path, ks_cleared)
+            ks = ks_cleared
+            log.warning(f"Kill switch AUTO-CLEARED after {st.get('consecutive_ok')} consecutive OK reconciles")
+            return {"ok": ok, "reason": norm_reason, "category": category, "failure_state": st, "kill_switch": ks, "auto_cleared": True}
 
         # Never auto-disable kill-switch. If it's enabled, operator must clear it.
         if bool(ks.get("enabled")):
