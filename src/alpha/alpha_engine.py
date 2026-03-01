@@ -207,10 +207,11 @@ class AlphaEngine:
             })
         
         # 加权平均合并同symbol的多个信号
+        # 取反：IC为负，反向使用因子
         scores = {}
         for sym, signals in symbol_signals.items():
             if len(signals) == 1:
-                scores[sym] = signals[0]['score']
+                scores[sym] = -signals[0]['score']  # 取反
             else:
                 # 分离买入和卖出信号
                 buy_signals = [s for s in signals if s['side'] == 'buy']
@@ -221,17 +222,17 @@ class AlphaEngine:
                     # 有冲突信号时，按权重加权平均
                     total_weight = sum(s['weight'] for s in signals)
                     weighted_score = sum(s['score'] * s['weight'] for s in signals) / total_weight
-                    scores[sym] = weighted_score
+                    scores[sym] = -weighted_score  # 取反
                 elif buy_signals:
                     # 只有买入信号
                     total_weight = sum(s['weight'] for s in buy_signals)
                     weighted_score = sum(s['score'] * s['weight'] for s in buy_signals) / total_weight
-                    scores[sym] = weighted_score
+                    scores[sym] = -weighted_score  # 取反
                 else:
                     # 只有卖出信号
                     total_weight = sum(s['weight'] for s in sell_signals)
                     weighted_score = sum(s['score'] * s['weight'] for s in sell_signals) / total_weight
-                    scores[sym] = weighted_score
+                    scores[sym] = -weighted_score  # 取反
         
         return scores
 
@@ -342,13 +343,15 @@ class AlphaEngine:
                 "f4_volume_expansion": z4.get(sym, 0.0),
                 "f5_rsi_trend_confirm": z5.get(sym, 0.0),
             }
-            score = (
+            # 原始因子评分（IC为负，因子与未来收益反向）
+            raw_score = (
                 w.f1_mom_5d * z1.get(sym, 0.0)
                 + w.f2_mom_20d * z2.get(sym, 0.0)
                 + w.f3_vol_adj_ret_20d * z3.get(sym, 0.0)
                 + w.f4_volume_expansion * z4.get(sym, 0.0)
                 + w.f5_rsi_trend_confirm * z5.get(sym, 0.0)
             )
-            scores[sym] = float(score)
+            # 反向使用因子：IC为负，取反后高分=买入低因子值币
+            scores[sym] = float(-raw_score)
 
         return AlphaSnapshot(raw_factors=raw_factors, z_factors=z_factors, scores=scores)
