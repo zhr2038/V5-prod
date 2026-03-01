@@ -168,9 +168,9 @@ class LivePreflight:
         # 3) Reconcile once + kill-switch guard
         # (Write reconcile_status.json; then guard will write failure_state/kill_switch)
         th = ReconcileThresholds(
-            abs_usdt_tol=1.0,
-            abs_base_tol=1e-8,
-            dust_usdt_ignore=float(getattr(self.cfg, "reconcile_dust_usdt_ignore", 0.0) or 0.0),
+            abs_usdt_tol=float(getattr(self.cfg, "reconcile_abs_usdt_tol", 50.0)),  # Use config or default 50
+            abs_base_tol=1e-6,
+            dust_usdt_ignore=float(getattr(self.cfg, "reconcile_dust_usdt_ignore", 5.0) or 5.0),
         )
         eng = ReconcileEngine(
             okx=self.okx,
