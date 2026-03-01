@@ -518,19 +518,22 @@ def api_positions():
                             ccy = str(d.get('ccy') or '')
                             if not ccy or ccy == 'USDT' or ccy in hidden_symbols:
                                 continue
-                            qty_float = float(d.get('eq') or 0)
-                            if qty_float <= 0:
+                            # OKX API: 'eq' = equity value (数量 × 价格), 'cashBal' = 数量
+                            eq_value = float(d.get('eq') or 0)  # 权益价值 (USDT)
+                            cash_bal = float(d.get('cashBal') or 0)  # 实际数量
+                            if eq_value <= 0 or cash_bal <= 0:
                                 continue
                             px = get_last_price_usdt(ccy)
                             if px <= 0:
                                 continue
-                            value = qty_float * px
+                            # value 直接使用 eq (权益价值)
+                            value = eq_value
                             if value < 0.5:
                                 continue
                             positions.append({
                                 'symbol': ccy,
-                                'qty': round(qty_float, 8),
-                                'avg_px': 0.0,
+                                'qty': round(cash_bal, 8),  # 使用 cashBal 作为数量
+                                'avg_px': round(px, 6),
                                 'last_price': round(px, 6),
                                 'value_usdt': round(value, 4)
                             })
