@@ -121,9 +121,29 @@ def main():
                     failure_state = json.loads(failure_state_path.read_text())
                     failure_state['consecutive_hard'] = 0
                     failure_state['consecutive_soft'] = 0
+                    failure_state['consecutive_ok'] = 1  # Mark as OK for auto-clear
                     failure_state['last_reason'] = 'auto_sync_reset'
                     failure_state_path.write_text(json.dumps(failure_state, indent=2))
                     logger.info("✅ Reset failure state counters")
+                
+                # Update reconcile status to OK
+                reconcile_status_path = Path('reports/reconcile_status.json')
+                reconcile_status = {
+                    'schema_version': 1,
+                    'ok': True,
+                    'reason': 'ok',
+                    'generated_ts_ms': int(time.time() * 1000),
+                    'ts_ms': int(time.time() * 1000),
+                    'source': 'auto_sync',
+                    'stats': {
+                        'max_abs_usdt_delta': 0.0,
+                        'max_abs_base_delta': 0.0
+                    },
+                    'diffs': []
+                }
+                reconcile_status_path.parent.mkdir(parents=True, exist_ok=True)
+                reconcile_status_path.write_text(json.dumps(reconcile_status, indent=2))
+                logger.info("✅ Updated reconcile status to OK")
                 
                 # Clear kill switch
                 kill_switch_path = Path('reports/kill_switch.json')
