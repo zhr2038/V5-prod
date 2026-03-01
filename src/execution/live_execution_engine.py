@@ -21,6 +21,9 @@ from src.data.okx_instruments import OKXSpotInstrumentsCache, round_down_to_lot
 
 log = logging.getLogger(__name__)
 
+# Treat sub-threshold notional as dust (local-state hygiene, not exchange accounting).
+DUST_NOTIONAL_USDT = 0.5
+
 
 def symbol_to_inst_id(symbol: str) -> str:
     """将V5内部symbol转换为OKX instId格式
@@ -564,6 +567,21 @@ class LiveExecutionEngine:
                 submit_gate=gate,
             )
             self.order_store.update_state(clid, new_state="REJECTED", last_error_code="DUST", last_error_msg=str(e), event_type="DUST_SKIP")
+
+            # For tiny SELL dust (< threshold), clear local position to prevent repeated close retries.
+            try:
+                if str(o.side).lower() == "sell":
+                    px = float(getattr(o, "signal_price", 0.0) or 0.0)
+                    est_qty = float(e.qty_rounded or e.qty or 0.0)
+                    est_notional = est_qty * px if px > 0 else 0.0
+                    if est_notional > 0 and est_notional < DUST_NOTIONAL_USDT:
+                        self.position_store.close_long(o.symbol)
+                        log.info(
+                            f"DUST_LOCAL_CLOSE: {o.symbol} est_notional={est_notional:.6f} < {DUST_NOTIONAL_USDT}"
+                        )
+            except Exception as _e:
+                log.warning(f"DUST_LOCAL_CLOSE failed for {o.symbol}: {_e}")
+
             return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         # 1) persist intent before sending
@@ -651,7 +669,7 @@ class LiveExecutionEngine:
                                     # If remaining is dust (very small notional), close it to avoid stale trailing state.
                                     try:
                                         last_px = float(o.signal_price or avg_px or 0.0)
-                                        if last_px > 0 and float(new_qty) * last_px < 0.01:
+                                        if last_px > 0 and float(new_qty) * last_px < DUST_NOTIONAL_USDT:
                                             self.position_store.close_long(o.symbol)
                                         else:
                                             # keep avg_px unchanged on partial close

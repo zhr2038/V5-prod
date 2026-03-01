@@ -99,9 +99,12 @@ def main():
             tracked_symbols |= set(getattr(getattr(cfg, 'universe', None), 'symbols', []) or [])
             # Core pairs (defensive fallback when config schema varies)
             tracked_symbols |= {'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT'}
+            # Ignore tiny balances in sync to reduce dust-churn.
+            # Positions below this USD value will be treated as dust and not written into local store.
             min_sync_value_usd = 0.5
 
             okx_positions = {}
+            skipped_dust = []
 
             # 1) Bulk balance parse
             for detail in balance.data.get('details', []):
@@ -111,8 +114,14 @@ def main():
                 sym = f"{ccy}/USDT"
                 qty = _extract_spot_qty(detail)
                 eq_usd = _as_float(detail.get('eqUsd'))
-                if qty > 1e-8 and (sym in tracked_symbols or eq_usd >= min_sync_value_usd):
+                if qty <= 1e-8:
+                    continue
+
+                # Keep only meaningful positions to avoid repeatedly syncing dust.
+                if eq_usd >= min_sync_value_usd:
                     okx_positions[sym] = qty
+                else:
+                    skipped_dust.append((sym, qty, eq_usd))
 
             # 2) Per-ccy verification for local symbols missing from bulk response
             #    (bulk details can occasionally omit small spot positions)
@@ -127,12 +136,19 @@ def main():
                 try:
                     one = client.get_balance(ccy=ccy)
                     qty = 0.0
+                    eq_usd = 0.0
                     for d in one.data.get('data', [{}])[0].get('details', []):
                         if str(d.get('ccy') or '').upper() == ccy:
                             qty = max(qty, _extract_spot_qty(d))
-                    if qty > 1e-8:
+                            eq_usd = max(eq_usd, _as_float(d.get('eqUsd')))
+                    if qty > 1e-8 and eq_usd >= min_sync_value_usd:
                         okx_positions[sym] = qty
                         logger.info(f"  [ccy-check] {sym}: recovered qty={qty:.8f}")
+                    elif qty > 1e-8:
+                        skipped_dust.append((sym, qty, eq_usd))
+                        logger.info(
+                            f"  [ccy-check] {sym}: skip dust qty={qty:.8f}, eqUsd={eq_usd:.4f} < {min_sync_value_usd}"
+                        )
                     else:
                         logger.info(f"  [ccy-check] {sym}: confirmed zero")
                 except Exception as e:
@@ -160,6 +176,12 @@ def main():
                     logger.info(f"  {sym}: local=0, okx={okx_qty:.8f}, diff={okx_qty:.8f}")
             
             logger.info(f"Total position diff: {total_diff:.8f}")
+            if skipped_dust:
+                sample = ', '.join([f"{s}:{u:.3f}U" for s, _, u in skipped_dust[:8]])
+                logger.info(
+                    f"Dust skipped from sync (<{min_sync_value_usd}U): {len(skipped_dust)} assets"
+                    + (f" | {sample}" if sample else "")
+                )
             
             # Always sync from OKX before trade. Large diffs are exactly when sync is needed.
             if total_diff >= 5.0:

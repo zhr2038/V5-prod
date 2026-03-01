@@ -155,7 +155,8 @@ class PositionStore:
         cur_pos = self.get(symbol)
 
         # If existing position is only dust (very small notional), treat as flat.
-        dust_reset_notional_usdt = 0.01
+        # Treat tiny residual local positions as flat to reduce dust-churn re-entry noise.
+        dust_reset_notional_usdt = 0.5
         if cur_pos and float(cur_pos.qty) > 0 and float(cur_pos.qty) * float(px) < dust_reset_notional_usdt:
             cur_pos = None
 
