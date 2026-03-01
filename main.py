@@ -149,34 +149,44 @@ class TrendCacheRegimeResult:
 
 
 def _get_env_epoch_sec(name: str) -> Optional[int]:
-    """从环境变量读取时间戳（秒/毫秒兼容）
+    """从环境变量读取时间戳（秒/毫秒/微秒兼容）
 
-    改进版：使用明确的阈值判断，而非相对接近度
+    规则：
+    - 10位及以下：秒
+    - 13位：毫秒
+    - 16位及以上：微秒
+    - 其他位数：按数值兜底判定（>1e14 当微秒，>1e11 当毫秒）
     """
     v = os.getenv(name)
     if not v:
         return None
     try:
         x = int(v)
-        
-        # 明确的时间戳范围判断
-        # 秒级时间戳（10位）：2001-09-09 ~ 2286-11-20
-        # 毫秒级（13位）：2001-09-09 ~ 2286-11-20
-        # 微秒级（16位）：1973-03-03 ~ 2318-06-04
-        
-        if x > 1_000_000_000_000_000:  # 16位+ = 微秒
-            x //= 1_000_000
-        elif x > 1_000_000_000_000:  # 13-15位 = 毫秒
-            x //= 1000
-        # 10位或更少 = 秒，保持不变
-        
-        # 验证结果合理性（必须在2000-2050年之间）
-        if x < 946684800 or x > 2524608000:  # 2000-01-01 to 2050-01-01
+        digits = len(str(abs(x)))
+
+        if digits <= 10:
+            pass  # seconds
+        elif digits == 13:
+            x //= 1000  # milliseconds -> seconds
+        elif digits >= 16:
+            x //= 1_000_000  # microseconds -> seconds
+        else:
+            # 11/12/14/15 位：非常规输入，做保守兜底
+            if abs(x) > 100_000_000_000_000:
+                x //= 1_000_000
+            elif abs(x) > 100_000_000_000:
+                x //= 1000
             logging.getLogger(__name__).warning(
-                "Timestamp %s out of reasonable range (2000-2050)", name
+                "Unusual timestamp digits for %s: %s (%d digits)", name, v, digits
+            )
+
+        # 放宽到 2000-2100，避免未来年份误判
+        if x < 946684800 or x > 4102444800:  # 2000-01-01 to 2100-01-01
+            logging.getLogger(__name__).warning(
+                "Timestamp %s out of reasonable range (2000-2100): %s", name, x
             )
             return None
-            
+
         return x
     except (ValueError, TypeError) as e:
         logging.getLogger(__name__).warning("Invalid timestamp for %s: %s - %s", name, v, e)

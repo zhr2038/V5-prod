@@ -7,4 +7,4 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/home/admin/clawd/v5-trading-bot
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-trading-bot && python3 scripts/compute_dynamic_alpha_weights.py --lookback-days 7 --horizon 1h'
+ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-trading-bot && /home/admin/clawd/v5-trading-bot/.venv/bin/python scripts/compute_dynamic_alpha_weights.py --lookback-days 7 --horizon 1h'
