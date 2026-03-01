@@ -24,10 +24,11 @@ universe:
   cache_path: reports/universe_cache.json
   cache_ttl_sec: 3600
 
-  # 动态选股参数（历史优化配置）
-  top_n_market_cap: 30              # 选市值前30
-  min_24h_quote_volume_usdt: 5000000   # 24h成交额 > 500万 USDT (从1000万放宽)
-  max_spread_bps: 20                 # 点差 < 20bps
+  # 币池门槛 - 只过滤劣币，不限制好币
+  # 策略将在这个币池内自由竞争选股
+  top_n_market_cap: 50              # 选市值前50（更大的池子）
+  min_24h_quote_volume_usdt: 50000000   # 24h成交额 > 5000万 USDT（提高10倍，过滤垃圾币）
+  max_spread_bps: 15                 # 点差 < 15bps（更严格的流动性要求）
   
   # 点差过大的币自动拉黑7天
   blacklist_path: configs/blacklist.json
@@ -38,39 +39,31 @@ universe:
   refine_single_ticker_max_candidates: 100
   refine_single_ticker_sleep_sec: 0.02
   
-  # 保底币种（确保这些主流币始终在池子里）
-  # ⚠️ 排除黄金/白银等非加密货币（PAXG在加密牛市表现不佳）
-  include_symbols:
-    - BTC/USDT
-    - ETH/USDT
-    - SOL/USDT
-    - BNB/USDT
-    - ADA/USDT
-    - DOT/USDT
-    - AVAX/USDT
-    - POL/USDT
-    - ATOM/USDT
-    - NEAR/USDT
-    - LINK/USDT
-    - UNI/USDT
-    - AAVE/USDT
-    - LTC/USDT
-    - BCH/USDT
-    - ETC/USDT
-    - XRP/USDT
-    - DOGE/USDT
-    - TRX/USDT
-    - SUI/USDT
+  # ❌ 移除白名单限制 - 策略自由竞争
+  # 只保留黑名单过滤劣币
   
-  # 明确排除非加密货币
+  # 明确排除非加密货币和低质量币
   exclude_symbols:
-    - PAXG/USDT  # 黄金，非加密货币
-    - XAUT/USDT  # 黄金
-    - PAX/USDT   # 美元稳定币
+    # 贵金属（非加密货币）
+    - PAXG/USDT
+    - XAUT/USDT
+    # 稳定币
+    - USDT/USDT
+    - USDC/USDT
+    - TUSD/USDT
+    - DAI/USDT
+    # 已知的垃圾币/低质量币
+    - PEPE/USDT
+    - SHIB/USDT
+    - FLOKI/USDT
+    - BONK/USDT
+    - DOGE/USDT    # meme币，波动太大
+    - TRX/USDT     # 争议项目
 
 alpha:
-  long_top_pct: 0.25
-  min_score_threshold: 0.05  # 最低分阈值，避免买入负分币的币（约5个，更分散）
+  # 数量控制交由AutoRiskGuard，这里只设最大限制
+  long_top_pct: 0.50         # 最多选50%（给策略足够空间），实际数量由AutoRiskGuard决定
+  min_score_threshold: 0.05  # 最低分阈值，过滤负分币
   
   # 基于 IC 分析的静态权重（IC(1h)=0.5549）
   weights:
@@ -119,6 +112,22 @@ risk:
   max_gross_exposure: 1.0
   drawdown_trigger: 0.12  # 12%回撤触发保护（恢复真实风控）
   drawdown_delever: 0.60  # 触发后降至60%风险敞口
+
+  # AutoRiskGuard - 自动档位控制持仓数量
+  auto_risk_guard:
+    enabled: true
+    # 根据市场状态动态调整持仓数量
+    max_positions_by_regime:
+      trending: 5    # 趋势行情：最多5个币
+      sideways: 3    # 震荡行情：最多3个币
+      risk_off: 0    # RiskOff：空仓
+    # 根据回撤调整
+    drawdown_adjustment:
+      enabled: true
+      "<5%":   {max_positions: 5, position_size_pct: 1.0}   # 正常
+      "5-10%": {max_positions: 3, position_size_pct: 0.7}   # 减仓
+      "10-15%":{max_positions: 2, position_size_pct: 0.5}   # 大减仓
+      ">15%":  {max_positions: 0, position_size_pct: 0.0}   # 清仓
 
 rebalance:
   deadband_sideways: 0.035  # 降低噪声交易，减少震荡磨损
