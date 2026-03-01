@@ -344,7 +344,7 @@ ml_factor:
   training_data_db: reports/ml_training_data.db
 # Event-Driven Trading Configuration
 event_driven:
-  enabled: false  # Set to true to enable (Phase 1: log only)
+  enabled: true  # 启用事件驱动交易
   check_interval_minutes: 15
   global_cooldown_p2_minutes: 30
   symbol_cooldown_minutes: 60
