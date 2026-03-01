@@ -123,6 +123,7 @@ class CooldownManager:
                 'count': 1,
                 'first_seen_ms': int(time.time() * 1000)
             }
+            self._save_state()  # persist across timer runs
             logger.info(f"{symbol}: New signal recorded, waiting confirmation")
             return False
         
@@ -134,9 +135,11 @@ class CooldownManager:
             if pending['count'] >= self.config.signal_confirmation_periods:
                 # Signal confirmed
                 del self.pending_signals[symbol]
+                self._save_state()  # persist clear
                 logger.info(f"{symbol}: Signal confirmed after {pending['count']} periods")
                 return True
             else:
+                self._save_state()  # persist counter
                 logger.info(f"{symbol}: Signal count {pending['count']}/{self.config.signal_confirmation_periods}")
                 return False
         else:
@@ -147,12 +150,14 @@ class CooldownManager:
                 'count': 1,
                 'first_seen_ms': int(time.time() * 1000)
             }
+            self._save_state()  # persist reset
             return False
     
     def clear_pending_signal(self, symbol: str):
         """Clear pending signal for a symbol (after trade execution)."""
         if symbol in self.pending_signals:
             del self.pending_signals[symbol]
+            self._save_state()
     
     def get_cooldown_status(self) -> Dict:
         """Get current cooldown status for monitoring."""

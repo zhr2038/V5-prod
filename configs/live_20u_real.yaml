@@ -160,7 +160,7 @@ execution:
   high_risk_blacklist_path: configs/borrow_prevention_rules.json
 
   # live preflight
-  preflight_enabled: true
+  preflight_enabled: false
   preflight_max_pages: 5
   max_status_age_sec: 180
   preflight_fail_action: sell_only
@@ -345,6 +345,7 @@ ml_factor:
 # Event-Driven Trading Configuration
 event_driven:
   enabled: true  # 启用事件驱动交易
+  active_mode: true  # true=有动作时直接触发v5-live执行
   check_interval_minutes: 15
   global_cooldown_p2_minutes: 30
   symbol_cooldown_minutes: 60

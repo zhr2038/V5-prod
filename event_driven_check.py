@@ -8,6 +8,7 @@ Phase 2: Active mode (event-driven trading)
 import sys
 import json
 import logging
+import subprocess
 from pathlib import Path
 from datetime import datetime
 
@@ -153,6 +154,29 @@ def load_current_state(cfg=None):
         return None
 
 
+def trigger_live_execution_service():
+    """Start full live execution service (active mode)."""
+    try:
+        cmd = ['systemctl', '--user', 'start', 'v5-live-20u.user.service']
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+        ok = proc.returncode == 0
+        return {
+            'ok': ok,
+            'returncode': proc.returncode,
+            'stdout': (proc.stdout or '').strip(),
+            'stderr': (proc.stderr or '').strip(),
+            'cmd': ' '.join(cmd),
+        }
+    except Exception as e:
+        return {
+            'ok': False,
+            'returncode': -1,
+            'stdout': '',
+            'stderr': str(e),
+            'cmd': 'systemctl --user start v5-live-20u.user.service',
+        }
+
+
 def main():
     """Main entry point."""
     logger.info("=" * 60)
@@ -162,12 +186,18 @@ def main():
     # Check if event-driven is enabled in config
     config_path = Path('/home/admin/clawd/v5-trading-bot/configs/live_20u_real.yaml')
     event_driven_enabled = False
+    active_mode = False
+    ev_cfg = {}
+    cfg = {}
     
     try:
         import yaml
         with open(config_path) as f:
-            cfg = yaml.safe_load(f)
-            event_driven_enabled = cfg.get('event_driven', {}).get('enabled', False)
+            cfg = yaml.safe_load(f) or {}
+            ev_cfg = cfg.get('event_driven', {}) or {}
+            event_driven_enabled = bool(ev_cfg.get('enabled', False))
+            mode = str(ev_cfg.get('mode', '')).strip().lower()
+            active_mode = bool(ev_cfg.get('active_mode', mode == 'active'))
     except Exception as e:
         logger.warning(f"Could not read config: {e}")
     
@@ -206,13 +236,21 @@ def main():
     logger.info(f"Positions: {list(state['positions'].keys())}")
     logger.info(f"Selected: {state['selected_symbols']}")
     
-    # Create event-driven trader with breakout disabled (price data unreliable)
+    logger.info(f"Event-driven mode: {'ACTIVE' if active_mode else 'PASSIVE'}")
+
+    # Build trader config from YAML (with safe defaults)
     trader = create_event_driven_trader({
         'enabled': True,
-        'check_interval_minutes': 15,
-        'global_cooldown_p2_minutes': 30,
-        'symbol_cooldown_minutes': 60,
-        'breakout_enabled': False  # Disable breakout detection - no reliable price source
+        'check_interval_minutes': int(ev_cfg.get('check_interval_minutes', 15) or 15),
+        'global_cooldown_p2_minutes': int(ev_cfg.get('global_cooldown_p2_minutes', 30) or 30),
+        'symbol_cooldown_minutes': int(ev_cfg.get('symbol_cooldown_minutes', 60) or 60),
+        'signal_confirmation_periods': int(ev_cfg.get('signal_confirmation_periods', 2) or 2),
+        'score_change_threshold': float(ev_cfg.get('score_change_threshold', 0.30) or 0.30),
+        'rank_jump_threshold': int(ev_cfg.get('rank_jump_threshold', 3) or 3),
+        'breakout_enabled': bool(ev_cfg.get('breakout_enabled', True)),
+        'breakout_lookback_hours': int(ev_cfg.get('breakout_lookback_hours', 24) or 24),
+        'breakout_threshold_pct': float(ev_cfg.get('breakout_threshold_pct', 0.5) or 0.5),
+        'heartbeat_interval_hours': int(ev_cfg.get('heartbeat_interval_hours', 4) or 4),
     })
     
     # Check if should trade (with last state for comparison)
@@ -229,6 +267,37 @@ def main():
         for action in result['actions']:
             logger.info(f"  - {action['symbol']}: {action['action']} ({action['reason']})")
     
+    # Active-mode execution (trigger full live run)
+    execution = {
+        'active_mode': active_mode,
+        'live_service_triggered': False,
+        'live_service_ok': None,
+        'live_service_returncode': None,
+        'live_service_stderr': ''
+    }
+
+    if result['should_trade'] and result['actions']:
+        logger.info("Event-driven trading triggered - actions generated")
+        if active_mode:
+            logger.info("ACTIVE mode: starting v5-live-20u.user.service")
+            exec_res = trigger_live_execution_service()
+            execution.update({
+                'live_service_triggered': True,
+                'live_service_ok': exec_res.get('ok'),
+                'live_service_returncode': exec_res.get('returncode'),
+                'live_service_stderr': exec_res.get('stderr', ''),
+            })
+            if exec_res.get('ok'):
+                logger.info("ACTIVE mode: live service start request accepted")
+            else:
+                logger.error(
+                    f"ACTIVE mode: failed to start live service rc={exec_res.get('returncode')} err={exec_res.get('stderr')}"
+                )
+        else:
+            logger.info("PASSIVE mode: actions logged only, no execution")
+    else:
+        logger.info("No event-driven actions - standard V5 may skip if no signals")
+
     # Log to file for monitoring
     log_entry = {
         'timestamp': datetime.now().isoformat(),
@@ -237,7 +306,8 @@ def main():
         'actions': result['actions'],
         'regime': state['regime'],
         'events_processed': result.get('events_processed', 0),
-        'events_blocked': result.get('events_blocked', 0)
+        'events_blocked': result.get('events_blocked', 0),
+        'execution': execution,
     }
     
     log_path = Path('/home/admin/clawd/v5-trading-bot/reports/event_driven_log.jsonl')
@@ -257,18 +327,8 @@ def main():
     }
     history_path.write_text(json.dumps(signal_history, indent=2))
     logger.info(f"Saved signal history ({len(signal_history['signals'])} signals)")
-    
-    # Return exit code
-    # 0 = Continue with standard V5 (or no action needed)
-    # 1 = Event-driven handled (skip standard)
-    if result['should_trade'] and result['actions']:
-        logger.info("Event-driven trading triggered - actions generated")
-        # For Phase 1, we still return 0 to let standard V5 run
-        # In Phase 2, we would return 1 and execute actions here
-        return 0
-    else:
-        logger.info("No event-driven actions - standard V5 may skip if no signals")
-        return 0
+
+    return 0
 
 
 if __name__ == '__main__':
