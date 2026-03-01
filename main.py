@@ -21,6 +21,14 @@ from src.reporting.reporting import dump_run_artifacts
 from src.core.models import Order, PositionState
 from src.risk.risk_engine import RiskEngine
 
+# 预算限制（20 USDT硬限制）
+try:
+    from src.risk.budget_guard import BudgetGuard
+    BUDGET_GUARD_ENABLED = True
+except ImportError:
+    BUDGET_GUARD_ENABLED = False
+    BudgetGuard = None
+
 # Alpha 历史数据收集（可选）
 try:
     from scripts.collect_alpha_history import AlphaHistoryCollector
@@ -457,6 +465,51 @@ def main() -> None:
             acc_store.set(acc)
     except Exception as e:
         log.debug("equity peak check skipped: %s", e)
+
+    # ========== 预算限制检查（20 USDT 硬限制）==========
+    try:
+        eq_now = float(acc.cash_usdt)
+        for p in held:
+            s = md_1h.get(p.symbol)
+            if s and s.close:
+                eq_now += float(p.qty) * float(s.close[-1])
+        
+        # 从配置读取预算上限，默认20 USDT
+        equity_cap = float(getattr(cfg.budget, 'live_equity_cap_usdt', 20.0) or 20.0)
+        
+        if BUDGET_GUARD_ENABLED and BudgetGuard:
+            budget_guard = BudgetGuard(equity_cap_usdt=equity_cap)
+            check_result = budget_guard.check_equity(eq_now)
+            
+            if not check_result['allowed']:
+                log.error(f"🚨 BUDGET EXCEEDED: {eq_now:.2f} USDT > {equity_cap:.2f} USDT. STOPPING ALL TRADING.")
+                # 创建空的输出，不执行任何交易
+                from types import SimpleNamespace
+                out = SimpleNamespace(
+                    orders=[],
+                    portfolio=SimpleNamespace(selected=[], targets={}),
+                    router_decisions=[],
+                    regime=regime,
+                )
+                # 跳过后续执行，直接保存审计
+                audit.add_note(f"BUDGET_LIMIT_EXCEEDED: {eq_now:.2f} > {equity_cap:.2f}")
+                dump_run_artifacts(run_id, audit, out)
+                log.info("V5 live run completed (BUDGET LIMITED)")
+                return
+            elif check_result['action'] == 'warning':
+                log.warning(f"⚠️ BUDGET WARNING: {eq_now:.2f} / {equity_cap:.2f} USDT ({check_result['utilization']*100:.0f}%)")
+            else:
+                log.info(f"✅ BUDGET OK: {eq_now:.2f} / {equity_cap:.2f} USDT ({check_result['utilization']*100:.0f}%)")
+        
+        # 将预算信息添加到audit
+        audit.budget = getattr(audit, 'budget', {}) or {}
+        audit.budget['equity_cap_usdt'] = equity_cap
+        audit.budget['current_equity_usdt'] = eq_now
+        audit.budget['utilization_pct'] = (eq_now / equity_cap * 100) if equity_cap > 0 else 0
+        
+    except Exception as e:
+        log.warning(f"Budget check skipped: {e}")
+    # ========== 预算限制检查结束 ==========
 
     pipe = V5Pipeline(cfg)
     out = pipe.run(
