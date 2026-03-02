@@ -67,6 +67,46 @@ V5是一个完整的横截面趋势轮动量化交易系统，专为OKX现货市
 
 ---
 
+## 🗺️ 完整程序运行流程图
+
+> 从定时器/手动触发到下单与审计落盘的完整链路（当前线上实现）
+
+```mermaid
+flowchart TD
+    A[触发入口\n- systemd timer\n- event-driven\n- 手动 main.py] --> B[加载配置\nconfigs/live_20u_real.yaml]
+    B --> C[Pre-Trade Auto Sync\n同步交易所余额/持仓到本地]
+    C --> D{预检是否通过?\n借贷检查/账户模式/预算检查}
+    D -- 否 --> D1[进入保护路径\nSELL_ONLY / ABORT\n写入reconcile_status]
+    D -- 是 --> E[拉取市场数据\nK线/成交量/情绪/资金费率]
+
+    E --> F[Universe筛选\n市值/成交额/点差/黑名单]
+    F --> G[Alpha层计算\n多策略并行:
+TrendFollowing + MeanReversion + Alpha6]
+
+    G --> H[信号融合\n同向加权/冲突过滤]
+    H --> I[Regime判断\nEnsemble: HMM + Funding + RSS]
+    I --> J[组合构建\n评分排序 + top_pct + min_score_threshold]
+
+    J --> K[风险控制\nAutoRiskGuard/止损止盈/回撤约束]
+    K --> L[订单仲裁\nOrderArbitrator + Symbol状态机]
+    L --> M[执行引擎\nOKX下单/查单/重试/冷却]
+
+    M --> N[成交回写\norders.sqlite / position_store]
+    N --> O[审计与报告\nrun目录、decision_audit、web API]
+    O --> P[下轮触发\n15分钟事件驱动 + 整点任务]
+```
+
+### 关键状态文件（运行时）
+
+- `reports/orders.sqlite`：订单与成交
+- `reports/portfolio.json`：目标组合/当前组合
+- `reports/reconcile_status.json`：对账与预检状态
+- `reports/order_state_machine.json`：按币种执行状态机
+- `reports/runs/<run_id>/decision_audit.json`：每轮决策归因
+- `reports/event_monitor_state.json`：事件驱动状态
+
+---
+
 ## 🚀 快速开始
 
 ### 环境配置
