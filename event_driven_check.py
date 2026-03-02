@@ -62,10 +62,15 @@ def load_current_state(cfg=None):
                     }
         
         # Build tradeable symbol universe (only strategy-tradeable symbols)
-        tradeable_symbols = set(str(s) for s in (cfg.symbols or []))
+        cfg_symbols = cfg.get('symbols', []) if isinstance(cfg, dict) else getattr(cfg, 'symbols', [])
+        tradeable_symbols = set(str(s) for s in (cfg_symbols or []))
         try:
-            if getattr(cfg.universe, 'enabled', False) and getattr(cfg.universe, 'use_universe_symbols', False):
-                cache_path = Path(getattr(cfg.universe, 'cache_path', 'reports/universe_cache.json'))
+            uni_cfg = cfg.get('universe', {}) if isinstance(cfg, dict) else getattr(cfg, 'universe', None)
+            uni_enabled = uni_cfg.get('enabled', False) if isinstance(uni_cfg, dict) else bool(getattr(uni_cfg, 'enabled', False))
+            uni_use = uni_cfg.get('use_universe_symbols', False) if isinstance(uni_cfg, dict) else bool(getattr(uni_cfg, 'use_universe_symbols', False))
+            if uni_enabled and uni_use:
+                cache_rel = uni_cfg.get('cache_path', 'reports/universe_cache.json') if isinstance(uni_cfg, dict) else getattr(uni_cfg, 'cache_path', 'reports/universe_cache.json')
+                cache_path = Path(cache_rel)
                 if not cache_path.is_absolute():
                     cache_path = Path('/home/admin/clawd/v5-trading-bot') / cache_path
                 if cache_path.exists():
