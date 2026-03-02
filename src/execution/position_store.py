@@ -95,7 +95,7 @@ class PositionStore:
             log.warning("Failed to migrate position columns: %s", e)
 
     def list(self) -> List[Position]:
-        """获取所有持仓列表
+        """获取有效持仓列表（仅 qty>0）
 
         Returns:
             持仓列表
@@ -104,7 +104,7 @@ class PositionStore:
             con = sqlite3.connect(str(self.path))
             cur = con.cursor()
             cur.execute(
-                "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions"
+                "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE qty > 0"
             )
             rows = cur.fetchall()
             con.close()
@@ -317,11 +317,18 @@ class PositionStore:
         p = self.get(symbol)
         if not p:
             return
+
+        q = float(qty)
+        # 根治：qty<=0 直接视为平仓，避免残留0仓位触发幽灵卖单
+        if q <= 0:
+            self.close_long(symbol)
+            return
+
         now = now_ts or (datetime.utcnow().isoformat() + "Z")
         self.upsert_position(
             Position(
                 symbol=p.symbol,
-                qty=float(qty),
+                qty=q,
                 avg_px=float(p.avg_px),
                 entry_ts=str(p.entry_ts),
                 highest_px=float(p.highest_px),
