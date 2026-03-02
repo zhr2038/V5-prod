@@ -197,6 +197,9 @@ class ExecutionConfig(BaseModel):
     dust_qty_threshold: float = Field(default=1e-6, ge=0)
     dust_value_threshold: float = Field(default=0.5, ge=0)
 
+    # Hard rule (optional): if a held symbol is absent from current scored list, force CLOSE_LONG.
+    force_close_unscored_positions: bool = Field(default=False)
+
     # Ops convenience: allow controlled auto-clear of kill-switch when reconcile/ledger are OK.
     # Default False for safety.
     auto_clear_kill_switch_if_ok: bool = Field(default=False)

@@ -682,13 +682,43 @@ class V5Pipeline:
 
         # Rebalance should also handle symbols currently held but removed from target universe.
         # Iterate union(current positions, target weights). For symbols not in target, desired weight = 0.
-        symbols_all = sorted(set(current_w.keys()) | set(target.keys()))
+        held_symbols = {p.symbol for p in positions if float(getattr(p, 'qty', 0.0) or 0.0) > 0}
+        symbols_all = sorted(set(current_w.keys()) | set(target.keys()) | held_symbols)
+
+        # Optional hard rule: force-close held symbols that are no longer in current scored universe.
+        scored_symbols = set(alpha.scores.keys()) if alpha and getattr(alpha, 'scores', None) else set()
+        force_close_unscored = bool(getattr(self.cfg.execution, 'force_close_unscored_positions', False))
 
         for sym in symbols_all:
             tw = float(target.get(sym, 0.0))
             # deadband check on weight drift with banding: new position vs existing
             cw = float(current_w.get(sym, 0.0))
             drift = float(tw) - cw
+
+            held = next((p for p in positions if p.symbol == sym and float(getattr(p, 'qty', 0.0) or 0.0) > 0), None)
+
+            # User hard rule: if symbol is held but absent from scoring list, force CLOSE_LONG.
+            if force_close_unscored and held is not None and scored_symbols and sym not in scored_symbols:
+                px_fs = float(prices.get(sym, 0.0) or 0.0)
+                if px_fs <= 0:
+                    px_fs = float(getattr(held, 'last_mark_px', 0.0) or 0.0)
+                if px_fs > 0:
+                    notional_fs = max(0.0, float(getattr(held, 'qty', 0.0) or 0.0) * px_fs)
+                    if notional_fs > 0:
+                        rebalance_orders.append(
+                            Order(
+                                symbol=sym,
+                                side='sell',
+                                intent='CLOSE_LONG',
+                                notional_usdt=notional_fs,
+                                signal_price=px_fs,
+                                meta={'reason': 'force_close_unscored'},
+                            )
+                        )
+                        if audit:
+                            audit.add_note(f"Force close unscored: {sym} qty={float(getattr(held,'qty',0.0)):.8f}")
+                            router_decisions.append({'symbol': sym, 'action': 'close', 'reason': 'force_close_unscored'})
+                        continue
             
             # Banding 逻辑：新建仓阈值 > 维持仓阈值
             # 判断是否是新建仓（当前权重接近0）
@@ -746,8 +776,6 @@ class V5Pipeline:
                 })
                 continue
             
-            held = next((p for p in positions if p.symbol == sym and p.qty > 0), None)
-
             # P0 FIX: Risk-Off close-only 模式：跳过所有买入型的 rebalance
             if is_risk_off_close_only and drift > 0:
                 if audit:

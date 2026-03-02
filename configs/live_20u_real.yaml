@@ -167,6 +167,8 @@ execution:
   # Dust thresholds (small-account safe): do not wipe valid ~9U positions as dust.
   dust_qty_threshold: 0.000001
   dust_value_threshold: 0.5
+  # 强规则：持仓若不在本轮评分清单中，强制清仓
+  force_close_unscored_positions: true
 
   # Ops: allow kill-switch to auto-clear when reconcile+ledger OK (prevents stuck automation)
   auto_clear_kill_switch_if_ok: true
