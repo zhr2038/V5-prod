@@ -217,7 +217,7 @@ execution:
 budget:
   # 实盘测试 - 设置明确的资金限制
   # 升级到130U测试规模
-  live_equity_cap_usdt: 135.0  # 当前小规模实盘上限（上调）
+  live_equity_cap_usdt: 137.0  # 当前小规模实盘上限（上调）
 
   # Exchange min-order protection (avoid 51020/minSz failures on small budget)
   exchange_min_notional_enabled: true
