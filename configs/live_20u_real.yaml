@@ -115,8 +115,8 @@ risk:
       dd_15_plus: {max_positions: 0, position_size_pct: 0.0}  # 回撤>15%：清仓
 
 rebalance:
-  deadband_sideways: 0.035  # 降低噪声交易，减少震荡磨损
-  deadband_trending: 0.03
+  deadband_sideways: 0.06   # 提高死区，降低震荡反复换仓
+  deadband_trending: 0.05
   deadband_riskoff: 0.07
 
   # Small-budget tuning: do NOT double deadband for new positions; otherwise signals rarely cross.
@@ -186,7 +186,7 @@ execution:
   split_orders: 3
   split_interval_sec: 3
   max_hourly_volume_pct: 0.05
-  open_long_cooldown_minutes: 10  # 同币种10分钟内已OPEN_LONG成交则禁止再次OPEN_LONG
+  open_long_cooldown_minutes: 30  # 同币种30分钟内已OPEN_LONG成交则禁止再次OPEN_LONG
   order_state_machine_path: reports/order_state_machine.json  # 执行仲裁状态机持久化
   slippage_db_path: reports/slippage.sqlite
   fee_bps: 6
@@ -250,8 +250,8 @@ alpha:
     f3_vol_adj_ret_20d: 0.25
     f4_volume_expansion: 0.15
     f5_rsi_trend_confirm: 0.10
-  long_top_pct: 0.50
-  min_score_threshold: 0.03
+  long_top_pct: 0.30
+  min_score_threshold: 0.08
   dynamic_weights_by_regime_enabled: true
   dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
 
@@ -343,9 +343,9 @@ event_driven:
   check_interval_minutes: 15
   global_cooldown_p2_minutes: 30
   symbol_cooldown_minutes: 60
-  signal_confirmation_periods: 2
-  score_change_threshold: 0.30
-  rank_jump_threshold: 3
+  signal_confirmation_periods: 3
+  score_change_threshold: 0.45
+  rank_jump_threshold: 5
   breakout_enabled: true
   breakout_lookback_hours: 24
   breakout_threshold_pct: 0.5
