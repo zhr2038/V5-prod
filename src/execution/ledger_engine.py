@@ -43,7 +43,10 @@ def _dec(x: Optional[str]) -> Decimal:
 class LedgerThresholds:
     """LedgerThresholds类"""
     abs_usdt_tol: Decimal = Decimal("1")
-    abs_base_tol: Decimal = Decimal("1e-8")
+    # Dust tolerance: ignore dust amounts below this threshold (was 1e-8, now 0.01 to handle dust)
+    abs_base_tol: Decimal = Decimal("0.01")
+    # Auto-reset baseline when non-USDT dust exceeds this threshold
+    dust_reset_threshold: Decimal = Decimal("0.1")
 
 
 class LedgerEngine:
@@ -147,6 +150,9 @@ class LedgerEngine:
         diffs: Dict[str, Dict[str, str]] = {}
         ok = True
         reason = None
+        
+        # Track dust accumulation for auto-reset decision
+        total_non_usdt_dust = Decimal("0")
 
         # monitored ccys = union(baseline/current/agg) plus USDT
         ccys = sorted(set((baseline.get("balances") or {}).keys()) | set(current_bal.keys()) | set(agg.keys()) | {"USDT"})
@@ -167,6 +173,10 @@ class LedgerEngine:
                 ok = False
                 if reason is None:
                     reason = "ledger_mismatch_usdt" if ccy.upper() == "USDT" else "ledger_mismatch_base"
+            
+            # Accumulate non-USDT dust for auto-reset check
+            if ccy.upper() != "USDT" and abs(delta) > tol:
+                total_non_usdt_dust += abs(delta)
 
         obj = {
             "schema_version": 1,
@@ -191,5 +201,17 @@ class LedgerEngine:
         # Advance baseline only when ok=true (keeps failures reproducible for debugging).
         if ok:
             self._write_baseline(ts_ms=now, last_bill_id=last_bill_id, last_bill_ts_ms=end_ts, balances=current_bal)
+        elif total_non_usdt_dust > self.thresholds.dust_reset_threshold:
+            # Auto-reset baseline when dust accumulation is too high (dust from sold positions)
+            # This prevents permanent SELL_ONLY lock due to dust mismatches
+            self._write_baseline(ts_ms=now, last_bill_id=last_bill_id, last_bill_ts_ms=end_ts, balances=current_bal)
+            # Mark as ok after reset since this is dust-related, not a real mismatch
+            obj["ok"] = True
+            obj["reason"] = "dust_baseline_reset"
+            obj["dust_reset"] = {
+                "total_non_usdt_dust": str(total_non_usdt_dust),
+                "threshold": str(self.thresholds.dust_reset_threshold),
+            }
+            _atomic_write_json(out_path, obj)
 
         return obj

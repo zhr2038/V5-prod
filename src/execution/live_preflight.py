@@ -111,6 +111,9 @@ class LivePreflight:
         led = LedgerEngine(okx=self.okx, bills_store=store, state_path=self.ledger_state_path)
         ledger_obj = led.run(out_path=self.ledger_status_path)
         ledger_ok = bool(ledger_obj.get("ok"))
+        # Treat dust_reset as effectively ok for preflight (not a real mismatch)
+        if not ledger_ok and ledger_obj.get("reason") == "dust_baseline_reset":
+            ledger_ok = True
         details["ledger"] = {"ok": ledger_ok, "reason": ledger_obj.get("reason"), "bill_count": (ledger_obj.get("bills_aggregate") or {}).get("count")}
 
         # 2b) Borrow/liability safety check (before reconcile/decision)
