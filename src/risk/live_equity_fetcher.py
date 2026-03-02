@@ -85,8 +85,8 @@ def check_budget_limit(equity_cap: float = 20.0) -> Dict:
     
     utilization = (equity / equity_cap * 100) if equity_cap > 0 else 0
     
-    # 允许10%缓冲（防止浮点误差）
-    ok = equity <= equity_cap * 1.1
+    # 严格预算：不再放宽10%缓冲，超过上限即视为超限。
+    ok = equity <= equity_cap
     
     return {
         'ok': ok,

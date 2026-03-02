@@ -872,14 +872,25 @@ class V5Pipeline:
                         )
                     continue
 
-            # Hard budget buy-block: when raw equity hits configured cap, force sell-only.
+            # Hard budget buy-block: when equity hits configured cap, force sell-only.
+            # Prefer live equity from main(audit.budget.current_equity_usdt) to avoid local-state drift bypass.
             if side == "buy" and bool(getattr(self.cfg.budget, "hard_buy_block_on_cap", False)):
                 try:
                     cap_raw = getattr(self.cfg.budget, "live_equity_cap_usdt", None)
                     cap_ratio = float(getattr(self.cfg.budget, "hard_buy_block_cap_ratio", 1.0) or 1.0)
                     if cap_raw is not None and float(cap_raw) > 0:
                         hard_cap = float(cap_raw) * cap_ratio
-                        if float(equity_raw) >= float(hard_cap):
+
+                        equity_ref = float(equity_raw)
+                        try:
+                            if audit and isinstance(getattr(audit, "budget", None), dict):
+                                eq_live = audit.budget.get("current_equity_usdt")
+                                if eq_live is not None:
+                                    equity_ref = float(eq_live)
+                        except Exception:
+                            pass
+
+                        if float(equity_ref) >= float(hard_cap):
                             if audit:
                                 audit.reject("budget_hard_buy_block")
                                 router_decisions.append(
@@ -887,7 +898,7 @@ class V5Pipeline:
                                         "symbol": sym,
                                         "action": "skip",
                                         "reason": "budget_hard_buy_block",
-                                        "equity_raw": float(equity_raw),
+                                        "equity_ref": float(equity_ref),
                                         "hard_cap": float(hard_cap),
                                     }
                                 )
