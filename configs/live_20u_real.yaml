@@ -152,9 +152,15 @@ execution:
   max_status_age_sec: 180
   preflight_fail_action: sell_only
 
-  # 账户配置硬闸：禁止借币（只要开启了现货借币就不允许买入）
+  # 账户配置检查保留开启；
+  # 但由于部分账户/App 无法直接关闭 spotBorrow 开关，不再依赖该开关做全局禁买。
   enforce_account_config_check: true
-  require_spot_borrow_disabled: true
+  require_spot_borrow_disabled: false
+
+  # 真实无借币约束（执行层）：买单不得超过可用USDT预算
+  buy_quote_balance_safety_check: true
+  buy_quote_reserve_usdt: 2.0
+  buy_quote_slack_ratio: 0.001
   
   # 优化: 小额差异时仍允许交易（避免灰尘持仓阻止交易）
   allow_trade_on_small_reconcile_drift: true  # 允许小额差异时交易
@@ -167,8 +173,8 @@ execution:
   # Borrow detection thresholds (strict)
   borrow_liab_eps: 0.01
   borrow_neg_eq_eps: 0.01
-  # Borrow block scope: symbol_only = freeze only affected symbols (no global ABORT)
-  borrow_block_mode: symbol_only
+  # Borrow block scope: global_abort = 任意负债直接阻断交易
+  borrow_block_mode: global_abort
 
   # Dust thresholds (small-account safe): do not wipe valid ~9U positions as dust.
   dust_qty_threshold: 0.000001
