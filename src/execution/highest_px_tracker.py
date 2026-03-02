@@ -61,16 +61,19 @@ class HighestPriceTracker:
             print(f"[HighestPriceTracker] 保存失败: {e}")
     
     def update(self, symbol: str, highest_px: float, entry_px: float, source: str = "trade"):
-        """更新峰值价格（取最大）"""
+        """更新峰值价格（默认取最大；new_position 时强制重置为入场价附近）"""
         symbol = str(symbol)
         existing = self.records.get(symbol)
-        
-        if existing:
-            # 保留更大的值
+
+        # 根治：新开仓必须重置峰值，避免继承历史污染导致atr_trailing误触发
+        if source in {"new_position", "reopen_position", "reset"}:
+            new_high = float(highest_px)
+        elif existing:
+            # 常规路径保留更大的值
             new_high = max(float(highest_px), float(existing.highest_px))
         else:
             new_high = float(highest_px)
-        
+
         self.records[symbol] = HighestPriceRecord(
             symbol=symbol,
             highest_px=new_high,

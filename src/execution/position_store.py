@@ -168,13 +168,9 @@ class PositionStore:
             tracker = None
 
         if not cur_pos or cur_pos.qty <= 0:
-            # New position: check tracker for existing highest_px
+            # New position: highest 必须从入场价重置，禁止沿用历史峰值
             highest = px
-            if tracker:
-                tracked_high = tracker.get_highest_px(symbol, px)
-                if tracked_high > px:
-                    highest = tracked_high
-            
+
             pos = Position(
                 symbol=symbol,
                 qty=qty,
@@ -186,7 +182,7 @@ class PositionStore:
                 unrealized_pnl_pct=0.0,
                 tags_json="{}",
             )
-            # Update tracker with new position
+            # Update tracker with new position (force reset)
             if tracker:
                 tracker.update(symbol, highest, px, source="new_position")
         else:
@@ -359,6 +355,14 @@ class PositionStore:
             c.execute("DELETE FROM positions WHERE symbol=?", (symbol,))
             con.commit()
             con.close()
+
+            # Clear persisted highest tracker to avoid stale trailing state on next reopen
+            try:
+                from src.execution.highest_px_tracker import get_highest_price_tracker
+                get_highest_price_tracker().clear_symbol(symbol)
+            except Exception:
+                pass
+
             log.info("Position closed: %s", symbol)
             return True
         except Exception as e:
