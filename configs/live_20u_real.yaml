@@ -95,6 +95,8 @@ regime:
 risk:
   max_single_weight: 0.30  # 提高单币种限制，避免资金不足
   max_gross_exposure: 1.0
+  # 硬限制：始终只允许1个持仓标的
+  max_positions_override: 1
   drawdown_trigger: 0.12  # 12%回撤触发保护（恢复真实风控）
   drawdown_delever: 0.60  # 触发后降至60%风险敞口
 
@@ -145,10 +147,14 @@ execution:
   high_risk_blacklist_path: configs/borrow_prevention_rules.json
 
   # live preflight
-  preflight_enabled: false
+  preflight_enabled: true
   preflight_max_pages: 5
   max_status_age_sec: 180
   preflight_fail_action: sell_only
+
+  # 账户配置硬闸：禁止借币（只要开启了现货借币就不允许买入）
+  enforce_account_config_check: true
+  require_spot_borrow_disabled: true
   
   # 优化: 小额差异时仍允许交易（避免灰尘持仓阻止交易）
   allow_trade_on_small_reconcile_drift: true  # 允许小额差异时交易

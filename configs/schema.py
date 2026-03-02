@@ -116,6 +116,8 @@ class RiskConfig(BaseModel):
     max_gross_exposure: float = Field(default=1.0, gt=0, le=1.0)
     drawdown_trigger: float = Field(default=0.08, gt=0, le=1)
     drawdown_delever: float = Field(default=0.50, gt=0, le=1)
+    # Hard cap for number of selected symbols. When set, overrides auto-risk level cap.
+    max_positions_override: Optional[int] = Field(default=None, ge=1, le=20)
 
     @model_validator(mode='after')
     def _check_drawdown_logic(self):

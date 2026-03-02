@@ -75,7 +75,21 @@ class PortfolioEngine:
         return None
 
     def _get_dynamic_max_positions(self) -> Optional[int]:
-        """Read current auto-risk level and return effective max positions cap."""
+        """Return effective max positions cap.
+
+        Priority:
+        1) risk.max_positions_override (hard override)
+        2) auto-risk level mapping from reports/auto_risk_eval.json
+        """
+        try:
+            ov = getattr(self.risk_cfg, "max_positions_override", None)
+            if ov is not None:
+                ov_i = int(ov)
+                if ov_i > 0:
+                    return ov_i
+        except Exception:
+            pass
+
         try:
             p = Path("reports/auto_risk_eval.json")
             if not p.exists():

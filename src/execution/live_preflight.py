@@ -32,6 +32,15 @@ def _read_json(path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _to_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    s = str(v).strip().lower()
+    return s in {"1", "true", "yes", "on"}
+
+
 @dataclass
 class LivePreflightResult:
     """LivePreflightResult类"""
@@ -162,6 +171,68 @@ class LivePreflight:
                 ledger_ok=ledger_ok,
                 kill_switch_enabled=False,
                 reason="borrow_check_error",
+                details=details,
+            )
+
+        # 2c) Account configuration safety check (buy gating by account mode/settings)
+        try:
+            if bool(getattr(self.cfg, "enforce_account_config_check", True)):
+                r = self.okx.get_account_config()
+                rows = (r.data or {}).get("data") if isinstance(r.data, dict) else None
+                cfg0 = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else {}
+
+                acct_lv = str(cfg0.get("acctLv", "") or "")
+                pos_mode = str(cfg0.get("posMode", "") or "")
+                auto_loan = _to_bool(cfg0.get("autoLoan"))
+                enable_spot_borrow = _to_bool(cfg0.get("enableSpotBorrow"))
+                spot_auto_repay = _to_bool(cfg0.get("spotBorrowAutoRepay"))
+
+                violations = []
+
+                required_acct_lv = str(getattr(self.cfg, "required_acct_lv", "") or "").strip()
+                if required_acct_lv and acct_lv and acct_lv != required_acct_lv:
+                    violations.append(f"acctLv_mismatch:{acct_lv}!={required_acct_lv}")
+
+                required_pos_mode = str(getattr(self.cfg, "required_pos_mode", "") or "").strip()
+                if required_pos_mode and pos_mode and pos_mode != required_pos_mode:
+                    violations.append(f"posMode_mismatch:{pos_mode}!={required_pos_mode}")
+
+                if bool(getattr(self.cfg, "require_auto_loan_false", True)) and auto_loan:
+                    violations.append("autoLoan_true")
+
+                if bool(getattr(self.cfg, "require_spot_borrow_disabled", False)) and enable_spot_borrow:
+                    violations.append("enableSpotBorrow_true")
+
+                if bool(getattr(self.cfg, "ensure_spot_auto_repay_true", True)) and enable_spot_borrow and (not spot_auto_repay):
+                    violations.append("spotBorrowAutoRepay_false")
+
+                details["account_config"] = {
+                    "ok": len(violations) == 0,
+                    "acctLv": acct_lv,
+                    "posMode": pos_mode,
+                    "autoLoan": auto_loan,
+                    "enableSpotBorrow": enable_spot_borrow,
+                    "spotBorrowAutoRepay": spot_auto_repay,
+                    "violations": violations,
+                }
+
+                if violations:
+                    return LivePreflightResult(
+                        decision="SELL_ONLY",
+                        reconcile_ok=False,
+                        ledger_ok=ledger_ok,
+                        kill_switch_enabled=False,
+                        reason="account_config_block",
+                        details=details,
+                    )
+        except Exception as e:
+            details["account_config"] = {"ok": False, "reason": f"error:{e}"}
+            return LivePreflightResult(
+                decision="SELL_ONLY",
+                reconcile_ok=False,
+                ledger_ok=ledger_ok,
+                kill_switch_enabled=False,
+                reason="account_config_check_error",
                 details=details,
             )
 
