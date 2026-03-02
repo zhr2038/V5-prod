@@ -2408,6 +2408,40 @@ def api_decision_audit():
                 except Exception:
                     continue
 
+        # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.
+        held_symbols = set()
+        try:
+            con = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
+            cur = con.cursor()
+            cur.execute("SELECT symbol FROM positions WHERE qty > 0")
+            held_symbols = {str(r[0]) for r in cur.fetchall()}
+            con.close()
+        except Exception:
+            held_symbols = set()
+
+        fused_rows = []
+        for block in (strategy_signals or []):
+            for s in (block.get('signals') or []):
+                sym = str(s.get('symbol') or '')
+                side = str(s.get('side') or s.get('direction') or '').lower()
+                try:
+                    score = float(s.get('score', 0.0) or 0.0)
+                except Exception:
+                    score = 0.0
+                if sym and side in {'buy', 'sell'}:
+                    fused_rows.append({'symbol': sym, 'side': side, 'score': score})
+
+        actionable_buy = sorted(
+            [r for r in fused_rows if r['side'] == 'buy' and r['symbol'] not in held_symbols],
+            key=lambda x: x['score'],
+            reverse=True,
+        )
+        actionable_sell = sorted(
+            [r for r in fused_rows if r['side'] == 'sell' and r['symbol'] in held_symbols],
+            key=lambda x: x['score'],
+            reverse=True,
+        )
+
         return jsonify({
             'run_id': audit_data.get('run_id') or latest_run_dir.name,
             'strategy_run_id': strategy_source_run,
@@ -2417,6 +2451,11 @@ def api_decision_audit():
             'regime_details': audit_data.get('regime_details', {}),
             'counts': audit_data.get('counts', {}),
             'strategy_signals': strategy_signals,
+            'actionable_signals': {
+                'held_symbols': sorted(list(held_symbols)),
+                'buy_candidates': actionable_buy,
+                'sell_candidates': actionable_sell,
+            },
             'notes': audit_data.get('notes', [])[:10]
         })
     except Exception as e:
