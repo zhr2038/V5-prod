@@ -27,15 +27,15 @@ universe:
   # 币池门槛 - 只过滤劣币，不限制好币
   # 策略将在这个币池内自由竞争选股
   top_n_market_cap: 50              # 选市值前50（更大的池子）
-  min_24h_quote_volume_usdt: 50000000   # 24h成交额 > 5000万 USDT（提高10倍，过滤垃圾币）
-  max_spread_bps: 15                 # 点差 < 15bps（更严格的流动性要求）
+  min_24h_quote_volume_usdt: 5000000    # 24h成交额 > 500万 USDT（避免币池过窄）
+  max_spread_bps: 30                 # 点差 < 30bps（放宽，先保证可选标的数量）
   
   # 点差过大的币自动拉黑7天
   blacklist_path: configs/blacklist.json
   exclude_stablecoins: true
   
   # 单币 ticker 精筛（更可靠的成交量数据）
-  refine_with_single_ticker: true
+  refine_with_single_ticker: false   # 关闭单币逐个精筛，避免把币池压缩到仅4个
   refine_single_ticker_max_candidates: 100
   refine_single_ticker_sleep_sec: 0.02
   
