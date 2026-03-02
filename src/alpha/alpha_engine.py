@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional
+from pathlib import Path
+import json
 import numpy as np
 
 from src.core.models import MarketSeries
@@ -126,6 +128,27 @@ class AlphaEngine:
             'f5_rsi_trend_confirm': float(getattr(cfg_weights, 'f5_rsi_trend_confirm', 0.15)) if cfg_weights else 0.15,
             'f6_sentiment': 0.15,
         }
+
+        # 若启用动态IC权重文件，按IC符号修正方向（根治“全卖/全空”偏置）
+        if getattr(self.cfg, 'dynamic_weights_by_regime_enabled', False):
+            try:
+                p = Path(str(getattr(self.cfg, 'dynamic_weights_by_regime_path', '') or ''))
+                if p.exists():
+                    data = json.loads(p.read_text(encoding='utf-8'))
+                    overall = data.get('overall', {})
+                    ic = overall.get('ic_spearman_mean', {})
+                    sign_map = {
+                        'f1_mom_5d': -1.0 if float(ic.get('f1_mom_5d', 0.0)) < 0 else 1.0,
+                        'f2_mom_20d': -1.0 if float(ic.get('f2_mom_20d', 0.0)) < 0 else 1.0,
+                        'f3_vol_adj_ret': -1.0 if float(ic.get('f3_vol_adj_ret_20d', 0.0)) < 0 else 1.0,
+                        'f4_volume_expansion': -1.0 if float(ic.get('f4_volume_expansion', 0.0)) < 0 else 1.0,
+                        'f5_rsi_trend_confirm': -1.0 if float(ic.get('f5_rsi_trend_confirm', 0.0)) < 0 else 1.0,
+                    }
+                    for k in ('f1_mom_5d', 'f2_mom_20d', 'f3_vol_adj_ret', 'f4_volume_expansion', 'f5_rsi_trend_confirm'):
+                        alpha_weights[k] = float(alpha_weights[k]) * sign_map[k]
+                    print(f"[AlphaEngine] 已按动态IC符号修正Alpha6权重: {sign_map}")
+            except Exception as e:
+                print(f"[AlphaEngine] 动态IC符号修正失败，回退静态权重: {e}")
 
         alpha6_strategy = Alpha6FactorStrategy(config={
             'weights': alpha_weights,

@@ -380,45 +380,83 @@ class Alpha6FactorStrategy(BaseStrategy):
         self.sentiment_cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
     
     def generate_signals(self, market_data: pd.DataFrame) -> List[Signal]:
-        """生成6因子Alpha信号"""
-        signals = []
-        
+        """生成6因子Alpha信号
+
+        根治修复：
+        - 先计算全截面分数，再做截面中心化(rel_score = score - mean)
+        - 避免在“全市场同向偏空”时出现 0 buy / 全 sell 的退化输出
+        """
+        signals: List[Signal] = []
+        per_symbol = []
+
         for symbol in market_data['symbol'].unique():
             df = market_data[market_data['symbol'] == symbol].copy()
-            # 仅要求最低60根K线，避免在小样本阶段完全无信号
             if len(df) < 60:
                 continue
-            
-            # 计算6个因子
+
             factors = self._calculate_factors(df, symbol)
-            
-            # z-score标准化
             z_factors = self._zscore_factors(factors)
-            
-            # 加权计算综合评分
             score = self._calculate_score(z_factors)
-            
-            # 生成信号
-            if abs(score) > self.config['score_threshold']:
-                side = 'buy' if score > 0 else 'sell'
-                confidence = min(abs(score), 1.0)
-                
-                signal = Signal(
-                    symbol=symbol,
-                    side=side,
-                    score=abs(score),
-                    confidence=confidence,
-                    strategy=self.name,
-                    timestamp=datetime.now(),
-                    metadata={
-                        'raw_factors': factors,
-                        'z_factors': z_factors,
-                        'final_score': score
-                    }
+            per_symbol.append((symbol, factors, z_factors, float(score)))
+
+        if not per_symbol:
+            return signals
+
+        # 截面中心化：解决“绝对分数全负 => 全卖无买”
+        cs_mean = float(np.mean([x[3] for x in per_symbol]))
+        threshold = float(self.config['score_threshold'])
+
+        buy_count = 0
+        for symbol, factors, z_factors, score in per_symbol:
+            rel_score = score - cs_mean
+            if abs(rel_score) <= threshold:
+                continue
+
+            side = 'buy' if rel_score > 0 else 'sell'
+            if side == 'buy':
+                buy_count += 1
+            confidence = min(abs(rel_score), 1.0)
+
+            signal = Signal(
+                symbol=symbol,
+                side=side,
+                score=abs(rel_score),
+                confidence=confidence,
+                strategy=self.name,
+                timestamp=datetime.now(),
+                metadata={
+                    'raw_factors': factors,
+                    'z_factors': z_factors,
+                    'final_score': score,
+                    'cross_section_mean': cs_mean,
+                    'relative_score': rel_score,
+                }
+            )
+            signals.append(signal)
+            self.signals_history.append(signal)
+
+        # 兜底：如果仍无buy，强制给最强相对分一个低置信度buy，防止长期全空仓
+        if buy_count == 0 and per_symbol:
+            top = max(per_symbol, key=lambda x: x[3] - cs_mean)
+            rel_top = float(top[3] - cs_mean)
+            if rel_top > -threshold:
+                signals.append(
+                    Signal(
+                        symbol=top[0],
+                        side='buy',
+                        score=max(0.05, abs(rel_top)),
+                        confidence=0.35,
+                        strategy=self.name,
+                        timestamp=datetime.now(),
+                        metadata={
+                            'fallback_buy': True,
+                            'final_score': float(top[3]),
+                            'cross_section_mean': cs_mean,
+                            'relative_score': rel_top,
+                        }
+                    )
                 )
-                signals.append(signal)
-                self.signals_history.append(signal)
-        
+
         return signals
     
     def _calculate_factors(self, df: pd.DataFrame, symbol: str) -> Dict[str, float]:
