@@ -61,21 +61,33 @@ def load_current_state(cfg=None):
                         'quantity': data.get('quantity', 0)
                     }
         
-        # Load prices from OKX API
+        # Build tradeable symbol universe (only strategy-tradeable symbols)
+        tradeable_symbols = set(str(s) for s in (cfg.symbols or []))
+        try:
+            if getattr(cfg.universe, 'enabled', False) and getattr(cfg.universe, 'use_universe_symbols', False):
+                cache_path = Path(getattr(cfg.universe, 'cache_path', 'reports/universe_cache.json'))
+                if not cache_path.is_absolute():
+                    cache_path = Path('/home/admin/clawd/v5-trading-bot') / cache_path
+                if cache_path.exists():
+                    cache_obj = json.loads(cache_path.read_text(encoding='utf-8'))
+                    tradeable_symbols = set(str(s) for s in (cache_obj.get('symbols') or []))
+        except Exception as e:
+            logger.warning(f"Could not load universe cache, fallback to cfg.symbols: {e}")
+
+        # Load prices from OKX API (filtered to tradeable universe only)
         prices = {}
         try:
             from src.execution.price_fetcher import fetch_prices
-            prices = fetch_prices()
-            logger.info(f"Loaded {len(prices)} prices")
-            # Show sample
-            for sym, px in list(prices.items())[:3]:
+            all_prices = fetch_prices()
+            prices = {sym: px for sym, px in all_prices.items() if sym in tradeable_symbols}
+            logger.info(f"Loaded {len(prices)}/{len(all_prices)} prices (tradeable universe)")
+            for sym, px in list(prices.items())[:5]:
                 logger.info(f"  {sym}: {px}")
         except Exception as e:
             logger.error(f"Failed to fetch prices: {e}")
-        
+
         if not prices:
-            # Fallback: empty prices (disable breakout detection)
-            logger.warning("No prices available - breakout detection disabled")
+            logger.warning("No prices available in tradeable universe - breakout detection disabled")
         
         # Load signals - PRIORITY: fused signals > alpha snapshot
         signals = {}
@@ -99,6 +111,8 @@ def load_current_state(cfg=None):
                             logger.info(f"Found {len(fused_signals)} fused signals in file")
                             if fused_signals:
                                 for sym, data in fused_signals.items():
+                                    if sym not in tradeable_symbols:
+                                        continue
                                     signals[sym] = SignalState(
                                         symbol=sym,
                                         direction=data.get('direction', 'hold'),
@@ -106,7 +120,7 @@ def load_current_state(cfg=None):
                                         rank=data.get('rank', 99),
                                         timestamp_ms=int(datetime.now().timestamp() * 1000)
                                     )
-                                logger.info(f"Loaded {len(signals)} FUSED signals from {latest.name}")
+                                logger.info(f"Loaded {len(signals)} FUSED signals from {latest.name} (tradeable filtered)")
                             else:
                                 logger.warning("fused_signals is empty")
                     except Exception as e:
@@ -125,6 +139,8 @@ def load_current_state(cfg=None):
                 with open(alpha_path) as f:
                     alpha = json.load(f)
                     for sym, score in alpha.get('scores', {}).items():
+                        if sym not in tradeable_symbols:
+                            continue
                         direction = 'buy' if score > 0 else 'sell' if score < 0 else 'hold'
                         rank = 50 - int(score * 50)
                         signals[sym] = SignalState(
