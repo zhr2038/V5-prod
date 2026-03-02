@@ -689,6 +689,46 @@ class V5Pipeline:
         scored_symbols = set(alpha.scores.keys()) if alpha and getattr(alpha, 'scores', None) else set()
         force_close_unscored = bool(getattr(self.cfg.execution, 'force_close_unscored_positions', False))
 
+        # Optional hard rule: require fused strategy signals for any buy order (disable alpha fallback buys).
+        require_fused_buy = bool(getattr(self.cfg.execution, 'require_fused_signals_for_buy', False))
+        fused_buy_symbols = set()
+        if require_fused_buy:
+            try:
+                import json as _json
+                from pathlib import Path as _Path
+                from datetime import datetime as _dt
+
+                cand_files = []
+                same_hour = _Path(f"reports/runs/{_dt.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
+                if same_hour.exists():
+                    cand_files.append(same_hour)
+
+                runs_dir = _Path("reports/runs")
+                if runs_dir.exists():
+                    run_dirs = sorted(
+                        [d for d in runs_dir.iterdir() if d.is_dir() and (d / "strategy_signals.json").exists()],
+                        key=lambda x: x.stat().st_mtime,
+                        reverse=True,
+                    )
+                    for d in run_dirs[:5]:
+                        fp = d / "strategy_signals.json"
+                        if fp not in cand_files:
+                            cand_files.append(fp)
+
+                for fp in cand_files:
+                    obj = _json.loads(fp.read_text(encoding='utf-8'))
+                    fused = obj.get('fused')
+                    if isinstance(fused, dict) and fused:
+                        for fsym, sig in fused.items():
+                            if str((sig or {}).get('direction', '')).lower() == 'buy':
+                                fused_buy_symbols.add(str(fsym))
+                        break
+            except Exception:
+                fused_buy_symbols = set()
+
+            if audit:
+                audit.add_note(f"require_fused_signals_for_buy enabled: fused_buy_symbols={len(fused_buy_symbols)}")
+
         for sym in symbols_all:
             tw = float(target.get(sym, 0.0))
             # deadband check on weight drift with banding: new position vs existing
@@ -807,6 +847,31 @@ class V5Pipeline:
                 if notional <= 0:
                     continue
             
+            # Require fused signals for buys (no alpha-fallback buys).
+            if side == "buy" and require_fused_buy:
+                if not fused_buy_symbols:
+                    if audit:
+                        audit.reject("require_fused_missing")
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": "require_fused_missing",
+                            }
+                        )
+                    continue
+                if sym not in fused_buy_symbols:
+                    if audit:
+                        audit.reject("require_fused_symbol")
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": "require_fused_symbol",
+                            }
+                        )
+                    continue
+
             # Hard budget buy-block: when raw equity hits configured cap, force sell-only.
             if side == "buy" and bool(getattr(self.cfg.budget, "hard_buy_block_on_cap", False)):
                 try:

@@ -205,6 +205,9 @@ class ExecutionConfig(BaseModel):
     anti_chase_max_entry_premium_pct: float = Field(default=0.015, ge=0, le=1)
     anti_chase_max_add_notional_ratio: float = Field(default=0.25, ge=0, le=10)
 
+    # Require fused strategy signal file for buy decisions. If missing, block buy orders.
+    require_fused_signals_for_buy: bool = Field(default=False)
+
     # Ops convenience: allow controlled auto-clear of kill-switch when reconcile/ledger are OK.
     # Default False for safety.
     auto_clear_kill_switch_if_ok: bool = Field(default=False)

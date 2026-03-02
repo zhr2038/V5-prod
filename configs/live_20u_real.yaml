@@ -175,6 +175,9 @@ execution:
   anti_chase_max_entry_premium_pct: 0.012
   anti_chase_max_add_notional_ratio: 0.20
 
+  # 严格要求使用融合信号：拿不到 fused 信号时禁止买入（不使用 alpha fallback 开仓）
+  require_fused_signals_for_buy: true
+
   # Ops: allow kill-switch to auto-clear when reconcile+ledger OK (prevents stuck automation)
   auto_clear_kill_switch_if_ok: true
 
