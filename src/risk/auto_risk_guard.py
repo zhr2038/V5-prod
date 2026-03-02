@@ -176,13 +176,21 @@ class AutoRiskGuard:
             new_level = 'DEFENSE'
             reasons.append(f"连续{consecutive_losses}轮亏损，防守为主")
         
-        # 升级条件（需要更严格的确认）
+        # 升级条件（分级恢复，避免长期卡死在PROTECT）
         if new_level == old_level or self._is_lower_level(new_level, old_level):
-            if old_level in ['DEFENSE', 'PROTECT']:
-                if dd_pct < 0.05 and conversion_rate > 0.5 and recent_pnl_trend == 'up':
-                    if consecutive_losses == 0:
-                        new_level = 'NEUTRAL'
-                        reasons.append("回撤控制，成交改善，恢复中性")
+            trend_ok = recent_pnl_trend in ('up', 'flat')
+            if old_level == 'PROTECT':
+                if dd_pct < 0.05 and conversion_rate > 0.5 and trend_ok and consecutive_losses == 0:
+                    new_level = 'DEFENSE'
+                    reasons.append("回撤已收敛，先从保护恢复到防守")
+            elif old_level == 'DEFENSE':
+                if dd_pct < 0.05 and conversion_rate > 0.5 and trend_ok and consecutive_losses == 0:
+                    new_level = 'NEUTRAL'
+                    reasons.append("回撤控制，成交改善，恢复中性")
+            elif old_level == 'NEUTRAL':
+                if dd_pct < 0.03 and conversion_rate > 0.6 and recent_pnl_trend == 'up' and consecutive_losses == 0:
+                    new_level = 'ATTACK'
+                    reasons.append("表现稳定向上，切换进攻档位")
         
         # 执行切换
         if new_level != old_level:

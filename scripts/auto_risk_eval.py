@@ -118,18 +118,43 @@ def calculate_metrics(runs: List[Dict]) -> Dict:
         elif pnl is not None:
             break
     
-    # Estimate drawdown from notes
+    # Estimate drawdown (prefer real-time equity vs account peak; fallback to notes)
     dd_pct = 0.0
-    for run in runs:
-        for note in run.get('notes', []):
-            if 'drawdown' in str(note).lower():
-                try:
-                    import re
-                    m = re.search(r'drawdown[:\s]+([\d.]+)%', str(note), re.IGNORECASE)
-                    if m:
-                        dd_pct = max(dd_pct, float(m.group(1)) / 100)
-                except Exception:
-                    pass
+    live_dd_computed = False
+    try:
+        from src.risk.live_equity_fetcher import get_live_equity_from_okx
+        import sqlite3
+
+        eq_live = get_live_equity_from_okx()
+        acc_db = REPORTS_DIR / 'positions.sqlite'
+        peak = 0.0
+        if acc_db.exists():
+            con = sqlite3.connect(str(acc_db))
+            cur = con.cursor()
+            cur.execute("SELECT equity_peak_usdt FROM account_state WHERE k='default'")
+            row = cur.fetchone()
+            con.close()
+            if row and row[0] is not None:
+                peak = float(row[0])
+
+        if eq_live is not None and peak > 0:
+            dd_pct = max(0.0, 1.0 - float(eq_live) / float(peak))
+            live_dd_computed = True
+    except Exception:
+        pass
+
+    # Fallback: parse drawdown from notes only when live method is unavailable
+    if not live_dd_computed:
+        for run in runs:
+            for note in run.get('notes', []):
+                if 'drawdown' in str(note).lower():
+                    try:
+                        import re
+                        m = re.search(r'drawdown[:\s]+([\d.]+)%', str(note), re.IGNORECASE)
+                        if m:
+                            dd_pct = max(dd_pct, float(m.group(1)) / 100)
+                    except Exception:
+                        pass
     
     return {
         'dd_pct': dd_pct,
