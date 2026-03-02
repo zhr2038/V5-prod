@@ -194,8 +194,8 @@ execution:
 
 budget:
   # 实盘测试 - 设置明确的资金限制
-  # 临时提高到30 USDT（实际账户20.29 USDT，代码检测有问题）
-  live_equity_cap_usdt: 30.0  # 临时提高到30 USDT
+  # 升级到130U测试规模
+  live_equity_cap_usdt: 130.0  # 当前小规模实盘上限
 
   # Exchange min-order protection (avoid 51020/minSz failures on small budget)
   exchange_min_notional_enabled: true
@@ -212,7 +212,7 @@ budget:
   min_fills_for_second_stage: 3  # 合理要求
   deadband_multiplier_exceeded: 1.5  # 启用超支惩罚
   deadband_cap: 0.15  # 合理上限
-  action_enabled: false  # 关闭预算硬拦截，避免因转入资金触发误阻断
+  action_enabled: true  # 启用预算硬拦截，超限时禁止继续加仓
   turnover_budget_per_day: null
   cost_budget_bps_per_day: null
 
