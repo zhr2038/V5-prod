@@ -116,17 +116,22 @@ class AlphaEngine:
         orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal('0.35'))
 
         # 注册6因子Alpha策略 (50%资金，主策略)
+        # 根治：不再硬编码权重，统一读取 live 配置，避免“改了配置但策略不生效”
+        cfg_weights = getattr(self.cfg, 'weights', None)
+        alpha_weights = {
+            'f1_mom_5d': float(getattr(cfg_weights, 'f1_mom_5d', 0.15)) if cfg_weights else 0.15,
+            'f2_mom_20d': float(getattr(cfg_weights, 'f2_mom_20d', 0.25)) if cfg_weights else 0.25,
+            'f3_vol_adj_ret': float(getattr(cfg_weights, 'f3_vol_adj_ret_20d', 0.15)) if cfg_weights else 0.15,
+            'f4_volume_expansion': float(getattr(cfg_weights, 'f4_volume_expansion', 0.15)) if cfg_weights else 0.15,
+            'f5_rsi_trend_confirm': float(getattr(cfg_weights, 'f5_rsi_trend_confirm', 0.15)) if cfg_weights else 0.15,
+            'f6_sentiment': 0.15,
+        }
+
         alpha6_strategy = Alpha6FactorStrategy(config={
-            'weights': {
-                'f1_mom_5d': 0.15,
-                'f2_mom_20d': 0.25,
-                'f3_vol_adj_ret': 0.15,
-                'f4_volume_expansion': 0.15,
-                'f5_rsi_trend_confirm': 0.15,
-                'f6_sentiment': 0.15
-            },
+            'weights': alpha_weights,
             'position_size_pct': 0.30,
-            'score_threshold': 0.10
+            # 与组合层最低门槛联动，避免二次门槛叠加导致长期0买入
+            'score_threshold': float(max(0.03, min(0.10, getattr(self.cfg, 'min_score_threshold', 0.05))))
         })
         orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.50'))
 
