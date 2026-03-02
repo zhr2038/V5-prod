@@ -112,7 +112,7 @@ risk:
       dd_0_5:    {max_positions: 5, position_size_pct: 1.0}   # 回撤<5%：正常
       dd_5_10:   {max_positions: 3, position_size_pct: 0.7}   # 回撤5-10%：减仓
       dd_10_15:  {max_positions: 2, position_size_pct: 0.5}   # 回撤10-15%：大减仓
-      dd_15_plus: {max_positions: 0, position_size_pct: 0.0}  # 回撤>15%：清仓
+      dd_15_plus: {max_positions: 1, position_size_pct: 0.15}  # 回撤>15%：保护态探针仓（防长期锁死）
 
 rebalance:
   deadband_sideways: 0.06   # 提高死区，降低震荡反复换仓
