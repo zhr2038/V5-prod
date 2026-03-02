@@ -807,6 +807,72 @@ class V5Pipeline:
                 if notional <= 0:
                     continue
             
+            # Hard budget buy-block: when raw equity hits configured cap, force sell-only.
+            if side == "buy" and bool(getattr(self.cfg.budget, "hard_buy_block_on_cap", False)):
+                try:
+                    cap_raw = getattr(self.cfg.budget, "live_equity_cap_usdt", None)
+                    cap_ratio = float(getattr(self.cfg.budget, "hard_buy_block_cap_ratio", 1.0) or 1.0)
+                    if cap_raw is not None and float(cap_raw) > 0:
+                        hard_cap = float(cap_raw) * cap_ratio
+                        if float(equity_raw) >= float(hard_cap):
+                            if audit:
+                                audit.reject("budget_hard_buy_block")
+                                router_decisions.append(
+                                    {
+                                        "symbol": sym,
+                                        "action": "skip",
+                                        "reason": "budget_hard_buy_block",
+                                        "equity_raw": float(equity_raw),
+                                        "hard_cap": float(hard_cap),
+                                    }
+                                )
+                            continue
+                except Exception:
+                    pass
+
+            # Anti-chase for existing positions: avoid adding too high above own entry and avoid oversized add-ons.
+            if side == "buy" and held is not None and bool(getattr(self.cfg.execution, "anti_chase_enabled", False)):
+                try:
+                    entry_px = float(getattr(held, "avg_px", 0.0) or 0.0)
+                    held_qty = float(getattr(held, "qty", 0.0) or 0.0)
+                    held_value = held_qty * float(px)
+                    premium = (float(px) / entry_px - 1.0) if entry_px > 0 else 0.0
+                    max_premium = float(getattr(self.cfg.execution, "anti_chase_max_entry_premium_pct", 0.015) or 0.015)
+                    max_add_ratio = float(getattr(self.cfg.execution, "anti_chase_max_add_notional_ratio", 0.25) or 0.25)
+
+                    if entry_px > 0 and premium > max_premium:
+                        if audit:
+                            audit.reject("anti_chase_premium")
+                            router_decisions.append(
+                                {
+                                    "symbol": sym,
+                                    "action": "skip",
+                                    "reason": "anti_chase_premium",
+                                    "entry_px": float(entry_px),
+                                    "px": float(px),
+                                    "premium": float(premium),
+                                    "max_premium": float(max_premium),
+                                }
+                            )
+                        continue
+
+                    if held_value > 0 and float(notional) > float(held_value) * float(max_add_ratio):
+                        if audit:
+                            audit.reject("anti_chase_add_size")
+                            router_decisions.append(
+                                {
+                                    "symbol": sym,
+                                    "action": "skip",
+                                    "reason": "anti_chase_add_size",
+                                    "notional": float(notional),
+                                    "held_value": float(held_value),
+                                    "max_add_ratio": float(max_add_ratio),
+                                }
+                            )
+                        continue
+                except Exception:
+                    pass
+
             # Router check: min_notional (base + F3.2 stage-2)
             min_notional = float(self.cfg.budget.min_trade_notional_base)
             if audit and (audit.budget or {}).get("exceeded") and self.cfg.budget.action_enabled:

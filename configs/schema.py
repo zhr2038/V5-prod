@@ -200,6 +200,11 @@ class ExecutionConfig(BaseModel):
     # Hard rule (optional): if a held symbol is absent from current scored list, force CLOSE_LONG.
     force_close_unscored_positions: bool = Field(default=False)
 
+    # Anti-chase controls for existing positions (avoid buying far above own average entry).
+    anti_chase_enabled: bool = Field(default=False)
+    anti_chase_max_entry_premium_pct: float = Field(default=0.015, ge=0, le=1)
+    anti_chase_max_add_notional_ratio: float = Field(default=0.25, ge=0, le=10)
+
     # Ops convenience: allow controlled auto-clear of kill-switch when reconcile/ledger are OK.
     # Default False for safety.
     auto_clear_kill_switch_if_ok: bool = Field(default=False)
@@ -311,6 +316,10 @@ class BudgetConfig(BaseModel):
     # Optional: for live small-budget sampling, cap the equity used by sizing logic.
     # This does NOT change reconcile/accounting; it only caps order sizing.
     live_equity_cap_usdt: Optional[float] = Field(default=None, ge=0)
+
+    # Hard buy block (optional): when raw equity >= cap*ratio, block all buy orders (sell-only).
+    hard_buy_block_on_cap: bool = Field(default=False)
+    hard_buy_block_cap_ratio: float = Field(default=1.0, ge=0.5, le=2.0)
 
     # Trigger metrics (computed from daily trades)
     small_trade_ratio_threshold: float = Field(default=0.6, ge=0, le=1)

@@ -170,6 +170,11 @@ execution:
   # 强规则：持仓若不在本轮评分清单中，强制清仓
   force_close_unscored_positions: true
 
+  # 防追高：已有仓位时，若价格相对持仓均价溢价过高则禁止继续加仓
+  anti_chase_enabled: true
+  anti_chase_max_entry_premium_pct: 0.012
+  anti_chase_max_add_notional_ratio: 0.20
+
   # Ops: allow kill-switch to auto-clear when reconcile+ledger OK (prevents stuck automation)
   auto_clear_kill_switch_if_ok: true
 
@@ -214,7 +219,10 @@ budget:
   min_fills_for_second_stage: 3  # 合理要求
   deadband_multiplier_exceeded: 1.5  # 启用超支惩罚
   deadband_cap: 0.15  # 合理上限
-  action_enabled: true  # 启用预算硬拦截，超限时禁止继续加仓
+  action_enabled: true  # 启用预算动作
+  # 超过预算上限后：硬性禁止买单（只允许卖出）
+  hard_buy_block_on_cap: true
+  hard_buy_block_cap_ratio: 1.0
   turnover_budget_per_day: null
   cost_budget_bps_per_day: null
 
