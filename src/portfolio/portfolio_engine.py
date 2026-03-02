@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, Any
+from pathlib import Path
+import json
 
 import numpy as np
 
@@ -72,6 +74,24 @@ class PortfolioEngine:
             pass
         return None
 
+    def _get_dynamic_max_positions(self) -> Optional[int]:
+        """Read current auto-risk level and return effective max positions cap."""
+        try:
+            p = Path("reports/auto_risk_eval.json")
+            if not p.exists():
+                return None
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            lvl = str(obj.get("current_level", "")).upper()
+            cap_map = {
+                "PROTECT": 1,
+                "DEFENSE": 3,
+                "NEUTRAL": 5,
+                "ATTACK": 8,
+            }
+            return cap_map.get(lvl)
+        except Exception:
+            return None
+
     def allocate(
         self,
         scores: Dict[str, float],
@@ -108,6 +128,13 @@ class PortfolioEngine:
         items = sorted(selection_scores.items(), key=lambda kv: float(kv[1]), reverse=True)
         k = max(1, int(np.ceil(len(items) * float(self.alpha_cfg.long_top_pct))))
         selected = [s for s, score in items[:k] if score >= float(getattr(self.alpha_cfg, "min_score_threshold", 0.0))]
+
+        # Enforce dynamic risk-level position cap (PROTECT/DEFENSE/NEUTRAL/ATTACK)
+        max_pos = self._get_dynamic_max_positions()
+        if max_pos is not None and max_pos >= 0 and len(selected) > max_pos:
+            selected = selected[:max_pos]
+            if audit:
+                audit.add_note(f"AutoRisk position cap applied: max_positions={max_pos}")
 
         # For weight calculation, use original scores (or fused if no original)
         weights_scores = scores if scores else fused_scores
