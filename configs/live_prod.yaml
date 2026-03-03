@@ -131,7 +131,7 @@ execution:
   fee_bps: 6
   slippage_bps: 5
   
-  open_long_cooldown_minutes: 30
+  open_long_cooldown_minutes: 15
   order_state_machine_path: reports/order_state_machine.json
 
   # 追高/入场质量防护
