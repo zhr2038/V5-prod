@@ -83,6 +83,28 @@ def resolve_live_service_unit(ev_cfg: dict) -> str:
     return 'v5-prod.user.service'
 
 
+def find_latest_fused_signals_file(runs_dir: Path, max_age_minutes: int = 90):
+    """Find newest strategy_signals.json under runs/ within freshness window."""
+    try:
+        files = sorted(
+            [p for p in runs_dir.glob('*/strategy_signals.json') if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not files:
+            return None, None
+
+        newest = files[0]
+        age_sec = max(0.0, time.time() - newest.stat().st_mtime)
+        age_min = age_sec / 60.0
+        if age_min > float(max_age_minutes):
+            return None, {'path': str(newest), 'age_min': age_min, 'fresh': False, 'count': len(files)}
+
+        return newest, {'path': str(newest), 'age_min': age_min, 'fresh': True, 'count': len(files)}
+    except Exception:
+        return None, None
+
+
 def load_current_state(cfg=None, config_path: Path = None):
     """Load current market state from V5 reports."""
     try:
@@ -151,40 +173,45 @@ def load_current_state(cfg=None, config_path: Path = None):
         # 1. Try to load FUSED signals from strategy_signals.json (highest priority)
         runs_dir = REPORTS_DIR / 'runs'
         if runs_dir.exists():
-            # Sort by modification time (newest first) instead of name
-            run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], 
-                             key=lambda x: x.stat().st_mtime, reverse=True)
+            run_dirs = [d for d in runs_dir.iterdir() if d.is_dir()]
             logger.info(f"Found {len(run_dirs)} run directories")
-            if run_dirs:
-                latest = run_dirs[0]
-                signals_path = latest / 'strategy_signals.json'
-                logger.info(f"Looking for signals at: {signals_path}")
-                if signals_path.exists():
-                    try:
-                        with open(signals_path) as f:
-                            sig_data = json.load(f)
-                            fused_signals = sig_data.get("fused", {})
-                            logger.info(f"Found {len(fused_signals)} fused signals in file")
-                            if fused_signals:
-                                for sym, data in fused_signals.items():
-                                    if sym not in tradeable_symbols:
-                                        continue
-                                    signals[sym] = SignalState(
-                                        symbol=sym,
-                                        direction=data.get('direction', 'hold'),
-                                        score=data.get('score', 0),
-                                        rank=data.get('rank', 99),
-                                        timestamp_ms=int(datetime.now().timestamp() * 1000)
-                                    )
-                                logger.info(f"Loaded {len(signals)} FUSED signals from {latest.name} (tradeable filtered)")
-                            else:
-                                logger.warning("fused_signals is empty")
-                    except Exception as e:
-                        logger.error(f"Could not load fused signals: {e}")
-                        import traceback
-                        traceback.print_exc()
+
+            ev_cfg = cfg.get('event_driven', {}) if isinstance(cfg, dict) else getattr(cfg, 'event_driven', None)
+            max_age = ev_cfg.get('fused_signal_max_age_minutes', 90) if isinstance(ev_cfg, dict) else getattr(ev_cfg, 'fused_signal_max_age_minutes', 90)
+            signals_path, meta = find_latest_fused_signals_file(runs_dir, max_age_minutes=int(max_age or 90))
+
+            if signals_path is not None:
+                logger.info(f"Using fused signals file: {signals_path} (age={meta.get('age_min', 0):.1f}m, files={meta.get('count', 0)})")
+                try:
+                    with open(signals_path) as f:
+                        sig_data = json.load(f)
+                        fused_signals = sig_data.get("fused", {})
+                        logger.info(f"Found {len(fused_signals)} fused signals in file")
+                        if fused_signals:
+                            for sym, data in fused_signals.items():
+                                if sym not in tradeable_symbols:
+                                    continue
+                                signals[sym] = SignalState(
+                                    symbol=sym,
+                                    direction=data.get('direction', 'hold'),
+                                    score=data.get('score', 0),
+                                    rank=data.get('rank', 99),
+                                    timestamp_ms=int(datetime.now().timestamp() * 1000)
+                                )
+                            logger.info(f"Loaded {len(signals)} FUSED signals (tradeable filtered)")
+                        else:
+                            logger.warning("fused_signals is empty")
+                except Exception as e:
+                    logger.error(f"Could not load fused signals: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                if meta and meta.get('path'):
+                    logger.warning(
+                        f"No fresh fused signals file (latest stale: {meta.get('path')}, age={meta.get('age_min', 0):.1f}m > {int(max_age or 90)}m)"
+                    )
                 else:
-                    logger.warning(f"Signals file not found: {signals_path}")
+                    logger.warning("No strategy_signals.json found under runs/")
         else:
             logger.warning(f"Runs directory not found: {runs_dir}")
         

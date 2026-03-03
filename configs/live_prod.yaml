@@ -191,4 +191,5 @@ event_driven:
   breakout_lookback_hours: 24
   breakout_threshold_pct: 0.3
   heartbeat_interval_hours: 4
+  fused_signal_max_age_minutes: 90
   live_service_unit: v5-prod.user.service
