@@ -2549,16 +2549,19 @@ def api_decision_audit():
         except Exception:
             pass
 
-        # Recent fill context (avoid confusion between "this run" and "latest successful trade")
+        # Recent fill context + latest run with actual order attempts
         recent_fill_summary = {
             'count_60m': 0,
             'count_24h': 0,
             'latest_fill': None,
         }
+        latest_ordered_run_summary = None
         try:
             conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
+
+                # 1) Recent fills window
                 cur.execute(
                     """
                     SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
@@ -2568,11 +2571,10 @@ def api_decision_audit():
                     LIMIT 200
                     """
                 )
-                rows = cur.fetchall()
-                conn.close()
+                fill_rows = cur.fetchall()
 
                 now_ms = int(datetime.now().timestamp() * 1000)
-                for i, r in enumerate(rows):
+                for i, r in enumerate(fill_rows):
                     ts_raw = int(r[0] or 0)
                     ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
                     age_ms = max(0, now_ms - ts_ms)
@@ -2591,6 +2593,51 @@ def api_decision_audit():
                             'notional_usdt': float(r[5] or 0.0),
                             'ord_id': str(r[6] or ''),
                         }
+
+                # 2) Latest run that has at least one order row (attempt)
+                cur.execute(
+                    """
+                    SELECT run_id, MAX(created_ts) AS last_ts
+                    FROM orders
+                    GROUP BY run_id
+                    ORDER BY last_ts DESC
+                    LIMIT 20
+                    """
+                )
+                run_rows = cur.fetchall()
+                for rr in run_rows:
+                    cand_run = str(rr[0] or '')
+                    if not cand_run:
+                        continue
+                    cur.execute(
+                        """
+                        SELECT
+                          COUNT(*) AS total,
+                          SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) AS filled,
+                          SUM(CASE WHEN state='REJECTED' THEN 1 ELSE 0 END) AS rejected,
+                          SUM(CASE WHEN state IN ('OPEN','PARTIAL','SENT','ACK','UNKNOWN') THEN 1 ELSE 0 END) AS open_like,
+                          SUM(CASE WHEN state IN ('CANCELED','CANCELLED') THEN 1 ELSE 0 END) AS cancelled
+                        FROM orders
+                        WHERE run_id = ?
+                        """,
+                        (cand_run,),
+                    )
+                    s = cur.fetchone() or (0, 0, 0, 0, 0)
+                    total = int(s[0] or 0)
+                    if total <= 0:
+                        continue
+                    latest_ordered_run_summary = {
+                        'run_id': cand_run,
+                        'total': total,
+                        'filled': int(s[1] or 0),
+                        'rejected': int(s[2] or 0),
+                        'open_or_partial': int(s[3] or 0),
+                        'cancelled': int(s[4] or 0),
+                        'last_ts': int(rr[1] or 0),
+                    }
+                    break
+
+                conn.close()
         except Exception:
             pass
 
@@ -2693,6 +2740,7 @@ def api_decision_audit():
                 'note': 'execution_summary/run_orders 仅统计本次run；recent_fill_summary统计跨run最近成交。',
             },
             'recent_fill_summary': recent_fill_summary,
+            'latest_ordered_run_summary': latest_ordered_run_summary,
             'run_orders': run_orders[:30],
             'notes': audit_data.get('notes', [])[:12]
         })
