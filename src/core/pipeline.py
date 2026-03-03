@@ -513,8 +513,12 @@ class V5Pipeline:
                     audit.add_note(f"Profit taking: {p.symbol} {reason}")
                 continue  # Skip other exit checks for this symbol
             
-            # 2nd priority: 固定比例止损
-            should_stop, stop_price, loss_pct = self.fixed_stop_loss.should_stop_loss(
+            # 2nd priority: 多级动态止损（取代固定止损，更智能）
+            # 确保持仓已注册到动态止损管理器
+            if p.symbol not in self.stop_loss_manager.positions:
+                self.stop_loss_manager.register_position(p.symbol, float(p.avg_px) if float(getattr(p, 'avg_px', 0)) > 0 else current_price)
+            
+            should_stop, stop_price, stop_type, profit_pct = self.stop_loss_manager.evaluate_stop(
                 p.symbol, current_price
             )
             
@@ -527,9 +531,35 @@ class V5Pipeline:
                         notional_usdt=float(p.qty) * current_price,
                         signal_price=current_price,
                         meta={
+                            "reason": f"dynamic_stop_{stop_type}",
+                            "stop_price": stop_price,
+                            "profit_pct": profit_pct,
+                            "stop_type": stop_type,
+                        },
+                    )
+                )
+                profit_symbols.add(p.symbol)  # Also skip rank exit
+                if audit:
+                    audit.add_note(f"Dynamic stop: {p.symbol} {stop_type}, profit {profit_pct*100:.1f}%")
+                continue  # Skip rank exit for this symbol
+            
+            # 3rd priority: 固定止损（备用，当动态止损未触发但固定止损条件满足时）
+            should_stop_fixed, stop_price_fixed, loss_pct = self.fixed_stop_loss.should_stop_loss(
+                p.symbol, current_price
+            )
+            
+            if should_stop_fixed and float(p.qty) > 0:
+                fixed_stop_orders.append(
+                    Order(
+                        symbol=p.symbol,
+                        side="sell",
+                        intent="CLOSE_LONG",
+                        notional_usdt=float(p.qty) * current_price,
+                        signal_price=current_price,
+                        meta={
                             "reason": "fixed_stop_loss",
                             "entry_price": self.fixed_stop_loss.entry_prices.get(p.symbol, p.avg_px),
-                            "stop_price": stop_price,
+                            "stop_price": stop_price_fixed,
                             "loss_pct": loss_pct,
                         },
                     )
@@ -585,10 +615,11 @@ class V5Pipeline:
         # Merge all exit orders: profit first, then stop, then rank, then policy
         exit_orders = profit_orders + fixed_stop_orders + ranking_exit_orders + exit_orders
 
-        # Deduplicate: keep only one exit per symbol per round, priority: sell_all > fixed_stop > atr > partial
+        # Deduplicate: keep only one exit per symbol per round, priority: sell_all > dynamic_stop > fixed_stop > atr > partial
         if exit_orders:
             prio_map = {
                 'profit_taking_stop_loss_hit': 100,
+                'dynamic_stop': 95,  # 动态止损优先级高于固定止损
                 'fixed_stop_loss': 90,
                 'atr_trailing': 80,
                 'regime_exit': 70,
