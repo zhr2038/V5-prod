@@ -423,6 +423,33 @@ class V5Pipeline:
             regime_mult=regime.multiplier,
             audit=audit
         )
+        
+        # Filter out symbols that don't meet OKX minSz requirement
+        # to avoid DUST_SKIP rejection at execution time
+        from src.data.okx_instruments import OKXSpotInstrumentsCache
+        instrument_cache = OKXSpotInstrumentsCache()
+        filtered_selected = []
+        skipped_for_minsz = []
+        for sym in (portfolio.selected or []):
+            inst_id = sym.replace("/", "-")
+            spec = instrument_cache.get_spec(inst_id)
+            px = float(prices.get(sym, 0.0) or 0.0)
+            if spec and px > 0:
+                weight = portfolio.target_weights.get(sym, 0)
+                notional = weight * float(equity_raw)
+                min_sz = float(spec.min_sz or 0)
+                est_qty = notional / px if px > 0 else 0
+                if min_sz > 0 and est_qty < min_sz:
+                    skipped_for_minsz.append(f"{sym}: est_qty={est_qty:.4f} < minSz={min_sz}")
+                    continue
+            filtered_selected.append(sym)
+        
+        if skipped_for_minsz and audit:
+            audit.add_note(f"minSz_skip: {', '.join(skipped_for_minsz)}")
+        
+        # Update portfolio.selected with filtered list
+        portfolio.selected = filtered_selected
+        
         target0 = dict(portfolio.target_weights or {})
         if audit:
             audit.targets_pre_risk = target0
