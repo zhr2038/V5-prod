@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 from pathlib import Path
+import os
 import json
 import numpy as np
 
@@ -72,28 +73,78 @@ class AlphaEngine:
         if self.use_multi_strategy and MULTI_STRATEGY_AVAILABLE:
             self._init_multi_strategy()
 
+    def _resolve_total_capital_usdt(self) -> float:
+        """Resolve dynamic capital base for multi-strategy sizing.
+
+        Priority:
+        1) ENV override: V5_MULTI_STRATEGY_CAP_USDT
+        2) reports/equity_validation.json (okx_total_eq / calculated_total_eq)
+        3) legacy config fields (for compatibility)
+        4) fallback 20.0
+        """
+        # 1) ENV override
+        env_cap = os.getenv('V5_MULTI_STRATEGY_CAP_USDT', '').strip()
+        if env_cap:
+            try:
+                v = float(env_cap)
+                if v > 0:
+                    return v
+            except Exception:
+                pass
+
+        # 2) live equity snapshot
+        try:
+            p = Path('reports/equity_validation.json')
+            if p.exists():
+                obj = json.loads(p.read_text(encoding='utf-8'))
+                for key in ('okx_total_eq', 'calculated_total_eq'):
+                    v = obj.get(key)
+                    if v is not None:
+                        v = float(v)
+                        if v > 0:
+                            return v
+        except Exception:
+            pass
+
+        # 3) compatibility paths
+        try:
+            if hasattr(self.cfg, 'live_equity_cap_usdt') and self.cfg.live_equity_cap_usdt:
+                v = float(self.cfg.live_equity_cap_usdt)
+                if v > 0:
+                    return v
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self.cfg, 'budget') and hasattr(self.cfg.budget, 'live_equity_cap_usdt'):
+                v = getattr(self.cfg.budget, 'live_equity_cap_usdt', None)
+                if v is not None and float(v) > 0:
+                    return float(v)
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self.cfg, 'account') and hasattr(self.cfg.account, 'live_equity_cap_usdt'):
+                v = getattr(self.cfg.account, 'live_equity_cap_usdt', None)
+                if v is not None and float(v) > 0:
+                    return float(v)
+        except Exception:
+            pass
+
+        return 20.0
+
     def _init_multi_strategy(self):
         """初始化多策略系统 (趋势跟踪 + 均值回归 + 6因子Alpha)"""
         from decimal import Decimal
         from src.strategy.multi_strategy_system import Alpha6FactorStrategy
 
-        # 从配置获取资金限制 - 修复：尝试多种方式获取 live_equity_cap_usdt
-        total_capital = Decimal('20.0')  # 默认20 USDT
-
-        # 尝试从 AlphaConfig 读取（旧方式，保持兼容）
-        if hasattr(self.cfg, 'live_equity_cap_usdt') and self.cfg.live_equity_cap_usdt:
-            total_capital = Decimal(str(self.cfg.live_equity_cap_usdt))
-        # 尝试从 budget 配置读取（正确路径）
-        elif hasattr(self.cfg, 'budget') and hasattr(self.cfg.budget, 'live_equity_cap_usdt'):
-            if self.cfg.budget.live_equity_cap_usdt:
-                total_capital = Decimal(str(self.cfg.budget.live_equity_cap_usdt))
-        # 尝试从 account 配置读取（备选路径）
-        elif hasattr(self.cfg, 'account') and hasattr(self.cfg.account, 'live_equity_cap_usdt'):
-            if self.cfg.account.live_equity_cap_usdt:
-                total_capital = Decimal(str(self.cfg.account.live_equity_cap_usdt))
+        # 动态资金基数：优先实时权益，不再固定20U
+        cap_usdt = self._resolve_total_capital_usdt()
+        total_capital = Decimal(str(cap_usdt))
 
         # 创建策略编排器
         orchestrator = StrategyOrchestrator(total_capital=total_capital)
+        print(f"[AlphaEngine] 多策略资金基数: {float(total_capital):.4f} USDT (dynamic)")
 
         # 注册趋势跟踪策略 (15%资金，降低熊市噪声影响)
         trend_strategy = TrendFollowingStrategy(config={
