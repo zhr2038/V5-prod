@@ -174,3 +174,21 @@ backtest:
   min_fills_global: 30
   min_fills_bucket: 10
   max_stats_age_days: 7
+
+# Event-driven trigger (production)
+event_driven:
+  enabled: true
+  active_mode: true
+  force_full_run: false
+  force_full_min_interval_minutes: 12
+  check_interval_minutes: 15
+  global_cooldown_p2_minutes: 30
+  symbol_cooldown_minutes: 60
+  signal_confirmation_periods: 3
+  score_change_threshold: 0.45
+  rank_jump_threshold: 5
+  breakout_enabled: true
+  breakout_lookback_hours: 24
+  breakout_threshold_pct: 0.5
+  heartbeat_interval_hours: 4
+  live_service_unit: v5-prod.user.service
