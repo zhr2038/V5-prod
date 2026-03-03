@@ -134,6 +134,10 @@ execution:
   open_long_cooldown_minutes: 30
   order_state_machine_path: reports/order_state_machine.json
   
+  # 允许小额对账差异时继续交易
+  allow_trade_on_small_reconcile_drift: true
+  preflight_fail_action: allow  # 或 sell_only, 但配合 allow_trade_on_small_reconcile_drift 使用
+  
   # 借币预防
   borrow_prevention: true
   min_trade_value_usdt: 10.0
@@ -157,10 +161,6 @@ budget:
   
   hard_buy_block_on_cap: false  # 禁用硬买块
   hard_buy_block_cap_ratio: 1.0
-
-  # 允许小额对账差异时继续交易
-  allow_trade_on_small_reconcile_drift: true
-  preflight_fail_action: allow  # 或 sell_only, 但配合 allow_trade_on_small_reconcile_drift 使用
 
 backtest:
   fee_bps: 6

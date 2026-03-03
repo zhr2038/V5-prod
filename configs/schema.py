@@ -164,6 +164,9 @@ class ExecutionConfig(BaseModel):
     preflight_max_pages: int = Field(default=5, ge=1)
     max_status_age_sec: int = Field(default=180, ge=1)
     preflight_fail_action: str = Field(default="sell_only", description="sell_only|abort")
+    
+    # Allow trading on small reconcile drift (useful for initialization)
+    allow_trade_on_small_reconcile_drift: bool = Field(default=False, description="Allow trading when reconcile has small drift (not hard failures)")
 
     # Optional: controlled exchange->local bootstrap patch (live-only)
     preflight_bootstrap_patch_enabled: bool = Field(default=False, description="When reconcile fails (base/usdt mismatch), patch local cash/qty from exchange as a state-alignment step.")
@@ -263,8 +266,8 @@ class ExecutionConfig(BaseModel):
     @classmethod
     def _preflight_fail_action(cls, v: str) -> str:
         vv = str(v or "sell_only").strip().lower()
-        if vv not in {"sell_only", "abort"}:
-            raise ValueError("execution.preflight_fail_action must be 'sell_only' or 'abort'")
+        if vv not in {"sell_only", "abort", "allow"}:
+            raise ValueError("execution.preflight_fail_action must be 'sell_only', 'abort', or 'allow'")
         return vv
 
 

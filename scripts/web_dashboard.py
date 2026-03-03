@@ -51,7 +51,40 @@ def add_no_cache_headers(resp):
 # 配置路径
 WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
 REPORTS_DIR = WORKSPACE / 'reports'
-CONFIG_PATH = WORKSPACE / 'configs/live_20u_real.yaml'
+
+
+def _resolve_config_path() -> Path:
+    """Resolve config path from env V5_CONFIG (supports relative path)."""
+    raw = os.getenv('V5_CONFIG', 'configs/live_20u_real.yaml')
+    p = Path(raw)
+    if not p.is_absolute():
+        p = WORKSPACE / p
+    return p
+
+
+CONFIG_PATH = _resolve_config_path()
+
+# 兼容新旧timer名称（生产与20u）
+TIMER_CANDIDATES = ['v5-prod.user.timer', 'v5-live-20u.user.timer']
+
+
+def _pick_timer_name() -> str:
+    """Pick active/enabled timer name, fallback to production timer."""
+    for name in TIMER_CANDIDATES:
+        try:
+            r = subprocess.run(['systemctl', '--user', 'is-active', name], capture_output=True, text=True, timeout=3)
+            if r.returncode == 0:
+                return name
+        except Exception:
+            pass
+    for name in TIMER_CANDIDATES:
+        try:
+            r = subprocess.run(['systemctl', '--user', 'is-enabled', name], capture_output=True, text=True, timeout=3)
+            if r.returncode == 0:
+                return name
+        except Exception:
+            pass
+    return TIMER_CANDIDATES[0]
 
 # 排除测试/异常数据
 EXCLUDED_SYMBOLS = ['PEPE-USDT', 'MERL-USDT', 'SPACE-USDT']
@@ -943,14 +976,16 @@ def api_status():
         
         # 检查timer状态
         import subprocess
+        timer_name = _pick_timer_name()
         result = subprocess.run(
-            ['systemctl', '--user', 'status', 'v5-live-20u.user.timer'],
+            ['systemctl', '--user', 'status', timer_name],
             capture_output=True, text=True
         )
         timer_active = 'active' in result.stdout.lower()
         
         return jsonify({
             'timer_active': timer_active,
+            'timer_name': timer_name,
             'mode': config.get('execution', {}).get('mode', 'unknown'),
             'dry_run': config.get('execution', {}).get('dry_run', True),
             'equity_cap': config.get('budget', {}).get('live_equity_cap_usdt', 0),
@@ -1316,9 +1351,10 @@ def api_timer():
         import re
         from datetime import datetime, timedelta
         
-        # 获取timer状态 - 使用status命令获取更准确的信息
+        timer_name = _pick_timer_name()
+        # 获取timer状态 - 使用show命令获取更准确的信息
         result = subprocess.run(
-            ['systemctl', '--user', 'show', 'v5-live-20u.user.timer', 
+            ['systemctl', '--user', 'show', timer_name,
              '--property=OnCalendar', '--property=Trigger'],
             capture_output=True, text=True
         )
@@ -1359,12 +1395,12 @@ def api_timer():
         # 如果上面的方法失败，尝试使用list-timers
         if not next_run:
             result2 = subprocess.run(
-                ['systemctl', '--user', 'list-timers', 'v5-live-20u.user.timer', '--no-pager'],
+                ['systemctl', '--user', 'list-timers', timer_name, '--no-pager'],
                 capture_output=True, text=True
             )
             
             for line in result2.stdout.split('\n'):
-                if 'v5-live-20u.user.timer' in line:
+                if timer_name in line:
                     # 格式: "Tue 2026-02-24 14:52:00 CST  1min 4s left ..."
                     # 或: "n/a  n/a  ..."
                     match = re.search(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', line)
@@ -1379,7 +1415,7 @@ def api_timer():
                             countdown_seconds = max(0, int(diff.total_seconds()))
                             
                             # 尝试解析LEFT列获取倒计时
-                            left_match = re.search(r'\d{2}:\d{2}:\d{2}\s+([\d\w\s]+?)\s+\w{3}\s+v5-live', line)
+                            left_match = re.search(r'\d{2}:\d{2}:\d{2}\s+([\d\w\s]+?)\s+\w{3}\s+', line)
                             if left_match:
                                 left_str = left_match.group(1).strip()
                                 # 解析类似 "1min 4s" 或 "45s" 或 "1h 30min"
@@ -1398,7 +1434,7 @@ def api_timer():
                     break
         
         return jsonify({
-            'timer_name': 'v5-live-20u.user.timer',
+            'timer_name': timer_name,
             'next_run': next_run,
             'countdown_seconds': countdown_seconds,
             'interval_minutes': interval_minutes,
@@ -1407,7 +1443,7 @@ def api_timer():
     except Exception as e:
         import traceback
         return jsonify({
-            'timer_name': 'v5-live-20u.user.timer',
+            'timer_name': _pick_timer_name(),
             'next_run': None,
             'countdown_seconds': 0,
             'interval_minutes': 120,
@@ -1423,9 +1459,10 @@ def api_timers():
         import subprocess
         import re
         
-        # 定义要监控的timer
+        # 定义要监控的timer（兼容新旧交易timer）
+        primary_timer = _pick_timer_name()
         timer_configs = [
-            {'name': 'v5-live-20u.user.timer', 'desc': '实盘交易执行', 'icon': '🔄'},
+            {'name': primary_timer, 'desc': '实盘交易执行', 'icon': '🔄'},
             {'name': 'v5-reconcile.timer', 'desc': '对账状态刷新', 'icon': '🔍'},
             {'name': 'v5-daily-ml-training.timer', 'desc': 'ML模型训练', 'icon': '🧠'},
             {'name': 'v5-reflection-agent.timer', 'desc': '交易后分析', 'icon': '📊'},
@@ -2472,16 +2509,17 @@ def api_health():
         # 1. 检查定时任务
         try:
             import subprocess
+            timer_name = _pick_timer_name()
             result = subprocess.run(
-                ['systemctl', '--user', 'is-active', 'v5-live-20u.user.timer'],
+                ['systemctl', '--user', 'is-active', timer_name],
                 capture_output=True, text=True, timeout=5
             )
             timer_active = result.returncode == 0
             
             if timer_active:
-                checks.append({'name': '定时任务', 'status': 'healthy', 'detail': 'v5-live-20u运行中'})
+                checks.append({'name': '定时任务', 'status': 'healthy', 'detail': f'{timer_name}运行中'})
             else:
-                checks.append({'name': '定时任务', 'status': 'critical', 'detail': 'v5-live-20u未运行'})
+                checks.append({'name': '定时任务', 'status': 'critical', 'detail': f'{timer_name}未运行'})
                 overall_status = 'critical'
         except Exception as e:
             checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(e)})
