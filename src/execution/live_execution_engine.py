@@ -270,6 +270,48 @@ class LiveExecutionEngine:
         }
         return make_decision_hash(payload)
 
+    def _check_open_long_entry_guard(self, o: Order, *, inst_id: str, tob: Optional[Dict[str, Any]]) -> None:
+        """Guard NEW long entries against chasing and excessive microstructure cost."""
+        if not bool(getattr(self.cfg, "open_long_entry_guard_enabled", False)):
+            return
+        if str(getattr(o, "side", "")).lower() != "buy":
+            return
+        if str(getattr(o, "intent", "")).upper() != "OPEN_LONG":
+            return
+
+        signal_px = float(getattr(o, "signal_price", 0.0) or 0.0)
+        if signal_px <= 0:
+            return
+
+        d = tob or {}
+        ask = float(d.get("ask") or 0.0)
+        bid = float(d.get("bid") or 0.0)
+        mid = float(d.get("mid") or 0.0)
+        ref_px = ask if ask > 0 else (mid if mid > 0 else 0.0)
+
+        if ref_px <= 0:
+            fail_open = bool(getattr(self.cfg, "open_long_entry_guard_fail_open", True))
+            if fail_open:
+                log.warning("ENTRY_GUARD skip (no top-of-book): %s", inst_id)
+                return
+            raise ValueError(f"ENTRY_GUARD_NO_TOB: {inst_id}")
+
+        max_premium = float(getattr(self.cfg, "open_long_max_signal_premium_pct", 0.006) or 0.006)
+        premium = float(ref_px / signal_px - 1.0)
+        if premium > max_premium:
+            raise ValueError(
+                f"ENTRY_GUARD_PREMIUM: {inst_id} ask_or_mid={ref_px:.8f} signal={signal_px:.8f} "
+                f"premium={premium:.4%} > max={max_premium:.4%}"
+            )
+
+        if bid > 0 and ask > 0 and mid > 0:
+            spread_bps = float((ask - bid) / mid * 10000.0)
+            max_spread_bps = float(getattr(self.cfg, "open_long_max_spread_bps", 35.0) or 35.0)
+            if spread_bps > max_spread_bps:
+                raise ValueError(
+                    f"ENTRY_GUARD_SPREAD: {inst_id} spread_bps={spread_bps:.2f} > max={max_spread_bps:.2f}"
+                )
+
     def _build_place_payload(self, o: Order, *, inst_id: str, cl_ord_id: str) -> Dict[str, Any]:
         # Minimal market order payload.
         side = str(o.side)
@@ -606,9 +648,11 @@ class LiveExecutionEngine:
                     return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         try:
-            payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
-            # Best-effort mid at submit for slippage attribution (do not send to exchange).
+            # Best-effort top-of-book at submit time for entry guard + slippage attribution.
             tob = _public_mid_at_submit(inst_id=inst_id, timeout_sec=2.0)
+            self._check_open_long_entry_guard(o, inst_id=inst_id, tob=tob)
+
+            payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
             req_store = dict(payload)
             if tob:
                 req_store["_meta"] = {"mid_px_at_submit": tob.get("mid"), "bid": tob.get("bid"), "ask": tob.get("ask"), "ts_ms": tob.get("ts_ms")}

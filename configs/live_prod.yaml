@@ -133,6 +133,15 @@ execution:
   
   open_long_cooldown_minutes: 30
   order_state_machine_path: reports/order_state_machine.json
+
+  # 追高/入场质量防护
+  anti_chase_enabled: true
+  anti_chase_max_entry_premium_pct: 0.012
+  anti_chase_max_add_notional_ratio: 0.20
+  open_long_entry_guard_enabled: true
+  open_long_max_signal_premium_pct: 0.006   # 新开仓时，实时ask相对信号价最大溢价0.6%
+  open_long_max_spread_bps: 35               # 点差过大不追单
+  open_long_entry_guard_fail_open: true      # 盘口数据偶发不可用时不中断主流程
   
   # 允许小额对账差异时继续交易
   allow_trade_on_small_reconcile_drift: true

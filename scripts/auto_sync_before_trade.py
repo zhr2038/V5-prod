@@ -279,16 +279,19 @@ def main():
             reconcile_status_path.write_text(json.dumps(reconcile_status, indent=2))
             logger.info("✅ Updated reconcile status to OK")
             
-            # Clear kill switch
+            # Clear kill switch only when it is NOT a manual lock.
             kill_switch_path = Path('reports/kill_switch.json')
             if kill_switch_path.exists():
                 ks = json.loads(kill_switch_path.read_text())
                 if ks.get('enabled'):
-                    ks['enabled'] = False
-                    ks['auto_sync_cleared'] = True
-                    ks['auto_sync_ts_ms'] = int(time.time() * 1000)
-                    kill_switch_path.write_text(json.dumps(ks, indent=2))
-                    logger.info("✅ Kill switch disabled by auto-sync")
+                    if bool(ks.get('manual')):
+                        logger.info("ℹ️ Manual kill switch detected, keep enabled")
+                    else:
+                        ks['enabled'] = False
+                        ks['auto_sync_cleared'] = True
+                        ks['auto_sync_ts_ms'] = int(time.time() * 1000)
+                        kill_switch_path.write_text(json.dumps(ks, indent=2))
+                        logger.info("✅ Kill switch disabled by auto-sync")
             
             return 0
                 

@@ -210,6 +210,16 @@ class ExecutionConfig(BaseModel):
     anti_chase_max_entry_premium_pct: float = Field(default=0.015, ge=0, le=1)
     anti_chase_max_add_notional_ratio: float = Field(default=0.25, ge=0, le=10)
 
+    # Entry guard for NEW OPEN_LONG orders.
+    # Uses real-time top-of-book (ask/bid) vs signal_price to avoid chasing delayed signals.
+    open_long_entry_guard_enabled: bool = Field(default=False)
+    open_long_max_signal_premium_pct: float = Field(default=0.006, ge=0, le=1)
+    open_long_max_spread_bps: float = Field(default=35.0, ge=0, le=10000)
+    open_long_entry_guard_fail_open: bool = Field(
+        default=True,
+        description="If top-of-book is unavailable, skip guard (true) or reject OPEN_LONG (false)",
+    )
+
     # Require fused strategy signal file for buy decisions. If missing, block buy orders.
     require_fused_signals_for_buy: bool = Field(default=False)
 
