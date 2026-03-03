@@ -1,0 +1,172 @@
+# V5 正式上线配置
+# 从20U小资金测试切换到正常规模交易
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  api_key: ${EXCHANGE_API_KEY}
+  api_secret: ${EXCHANGE_API_SECRET}
+  passphrase: ${EXCHANGE_PASSPHRASE}
+  testnet: false
+
+universe:
+  enabled: true
+  use_universe_symbols: true
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 3600
+
+  # 币池门槛 - 更宽松的优质币池
+  top_n_market_cap: 50
+  min_24h_quote_volume_usdt: 5000000
+  max_spread_bps: 30
+  
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+  
+  refine_with_single_ticker: false
+  refine_single_ticker_max_candidates: 100
+  refine_single_ticker_sleep_sec: 0.02
+  
+  exclude_symbols:
+    - PAXG/USDT
+    - XAUT/USDT
+    - USDT/USDT
+    - USDC/USDT
+    - TUSD/USDT
+    - DAI/USDT
+    - PEPE/USDT
+    - SHIB/USDT
+    - FLOKI/USDT
+    - BONK/USDT
+    - DOGE/USDT
+    - TRX/USDT
+
+alpha:
+  long_top_pct: 0.25  # 选前25%
+  min_score_threshold: 0.05
+  
+  weights:
+    f1_mom_5d: 0.20
+    f2_mom_20d: 0.30
+    f3_vol_adj_ret_20d: 0.25
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.10
+  
+  dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
+  dynamic_weights_by_regime_enabled: true
+  use_multi_strategy: true
+
+regime:
+  use_ensemble: true
+  use_hmm: true
+  hmm_weight: 0.35
+  funding_weight: 0.40
+  rss_weight: 0.25
+  
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  
+  pos_mult_trending: 1.2
+  pos_mult_sideways: 0.7
+  pos_mult_risk_off: 0.0
+  
+  sentiment_regime_override_enabled: true
+  sentiment_riskoff_relax_threshold: 0.55
+  sentiment_riskoff_harden_threshold: -0.65
+  ma_gap_relax_threshold: 0.03
+
+risk:
+  # 正式上线：放宽单币限制，允许多币分散
+  max_single_weight: 0.25  # 单币最多25%
+  max_gross_exposure: 1.0
+  # 取消单币硬限制，改由AutoRisk动态控制
+  max_positions_override: null
+  drawdown_trigger: 0.15  # 15%回撤触发保护
+  drawdown_delever: 0.60
+  
+  auto_risk_guard:
+    enabled: true
+    max_positions_by_regime:
+      trending: 8    # 趋势行情：最多8个币
+      sideways: 5    # 震荡行情：最多5个币
+      risk_off: 0    # RiskOff：空仓
+    drawdown_adjustment:
+      enabled: true
+      dd_0_5:    {max_positions: 8, position_size_pct: 1.0}
+      dd_5_10:   {max_positions: 5, position_size_pct: 0.7}
+      dd_10_15:  {max_positions: 3, position_size_pct: 0.5}
+      dd_15_plus: {max_positions: 1, position_size_pct: 0.15}
+
+rebalance:
+  deadband_sideways: 0.06
+  deadband_trending: 0.05
+  deadband_riskoff: 0.07
+  new_position_deadband_multiplier: 1.0
+  new_position_weight_eps: 0.001
+  close_only_deadband_multiplier: 0.25
+  close_only_weight_eps: 0.001
+
+execution:
+  mode: live
+  dry_run: false
+  order_store_path: reports/orders.sqlite
+  kill_switch_path: reports/kill_switch.json
+  reconcile_status_path: reports/reconcile_status.json
+  okx_exp_time_ms: 1500
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+  
+  split_orders: 3
+  split_interval_sec: 3.0
+  max_hourly_volume_pct: 0.05
+  slippage_db_path: reports/slippage.sqlite
+  fee_bps: 6
+  slippage_bps: 5
+  
+  open_long_cooldown_minutes: 30
+  order_state_machine_path: reports/order_state_machine.json
+  
+  # 借币预防
+  borrow_prevention: true
+  min_trade_value_usdt: 10.0
+  max_fee_ratio: 0.05
+  check_fee_currency_balance: true
+  high_risk_blacklist_path: configs/borrow_prevention_rules.json
+
+budget:
+  # 正式上线：取消资金上限限制
+  # 只保留监控功能，不限制交易
+  live_equity_cap_usdt: null  # 无上限
+  action_enabled: false  # 禁用预算限制动作（仅监控）
+  
+  exchange_min_notional_enabled: true
+  exchange_min_notional_slack_multiplier: 1.05
+  
+  min_trade_notional_base: 10.0
+  min_trade_notional_multiplier_exceeded: 1.5
+  min_trade_notional_cap_abs: 100.0
+  min_trade_notional_cap_equity_ratio: 0.03
+  
+  hard_buy_block_on_cap: false  # 禁用硬买块
+  hard_buy_block_cap_ratio: 1.0
+
+backtest:
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  cost_model: calibrated
+  cost_stats_dir: reports/cost_stats
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 30
+  min_fills_bucket: 10
+  max_stats_age_days: 7
