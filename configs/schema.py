@@ -82,6 +82,10 @@ class AlphaConfig(BaseModel):
     # 最低分阈值：避免买入负分币种
     min_score_threshold: float = Field(default=0.0, description="Minimum alpha score required to enter a position (0=disabled)")
 
+    # When fused signals are available, use fused scores for weight sizing too
+    # (not only for symbol selection). This avoids selection/weighting mismatch.
+    use_fused_score_for_weighting: bool = Field(default=True)
+
     # Research/ops: optionally override weights by regime from a JSON file.
     dynamic_weights_by_regime_path: Optional[str] = Field(default=None, description="Path to reports/alpha_dynamic_weights_by_regime.json")
     dynamic_weights_by_regime_enabled: bool = Field(default=False)

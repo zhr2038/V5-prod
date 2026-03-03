@@ -150,8 +150,16 @@ class PortfolioEngine:
             if audit:
                 audit.add_note(f"AutoRisk position cap applied: max_positions={max_pos}")
 
-        # For weight calculation, use original scores (or fused if no original)
-        weights_scores = scores if scores else fused_scores
+        # For weight calculation:
+        # - default: use fused scores when fused selection is active (to keep selection/sizing consistent)
+        # - fallback: use original alpha scores
+        use_fused_for_weighting = bool(getattr(self.alpha_cfg, 'use_fused_score_for_weighting', True))
+        if fused_scores and use_fused_for_weighting:
+            weights_scores = fused_scores
+            if audit:
+                audit.add_note("Using fused scores for weighting")
+        else:
+            weights_scores = scores if scores else fused_scores
         
         # Handle case where selected symbols may not be in weights_scores
         # (e.g., fused signals include symbols not in alpha scores)
