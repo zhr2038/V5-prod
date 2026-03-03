@@ -571,15 +571,44 @@ class V5Pipeline:
                 continue  # Skip rank exit for this symbol
         
         # 3rd priority: 排名退出（只在未被利润/止损处理时）
+        # IMPORTANT:
+        # - 排名来源要与选币/定仓尽量同源（fused 优先）
+        # - 若本轮该币目标仓位仍>0，则不应触发 rank_exit，避免“同轮又买又卖”
         ranking_exit_orders = []
-        if hasattr(alpha, 'scores') and alpha.scores:
-            sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
-            symbol_ranks = {sym: idx+1 for idx, (sym, _) in enumerate(sorted_scores)}
-            
+        rank_scores = dict(getattr(alpha, 'scores', {}) or {})
+        rank_source = 'alpha'
+
+        try:
+            use_fused_for_weighting = bool(getattr(self.cfg.alpha, 'use_fused_score_for_weighting', True))
+            if use_fused_for_weighting:
+                fused_rank_scores = self.portfolio_engine._load_fused_signals()
+                if fused_rank_scores:
+                    rank_scores = dict(fused_rank_scores)
+                    rank_source = 'fused'
+        except Exception:
+            pass
+
+        if rank_scores:
+            sorted_scores = sorted(rank_scores.items(), key=lambda x: x[1], reverse=True)
+            symbol_ranks = {sym: idx + 1 for idx, (sym, _) in enumerate(sorted_scores)}
+            target_hold_eps = float(getattr(self.cfg.rebalance, 'close_only_weight_eps', 0.001) or 0.001)
+
+            if audit:
+                audit.add_note(f"Rank exit source: {rank_source}, candidates={len(symbol_ranks)}")
+
             for p in positions:
                 if p.qty <= 0 or p.symbol in profit_symbols:
                     continue  # Skip if already handled by profit-taking or stop loss
-                
+
+                # Guard: if strategy still wants to hold this symbol (target_w > eps), skip rank exit.
+                tw = float(target.get(p.symbol, 0.0) or 0.0)
+                if tw > target_hold_eps:
+                    if audit:
+                        audit.add_note(
+                            f"Rank exit skipped: {p.symbol} target_w={tw:.4f} > eps={target_hold_eps:.4f}"
+                        )
+                    continue
+
                 current_rank = symbol_ranks.get(p.symbol, 999)
                 should_exit, reason = self.profit_taking.should_exit_by_rank(
                     p.symbol, current_rank, max_rank=3
@@ -598,11 +627,15 @@ class V5Pipeline:
                                 meta={
                                     "reason": f"rank_exit_{reason}",
                                     "current_rank": current_rank,
+                                    "rank_source": rank_source,
+                                    "target_w": tw,
                                 },
                             )
                         )
                         if audit:
-                            audit.add_note(f"Rank exit: {p.symbol} rank {current_rank}, {reason}")
+                            audit.add_note(
+                                f"Rank exit: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
+                            )
         
         # 4. Policy-based exits (if not already handled)
         exit_orders = self.exit_policy.evaluate(
