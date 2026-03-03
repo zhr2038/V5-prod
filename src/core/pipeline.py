@@ -416,6 +416,9 @@ class V5Pipeline:
             audit.reject("dd_throttle")
             audit.add_note(f"DD multiplier: {dd_mult} (drawdown: {pst.drawdown_pct:.2%})")
 
+        # Define prices early for use in minSz filtering and later logic
+        prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
+
         # 4. Portfolio分配后审计
         portfolio = self.portfolio_engine.allocate(
             scores=alpha.scores, 
@@ -463,9 +466,6 @@ class V5Pipeline:
         target = self.portfolio_engine.scale_targets(target0, dd_mult)
         if audit:
             audit.targets_post_risk = target
-        
-        # Define prices early for use in minSz filtering and later logic
-        prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
 
         # 4.4 确保已有持仓都注册到止损/利润管理（避免重启后状态丢失）
         for p in positions:
