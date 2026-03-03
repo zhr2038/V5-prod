@@ -2600,6 +2600,22 @@ def api_decision_audit():
             if str(rd.get('action') or '').lower() != 'create'
         ]
 
+        # Final target ranking from this run's own decision audit (most reliable for this run).
+        target_rank = []
+        try:
+            tpr = audit_data.get('targets_pre_risk', {}) or {}
+            if isinstance(tpr, dict):
+                for sym, w in tpr.items():
+                    try:
+                        target_rank.append({'symbol': str(sym), 'target_weight': float(w)})
+                    except Exception:
+                        continue
+                target_rank.sort(key=lambda x: float(x.get('target_weight', 0.0)), reverse=True)
+        except Exception:
+            target_rank = []
+
+        fused_source_is_fallback = bool(strategy_source_run) and str(strategy_source_run) != str(run_id)
+
         return jsonify({
             'run_id': run_id,
             'strategy_run_id': strategy_source_run,
@@ -2611,7 +2627,10 @@ def api_decision_audit():
             'rejects': audit_data.get('rejects', {}),
             'top_scores': audit_data.get('top_scores', []),
             'selection_source': 'fused' if fused_buy_rank else 'alpha',
+            'target_rank': target_rank[:20],
             'fused_buy_rank': fused_buy_rank[:20],
+            'fused_rank_source_run': strategy_source_run,
+            'fused_source_is_fallback': fused_source_is_fallback,
             'router_decisions': router_decisions,
             'router_reason_counts': router_reason_counts,
             'selected_orders': selected_orders,

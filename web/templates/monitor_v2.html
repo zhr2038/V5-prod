@@ -669,7 +669,10 @@
                 const routerReasonCounts = data.router_reason_counts || {};
                 const exec = data.execution_summary || {};
                 const runOrders = data.run_orders || [];
+                const targetRank = data.target_rank || [];
                 const fusedRank = data.fused_buy_rank || [];
+                const fusedFallback = !!data.fused_source_is_fallback;
+                const fusedSourceRun = data.fused_rank_source_run || '--';
                 const selectedOrders = data.selected_orders || [];
                 const blockedRoutes = data.blocked_routes || [];
 
@@ -684,6 +687,7 @@
                 const recentOrders = runOrders.slice(0, 8);
                 const selectedSymbols = selectedOrders.map(x => `${x.symbol}(${x.side || '-'})`).join('、') || '无';
                 const blockedSymbols = blockedRoutes.slice(0, 5).map(x => `${x.symbol}:${x.reason}`).join('；') || '无';
+                const topTarget = targetRank.slice(0, 6);
                 const topFused = fusedRank.slice(0, 6);
 
                 const html = `
@@ -706,7 +710,8 @@
                     <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
                         <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">怎么做的购买决策</div>
                         <div style="font-size:0.82rem; margin-bottom:4px;">决策来源：${data.selection_source || 'unknown'} | 市场状态：${data.regime || '--'}</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">融合买入Top：${topFused.map(x => `${x.rank}.${x.symbol}(${Number(x.score||0).toFixed(3)})`).join('；') || '无'}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">本轮目标仓位Top（真实执行基准）：${topTarget.map(x => `${x.symbol}(${(Number(x.target_weight||0)*100).toFixed(2)}%)`).join('；') || '无'}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">融合分数Top（参考）：${topFused.map(x => `${x.rank}.${x.symbol}(${Number(x.score||0).toFixed(3)})`).join('；') || '无'}${fusedFallback ? `（来自 ${fusedSourceRun}，非本run文件）` : ''}</div>
                         <div style="font-size:0.82rem; margin-bottom:4px;">路由通过：${selectedSymbols}</div>
                         <div style="font-size:0.82rem;">路由拦截：${blockedSymbols}</div>
                     </div>
