@@ -127,6 +127,11 @@ def main():
             okx_positions = {}
             skipped_dust = []
 
+            def _okx_qty(d):
+                if isinstance(d, dict):
+                    return _as_float(d.get('qty'))
+                return _as_float(d)
+
             # 1) Bulk balance parse
             for detail in balance_details:
                 ccy = str(detail.get('ccy') or '').upper()
@@ -140,7 +145,10 @@ def main():
 
                 # Keep only meaningful positions to avoid repeatedly syncing dust.
                 if eq_usd >= min_sync_value_usd:
-                    okx_positions[sym] = qty
+                    okx_positions[sym] = {
+                        'qty': float(qty),
+                        'eq_usd': float(eq_usd),
+                    }
                 else:
                     skipped_dust.append((sym, qty, eq_usd))
 
@@ -163,7 +171,10 @@ def main():
                             qty = max(qty, _extract_spot_qty(d))
                             eq_usd = max(eq_usd, _as_float(d.get('eqUsd')))
                     if qty > 1e-8 and eq_usd >= min_sync_value_usd:
-                        okx_positions[sym] = qty
+                        okx_positions[sym] = {
+                            'qty': float(qty),
+                            'eq_usd': float(eq_usd),
+                        }
                         logger.info(f"  [ccy-check] {sym}: recovered qty={qty:.8f}")
                     elif qty > 1e-8:
                         skipped_dust.append((sym, qty, eq_usd))
@@ -175,7 +186,10 @@ def main():
                 except Exception as e:
                     # Avoid false-zero wipe when single-ccy query fails transiently
                     if local_qty > 1e-8:
-                        okx_positions[sym] = local_qty
+                        okx_positions[sym] = {
+                            'qty': float(local_qty),
+                            'eq_usd': 0.0,
+                        }
                         logger.warning(
                             f"  [ccy-check] {sym}: query failed ({e}), keep local={local_qty:.8f}"
                         )
@@ -185,13 +199,14 @@ def main():
             # Calculate diff
             total_diff = 0
             for sym, local_qty in local_positions.items():
-                okx_qty = okx_positions.get(sym, 0)
+                okx_qty = _okx_qty(okx_positions.get(sym, 0.0))
                 diff = abs(local_qty - okx_qty)
                 if diff > 1e-8:
                     total_diff += diff
                     logger.info(f"  {sym}: local={local_qty:.8f}, okx={okx_qty:.8f}, diff={diff:.8f}")
 
-            for sym, okx_qty in okx_positions.items():
+            for sym, okx_meta in okx_positions.items():
+                okx_qty = _okx_qty(okx_meta)
                 if sym not in local_positions and okx_qty > 1e-8:
                     total_diff += okx_qty
                     logger.info(f"  {sym}: local=0, okx={okx_qty:.8f}, diff={okx_qty:.8f}")
@@ -220,11 +235,23 @@ def main():
                     logger.warning(f"  Could not clear {sym}: {e}")
             
             # Sync from OKX
-            for sym, qty in okx_positions.items():
+            for sym, meta in okx_positions.items():
+                qty = _okx_qty(meta)
                 if qty > 1e-8:
                     try:
-                        position_store.set_qty(sym, qty=float(qty))
-                        logger.info(f"  Synced {sym}: {qty}")
+                        existing = position_store.get(sym)
+                        # price hint from OKX eqUsd/qty, used when creating a new local row
+                        eq_usd = _as_float(meta.get('eq_usd')) if isinstance(meta, dict) else 0.0
+                        px_hint = (float(eq_usd) / float(qty)) if (float(qty) > 0 and float(eq_usd) > 0) else 0.0
+                        if existing is not None:
+                            position_store.set_qty(sym, qty=float(qty))
+                        else:
+                            # set_qty() only updates existing rows; for new symbols we must upsert.
+                            # Use px_hint to avoid zero avg_px.
+                            if px_hint <= 0:
+                                px_hint = 1.0
+                            position_store.upsert_buy(sym, qty=float(qty), px=float(px_hint))
+                        logger.info(f"  Synced {sym}: qty={qty:.8f}, px_hint={px_hint:.8f}")
                     except Exception as e:
                         logger.warning(f"  Could not sync {sym}: {e}")
             
