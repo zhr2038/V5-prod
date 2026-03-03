@@ -152,6 +152,18 @@ class PortfolioEngine:
 
         # For weight calculation, use original scores (or fused if no original)
         weights_scores = scores if scores else fused_scores
+        
+        # Handle case where selected symbols may not be in weights_scores
+        # (e.g., fused signals include symbols not in alpha scores)
+        valid_selected = [s for s in selected if s in weights_scores]
+        if len(valid_selected) != len(selected) and audit:
+            skipped = [s for s in selected if s not in weights_scores]
+            audit.add_note(f"Skipping symbols not in scores: {skipped}")
+        selected = valid_selected
+        
+        if not selected:
+            return PortfolioSnapshot(target_weights={}, selected=[], volatilities={}, notes="no_valid_selection")
+        
         vols: Dict[str, float] = {}
         inv: Dict[str, float] = {}
         for sym in selected:
