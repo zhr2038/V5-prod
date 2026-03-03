@@ -305,6 +305,36 @@ class MultiLevelStopLoss:
             'is_trailing': state.is_trailing
         }
     
+    def evaluate_stop(self, symbol: str, current_price: float) -> Tuple[bool, float, str, float]:
+        """
+        评估止损（供pipeline调用）
+        
+        Returns:
+            (是否触发, 止损价格, 止损类型, 盈利百分比)
+        """
+        if symbol not in self.positions:
+            # 未注册，不触发
+            return False, 0.0, "not_initialized", 0.0
+        
+        state = self.positions[symbol]
+        
+        # 更新最高价
+        if current_price > state.highest_price:
+            state.highest_price = current_price
+        
+        entry_price = state.entry_price
+        profit_pct = (current_price - entry_price) / entry_price
+        
+        # 调用update_stop_price计算最新止损
+        new_stop_price, new_stop_type, triggered = self.update_stop_price(symbol, current_price)
+        
+        return triggered, new_stop_price, new_stop_type, profit_pct
+    
+    def register_position(self, symbol: str, entry_price: float, market_state: str = "Sideways"):
+        """注册持仓（兼容pipeline调用）"""
+        if symbol not in self.positions:
+            self.initialize_position(symbol, entry_price, market_state)
+
     def batch_update_stops(
         self,
         prices: Dict[str, float],
