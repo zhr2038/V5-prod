@@ -15,15 +15,15 @@ event_driven:
   global_cooldown_p2_minutes: 30      # P2 events: min 30 min between trades
   symbol_cooldown_minutes: 60         # Per-symbol: 60 min cooldown
   signal_confirmation_periods: 2      # Confirm signal for 2 periods before trading
-  
+
   # Signal change thresholds
-  score_change_threshold: 0.30        # 30% change triggers event
-  rank_jump_threshold: 3              # 3 position jump triggers event
-  
+  score_change_threshold: 0.35        # 35% change triggers event
+  rank_jump_threshold: 4              # 4 position jump triggers event
+
   # Breakout detection
   breakout_enabled: true
   breakout_lookback_hours: 24         # 24h high/low
-  breakout_threshold_pct: 0.5         # 0.5% breakout threshold
+  breakout_threshold_pct: 0.3         # 0.3% breakout threshold
   
   # Heartbeat (fallback)
   heartbeat_interval_hours: 4         # Trade at least every 4 hours

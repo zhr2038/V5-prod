@@ -184,11 +184,11 @@ event_driven:
   check_interval_minutes: 15
   global_cooldown_p2_minutes: 30
   symbol_cooldown_minutes: 60
-  signal_confirmation_periods: 3
-  score_change_threshold: 0.45
-  rank_jump_threshold: 5
+  signal_confirmation_periods: 2
+  score_change_threshold: 0.35
+  rank_jump_threshold: 4
   breakout_enabled: true
   breakout_lookback_hours: 24
-  breakout_threshold_pct: 0.5
+  breakout_threshold_pct: 0.3
   heartbeat_interval_hours: 4
   live_service_unit: v5-prod.user.service
