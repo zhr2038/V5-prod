@@ -2479,21 +2479,97 @@ def api_decision_audit():
             reverse=True,
         )
 
+        run_id = str(audit_data.get('run_id') or latest_run_dir.name)
+
+        # Router decision summary (for why blocked / why passed)
+        router_decisions = audit_data.get('router_decisions', []) or []
+        router_reason_counts = {}
+        for rd in router_decisions:
+            reason = str(rd.get('reason') or 'unknown')
+            router_reason_counts[reason] = int(router_reason_counts.get(reason, 0)) + 1
+
+        # Execution outcomes (from orders.sqlite in this run_id)
+        run_orders = []
+        execution_summary = {
+            'total': 0,
+            'filled': 0,
+            'rejected': 0,
+            'open_or_partial': 0,
+            'cancelled': 0,
+            'other': 0,
+            'reject_reasons': {},
+        }
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT created_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id
+                    FROM orders
+                    WHERE run_id = ?
+                    ORDER BY created_ts DESC
+                    LIMIT 100
+                    """,
+                    (run_id,),
+                )
+                rows = cur.fetchall()
+                conn.close()
+
+                for r in rows:
+                    state = str(r[4] or 'UNKNOWN').upper()
+                    rec = {
+                        'created_ts': int(r[0] or 0),
+                        'inst_id': str(r[1] or ''),
+                        'side': str(r[2] or ''),
+                        'intent': str(r[3] or ''),
+                        'state': state,
+                        'notional_usdt': float(r[5] or 0.0),
+                        'last_error_code': str(r[6] or ''),
+                        'last_error_msg': str(r[7] or ''),
+                        'ord_id': str(r[8] or ''),
+                    }
+                    run_orders.append(rec)
+
+                execution_summary['total'] = len(run_orders)
+                for o in run_orders:
+                    st = str(o.get('state') or '').upper()
+                    if st == 'FILLED':
+                        execution_summary['filled'] += 1
+                    elif st == 'REJECTED':
+                        execution_summary['rejected'] += 1
+                        rs = str(o.get('last_error_code') or o.get('last_error_msg') or 'unknown')
+                        execution_summary['reject_reasons'][rs] = int(execution_summary['reject_reasons'].get(rs, 0)) + 1
+                    elif st in {'OPEN', 'PARTIAL', 'SENT', 'ACK', 'UNKNOWN'}:
+                        execution_summary['open_or_partial'] += 1
+                    elif st in {'CANCELED', 'CANCELLED'}:
+                        execution_summary['cancelled'] += 1
+                    else:
+                        execution_summary['other'] += 1
+        except Exception:
+            pass
+
         return jsonify({
-            'run_id': audit_data.get('run_id') or latest_run_dir.name,
+            'run_id': run_id,
             'strategy_run_id': strategy_source_run,
             'strategy_signals_count': len(strategy_signals or []),
             'timestamp': ts,
             'regime': audit_data.get('regime'),
             'regime_details': audit_data.get('regime_details', {}),
             'counts': audit_data.get('counts', {}),
+            'rejects': audit_data.get('rejects', {}),
+            'top_scores': audit_data.get('top_scores', []),
+            'router_decisions': router_decisions,
+            'router_reason_counts': router_reason_counts,
             'strategy_signals': strategy_signals,
             'actionable_signals': {
                 'held_symbols': sorted(list(held_symbols)),
                 'buy_candidates': actionable_buy,
                 'sell_candidates': actionable_sell,
             },
-            'notes': audit_data.get('notes', [])[:10]
+            'execution_summary': execution_summary,
+            'run_orders': run_orders[:30],
+            'notes': audit_data.get('notes', [])[:12]
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

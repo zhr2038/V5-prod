@@ -325,6 +325,19 @@
                     </div>
                 </div>
                 
+                <!-- Decision & Execution Flow -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">🧠 决策与执行透视</div>
+                            <div class="card-subtitle" id="decision-flow-time">加载中...</div>
+                        </div>
+                    </div>
+                    <div id="decision-flow-content">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+
                 <!-- System Status -->
                 <div class="card">
                     <div class="card-header">
@@ -639,6 +652,90 @@
             }
         }
         
+        // Load decision/execution flow (signals -> routing -> order outcome)
+        async function loadDecisionFlow() {
+            try {
+                const res = await fetch(`/api/decision_audit?_=${Date.now()}`);
+                const data = await res.json();
+
+                const runId = data.run_id || '--';
+                const t = data.timestamp ? new Date(data.timestamp * 1000).toLocaleString('zh-CN', {
+                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+                }) : '未知时间';
+                document.getElementById('decision-flow-time').textContent = `${t} · run ${runId}`;
+
+                const counts = data.counts || {};
+                const rejects = data.rejects || {};
+                const routerReasonCounts = data.router_reason_counts || {};
+                const actionable = data.actionable_signals || {};
+                const exec = data.execution_summary || {};
+                const runOrders = data.run_orders || [];
+
+                const topBuys = (actionable.buy_candidates || []).slice(0, 5);
+                const rejectList = Object.entries(rejects)
+                    .filter(([_, v]) => Number(v) > 0)
+                    .sort((a, b) => Number(b[1]) - Number(a[1]))
+                    .slice(0, 5);
+                const routerList = Object.entries(routerReasonCounts)
+                    .sort((a, b) => Number(b[1]) - Number(a[1]))
+                    .slice(0, 6);
+
+                const recentOrders = runOrders.slice(0, 6);
+
+                const html = `
+                    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px;">
+                        <div class="info-item"><div class="label">有信号</div><div class="value">${counts.selected || 0} 个</div></div>
+                        <div class="info-item"><div class="label">下单尝试</div><div class="value">${exec.total || 0} 笔</div></div>
+                        <div class="info-item"><div class="label">成交成功</div><div class="value ${Number(exec.filled||0)>0?'text-green':'text-yellow'}">${exec.filled || 0} 笔</div></div>
+                    </div>
+
+                    <div style="font-size:0.82rem; color:#94a3b8; margin-bottom:8px;">
+                        购买决策：多策略融合 → 风控筛选 → 路由生成订单（create）→ 执行引擎提交
+                    </div>
+
+                    <div style="margin-bottom:10px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">候选买入Top（按融合分数）</div>
+                        ${topBuys.length ? topBuys.map(x => `<span style="display:inline-block;background:#0f172a;border:1px solid #334155;border-radius:999px;padding:3px 8px;margin:2px;font-size:0.78rem;">${x.symbol} ${Number(x.score||0).toFixed(3)}</span>`).join('') : '<span style="color:#64748b;">无</span>'}
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px;">
+                        <div style="background:#0f172a;padding:10px;border-radius:8px;">
+                            <div style="font-size:0.78rem;color:#64748b;margin-bottom:6px;">被拦截原因（策略/路由层）</div>
+                            ${routerList.length ? routerList.map(([k,v]) => `<div style="display:flex;justify-content:space-between;font-size:0.82rem;padding:2px 0;"><span>${k}</span><span>${v}</span></div>`).join('') : '<div class="empty" style="padding:6px 0;">无</div>'}
+                        </div>
+                        <div style="background:#0f172a;padding:10px;border-radius:8px;">
+                            <div style="font-size:0.78rem;color:#64748b;margin-bottom:6px;">reject计数（审计）</div>
+                            ${rejectList.length ? rejectList.map(([k,v]) => `<div style="display:flex;justify-content:space-between;font-size:0.82rem;padding:2px 0;"><span>${k}</span><span>${v}</span></div>`).join('') : '<div class="empty" style="padding:6px 0;">无</div>'}
+                        </div>
+                    </div>
+
+                    <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">本轮订单结果（成功/失败与原因）</div>
+                    ${recentOrders.length ? `
+                    <table>
+                        <thead>
+                            <tr><th>币种</th><th>方向</th><th>状态</th><th>原因</th></tr>
+                        </thead>
+                        <tbody>
+                            ${recentOrders.map(o => `
+                                <tr>
+                                    <td>${o.inst_id || '--'}</td>
+                                    <td class="${o.side==='buy'?'text-green':'text-red'}">${o.side || '--'}</td>
+                                    <td class="${o.state==='FILLED'?'text-green':(o.state==='REJECTED'?'text-red':'text-yellow')}">${o.state || '--'}</td>
+                                    <td style="font-size:0.78rem;color:#94a3b8;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${o.last_error_code || o.last_error_msg || 'OK'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    ` : '<div class="empty">本轮无订单记录</div>'}
+                `;
+
+                document.getElementById('decision-flow-content').innerHTML = html;
+            } catch (e) {
+                console.error('决策透视加载失败:', e);
+                document.getElementById('decision-flow-content').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+
         // Load system status
         async function loadSystemStatus() {
             try {
@@ -745,6 +842,7 @@
                 loadPositions(),
                 loadTrades(),
                 loadStrategySignals(),
+                loadDecisionFlow(),
                 loadSystemStatus(),
                 loadHealthStatus()
             ]);
