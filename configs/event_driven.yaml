@@ -28,3 +28,14 @@ event_driven:
   # Heartbeat (fallback)
   heartbeat_interval_hours: 4         # Trade at least every 4 hours
   fused_signal_max_age_minutes: 90    # 超过该时效则不用融合信号
+  adaptive_cooldown:
+    enabled: true
+    lookback_runs: 12
+    high_block_ratio: 0.75
+    min_events_for_action: 8
+    p2_min_minutes: 8
+    p2_max_minutes: 60
+    symbol_min_minutes: 15
+    symbol_max_minutes: 120
+    confirm_min: 1
+    confirm_max: 4

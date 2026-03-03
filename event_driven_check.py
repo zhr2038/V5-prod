@@ -435,6 +435,106 @@ def build_riskoff_shadow_plan(state: dict, cfg: dict, watchlist: list):
     }
 
 
+def _read_recent_event_stats(log_path: Path, lookback: int = 12):
+    """Read recent event-driven log stats."""
+    items = []
+    try:
+        if not log_path.exists():
+            return items
+        with log_path.open('r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()[-max(1, int(lookback)):]
+        for ln in lines:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                items.append(json.loads(ln))
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return items
+
+
+def compute_adaptive_event_cfg(ev_cfg: dict, state: dict):
+    """Adaptive cooldown tuning for event-driven engine.
+
+    Only adjusts cooldown/confirmation knobs, does not force trading.
+    """
+    base = {
+        'check_interval_minutes': int(ev_cfg.get('check_interval_minutes', 15) or 15),
+        'global_cooldown_p2_minutes': int(ev_cfg.get('global_cooldown_p2_minutes', 30) or 30),
+        'symbol_cooldown_minutes': int(ev_cfg.get('symbol_cooldown_minutes', 60) or 60),
+        'signal_confirmation_periods': int(ev_cfg.get('signal_confirmation_periods', 2) or 2),
+    }
+
+    acfg = (ev_cfg or {}).get('adaptive_cooldown', {}) or {}
+    enabled = bool(acfg.get('enabled', True))
+    if not enabled:
+        return dict(base), {'enabled': False, 'applied': False, 'reason': 'disabled'}
+
+    lookback = int(acfg.get('lookback_runs', 12) or 12)
+    high_block_ratio = float(acfg.get('high_block_ratio', 0.75) or 0.75)
+    min_events_for_action = int(acfg.get('min_events_for_action', 8) or 8)
+
+    p2_min = int(acfg.get('p2_min_minutes', 8) or 8)
+    p2_max = int(acfg.get('p2_max_minutes', 60) or 60)
+    symbol_min = int(acfg.get('symbol_min_minutes', 15) or 15)
+    symbol_max = int(acfg.get('symbol_max_minutes', 120) or 120)
+    confirm_min = int(acfg.get('confirm_min', 1) or 1)
+    confirm_max = int(acfg.get('confirm_max', 4) or 4)
+
+    recent = _read_recent_event_stats(REPORTS_DIR / 'event_driven_log.jsonl', lookback=lookback)
+    processed = sum(int((x or {}).get('events_processed', 0) or 0) for x in recent)
+    blocked = sum(int((x or {}).get('events_blocked', 0) or 0) for x in recent)
+    block_ratio = (blocked / processed) if processed > 0 else 0.0
+
+    regime = str((state or {}).get('regime', 'SIDEWAYS')).upper()
+
+    out = dict(base)
+    reason = []
+
+    if regime in ('SIDEWAYS', 'TRENDING', 'TRENDING_UP') and processed >= min_events_for_action and block_ratio >= high_block_ratio:
+        out['global_cooldown_p2_minutes'] = max(p2_min, int(round(base['global_cooldown_p2_minutes'] * 0.5)))
+        out['symbol_cooldown_minutes'] = max(symbol_min, int(round(base['symbol_cooldown_minutes'] * 0.5)))
+        out['signal_confirmation_periods'] = max(confirm_min, int(base['signal_confirmation_periods']) - 1)
+        reason.append('high_block_ratio_relax')
+    elif regime in ('RISK_OFF', 'RISK-OFF'):
+        out['global_cooldown_p2_minutes'] = min(p2_max, int(round(base['global_cooldown_p2_minutes'] * 1.2)))
+        out['symbol_cooldown_minutes'] = min(symbol_max, int(round(base['symbol_cooldown_minutes'] * 1.2)))
+        out['signal_confirmation_periods'] = min(confirm_max, int(base['signal_confirmation_periods']) + 1)
+        reason.append('risk_off_harden')
+
+    # clamp
+    out['global_cooldown_p2_minutes'] = max(p2_min, min(p2_max, int(out['global_cooldown_p2_minutes'])))
+    out['symbol_cooldown_minutes'] = max(symbol_min, min(symbol_max, int(out['symbol_cooldown_minutes'])))
+    out['signal_confirmation_periods'] = max(confirm_min, min(confirm_max, int(out['signal_confirmation_periods'])))
+
+    applied = out != base
+    meta = {
+        'enabled': True,
+        'applied': applied,
+        'reason': ','.join(reason) if reason else 'no_change',
+        'regime': regime,
+        'lookback_runs': lookback,
+        'recent_events_processed': processed,
+        'recent_events_blocked': blocked,
+        'recent_block_ratio': round(block_ratio, 4),
+        'base': base,
+        'effective': out,
+    }
+
+    try:
+        (REPORTS_DIR / 'event_adaptive_state.json').write_text(
+            json.dumps({'timestamp': datetime.now().isoformat(), **meta}, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+    except Exception:
+        pass
+
+    return out, meta
+
+
 def run_event_param_scan(state: dict, last_state: dict, ev_cfg: dict):
     """Run lightweight one-shot parameter scan on current snapshot pair."""
     base = {
@@ -632,13 +732,21 @@ def main():
         encoding='utf-8',
     )
 
-    # Build trader config from YAML (with safe defaults)
+    # Build trader config from YAML (with adaptive cooldown)
+    adaptive_cd, adaptive_meta = compute_adaptive_event_cfg(ev_cfg, state)
+    logger.info(
+        f"Adaptive cooldown: applied={adaptive_meta.get('applied')} reason={adaptive_meta.get('reason')} "
+        f"p2={adaptive_cd.get('global_cooldown_p2_minutes')}m "
+        f"symbol={adaptive_cd.get('symbol_cooldown_minutes')}m "
+        f"confirm={adaptive_cd.get('signal_confirmation_periods')}"
+    )
+
     trader = create_event_driven_trader({
         'enabled': True,
-        'check_interval_minutes': int(ev_cfg.get('check_interval_minutes', 15) or 15),
-        'global_cooldown_p2_minutes': int(ev_cfg.get('global_cooldown_p2_minutes', 30) or 30),
-        'symbol_cooldown_minutes': int(ev_cfg.get('symbol_cooldown_minutes', 60) or 60),
-        'signal_confirmation_periods': int(ev_cfg.get('signal_confirmation_periods', 2) or 2),
+        'check_interval_minutes': int(ev_cfg.get('check_interval_minutes', adaptive_cd.get('check_interval_minutes', 15)) or 15),
+        'global_cooldown_p2_minutes': int(adaptive_cd.get('global_cooldown_p2_minutes', ev_cfg.get('global_cooldown_p2_minutes', 30)) or 30),
+        'symbol_cooldown_minutes': int(adaptive_cd.get('symbol_cooldown_minutes', ev_cfg.get('symbol_cooldown_minutes', 60)) or 60),
+        'signal_confirmation_periods': int(adaptive_cd.get('signal_confirmation_periods', ev_cfg.get('signal_confirmation_periods', 2)) or 2),
         'score_change_threshold': float(ev_cfg.get('score_change_threshold', 0.30) or 0.30),
         'rank_jump_threshold': int(ev_cfg.get('rank_jump_threshold', 3) or 3),
         'breakout_enabled': bool(ev_cfg.get('breakout_enabled', True)),
@@ -666,6 +774,7 @@ def main():
         'active_mode': active_mode,
         'force_full_mode': force_full_mode,
         'force_full_min_interval_minutes': force_full_min_interval_minutes,
+        'adaptive_cooldown': adaptive_meta,
         'live_service_unit': live_service_unit,
         'live_service_triggered': False,
         'live_service_ok': None,
