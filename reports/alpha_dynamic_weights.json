@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
-  "generated_ts": 1771819587,
-  "lookback_days": 7,
+  "generated_ts": 1772384830,
+  "lookback_days": 365,
   "horizon": "1h",
-  "alpha_rows": 7760,
-  "used_rows": 2093,
+  "alpha_rows": 22475,
+  "used_rows": 6996,
   "ic_spearman_mean": {
-    "f1_mom_5d": 0.014177380015488133,
-    "f2_mom_20d": 0.03131649605918186,
-    "f3_vol_adj_ret_20d": -0.022170948277252148,
-    "f4_volume_expansion": -0.06942850299629548,
-    "f5_rsi_trend_confirm": -0.03194478495613426
+    "f1_mom_5d": -0.017219053842253588,
+    "f2_mom_20d": -0.007387128704436812,
+    "f3_vol_adj_ret_20d": 0.0002473727571343738,
+    "f4_volume_expansion": -0.010171421065763528,
+    "f5_rsi_trend_confirm": -0.01050105890984227
   },
   "weights": {
-    "f1_mom_5d": 0.29354098552181496,
-    "f2_mom_20d": 0.5651672115825479,
-    "f3_vol_adj_ret_20d": 0.047097267631879,
-    "f4_volume_expansion": 0.047097267631879,
-    "f5_rsi_trend_confirm": 0.047097267631879
+    "f1_mom_5d": 0.0625,
+    "f2_mom_20d": 0.0625,
+    "f3_vol_adj_ret_20d": 0.7499999999999999,
+    "f4_volume_expansion": 0.0625,
+    "f5_rsi_trend_confirm": 0.0625
   },
   "notes": "weights derived from positive Spearman RankIC vs forward returns computed from market_data_1h"
 }

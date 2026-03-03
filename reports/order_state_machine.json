@@ -1,0 +1,215 @@
+{
+  "version": 1,
+  "symbols": {
+    "ETH/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772432754114,
+      "exit_pending_until_ms": 1772432274114,
+      "last_run_id": "20260302_061541",
+      "last_reason": "close_dominates"
+    },
+    "XAUT/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "PROMPT/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "SPACE/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "POL/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "KITE/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "WLFI/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "AAVE/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "LTC/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "MERL/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "J/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "ETC/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "AVAX/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 1772432274114,
+      "last_run_id": "20260302_062857",
+      "last_reason": "buy_selected"
+    },
+    "PEPE/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "DOT/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "FIL/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260302_180015",
+      "last_reason": "buy_selected"
+    },
+    "AGLD/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "TRX/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 1772432274114,
+      "last_run_id": "20260302_180015",
+      "last_reason": "buy_selected"
+    },
+    "USDG/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "UNI/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "HYPE/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260303_000014",
+      "last_reason": "buy_selected"
+    },
+    "PAXG/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772402150889,
+      "exit_pending_until_ms": 1772401670889,
+      "last_run_id": "20260301_214543",
+      "last_reason": "close_dominates"
+    },
+    "XRP/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772432754114,
+      "exit_pending_until_ms": 1772432274114,
+      "last_run_id": "20260302_061541",
+      "last_reason": "close_dominates"
+    },
+    "SOL/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 1772430471908,
+      "last_run_id": "20260302_062857",
+      "last_reason": "buy_selected"
+    },
+    "BNB/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 1772432274114,
+      "last_run_id": "20260302_180015",
+      "last_reason": "buy_selected"
+    },
+    "ADA/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": "20260302_033040",
+      "last_reason": "buy_selected"
+    },
+    "LINK/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": "20260302_062857",
+      "last_reason": "buy_selected"
+    },
+    "BTC/USDT": {
+      "state": "FLAT",
+      "cooldown_until_ms": 1772424683633,
+      "exit_pending_until_ms": 1772424203633,
+      "last_run_id": "20260302_040105",
+      "last_reason": "close_dominates"
+    },
+    "NEAR/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": "20260303_030013",
+      "last_reason": "buy_selected"
+    },
+    "BARD/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": "20260303_061505",
+      "last_reason": "buy_selected"
+    }
+  }
+}

@@ -139,5 +139,51 @@
       "min_train_samples": 100,
       "early_stopping_rounds": 10
     }
+  },
+  {
+    "timestamp": "2026-03-02T00:32:12.047611",
+    "samples": 2088,
+    "train_ic": 0.8257688830061634,
+    "valid_ic": 0.040569580915181334,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 30,
+      "max_depth": 3,
+      "learning_rate": 0.05,
+      "subsample": 0.5,
+      "colsample_bytree": 0.5,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "reg_alpha": 1.0,
+      "reg_lambda": 1.0,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100,
+      "early_stopping_rounds": 10
+    }
+  },
+  {
+    "timestamp": "2026-03-03T00:35:08.502814",
+    "samples": 2088,
+    "train_ic": 0.8257688830061634,
+    "valid_ic": 0.040569580915181334,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 30,
+      "max_depth": 3,
+      "learning_rate": 0.05,
+      "subsample": 0.5,
+      "colsample_bytree": 0.5,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "reg_alpha": 1.0,
+      "reg_lambda": 1.0,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 100,
+      "early_stopping_rounds": 10
+    }
   }
 ]

@@ -1,84 +1,84 @@
 {
   "schema_version": 1,
-  "generated_ts": 1771867375,
-  "lookback_days": 30,
+  "generated_ts": 1772384841,
+  "lookback_days": 365,
   "horizon": "1h",
-  "alpha_rows": 12461,
+  "alpha_rows": 22475,
   "regimes": {
     "Risk-Off": {
-      "alpha_rows": 4831,
+      "alpha_rows": 13522,
       "ic_spearman_mean": {
-        "f1_mom_5d": 0.003536579779403629,
-        "f2_mom_20d": -0.017289610039607505,
-        "f3_vol_adj_ret_20d": -0.014862785767632156,
-        "f4_volume_expansion": 0.005764970038445719,
-        "f5_rsi_trend_confirm": -0.03675508340179089
+        "f1_mom_5d": 0.001361404852961525,
+        "f2_mom_20d": -0.020314822674504185,
+        "f3_vol_adj_ret_20d": -0.005667799408135275,
+        "f4_volume_expansion": -0.0018816720225714094,
+        "f5_rsi_trend_confirm": -0.034798294622204934
       },
       "weights": {
-        "f1_mom_5d": 0.33640887709101874,
-        "f2_mom_20d": 0.044239408193932094,
-        "f3_vol_adj_ret_20d": 0.044239408193932094,
-        "f4_volume_expansion": 0.5308728983271851,
-        "f5_rsi_trend_confirm": 0.044239408193932094
+        "f1_mom_5d": 0.7499999999999998,
+        "f2_mom_20d": 0.06249999999999999,
+        "f3_vol_adj_ret_20d": 0.06249999999999999,
+        "f4_volume_expansion": 0.06249999999999999,
+        "f5_rsi_trend_confirm": 0.06249999999999999
       },
-      "used_points": 2425,
-      "used_timestamps": 228
+      "used_points": 2586,
+      "used_timestamps": 253
     },
     "Sideways": {
-      "alpha_rows": 5595,
+      "alpha_rows": 6771,
       "ic_spearman_mean": {
-        "f1_mom_5d": 0.02793553168310414,
-        "f2_mom_20d": 0.06266052024606489,
-        "f3_vol_adj_ret_20d": 0.014884809432904161,
-        "f4_volume_expansion": -0.038368593342922086,
-        "f5_rsi_trend_confirm": -0.006756047744130636
+        "f1_mom_5d": 0.013434489084760816,
+        "f2_mom_20d": 0.04114827384945443,
+        "f3_vol_adj_ret_20d": 0.019852397876769467,
+        "f4_volume_expansion": -0.04243777496944662,
+        "f5_rsi_trend_confirm": -0.002278834493305241
       },
       "weights": {
-        "f1_mom_5d": 0.24076346709529647,
-        "f2_mom_20d": 0.5400421325634578,
-        "f3_vol_adj_ret_20d": 0.12828530943215483,
+        "f1_mom_5d": 0.16407799435337225,
+        "f2_mom_20d": 0.5025517681934237,
+        "f3_vol_adj_ret_20d": 0.24246114654411308,
         "f4_volume_expansion": 0.045454545454545456,
         "f5_rsi_trend_confirm": 0.045454545454545456
       },
-      "used_points": 1607,
-      "used_timestamps": 165
+      "used_points": 1707,
+      "used_timestamps": 182
     },
     "Trending": {
-      "alpha_rows": 2035,
+      "alpha_rows": 2182,
       "ic_spearman_mean": {
-        "f1_mom_5d": -0.07657090831529463,
-        "f2_mom_20d": -0.0027547099842819525,
-        "f3_vol_adj_ret_20d": -0.02365873233432938,
-        "f4_volume_expansion": 0.02378385708482689,
-        "f5_rsi_trend_confirm": 0.016033089382514656
+        "f1_mom_5d": -0.07054972450821954,
+        "f2_mom_20d": -0.021555095914282205,
+        "f3_vol_adj_ret_20d": -0.015514435781831995,
+        "f4_volume_expansion": 0.028658519560978455,
+        "f5_rsi_trend_confirm": 0.012769572629140242
       },
       "weights": {
-        "f1_mom_5d": 0.043478260869565216,
-        "f2_mom_20d": 0.043478260869565216,
-        "f3_vol_adj_ret_20d": 0.043478260869565216,
-        "f4_volume_expansion": 0.5194174011644659,
-        "f5_rsi_trend_confirm": 0.3501478162268384
+        "f1_mom_5d": 0.04724850106646215,
+        "f2_mom_20d": 0.04724850106646215,
+        "f3_vol_adj_ret_20d": 0.04724850106646215,
+        "f4_volume_expansion": 0.5669820127975458,
+        "f5_rsi_trend_confirm": 0.2912724840030679
       },
-      "used_points": 1707,
-      "used_timestamps": 180
+      "used_points": 1791,
+      "used_timestamps": 193
     }
   },
   "overall": {
     "ic_spearman_mean": {
-      "f1_mom_5d": -0.015031419112887441,
-      "f2_mom_20d": 0.006394792455326802,
-      "f3_vol_adj_ret_20d": -0.003998910894907914,
-      "f4_volume_expansion": -0.008663959739007679,
-      "f5_rsi_trend_confirm": -0.01391448786155535
+      "f1_mom_5d": -0.017219053842253588,
+      "f2_mom_20d": -0.007387128704436812,
+      "f3_vol_adj_ret_20d": 0.0002473727571343738,
+      "f4_volume_expansion": -0.010171421065763528,
+      "f5_rsi_trend_confirm": -0.01050105890984227
     },
     "weights": {
-      "f1_mom_5d": 0.06249999999999999,
-      "f2_mom_20d": 0.7499999999999998,
-      "f3_vol_adj_ret_20d": 0.06249999999999999,
-      "f4_volume_expansion": 0.06249999999999999,
-      "f5_rsi_trend_confirm": 0.06249999999999999
+      "f1_mom_5d": 0.0625,
+      "f2_mom_20d": 0.0625,
+      "f3_vol_adj_ret_20d": 0.7499999999999999,
+      "f4_volume_expansion": 0.0625,
+      "f5_rsi_trend_confirm": 0.0625
     },
-    "used_points": 6514,
-    "used_timestamps": 274
+    "used_points": 6996,
+    "used_timestamps": 307
   }
 }

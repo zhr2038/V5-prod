@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_ts_ms": 1772364214119,
-  "consecutive_hard": 0,
+  "updated_ts_ms": 1772533806227,
+  "consecutive_hard": 1,
   "consecutive_soft": 0,
   "consecutive_stale": 0,
   "last_stale_ts_ms": 0,
-  "last_reason": "auto_sync_reset",
-  "last_ok_ts_ms": 1772334052917,
-  "last_reconcile_ts_ms": 1772364214116,
-  "consecutive_ok": 1
+  "last_reason": "base_mismatch",
+  "last_ok_ts_ms": 0,
+  "last_reconcile_ts_ms": 1772533806227,
+  "consecutive_ok": 0
 }

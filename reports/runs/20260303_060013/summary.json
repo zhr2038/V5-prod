@@ -1,0 +1,22 @@
+{
+  "run_id": "20260303_060013",
+  "start_ts": "2026-03-03T06:00:25.747794Z",
+  "end_ts": "2026-03-03T06:00:29.916994Z",
+  "window_start_ts": null,
+  "window_end_ts": null,
+  "avg_equity": 81.90286239131902,
+  "equity_start": 54.719220418656946,
+  "equity_end": 136.27014633664317,
+  "total_return_ratio": 1.4903524811581708,
+  "total_return_pct": 149.03524811581707,
+  "max_drawdown_pct": 0.0,
+  "sharpe": 93.59487165425513,
+  "num_trades": 0,
+  "turnover_ratio": 0.0,
+  "fees_usdt_total": 0.0,
+  "slippage_usdt_total": 0.0,
+  "cost_usdt_total": 0.0,
+  "cost_ratio": 0.0,
+  "win_rate": null,
+  "profit_factor": null
+}

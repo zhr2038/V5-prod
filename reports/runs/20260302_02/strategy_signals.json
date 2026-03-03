@@ -1,0 +1,134 @@
+{
+  "timestamp": "2026-03-02T02:57:39.912278",
+  "strategies": [
+    {
+      "strategy": "TrendFollowing",
+      "type": "trend",
+      "allocation": 0.15,
+      "total_signals": 0,
+      "buy_signals": 0,
+      "sell_signals": 0,
+      "signals": []
+    },
+    {
+      "strategy": "MeanReversion",
+      "type": "mean_reversion",
+      "allocation": 0.35,
+      "total_signals": 0,
+      "buy_signals": 0,
+      "sell_signals": 0,
+      "signals": []
+    },
+    {
+      "strategy": "Alpha6Factor",
+      "type": "alpha_6factor",
+      "allocation": 0.5,
+      "total_signals": 3,
+      "buy_signals": 0,
+      "sell_signals": 3,
+      "signals": [
+        {
+          "symbol": "BTC/USDT",
+          "side": "sell",
+          "score": 0.42297789245588263,
+          "confidence": 0.42297789245588263,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": 0.02920018438300761,
+              "f2_mom_20d": -0.03028650144186626,
+              "f3_vol_adj_ret": -5.265018819876063,
+              "f4_volume_expansion": 0.0057922044467455525,
+              "f5_rsi_trend_confirm": -0.29094194714253463,
+              "f6_sentiment": 0.0524
+            },
+            "z_factors": {
+              "f1_mom_5d": 0.29200184383007605,
+              "f2_mom_20d": -0.1514325072093313,
+              "f3_vol_adj_ret": -2.6325094099380313,
+              "f4_volume_expansion": 0.011584408893491105,
+              "f5_rsi_trend_confirm": -0.29094194714253463,
+              "f6_sentiment": 0.0524
+            },
+            "final_score": -0.42297789245588263
+          }
+        },
+        {
+          "symbol": "SOL/USDT",
+          "side": "sell",
+          "score": 0.2214392029325595,
+          "confidence": 0.2214392029325595,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": 0.07156525066972827,
+              "f2_mom_20d": -0.028677150786309016,
+              "f3_vol_adj_ret": -3.444987306791356,
+              "f4_volume_expansion": 0.12504808506386045,
+              "f5_rsi_trend_confirm": -0.5299401197604803,
+              "f6_sentiment": 0.0494
+            },
+            "z_factors": {
+              "f1_mom_5d": 0.7156525066972826,
+              "f2_mom_20d": -0.14338575393154507,
+              "f3_vol_adj_ret": -1.722493653395678,
+              "f4_volume_expansion": 0.2500961701277209,
+              "f5_rsi_trend_confirm": -0.5299401197604803,
+              "f6_sentiment": 0.0494
+            },
+            "final_score": -0.2214392029325595
+          }
+        },
+        {
+          "symbol": "DOGE/USDT",
+          "side": "sell",
+          "score": 0.7190946907813167,
+          "confidence": 0.7190946907813167,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": 0.008584157339997817,
+              "f2_mom_20d": -0.06966021850255585,
+              "f3_vol_adj_ret": -8.621262748616301,
+              "f4_volume_expansion": 0.24744722771073224,
+              "f5_rsi_trend_confirm": -0.43886743886743856,
+              "f6_sentiment": -0.0447
+            },
+            "z_factors": {
+              "f1_mom_5d": 0.08584157339997817,
+              "f2_mom_20d": -0.34830109251277924,
+              "f3_vol_adj_ret": -4.310631374308151,
+              "f4_volume_expansion": 0.4948944554214645,
+              "f5_rsi_trend_confirm": -0.43886743886743856,
+              "f6_sentiment": -0.0447
+            },
+            "final_score": -0.7190946907813167
+          }
+        }
+      ]
+    }
+  ],
+  "fused": {
+    "BTC/USDT": {
+      "symbol": "BTC/USDT",
+      "direction": "sell",
+      "score": 0.42297789245588263,
+      "confidence": 0.42297789245588263,
+      "strategy": "Alpha6Factor",
+      "rank": 0
+    },
+    "SOL/USDT": {
+      "symbol": "SOL/USDT",
+      "direction": "sell",
+      "score": 0.2214392029325595,
+      "confidence": 0.2214392029325595,
+      "strategy": "Alpha6Factor",
+      "rank": 0
+    },
+    "DOGE/USDT": {
+      "symbol": "DOGE/USDT",
+      "direction": "sell",
+      "score": 0.7190946907813167,
+      "confidence": 0.7190946907813167,
+      "strategy": "Alpha6Factor",
+      "rank": 0
+    }
+  }
+}

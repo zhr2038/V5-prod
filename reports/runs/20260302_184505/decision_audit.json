@@ -1,0 +1,68 @@
+{
+  "run_id": "20260302_184505",
+  "now_ts": 1772448305,
+  "window_start_ts": null,
+  "window_end_ts": null,
+  "regime": "Unknown",
+  "regime_multiplier": 1.0,
+  "counts": {
+    "universe": 22,
+    "scored": 0,
+    "selected": 0,
+    "targets_pre_risk": 0,
+    "orders_exit": 0,
+    "orders_rebalance": 0
+  },
+  "top_scores": [],
+  "targets_pre_risk": {},
+  "targets_post_risk": {},
+  "portfolio_debug": {},
+  "rebalance_deadband_pct": null,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {},
+  "rebalance_effective_deadband_by_symbol": {},
+  "router_decisions": [],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 0,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 0,
+    "provider_error": 0,
+    "exchange_min_notional": 0
+  },
+  "budget": {
+    "equity_cap_usdt": 140.0,
+    "current_equity_usdt": 144.81805065748884,
+    "utilization_pct": 103.44146475534916,
+    "action_enabled": true
+  },
+  "budget_action": {},
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 22,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "DOGE/USDT",
+      "XRP/USDT",
+      "HYPE/USDT",
+      "SUI/USDT",
+      "BNB/USDT",
+      "LINK/USDT",
+      "NEAR/USDT"
+    ]
+  },
+  "exit_signals": [],
+  "notes": [
+    "2026-03-02T18:45:18.680257: BUDGET_LIMIT_EXCEEDED: 144.82 > 140.00"
+  ],
+  "regime_details": {},
+  "strategy_signals": []
+}

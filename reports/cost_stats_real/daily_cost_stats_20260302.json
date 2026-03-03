@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "day": "20260302",
+  "coverage": {
+    "events_total": 0,
+    "fills": 0,
+    "missing_bidask": 0,
+    "dropped_invalid": 0,
+    "source": "okx_fill"
+  },
+  "buckets": {}
+}

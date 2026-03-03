@@ -5,12 +5,5 @@
     "entry_px": 0.09364,
     "updated_at": "2026-03-01T19:29:25.763078",
     "source": "mark_to_market"
-  },
-  "NEAR/USDT": {
-    "symbol": "NEAR/USDT",
-    "highest_px": 1.158,
-    "entry_px": 1.139,
-    "updated_at": "2026-02-27T19:00:18.504942",
-    "source": "mark_to_market"
   }
 }

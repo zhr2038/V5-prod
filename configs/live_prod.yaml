@@ -158,6 +158,10 @@ budget:
   hard_buy_block_on_cap: false  # 禁用硬买块
   hard_buy_block_cap_ratio: 1.0
 
+  # 允许小额对账差异时继续交易
+  allow_trade_on_small_reconcile_drift: true
+  preflight_fail_action: allow  # 或 sell_only, 但配合 allow_trade_on_small_reconcile_drift 使用
+
 backtest:
   fee_bps: 6
   slippage_bps: 5

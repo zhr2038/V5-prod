@@ -1,15 +1,15 @@
 {
-  "ts": "2026-03-03T00:29:36.188862",
-  "current_level": "DEFENSE",
+  "ts": "2026-03-03T18:30:05.213125",
+  "current_level": "NEUTRAL",
   "metrics": {
     "dd_pct": 0.0,
-    "conversion_rate": 0.5363636363636364,
-    "dust_reject_rate": 0.12857142857142856,
+    "conversion_rate": 1.0,
+    "dust_reject_rate": 0.0,
     "pnl_trend": "flat",
     "consecutive_losses": 0,
-    "sample_size": 31,
-    "total_selected": 110,
-    "total_rebalance": 59
+    "sample_size": 16,
+    "total_selected": 6,
+    "total_rebalance": 6
   },
-  "reason": "回撤已收敛，先从保护恢复到防守"
+  "reason": "维持当前档位"
 }

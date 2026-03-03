@@ -1,39 +1,6 @@
 {
-  "timestamp": "2026-03-01T16:15:55Z",
+  "timestamp": "2026-03-03T10:30:06Z",
   "dry_run": false,
-  "orders": [
-    {
-      "symbol": "ETH/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 9.02073708644,
-      "signal_price": 1999.7,
-      "meta": {
-        "reason": "atr_trailing",
-        "last": 1999.7,
-        "stop": 2030.6565714285712,
-        "highest": 2083.62,
-        "atr": 24.07428571428573,
-        "atr_mult": 2.2,
-        "atr_n": 14
-      }
-    },
-    {
-      "symbol": "ETH/USDT",
-      "side": "buy",
-      "intent": "REBALANCE",
-      "notional_usdt": 9.0,
-      "signal_price": 1999.7,
-      "meta": {
-        "target_w": 0.3,
-        "dd_mult": 1.0,
-        "regime": "Sideways",
-        "window_start_ts": null,
-        "window_end_ts": null,
-        "deadband_pct": 0.035,
-        "drift": 0.3
-      }
-    }
-  ],
-  "notes": "regime=RegimeState.SIDEWAYS selected=['ETH/USDT'] orders=2"
+  "orders": [],
+  "notes": "regime=RegimeState.RISK_OFF selected=[] orders=0"
 }

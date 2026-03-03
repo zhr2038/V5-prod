@@ -1,17 +1,17 @@
 {
-  "current_level": "DEFENSE",
+  "current_level": "NEUTRAL",
   "current_config": {
-    "name": "DEFENSE",
-    "pos_mult_sideways": 0.5,
-    "pos_mult_trending": 0.9,
-    "deadband_sideways": 0.04,
-    "min_trade_notional_base": 3.0,
-    "drawdown_trigger": 0.08,
-    "drawdown_delever": 0.5,
-    "score_threshold_pct": 0.2,
-    "max_positions": 3,
-    "cooldown_hours": 4,
-    "description": "\u56de\u64a4\u6269\u5927\uff0c\u964d\u4f4e\u98ce\u9669"
+    "name": "NEUTRAL",
+    "pos_mult_sideways": 0.7,
+    "pos_mult_trending": 1.2,
+    "deadband_sideways": 0.035,
+    "min_trade_notional_base": 2.5,
+    "drawdown_trigger": 0.12,
+    "drawdown_delever": 0.6,
+    "score_threshold_pct": 0.1,
+    "max_positions": 4,
+    "cooldown_hours": 3,
+    "description": "\u6b63\u5e38\u9707\u8361\uff0c\u6807\u51c6\u64cd\u4f5c"
   },
   "metrics": {
     "consecutive_loss_rounds": 0,
@@ -55,7 +55,19 @@
         "last_dd_pct": 0.0,
         "last_conversion_rate": 0.5363636363636364
       }
+    },
+    {
+      "ts": "2026-03-03T00:30:04.076449",
+      "from": "DEFENSE",
+      "to": "NEUTRAL",
+      "reason": "\u56de\u64a4\u63a7\u5236\uff0c\u6210\u4ea4\u6539\u5584\uff0c\u6062\u590d\u4e2d\u6027",
+      "metrics": {
+        "consecutive_loss_rounds": 0,
+        "consecutive_noise_rounds": 0,
+        "last_dd_pct": 0.0,
+        "last_conversion_rate": 0.5363636363636364
+      }
     }
   ],
-  "last_update": "2026-03-03T00:29:36.188667"
+  "last_update": "2026-03-03T00:30:04.076672"
 }
