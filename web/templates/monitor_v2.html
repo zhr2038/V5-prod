@@ -384,6 +384,98 @@
             };
             return map[level] || 'risk-neutral';
         }
+
+        // 术语翻译（把程序名词换成人话）
+        const TERM_EXPLAIN = {
+            OPEN_LONG_COOLDOWN: '开仓冷却中（防止同币短时间重复开仓）',
+            min_notional: '下单金额低于最小门槛',
+            MIN_NOTIONAL: '下单金额低于最小门槛',
+            exchange_min_notional: '低于交易所最小下单金额',
+            EXCHANGE_MIN_NOTIONAL: '低于交易所最小下单金额',
+            deadband: '仓位差在静默区（波动太小，不调整）',
+            DEADBAND: '仓位差在静默区（波动太小，不调整）',
+            GATE: '风控门控拦截',
+            SELL_ONLY: '仅允许卖出（买入被禁）',
+            DUST: '灰尘单/数量太小',
+            SAFETY: '安全规则拦截',
+            require_fused_symbol: '不在融合信号买入名单',
+            require_fused_missing: '缺少融合信号文件',
+            budget_hard_buy_block: '触发预算硬限制，禁止买入',
+            spread_gate: '点差过大被拦截',
+            dd_throttle: '回撤保护降速',
+            no_closed_bar: '缺少收盘数据',
+            insufficient_cash: '可用现金不足',
+            provider_error: '行情提供方异常',
+            high_risk_symbol: '高风险币种过滤',
+            min_price: '低价币过滤',
+            ok: '通过',
+            OK: '通过',
+        };
+
+        function sideZh(v) {
+            const s = String(v || '').toLowerCase();
+            if (s === 'buy') return '买入';
+            if (s === 'sell') return '卖出';
+            return v || '--';
+        }
+
+        function stateZh(v) {
+            const s = String(v || '').toUpperCase();
+            const map = {
+                FILLED: '已成交',
+                REJECTED: '已拒单',
+                OPEN: '已提交',
+                PARTIAL: '部分成交',
+                SENT: '已发送',
+                ACK: '已确认',
+                CANCELED: '已撤单',
+                CANCELLED: '已撤单',
+                UNKNOWN: '未知状态',
+            };
+            return map[s] || (v || '--');
+        }
+
+        function regimeZh(v) {
+            const s = String(v || '').toUpperCase();
+            const map = {
+                TRENDING: '趋势',
+                SIDEWAYS: '震荡',
+                RISK_OFF: '风险规避',
+            };
+            return map[s] || (v || '--');
+        }
+
+        function sourceZh(v) {
+            const s = String(v || '').toLowerCase();
+            if (s === 'fused') return '融合执行榜';
+            if (s === 'alpha') return 'Alpha评分榜';
+            return v || '--';
+        }
+
+        function explainTerm(raw) {
+            const txt = String(raw || '').trim();
+            if (!txt) return '正常';
+            if (TERM_EXPLAIN[txt]) return TERM_EXPLAIN[txt];
+            const up = txt.toUpperCase();
+            if (TERM_EXPLAIN[up]) return TERM_EXPLAIN[up];
+
+            if (up.includes('OPEN_LONG_COOLDOWN')) return TERM_EXPLAIN.OPEN_LONG_COOLDOWN;
+            if (up.includes('MIN_NOTIONAL')) return TERM_EXPLAIN.MIN_NOTIONAL;
+            if (up.includes('DEADBAND')) return TERM_EXPLAIN.deadband;
+            if (up.includes('SELL_ONLY')) return TERM_EXPLAIN.SELL_ONLY;
+            if (up.includes('DUST')) return TERM_EXPLAIN.DUST;
+            if (up.includes('EXCHANGE_MIN_NOTIONAL')) return TERM_EXPLAIN.EXCHANGE_MIN_NOTIONAL;
+            if (up.includes('SPREAD')) return TERM_EXPLAIN.spread_gate;
+            return txt;
+        }
+
+        function explainWithCode(raw) {
+            const txt = String(raw || '').trim();
+            if (!txt) return '通过';
+            const zh = explainTerm(txt);
+            if (zh === txt) return txt;
+            return `${zh}（${txt}）`;
+        }
         
         // Load account
         async function loadAccount() {
@@ -515,7 +607,7 @@
                 const validPositions = positions.filter(p => (p.value || 0) > 1);
                 
                 document.getElementById('positions-subtitle').textContent = 
-                    validPositions.length > 0 ? `${validPositions.length}个有效持仓 (已过滤dust)` : '无有效持仓';
+                    validPositions.length > 0 ? `${validPositions.length}个有效持仓（已过滤灰尘仓）` : '无有效持仓';
                 
                 if (validPositions.length === 0) {
                     document.getElementById('positions-content').innerHTML = '<div class="empty">当前没有有效持仓</div>';
@@ -688,8 +780,8 @@
                     .slice(0, 6);
 
                 const recentOrders = runOrders.slice(0, 8);
-                const selectedSymbols = selectedOrders.map(x => `${x.symbol}(${x.side || '-'})`).join('、') || '无';
-                const blockedSymbols = blockedRoutes.slice(0, 5).map(x => `${x.symbol}:${x.reason}`).join('；') || '无';
+                const selectedSymbols = selectedOrders.map(x => `${x.symbol}(${sideZh(x.side)})`).join('、') || '无';
+                const blockedSymbols = blockedRoutes.slice(0, 5).map(x => `${x.symbol}:${explainWithCode(x.reason)}`).join('；') || '无';
                 const topTarget = targetRank.slice(0, 6);
                 const topFused = fusedRank.slice(0, 6);
 
@@ -738,23 +830,25 @@
 
                     <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
                         <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">原因是什么（执行结果）</div>
-                        <div style="font-size:0.84rem;">拒单 ${exec.rejected || 0} 笔，主要原因：${Object.entries(exec.reject_reasons || {}).map(([k,v]) => `${k}×${v}`).join('，') || '无'}</div>
+                        <div style="font-size:0.84rem;">拒单 ${exec.rejected || 0} 笔，主要原因：${Object.entries(exec.reject_reasons || {}).map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
                     </div>
 
                     <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
                         <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">被啥拦截（路由/审计）</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">路由：${routerList.map(([k,v]) => `${k}×${v}`).join('，') || '无'}</div>
-                        <div style="font-size:0.82rem;">审计reject：${rejectList.map(([k,v]) => `${k}×${v}`).join('，') || '无'}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">路由：${routerList.map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
+                        <div style="font-size:0.82rem;">审计reject：${rejectList.map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
                     </div>
 
                     <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
                         <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">怎么做的购买决策</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">决策来源：${data.selection_source || 'unknown'} | 市场状态：${data.regime || '--'}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">决策来源：${sourceZh(data.selection_source)} | 市场状态：${regimeZh(data.regime)}（${data.regime || '--'}）</div>
                         <div style="font-size:0.82rem; margin-bottom:4px;">本轮目标仓位Top（真实执行基准）：${topTarget.map(x => `${x.symbol}(${(Number(x.target_weight||0)*100).toFixed(2)}%)`).join('；') || '无'}</div>
                         <div style="font-size:0.82rem; margin-bottom:4px;">融合分数Top（参考）：${topFused.map(x => `${x.rank}.${x.symbol}(${Number(x.score||0).toFixed(3)})`).join('；') || '无'}${fusedFallback ? `（来自 ${fusedSourceRun}，非本run文件）` : ''}</div>
                         <div style="font-size:0.82rem; margin-bottom:4px;">路由通过：${selectedSymbols}</div>
                         <div style="font-size:0.82rem;">路由拦截：${blockedSymbols}</div>
                     </div>
+
+                    <div style="font-size:0.76rem;color:#64748b;margin-bottom:6px;">术语速查：deadband=仓位差静默区；min_notional=最小下单金额；OPEN_LONG_COOLDOWN=开仓冷却；run=一轮完整决策执行。</div>
 
                     <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">本轮订单明细</div>
                     ${recentOrders.length ? `
@@ -766,9 +860,9 @@
                             ${recentOrders.map(o => `
                                 <tr>
                                     <td>${o.inst_id || '--'}</td>
-                                    <td class="${o.side==='buy'?'text-green':'text-red'}">${o.side || '--'}</td>
-                                    <td class="${o.state==='FILLED'?'text-green':(o.state==='REJECTED'?'text-red':'text-yellow')}">${o.state || '--'}</td>
-                                    <td style="font-size:0.78rem;color:#94a3b8;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${o.last_error_code || o.last_error_msg || 'OK'}</td>
+                                    <td class="${o.side==='buy'?'text-green':'text-red'}">${sideZh(o.side)}</td>
+                                    <td class="${o.state==='FILLED'?'text-green':(o.state==='REJECTED'?'text-red':'text-yellow')}">${stateZh(o.state)}</td>
+                                    <td style="font-size:0.78rem;color:#94a3b8;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${explainWithCode(o.last_error_code || o.last_error_msg || 'OK')}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
