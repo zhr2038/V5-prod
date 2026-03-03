@@ -667,49 +667,51 @@
                 const counts = data.counts || {};
                 const rejects = data.rejects || {};
                 const routerReasonCounts = data.router_reason_counts || {};
-                const actionable = data.actionable_signals || {};
                 const exec = data.execution_summary || {};
                 const runOrders = data.run_orders || [];
+                const fusedRank = data.fused_buy_rank || [];
+                const selectedOrders = data.selected_orders || [];
+                const blockedRoutes = data.blocked_routes || [];
 
-                const topBuys = (actionable.buy_candidates || []).slice(0, 5);
                 const rejectList = Object.entries(rejects)
                     .filter(([_, v]) => Number(v) > 0)
                     .sort((a, b) => Number(b[1]) - Number(a[1]))
-                    .slice(0, 5);
+                    .slice(0, 6);
                 const routerList = Object.entries(routerReasonCounts)
                     .sort((a, b) => Number(b[1]) - Number(a[1]))
                     .slice(0, 6);
 
-                const recentOrders = runOrders.slice(0, 6);
+                const recentOrders = runOrders.slice(0, 8);
+                const selectedSymbols = selectedOrders.map(x => `${x.symbol}(${x.side || '-'})`).join('、') || '无';
+                const blockedSymbols = blockedRoutes.slice(0, 5).map(x => `${x.symbol}:${x.reason}`).join('；') || '无';
+                const topFused = fusedRank.slice(0, 6);
 
                 const html = `
-                    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px;">
-                        <div class="info-item"><div class="label">有信号</div><div class="value">${counts.selected || 0} 个</div></div>
-                        <div class="info-item"><div class="label">下单尝试</div><div class="value">${exec.total || 0} 笔</div></div>
-                        <div class="info-item"><div class="label">成交成功</div><div class="value ${Number(exec.filled||0)>0?'text-green':'text-yellow'}">${exec.filled || 0} 笔</div></div>
+                    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:10px;">
+                        <div class="info-item"><div class="label">有没有信号</div><div class="value">${counts.selected || 0} 个候选</div></div>
+                        <div class="info-item"><div class="label">交易成功与否</div><div class="value ${Number(exec.filled||0)>0?'text-green':'text-yellow'}">成功 ${exec.filled||0} / 尝试 ${exec.total||0}</div></div>
                     </div>
 
-                    <div style="font-size:0.82rem; color:#94a3b8; margin-bottom:8px;">
-                        购买决策：多策略融合 → 风控筛选 → 路由生成订单（create）→ 执行引擎提交
+                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">原因是什么（执行结果）</div>
+                        <div style="font-size:0.84rem;">拒单 ${exec.rejected || 0} 笔，主要原因：${Object.entries(exec.reject_reasons || {}).map(([k,v]) => `${k}×${v}`).join('，') || '无'}</div>
                     </div>
 
-                    <div style="margin-bottom:10px;">
-                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">候选买入Top（按融合分数）</div>
-                        ${topBuys.length ? topBuys.map(x => `<span style="display:inline-block;background:#0f172a;border:1px solid #334155;border-radius:999px;padding:3px 8px;margin:2px;font-size:0.78rem;">${x.symbol} ${Number(x.score||0).toFixed(3)}</span>`).join('') : '<span style="color:#64748b;">无</span>'}
+                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">被啥拦截（路由/审计）</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">路由：${routerList.map(([k,v]) => `${k}×${v}`).join('，') || '无'}</div>
+                        <div style="font-size:0.82rem;">审计reject：${rejectList.map(([k,v]) => `${k}×${v}`).join('，') || '无'}</div>
                     </div>
 
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px;">
-                        <div style="background:#0f172a;padding:10px;border-radius:8px;">
-                            <div style="font-size:0.78rem;color:#64748b;margin-bottom:6px;">被拦截原因（策略/路由层）</div>
-                            ${routerList.length ? routerList.map(([k,v]) => `<div style="display:flex;justify-content:space-between;font-size:0.82rem;padding:2px 0;"><span>${k}</span><span>${v}</span></div>`).join('') : '<div class="empty" style="padding:6px 0;">无</div>'}
-                        </div>
-                        <div style="background:#0f172a;padding:10px;border-radius:8px;">
-                            <div style="font-size:0.78rem;color:#64748b;margin-bottom:6px;">reject计数（审计）</div>
-                            ${rejectList.length ? rejectList.map(([k,v]) => `<div style="display:flex;justify-content:space-between;font-size:0.82rem;padding:2px 0;"><span>${k}</span><span>${v}</span></div>`).join('') : '<div class="empty" style="padding:6px 0;">无</div>'}
-                        </div>
+                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">怎么做的购买决策</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">决策来源：${data.selection_source || 'unknown'} | 市场状态：${data.regime || '--'}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">融合买入Top：${topFused.map(x => `${x.rank}.${x.symbol}(${Number(x.score||0).toFixed(3)})`).join('；') || '无'}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">路由通过：${selectedSymbols}</div>
+                        <div style="font-size:0.82rem;">路由拦截：${blockedSymbols}</div>
                     </div>
 
-                    <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">本轮订单结果（成功/失败与原因）</div>
+                    <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">本轮订单明细</div>
                     ${recentOrders.length ? `
                     <table>
                         <thead>

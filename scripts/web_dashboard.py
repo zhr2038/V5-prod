@@ -2549,6 +2549,57 @@ def api_decision_audit():
         except Exception:
             pass
 
+        # Try to expose actual fused ranking used for selection (if available)
+        fused_buy_rank = []
+        strategy_source_file = None
+        try:
+            if strategy_source_run:
+                p = runs_dir / str(strategy_source_run) / 'strategy_signals.json'
+                if p.exists():
+                    strategy_source_file = p
+            if strategy_source_file is None and strategy_file.exists():
+                strategy_source_file = strategy_file
+
+            if strategy_source_file and strategy_source_file.exists():
+                sobj = json.loads(strategy_source_file.read_text(encoding='utf-8'))
+                fused = sobj.get('fused', {}) if isinstance(sobj, dict) else {}
+                if isinstance(fused, dict):
+                    buys = []
+                    for sym, sig in fused.items():
+                        if str((sig or {}).get('direction', '')).lower() != 'buy':
+                            continue
+                        try:
+                            sc = float((sig or {}).get('score', 0.0) or 0.0)
+                        except Exception:
+                            sc = 0.0
+                        buys.append({'symbol': str(sym), 'score': sc})
+                    buys.sort(key=lambda x: x['score'], reverse=True)
+                    for i, b in enumerate(buys, start=1):
+                        fused_buy_rank.append({'rank': i, 'symbol': b['symbol'], 'score': b['score']})
+        except Exception:
+            fused_buy_rank = []
+
+        # Route-level selected/blocked breakdown
+        selected_orders = [
+            {
+                'symbol': str(rd.get('symbol') or ''),
+                'side': str(rd.get('side') or ''),
+                'reason': str(rd.get('reason') or ''),
+                'notional': float(rd.get('notional') or 0.0),
+            }
+            for rd in router_decisions
+            if str(rd.get('action') or '').lower() == 'create'
+        ]
+        blocked_routes = [
+            {
+                'symbol': str(rd.get('symbol') or ''),
+                'reason': str(rd.get('reason') or 'unknown'),
+                'action': str(rd.get('action') or ''),
+            }
+            for rd in router_decisions
+            if str(rd.get('action') or '').lower() != 'create'
+        ]
+
         return jsonify({
             'run_id': run_id,
             'strategy_run_id': strategy_source_run,
@@ -2559,8 +2610,12 @@ def api_decision_audit():
             'counts': audit_data.get('counts', {}),
             'rejects': audit_data.get('rejects', {}),
             'top_scores': audit_data.get('top_scores', []),
+            'selection_source': 'fused' if fused_buy_rank else 'alpha',
+            'fused_buy_rank': fused_buy_rank[:20],
             'router_decisions': router_decisions,
             'router_reason_counts': router_reason_counts,
+            'selected_orders': selected_orders,
+            'blocked_routes': blocked_routes,
             'strategy_signals': strategy_signals,
             'actionable_signals': {
                 'held_symbols': sorted(list(held_symbols)),
