@@ -66,11 +66,25 @@ def load_reconcile_ok(path: str) -> bool:
 
 
 def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
-    """Submit gate for live"""
+    """Submit gate for live.
+
+    Keep execution gate aligned with preflight policy:
+    - kill-switch => SELL_ONLY
+    - reconcile not ok + allow_trade_on_small_reconcile_drift => ALLOW (forced)
+    - otherwise reconcile not ok => SELL_ONLY
+    """
     ks = load_kill_switch_enabled(getattr(cfg, "kill_switch_path", "reports/kill_switch.json"))
     rc_ok = load_reconcile_ok(getattr(cfg, "reconcile_status_path", "reports/reconcile_status.json"))
-    if ks or not rc_ok:
+
+    if ks:
         return "SELL_ONLY", rc_ok, ks
+
+    if not rc_ok:
+        force_allow = bool(getattr(cfg, "allow_trade_on_small_reconcile_drift", False))
+        if force_allow:
+            return "ALLOW", rc_ok, ks
+        return "SELL_ONLY", rc_ok, ks
+
     return "ALLOW", rc_ok, ks
 
 

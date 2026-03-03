@@ -6,6 +6,7 @@ Runs before main V5 execution to ensure local state matches OKX.
 from __future__ import print_function
 
 import sys
+import os
 import json
 import time
 import logging
@@ -44,6 +45,22 @@ def _extract_spot_qty(detail):
     return qty if qty > 0 else 0.0
 
 
+def _balance_details(balance_resp):
+    """Normalize OKX balance payload to details list."""
+    try:
+        payload = balance_resp.data if hasattr(balance_resp, 'data') else (balance_resp or {})
+        data_arr = payload.get('data') if isinstance(payload, dict) else None
+        if isinstance(data_arr, list) and data_arr:
+            d0 = data_arr[0] if isinstance(data_arr[0], dict) else {}
+            details = d0.get('details', [])
+            if isinstance(details, list):
+                return details
+        details = payload.get('details', []) if isinstance(payload, dict) else []
+        return details if isinstance(details, list) else []
+    except Exception:
+        return []
+
+
 def main():
     """Auto-sync positions from OKX to local store."""
     logger.info("=" * 60)
@@ -60,11 +77,13 @@ def main():
         from src.execution.account_store import AccountStore
         from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
         
-        # Load config
+        # Load config (prefer active V5_CONFIG)
+        cfg_path = os.getenv('V5_CONFIG', 'configs/live_20u_real.yaml')
         cfg = load_config(
-            'configs/live_20u_real.yaml',
+            cfg_path,
             env_path='/home/admin/clawd/v5-trading-bot/.env'
         )
+        logger.info(f"Using config: {cfg_path}")
         
         # Create client
         client = OKXPrivateClient(exchange=cfg.exchange)
@@ -73,7 +92,9 @@ def main():
             # Get OKX balance
             logger.info("Fetching OKX balance...")
             balance = client.get_balance()
-            
+            balance_details = _balance_details(balance)
+            logger.info(f"Balance details loaded: {len(balance_details)} assets")
+
             # Load stores
             position_store = PositionStore(path='reports/positions.sqlite')
             account_store = AccountStore(path='reports/positions.sqlite')
@@ -107,7 +128,7 @@ def main():
             skipped_dust = []
 
             # 1) Bulk balance parse
-            for detail in balance.data.get('details', []):
+            for detail in balance_details:
                 ccy = str(detail.get('ccy') or '').upper()
                 if not ccy or ccy == 'USDT':
                     continue
@@ -208,11 +229,19 @@ def main():
                         logger.warning(f"  Could not sync {sym}: {e}")
             
             # Update cash
-            for detail in balance.data.get('details', []):
-                if detail.get('ccy') == 'USDT':
-                    cash = float(detail.get('eq', 0))
+            for detail in balance_details:
+                if str(detail.get('ccy') or '').upper() == 'USDT':
+                    cash = max(
+                        _as_float(detail.get('cashBal')),
+                        _as_float(detail.get('availBal')),
+                        _as_float(detail.get('eq')),
+                    )
                     try:
-                        account_store.update_cash(cash)
+                        st = account_store.get()
+                        # keep peak at least as large as current cash to avoid fake DD on empty portfolio
+                        st.cash_usdt = float(cash)
+                        st.equity_peak_usdt = max(float(st.equity_peak_usdt), float(cash))
+                        account_store.set(st)
                         logger.info(f"  Synced cash: {cash} USDT")
                     except Exception as e:
                         logger.warning(f"  Could not sync cash: {e}")
