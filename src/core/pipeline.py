@@ -464,6 +464,7 @@ class V5Pipeline:
         if audit:
             audit.targets_post_risk = target
         
+        # Define prices early for use in minSz filtering and later logic
         prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
 
         # 4.4 确保已有持仓都注册到止损/利润管理（避免重启后状态丢失）
