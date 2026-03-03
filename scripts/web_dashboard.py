@@ -2549,6 +2549,51 @@ def api_decision_audit():
         except Exception:
             pass
 
+        # Recent fill context (avoid confusion between "this run" and "latest successful trade")
+        recent_fill_summary = {
+            'count_60m': 0,
+            'count_24h': 0,
+            'latest_fill': None,
+        }
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
+                    FROM orders
+                    WHERE state = 'FILLED'
+                    ORDER BY created_ts DESC
+                    LIMIT 200
+                    """
+                )
+                rows = cur.fetchall()
+                conn.close()
+
+                now_ms = int(datetime.now().timestamp() * 1000)
+                for i, r in enumerate(rows):
+                    ts_raw = int(r[0] or 0)
+                    ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
+                    age_ms = max(0, now_ms - ts_ms)
+                    if age_ms <= 60 * 60 * 1000:
+                        recent_fill_summary['count_60m'] += 1
+                    if age_ms <= 24 * 60 * 60 * 1000:
+                        recent_fill_summary['count_24h'] += 1
+
+                    if i == 0:
+                        recent_fill_summary['latest_fill'] = {
+                            'created_ts': ts_raw,
+                            'run_id': str(r[1] or ''),
+                            'inst_id': str(r[2] or ''),
+                            'side': str(r[3] or ''),
+                            'intent': str(r[4] or ''),
+                            'notional_usdt': float(r[5] or 0.0),
+                            'ord_id': str(r[6] or ''),
+                        }
+        except Exception:
+            pass
+
         # Try to expose actual fused ranking used for selection (if available)
         fused_buy_rank = []
         strategy_source_file = None
@@ -2642,6 +2687,12 @@ def api_decision_audit():
                 'sell_candidates': actionable_sell,
             },
             'execution_summary': execution_summary,
+            'execution_scope': {
+                'type': 'run_id_only',
+                'run_id': run_id,
+                'note': 'execution_summary/run_orders 仅统计本次run；recent_fill_summary统计跨run最近成交。',
+            },
+            'recent_fill_summary': recent_fill_summary,
             'run_orders': run_orders[:30],
             'notes': audit_data.get('notes', [])[:12]
         })

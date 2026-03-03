@@ -675,6 +675,8 @@
                 const fusedSourceRun = data.fused_rank_source_run || '--';
                 const selectedOrders = data.selected_orders || [];
                 const blockedRoutes = data.blocked_routes || [];
+                const recentFill = data.recent_fill_summary || {};
+                const latestFill = recentFill.latest_fill || null;
 
                 const rejectList = Object.entries(rejects)
                     .filter(([_, v]) => Number(v) > 0)
@@ -690,10 +692,26 @@
                 const topTarget = targetRank.slice(0, 6);
                 const topFused = fusedRank.slice(0, 6);
 
+                let latestFillText = '无';
+                if (latestFill && latestFill.inst_id) {
+                    const rawTs = Number(latestFill.created_ts || 0);
+                    const ms = rawTs > 1e12 ? rawTs : rawTs * 1000;
+                    const d = ms > 0 ? new Date(ms) : null;
+                    const tstr = d ? d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
+                    latestFillText = `${latestFill.inst_id} ${latestFill.side || ''} ${Number(latestFill.notional_usdt || 0).toFixed(2)}U @ ${tstr}`;
+                }
+
                 const html = `
                     <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:10px;">
                         <div class="info-item"><div class="label">有没有信号</div><div class="value">${counts.selected || 0} 个候选</div></div>
-                        <div class="info-item"><div class="label">交易成功与否</div><div class="value ${Number(exec.filled||0)>0?'text-green':'text-yellow'}">成功 ${exec.filled||0} / 尝试 ${exec.total||0}</div></div>
+                        <div class="info-item"><div class="label">交易成功与否（本轮）</div><div class="value ${Number(exec.filled||0)>0?'text-green':'text-yellow'}">成功 ${exec.filled||0} / 尝试 ${exec.total||0}</div></div>
+                    </div>
+
+                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">范围说明</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">本轮run：${runId}（上面的成功/失败只统计本run）</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">最近60分钟成交：${Number(recentFill.count_60m || 0)} 笔；24小时成交：${Number(recentFill.count_24h || 0)} 笔</div>
+                        <div style="font-size:0.82rem;">最近一笔真实成交：${latestFillText}</div>
                     </div>
 
                     <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
