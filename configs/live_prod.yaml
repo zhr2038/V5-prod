@@ -114,7 +114,7 @@ risk:
       dd_15_plus: {max_positions: 1, position_size_pct: 0.15}
 
 rebalance:
-  deadband_sideways: 0.06
+  deadband_sideways: 0.05
   deadband_trending: 0.04
   deadband_riskoff: 0.07
   new_position_deadband_multiplier: 1.0
@@ -171,7 +171,7 @@ budget:
   exchange_min_notional_enabled: true
   exchange_min_notional_slack_multiplier: 1.05
   
-  min_trade_notional_base: 9.5
+  min_trade_notional_base: 9.0
   min_trade_notional_multiplier_exceeded: 1.5
   min_trade_notional_cap_abs: 100.0
   min_trade_notional_cap_equity_ratio: 0.03
