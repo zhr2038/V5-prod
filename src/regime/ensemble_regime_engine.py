@@ -100,11 +100,17 @@ class EnsembleRegimeEngine:
                         model = pickle.load(f)
 
                     model_class = type(model).__name__
-                    if expected_model_class and str(expected_model_class) != model_class:
-                        self._model_type_mismatch = True
-                        msg = f"model_type_mismatch(expected={expected_model_class}, actual={model_class})"
-                        self.startup_alerts.append(msg)
-                        print(f"[EnsembleRegime] ⚠️ {msg}")
+                    if expected_model_class:
+                        expected = str(expected_model_class)
+                        compatible = (
+                            expected == model_class
+                            or (expected in {'SimpleGaussianHMM', 'HMMRegimeDetector', 'SimpleGaussianHMMPayload'} and model_class == 'dict')
+                        )
+                        if not compatible:
+                            self._model_type_mismatch = True
+                            msg = f"model_type_mismatch(expected={expected_model_class}, actual={model_class})"
+                            self.startup_alerts.append(msg)
+                            print(f"[EnsembleRegime] ⚠️ {msg}")
 
                     if model_class == 'GaussianMixture':
                         class GMMWrapper:

@@ -109,6 +109,8 @@ def main():
     print("\n[4] 保存模型信息...")
     model_info = {
         'trained_at': datetime.now().isoformat(),
+        'model_class': 'SimpleGaussianHMM',
+        'model_payload_type': 'dict',
         'n_components': detector.n_components,
         'n_samples': len(X),
         'n_features': X.shape[1],
