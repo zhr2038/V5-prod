@@ -1106,6 +1106,8 @@ def api_market_state():
                 'funding': ensemble_data.get('votes', {}).get('funding', {'state': 'N/A', 'weight': 0}),
                 'rss': ensemble_data.get('votes', {}).get('rss', {'state': 'N/A', 'weight': 0})
             },
+            'alerts': ensemble_data.get('votes', {}).get('alerts', []),
+            'monitor': ensemble_data.get('votes', {}).get('monitor', {}),
             'final_score': ensemble_data.get('final_score', 0),
             'price': indicators['price']
         }

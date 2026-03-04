@@ -84,6 +84,13 @@ regime:
   sentiment_riskoff_harden_threshold: -0.65
   ma_gap_relax_threshold: 0.03
 
+  # Regime monitor（学习记录补齐）：持久化状态+检测卡住/沉默故障
+  regime_monitor_enabled: true
+  regime_history_db_path: reports/regime_history.db
+  regime_sideways_prob_warn_threshold: 0.80
+  regime_sideways_consecutive_warn: 10
+  regime_monitor_keep_rows: 5000
+
 risk:
   # 正式上线：放宽单币限制，允许多币分散
   max_single_weight: 0.25  # 单币最多25%

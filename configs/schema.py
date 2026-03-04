@@ -114,6 +114,13 @@ class RegimeConfig(BaseModel):
     sentiment_riskoff_harden_threshold: float = Field(default=-0.65, ge=-1.0, le=1.0)
     ma_gap_relax_threshold: float = Field(default=0.03, ge=0.0, le=0.2, description="(ma60-ma20)/ma60 小于该值时允许情绪放松Risk-Off")
 
+    # Regime monitor: persist votes and detect silent failures/stuck states.
+    regime_monitor_enabled: bool = Field(default=True)
+    regime_history_db_path: str = Field(default="reports/regime_history.db")
+    regime_sideways_prob_warn_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    regime_sideways_consecutive_warn: int = Field(default=10, ge=2, le=200)
+    regime_monitor_keep_rows: int = Field(default=5000, ge=100, le=500000)
+
 
 class RiskConfig(BaseModel):
     max_single_weight: float = Field(default=0.25, gt=0, le=1)
