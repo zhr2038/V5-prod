@@ -107,6 +107,50 @@ def clear_risk_state_on_full_close(symbol: str) -> None:
         log.info("RISK_STATE_CLEARED: %s removed_from=%d", symbol, removed)
 
 
+def _read_rank_exit_cooldown_state(path: str = "reports/rank_exit_cooldown_state.json") -> Dict[str, Any]:
+    obj = _load_json(path)
+    return obj if isinstance(obj, dict) else {}
+
+
+def _write_rank_exit_cooldown_state(data: Dict[str, Any], path: str = "reports/rank_exit_cooldown_state.json") -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(data or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
+def _record_rank_exit_fill(symbol: str, reason: str, path: str = "reports/rank_exit_cooldown_state.json") -> None:
+    try:
+        st = _read_rank_exit_cooldown_state(path)
+        st[str(symbol)] = {
+            "last_rank_exit_ts_ms": _now_ms(),
+            "reason": str(reason or "rank_exit"),
+        }
+        _write_rank_exit_cooldown_state(st, path)
+        log.info("RANK_EXIT_COOLDOWN_SET: %s reason=%s", symbol, reason)
+    except Exception as e:
+        log.warning("RANK_EXIT_COOLDOWN_SET failed for %s: %s", symbol, e)
+
+
+def _rank_exit_cooldown_remaining_ms(symbol: str, cooldown_minutes: int, path: str = "reports/rank_exit_cooldown_state.json") -> int:
+    try:
+        if int(cooldown_minutes or 0) <= 0:
+            return 0
+        st = _read_rank_exit_cooldown_state(path)
+        rec = st.get(str(symbol)) if isinstance(st, dict) else None
+        if not isinstance(rec, dict):
+            return 0
+        ts_ms = int(rec.get("last_rank_exit_ts_ms") or 0)
+        if ts_ms <= 0:
+            return 0
+        cooldown_ms = int(cooldown_minutes) * 60 * 1000
+        elapsed = max(0, _now_ms() - ts_ms)
+        return max(0, cooldown_ms - elapsed)
+    except Exception:
+        return 0
+
+
 def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
     """Submit gate for live.
 
@@ -403,6 +447,17 @@ class LiveExecutionEngine:
             # Spot market buy: submit quote notional in USDT
             # OKX expects plain decimal string
             from decimal import Decimal
+
+            # Rank-exit re-entry cooldown: after FILLED rank_exit sell, delay OPEN_LONG re-entry.
+            if str(o.intent or "").upper() == "OPEN_LONG":
+                cooldown_min = int(getattr(self.cfg, "rank_exit_reentry_cooldown_minutes", 0) or 0)
+                if cooldown_min > 0:
+                    remain_ms = _rank_exit_cooldown_remaining_ms(o.symbol, cooldown_min)
+                    if remain_ms > 0:
+                        remain_sec = remain_ms / 1000.0
+                        raise ValueError(
+                            f"RANK_EXIT_REENTRY_COOLDOWN: {o.symbol} remain={remain_sec:.1f}s (<{cooldown_min}m)"
+                        )
 
             # Hard no-borrow guard (buy-side):
             # never allow buy notional to exceed available quote balance budget.
@@ -842,6 +897,14 @@ class LiveExecutionEngine:
             # NO_BORROW false positives on subsequent sells.
             try:
                 if polled_state == "FILLED":
+                    # Record rank-exit fill for re-entry cooldown gate.
+                    try:
+                        reason = str((o.meta or {}).get("reason", "") or "")
+                        if str(o.side).lower() == "sell" and reason.startswith("rank_exit_"):
+                            _record_rank_exit_fill(o.symbol, reason)
+                    except Exception:
+                        pass
+
                     row = self.order_store.get(clid)
                     # parse last_query to extract accFillSz/avgPx if present
                     last_q = None

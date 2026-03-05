@@ -262,6 +262,27 @@ class ExecutionConfig(BaseModel):
         ge=0,
         description="Block new OPEN_LONG buy if same symbol had FILLED OPEN_LONG within this many minutes (0=disable)",
     )
+
+    # Rank-exit anti-churn controls.
+    rank_exit_max_rank: int = Field(
+        default=3,
+        ge=1,
+        le=50,
+        description="Trigger rank-exit when rank exceeds this threshold",
+    )
+    rank_exit_confirm_rounds: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description="Require N consecutive rounds beyond rank_exit_max_rank before exiting",
+    )
+    rank_exit_reentry_cooldown_minutes: int = Field(
+        default=60,
+        ge=0,
+        le=24 * 60,
+        description="After a FILLED rank-exit sell, block OPEN_LONG re-entry for this many minutes",
+    )
+
     order_state_machine_path: str = Field(
         default="reports/order_state_machine.json",
         description="Path for execution arbitration state machine persistence",

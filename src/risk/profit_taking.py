@@ -35,6 +35,11 @@ class PositionProfitState:
     partial_sold: bool = False
     partial_sell_time: Optional[datetime] = None
 
+    # 排名退出防抖状态
+    rank_exit_streak: int = 0
+    last_rank: Optional[int] = None
+    last_rank_exit_time: Optional[datetime] = None
+
 
 class ProfitTakingManager:
     """
@@ -81,7 +86,10 @@ class ProfitTakingManager:
                             current_stop=state.get('current_stop', 0.0),
                             current_action=state.get('current_action', 'hold'),
                             partial_sold=state.get('partial_sold', False),
-                            partial_sell_time=datetime.fromisoformat(state['partial_sell_time']) if state.get('partial_sell_time') else None
+                            partial_sell_time=datetime.fromisoformat(state['partial_sell_time']) if state.get('partial_sell_time') else None,
+                            rank_exit_streak=int(state.get('rank_exit_streak', 0) or 0),
+                            last_rank=int(state.get('last_rank')) if state.get('last_rank') is not None else None,
+                            last_rank_exit_time=datetime.fromisoformat(state['last_rank_exit_time']) if state.get('last_rank_exit_time') else None,
                         )
             except Exception as e:
                 print(f"[ProfitTaking] 加载状态失败: {e}")
@@ -100,7 +108,10 @@ class ProfitTakingManager:
                     'current_stop': state.current_stop,
                     'current_action': state.current_action,
                     'partial_sold': state.partial_sold,
-                    'partial_sell_time': state.partial_sell_time.isoformat() if state.partial_sell_time else None
+                    'partial_sell_time': state.partial_sell_time.isoformat() if state.partial_sell_time else None,
+                    'rank_exit_streak': int(state.rank_exit_streak),
+                    'last_rank': state.last_rank,
+                    'last_rank_exit_time': state.last_rank_exit_time.isoformat() if state.last_rank_exit_time else None,
                 }
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.state_file, 'w') as f:
@@ -125,6 +136,9 @@ class ProfitTakingManager:
                 self.positions[symbol].current_action = 'hold'
                 self.positions[symbol].partial_sold = False
                 self.positions[symbol].partial_sell_time = None
+                self.positions[symbol].rank_exit_streak = 0
+                self.positions[symbol].last_rank = None
+                self.positions[symbol].last_rank_exit_time = None
                 self._save_state()
         else:
             # 新持仓
@@ -133,7 +147,10 @@ class ProfitTakingManager:
                 entry_price=entry_price,
                 entry_time=datetime.now(),
                 highest_price=current_price or entry_price,
-                current_stop=entry_price * 0.95  # 初始止损-5%
+                current_stop=entry_price * 0.95,  # 初始止损-5%
+                rank_exit_streak=0,
+                last_rank=None,
+                last_rank_exit_time=None,
             )
             self._save_state()
             print(f"[ProfitTaking] {symbol} 注册 @ {entry_price:.4f}, 初始止损 {self.positions[symbol].current_stop:.4f}")
@@ -203,30 +220,57 @@ class ProfitTakingManager:
         
         return 'hold', 0, f'profit_{profit_pct:.1%}_holding'
     
-    def should_exit_by_rank(self, symbol: str, current_rank: int, max_rank: int = 3) -> Tuple[bool, str]:
-        """
-        根据排名决定是否退出
-        
+    def should_exit_by_rank(
+        self,
+        symbol: str,
+        current_rank: int,
+        max_rank: int = 3,
+        confirm_rounds: int = 2,
+    ) -> Tuple[bool, str]:
+        """根据排名决定是否退出（带防抖确认）
+
         Returns:
             (should_exit, reason)
         """
         if symbol not in self.positions:
             return False, 'not_in_positions'
-        
+
         state = self.positions[symbol]
-        
-        # 如果已经在高利润状态，排名退出可以延后
+        current_rank_i = int(current_rank if current_rank is not None else 999)
+        confirm_rounds_i = max(1, int(confirm_rounds or 1))
+
+        # 盈利高时放宽排名阈值
+        effective_max_rank = 5 if state.profit_high > 0.20 else int(max_rank)
+
+        changed = False
+        if current_rank_i > effective_max_rank:
+            state.rank_exit_streak = int(state.rank_exit_streak or 0) + 1
+            state.last_rank = current_rank_i
+            changed = True
+
+            if state.rank_exit_streak >= confirm_rounds_i:
+                state.last_rank_exit_time = datetime.now()
+                self._save_state()
+                if state.profit_high > 0.20:
+                    return True, f'rank_{current_rank_i}_exceeds_{effective_max_rank}_with_profit_streak_{state.rank_exit_streak}'
+                return True, f'rank_{current_rank_i}_exceeds_{effective_max_rank}_streak_{state.rank_exit_streak}'
+
+            if changed:
+                self._save_state()
+            return False, f'rank_exit_pending_{state.rank_exit_streak}/{confirm_rounds_i}'
+
+        # 回到阈值内，重置 streak
+        if int(state.rank_exit_streak or 0) != 0 or state.last_rank != current_rank_i:
+            state.rank_exit_streak = 0
+            state.last_rank = current_rank_i
+            changed = True
+
+        if changed:
+            self._save_state()
+
         if state.profit_high > 0.20:
-            # 盈利20%以上，允许排名跌出前5才卖
-            if current_rank > 5:
-                return True, f'rank_{current_rank}_exceeds_5_with_profit'
-            return False, f'rank_{current_rank}_but_high_profit'
-        
-        # 正常情况：跌出前3就卖
-        if current_rank > max_rank:
-            return True, f'rank_{current_rank}_exceeds_{max_rank}'
-        
-        return False, f'rank_{current_rank}_ok'
+            return False, f'rank_{current_rank_i}_ok_high_profit'
+        return False, f'rank_{current_rank_i}_ok'
     
     def get_position_summary(self, symbol: str, current_price: float) -> dict:
         """获取持仓摘要"""

@@ -211,6 +211,10 @@ execution:
   split_interval_sec: 3
   max_hourly_volume_pct: 0.05
   open_long_cooldown_minutes: 30  # 同币种30分钟内已OPEN_LONG成交则禁止再次OPEN_LONG
+  # 排名退出防抖：需连续2轮跌出前3才触发rank_exit；且退出后1小时内禁止回补
+  rank_exit_max_rank: 3
+  rank_exit_confirm_rounds: 2
+  rank_exit_reentry_cooldown_minutes: 60
   order_state_machine_path: reports/order_state_machine.json  # 执行仲裁状态机持久化
   slippage_db_path: reports/slippage.sqlite
   fee_bps: 6

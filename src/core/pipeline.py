@@ -592,9 +592,13 @@ class V5Pipeline:
             sorted_scores = sorted(rank_scores.items(), key=lambda x: x[1], reverse=True)
             symbol_ranks = {sym: idx + 1 for idx, (sym, _) in enumerate(sorted_scores)}
             target_hold_eps = float(getattr(self.cfg.rebalance, 'close_only_weight_eps', 0.001) or 0.001)
+            rank_exit_max_rank = int(getattr(self.cfg.execution, 'rank_exit_max_rank', 3) or 3)
+            rank_exit_confirm_rounds = int(getattr(self.cfg.execution, 'rank_exit_confirm_rounds', 2) or 2)
 
             if audit:
-                audit.add_note(f"Rank exit source: {rank_source}, candidates={len(symbol_ranks)}")
+                audit.add_note(
+                    f"Rank exit source: {rank_source}, candidates={len(symbol_ranks)}, max_rank={rank_exit_max_rank}, confirm_rounds={rank_exit_confirm_rounds}"
+                )
 
             for p in positions:
                 if p.qty <= 0 or p.symbol in profit_symbols:
@@ -611,7 +615,10 @@ class V5Pipeline:
 
                 current_rank = symbol_ranks.get(p.symbol, 999)
                 should_exit, reason = self.profit_taking.should_exit_by_rank(
-                    p.symbol, current_rank, max_rank=3
+                    p.symbol,
+                    current_rank,
+                    max_rank=rank_exit_max_rank,
+                    confirm_rounds=rank_exit_confirm_rounds,
                 )
                 if should_exit:
                     s = market_data_1h.get(p.symbol)
@@ -629,6 +636,8 @@ class V5Pipeline:
                                     "current_rank": current_rank,
                                     "rank_source": rank_source,
                                     "target_w": tw,
+                                    "confirm_rounds": rank_exit_confirm_rounds,
+                                    "max_rank": rank_exit_max_rank,
                                 },
                             )
                         )
@@ -636,6 +645,11 @@ class V5Pipeline:
                             audit.add_note(
                                 f"Rank exit: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
                             )
+                else:
+                    if audit and str(reason).startswith("rank_exit_pending"):
+                        audit.add_note(
+                            f"Rank exit pending: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
+                        )
         
         # 4. Policy-based exits (if not already handled)
         exit_orders = self.exit_policy.evaluate(
