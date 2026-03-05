@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-03-04T16:00:33.341000Z,20260304_160016,APT/USDT,OPEN_LONG,buy,21.8914,1.0257,22.45400898,0.02245400898,,,

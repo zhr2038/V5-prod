@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-03-05T11:45:02.484057",
+  "enabled": true,
+  "applied": true,
+  "reason": "high_block_ratio_relax",
+  "regime": "SIDEWAYS",
+  "lookback_runs": 12,
+  "recent_events_processed": 344,
+  "recent_events_blocked": 322,
+  "recent_block_ratio": 0.936,
+  "base": {
+    "check_interval_minutes": 15,
+    "global_cooldown_p2_minutes": 30,
+    "symbol_cooldown_minutes": 60,
+    "signal_confirmation_periods": 2
+  },
+  "effective": {
+    "check_interval_minutes": 15,
+    "global_cooldown_p2_minutes": 15,
+    "symbol_cooldown_minutes": 30,
+    "signal_confirmation_periods": 1
+  }
+}

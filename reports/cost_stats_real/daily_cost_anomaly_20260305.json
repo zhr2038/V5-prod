@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "day": "20260305",
+  "today_overall_p50_cost_bps": null,
+  "lookback_days": 7,
+  "lookback_used_days": [],
+  "lookback_overall_p50_cost_bps": [],
+  "baseline_median_p50_cost_bps": null,
+  "threshold": {
+    "multiplier": 2.0,
+    "abs_bps": 30.0,
+    "computed_bps": 30.0
+  },
+  "is_anomaly": false
+}

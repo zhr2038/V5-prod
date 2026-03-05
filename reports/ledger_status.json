@@ -1,27 +1,120 @@
 {
   "schema_version": 1,
-  "ts_ms": 1772533805271,
-  "ok": false,
-  "reason": "no_baseline",
+  "ts_ms": 1772681421393,
+  "ok": true,
+  "reason": null,
   "window": {
-    "begin_ts_ms": null,
-    "end_ts_ms": 1772533805271
+    "begin_ts_ms": 1772679634764,
+    "end_ts_ms": 1772680524145
   },
-  "baseline": null,
-  "current": {
-    "ts_ms": 1772533805271,
-    "last_bill_id": "3356102780573442048",
+  "baseline": {
+    "ts_ms": 1772680521648,
+    "last_bill_id": "3361390211866550272",
+    "last_bill_ts_ms": 1772679634764,
     "balances": {
-      "USDT": "134.96697404244412",
-      "HYPE": "0.0000512",
-      "NEAR": "0.00000000626"
+      "USDT": "60.53480574417825",
+      "APT": "21.8695159",
+      "TON": "12.4966344",
+      "NEAR": "12.94851650531",
+      "UNI": "4.114980321",
+      "HYPE": "0.0000467",
+      "XPL": "0.008",
+      "BNB": "0.00000098",
+      "LTC": "0.000000912",
+      "SOL": "0.000000156",
+      "FIL": "0.000000679",
+      "DOGE": "0.00000098"
+    }
+  },
+  "current": {
+    "ts_ms": 1772681421393,
+    "last_bill_id": "3361420054540836864",
+    "last_bill_ts_ms": 1772680524145,
+    "balances": {
+      "USDT": "93.50486555280675",
+      "APT": "21.8695159",
+      "UNI": "4.114980321",
+      "HYPE": "0.0000467",
+      "XPL": "0.008",
+      "BNB": "0.00000098",
+      "LTC": "0.000000912",
+      "TON": "0.0000344",
+      "SOL": "0.000000156",
+      "FIL": "0.000000679",
+      "DOGE": "0.00000098",
+      "NEAR": "0.00000000531"
     }
   },
   "bills_aggregate": {
-    "count": 0,
-    "sum_bal_chg": {}
+    "count": 4,
+    "sum_bal_chg": {
+      "USDT": "32.9700598086285000",
+      "NEAR": "-12.94851650000",
+      "TON": "-12.4966000"
+    }
   },
-  "diffs": {},
+  "diffs": {
+    "APT": {
+      "expected": "21.8695159",
+      "actual": "21.8695159",
+      "delta": "0E-7"
+    },
+    "BNB": {
+      "expected": "9.8E-7",
+      "actual": "9.8E-7",
+      "delta": "0E-8"
+    },
+    "DOGE": {
+      "expected": "9.8E-7",
+      "actual": "9.8E-7",
+      "delta": "0E-8"
+    },
+    "FIL": {
+      "expected": "6.79E-7",
+      "actual": "6.79E-7",
+      "delta": "0E-9"
+    },
+    "HYPE": {
+      "expected": "0.0000467",
+      "actual": "0.0000467",
+      "delta": "0E-7"
+    },
+    "LTC": {
+      "expected": "9.12E-7",
+      "actual": "9.12E-7",
+      "delta": "0E-9"
+    },
+    "NEAR": {
+      "expected": "5.31E-9",
+      "actual": "5.31E-9",
+      "delta": "0E-11"
+    },
+    "SOL": {
+      "expected": "1.56E-7",
+      "actual": "1.56E-7",
+      "delta": "0E-9"
+    },
+    "TON": {
+      "expected": "0.0000344",
+      "actual": "0.0000344",
+      "delta": "0E-7"
+    },
+    "UNI": {
+      "expected": "4.114980321",
+      "actual": "4.114980321",
+      "delta": "0E-9"
+    },
+    "USDT": {
+      "expected": "93.5048655528067500",
+      "actual": "93.50486555280675",
+      "delta": "0E-16"
+    },
+    "XPL": {
+      "expected": "0.008",
+      "actual": "0.008",
+      "delta": "0.000"
+    }
+  },
   "error": {
     "http_status": 200,
     "okx_code": "0",

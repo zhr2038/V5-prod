@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EventMonitorConfig:
     """Configuration for event monitor."""
-    # Signal change thresholds
-    score_change_threshold: float = 0.30  # 30% change
-    rank_jump_threshold: int = 3          # 3 position jump
+    # Signal change thresholds - 提高阈值降低噪声
+    score_change_threshold: float = 0.60  # 60% change (原0.30)
+    rank_jump_threshold: int = 7          # 7 position jump (原3)
     
-    # Breakout detection
+    # Breakout detection - 提高突破阈值
     breakout_lookback_hours: int = 24
-    breakout_threshold_pct: float = 0.5   # 0.5%
+    breakout_threshold_pct: float = 0.8   # 0.8% (原0.5%)
     bollinger_enabled: bool = True
     
     # Heartbeat

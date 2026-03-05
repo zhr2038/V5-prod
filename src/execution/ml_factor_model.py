@@ -26,21 +26,23 @@ class MLFactorConfig:
     # Ridge/Lasso参数
     alpha: float = 10.0       # L2正则化强度
     
-    # LightGBM参数（保留但不默认使用）
-    n_estimators: int = 30
-    max_depth: int = 3
+    # LightGBM参数（保留但不默认使用）- 增加正则化防止过拟合
+    n_estimators: int = 50    # 树的数量（减少以降低复杂度）
+    max_depth: int = 4        # 树的最大深度（减少以防止过拟合）
     learning_rate: float = 0.05
-    subsample: float = 0.5
-    colsample_bytree: float = 0.5
+    subsample: float = 0.6    # 行采样率（防止过拟合）
+    colsample_bytree: float = 0.6  # 列采样率（防止过拟合）
     num_leaves: int = 7
-    min_data_in_leaf: int = 50
-    reg_alpha: float = 1.0
-    reg_lambda: float = 1.0
+    min_data_in_leaf: int = 50     # 叶子最小样本数
+    min_child_samples: int = 30    # 新增：叶子节点最小样本数
+    reg_alpha: float = 2.0         # L1正则化（增加）
+    reg_lambda: float = 5.0        # L2正则化（增加）
+    random_state: int = 42         # 随机种子确保可复现
     
     # 训练参数
     train_lookback_days: int = 60
     prediction_horizon: int = 6
-    min_train_samples: int = 100
+    min_train_samples: int = 200   # 增加最小样本数
     early_stopping_rounds: int = 10
 
 class MLFactorModel:

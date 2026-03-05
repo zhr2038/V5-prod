@@ -1,75 +1,10 @@
 {
-  "timestamp": 1772205516,
-  "okx_total_eq": 109.02951698973541,
-  "calculated_total_eq": 109.01640083144763,
-  "difference": 0.013116158287786561,
-  "usdt_balance": 109.00976640052828,
-  "positions_value": 0.006634430919342758,
-  "positions_count": 8,
-  "positions": [
-    {
-      "symbol": "PROMPT/USDT",
-      "ccy": "PROMPT",
-      "qty": 0.0821,
-      "price": 0.04546,
-      "value": 0.003732266,
-      "value_pct": 0.0034231702598034757
-    },
-    {
-      "symbol": "SPACE/USDT",
-      "ccy": "SPACE",
-      "qty": 0.154,
-      "price": 0.008438,
-      "value": 0.001299452,
-      "value_pct": 0.0011918350515322715
-    },
-    {
-      "symbol": "POL/USDT",
-      "ccy": "POL",
-      "qty": 0.00754,
-      "price": 0.1096,
-      "value": 0.000826384,
-      "value_pct": 0.0007579452086152046
-    },
-    {
-      "symbol": "KITE/USDT",
-      "ccy": "KITE",
-      "qty": 0.00235,
-      "price": 0.244,
-      "value": 0.0005734000000000001,
-      "value_pct": 0.0005259126297459273
-    },
-    {
-      "symbol": "WLFI/USDT",
-      "ccy": "WLFI",
-      "qty": 0.00144,
-      "price": 0.114,
-      "value": 0.00016416000000000003,
-      "value_pct": 0.00015056473194818875
-    },
-    {
-      "symbol": "MERL/USDT",
-      "ccy": "MERL",
-      "qty": 0.000639,
-      "price": 0.04341,
-      "value": 2.773899e-05,
-      "value_pct": 2.544172510881754e-05
-    },
-    {
-      "symbol": "J/USDT",
-      "ccy": "J",
-      "qty": 0.000744,
-      "price": 0.01367,
-      "value": 1.0170479999999999e-05,
-      "value_pct": 9.328189540597066e-06
-    },
-    {
-      "symbol": "PEPE/USDT",
-      "ccy": "PEPE",
-      "qty": 0.2331658553331767,
-      "price": 3.686e-06,
-      "value": 8.594493427580893e-07,
-      "value_pct": 7.882721729740418e-07
-    }
-  ]
+  "timestamp": 1772534415,
+  "okx_total_eq": 134.93890568768998,
+  "calculated_total_eq": 134.96697404244412,
+  "difference": 0.028068354754140046,
+  "usdt_balance": 134.96697404244412,
+  "positions_value": 0,
+  "positions_count": 0,
+  "positions": []
 }

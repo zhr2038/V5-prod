@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-03-04T07:30:17.673000Z,20260304_073005,LTC/USDT,OPEN_LONG,buy,0.186088,54.92,10.21995296,0.01021995296,,,

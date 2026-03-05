@@ -1,0 +1,97 @@
+{
+  "timestamp": "2026-03-05T11:45:02.379964",
+  "regime": "SIDEWAYS",
+  "count": 10,
+  "candidates": [
+    {
+      "symbol": "BCH/USDT",
+      "direction": "sell",
+      "score": 2.4421963341312876,
+      "rank": 99,
+      "price": 459.1,
+      "trigger_up": 460.47729999999996,
+      "trigger_down": 457.72270000000003
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "direction": "buy",
+      "score": 1.7445988043789256,
+      "rank": 99,
+      "price": 1.277,
+      "trigger_up": 1.2808309999999998,
+      "trigger_down": 1.273169
+    },
+    {
+      "symbol": "UNI/USDT",
+      "direction": "buy",
+      "score": 1.5725670659927262,
+      "rank": 99,
+      "price": 3.975,
+      "trigger_up": 3.986925,
+      "trigger_down": 3.963075
+    },
+    {
+      "symbol": "TON/USDT",
+      "direction": "buy",
+      "score": 1.0,
+      "rank": 99,
+      "price": 1.32,
+      "trigger_up": 1.32396,
+      "trigger_down": 1.31604
+    },
+    {
+      "symbol": "BNB/USDT",
+      "direction": "buy",
+      "score": 0.9859782207675091,
+      "rank": 99,
+      "price": 652.9,
+      "trigger_up": 654.8586999999999,
+      "trigger_down": 650.9413
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "direction": "sell",
+      "score": 0.9587654571441184,
+      "rank": 99,
+      "price": 0.09598,
+      "trigger_up": 0.09626793999999998,
+      "trigger_down": 0.09569206
+    },
+    {
+      "symbol": "BTC/USDT",
+      "direction": "buy",
+      "score": 0.9463794261140595,
+      "rank": 99,
+      "price": 72352.8,
+      "trigger_up": 72569.8584,
+      "trigger_down": 72135.74160000001
+    },
+    {
+      "symbol": "FIL/USDT",
+      "direction": "buy",
+      "score": 0.873123567571626,
+      "rank": 99,
+      "price": 1.0224,
+      "trigger_up": 1.0254671999999998,
+      "trigger_down": 1.0193328
+    },
+    {
+      "symbol": "XPL/USDT",
+      "direction": "buy",
+      "score": 0.7927693721015567,
+      "rank": 99,
+      "price": 0.10993,
+      "trigger_up": 0.11025978999999998,
+      "trigger_down": 0.10960021
+    },
+    {
+      "symbol": "ETH/USDT",
+      "direction": "buy",
+      "score": 0.7380626346659032,
+      "rank": 99,
+      "price": 2108.49,
+      "trigger_up": 2114.8154699999996,
+      "trigger_down": 2102.1645299999996
+    }
+  ]
+}

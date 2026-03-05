@@ -1,0 +1,445 @@
+{
+  "run_id": "20260303_143908",
+  "now_ts": 1772519948,
+  "window_start_ts": null,
+  "window_end_ts": null,
+  "regime": "Sideways",
+  "regime_multiplier": 0.6519847131878619,
+  "counts": {
+    "universe": 24,
+    "scored": 24,
+    "selected": 3,
+    "targets_pre_risk": 3,
+    "orders_exit": 0,
+    "orders_rebalance": 2
+  },
+  "top_scores": [
+    {
+      "symbol": "IP/USDT",
+      "score": 2.79771526491585
+    },
+    {
+      "symbol": "BCH/USDT",
+      "score": 1.3123586019555025
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "score": 0.9344129183711557
+    },
+    {
+      "symbol": "AAVE/USDT",
+      "score": 0.7917999254402777
+    },
+    {
+      "symbol": "ADA/USDT",
+      "score": 0.3176198833451182
+    },
+    {
+      "symbol": "PUMP/USDT",
+      "score": 0.2898290552549459
+    },
+    {
+      "symbol": "XRP/USDT",
+      "score": 0.17309005082896883
+    },
+    {
+      "symbol": "ASTER/USDT",
+      "score": 0.06144685217449268
+    },
+    {
+      "symbol": "OKB/USDT",
+      "score": 0.03069103370975431
+    },
+    {
+      "symbol": "CC/USDT",
+      "score": 0.011724766573121237
+    }
+  ],
+  "targets_pre_risk": {
+    "NEAR/USDT": 0.04365867800364845,
+    "HYPE/USDT": 0.25,
+    "FIL/USDT": 0.25
+  },
+  "targets_post_risk": {
+    "NEAR/USDT": 0.04365867800364845,
+    "HYPE/USDT": 0.25,
+    "FIL/USDT": 0.25
+  },
+  "portfolio_debug": {
+    "inv_vol_norm": {
+      "NEAR/USDT": 0.31237435373809563,
+      "HYPE/USDT": 0.34423598754124446,
+      "FIL/USDT": 0.34338965872065996
+    },
+    "confidence_raw": {
+      "NEAR/USDT": 0.07320565469101042,
+      "HYPE/USDT": 0.446385516979545,
+      "FIL/USDT": 0.4804088283294446
+    },
+    "score_stats": {
+      "min": -2.593733726915707,
+      "max": -0.9005054076222575,
+      "std": 0.7830786580778697,
+      "count": 3
+    },
+    "zero_reason_by_symbol": {},
+    "weight_pre_clip": {
+      "NEAR/USDT": 0.06696273259257952,
+      "HYPE/USDT": 0.4499658295270057,
+      "FIL/USDT": 0.48307143788041473
+    }
+  },
+  "rebalance_deadband_pct": 0.06,
+  "rebalance_skipped_deadband_count": 1,
+  "rebalance_skipped_deadband_by_symbol": {
+    "NEAR/USDT": 0.04365867800364845
+  },
+  "rebalance_drift_by_symbol": {
+    "FIL/USDT": 0.25,
+    "HYPE/USDT": 0.25,
+    "NEAR/USDT": 0.04365867800364845
+  },
+  "rebalance_effective_deadband_by_symbol": {
+    "FIL/USDT": 0.06,
+    "HYPE/USDT": 0.06,
+    "NEAR/USDT": 0.06
+  },
+  "router_decisions": [
+    {
+      "symbol": "FIL/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 33.74174351061103,
+      "cash_after": 101.22523053183309
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "action": "create",
+      "reason": "ok",
+      "side": "buy",
+      "notional": 33.74174351061103,
+      "cash_after": 67.48348702122206
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "action": "skip",
+      "reason": "deadband",
+      "drift": 0.04365867800364845,
+      "deadband": 0.06,
+      "is_new_position": true
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 0,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 1,
+    "provider_error": 0,
+    "exchange_min_notional": 0
+  },
+  "budget": {
+    "equity_cap_usdt": null,
+    "current_equity_usdt": 134.96858526372014,
+    "utilization_pct": null,
+    "action_enabled": false
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 24,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT",
+      "DOGE/USDT",
+      "XRP/USDT",
+      "SUI/USDT",
+      "HYPE/USDT",
+      "BNB/USDT",
+      "NEAR/USDT",
+      "ADA/USDT"
+    ]
+  },
+  "exit_signals": [],
+  "notes": [
+    "2026-03-03T14:39:19.182470: alpha weights overridden by regime=Sideways from reports/alpha_dynamic_weights_by_regime.json",
+    "2026-03-03T14:39:19.182833: Multi-strategy: 3 strategies, 28 total signals",
+    "2026-03-03T14:39:19.182843:   TrendFollowing: 4 signals (1 buy, 3 sell)",
+    "2026-03-03T14:39:19.182847:   MeanReversion: 0 signals (0 buy, 0 sell)",
+    "2026-03-03T14:39:19.182851:   Alpha6Factor: 24 signals (13 buy, 11 sell)",
+    "2026-03-03T14:39:19.184747: Using fused signals for selection: ['DOGE/USDT', 'ADA/USDT', 'XPL/USDT', 'BCH/USDT', 'BTC/USDT']",
+    "2026-03-03T14:39:19.184860: AutoRisk position cap applied: max_positions=3",
+    "2026-03-03T14:39:19.217312: Banding: FIL/USDT is new position, deadband 0.06→0.060",
+    "2026-03-03T14:39:19.218527: Fixed stop registered: FIL/USDT @ 0.9909, stop @ 0.9414",
+    "2026-03-03T14:39:19.218592: Banding: HYPE/USDT is new position, deadband 0.06→0.060",
+    "2026-03-03T14:39:19.219073: Fixed stop registered: HYPE/USDT @ 31.4640, stop @ 29.8908",
+    "2026-03-03T14:39:19.219086: Banding: NEAR/USDT is new position, deadband 0.06→0.060"
+  ],
+  "regime_details": {
+    "method": "EnsembleRegimeEngine",
+    "votes": {
+      "hmm": {
+        "state": "SIDEWAYS",
+        "confidence": 0.8911247589359579,
+        "weight": 0.35,
+        "sentiment": -0.057264663603988374,
+        "raw_state": "Sideways",
+        "probs": {
+          "Sideways": 0.8911247589359579,
+          "TrendingUp": 0.025805288730026764,
+          "TrendingDown": 0.08306995233401514
+        }
+      },
+      "funding": {
+        "state": "SIDEWAYS",
+        "confidence": 0.0816,
+        "weight": 0.4,
+        "sentiment": -0.0408,
+        "composite": true,
+        "details": {
+          "large": {
+            "avg": 0.0214,
+            "count": 2
+          },
+          "mid": {
+            "avg": -0.109175,
+            "count": 4
+          },
+          "small": {
+            "avg": -0.09375,
+            "count": 4
+          }
+        }
+      },
+      "rss": {
+        "state": "RISK_OFF",
+        "confidence": 0.75,
+        "weight": 0.25,
+        "sentiment": -0.3,
+        "summary": "[RSS情报] 市场情绪偏向谨慎悲观，短期面临下跌压力但长期仍有看涨预期。"
+      }
+    },
+    "final_score": 0.34453366562758525,
+    "hmm_weight": 0.35,
+    "funding_weight": 0.4,
+    "rss_weight": 0.25
+  },
+  "strategy_signals": [
+    {
+      "strategy": "TrendFollowing",
+      "type": "trend",
+      "allocation": 0.15,
+      "total_signals": 4,
+      "buy_signals": 1,
+      "sell_signals": 3,
+      "signals": [
+        {
+          "symbol": "DOGE/USDT",
+          "side": "sell",
+          "score": 1.0,
+          "confidence": 1.0,
+          "metadata": {
+            "ma_fast": 0.09204999999999999,
+            "ma_slow": 0.09290000000000001,
+            "adx": 51.02373896662657
+          }
+        },
+        {
+          "symbol": "ADA/USDT",
+          "side": "sell",
+          "score": 1.0,
+          "confidence": 1.0,
+          "metadata": {
+            "ma_fast": 0.27149999999999996,
+            "ma_slow": 0.27519000000000005,
+            "adx": 54.31638540325882
+          }
+        },
+        {
+          "symbol": "XPL/USDT",
+          "side": "buy",
+          "score": 1.0,
+          "confidence": 1.0,
+          "metadata": {
+            "ma_fast": 0.1067855,
+            "ma_slow": 0.1013655,
+            "adx": 51.45051013049009
+          }
+        },
+        {
+          "symbol": "BCH/USDT",
+          "side": "sell",
+          "score": 0.592822382824727,
+          "confidence": 0.6742579062597815,
+          "metadata": {
+            "ma_fast": 441.70500000000004,
+            "ma_slow": 444.10499999999996,
+            "adx": 29.641119141236352
+          }
+        }
+      ]
+    },
+    {
+      "strategy": "MeanReversion",
+      "type": "mean_reversion",
+      "allocation": 0.35,
+      "total_signals": 0,
+      "buy_signals": 0,
+      "sell_signals": 0,
+      "signals": []
+    },
+    {
+      "strategy": "Alpha6Factor",
+      "type": "alpha_6factor",
+      "allocation": 0.5,
+      "total_signals": 24,
+      "buy_signals": 13,
+      "sell_signals": 11,
+      "signals": [
+        {
+          "symbol": "BTC/USDT",
+          "side": "buy",
+          "score": 0.16883975850210076,
+          "confidence": 0.16883975850210076,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": -0.003178994297994311,
+              "f2_mom_20d": 0.002770976410869003,
+              "f3_vol_adj_ret": 0.44431213400957864,
+              "f4_volume_expansion": 0.1572425885506623,
+              "f5_rsi_trend_confirm": -0.44354950701291584,
+              "f6_sentiment": 0.0275
+            },
+            "z_factors": {
+              "f1_mom_5d": -0.03178994297994311,
+              "f2_mom_20d": 0.013854882054345014,
+              "f3_vol_adj_ret": 0.22215606700478932,
+              "f4_volume_expansion": 0.3144851771013246,
+              "f5_rsi_trend_confirm": -0.44354950701291584,
+              "f6_sentiment": 0.0275
+            },
+            "final_score": 0.05904771486697534,
+            "cross_section_mean": -0.1097920436351254,
+            "relative_score": 0.16883975850210076
+          }
+        },
+        {
+          "symbol": "ETH/USDT",
+          "side": "buy",
+          "score": 0.17432328481750653,
+          "confidence": 0.17432328481750653,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": -0.03379694293077333,
+              "f2_mom_20d": -0.00392932288893959,
+              "f3_vol_adj_ret": -0.5030677141835282,
+              "f4_volume_expansion": -0.0026162141945204054,
+              "f5_rsi_trend_confirm": -0.5084697100200998,
+              "f6_sentiment": 0.0153
+            },
+            "z_factors": {
+              "f1_mom_5d": -0.33796942930773327,
+              "f2_mom_20d": -0.01964661444469795,
+              "f3_vol_adj_ret": -0.2515338570917641,
+              "f4_volume_expansion": -0.005232428389040811,
+              "f5_rsi_trend_confirm": -0.5084697100200998,
+              "f6_sentiment": 0.0153
+            },
+            "final_score": 0.06453124118238113,
+            "cross_section_mean": -0.1097920436351254,
+            "relative_score": 0.17432328481750653
+          }
+        },
+        {
+          "symbol": "SOL/USDT",
+          "side": "buy",
+          "score": 0.5406950867877841,
+          "confidence": 0.5406950867877841,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": -0.030264525817257602,
+              "f2_mom_20d": 0.0265346050379066,
+              "f3_vol_adj_ret": 3.0083803827522213,
+              "f4_volume_expansion": 0.0061146659101347645,
+              "f5_rsi_trend_confirm": -0.5943775100401624,
+              "f6_sentiment": -0.1565
+            },
+            "z_factors": {
+              "f1_mom_5d": -0.302645258172576,
+              "f2_mom_20d": 0.132673025189533,
+              "f3_vol_adj_ret": 1.5041901913761107,
+              "f4_volume_expansion": 0.012229331820269529,
+              "f5_rsi_trend_confirm": -0.5943775100401624,
+              "f6_sentiment": -0.1565
+            },
+            "final_score": 0.4309030431526587,
+            "cross_section_mean": -0.1097920436351254,
+            "relative_score": 0.5406950867877841
+          }
+        },
+        {
+          "symbol": "DOGE/USDT",
+          "side": "sell",
+          "score": 0.9333007198789904,
+          "confidence": 0.9333007198789904,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": -0.08378981537837293,
+              "f2_mom_20d": -0.0844399391789154,
+              "f3_vol_adj_ret": -10.202301633788109,
+              "f4_volume_expansion": 0.3437618521675123,
+              "f5_rsi_trend_confirm": -0.5755395683453242,
+              "f6_sentiment": -0.1098
+            },
+            "z_factors": {
+              "f1_mom_5d": -0.8378981537837293,
+              "f2_mom_20d": -0.422199695894577,
+              "f3_vol_adj_ret": -5.101150816894054,
+              "f4_volume_expansion": 0.6875237043350246,
+              "f5_rsi_trend_confirm": -0.5755395683453242,
+              "f6_sentiment": -0.1098
+            },
+            "final_score": -1.0430927635141158,
+            "cross_section_mean": -0.1097920436351254,
+            "relative_score": -0.9333007198789904
+          }
+        },
+        {
+          "symbol": "XRP/USDT",
+          "side": "sell",
+          "score": 0.4160409244641311,
+          "confidence": 0.4160409244641311,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": -0.04517627190204773,
+              "f2_mom_20d": -0.05052130711636697,
+              "f3_vol_adj_ret": -6.64571418193869,
+              "f4_volume_expansion": -0.014341185733297124,
+              "f5_rsi_trend_confirm": -0.444444444444446,
+              "f6_sentiment": 0.6
+            },
+            "z_factors": {
+              "f1_mom_5d": -0.4517627190204773,
+              "f2_mom_20d": -0.2526065355818348,
+              "f3_vol_adj_ret": -3.322857090969345,
+              "f4_volume_expansion": -0.028682371466594248,
+              "f5_rsi_trend_confirm": -0.444444444444446,
+              "f6_sentiment": 0.6
+            },
+            "final_score": -0.5258329680992565,
+            "cross_section_mean": -0.1097920436351254,
+            "relative_score": -0.4160409244641311
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,13 +1,13 @@
 {
   "price_high_24h": {
-    "BTC/USDT": 69817.1,
-    "ETH/USDT": 2077.89,
-    "SOL/USDT": 89.88,
-    "DOGE/USDT": 0.09718,
-    "XRP/USDT": 1.4172,
+    "BTC/USDT": 73877.8,
+    "ETH/USDT": 2182.16,
+    "SOL/USDT": 93.79,
+    "DOGE/USDT": 0.10352,
+    "XRP/USDT": 1.4689,
     "KNC/USDT": 0.178,
     "BOME/USDT": 0.0003913,
-    "PI/USDT": 0.1707,
+    "PI/USDT": 0.1843,
     "AGLD/USDT": 0.2273,
     "BONK/USDT": 6.035e-06,
     "ZKJ/USDT": 0.02506,
@@ -16,22 +16,22 @@
     "ETC/USDT": 8.717,
     "ASTR/USDT": 0.007284,
     "WET/USDT": 0.10722,
-    "BCH/USDT": 452.9,
-    "APT/USDT": 0.9593,
+    "BCH/USDT": 473.7,
+    "APT/USDT": 1.0283,
     "GAS/USDT": 1.62,
-    "TRX/USDT": 0.28365,
+    "TRX/USDT": 0.28812,
     "CELO/USDT": 0.0802,
     "SAND/USDT": 0.0851,
     "LAT/USDT": 0.001389,
     "T/USDT": 0.006751,
-    "PUMP/USDT": 0.002102,
+    "PUMP/USDT": 0.002129,
     "RAY/USDT": 0.6045,
     "PIXEL/USDT": 0.004924,
     "LDO/USDT": 0.3079,
     "TRA/USDT": 0.2528,
     "NMR/USDT": 7.657,
-    "TON/USDT": 1.253,
-    "AAVE/USDT": 116.49,
+    "TON/USDT": 1.334,
+    "AAVE/USDT": 118.22,
     "S/USDT": 0.04052,
     "NEIRO/USDT": 6.952e-05,
     "TRB/USDT": 14.22,
@@ -74,16 +74,16 @@
     "AERGO/USDT": 0.05708,
     "CFX/USDT": 0.04868,
     "PEPE/USDT": 3.59e-06,
-    "PENGU/USDT": 0.007322,
+    "PENGU/USDT": 0.007496,
     "PROVE/USDT": 0.3001,
     "DOGS/USDT": 2.648e-05,
-    "ZEC/USDT": 224.42,
+    "ZEC/USDT": 250.0,
     "ICX/USDT": 0.03738,
     "BABY/USDT": 0.0116,
     "NAVX/USDT": 0.009595,
     "WIN/USDT": 2.387e-05,
     "SATS/USDT": 1.149e-08,
-    "OKB/USDT": 77.41,
+    "OKB/USDT": 79.16,
     "ZENT/USDT": 0.003719,
     "RPL/USDT": 1.871,
     "BLUR/USDT": 0.02029,
@@ -139,7 +139,7 @@
     "RENDER/USDT": 1.388,
     "GALFT/USDT": 1.653,
     "MET/USDT": 0.1838,
-    "AVAX/USDT": 9.448,
+    "AVAX/USDT": 9.714,
     "MASK/USDT": 0.4329,
     "STX/USDT": 0.2598,
     "TRUMP/USDT": 3.513,
@@ -150,7 +150,7 @@
     "CVX/USDT": 1.778,
     "JTO/USDT": 0.2697,
     "LSK/USDT": 0.1274,
-    "XPL/USDT": 0.11381,
+    "XPL/USDT": 0.12039,
     "IOTA/USDT": 0.06785,
     "PNUT/USDT": 0.04507,
     "A/USDT": 0.08094,
@@ -180,12 +180,12 @@
     "SWEAT/USDT": 0.0006905,
     "PAXG/USDT": 5436.0,
     "ENA/USDT": 0.1069,
-    "BNB/USDT": 651.6,
+    "BNB/USDT": 664.5,
     "CRV/USDT": 0.2488,
     "TNSR/USDT": 0.04585,
     "EGLD/USDT": 4.476,
     "MINA/USDT": 0.05787,
-    "PHA/USDT": 0.02396,
+    "PHA/USDT": 0.05092,
     "GRT/USDT": 0.02636,
     "MEW/USDT": 0.0006132,
     "SKL/USDT": 0.006621,
@@ -203,15 +203,15 @@
     "SHIB/USDT": 5.73e-06,
     "SNT/USDT": 0.01062,
     "USAT/USDT": 0.9979,
-    "UNI/USDT": 3.844,
+    "UNI/USDT": 4.072,
     "KAITO/USDT": 0.3409,
     "THETA/USDT": 0.1938,
     "HBAR/USDT": 0.10004,
     "CC/USDT": 0.16677,
     "ANIME/USDT": 0.00494,
     "SUSHI/USDT": 0.204,
-    "LTC/USDT": 55.56,
-    "LINK/USDT": 9.232,
+    "LTC/USDT": 57.62,
+    "LINK/USDT": 9.583,
     "CITY/USDT": 0.668,
     "AIXBT/USDT": 0.02185,
     "PENDLE/USDT": 1.302,
@@ -220,10 +220,10 @@
     "STETH/USDT": 2015.11,
     "ELF/USDT": 0.08354,
     "RVN/USDT": 0.005762,
-    "WLD/USDT": 0.3936,
+    "WLD/USDT": 0.4305,
     "OP/USDT": 0.1248,
     "ETHW/USDT": 0.3119,
-    "SUI/USDT": 0.9615,
+    "SUI/USDT": 0.9867,
     "SPACE/USDT": 0.007984,
     "ICP/USDT": 2.462,
     "AEVO/USDT": 0.02267,
@@ -236,7 +236,7 @@
     "PYTH/USDT": 0.0496,
     "HYPE/USDT": 33.497,
     "MENGO/USDT": 0.04584,
-    "FIL/USDT": 1.0229,
+    "FIL/USDT": 1.0332,
     "RSR/USDT": 0.001516,
     "RON/USDT": 0.1042,
     "ONDO/USDT": 0.2626,
@@ -272,7 +272,7 @@
     "ALGO/USDT": 0.0878,
     "BARD/USDT": 1.1325,
     "DASH/USDT": 33.29,
-    "ASTER/USDT": 0.7222,
+    "ASTER/USDT": 0.7311,
     "BABYDOGE/USDT": 3.91e-10,
     "ENJ/USDT": 0.01972,
     "GLM/USDT": 0.135,
@@ -312,7 +312,7 @@
     "BCH/USDT": 432.9,
     "APT/USDT": 0.9081,
     "GAS/USDT": 1.556,
-    "TRX/USDT": 0.28019,
+    "TRX/USDT": 0.27902,
     "CELO/USDT": 0.0756,
     "SAND/USDT": 0.0807,
     "LAT/USDT": 0.001338,
@@ -324,7 +324,7 @@
     "TRA/USDT": 0.2267,
     "NMR/USDT": 7.325,
     "TON/USDT": 1.193,
-    "AAVE/USDT": 111.07,
+    "AAVE/USDT": 108.63,
     "S/USDT": 0.03838,
     "NEIRO/USDT": 6.475e-05,
     "TRB/USDT": 13.54,
@@ -362,7 +362,7 @@
     "ID/USDT": 0.04155,
     "GHST/USDT": 0.0872,
     "TIA/USDT": 0.3087,
-    "ADA/USDT": 0.264,
+    "ADA/USDT": 0.2592,
     "RSS3/USDT": 0.00853,
     "AERGO/USDT": 0.055,
     "CFX/USDT": 0.04606,
@@ -455,7 +455,7 @@
     "MEMEFI/USDT": 0.0003101,
     "LQTY/USDT": 0.266,
     "VELO/USDT": 0.00325,
-    "IP/USDT": 0.8302,
+    "IP/USDT": 0.8137,
     "SAFE/USDT": 0.0993,
     "CELR/USDT": 0.002452,
     "NIGHT/USDT": 0.05652,
@@ -500,7 +500,7 @@
     "KAITO/USDT": 0.3245,
     "THETA/USDT": 0.1821,
     "HBAR/USDT": 0.09595,
-    "CC/USDT": 0.15663,
+    "CC/USDT": 0.15305,
     "ANIME/USDT": 0.00472,
     "SUSHI/USDT": 0.1935,
     "LTC/USDT": 52.63,
@@ -585,185 +585,225 @@
     "USDG/USDT": 0.9998,
     "ZRO/USDT": 1.725
   },
-  "last_trade_time_ms": 1772532002459,
+  "last_trade_time_ms": 1772681403015,
   "last_state": {
-    "timestamp_ms": 1772533802434,
+    "timestamp_ms": 1772682302379,
     "regime": "SIDEWAYS",
     "prices": {
-      "BCH/USDT": 437.3,
-      "TRX/USDT": 0.28107,
-      "PUMP/USDT": 0.001891,
-      "DOGE/USDT": 0.08945,
-      "BTC/USDT": 66517.1,
-      "ADA/USDT": 0.2641,
-      "PENGU/USDT": 0.006784,
-      "OKB/USDT": 75.44,
-      "ETH/USDT": 1949.8,
-      "AVAX/USDT": 8.96,
-      "XPL/USDT": 0.10602,
-      "IP/USDT": 0.8365,
-      "SOL/USDT": 84.03,
-      "XRP/USDT": 1.3443,
-      "BNB/USDT": 622.9,
-      "CC/USDT": 0.15759,
-      "LTC/USDT": 53.14,
-      "LINK/USDT": 8.626,
-      "SUI/USDT": 0.8965,
-      "HYPE/USDT": 31.85,
-      "FIL/USDT": 0.979,
-      "ASTER/USDT": 0.6933,
-      "NEAR/USDT": 1.336
+      "BCH/USDT": 459.1,
+      "TRX/USDT": 0.2864,
+      "PUMP/USDT": 0.002025,
+      "TON/USDT": 1.32,
+      "AAVE/USDT": 115.3,
+      "DOGE/USDT": 0.09598,
+      "BTC/USDT": 72352.8,
+      "ADA/USDT": 0.2735,
+      "PENGU/USDT": 0.007117,
+      "ZEC/USDT": 237.46,
+      "OKB/USDT": 77.51,
+      "ETH/USDT": 2108.49,
+      "AVAX/USDT": 9.434,
+      "XPL/USDT": 0.10993,
+      "IP/USDT": 0.8699,
+      "SOL/USDT": 89.72,
+      "XRP/USDT": 1.4166,
+      "BNB/USDT": 652.9,
+      "UNI/USDT": 3.975,
+      "CC/USDT": 0.15501,
+      "LTC/USDT": 56.31,
+      "LINK/USDT": 9.24,
+      "WLD/USDT": 0.4143,
+      "SUI/USDT": 0.9461,
+      "HYPE/USDT": 31.449,
+      "FIL/USDT": 1.0224,
+      "ASTER/USDT": 0.7157,
+      "NEAR/USDT": 1.277
     },
     "signals": {
       "BTC/USDT": {
         "symbol": "BTC/USDT",
+        "direction": "buy",
+        "score": 0.9463794261140595,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "CC/USDT": {
+        "symbol": "CC/USDT",
         "direction": "sell",
-        "score": 0.056536981846777266,
-        "rank": 52,
-        "timestamp_ms": 1772533802434
+        "score": 0.6462688561421789,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "TRX/USDT": {
+        "symbol": "TRX/USDT",
+        "direction": "buy",
+        "score": 0.6222782567984759,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "TON/USDT": {
+        "symbol": "TON/USDT",
+        "direction": "buy",
+        "score": 1.0,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
       "ETH/USDT": {
         "symbol": "ETH/USDT",
-        "direction": "sell",
-        "score": 0.05127017216809977,
-        "rank": 52,
-        "timestamp_ms": 1772533802434
+        "direction": "buy",
+        "score": 0.7380626346659032,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
       "SOL/USDT": {
         "symbol": "SOL/USDT",
-        "direction": "sell",
-        "score": 0.2281926036974521,
-        "rank": 61,
-        "timestamp_ms": 1772533802434
+        "direction": "buy",
+        "score": 0.5654700187191288,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
       "DOGE/USDT": {
         "symbol": "DOGE/USDT",
-        "direction": "buy",
-        "score": 1.0293420699553975,
-        "rank": 1,
-        "timestamp_ms": 1772533802434
+        "direction": "sell",
+        "score": 0.9587654571441184,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
       "XRP/USDT": {
         "symbol": "XRP/USDT",
         "direction": "sell",
-        "score": 0.3708326305728998,
-        "rank": 68,
-        "timestamp_ms": 1772533802434
+        "score": 0.2074133680956536,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
-      "LINK/USDT": {
-        "symbol": "LINK/USDT",
+      "SUI/USDT": {
+        "symbol": "SUI/USDT",
         "direction": "sell",
-        "score": 0.16009688289897864,
-        "rank": 58,
-        "timestamp_ms": 1772533802434
-      },
-      "PENGU/USDT": {
-        "symbol": "PENGU/USDT",
-        "direction": "sell",
-        "score": 0.03763675594083565,
-        "rank": 51,
-        "timestamp_ms": 1772533802434
+        "score": 0.14509263115464827,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
       "HYPE/USDT": {
         "symbol": "HYPE/USDT",
-        "direction": "sell",
-        "score": 1.0604694881883376,
-        "rank": 99,
-        "timestamp_ms": 1772533802434
+        "direction": "buy",
+        "score": 0.3141247176816502,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
-      "NEAR/USDT": {
-        "symbol": "NEAR/USDT",
+      "ADA/USDT": {
+        "symbol": "ADA/USDT",
         "direction": "sell",
-        "score": 2.2817120491271714,
-        "rank": 99,
-        "timestamp_ms": 1772533802434
+        "score": 0.667409623602012,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "LINK/USDT": {
+        "symbol": "LINK/USDT",
+        "direction": "buy",
+        "score": 0.3498752812408723,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
       "BNB/USDT": {
         "symbol": "BNB/USDT",
-        "direction": "sell",
-        "score": 0.4304802649977021,
-        "rank": 71,
-        "timestamp_ms": 1772533802434
-      },
-      "IP/USDT": {
-        "symbol": "IP/USDT",
         "direction": "buy",
-        "score": 2.8258096522858573,
-        "rank": 1,
-        "timestamp_ms": 1772533802434
-      },
-      "TRX/USDT": {
-        "symbol": "TRX/USDT",
-        "direction": "sell",
-        "score": 0.6206569358958738,
-        "rank": 81,
-        "timestamp_ms": 1772533802434
-      },
-      "XPL/USDT": {
-        "symbol": "XPL/USDT",
-        "direction": "sell",
-        "score": 0.771094640145754,
-        "rank": 88,
-        "timestamp_ms": 1772533802434
-      },
-      "AVAX/USDT": {
-        "symbol": "AVAX/USDT",
-        "direction": "sell",
-        "score": 0.13495811065955596,
-        "rank": 56,
-        "timestamp_ms": 1772533802434
+        "score": 0.9859782207675091,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
       "LTC/USDT": {
         "symbol": "LTC/USDT",
-        "direction": "sell",
-        "score": 0.02538299163988501,
-        "rank": 51,
-        "timestamp_ms": 1772533802434
-      },
-      "FIL/USDT": {
-        "symbol": "FIL/USDT",
-        "direction": "sell",
-        "score": 0.7418566824872816,
-        "rank": 87,
-        "timestamp_ms": 1772533802434
-      },
-      "ASTER/USDT": {
-        "symbol": "ASTER/USDT",
         "direction": "buy",
-        "score": 0.15651952336594235,
-        "rank": 43,
-        "timestamp_ms": 1772533802434
+        "score": 0.22069868310027033,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
-      "BCH/USDT": {
-        "symbol": "BCH/USDT",
+      "AVAX/USDT": {
+        "symbol": "AVAX/USDT",
         "direction": "buy",
-        "score": 2.628009962404764,
-        "rank": 1,
-        "timestamp_ms": 1772533802434
+        "score": 0.3387156521636927,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
       "OKB/USDT": {
         "symbol": "OKB/USDT",
-        "direction": "buy",
-        "score": 0.04336825256336146,
-        "rank": 48,
-        "timestamp_ms": 1772533802434
+        "direction": "sell",
+        "score": 0.5083330352352362,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       },
-      "CC/USDT": {
-        "symbol": "CC/USDT",
+      "XPL/USDT": {
+        "symbol": "XPL/USDT",
         "direction": "buy",
-        "score": 0.10672879406062237,
-        "rank": 45,
-        "timestamp_ms": 1772533802434
+        "score": 0.7927693721015567,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "PENGU/USDT": {
+        "symbol": "PENGU/USDT",
+        "direction": "buy",
+        "score": 0.22073481834139486,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "FIL/USDT": {
+        "symbol": "FIL/USDT",
+        "direction": "buy",
+        "score": 0.873123567571626,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "BCH/USDT": {
+        "symbol": "BCH/USDT",
+        "direction": "sell",
+        "score": 2.4421963341312876,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "PUMP/USDT": {
+        "symbol": "PUMP/USDT",
+        "direction": "sell",
+        "score": 0.4208652259708857,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "NEAR/USDT": {
+        "symbol": "NEAR/USDT",
+        "direction": "buy",
+        "score": 1.7445988043789256,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "AAVE/USDT": {
+        "symbol": "AAVE/USDT",
+        "direction": "sell",
+        "score": 0.24187528302209652,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "UNI/USDT": {
+        "symbol": "UNI/USDT",
+        "direction": "buy",
+        "score": 1.5725670659927262,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
+      },
+      "WLD/USDT": {
+        "symbol": "WLD/USDT",
+        "direction": "buy",
+        "score": 0.44077619915699495,
+        "rank": 0,
+        "timestamp_ms": 1772682302379
       }
     },
     "positions": {},
     "selected_symbols": [
       "BTC/USDT",
-      "ETH/USDT",
-      "SOL/USDT",
-      "DOGE/USDT",
-      "XRP/USDT"
+      "CC/USDT",
+      "TRX/USDT",
+      "TON/USDT",
+      "ETH/USDT"
     ]
   },
-  "saved_at_ms": 1772533802436
+  "saved_at_ms": 1772682302485
 }

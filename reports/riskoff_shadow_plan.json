@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-03-05T11:45:02.380327",
+  "regime": "SIDEWAYS",
+  "current_pos_mult_risk_off": 0.0,
+  "equity_estimate_usdt": 134.938906,
+  "enabled_for_current_regime": false,
+  "plans": [
+    {
+      "name": "strict_close_only",
+      "pos_mult": 0.0,
+      "max_positions": 0,
+      "gross_notional": 0.0,
+      "candidates": []
+    },
+    {
+      "name": "probe_1",
+      "pos_mult": 0.15,
+      "max_positions": 1,
+      "gross_notional": 20.2408,
+      "candidates": [
+        {
+          "symbol": "NEAR/USDT",
+          "score": 1.7445988043789256,
+          "price": 1.277,
+          "shadow_target_usdt": 20.2408
+        }
+      ]
+    },
+    {
+      "name": "probe_2",
+      "pos_mult": 0.25,
+      "max_positions": 2,
+      "gross_notional": 33.7347,
+      "candidates": [
+        {
+          "symbol": "NEAR/USDT",
+          "score": 1.7445988043789256,
+          "price": 1.277,
+          "shadow_target_usdt": 16.8674
+        },
+        {
+          "symbol": "UNI/USDT",
+          "score": 1.5725670659927262,
+          "price": 3.975,
+          "shadow_target_usdt": 16.8674
+        }
+      ]
+    }
+  ],
+  "note": "Shadow only. No execution triggered by this report."
+}

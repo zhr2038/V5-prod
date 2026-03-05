@@ -1,0 +1,98 @@
+{
+  "timestamp": "2026-03-05T11:45:02.483218",
+  "base": {
+    "enabled": true,
+    "check_interval_minutes": 15,
+    "global_cooldown_p2_minutes": 30,
+    "symbol_cooldown_minutes": 60,
+    "signal_confirmation_periods": 2,
+    "score_change_threshold": 0.35,
+    "rank_jump_threshold": 4,
+    "breakout_enabled": true,
+    "breakout_lookback_hours": 24,
+    "breakout_threshold_pct": 0.3,
+    "heartbeat_interval_hours": 4
+  },
+  "best": {
+    "params": {
+      "score_change_threshold": 0.35,
+      "rank_jump_threshold": 3,
+      "signal_confirmation_periods": 2,
+      "breakout_threshold_pct": 0.3
+    },
+    "actions": 0,
+    "events_processed": 27,
+    "events_blocked": 27,
+    "should_trade": false,
+    "fitness": -27.0
+  },
+  "top5": [
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 3,
+        "signal_confirmation_periods": 2,
+        "breakout_threshold_pct": 0.3
+      },
+      "actions": 0,
+      "events_processed": 27,
+      "events_blocked": 27,
+      "should_trade": false,
+      "fitness": -27.0
+    },
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 3,
+        "signal_confirmation_periods": 3,
+        "breakout_threshold_pct": 0.3
+      },
+      "actions": 0,
+      "events_processed": 27,
+      "events_blocked": 27,
+      "should_trade": false,
+      "fitness": -27.0
+    },
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 4,
+        "signal_confirmation_periods": 2,
+        "breakout_threshold_pct": 0.3
+      },
+      "actions": 0,
+      "events_processed": 27,
+      "events_blocked": 27,
+      "should_trade": false,
+      "fitness": -27.0
+    },
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 4,
+        "signal_confirmation_periods": 3,
+        "breakout_threshold_pct": 0.3
+      },
+      "actions": 0,
+      "events_processed": 27,
+      "events_blocked": 27,
+      "should_trade": false,
+      "fitness": -27.0
+    },
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 5,
+        "signal_confirmation_periods": 2,
+        "breakout_threshold_pct": 0.3
+      },
+      "actions": 0,
+      "events_processed": 27,
+      "events_blocked": 27,
+      "should_trade": false,
+      "fitness": -27.0
+    }
+  ],
+  "count": 72,
+  "note": "One-shot scan on current+previous snapshot, for no-trade tuning guidance."
+}

@@ -336,21 +336,29 @@ sentiment:
     - POL/USDT
 
 # ============================================================
-# ML因子模型配置 (LightGBM)
+# ML因子模型配置 (LightGBM) - 增加正则化防止过拟合
 # ============================================================
 ml_factor:
   enabled: true               # 启用ML因子模型
   model_type: lightgbm        # lightgbm | xgboost | sklearn
-  n_estimators: 100           # 树的数量
-  max_depth: 5                # 树的最大深度
+  # 减少模型复杂度防止过拟合
+  n_estimators: 50            # 树的数量减半（原100）
+  max_depth: 4                # 最大深度降低（原5）
   learning_rate: 0.05         # 学习率
+  # 增加正则化参数
+  subsample: 0.6              # 行采样率（新增）
+  colsample_bytree: 0.6       # 列采样率（新增）
+  reg_alpha: 2.0              # L1正则化（新增，原默认0）
+  reg_lambda: 5.0             # L2正则化（新增，原默认0）
+  min_child_samples: 30       # 叶子最小样本数（新增）
+  
   min_train_samples: 200      # 最小训练样本数
   prediction_horizon: 6       # 预测未来6小时收益
   
   # 与传统因子的融合权重
   blend_with_traditional: true
-  ml_weight: 0.30             # ML模型占30%
-  traditional_weight: 0.70    # 传统因子占70%
+  ml_weight: 0.20             # ML模型权重降低（原0.30，现0.20）
+  traditional_weight: 0.80    # 传统因子权重提高（原0.70，现0.80）
   
   # 自动重训练
   auto_retrain: true
@@ -369,9 +377,10 @@ event_driven:
   global_cooldown_p2_minutes: 30
   symbol_cooldown_minutes: 60
   signal_confirmation_periods: 3
-  score_change_threshold: 0.45
-  rank_jump_threshold: 5
+  # 提高阈值降低噪声（原0.45->0.60，原5->7）
+  score_change_threshold: 0.60
+  rank_jump_threshold: 7
   breakout_enabled: true
   breakout_lookback_hours: 24
-  breakout_threshold_pct: 0.5
+  breakout_threshold_pct: 0.8  # 提高突破阈值（原0.5->0.8）
   heartbeat_interval_hours: 4
