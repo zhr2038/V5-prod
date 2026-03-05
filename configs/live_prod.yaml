@@ -142,6 +142,9 @@ execution:
   open_long_cooldown_minutes: 15
   order_state_machine_path: reports/order_state_machine.json
 
+  # 当部分减仓触发 minSz dust 时，自动升级为整仓卖出（若整仓可交易）
+  auto_upgrade_dust_sell_to_close: true
+
   # 追高/入场质量防护
   anti_chase_enabled: true
   anti_chase_max_entry_premium_pct: 0.012

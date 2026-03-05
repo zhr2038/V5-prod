@@ -506,7 +506,35 @@ class LiveExecutionEngine:
             min_sz = float(specs.min_sz) if specs is not None else 0.0
             lot_sz = float(specs.lot_sz) if specs is not None else 0.0
             if min_sz > 0 and qty_rounded < min_sz:
-                raise DustOrderSkip(o.symbol, qty=qty, qty_rounded=qty_rounded, min_sz=min_sz, lot_sz=lot_sz)
+                # Optional: if partial REBALANCE sell is below minSz, auto-upgrade to full close.
+                # This avoids repeated DUST rejects when residual position itself is tradable.
+                auto_upgrade = bool(getattr(self.cfg, "auto_upgrade_dust_sell_to_close", True))
+                if auto_upgrade and str(o.intent).upper() == "REBALANCE":
+                    qty_full = float(qty_full_dec)
+                    qty_full_rounded = round_down_to_lot(qty_full, lot_sz) if lot_sz > 0 else qty_full
+                    if qty_full_rounded >= min_sz:
+                        pre_upgrade_qty = float(qty_rounded)
+                        log.warning(
+                            "DUST_AUTO_UPGRADE_TO_FULL_CLOSE: %s partial_qty=%.12g < minSz=%.12g, upgrade_to_full_qty=%.12g",
+                            o.symbol,
+                            pre_upgrade_qty,
+                            float(min_sz),
+                            float(qty_full_rounded),
+                        )
+                        qty = float(qty_full_rounded)
+                        qty_rounded = float(qty_full_rounded)
+                        try:
+                            if isinstance(o.meta, dict):
+                                o.meta["dust_auto_upgrade"] = True
+                                o.meta["dust_upgrade_from_qty"] = pre_upgrade_qty
+                                o.meta["dust_upgrade_to_qty"] = float(qty_full_rounded)
+                                o.meta["dust_upgrade_min_sz"] = float(min_sz)
+                        except Exception:
+                            pass
+                    else:
+                        raise DustOrderSkip(o.symbol, qty=qty, qty_rounded=qty_rounded, min_sz=min_sz, lot_sz=lot_sz)
+                else:
+                    raise DustOrderSkip(o.symbol, qty=qty, qty_rounded=qty_rounded, min_sz=min_sz, lot_sz=lot_sz)
 
             # OKX rejects scientific notation (e.g. 5e-05) with 51000 Parameter sz error.
             # Always send plain decimal string and avoid float->str exponent.

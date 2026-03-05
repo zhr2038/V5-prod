@@ -213,6 +213,10 @@ class ExecutionConfig(BaseModel):
     dust_qty_threshold: float = Field(default=1e-6, ge=0)
     dust_value_threshold: float = Field(default=0.5, ge=0)
 
+    # If partial REBALANCE sell falls below exchange minSz, optionally auto-upgrade
+    # to full close (when full position itself is tradable) to avoid repeated DUST rejects.
+    auto_upgrade_dust_sell_to_close: bool = Field(default=True)
+
     # Hard rule (optional): if a held symbol is absent from current scored list, force CLOSE_LONG.
     force_close_unscored_positions: bool = Field(default=False)
 

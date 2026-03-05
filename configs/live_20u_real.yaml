@@ -179,6 +179,8 @@ execution:
   # Dust thresholds (small-account safe): do not wipe valid ~9U positions as dust.
   dust_qty_threshold: 0.000001
   dust_value_threshold: 0.5
+  # 当部分减仓因 minSz 触发 dust 时，自动升级为整仓卖出（若整仓可交易）
+  auto_upgrade_dust_sell_to_close: true
   # 强规则：持仓若不在本轮评分清单中，强制清仓
   force_close_unscored_positions: true
 
