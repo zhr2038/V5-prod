@@ -19,6 +19,8 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from src.alpha.qlib_factors import compute_alpha158_style_factors
+
 
 class StrategyType(Enum):
     """策略类型"""
@@ -361,11 +363,27 @@ class Alpha6FactorStrategy(BaseStrategy):
                 'f3_vol_adj_ret': 0.15,
                 'f4_volume_expansion': 0.15,
                 'f5_rsi_trend_confirm': 0.15,
-                'f6_sentiment': 0.15
+                'f6_sentiment': 0.15,
+                # Alpha158 overlay
+                'f6_corr_pv_10': 0.15,
+                'f7_cord_10': 0.15,
+                'f8_rsqr_10': 0.20,
+                'f9_rank_20': 0.15,
+                'f10_imax_14': -0.05,
+                'f11_imin_14': 0.05,
+                'f12_imxd_14': 0.35,
             },
             'position_size_pct': 0.25,
             'score_threshold': 0.3,  # 评分阈值，超过才产生信号
-            'use_sentiment': True
+            'use_sentiment': True,
+            'alpha158_enabled': True,
+            'alpha158_blend_weight': 0.35,
+            'dynamic_ic_weighting': {
+                'enabled': False,
+                'ic_monitor_path': 'reports/alpha_ic_monitor.json',
+                'min_abs_ic': 0.003,
+                'fallback_to_static': True,
+            },
         }
         if config:
             default_config.update(config)

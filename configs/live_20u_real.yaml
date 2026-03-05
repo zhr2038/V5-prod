@@ -229,6 +229,14 @@ execution:
   cost_aware_min_score_floor: 0.12
   cost_aware_roundtrip_cost_bps: null
 
+  # 负期望标的自动冷却（小资金更快止损）
+  negative_expectancy_cooldown_enabled: true
+  negative_expectancy_lookback_hours: 24
+  negative_expectancy_min_closed_cycles: 3
+  negative_expectancy_threshold_usdt: 0.0
+  negative_expectancy_cooldown_hours: 24
+  negative_expectancy_state_path: reports/negative_expectancy_cooldown.json
+
   order_state_machine_path: reports/order_state_machine.json  # 执行仲裁状态机持久化
   slippage_db_path: reports/slippage.sqlite
   fee_bps: 6
@@ -299,6 +307,33 @@ alpha:
   min_score_threshold: 0.08
   dynamic_weights_by_regime_enabled: true
   dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
+
+  # Qlib Alpha158 因子 overlay
+  alpha158_overlay:
+    enabled: true
+    blend_weight: 0.40
+    weights:
+      f6_corr_pv_10: 0.15
+      f7_cord_10: 0.15
+      f8_rsqr_10: 0.20
+      f9_rank_20: 0.15
+      f10_imax_14: -0.05
+      f11_imin_14: 0.05
+      f12_imxd_14: 0.35
+
+  # TopkDropout：小资金更严格
+  topk_dropout:
+    enabled: true
+    topk_override: null
+    n_drop_per_cycle: 1
+    hold_cycles: 2
+    state_path: reports/topk_dropout_state.json
+
+  dynamic_ic_weighting:
+    enabled: true
+    ic_monitor_path: reports/alpha_ic_monitor.json
+    min_abs_ic: 0.004
+    fallback_to_static: true
 
 # ============================================================
 # 因子权重配置 (IC-based动态权重)

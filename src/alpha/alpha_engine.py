@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from pathlib import Path
 import os
 import json
@@ -11,6 +11,7 @@ from src.core.models import MarketSeries
 from src.utils.math import safe_pct_change, zscore_cross_section
 from configs.schema import AlphaConfig
 from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
+from src.alpha.qlib_factors import compute_alpha158_style_factors
 
 # 多策略集成
 try:
@@ -72,6 +73,71 @@ class AlphaEngine:
 
         if self.use_multi_strategy and MULTI_STRATEGY_AVAILABLE:
             self._init_multi_strategy()
+
+    def _load_dynamic_ic_weights(self, default_weights: Dict[str, float]) -> Dict[str, float]:
+        """Load dynamic factor weights from IC monitor summary.
+
+        规则：
+        - 若启用 dynamic_ic_weighting 且有可用IC，按 sign(IC) * abs(IC) 生成新权重
+        - 再缩放到与静态权重同等 L1 强度，避免分值尺度漂移
+        - 失败时回退静态权重
+        """
+        try:
+            ic_cfg = getattr(self.cfg, 'dynamic_ic_weighting', None)
+            if not ic_cfg or not bool(getattr(ic_cfg, 'enabled', False)):
+                return dict(default_weights)
+
+            p = Path(str(getattr(ic_cfg, 'ic_monitor_path', 'reports/alpha_ic_monitor.json')))
+            if not p.exists():
+                return dict(default_weights)
+
+            obj = json.loads(p.read_text(encoding='utf-8'))
+            factor_ic = obj.get('factor_ic') if isinstance(obj, dict) else None
+            if not isinstance(factor_ic, dict):
+                return dict(default_weights)
+
+            min_abs_ic = float(getattr(ic_cfg, 'min_abs_ic', 0.003) or 0.003)
+            dyn = {}
+            has_any = False
+            for k, w in (default_weights or {}).items():
+                rec = factor_ic.get(k) or {}
+                # 优先 short，再 long
+                ic_mean = None
+                try:
+                    ic_mean = float((rec.get('rank_ic_short') or {}).get('mean'))
+                except Exception:
+                    ic_mean = None
+                if ic_mean is None:
+                    try:
+                        ic_mean = float((rec.get('ic_short') or {}).get('mean'))
+                    except Exception:
+                        ic_mean = None
+                if ic_mean is None:
+                    continue
+
+                if abs(ic_mean) < min_abs_ic:
+                    continue
+
+                sign = 1.0 if ic_mean >= 0 else -1.0
+                dyn[k] = sign * abs(ic_mean)
+                has_any = True
+
+            if not has_any:
+                return dict(default_weights)
+
+            # scale L1 norm to static weights
+            l1_static = float(sum(abs(float(v)) for v in default_weights.values()))
+            l1_dyn = float(sum(abs(float(v)) for v in dyn.values()))
+            if l1_dyn <= 1e-12:
+                return dict(default_weights)
+            scale = l1_static / l1_dyn if l1_static > 0 else 1.0
+            out = dict(default_weights)
+            for k in out.keys():
+                if k in dyn:
+                    out[k] = float(dyn[k]) * scale
+            return out
+        except Exception:
+            return dict(default_weights)
 
     def _resolve_total_capital_usdt(self) -> float:
         """Resolve dynamic capital base for multi-strategy sizing.
@@ -180,6 +246,23 @@ class AlphaEngine:
             'f6_sentiment': 0.15,
         }
 
+        # Qlib Alpha158 overlay 权重并入 Alpha6 策略
+        ov = getattr(self.cfg, 'alpha158_overlay', None)
+        if ov and bool(getattr(ov, 'enabled', False)):
+            ow = getattr(ov, 'weights', None)
+            if ow is not None:
+                alpha_weights.update(
+                    {
+                        'f6_corr_pv_10': float(getattr(ow, 'f6_corr_pv_10', 0.15)),
+                        'f7_cord_10': float(getattr(ow, 'f7_cord_10', 0.15)),
+                        'f8_rsqr_10': float(getattr(ow, 'f8_rsqr_10', 0.20)),
+                        'f9_rank_20': float(getattr(ow, 'f9_rank_20', 0.15)),
+                        'f10_imax_14': float(getattr(ow, 'f10_imax_14', -0.05)),
+                        'f11_imin_14': float(getattr(ow, 'f11_imin_14', 0.05)),
+                        'f12_imxd_14': float(getattr(ow, 'f12_imxd_14', 0.35)),
+                    }
+                )
+
         # 若启用动态IC权重文件，按IC符号修正方向（根治“全卖/全空”偏置）
         if getattr(self.cfg, 'dynamic_weights_by_regime_enabled', False):
             try:
@@ -205,7 +288,15 @@ class AlphaEngine:
             'weights': alpha_weights,
             'position_size_pct': 0.30,
             # 与组合层最低门槛联动，避免二次门槛叠加导致长期0买入
-            'score_threshold': float(max(0.03, min(0.10, getattr(self.cfg, 'min_score_threshold', 0.05))))
+            'score_threshold': float(max(0.03, min(0.10, getattr(self.cfg, 'min_score_threshold', 0.05)))),
+            'alpha158_enabled': bool(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'enabled', False)),
+            'alpha158_blend_weight': float(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'blend_weight', 0.35) or 0.35),
+            'dynamic_ic_weighting': {
+                'enabled': bool(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'enabled', False)),
+                'ic_monitor_path': str(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'ic_monitor_path', 'reports/alpha_ic_monitor.json')),
+                'min_abs_ic': float(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'min_abs_ic', 0.003) or 0.003),
+                'fallback_to_static': bool(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'fallback_to_static', True)),
+            },
         })
         orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.55'))
 
@@ -351,50 +442,54 @@ class AlphaEngine:
                 scores=scores
             )
 
-        # 否则使用传统的5因子Alpha计算
-        # Compute raw factors
+        # 否则使用传统5因子 + Alpha158 overlay（可选）
         f1: Dict[str, float] = {}
         f2: Dict[str, float] = {}
         f3: Dict[str, float] = {}
         f4: Dict[str, float] = {}
         f5: Dict[str, float] = {}
 
+        # Alpha158 overlay factors
+        ov_names = [
+            "f6_corr_pv_10",
+            "f7_cord_10",
+            "f8_rsqr_10",
+            "f9_rank_20",
+            "f10_imax_14",
+            "f11_imin_14",
+            "f12_imxd_14",
+        ]
+        ov_vals: Dict[str, Dict[str, float]] = {k: {} for k in ov_names}
+
         for sym, s in (market_data or {}).items():
             c = list(s.close)
             v = list(s.volume)
+            h = list(s.high) if hasattr(s, "high") else list(s.close)
+            l = list(s.low) if hasattr(s, "low") else list(s.close)
             if len(c) < 25:
                 continue
 
-            # 5d momentum and 20d momentum: on 1h data, treat 24 bars/day
-            # For this scaffold: assume 1h bars and approximate.
+            # base 5 factors
             mom_5d = safe_pct_change(c[-1 - 24 * 5], c[-1]) if len(c) > 24 * 5 else safe_pct_change(c[0], c[-1])
             mom_20d = safe_pct_change(c[-1 - 24 * 20], c[-1]) if len(c) > 24 * 20 else safe_pct_change(c[0], c[-1])
 
-            # 20d vol-adjusted return: mom_20d / vol_20d
             rets = np.diff(np.array(c[-(24 * 20 + 1) :], dtype=float)) / np.array(c[-(24 * 20 + 1) : -1], dtype=float)
             vol = float(np.std(rets)) if len(rets) > 10 else 0.0
             vol_adj = mom_20d / (vol + 1e-12)
 
-            # volume expansion: last 24h QUOTE volume vs prev 7d average daily QUOTE volume
-            # Quote volume = volume * close (USDT value)
             if len(v) >= 24 and len(c) >= 24:
-                # 计算最近24小时的quote volume
                 vol_1d = compute_quote_volume(v[-24:], c[-24:])
-
-                # 计算过去7天的平均daily quote volume
                 daily_quote = []
                 if len(v) >= 24 * 8 and len(c) >= 24 * 8:
                     for k in range(1, 8):
                         start = -24 * (k + 1)
                         end = -24 * k
                         daily_quote.append(compute_quote_volume(v[start:end], c[start:end]))
-
                 avg_7d = float(np.mean(daily_quote)) if daily_quote else vol_1d
                 vol_exp = (vol_1d / (avg_7d + 1e-12)) - 1.0
             else:
                 vol_exp = 0.0
 
-            # RSI trend confirm: RSI - 50 (positive is bullish)
             rsi = _rsi(c, 14)
             rsi_trend = (rsi - 50.0) / 50.0
 
@@ -404,26 +499,66 @@ class AlphaEngine:
             f4[sym] = float(vol_exp)
             f5[sym] = float(rsi_trend)
 
-        # 使用稳健的z-score或标准z-score
+            # Alpha158 overlay
+            qf = compute_alpha158_style_factors(c, h, l, v)
+            for k in ov_names:
+                ov_vals[k][sym] = float(qf.get(k, 0.0))
+
+        # z-score
         if use_robust_zscore:
-            z1 = robust_zscore_cross_section(f1, winsorize_pct=0.05)
-            z2 = robust_zscore_cross_section(f2, winsorize_pct=0.05)
-            z3 = robust_zscore_cross_section(f3, winsorize_pct=0.05)
-            z4 = robust_zscore_cross_section(f4, winsorize_pct=0.05)
-            z5 = robust_zscore_cross_section(f5, winsorize_pct=0.05)
+            z_map = {
+                "f1_mom_5d": robust_zscore_cross_section(f1, winsorize_pct=0.05),
+                "f2_mom_20d": robust_zscore_cross_section(f2, winsorize_pct=0.05),
+                "f3_vol_adj_ret_20d": robust_zscore_cross_section(f3, winsorize_pct=0.05),
+                "f4_volume_expansion": robust_zscore_cross_section(f4, winsorize_pct=0.05),
+                "f5_rsi_trend_confirm": robust_zscore_cross_section(f5, winsorize_pct=0.05),
+            }
+            for k in ov_names:
+                z_map[k] = robust_zscore_cross_section(ov_vals.get(k, {}), winsorize_pct=0.05)
         else:
-            z1 = zscore_cross_section(f1)
-            z2 = zscore_cross_section(f2)
-            z3 = zscore_cross_section(f3)
-            z4 = zscore_cross_section(f4)
-            z5 = zscore_cross_section(f5)
+            z_map = {
+                "f1_mom_5d": zscore_cross_section(f1),
+                "f2_mom_20d": zscore_cross_section(f2),
+                "f3_vol_adj_ret_20d": zscore_cross_section(f3),
+                "f4_volume_expansion": zscore_cross_section(f4),
+                "f5_rsi_trend_confirm": zscore_cross_section(f5),
+            }
+            for k in ov_names:
+                z_map[k] = zscore_cross_section(ov_vals.get(k, {}))
+
+        static_base_w = {
+            "f1_mom_5d": float(self.cfg.weights.f1_mom_5d),
+            "f2_mom_20d": float(self.cfg.weights.f2_mom_20d),
+            "f3_vol_adj_ret_20d": float(self.cfg.weights.f3_vol_adj_ret_20d),
+            "f4_volume_expansion": float(self.cfg.weights.f4_volume_expansion),
+            "f5_rsi_trend_confirm": float(self.cfg.weights.f5_rsi_trend_confirm),
+        }
+        base_w = self._load_dynamic_ic_weights(static_base_w)
+
+        ov_cfg = getattr(self.cfg, "alpha158_overlay", None)
+        ov_enabled = bool(getattr(ov_cfg, "enabled", False))
+        ov_blend = float(getattr(ov_cfg, "blend_weight", 0.35) or 0.35)
+
+        static_ov_w: Dict[str, float] = {}
+        if ov_enabled and ov_cfg is not None and getattr(ov_cfg, "weights", None) is not None:
+            ow = ov_cfg.weights
+            static_ov_w = {
+                "f6_corr_pv_10": float(getattr(ow, "f6_corr_pv_10", 0.15)),
+                "f7_cord_10": float(getattr(ow, "f7_cord_10", 0.15)),
+                "f8_rsqr_10": float(getattr(ow, "f8_rsqr_10", 0.20)),
+                "f9_rank_20": float(getattr(ow, "f9_rank_20", 0.15)),
+                "f10_imax_14": float(getattr(ow, "f10_imax_14", -0.05)),
+                "f11_imin_14": float(getattr(ow, "f11_imin_14", 0.05)),
+                "f12_imxd_14": float(getattr(ow, "f12_imxd_14", 0.35)),
+            }
+        ov_w = self._load_dynamic_ic_weights(static_ov_w) if static_ov_w else {}
 
         raw_factors: Dict[str, Dict[str, float]] = {}
         z_factors: Dict[str, Dict[str, float]] = {}
         scores: Dict[str, float] = {}
 
-        w = self.cfg.weights
-        for sym in z1.keys():
+        symbols = sorted(set(f1.keys()))
+        for sym in symbols:
             raw_factors[sym] = {
                 "f1_mom_5d": f1.get(sym, 0.0),
                 "f2_mom_20d": f2.get(sym, 0.0),
@@ -431,22 +566,21 @@ class AlphaEngine:
                 "f4_volume_expansion": f4.get(sym, 0.0),
                 "f5_rsi_trend_confirm": f5.get(sym, 0.0),
             }
-            z_factors[sym] = {
-                "f1_mom_5d": z1.get(sym, 0.0),
-                "f2_mom_20d": z2.get(sym, 0.0),
-                "f3_vol_adj_ret_20d": z3.get(sym, 0.0),
-                "f4_volume_expansion": z4.get(sym, 0.0),
-                "f5_rsi_trend_confirm": z5.get(sym, 0.0),
-            }
-            # 原始因子评分（IC为负，因子与未来收益反向）
-            raw_score = (
-                w.f1_mom_5d * z1.get(sym, 0.0)
-                + w.f2_mom_20d * z2.get(sym, 0.0)
-                + w.f3_vol_adj_ret_20d * z3.get(sym, 0.0)
-                + w.f4_volume_expansion * z4.get(sym, 0.0)
-                + w.f5_rsi_trend_confirm * z5.get(sym, 0.0)
-            )
-            # 反向使用因子：IC为负，取反后高分=买入低因子值币
+            for k in ov_names:
+                raw_factors[sym][k] = float(ov_vals.get(k, {}).get(sym, 0.0))
+
+            z_factors[sym] = {}
+            for k, zv in z_map.items():
+                z_factors[sym][k] = float(zv.get(sym, 0.0))
+
+            base_score = float(sum(float(base_w.get(k, 0.0)) * float(z_factors[sym].get(k, 0.0)) for k in static_base_w.keys()))
+            if ov_enabled and ov_w:
+                ov_score = float(sum(float(ov_w.get(k, 0.0)) * float(z_factors[sym].get(k, 0.0)) for k in ov_w.keys()))
+                raw_score = (1.0 - ov_blend) * base_score + ov_blend * ov_score
+            else:
+                raw_score = base_score
+
+            # 保持与现有线上口径一致：反向使用（历史IC偏负）
             scores[sym] = float(-raw_score)
 
         return AlphaSnapshot(raw_factors=raw_factors, z_factors=z_factors, scores=scores)

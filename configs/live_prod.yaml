@@ -65,6 +65,34 @@ alpha:
   dynamic_weights_by_regime_enabled: true
   use_multi_strategy: true
 
+  # Qlib Alpha158 因子 overlay（增强量价/趋势质量）
+  alpha158_overlay:
+    enabled: true
+    blend_weight: 0.35
+    weights:
+      f6_corr_pv_10: 0.15
+      f7_cord_10: 0.15
+      f8_rsqr_10: 0.20
+      f9_rank_20: 0.15
+      f10_imax_14: -0.05
+      f11_imin_14: 0.05
+      f12_imxd_14: 0.35
+
+  # TopkDropout：每轮限量换仓 + 最短持有周期（按轮次）
+  topk_dropout:
+    enabled: true
+    topk_override: null
+    n_drop_per_cycle: 2
+    hold_cycles: 2
+    state_path: reports/topk_dropout_state.json
+
+  # 动态IC权重：用 rolling IC 做因子权重再分配
+  dynamic_ic_weighting:
+    enabled: true
+    ic_monitor_path: reports/alpha_ic_monitor.json
+    min_abs_ic: 0.003
+    fallback_to_static: true
+
 regime:
   use_ensemble: true
   use_hmm: true
@@ -157,6 +185,14 @@ execution:
   cost_aware_score_per_bps: 0.0020
   cost_aware_min_score_floor: 0.10
   cost_aware_roundtrip_cost_bps: null
+
+  # 负期望标的自动冷却（24h窗口）
+  negative_expectancy_cooldown_enabled: true
+  negative_expectancy_lookback_hours: 24
+  negative_expectancy_min_closed_cycles: 4
+  negative_expectancy_threshold_usdt: 0.0
+  negative_expectancy_cooldown_hours: 24
+  negative_expectancy_state_path: reports/negative_expectancy_cooldown.json
 
   order_state_machine_path: reports/order_state_machine.json
 

@@ -75,10 +75,51 @@ class AlphaWeights(BaseModel):
         return self
 
 
+class Alpha158OverlayWeights(BaseModel):
+    # Qlib Alpha158 风格补充因子权重（用于 overlay score）
+    f6_corr_pv_10: float = 0.15
+    f7_cord_10: float = 0.15
+    f8_rsqr_10: float = 0.20
+    f9_rank_20: float = 0.15
+    f10_imax_14: float = -0.05
+    f11_imin_14: float = 0.05
+    f12_imxd_14: float = 0.35
+
+
+class Alpha158OverlayConfig(BaseModel):
+    enabled: bool = Field(default=True, description="Enable Alpha158-style factor overlay")
+    blend_weight: float = Field(default=0.35, ge=0, le=1, description="Blend ratio of overlay score into final score")
+    weights: Alpha158OverlayWeights = Field(default_factory=Alpha158OverlayWeights)
+
+
+class TopkDropoutConfig(BaseModel):
+    enabled: bool = Field(default=True, description="Enable TopkDropout-style limited replacement")
+    topk_override: Optional[int] = Field(default=None, ge=1, le=200)
+    n_drop_per_cycle: int = Field(default=2, ge=1, le=50)
+    hold_cycles: int = Field(default=2, ge=1, le=200)
+    state_path: str = Field(default="reports/topk_dropout_state.json")
+
+
+class DynamicICWeightingConfig(BaseModel):
+    enabled: bool = Field(default=True)
+    ic_monitor_path: str = Field(default="reports/alpha_ic_monitor.json")
+    min_abs_ic: float = Field(default=0.003, ge=0, le=1)
+    fallback_to_static: bool = Field(default=True)
+
+
 class AlphaConfig(BaseModel):
     weights: AlphaWeights = Field(default_factory=AlphaWeights)
     long_top_pct: float = Field(default=0.20, gt=0, le=1)
-    
+
+    # Qlib Alpha158 风格补充层
+    alpha158_overlay: Alpha158OverlayConfig = Field(default_factory=Alpha158OverlayConfig)
+
+    # TopkDropout-style 控换手
+    topk_dropout: TopkDropoutConfig = Field(default_factory=TopkDropoutConfig)
+
+    # 动态IC权重（基于 reports/alpha_ic_monitor.json）
+    dynamic_ic_weighting: DynamicICWeightingConfig = Field(default_factory=DynamicICWeightingConfig)
+
     # 最低分阈值：避免买入负分币种
     min_score_threshold: float = Field(default=0.0, description="Minimum alpha score required to enter a position (0=disabled)")
 
@@ -89,7 +130,7 @@ class AlphaConfig(BaseModel):
     # Research/ops: optionally override weights by regime from a JSON file.
     dynamic_weights_by_regime_path: Optional[str] = Field(default=None, description="Path to reports/alpha_dynamic_weights_by_regime.json")
     dynamic_weights_by_regime_enabled: bool = Field(default=False)
-    
+
     # 多策略模式
     use_multi_strategy: bool = Field(default=False, description="Enable multi-strategy mode (trend + mean reversion)")
 
@@ -326,6 +367,14 @@ class ExecutionConfig(BaseModel):
         le=10000,
         description="Override round-trip cost bps for cost-aware gate; default=2*(fee_bps+slippage_bps)",
     )
+
+    # Negative-expectancy symbol cooldown (root-cause churn suppressor)
+    negative_expectancy_cooldown_enabled: bool = Field(default=True)
+    negative_expectancy_lookback_hours: int = Field(default=24, ge=1, le=24 * 30)
+    negative_expectancy_min_closed_cycles: int = Field(default=4, ge=1, le=200)
+    negative_expectancy_threshold_usdt: float = Field(default=0.0, ge=-1000, le=1000)
+    negative_expectancy_cooldown_hours: int = Field(default=24, ge=1, le=24 * 30)
+    negative_expectancy_state_path: str = Field(default="reports/negative_expectancy_cooldown.json")
 
     order_state_machine_path: str = Field(
         default="reports/order_state_machine.json",
