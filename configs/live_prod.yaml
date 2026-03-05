@@ -144,6 +144,20 @@ execution:
   rank_exit_max_rank: 3
   rank_exit_confirm_rounds: 2
   rank_exit_reentry_cooldown_minutes: 60
+
+  # qlib经验迁移：最短持仓门槛（先控超短抖动）
+  min_hold_minutes_before_rank_exit: 120
+  min_hold_minutes_before_regime_exit: 45
+
+  # qlib经验迁移：每轮最大换手（只作用于rebalance单，不拦截止损/强平）
+  max_rebalance_turnover_per_cycle: 0.30
+
+  # qlib经验迁移：成本感知开仓（score代理edge）
+  cost_aware_entry_enabled: true
+  cost_aware_score_per_bps: 0.0020
+  cost_aware_min_score_floor: 0.10
+  cost_aware_roundtrip_cost_bps: null
+
   order_state_machine_path: reports/order_state_machine.json
 
   # 当部分减仓触发 minSz dust 时，自动升级为整仓卖出（若整仓可交易）

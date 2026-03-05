@@ -215,6 +215,20 @@ execution:
   rank_exit_max_rank: 3
   rank_exit_confirm_rounds: 2
   rank_exit_reentry_cooldown_minutes: 60
+
+  # qlib经验迁移：最短持仓门槛（防15~30分钟反复进出）
+  min_hold_minutes_before_rank_exit: 120
+  min_hold_minutes_before_regime_exit: 60
+
+  # qlib经验迁移：每轮rebalance换手上限（小资金更严格）
+  max_rebalance_turnover_per_cycle: 0.20
+
+  # qlib经验迁移：成本感知开仓（score代理edge）
+  cost_aware_entry_enabled: true
+  cost_aware_score_per_bps: 0.0025
+  cost_aware_min_score_floor: 0.12
+  cost_aware_roundtrip_cost_bps: null
+
   order_state_machine_path: reports/order_state_machine.json  # 执行仲裁状态机持久化
   slippage_db_path: reports/slippage.sqlite
   fee_bps: 6

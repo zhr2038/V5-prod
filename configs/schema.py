@@ -283,6 +283,50 @@ class ExecutionConfig(BaseModel):
         description="After a FILLED rank-exit sell, block OPEN_LONG re-entry for this many minutes",
     )
 
+    # qlib-style hold threshold: avoid ultra-short churn exits.
+    # Applied in pipeline to rank_exit / regime_exit only (stop-loss exits are not delayed).
+    min_hold_minutes_before_rank_exit: int = Field(
+        default=90,
+        ge=0,
+        le=7 * 24 * 60,
+        description="Minimum holding minutes before rank-exit is allowed (0=disable)",
+    )
+    min_hold_minutes_before_regime_exit: int = Field(
+        default=60,
+        ge=0,
+        le=7 * 24 * 60,
+        description="Minimum holding minutes before regime-exit is allowed (0=disable)",
+    )
+
+    # Proactive churn cap: limit rebalance turnover per cycle (sum(abs(notional))/equity).
+    max_rebalance_turnover_per_cycle: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=2.0,
+        description="Cap rebalance turnover ratio per cycle (e.g. 0.25 means <=25% equity notional)",
+    )
+
+    # Cost-aware entry gate (score proxy > estimated round-trip costs).
+    cost_aware_entry_enabled: bool = Field(default=False)
+    cost_aware_score_per_bps: float = Field(
+        default=0.0025,
+        ge=0,
+        le=0.1,
+        description="Convert cost bps into required additional score",
+    )
+    cost_aware_min_score_floor: float = Field(
+        default=0.08,
+        ge=-5,
+        le=10,
+        description="Base score floor for cost-aware entry gate",
+    )
+    cost_aware_roundtrip_cost_bps: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=10000,
+        description="Override round-trip cost bps for cost-aware gate; default=2*(fee_bps+slippage_bps)",
+    )
+
     order_state_machine_path: str = Field(
         default="reports/order_state_machine.json",
         description="Path for execution arbitration state machine persistence",

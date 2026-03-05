@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 定义报告目录
@@ -27,6 +28,29 @@ def _effective_deadband(base: float, cfg: AppConfig, audit: Optional[DecisionAud
         return float(min(db * mult, cap))
     except Exception:
         return db
+
+
+def _parse_iso_utc(ts: Optional[str]) -> Optional[datetime]:
+    """Parse ISO-like timestamp to aware UTC datetime (best effort)."""
+    try:
+        s = str(ts or "").strip()
+        if not s:
+            return None
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _holding_minutes(entry_ts: Optional[str], now_utc: datetime) -> Optional[float]:
+    ent = _parse_iso_utc(entry_ts)
+    if ent is None:
+        return None
+    return max(0.0, (now_utc - ent).total_seconds() / 60.0)
 
 
 from configs.schema import AppConfig
@@ -419,6 +443,14 @@ class V5Pipeline:
         # Define prices early for use in minSz filtering and later logic
         prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
 
+        # qlib hold-threshold migration: compute holding minutes once (best effort).
+        now_utc = self.clock.now().astimezone(timezone.utc)
+        held_minutes_by_symbol: Dict[str, float] = {}
+        for p in positions:
+            hm = _holding_minutes(getattr(p, 'entry_ts', None), now_utc)
+            if hm is not None:
+                held_minutes_by_symbol[p.symbol] = hm
+
         # 4. Portfolio分配后审计
         portfolio = self.portfolio_engine.allocate(
             scores=alpha.scores, 
@@ -614,6 +646,19 @@ class V5Pipeline:
                     continue
 
                 current_rank = symbol_ranks.get(p.symbol, 999)
+
+                # qlib hold-threshold migration: do not rank-exit too soon after entry.
+                min_hold_rank_exit = int(getattr(self.cfg.execution, 'min_hold_minutes_before_rank_exit', 0) or 0)
+                if min_hold_rank_exit > 0:
+                    held_min = held_minutes_by_symbol.get(p.symbol)
+                    if held_min is not None and held_min < float(min_hold_rank_exit):
+                        if audit:
+                            audit.reject('min_hold_rank_exit')
+                            audit.add_note(
+                                f"Rank exit blocked by min-hold: {p.symbol} held={held_min:.1f}m < {min_hold_rank_exit}m"
+                            )
+                        continue
+
                 should_exit, reason = self.profit_taking.should_exit_by_rank(
                     p.symbol,
                     current_rank,
@@ -659,6 +704,24 @@ class V5Pipeline:
         )
         # Filter out symbols already handled by profit/stop
         exit_orders = [o for o in exit_orders if o.symbol not in profit_symbols]
+
+        # qlib hold-threshold migration: optional minimum hold before regime-exit.
+        min_hold_regime_exit = int(getattr(self.cfg.execution, 'min_hold_minutes_before_regime_exit', 0) or 0)
+        if min_hold_regime_exit > 0 and exit_orders:
+            filtered_exit_orders = []
+            for eo in exit_orders:
+                reason = str((eo.meta or {}).get('reason', '') or '')
+                if reason == 'regime_exit':
+                    held_min = held_minutes_by_symbol.get(eo.symbol)
+                    if held_min is not None and held_min < float(min_hold_regime_exit):
+                        if audit:
+                            audit.reject('min_hold_regime_exit')
+                            audit.add_note(
+                                f"Regime exit blocked by min-hold: {eo.symbol} held={held_min:.1f}m < {min_hold_regime_exit}m"
+                            )
+                        continue
+                filtered_exit_orders.append(eo)
+            exit_orders = filtered_exit_orders
         
         # Merge all exit orders: profit first, then stop, then rank, then policy
         exit_orders = profit_orders + fixed_stop_orders + ranking_exit_orders + exit_orders
@@ -1055,6 +1118,47 @@ class V5Pipeline:
                 except Exception:
                     pass
 
+            # qlib migration: cost-aware entry gate (score as edge proxy).
+            if side == "buy" and bool(getattr(self.cfg.execution, "cost_aware_entry_enabled", False)):
+                try:
+                    score_sym = None
+                    try:
+                        score_sym = float(rank_scores.get(sym)) if sym in rank_scores else None
+                    except Exception:
+                        score_sym = None
+                    if score_sym is None:
+                        try:
+                            score_sym = float((alpha.scores or {}).get(sym))
+                        except Exception:
+                            score_sym = None
+
+                    if score_sym is not None:
+                        fee_bps = float(getattr(self.cfg.execution, "fee_bps", 0.0) or 0.0)
+                        slippage_bps = float(getattr(self.cfg.execution, "slippage_bps", 0.0) or 0.0)
+                        rt_cost_bps_cfg = getattr(self.cfg.execution, "cost_aware_roundtrip_cost_bps", None)
+                        rt_cost_bps = float(rt_cost_bps_cfg) if rt_cost_bps_cfg is not None else 2.0 * (fee_bps + slippage_bps)
+                        score_per_bps = float(getattr(self.cfg.execution, "cost_aware_score_per_bps", 0.0025) or 0.0025)
+                        score_floor = float(getattr(self.cfg.execution, "cost_aware_min_score_floor", 0.08) or 0.08)
+                        alpha_floor = float(getattr(self.cfg.alpha, "min_score_threshold", 0.0) or 0.0)
+                        required_score = max(alpha_floor, score_floor + rt_cost_bps * score_per_bps)
+
+                        if float(score_sym) < float(required_score):
+                            if audit:
+                                audit.reject("cost_aware_edge")
+                                router_decisions.append(
+                                    {
+                                        "symbol": sym,
+                                        "action": "skip",
+                                        "reason": "cost_aware_edge",
+                                        "score": float(score_sym),
+                                        "required_score": float(required_score),
+                                        "rt_cost_bps": float(rt_cost_bps),
+                                    }
+                                )
+                            continue
+                except Exception:
+                    pass
+
             # Router check: min_notional (base + F3.2 stage-2)
             min_notional = float(self.cfg.budget.min_trade_notional_base)
             if audit and (audit.budget or {}).get("exceeded") and self.cfg.budget.action_enabled:
@@ -1211,6 +1315,51 @@ class V5Pipeline:
                         "cash_after": cash_remaining,
                     }
                 )
+
+        # qlib migration: proactive per-cycle rebalance turnover cap.
+        max_rb_turnover = getattr(self.cfg.execution, 'max_rebalance_turnover_per_cycle', None)
+        if max_rb_turnover is not None and float(max_rb_turnover) > 0 and float(equity_raw) > 0 and rebalance_orders:
+            try:
+                cap_notional = float(max_rb_turnover) * float(equity_raw)
+                total_notional = float(sum(abs(float(o.notional_usdt or 0.0)) for o in rebalance_orders))
+                if total_notional > cap_notional:
+                    ranked = sorted(
+                        rebalance_orders,
+                        key=lambda x: abs(float(((x.meta or {}).get('drift', 0.0) or 0.0))),
+                        reverse=True,
+                    )
+                    kept = []
+                    used = 0.0
+                    dropped = []
+                    for o in ranked:
+                        n = abs(float(o.notional_usdt or 0.0))
+                        if (used + n) <= cap_notional or not kept:
+                            kept.append(o)
+                            used += n
+                        else:
+                            dropped.append(o)
+
+                    keep_ids = {id(x) for x in kept}
+                    rebalance_orders = [o for o in rebalance_orders if id(o) in keep_ids]
+
+                    if audit:
+                        audit.reject('turnover_cap')
+                        audit.add_note(
+                            f"Rebalance turnover capped: total=${total_notional:.2f} > cap=${cap_notional:.2f}, "
+                            f"kept={len(kept)}, dropped={len(dropped)}"
+                        )
+                        for o in dropped[:12]:
+                            router_decisions.append(
+                                {
+                                    'symbol': o.symbol,
+                                    'action': 'skip',
+                                    'reason': 'turnover_cap',
+                                    'notional': float(o.notional_usdt or 0.0),
+                                    'turnover_cap_notional': float(cap_notional),
+                                }
+                            )
+            except Exception:
+                pass
         
         if audit:
             audit.router_decisions = router_decisions
