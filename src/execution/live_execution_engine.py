@@ -65,6 +65,48 @@ def load_reconcile_ok(path: str) -> bool:
     return True
 
 
+def _remove_symbol_from_state_file(path: str, symbol: str) -> bool:
+    """Best-effort remove symbol state from a JSON dict file.
+
+    Returns True if file was modified.
+    """
+    try:
+        p = Path(path)
+        if not p.exists():
+            return False
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(obj, dict):
+            return False
+        if symbol not in obj:
+            return False
+        del obj[symbol]
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(p)
+        return True
+    except Exception:
+        return False
+
+
+def clear_risk_state_on_full_close(symbol: str) -> None:
+    """Clear symbol state in stop/profit trackers after full close.
+
+    This prevents stale stop-loss/profit state from contaminating a later re-entry.
+    """
+    files = [
+        "reports/stop_loss_state.json",
+        "reports/fixed_stop_loss_state.json",
+        "reports/profit_taking_state.json",
+        "reports/highest_px_state.json",
+    ]
+    removed = 0
+    for f in files:
+        if _remove_symbol_from_state_file(f, symbol):
+            removed += 1
+    if removed > 0:
+        log.info("RISK_STATE_CLEARED: %s removed_from=%d", symbol, removed)
+
+
 def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
     """Submit gate for live.
 
@@ -740,6 +782,7 @@ class LiveExecutionEngine:
                     est_notional = est_qty * px if px > 0 else 0.0
                     if est_notional > 0 and est_notional < DUST_NOTIONAL_USDT:
                         self.position_store.close_long(o.symbol)
+                        clear_risk_state_on_full_close(o.symbol)
                         log.info(
                             f"DUST_LOCAL_CLOSE: {o.symbol} est_notional={est_notional:.6f} < {DUST_NOTIONAL_USDT}"
                         )
@@ -829,12 +872,14 @@ class LiveExecutionEngine:
                                 new_qty = max(0.0, float(p.qty) - float(acc_fill_sz))
                                 if new_qty <= 0:
                                     self.position_store.close_long(o.symbol)
+                                    clear_risk_state_on_full_close(o.symbol)
                                 else:
                                     # If remaining is dust (very small notional), close it to avoid stale trailing state.
                                     try:
                                         last_px = float(o.signal_price or avg_px or 0.0)
                                         if last_px > 0 and float(new_qty) * last_px < DUST_NOTIONAL_USDT:
                                             self.position_store.close_long(o.symbol)
+                                            clear_risk_state_on_full_close(o.symbol)
                                         else:
                                             # keep avg_px unchanged on partial close
                                             self.position_store.set_qty(o.symbol, qty=new_qty)

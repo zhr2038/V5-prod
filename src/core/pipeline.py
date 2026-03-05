@@ -477,8 +477,8 @@ class V5Pipeline:
             entry_ref = float(p.avg_px) if float(getattr(p, 'avg_px', 0.0) or 0.0) > 0 else px
             if p.symbol not in self.fixed_stop_loss.entry_prices:
                 self.fixed_stop_loss.register_position(p.symbol, entry_ref)
-            if p.symbol not in self.profit_taking.positions:
-                self.profit_taking.register_position(p.symbol, entry_ref, current_price=px)
+            # profit_taking 自带“入场价漂移>1%自动重置”逻辑，需每轮同步一次
+            self.profit_taking.register_position(p.symbol, entry_ref, current_price=px)
 
         # 4.5 Profit-first exit priority (profit-taking > fixed stop > rank exit)
         profit_orders = []
@@ -515,10 +515,10 @@ class V5Pipeline:
                 continue  # Skip other exit checks for this symbol
             
             # 2nd priority: 多级动态止损（取代固定止损，更智能）
-            # 确保持仓已注册到动态止损管理器
-            if p.symbol not in self.stop_loss_manager.positions:
-                self.stop_loss_manager.register_position(p.symbol, float(p.avg_px) if float(getattr(p, 'avg_px', 0)) > 0 else current_price)
-            
+            # 每轮同步动态止损状态，避免旧仓位状态污染新开仓
+            entry_ref = float(p.avg_px) if float(getattr(p, 'avg_px', 0)) > 0 else current_price
+            self.stop_loss_manager.register_position(p.symbol, entry_ref)
+
             should_stop, stop_price, stop_type, profit_pct = self.stop_loss_manager.evaluate_stop(
                 p.symbol, current_price
             )

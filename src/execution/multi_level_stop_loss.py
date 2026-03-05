@@ -331,8 +331,30 @@ class MultiLevelStopLoss:
         return triggered, new_stop_price, new_stop_type, profit_pct
     
     def register_position(self, symbol: str, entry_price: float, market_state: str = "Sideways"):
-        """注册持仓（兼容pipeline调用）"""
-        if symbol not in self.positions:
+        """注册持仓（兼容pipeline调用）
+
+        同步逻辑：
+        - 不存在则初始化
+        - 已存在但入场价与当前持仓均价偏差>1%时，视为新仓重建止损状态
+        - 已存在但当前止损价高于/接近入场价（可能遗留旧状态）时，强制重建
+        """
+        state = self.positions.get(symbol)
+        if state is None:
+            self.initialize_position(symbol, entry_price, market_state)
+            return
+
+        try:
+            old_entry = float(state.entry_price)
+            new_entry = float(entry_price)
+            drift = abs(new_entry - old_entry) / max(abs(old_entry), 1e-12)
+
+            # stale-state guard: if stop already >= new entry, this can trigger instant false stop.
+            stop_crossed_entry = float(state.current_stop_price) >= new_entry * (1.0 - 1e-6)
+
+            if drift > 0.01 or stop_crossed_entry:
+                self.initialize_position(symbol, new_entry, market_state)
+        except Exception:
+            # fail-safe: if state is malformed, rebuild from current entry.
             self.initialize_position(symbol, entry_price, market_state)
 
     def batch_update_stops(
