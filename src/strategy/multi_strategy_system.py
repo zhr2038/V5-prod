@@ -869,39 +869,50 @@ class MultiStrategyAdapter:
         targets = []
         for signal in signals:
             position_size = Decimal('0')
+            strategy_weight = Decimal('0')
+            source_weight_sum = Decimal('0')
 
             # 常规单策略信号
             strategy = self.orchestrator.strategies.get(signal.strategy)
             if strategy is not None:
+                strategy_weight = self.orchestrator.strategy_allocations.get(signal.strategy, Decimal('0.1'))
+                source_weight_sum = strategy_weight
                 capital = self.orchestrator.get_strategy_capital(signal.strategy)
                 position_size = strategy.calculate_position_size(signal, capital)
 
-            # 融合信号：使用总资金计算仓位（修复资金碎片化问题）
+            # 融合信号：使用“来源策略权重”驱动仓位大小
             elif signal.strategy == "FUSED":
-                # 融合信号代表多策略共识，应使用总资金计算仓位
-                # 而不是按来源策略拆分资金
                 total_capital = self.orchestrator.total_capital
-                
-                # 根据信号置信度和来源策略数量调整仓位比例
+
                 source_names = signal.metadata.get('source_strategies', []) if signal.metadata else []
-                n_sources = len(source_names)
-                
-                # 基础仓位比例：30%，每增加一个策略来源增加5%，最高50%
-                base_position_pct = Decimal('0.30')
-                bonus_per_source = Decimal('0.05')
-                max_position_pct = Decimal('0.50')
-                
-                position_pct = base_position_pct + (bonus_per_source * n_sources)
+                source_allocs = {
+                    name: self.orchestrator.strategy_allocations.get(name, Decimal('0'))
+                    for name in source_names
+                }
+                source_weight_sum = sum(source_allocs.values(), Decimal('0'))
+
+                # FUSED 权重：优先使用来源策略分配之和，缺失时退化到confidence
+                if source_weight_sum > 0:
+                    strategy_weight = source_weight_sum
+                else:
+                    strategy_weight = Decimal(str(max(0.0, min(signal.confidence, 1.0))))
+
+                # 仓位比例与来源权重挂钩（让 3 策略权重真正生效）
+                # 例如：来源权重和=0.55 -> 仓位约47.5%；和=0.20 -> 仓位约30%
+                base_position_pct = Decimal('0.20')
+                weight_scale = Decimal('0.50')
+                max_position_pct = Decimal('0.55')
+
+                position_pct = base_position_pct + (source_weight_sum * weight_scale)
                 position_pct = min(position_pct, max_position_pct)
-                
-                # 根据置信度微调
+
                 confidence_factor = Decimal(str(signal.confidence))
                 position_size = total_capital * position_pct * confidence_factor
-                
+
                 print(f"[MultiStrategyAdapter] FUSED信号 {signal.symbol}: "
-                      f"来源={source_names}, 总资金={total_capital}, "
-                      f"仓位比例={float(position_pct):.0%}, 置信度={float(confidence_factor):.2f}, "
-                      f"计算仓位={float(position_size):.2f} USDT")
+                      f"来源={source_names}, 来源权重和={float(source_weight_sum):.2f}, "
+                      f"总资金={total_capital}, 仓位比例={float(position_pct):.0%}, "
+                      f"置信度={float(confidence_factor):.2f}, 计算仓位={float(position_size):.2f} USDT")
 
                 # 兜底：来源缺失时使用总资金的小比例
                 if position_size <= 0:
@@ -915,6 +926,8 @@ class MultiStrategyAdapter:
                     'signal_score': float(signal.score),
                     'confidence': float(signal.confidence),
                     'source_strategy': signal.strategy,
+                    'strategy_weight': float(strategy_weight),
+                    'source_weight_sum': float(source_weight_sum),
                     'metadata': signal.metadata
                 })
 

@@ -146,7 +146,7 @@ class AlphaEngine:
         orchestrator = StrategyOrchestrator(total_capital=total_capital)
         print(f"[AlphaEngine] 多策略资金基数: {float(total_capital):.4f} USDT (dynamic)")
 
-        # 注册趋势跟踪策略 (15%资金，降低熊市噪声影响)
+        # 注册趋势跟踪策略 (20%资金)
         trend_strategy = TrendFollowingStrategy(config={
             'fast_ma': 20,
             'slow_ma': 60,
@@ -154,9 +154,9 @@ class AlphaEngine:
             'position_size_pct': 0.35,
             'trailing_stop': 0.04
         })
-        orchestrator.register_strategy(trend_strategy, allocation=Decimal('0.15'))
+        orchestrator.register_strategy(trend_strategy, allocation=Decimal('0.20'))
 
-        # 注册均值回归策略 (35%资金)
+        # 注册均值回归策略 (25%资金)
         mean_revert_strategy = MeanReversionStrategy(config={
             'rsi_period': 14,
             'rsi_oversold': 28,
@@ -166,9 +166,9 @@ class AlphaEngine:
             'position_size_pct': 0.25,
             'mean_rev_threshold': 0.025
         })
-        orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal('0.35'))
+        orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal('0.25'))
 
-        # 注册6因子Alpha策略 (50%资金，主策略)
+        # 注册6因子Alpha策略 (55%资金，主策略)
         # 根治：不再硬编码权重，统一读取 live 配置，避免“改了配置但策略不生效”
         cfg_weights = getattr(self.cfg, 'weights', None)
         alpha_weights = {
@@ -207,14 +207,14 @@ class AlphaEngine:
             # 与组合层最低门槛联动，避免二次门槛叠加导致长期0买入
             'score_threshold': float(max(0.03, min(0.10, getattr(self.cfg, 'min_score_threshold', 0.05))))
         })
-        orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.50'))
+        orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.55'))
 
         # 创建适配器
         self.multi_strategy_adapter = MultiStrategyAdapter(orchestrator)
         print(f"[AlphaEngine] 多策略融合已启用:")
-        print(f"              - 趋势跟踪: 15%")
-        print(f"              - 均值回归: 35%")
-        print(f"              - 6因子Alpha: 50%")
+        print(f"              - 趋势跟踪: 20%")
+        print(f"              - 均值回归: 25%")
+        print(f"              - 6因子Alpha: 55%")
 
     def compute_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
         """计算Alpha评分
@@ -269,19 +269,35 @@ class AlphaEngine:
         from collections import defaultdict
         
         symbol_signals = defaultdict(list)  # symbol -> [(score, weight, side), ...]
-        
+        total_capital = max(float(self._resolve_total_capital_usdt() or 0.0), 1e-9)
+
         for target in targets:
             sym = target['symbol'].replace('-', '/')
+
+            # 基础信号强度
+            base_score = float(target['signal_score']) * float(target['confidence'])
+
+            # 让“策略分配权重”真正进入打分链路
+            strategy_weight = float(target.get('strategy_weight', target.get('confidence', 0.0)) or 0.0)
+            position_usdt = float(target.get('target_position_usdt', 0.0) or 0.0)
+            position_weight = max(0.0, position_usdt) / total_capital
+
+            # 组合权重：优先策略权重，兼顾目标仓位占比
+            if strategy_weight > 0 and position_weight > 0:
+                effective_weight = 0.7 * strategy_weight + 0.3 * position_weight
+            else:
+                effective_weight = max(strategy_weight, position_weight, float(target.get('confidence', 0.0) or 0.0))
+
+            effective_weight = max(effective_weight, 1e-6)
+
             # 买入信号为正分，卖出为负分
-            score = float(target['signal_score']) * float(target['confidence'])
+            score = base_score * effective_weight
             if target['side'] == 'sell':
                 score = -score
-            
-            # 获取策略权重（如果可用），否则默认使用confidence作为权重
-            strategy_weight = float(target.get('strategy_weight', target['confidence']))
+
             symbol_signals[sym].append({
                 'score': score,
-                'weight': strategy_weight,
+                'weight': effective_weight,
                 'side': target['side']
             })
         
