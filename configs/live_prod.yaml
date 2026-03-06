@@ -220,10 +220,9 @@ execution:
   high_risk_blacklist_path: configs/borrow_prevention_rules.json
 
 budget:
-  # 正式上线：取消资金上限限制
-  # 只保留监控功能，不限制交易
+  # 正式策略：不设资金硬上限，但启用日内换手/成本预算约束
   live_equity_cap_usdt: null  # 无上限
-  action_enabled: false  # 禁用预算限制动作（仅监控）
+  action_enabled: true  # 启用预算动作（主要用于换手/成本预算）
   
   exchange_min_notional_enabled: true
   exchange_min_notional_slack_multiplier: 1.05
@@ -233,8 +232,10 @@ budget:
   min_trade_notional_cap_abs: 100.0
   min_trade_notional_cap_equity_ratio: 0.03
   
-  hard_buy_block_on_cap: false  # 禁用硬买块
+  hard_buy_block_on_cap: false  # cap=null 时不启用资金上限硬拦截
   hard_buy_block_cap_ratio: 1.0
+  turnover_budget_per_day: 0.60
+  cost_budget_bps_per_day: 40
 
 backtest:
   fee_bps: 6
