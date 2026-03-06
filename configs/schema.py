@@ -111,6 +111,13 @@ class AlphaConfig(BaseModel):
     weights: AlphaWeights = Field(default_factory=AlphaWeights)
     long_top_pct: float = Field(default=0.20, gt=0, le=1)
 
+    # Lightweight portfolio optimizer (Qlib-inspired):
+    # blend confidence weights with previous weights to reduce churn.
+    optimizer_enabled: bool = Field(default=False)
+    optimizer_prev_weight_penalty: float = Field(default=0.35, ge=0, le=1)
+    optimizer_min_weight_floor: float = Field(default=0.0, ge=0, le=0.2)
+    optimizer_state_path: str = Field(default="reports/portfolio_optimizer_state.json")
+
     # Qlib Alpha158 风格补充层
     alpha158_overlay: Alpha158OverlayConfig = Field(default_factory=Alpha158OverlayConfig)
 

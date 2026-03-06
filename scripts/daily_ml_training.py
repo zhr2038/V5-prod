@@ -164,6 +164,34 @@ class DailyMLTrainer:
         cv_res = time_series_cv_score(model_cv, X, y, cv=cv, metric='ic')
         return float(cv_res['mean_score']), float(cv_res['std_score']), [float(s) for s in cv_res['scores']]
 
+    def _train_and_eval_model(self, model_type: str, X_train, y_train, X_valid, y_valid):
+        """Train one candidate model and return metrics.
+
+        Returns:
+            dict or None on failure
+        """
+        cfg = MLFactorConfig(model_type=model_type, alpha=10.0)
+        model = MLFactorModel(cfg)
+        model.train(X_train, y_train, X_valid, y_valid)
+
+        train_pred = model.predict_batch(X_train)
+        valid_pred = model.predict_batch(X_valid)
+
+        train_ic = float(pd.Series(y_train).corr(pd.Series(train_pred, index=y_train.index)))
+        valid_ic = float(pd.Series(y_valid).corr(pd.Series(valid_pred, index=y_valid.index)))
+        if not np.isfinite(train_ic):
+            train_ic = -1.0
+        if not np.isfinite(valid_ic):
+            valid_ic = -1.0
+
+        return {
+            'model_type': model_type,
+            'model': model,
+            'train_ic': train_ic,
+            'valid_ic': valid_ic,
+            'ic_gap': float(train_ic - valid_ic),
+        }
+
     def export_and_train(self):
         """导出数据并训练模型（时序CV门禁 + 动态特征选择）"""
         self.log("="*60)
@@ -250,31 +278,42 @@ class DailyMLTrainer:
         self.log(f"CV mean IC: {cv_mean_ic:.4f}")
         self.log(f"CV std IC:  {cv_std_ic:.4f}")
 
-        # 8) 训练最终模型
-        self.log("\nTraining Ridge Regression model...")
-        config = MLFactorConfig(model_type='ridge', alpha=10.0)
-        model = MLFactorModel(config)
+        # 8) 训练候选模型（轻量双模型：ridge + lightgbm）
+        # 可通过 V5_ML_CANDIDATES 覆盖，例如 "ridge" 或 "ridge,lightgbm"
+        cand_env = os.getenv('V5_ML_CANDIDATES', 'ridge,lightgbm')
+        candidates = [c.strip().lower() for c in cand_env.split(',') if c.strip()]
+        if not candidates:
+            candidates = ['ridge']
 
-        try:
-            model.train(X_train, y_train, X_valid, y_valid)
-        except Exception as e:
-            self.log(f"❌ Training failed: {e}")
+        self.log(f"\nTraining candidates: {candidates}")
+        candidate_results = []
+        for mt in candidates:
+            try:
+                res = self._train_and_eval_model(mt, X_train, y_train, X_valid, y_valid)
+                candidate_results.append(res)
+                self.log(f"  [{mt}] Train IC={res['train_ic']:.4f}, Valid IC={res['valid_ic']:.4f}, Gap={res['ic_gap']:.4f}")
+            except Exception as e:
+                self.log(f"  [{mt}] skipped: {e}")
+
+        if not candidate_results:
+            self.log("❌ No candidate model trained successfully")
             self.last_outcome = 'error'
             return False
 
-        # 9) Holdout评估
-        train_pred = model.predict_batch(X_train)
-        valid_pred = model.predict_batch(X_valid)
-        train_ic = float(pd.Series(y_train).corr(pd.Series(train_pred, index=y_train.index)))
-        valid_ic = float(pd.Series(y_valid).corr(pd.Series(valid_pred, index=y_valid.index)))
+        # 选择策略：优先 valid_ic，其次更小 ic_gap
+        candidate_results.sort(key=lambda r: (r['valid_ic'], -abs(r['ic_gap'])), reverse=True)
+        best = candidate_results[0]
+        model = best['model']
+        train_ic = float(best['train_ic'])
+        valid_ic = float(best['valid_ic'])
+        ic_gap = float(best['ic_gap'])
 
-        self.log("\nModel Performance:")
+        self.log("\nBest Candidate:")
+        self.log(f"  model_type: {best['model_type']}")
         self.log(f"  Train IC: {train_ic:.4f}")
         self.log(f"  Valid IC: {valid_ic:.4f}")
 
-        ic_gap = float(train_ic - valid_ic)
-
-        # 10) 双闸门判定
+        # 9) 双闸门判定
         fail_reasons = []
         if valid_ic < min_valid_ic:
             fail_reasons.append(f"valid_ic<{min_valid_ic:.2f}")
@@ -287,7 +326,7 @@ class DailyMLTrainer:
 
         gate_passed = len(fail_reasons) == 0
 
-        # 11) 记录历史（无论通过与否都记录）
+        # 10) 记录历史（无论通过与否都记录）
         history = {
             'timestamp': datetime.now().isoformat(),
             'samples': int(len(work_df)),
@@ -300,6 +339,16 @@ class DailyMLTrainer:
             'selected_features': selected_cols,
             'mi_scores': mi_scores,
             'selector_reason': selector_reason,
+            'candidate_models': [
+                {
+                    'model_type': r['model_type'],
+                    'train_ic': float(r['train_ic']),
+                    'valid_ic': float(r['valid_ic']),
+                    'ic_gap': float(r['ic_gap']),
+                }
+                for r in candidate_results
+            ],
+            'selected_model_type': best['model_type'],
             'gate': {
                 'min_valid_ic': min_valid_ic,
                 'max_ic_gap': max_ic_gap,
@@ -309,7 +358,10 @@ class DailyMLTrainer:
                 'fail_reasons': fail_reasons,
             },
             'model_saved': gate_passed,
-            'config': config.__dict__,
+            'config': {
+                'model_type': best['model_type'],
+                'candidates': candidates,
+            },
         }
         self._append_history(history)
 
@@ -319,12 +371,13 @@ class DailyMLTrainer:
             self.last_outcome = 'blocked'
             return False
 
-        # 12) 保存模型
+        # 11) 保存模型
         self.log(f"\nSaving model to {self.model_path}...")
         model.save_model(str(self.model_path))
 
         self.log("\n✅ Training completed successfully!")
         self.log(f"   Model saved: {self.model_path}")
+        self.log(f"   Selected model: {best['model_type']}")
         self.log(f"   Valid IC: {valid_ic:.4f}")
         self.log(f"   CV Mean/Std: {cv_mean_ic:.4f} / {cv_std_ic:.4f}")
 

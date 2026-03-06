@@ -53,6 +53,12 @@ alpha:
   long_top_pct: 0.25  # 选前25%
   min_score_threshold: 0.05
   use_fused_score_for_weighting: true  # 融合分不仅选币，也用于定仓，避免选币/仓位错配
+
+  # Qlib-inspired 轻量组合优化（降低仓位抖动）
+  optimizer_enabled: true
+  optimizer_prev_weight_penalty: 0.35
+  optimizer_min_weight_floor: 0.01
+  optimizer_state_path: reports/portfolio_optimizer_state.json
   
   weights:
     f1_mom_5d: 0.20

@@ -24,8 +24,10 @@ class PortfolioSnapshot:
 
 class PortfolioEngine:
     """投资组合引擎
-    
-    根据Alpha评分分配目标权重
+
+    根据Alpha评分分配目标权重。
+    支持轻量级 Qlib-inspired optimizer：在当前权重与上一轮权重之间做平滑，
+    以降低换手抖动和边界来回交易。
     """
     
     def __init__(self, alpha_cfg: AlphaConfig, risk_cfg: RiskConfig):
@@ -37,6 +39,37 @@ class PortfolioEngine:
         """
         self.alpha_cfg = alpha_cfg
         self.risk_cfg = risk_cfg
+
+    def _load_optimizer_state(self) -> Dict[str, Any]:
+        try:
+            p = Path(str(getattr(self.alpha_cfg, 'optimizer_state_path', 'reports/portfolio_optimizer_state.json')))
+            if not p.exists():
+                return {'weights': {}, 'updated_ts': 0}
+            obj = json.loads(p.read_text(encoding='utf-8'))
+            if isinstance(obj, dict):
+                w = obj.get('weights') or {}
+                if isinstance(w, dict):
+                    return {
+                        'weights': {str(k): float(v) for k, v in w.items() if isinstance(v, (int, float))},
+                        'updated_ts': int(obj.get('updated_ts', 0) or 0),
+                    }
+        except Exception:
+            pass
+        return {'weights': {}, 'updated_ts': 0}
+
+    def _save_optimizer_state(self, weights: Dict[str, float]) -> None:
+        try:
+            p = Path(str(getattr(self.alpha_cfg, 'optimizer_state_path', 'reports/portfolio_optimizer_state.json')))
+            p.parent.mkdir(parents=True, exist_ok=True)
+            obj = {
+                'weights': {str(k): float(v) for k, v in (weights or {}).items()},
+                'updated_ts': int(time.time()),
+            }
+            tmp = p.with_suffix(p.suffix + '.tmp')
+            tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding='utf-8')
+            tmp.replace(p)
+        except Exception:
+            pass
 
     def _load_topk_state(self) -> Dict[str, Any]:
         try:
@@ -349,7 +382,40 @@ class PortfolioEngine:
         raw = {s: base_w[s] * conf[s] for s in selected}
         raw_sum = float(sum(raw.values())) or 1.0
         w2 = {s: raw[s] / raw_sum for s in selected}
-        
+
+        # Qlib-inspired lightweight optimizer:
+        # blend current weights with previous cycle to reduce churn.
+        if bool(getattr(self.alpha_cfg, 'optimizer_enabled', False)):
+            try:
+                state = self._load_optimizer_state()
+                prev_w = state.get('weights') or {}
+                lam = float(getattr(self.alpha_cfg, 'optimizer_prev_weight_penalty', 0.35) or 0.35)
+                lam = clamp(lam, 0.0, 1.0)
+                floor = float(getattr(self.alpha_cfg, 'optimizer_min_weight_floor', 0.0) or 0.0)
+                floor = clamp(floor, 0.0, 0.2)
+
+                merged_syms = sorted(set(list(w2.keys()) + list(prev_w.keys())))
+                blended = {}
+                for s in merged_syms:
+                    cur = float(w2.get(s, 0.0))
+                    prev = float(prev_w.get(s, 0.0))
+                    v = (1.0 - lam) * cur + lam * prev
+                    if s in w2 and v < floor:
+                        v = floor
+                    blended[s] = max(0.0, v)
+
+                # normalize only selected symbols to keep target basket explicit
+                sel_sum = float(sum(blended.get(s, 0.0) for s in selected)) or 1.0
+                w2 = {s: float(blended.get(s, 0.0)) / sel_sum for s in selected}
+
+                if audit:
+                    audit.add_note(
+                        f"Optimizer applied: lambda={lam:.2f}, floor={floor:.3f}, prev_n={len(prev_w)}"
+                    )
+            except Exception as e:
+                if audit:
+                    audit.add_note(f"Optimizer skipped: {e}")
+
         # 记录zero_reason_by_symbol
         zero_reason_by_symbol = {}
         for s in selected:
@@ -360,7 +426,7 @@ class PortfolioEngine:
                     zero_reason_by_symbol[s] = "confidence_zero"
                 else:
                     zero_reason_by_symbol[s] = "normalization_zero"
-        
+
         portfolio_debug["zero_reason_by_symbol"] = zero_reason_by_symbol
         portfolio_debug["weight_pre_clip"] = w2
 
@@ -378,7 +444,11 @@ class PortfolioEngine:
                 for reason in zero_reason_by_symbol.values():
                     if hasattr(audit, 'reject'):
                         audit.reject(f"portfolio_{reason}")
-        
+
+        # persist final target weights for next-cycle optimizer smoothing
+        if bool(getattr(self.alpha_cfg, 'optimizer_enabled', False)):
+            self._save_optimizer_state(capped)
+
         return PortfolioSnapshot(target_weights=capped, selected=selected, volatilities=vols)
 
     def scale_targets(self, targets: Dict[str, float], mult: float) -> Dict[str, float]:
