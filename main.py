@@ -547,6 +547,24 @@ def main() -> None:
         audit=audit,
     )
 
+    # Qlib-style IC monitor update (score/rankIC + factor IC when available)
+    try:
+        from src.alpha.ic_monitor import AlphaICMonitor
+
+        icm = AlphaICMonitor()
+        closes = {s: float(md_1h[s].close[-1]) for s in md_1h.keys() if getattr(md_1h[s], 'close', None)}
+        ic_summary = icm.update(
+            now_ts_ms=int(datetime.utcnow().timestamp() * 1000),
+            alpha_snapshot=out.alpha,
+            closes=closes,
+        )
+        if ic_summary:
+            ic_mean = float(((ic_summary.get('score_rank_ic_short') or {}).get('mean') or 0.0))
+            if audit:
+                audit.add_note(f"IC monitor updated: short_rank_ic_mean={ic_mean:.4f}")
+    except Exception as e:
+        log.warning(f"ic monitor update failed: {e}")
+
     # F1.2 spread snapshot (records even when no orders/fills)
     try:
         from src.reporting.spread_snapshots import append_spread_snapshot

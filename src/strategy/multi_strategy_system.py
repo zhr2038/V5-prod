@@ -396,6 +396,57 @@ class Alpha6FactorStrategy(BaseStrategy):
         
         self.factor_weights = self.config['weights']
         self.sentiment_cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
+
+    def _resolve_dynamic_weights(self, static_weights: Dict[str, float]) -> Dict[str, float]:
+        """根据 IC monitor 动态修正因子权重（可选）。"""
+        try:
+            cfg = self.config.get('dynamic_ic_weighting', {}) or {}
+            if not bool(cfg.get('enabled', False)):
+                return dict(static_weights)
+
+            p = Path(str(cfg.get('ic_monitor_path', 'reports/alpha_ic_monitor.json')))
+            if not p.exists():
+                return dict(static_weights)
+
+            obj = json.loads(p.read_text(encoding='utf-8'))
+            factor_ic = obj.get('factor_ic') if isinstance(obj, dict) else None
+            if not isinstance(factor_ic, dict):
+                return dict(static_weights)
+
+            min_abs_ic = float(cfg.get('min_abs_ic', 0.003) or 0.003)
+            dyn = {}
+            for k in static_weights.keys():
+                rec = factor_ic.get(k) or {}
+                ic = None
+                try:
+                    ic = float((rec.get('rank_ic_short') or {}).get('mean'))
+                except Exception:
+                    ic = None
+                if ic is None:
+                    try:
+                        ic = float((rec.get('ic_short') or {}).get('mean'))
+                    except Exception:
+                        ic = None
+                if ic is None or abs(ic) < min_abs_ic:
+                    continue
+                dyn[k] = (1.0 if ic >= 0 else -1.0) * abs(ic)
+
+            if not dyn:
+                return dict(static_weights)
+
+            l1_static = float(sum(abs(float(v)) for v in static_weights.values()))
+            l1_dyn = float(sum(abs(float(v)) for v in dyn.values()))
+            if l1_dyn <= 1e-12:
+                return dict(static_weights)
+            scale = l1_static / l1_dyn if l1_static > 0 else 1.0
+
+            out = dict(static_weights)
+            for k in out.keys():
+                if k in dyn:
+                    out[k] = float(dyn[k]) * scale
+            return out
+        except Exception:
+            return dict(static_weights)
     
     def generate_signals(self, market_data: pd.DataFrame) -> List[Signal]:
         """生成6因子Alpha信号
@@ -406,6 +457,7 @@ class Alpha6FactorStrategy(BaseStrategy):
         """
         signals: List[Signal] = []
         per_symbol = []
+        weights_resolved = self._resolve_dynamic_weights(self.factor_weights)
 
         for symbol in market_data['symbol'].unique():
             df = market_data[market_data['symbol'] == symbol].copy()
@@ -414,7 +466,7 @@ class Alpha6FactorStrategy(BaseStrategy):
 
             factors = self._calculate_factors(df, symbol)
             z_factors = self._zscore_factors(factors)
-            score = self._calculate_score(z_factors)
+            score = self._calculate_score(z_factors, weights_resolved)
             per_symbol.append((symbol, factors, z_factors, float(score)))
 
         if not per_symbol:
@@ -480,21 +532,23 @@ class Alpha6FactorStrategy(BaseStrategy):
     def _calculate_factors(self, df: pd.DataFrame, symbol: str) -> Dict[str, float]:
         """计算6个原始因子"""
         close = df['close'].values
+        high = df['high'].values if 'high' in df.columns else close
+        low = df['low'].values if 'low' in df.columns else close
         volume = df['volume'].values if 'volume' in df.columns else np.ones(len(close))
-        
+
         # f1: 5日动量 (5*24=120根1小时K线)
         f1 = (close[-1] - close[-min(120, len(close))]) / close[-min(120, len(close))]
-        
+
         # f2: 20日动量 (20*24=480根1小时K线)
         f2 = (close[-1] - close[-min(480, len(close))]) / close[-min(480, len(close))]
-        
+
         # f3: 波动率调整收益 (20日)
         window = close[-min(481, len(close)):]
         # 对齐分母长度，避免广播错误
         returns = np.diff(window) / window[:-1]
         vol = np.std(returns) if len(returns) > 0 else 1e-12
         f3 = f2 / (vol + 1e-12)
-        
+
         # f4: 成交量扩张 (最近24h vs 前7天平均)
         if len(volume) >= 24 * 8:
             vol_recent = np.mean(volume[-24:])
@@ -502,22 +556,34 @@ class Alpha6FactorStrategy(BaseStrategy):
             f4 = (vol_recent / (vol_prev + 1e-12)) - 1.0
         else:
             f4 = 0.0
-        
+
         # f5: RSI趋势确认 (RSI-50)/50
         rsi = self._calculate_rsi_single(close)
         f5 = (rsi - 50.0) / 50.0
-        
+
         # f6: 情绪因子（从缓存读取，失败则回退0）
         f6 = self._load_sentiment_factor(symbol) if self.config.get('use_sentiment', True) else 0.0
-        
-        return {
+
+        out = {
             'f1_mom_5d': f1,
             'f2_mom_20d': f2,
             'f3_vol_adj_ret': f3,
             'f4_volume_expansion': f4,
             'f5_rsi_trend_confirm': f5,
-            'f6_sentiment': f6
+            'f6_sentiment': f6,
         }
+
+        # Alpha158 overlay factors
+        if bool(self.config.get('alpha158_enabled', True)):
+            try:
+                qf = compute_alpha158_style_factors(
+                    close.tolist(), high.tolist(), low.tolist(), volume.tolist()
+                )
+                out.update(qf)
+            except Exception:
+                pass
+
+        return out
     
     def _zscore_factors(self, factors: Dict[str, float]) -> Dict[str, float]:
         """对因子进行z-score标准化 (简化版，实际应该用历史均值/std)"""
@@ -528,7 +594,14 @@ class Alpha6FactorStrategy(BaseStrategy):
             'f3_vol_adj_ret': 2.0,
             'f4_volume_expansion': 0.50,
             'f5_rsi_trend_confirm': 1.0,
-            'f6_sentiment': 1.0
+            'f6_sentiment': 1.0,
+            'f6_corr_pv_10': 0.30,
+            'f7_cord_10': 0.30,
+            'f8_rsqr_10': 0.30,
+            'f9_rank_20': 0.30,
+            'f10_imax_14': 0.30,
+            'f11_imin_14': 0.30,
+            'f12_imxd_14': 0.30,
         }
         
         z_factors = {}
@@ -537,13 +610,39 @@ class Alpha6FactorStrategy(BaseStrategy):
         
         return z_factors
     
-    def _calculate_score(self, z_factors: Dict[str, float]) -> float:
-        """计算加权综合评分"""
-        score = 0.0
-        for name, z_value in z_factors.items():
-            weight = self.factor_weights.get(name, 0.0)
-            score += weight * z_value
-        return score
+    def _calculate_score(self, z_factors: Dict[str, float], resolved_weights: Dict[str, float]) -> float:
+        """计算综合评分：base + Alpha158 overlay blending。"""
+        base_keys = [
+            'f1_mom_5d',
+            'f2_mom_20d',
+            'f3_vol_adj_ret',
+            'f4_volume_expansion',
+            'f5_rsi_trend_confirm',
+            'f6_sentiment',
+        ]
+        ov_keys = [
+            'f6_corr_pv_10',
+            'f7_cord_10',
+            'f8_rsqr_10',
+            'f9_rank_20',
+            'f10_imax_14',
+            'f11_imin_14',
+            'f12_imxd_14',
+        ]
+
+        base_score = 0.0
+        for k in base_keys:
+            base_score += float(resolved_weights.get(k, 0.0)) * float(z_factors.get(k, 0.0))
+
+        if bool(self.config.get('alpha158_enabled', True)):
+            ov_score = 0.0
+            for k in ov_keys:
+                ov_score += float(resolved_weights.get(k, 0.0)) * float(z_factors.get(k, 0.0))
+            blend = float(self.config.get('alpha158_blend_weight', 0.35) or 0.35)
+            blend = float(max(0.0, min(1.0, blend)))
+            return (1.0 - blend) * base_score + blend * ov_score
+
+        return base_score
     
     def _calculate_rsi_single(self, prices: np.ndarray, period: int = 14) -> float:
         """计算RSI"""

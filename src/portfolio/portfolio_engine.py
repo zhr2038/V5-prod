@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import json
+import time
 
 import numpy as np
 
@@ -36,6 +37,107 @@ class PortfolioEngine:
         """
         self.alpha_cfg = alpha_cfg
         self.risk_cfg = risk_cfg
+
+    def _load_topk_state(self) -> Dict[str, Any]:
+        try:
+            cfg = getattr(self.alpha_cfg, "topk_dropout", None)
+            if not cfg:
+                return {"selected": [], "hold_cycles": {}, "updated_ts": 0}
+            p = Path(str(getattr(cfg, "state_path", "reports/topk_dropout_state.json")))
+            if not p.exists():
+                return {"selected": [], "hold_cycles": {}, "updated_ts": 0}
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(obj, dict):
+                obj.setdefault("selected", [])
+                obj.setdefault("hold_cycles", {})
+                obj.setdefault("updated_ts", 0)
+                return obj
+        except Exception:
+            pass
+        return {"selected": [], "hold_cycles": {}, "updated_ts": 0}
+
+    def _save_topk_state(self, selected: List[str], hold_cycles: Dict[str, int]) -> None:
+        try:
+            cfg = getattr(self.alpha_cfg, "topk_dropout", None)
+            if not cfg:
+                return
+            p = Path(str(getattr(cfg, "state_path", "reports/topk_dropout_state.json")))
+            p.parent.mkdir(parents=True, exist_ok=True)
+            obj = {
+                "selected": list(selected or []),
+                "hold_cycles": {k: int(v) for k, v in (hold_cycles or {}).items()},
+                "updated_ts": int(time.time()),
+            }
+            tmp = p.with_suffix(p.suffix + ".tmp")
+            tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(p)
+        except Exception:
+            pass
+
+    def _apply_topk_dropout(self, selected: List[str], selection_scores: Dict[str, float], audit: Optional[Any] = None) -> List[str]:
+        """TopkDropout: 每轮最多替换 n_drop，且仅替换满足最短持有轮次的旧标的。"""
+        cfg = getattr(self.alpha_cfg, "topk_dropout", None)
+        if not cfg or not bool(getattr(cfg, "enabled", False)):
+            return selected
+
+        n_drop = max(1, int(getattr(cfg, "n_drop_per_cycle", 2) or 2))
+        hold_req = max(1, int(getattr(cfg, "hold_cycles", 2) or 2))
+
+        st = self._load_topk_state()
+        prev_selected = [s for s in (st.get("selected") or []) if isinstance(s, str)]
+        prev_hold = st.get("hold_cycles") or {}
+
+        # 冷启动
+        if not prev_selected:
+            hold_new = {s: 1 for s in selected}
+            self._save_topk_state(selected, hold_new)
+            return selected
+
+        candidate = list(selected)
+        candidate_set = set(candidate)
+        prev_set = set(prev_selected)
+
+        newcomers = [s for s in candidate if s not in prev_set]
+        hold_cont = [s for s in prev_selected if s in candidate_set]
+
+        # 仅允许替换满足 hold_req 的旧持仓
+        droppable = [s for s in prev_selected if int(prev_hold.get(s, 1)) >= hold_req]
+        # 在 droppable 里优先淘汰当前评分最低者
+        droppable_sorted = sorted(droppable, key=lambda s: float(selection_scores.get(s, -1e9)))
+
+        max_replace = min(n_drop, len(newcomers), len(droppable_sorted))
+        drop_set = set(droppable_sorted[:max_replace])
+        add_list = newcomers[:max_replace]
+
+        kept = [s for s in prev_selected if s not in drop_set]
+        merged = kept + [s for s in add_list if s not in kept]
+
+        # 用候选池补齐（避免容量不足）
+        for s in candidate:
+            if s not in merged:
+                merged.append(s)
+
+        # 保持与候选同样容量
+        target_k = len(candidate)
+        merged = merged[:target_k]
+
+        # 更新 hold cycle
+        hold_new: Dict[str, int] = {}
+        for s in merged:
+            if s in prev_set and s in hold_cont:
+                hold_new[s] = int(prev_hold.get(s, 1)) + 1
+            else:
+                hold_new[s] = 1
+
+        self._save_topk_state(merged, hold_new)
+
+        if audit:
+            audit.add_note(
+                "TopkDropout applied: prev={} cand={} kept={} replace={} hold_req={} n_drop={}"
+                .format(len(prev_selected), len(candidate), len(merged), max_replace, hold_req, n_drop)
+            )
+
+        return merged
 
     def _load_fused_signals(self) -> Optional[Dict[str, float]]:
         """Load fused signals from strategy_signals.json if available"""
@@ -140,8 +242,22 @@ class PortfolioEngine:
 
         # Select top pct by score (using fused signals if available)
         items = sorted(selection_scores.items(), key=lambda kv: float(kv[1]), reverse=True)
-        k = max(1, int(np.ceil(len(items) * float(self.alpha_cfg.long_top_pct))))
+
+        # top-k size from pct / override
+        k_pct = max(1, int(np.ceil(len(items) * float(self.alpha_cfg.long_top_pct))))
+        k = k_pct
+        try:
+            topk_cfg = getattr(self.alpha_cfg, "topk_dropout", None)
+            topk_override = int(getattr(topk_cfg, "topk_override", 0) or 0) if topk_cfg else 0
+            if topk_override > 0:
+                k = min(len(items), max(1, topk_override))
+        except Exception:
+            pass
+
         selected = [s for s, score in items[:k] if score >= float(getattr(self.alpha_cfg, "min_score_threshold", 0.0))]
+
+        # TopkDropout limited replacement（在风险cap之前，先控换手）
+        selected = self._apply_topk_dropout(selected, selection_scores=selection_scores, audit=audit)
 
         # Enforce dynamic risk-level position cap (PROTECT/DEFENSE/NEUTRAL/ATTACK)
         max_pos = self._get_dynamic_max_positions()

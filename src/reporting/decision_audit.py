@@ -60,6 +60,9 @@ class DecisionAudit:
         "deadband_skip": 0,
         "provider_error": 0,
         "exchange_min_notional": 0,
+        "cooldown_hit": 0,
+        "cost_edge_insufficient": 0,
+        "confirmation_pending": 0,
     })
     
     # Budget (F3)

@@ -74,6 +74,10 @@ from src.risk.risk_engine import RiskEngine
 from src.risk.fixed_stop_loss import FixedStopLossManager, FixedStopLossConfig
 from src.risk.profit_taking import ProfitTakingManager  # 程序化利润管理
 from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard  # 自动风险档位
+from src.risk.negative_expectancy_cooldown import (
+    NegativeExpectancyCooldown,
+    NegativeExpectancyConfig,
+)
 from src.core.models import PositionState
 from src.reporting.decision_audit import DecisionAudit
 
@@ -177,6 +181,19 @@ class V5Pipeline:
         
         # 自动风险档位守卫
         self.auto_risk_guard = get_auto_risk_guard()
+
+        # 负期望标的自动冷却（根因级抑制高成本来回交易）
+        self.negative_expectancy_cooldown = NegativeExpectancyCooldown(
+            NegativeExpectancyConfig(
+                enabled=bool(getattr(cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
+                lookback_hours=int(getattr(cfg.execution, 'negative_expectancy_lookback_hours', 24) or 24),
+                min_closed_cycles=int(getattr(cfg.execution, 'negative_expectancy_min_closed_cycles', 4) or 4),
+                expectancy_threshold_usdt=float(getattr(cfg.execution, 'negative_expectancy_threshold_usdt', 0.0) or 0.0),
+                cooldown_hours=int(getattr(cfg.execution, 'negative_expectancy_cooldown_hours', 24) or 24),
+                state_path=str(getattr(cfg.execution, 'negative_expectancy_state_path', 'reports/negative_expectancy_cooldown.json')),
+                orders_db_path=str(getattr(cfg.execution, 'order_store_path', 'reports/orders.sqlite')),
+            )
+        )
         
         # Phase 3: 初始化ML数据收集器
         from src.execution.ml_data_collector import MLDataCollector
@@ -854,6 +871,19 @@ class V5Pipeline:
         held_symbols = {p.symbol for p in positions if float(getattr(p, 'qty', 0.0) or 0.0) > 0}
         symbols_all = sorted(set(current_w.keys()) | set(target.keys()) | held_symbols)
 
+        # 负期望冷却状态刷新
+        neg_cd_enabled = bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False))
+        neg_cd_state = {}
+        if neg_cd_enabled:
+            try:
+                neg_cd_state = self.negative_expectancy_cooldown.refresh(force=False) or {}
+                if audit:
+                    blocked_n = len((neg_cd_state.get('symbols') or {}))
+                    audit.add_note(f"NegativeExpectancy cooldown active symbols={blocked_n}")
+            except Exception as e:
+                if audit:
+                    audit.add_note(f"NegativeExpectancy refresh error: {e}")
+
         # Optional hard rule: force-close held symbols that are no longer in current scored universe.
         scored_symbols = set(alpha.scores.keys()) if alpha and getattr(alpha, 'scores', None) else set()
         force_close_unscored = bool(getattr(self.cfg.execution, 'force_close_unscored_positions', False))
@@ -1015,6 +1045,24 @@ class V5Pipeline:
                 notional = abs(float(drift)) * float(equity)
                 if notional <= 0:
                     continue
+
+            # Negative expectancy cooldown gate
+            if side == "buy" and neg_cd_enabled:
+                blocked = self.negative_expectancy_cooldown.is_blocked(sym)
+                if blocked:
+                    if audit:
+                        audit.reject("cooldown_hit")
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": "negative_expectancy_cooldown",
+                                "expectancy_usdt": float(blocked.get("expectancy_usdt") or 0.0),
+                                "closed_cycles": int(blocked.get("closed_cycles") or 0),
+                                "remain_seconds": float(blocked.get("remain_seconds") or 0.0),
+                            }
+                        )
+                    continue
             
             # Require fused signals for buys (no alpha-fallback buys).
             if side == "buy" and require_fused_buy:
@@ -1144,7 +1192,7 @@ class V5Pipeline:
 
                         if float(score_sym) < float(required_score):
                             if audit:
-                                audit.reject("cost_aware_edge")
+                                audit.reject("cost_edge_insufficient")
                                 router_decisions.append(
                                     {
                                         "symbol": sym,
