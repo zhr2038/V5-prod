@@ -92,7 +92,8 @@ class DailyMLTrainer:
     def _select_features_dynamic(self, df: pd.DataFrame, y: pd.Series, fallback_cols: list):
         """动态特征选择（带白名单兜底）。"""
         excluded = {
-            'future_return_6h', 'symbol', 'regime', 'created_at', 'label_filled', 'timestamp'
+            'future_return_6h', 'symbol', 'regime', 'created_at', 'label_filled',
+            'timestamp', 'hour_of_day', 'day_of_week'
         }
         candidate_cols = []
         for c in df.columns:
@@ -199,14 +200,6 @@ class DailyMLTrainer:
         df = pd.read_csv(csv_path)
         if 'timestamp' in df.columns:
             df = df.sort_values('timestamp').reset_index(drop=True)
-
-        # 增加时间派生特征（不直接使用原 timestamp）
-        if 'timestamp' in df.columns:
-            ts = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
-            if ts.isna().all():
-                ts = pd.to_datetime(df['timestamp'], errors='coerce')
-            df['hour_of_day'] = ts.dt.hour.fillna(0).astype(int)
-            df['day_of_week'] = ts.dt.dayofweek.fillna(0).astype(int)
 
         # 4) 特征选择（动态 + 兜底）
         fallback_cols = self._fallback_feature_cols(df)
