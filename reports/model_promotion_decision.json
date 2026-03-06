@@ -1,0 +1,24 @@
+{
+  "ts": "2026-03-06T20:22:44.233047",
+  "passed": false,
+  "selected_model_path": "models/ml_factor_model",
+  "metrics": {
+    "valid_ic": -0.0076747876832003676,
+    "cv_mean_ic": 0.15181476431950763,
+    "cv_std_ic": 0.21687851640184688,
+    "ic_gap": 0.8244914141913614,
+    "recent_mean_valid_ic": -0.0561250042905301
+  },
+  "thresholds": {
+    "min_valid_ic": 0.0,
+    "min_cv_mean_ic": 0.01,
+    "max_cv_std": 0.15,
+    "max_ic_gap": 0.25
+  },
+  "fail_reasons": [
+    "valid_ic<0.00",
+    "cv_std_ic>0.15",
+    "ic_gap>0.25",
+    "recent_mean_valid_ic<0"
+  ]
+}

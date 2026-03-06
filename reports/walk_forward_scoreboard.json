@@ -1,0 +1,14 @@
+{
+  "ts": "2026-03-06T20:22:44.207536",
+  "runs_count": 68,
+  "net_pnl_usdt": 0.0,
+  "avg_pnl_usdt": 0.0,
+  "win_rate": 0.0,
+  "total_cost_usdt": 0.0,
+  "cost_to_gross_abs_ratio": 0.0,
+  "last_20": {
+    "runs": 20,
+    "net_pnl_usdt": 0.0,
+    "win_rate": 0.0
+  }
+}
