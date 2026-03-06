@@ -244,8 +244,8 @@ execution:
 
 budget:
   # 实盘测试 - 设置明确的资金限制
-  # 升级到130U测试规模
-  live_equity_cap_usdt: 137.0  # 当前小规模实盘上限（上调）
+  # 当前阶段：140U 上限
+  live_equity_cap_usdt: 140.0
 
   # Exchange min-order protection (avoid 51020/minSz failures on small budget)
   exchange_min_notional_enabled: true
@@ -266,8 +266,8 @@ budget:
   # 超过预算上限后：硬性禁止买单（只允许卖出）
   hard_buy_block_on_cap: true
   hard_buy_block_cap_ratio: 1.0
-  turnover_budget_per_day: null
-  cost_budget_bps_per_day: null
+  turnover_budget_per_day: 0.50
+  cost_budget_bps_per_day: 35
 
 backtest:
   fee_bps: 6

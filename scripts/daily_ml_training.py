@@ -172,11 +172,12 @@ class DailyMLTrainer:
         self.last_outcome = 'unknown'
 
         # ---- Gate Config ----
-        min_samples = int(os.getenv('V5_ML_MIN_SAMPLES', '100'))
-        min_valid_ic = float(os.getenv('V5_ML_MIN_VALID_IC', '-0.10'))
-        max_ic_gap = float(os.getenv('V5_ML_MAX_IC_GAP', '0.90'))
-        min_cv_mean_ic = float(os.getenv('V5_ML_MIN_CV_MEAN_IC', '0.00'))
-        max_cv_std = float(os.getenv('V5_ML_MAX_CV_STD', '0.35'))
+        # More conservative defaults to avoid overfitted model promotion in live.
+        min_samples = int(os.getenv('V5_ML_MIN_SAMPLES', '160'))
+        min_valid_ic = float(os.getenv('V5_ML_MIN_VALID_IC', '0.00'))
+        max_ic_gap = float(os.getenv('V5_ML_MAX_IC_GAP', '0.25'))
+        min_cv_mean_ic = float(os.getenv('V5_ML_MIN_CV_MEAN_IC', '0.01'))
+        max_cv_std = float(os.getenv('V5_ML_MAX_CV_STD', '0.15'))
 
         # 1) 数据充足性
         is_ready, stats = self.check_data_sufficiency(min_samples=min_samples)
