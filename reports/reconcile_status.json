@@ -1,131 +1,111 @@
 {
   "schema_version": 1,
-  "ts_ms": 1772681422330,
+  "ts_ms": 1772830827910,
   "ok": false,
   "reason": "base_mismatch",
   "exchange_snapshot": {
     "source": "okx_account_balance",
-    "uTime_max_ms": 1772680524145,
+    "uTime_max_ms": 1772799942313,
     "ccy_cashBal": {
-      "USDT": "93.50486555280675",
-      "APT": "21.8695159",
-      "UNI": "4.114980321",
-      "HYPE": "0.0000467",
-      "XPL": "0.008",
-      "BNB": "0.00000098",
-      "LTC": "0.000000912",
-      "TON": "0.0000344",
-      "SOL": "0.000000156",
-      "FIL": "0.000000679",
-      "DOGE": "0.00000098",
-      "NEAR": "0.00000000531"
+      "USDT": "129.94874357053843",
+      "BARD": "0.00861",
+      "BNB": "0.000000621",
+      "BTC": "0.00000000415",
+      "XPL": "0.00235",
+      "APT": "0.0000159",
+      "UNI": "0.000000323",
+      "FIL": "0.000000987",
+      "TRX": "0.000000754",
+      "NEAR": "0.00000000108"
     },
     "ccy_ordFrozen": {
       "USDT": "0",
+      "BARD": "0",
+      "BNB": "0",
+      "BTC": "0",
+      "XPL": "0",
       "APT": "0",
       "UNI": "0",
-      "HYPE": "0",
-      "XPL": "0",
-      "BNB": "0",
-      "LTC": "0",
-      "TON": "0",
-      "SOL": "0",
       "FIL": "0",
-      "DOGE": "0",
+      "TRX": "0",
       "NEAR": "0"
     }
   },
   "local_snapshot": {
-    "cash_usdt": "93.5048655528",
+    "cash_usdt": "129.948743571",
     "ccy_qty": {
-      "USDT": "93.5048655528",
-      "APT": "21.8695159",
-      "UNI": "4.114980321"
+      "USDT": "129.948743571"
     }
   },
   "diffs": [
     {
       "ccy": "APT",
-      "exchange": "21.8695159",
-      "local": "21.8695159",
-      "delta": "0",
+      "exchange": "0.0000159",
+      "local": "0",
+      "delta": "1.59e-05",
+      "delta_usdt": null
+    },
+    {
+      "ccy": "BARD",
+      "exchange": "0.00861",
+      "local": "0",
+      "delta": "0.00861",
       "delta_usdt": null
     },
     {
       "ccy": "BNB",
-      "exchange": "0.00000098",
+      "exchange": "0.000000621",
       "local": "0",
-      "delta": "9.8e-07",
+      "delta": "6.21e-07",
       "delta_usdt": null
     },
     {
-      "ccy": "DOGE",
-      "exchange": "0.00000098",
+      "ccy": "BTC",
+      "exchange": "0.00000000415",
       "local": "0",
-      "delta": "9.8e-07",
+      "delta": "4.15e-09",
       "delta_usdt": null
     },
     {
       "ccy": "FIL",
-      "exchange": "0.000000679",
+      "exchange": "0.000000987",
       "local": "0",
-      "delta": "6.79e-07",
-      "delta_usdt": null
-    },
-    {
-      "ccy": "HYPE",
-      "exchange": "0.0000467",
-      "local": "0",
-      "delta": "4.67e-05",
-      "delta_usdt": null
-    },
-    {
-      "ccy": "LTC",
-      "exchange": "0.000000912",
-      "local": "0",
-      "delta": "9.12e-07",
+      "delta": "9.87e-07",
       "delta_usdt": null
     },
     {
       "ccy": "NEAR",
-      "exchange": "0.00000000531",
+      "exchange": "0.00000000108",
       "local": "0",
-      "delta": "5.31e-09",
+      "delta": "1.08e-09",
       "delta_usdt": null
     },
     {
-      "ccy": "SOL",
-      "exchange": "0.000000156",
+      "ccy": "TRX",
+      "exchange": "0.000000754",
       "local": "0",
-      "delta": "1.56e-07",
-      "delta_usdt": null
-    },
-    {
-      "ccy": "TON",
-      "exchange": "0.0000344",
-      "local": "0",
-      "delta": "3.44e-05",
+      "delta": "7.54e-07",
       "delta_usdt": null
     },
     {
       "ccy": "UNI",
-      "exchange": "4.114980321",
-      "local": "4.114980321",
-      "delta": "0",
+      "exchange": "0.000000323",
+      "local": "0",
+      "delta": "3.23e-07",
       "delta_usdt": null
     },
     {
       "ccy": "USDT",
-      "exchange": "93.50486555280675",
-      "local": "93.5048655528",
-      "delta": "6.75015598972e-12",
-      "delta_usdt": "6.75015598972e-12"
+      "exchange": "129.94874357053843",
+      "local": "129.948743571",
+      "delta": "-4.6156856115e-10",
+      "delta_usdt": "-4.6156856115e-10"
     },
     {
       "ccy": "XPL",
-      "exchange": "0.008",
+      "exchange": "0.00235",
       "local": "0",
-      "delta": "0.008",
+      "delta": "0.00235",
       "delta_usdt": null
     }
   ],
@@ -135,8 +115,8 @@
     "dust_usdt_ignore": 1.0
   },
   "stats": {
-    "max_abs_usdt_delta": 6.750155989720952e-12,
-    "max_abs_base_delta": 0.008
+    "max_abs_usdt_delta": 4.615685611497611e-10,
+    "max_abs_base_delta": 0.00861
   },
   "error": {
     "http_status": 200,
@@ -146,5 +126,5 @@
   "open_orders": {
     "note": "using cashBal avoids false mismatch from ordFrozen"
   },
-  "generated_ts_ms": 1772681422330
+  "generated_ts_ms": 1772830827910
 }

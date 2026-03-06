@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-03-05T15:00:32.547000Z,20260305_150016,BTC/USDT,OPEN_LONG,buy,0.00017883,72693.5,12.999778605,0.012999778605,,,

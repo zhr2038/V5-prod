@@ -1,0 +1,100 @@
+{
+  "updated_at": "2026-03-06T01:32:45.788050Z",
+  "points_short": 1,
+  "points_long": 1,
+  "score_ic_short": {
+    "mean": 0.999898438262259,
+    "std": 0.0,
+    "ir": 0.0,
+    "positive_ratio": 1.0,
+    "count": 1
+  },
+  "score_rank_ic_short": {
+    "mean": 1.0,
+    "std": 0.0,
+    "ir": 0.0,
+    "positive_ratio": 1.0,
+    "count": 1
+  },
+  "score_ic_long": {
+    "mean": 0.999898438262259,
+    "std": 0.0,
+    "ir": 0.0,
+    "positive_ratio": 1.0,
+    "count": 1
+  },
+  "score_rank_ic_long": {
+    "mean": 1.0,
+    "std": 0.0,
+    "ir": 0.0,
+    "positive_ratio": 1.0,
+    "count": 1
+  },
+  "factor_ic": {
+    "f1": {
+      "ic_short": {
+        "mean": 0.9998984382622589,
+        "std": 0.0,
+        "ir": 0.0,
+        "positive_ratio": 1.0,
+        "count": 1
+      },
+      "rank_ic_short": {
+        "mean": 1.0,
+        "std": 0.0,
+        "ir": 0.0,
+        "positive_ratio": 1.0,
+        "count": 1
+      },
+      "ic_long": {
+        "mean": 0.9998984382622589,
+        "std": 0.0,
+        "ir": 0.0,
+        "positive_ratio": 1.0,
+        "count": 1
+      },
+      "rank_ic_long": {
+        "mean": 1.0,
+        "std": 0.0,
+        "ir": 0.0,
+        "positive_ratio": 1.0,
+        "count": 1
+      }
+    },
+    "f2": {
+      "ic_short": {
+        "mean": 0.9998984382622589,
+        "std": 0.0,
+        "ir": 0.0,
+        "positive_ratio": 1.0,
+        "count": 1
+      },
+      "rank_ic_short": {
+        "mean": 1.0,
+        "std": 0.0,
+        "ir": 0.0,
+        "positive_ratio": 1.0,
+        "count": 1
+      },
+      "ic_long": {
+        "mean": 0.9998984382622589,
+        "std": 0.0,
+        "ir": 0.0,
+        "positive_ratio": 1.0,
+        "count": 1
+      },
+      "rank_ic_long": {
+        "mean": 1.0,
+        "std": 0.0,
+        "ir": 0.0,
+        "positive_ratio": 1.0,
+        "count": 1
+      }
+    }
+  },
+  "decay": {
+    "short_mean_ic": 0.999898438262259,
+    "long_mean_ic": 0.999898438262259,
+    "decay_ratio": 1.0
+  }
+}

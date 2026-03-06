@@ -1,18 +1,15 @@
 {
   "target_weights": {
-    "NEAR/USDT": 0.25,
-    "UNI/USDT": 0.25,
-    "TON/USDT": 0.1901165406013995
+    "SOL/USDT": 0.2127481273998651,
+    "HYPE/USDT": 0.25
   },
   "selected": [
-    "NEAR/USDT",
-    "UNI/USDT",
-    "TON/USDT"
+    "SOL/USDT",
+    "HYPE/USDT"
   ],
   "volatilities": {
-    "NEAR/USDT": 0.01231647807556177,
-    "UNI/USDT": 0.01006244598624569,
-    "TON/USDT": 0.007181426372820393
+    "SOL/USDT": 0.009516166423971828,
+    "HYPE/USDT": 0.010936557310024889
   },
   "notes": ""
 }

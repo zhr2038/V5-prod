@@ -1,0 +1,11 @@
+{
+  "selected": [
+    "SOL/USDT",
+    "HYPE/USDT"
+  ],
+  "hold_cycles": {
+    "SOL/USDT": 1,
+    "HYPE/USDT": 2
+  },
+  "updated_ts": 1772830825
+}

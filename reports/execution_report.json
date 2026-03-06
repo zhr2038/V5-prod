@@ -1,6 +1,23 @@
 {
-  "timestamp": "2026-03-05T03:30:22Z",
+  "timestamp": "2026-03-06T21:00:27Z",
   "dry_run": false,
-  "orders": [],
-  "notes": "regime=RegimeState.TRENDING selected=['NEAR/USDT', 'UNI/USDT', 'TON/USDT'] orders=0"
+  "orders": [
+    {
+      "symbol": "HYPE/USDT",
+      "side": "buy",
+      "intent": "OPEN_LONG",
+      "notional_usdt": 32.487185892634606,
+      "signal_price": 31.055,
+      "meta": {
+        "target_w": 0.25,
+        "dd_mult": 1.0,
+        "regime": "Sideways",
+        "window_start_ts": null,
+        "window_end_ts": null,
+        "deadband_pct": 0.05,
+        "drift": 0.25
+      }
+    }
+  ],
+  "notes": "regime=RegimeState.SIDEWAYS selected=['SOL/USDT', 'HYPE/USDT'] orders=1"
 }

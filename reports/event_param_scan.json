@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-05T11:45:02.483218",
+  "timestamp": "2026-03-07T06:00:03.189591",
   "base": {
     "enabled": true,
     "check_interval_minutes": 15,
@@ -21,10 +21,10 @@
       "breakout_threshold_pct": 0.3
     },
     "actions": 0,
-    "events_processed": 27,
-    "events_blocked": 27,
+    "events_processed": 15,
+    "events_blocked": 15,
     "should_trade": false,
-    "fitness": -27.0
+    "fitness": -15.0
   },
   "top5": [
     {
@@ -35,10 +35,10 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 27,
-      "events_blocked": 27,
+      "events_processed": 15,
+      "events_blocked": 15,
       "should_trade": false,
-      "fitness": -27.0
+      "fitness": -15.0
     },
     {
       "params": {
@@ -48,10 +48,10 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 27,
-      "events_blocked": 27,
+      "events_processed": 15,
+      "events_blocked": 15,
       "should_trade": false,
-      "fitness": -27.0
+      "fitness": -15.0
     },
     {
       "params": {
@@ -61,10 +61,10 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 27,
-      "events_blocked": 27,
+      "events_processed": 15,
+      "events_blocked": 15,
       "should_trade": false,
-      "fitness": -27.0
+      "fitness": -15.0
     },
     {
       "params": {
@@ -74,10 +74,10 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 27,
-      "events_blocked": 27,
+      "events_processed": 15,
+      "events_blocked": 15,
       "should_trade": false,
-      "fitness": -27.0
+      "fitness": -15.0
     },
     {
       "params": {
@@ -87,10 +87,10 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 27,
-      "events_blocked": 27,
+      "events_processed": 15,
+      "events_blocked": 15,
       "should_trade": false,
-      "fitness": -27.0
+      "fitness": -15.0
     }
   ],
   "count": 72,

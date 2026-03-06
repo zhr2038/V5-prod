@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "symbols": [
+    "BARD/USDT",
     "SAHARA/USDT"
   ],
   "entries": [
@@ -12,7 +13,16 @@
       "meta": {
         "spread_bps": 20.314880650075356
       }
+    },
+    {
+      "symbol": "BARD/USDT",
+      "reason": "spread_too_wide>30.0bps",
+      "ts_ms": 1772697605382,
+      "expires_ts_ms": 1773302405382,
+      "meta": {
+        "spread_bps": 55.06030414263216
+      }
     }
   ],
-  "updated_ts_ms": 1772297845922
+  "updated_ts_ms": 1772697605382
 }

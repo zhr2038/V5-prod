@@ -1,0 +1,540 @@
+{
+  "run_id": "20260306_130014",
+  "now_ts": 1772773214,
+  "window_start_ts": null,
+  "window_end_ts": null,
+  "regime": "Sideways",
+  "regime_multiplier": 0.638099047163496,
+  "counts": {
+    "universe": 20,
+    "scored": 19,
+    "selected": 3,
+    "targets_pre_risk": 3,
+    "orders_exit": 0,
+    "orders_rebalance": 0
+  },
+  "top_scores": [
+    {
+      "symbol": "IP/USDT",
+      "score": 0.7342654551076206
+    },
+    {
+      "symbol": "CC/USDT",
+      "score": 0.16639079053824096
+    },
+    {
+      "symbol": "BTC/USDT",
+      "score": 0.16099999999999998
+    },
+    {
+      "symbol": "SOL/USDT",
+      "score": 0.138472717932145
+    },
+    {
+      "symbol": "BNB/USDT",
+      "score": 0.12614192024697565
+    },
+    {
+      "symbol": "OKB/USDT",
+      "score": 0.11033220999952412
+    },
+    {
+      "symbol": "ADA/USDT",
+      "score": 0.09507033840132732
+    },
+    {
+      "symbol": "XRP/USDT",
+      "score": 0.09256500109053058
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "score": 0.08766360503951656
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": 0.06962726198643643
+    }
+  ],
+  "targets_pre_risk": {
+    "SOL/USDT": 0.16471583113584187,
+    "BTC/USDT": 0.21068906651926614,
+    "BNB/USDT": 0.25
+  },
+  "targets_post_risk": {
+    "SOL/USDT": 0.16471583113584187,
+    "BTC/USDT": 0.21068906651926614,
+    "BNB/USDT": 0.25
+  },
+  "portfolio_debug": {
+    "inv_vol_norm": {
+      "SOL/USDT": 0.2506661298868893,
+      "BTC/USDT": 0.34963551427412826,
+      "BNB/USDT": 0.39969835583898244
+    },
+    "confidence_raw": {
+      "SOL/USDT": 0.3367569381324642,
+      "BTC/USDT": 0.30931890423397507,
+      "BNB/USDT": 0.35392415763356067
+    },
+    "score_stats": {
+      "min": -1.0,
+      "max": -0.8787611359247854,
+      "std": 0.05005777528251985,
+      "count": 3
+    },
+    "zero_reason_by_symbol": {},
+    "weight_pre_clip": {
+      "SOL/USDT": 0.2581352093660748,
+      "BTC/USDT": 0.3301823869755484,
+      "BNB/USDT": 0.4116824036583768
+    }
+  },
+  "rebalance_deadband_pct": 0.05,
+  "rebalance_skipped_deadband_count": 0,
+  "rebalance_skipped_deadband_by_symbol": {},
+  "rebalance_drift_by_symbol": {
+    "BNB/USDT": 0.25,
+    "BTC/USDT": 0.21068906651926614,
+    "SOL/USDT": 0.16471583113584187
+  },
+  "rebalance_effective_deadband_by_symbol": {
+    "BNB/USDT": 0.05,
+    "BTC/USDT": 0.05,
+    "SOL/USDT": 0.05
+  },
+  "router_decisions": [
+    {
+      "symbol": "BNB/USDT",
+      "action": "skip",
+      "reason": "cost_aware_edge",
+      "score": -0.8787611359247854,
+      "required_score": 0.14400000000000002,
+      "rt_cost_bps": 22.0
+    },
+    {
+      "symbol": "BTC/USDT",
+      "action": "skip",
+      "reason": "negative_expectancy_cooldown",
+      "expectancy_usdt": -0.07944491896261664,
+      "closed_cycles": 4,
+      "remain_seconds": 71999.48
+    },
+    {
+      "symbol": "SOL/USDT",
+      "action": "skip",
+      "reason": "cost_aware_edge",
+      "score": -0.9235102410479153,
+      "required_score": 0.14400000000000002,
+      "rt_cost_bps": 22.0
+    }
+  ],
+  "rejects": {
+    "no_closed_bar": 0,
+    "min_notional": 0,
+    "spread_gate": 0,
+    "dd_throttle": 0,
+    "cap_clipped": 0,
+    "insufficient_cash": 0,
+    "deadband_skip": 0,
+    "provider_error": 0,
+    "exchange_min_notional": 0,
+    "cooldown_hit": 1,
+    "cost_edge_insufficient": 2,
+    "confirmation_pending": 0
+  },
+  "budget": {
+    "equity_cap_usdt": null,
+    "current_equity_usdt": 129.96194785544586,
+    "utilization_pct": null,
+    "action_enabled": false
+  },
+  "budget_action": {
+    "enabled": false
+  },
+  "universe_config": {
+    "enabled": true,
+    "use_universe_symbols": true,
+    "config_symbols_count": 4,
+    "actual_symbols_count": 20,
+    "actual_symbols_sample": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "OKB/USDT",
+      "SOL/USDT",
+      "DOGE/USDT",
+      "XRP/USDT",
+      "CC/USDT",
+      "SUI/USDT",
+      "TRX/USDT",
+      "HYPE/USDT"
+    ]
+  },
+  "exit_signals": [],
+  "notes": [
+    "2026-03-06T13:00:26.729010: alpha weights overridden by regime=Sideways from reports/alpha_dynamic_weights_by_regime.json",
+    "2026-03-06T13:00:26.729229: Multi-strategy: 3 strategies, 28 total signals",
+    "2026-03-06T13:00:26.729234:   TrendFollowing: 9 signals (2 buy, 7 sell)",
+    "2026-03-06T13:00:26.729237:   MeanReversion: 0 signals (0 buy, 0 sell)",
+    "2026-03-06T13:00:26.729238:   Alpha6Factor: 19 signals (11 buy, 8 sell)",
+    "2026-03-06T13:00:26.730660: Using fused signals for selection: ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'TRX/USDT']",
+    "2026-03-06T13:00:26.731012: TopkDropout applied: prev=5 cand=5 kept=5 replace=1 hold_req=2 n_drop=2",
+    "2026-03-06T13:00:26.731084: AutoRisk position cap applied: max_positions=3",
+    "2026-03-06T13:00:26.731090: Using fused scores for weighting",
+    "2026-03-06T13:00:26.731443: Optimizer applied: lambda=0.35, floor=0.010, prev_n=3",
+    "2026-03-06T13:00:27.032908: Rank exit source: fused, candidates=19, max_rank=3, confirm_rounds=2",
+    "2026-03-06T13:00:27.034323: NegativeExpectancy cooldown active symbols=2",
+    "2026-03-06T13:00:27.034353: Banding: BNB/USDT is new position, deadband 0.05→0.050",
+    "2026-03-06T13:00:27.034428: Banding: BTC/USDT is new position, deadband 0.05→0.050",
+    "2026-03-06T13:00:27.034446: Banding: SOL/USDT is new position, deadband 0.05→0.050",
+    "2026-03-06T13:00:27.066182: IC monitor updated: short_rank_ic_mean=0.1038"
+  ],
+  "regime_details": {
+    "method": "EnsembleRegimeEngine",
+    "votes": {
+      "hmm": {
+        "state": "SIDEWAYS",
+        "confidence": 0.6644295339488979,
+        "weight": 0.35,
+        "sentiment": -0.21476200642071325,
+        "raw_state": "Sideways",
+        "probs": {
+          "Sideways": 0.6644295339488979,
+          "TrendingUp": 0.0604042298151944,
+          "TrendingDown": 0.27516623623590764
+        }
+      },
+      "funding": {
+        "state": "SIDEWAYS",
+        "confidence": 0.032,
+        "weight": 0.4,
+        "sentiment": 0.016,
+        "composite": true,
+        "details": {
+          "large": {
+            "avg": 0.03535,
+            "count": 2
+          },
+          "mid": {
+            "avg": 0.006575000000000001,
+            "count": 4
+          },
+          "small": {
+            "avg": -0.01805,
+            "count": 4
+          }
+        }
+      },
+      "rss": {
+        "state": "RISK_OFF",
+        "confidence": 0.75,
+        "weight": 0.25,
+        "sentiment": -0.3,
+        "summary": "[RSS情报] 市场情绪偏向谨慎，比特币价格回调至7万美元附近，投资者在关键经济数据和地缘政治紧张局势前采取防御姿态。"
+      },
+      "alerts": [
+        "regime_stuck_sideways"
+      ],
+      "monitor": {
+        "enabled": true,
+        "db_path": "/home/admin/clawd/v5-trading-bot/reports/regime_history.db",
+        "sideways_prob_warn_threshold": 0.8,
+        "sideways_consecutive_warn": 10
+      }
+    },
+    "final_score": 0.24535033688211427,
+    "hmm_weight": 0.35,
+    "funding_weight": 0.4,
+    "rss_weight": 0.25
+  },
+  "strategy_signals": [
+    {
+      "strategy": "TrendFollowing",
+      "type": "trend",
+      "allocation": 0.2,
+      "total_signals": 9,
+      "buy_signals": 2,
+      "sell_signals": 7,
+      "signals": [
+        {
+          "symbol": "BTC/USDT",
+          "side": "sell",
+          "score": 1.0,
+          "confidence": 1.0,
+          "metadata": {
+            "ma_fast": 70783.20999999999,
+            "ma_slow": 71452.12833333334,
+            "adx": 50.031994489791536
+          }
+        },
+        {
+          "symbol": "ETH/USDT",
+          "side": "sell",
+          "score": 0.6350087124842624,
+          "confidence": 0.7080069699874099,
+          "metadata": {
+            "ma_fast": 2072.6425,
+            "ma_slow": 2087.1974999999998,
+            "adx": 31.75043562421312
+          }
+        },
+        {
+          "symbol": "SOL/USDT",
+          "side": "sell",
+          "score": 0.9235102410479153,
+          "confidence": 0.9388081928383323,
+          "metadata": {
+            "ma_fast": 88.257,
+            "ma_slow": 89.50533333333334,
+            "adx": 46.17551205239577
+          }
+        },
+        {
+          "symbol": "XRP/USDT",
+          "side": "sell",
+          "score": 0.6591157303125165,
+          "confidence": 0.7272925842500133,
+          "metadata": {
+            "ma_fast": 1.403565,
+            "ma_slow": 1.412215,
+            "adx": 32.955786515625825
+          }
+        },
+        {
+          "symbol": "TRX/USDT",
+          "side": "buy",
+          "score": 1.0,
+          "confidence": 1.0,
+          "metadata": {
+            "ma_fast": 0.285439,
+            "ma_slow": 0.2848698333333334,
+            "adx": 65.52249656469287
+          }
+        }
+      ]
+    },
+    {
+      "strategy": "MeanReversion",
+      "type": "mean_reversion",
+      "allocation": 0.25,
+      "total_signals": 0,
+      "buy_signals": 0,
+      "sell_signals": 0,
+      "signals": []
+    },
+    {
+      "strategy": "Alpha6Factor",
+      "type": "alpha_6factor",
+      "allocation": 0.55,
+      "total_signals": 19,
+      "buy_signals": 11,
+      "sell_signals": 8,
+      "signals": [
+        {
+          "symbol": "BTC/USDT",
+          "side": "buy",
+          "score": 0.44711998115535784,
+          "confidence": 0.44711998115535784,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": 0.04626764092170306,
+              "f2_mom_20d": 0.029931576134250407,
+              "f3_vol_adj_ret": 4.4265708322952735,
+              "f4_volume_expansion": -0.09448096965746411,
+              "f5_rsi_trend_confirm": -0.31635651322233227,
+              "f6_sentiment": 0.0447,
+              "f6_corr_pv_10": 0.6050280885336675,
+              "f7_cord_10": 0.27974503058520855,
+              "f8_rsqr_10": 0.48105509740881014,
+              "f9_rank_20": 0.1,
+              "f10_imax_14": 0.8461538461538461,
+              "f11_imin_14": 0.07692307692307693,
+              "f12_imxd_14": 0.7692307692307692
+            },
+            "z_factors": {
+              "f1_mom_5d": 0.46267640921703057,
+              "f2_mom_20d": 0.14965788067125202,
+              "f3_vol_adj_ret": 2.2132854161476367,
+              "f4_volume_expansion": -0.18896193931492822,
+              "f5_rsi_trend_confirm": -0.31635651322233227,
+              "f6_sentiment": 0.0447,
+              "f6_corr_pv_10": 2.016760295112225,
+              "f7_cord_10": 0.9324834352840286,
+              "f8_rsqr_10": 1.6035169913627005,
+              "f9_rank_20": 0.33333333333333337,
+              "f10_imax_14": 2.8205128205128207,
+              "f11_imin_14": 0.25641025641025644,
+              "f12_imxd_14": 2.564102564102564
+            },
+            "final_score": 0.8674851271095014,
+            "cross_section_mean": 0.4203651459541436,
+            "relative_score": 0.44711998115535784
+          }
+        },
+        {
+          "symbol": "ETH/USDT",
+          "side": "buy",
+          "score": 0.4219882923001434,
+          "confidence": 0.4219882923001434,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": 0.024422435644257307,
+              "f2_mom_20d": 0.03880842175705064,
+              "f3_vol_adj_ret": 4.560219789551899,
+              "f4_volume_expansion": -0.32511295007365804,
+              "f5_rsi_trend_confirm": -0.26457399103138823,
+              "f6_sentiment": 0.026,
+              "f6_corr_pv_10": 0.395170417691359,
+              "f7_cord_10": -0.27618837779406635,
+              "f8_rsqr_10": 0.6460328443270928,
+              "f9_rank_20": 0.1,
+              "f10_imax_14": 0.8461538461538461,
+              "f11_imin_14": 0.07692307692307693,
+              "f12_imxd_14": 0.7692307692307692
+            },
+            "z_factors": {
+              "f1_mom_5d": 0.24422435644257307,
+              "f2_mom_20d": 0.1940421087852532,
+              "f3_vol_adj_ret": 2.2801098947759497,
+              "f4_volume_expansion": -0.6502259001473161,
+              "f5_rsi_trend_confirm": -0.26457399103138823,
+              "f6_sentiment": 0.026,
+              "f6_corr_pv_10": 1.3172347256378634,
+              "f7_cord_10": -0.9206279259802213,
+              "f8_rsqr_10": 2.153442814423643,
+              "f9_rank_20": 0.33333333333333337,
+              "f10_imax_14": 2.8205128205128207,
+              "f11_imin_14": 0.25641025641025644,
+              "f12_imxd_14": 2.564102564102564
+            },
+            "final_score": 0.842353438254287,
+            "cross_section_mean": 0.4203651459541436,
+            "relative_score": 0.4219882923001434
+          }
+        },
+        {
+          "symbol": "OKB/USDT",
+          "side": "sell",
+          "score": 0.5183358107362138,
+          "confidence": 0.5183358107362138,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": 0.25065274151436034,
+              "f2_mom_20d": 0.21511922881785886,
+              "f3_vol_adj_ret": 8.104689893334058,
+              "f4_volume_expansion": 2.5008798952515954,
+              "f5_rsi_trend_confirm": -0.02070293692826226,
+              "f6_sentiment": 0.6,
+              "f6_corr_pv_10": 0.2580374734982483,
+              "f7_cord_10": -0.025132195150378824,
+              "f8_rsqr_10": 0.06604854704671925,
+              "f9_rank_20": 0.4,
+              "f10_imax_14": 0.9230769230769231,
+              "f11_imin_14": 0.6923076923076923,
+              "f12_imxd_14": 0.23076923076923084
+            },
+            "z_factors": {
+              "f1_mom_5d": 2.506527415143603,
+              "f2_mom_20d": 1.0755961440892943,
+              "f3_vol_adj_ret": 4.052344946667029,
+              "f4_volume_expansion": 5.001759790503191,
+              "f5_rsi_trend_confirm": -0.02070293692826226,
+              "f6_sentiment": 0.6,
+              "f6_corr_pv_10": 0.8601249116608277,
+              "f7_cord_10": -0.08377398383459608,
+              "f8_rsqr_10": 0.22016182348906418,
+              "f9_rank_20": 1.3333333333333335,
+              "f10_imax_14": 3.076923076923077,
+              "f11_imin_14": 2.307692307692308,
+              "f12_imxd_14": 0.7692307692307695
+            },
+            "final_score": -0.09797066478207025,
+            "cross_section_mean": 0.4203651459541436,
+            "relative_score": -0.5183358107362138
+          }
+        },
+        {
+          "symbol": "SOL/USDT",
+          "side": "buy",
+          "score": 0.26692930875441984,
+          "confidence": 0.26692930875441984,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": 0.007925407925408004,
+              "f2_mom_20d": 0.017770977992232612,
+              "f3_vol_adj_ret": 1.8842098801169818,
+              "f4_volume_expansion": -0.34577512408017574,
+              "f5_rsi_trend_confirm": -0.44639376218323945,
+              "f6_sentiment": -0.0832,
+              "f6_corr_pv_10": 0.42983318010833593,
+              "f7_cord_10": -0.23385126265180028,
+              "f8_rsqr_10": 0.6534633740198919,
+              "f9_rank_20": 0.1,
+              "f10_imax_14": 0.8461538461538461,
+              "f11_imin_14": 0.07692307692307693,
+              "f12_imxd_14": 0.7692307692307692
+            },
+            "z_factors": {
+              "f1_mom_5d": 0.07925407925408004,
+              "f2_mom_20d": 0.08885488996116306,
+              "f3_vol_adj_ret": 0.9421049400584909,
+              "f4_volume_expansion": -0.6915502481603515,
+              "f5_rsi_trend_confirm": -0.44639376218323945,
+              "f6_sentiment": -0.0832,
+              "f6_corr_pv_10": 1.4327772670277865,
+              "f7_cord_10": -0.7795042088393344,
+              "f8_rsqr_10": 2.178211246732973,
+              "f9_rank_20": 0.33333333333333337,
+              "f10_imax_14": 2.8205128205128207,
+              "f11_imin_14": 0.25641025641025644,
+              "f12_imxd_14": 2.564102564102564
+            },
+            "final_score": 0.6872944547085634,
+            "cross_section_mean": 0.4203651459541436,
+            "relative_score": 0.26692930875441984
+          }
+        },
+        {
+          "symbol": "DOGE/USDT",
+          "side": "sell",
+          "score": 0.339044433790911,
+          "confidence": 0.339044433790911,
+          "metadata": {
+            "raw_factors": {
+              "f1_mom_5d": -0.011056772273017214,
+              "f2_mom_20d": -0.043889402816322295,
+              "f3_vol_adj_ret": -4.910506873145081,
+              "f4_volume_expansion": -0.5078327782723986,
+              "f5_rsi_trend_confirm": -0.1372549019607824,
+              "f6_sentiment": -0.0768,
+              "f6_corr_pv_10": 0.4439427335536576,
+              "f7_cord_10": 0.4507554242807136,
+              "f8_rsqr_10": 0.44358913734727046,
+              "f9_rank_20": 0.05,
+              "f10_imax_14": 0.46153846153846156,
+              "f11_imin_14": 0.3076923076923077,
+              "f12_imxd_14": 0.15384615384615385
+            },
+            "z_factors": {
+              "f1_mom_5d": -0.11056772273017214,
+              "f2_mom_20d": -0.21944701408161146,
+              "f3_vol_adj_ret": -2.4552534365725407,
+              "f4_volume_expansion": -1.0156655565447972,
+              "f5_rsi_trend_confirm": -0.1372549019607824,
+              "f6_sentiment": -0.0768,
+              "f6_corr_pv_10": 1.4798091118455254,
+              "f7_cord_10": 1.502518080935712,
+              "f8_rsqr_10": 1.4786304578242349,
+              "f9_rank_20": 0.16666666666666669,
+              "f10_imax_14": 1.5384615384615385,
+              "f11_imin_14": 1.0256410256410258,
+              "f12_imxd_14": 0.5128205128205129
+            },
+            "final_score": 0.08132071216323261,
+            "cross_section_mean": 0.4203651459541436,
+            "relative_score": -0.339044433790911
+          }
+        }
+      ]
+    }
+  ]
+}

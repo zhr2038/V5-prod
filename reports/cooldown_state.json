@@ -1,226 +1,64 @@
 {
-  "last_global_trade_ms": 1772681403014,
+  "last_global_trade_ms": 1772832603521,
   "symbol_cooldowns": {
-    "BTC/USDT": 1772677802579,
-    "DOGE/USDT": 1772666102951,
-    "XRP/USDT": 1772670602922,
-    "SUI/USDT": 1772661602984,
+    "BTC/USDT": 1772786702488,
+    "DOGE/USDT": 1772792102379,
+    "XRP/USDT": 1772756102226,
+    "SUI/USDT": 1772815503708,
     "CC/USDT": 1772539417702,
-    "OKB/USDT": 1772477102568,
+    "OKB/USDT": 1772832603521,
     "IP/USDT": 1772532002449,
-    "ADA/USDT": 1772527502650,
-    "XPL/USDT": 1772622902866,
-    "ETH/USDT": 1772680502227,
-    "SOL/USDT": 1772674202921,
-    "LINK/USDT": 1772646303396,
-    "BNB/USDT": 1772633703024,
-    "AVAX/USDT": 1772631003071,
-    "LTC/USDT": 1772678702974,
-    "NEAR/USDT": 1772579702933,
-    "HYPE/USDT": 1772586002315,
+    "ADA/USDT": 1772723703721,
+    "XPL/USDT": 1772819103115,
+    "ETH/USDT": 1772780402853,
+    "SOL/USDT": 1772777703219,
+    "LINK/USDT": 1772802003201,
+    "BNB/USDT": 1772763302989,
+    "AVAX/USDT": 1772719202770,
+    "LTC/USDT": 1772783102171,
+    "NEAR/USDT": 1772715602867,
+    "HYPE/USDT": 1772830802169,
     "APT/USDT": 1772620202341,
-    "TRX/USDT": 1772640003062,
-    "FIL/USDT": 1772655302473,
-    "TON/USDT": 1772681403014
+    "TRX/USDT": 1772804703505,
+    "FIL/USDT": 1772806502702,
+    "TON/USDT": 1772748003200,
+    "ASTER/USDT": 1772728203638,
+    "HUMA/USDT": 1772803802985,
+    "UNI/USDT": 1772794802381
   },
   "pending_signals": {
-    "PUMP/USDT": {
-      "signal": {
-        "symbol": "PUMP/USDT",
-        "direction": "buy",
-        "score": 1.0,
-        "rank": 0,
-        "timestamp_ms": 1772655302360
-      },
-      "count": 2,
-      "first_seen_ms": 1772655302472
-    },
     "PENGU/USDT": {
       "signal": {
         "symbol": "PENGU/USDT",
         "direction": "buy",
-        "score": 0.48901743391952035,
+        "score": 0.2041121114061778,
         "rank": 0,
-        "timestamp_ms": 1772661602724
+        "timestamp_ms": 1772685002970
       },
       "count": 1,
-      "first_seen_ms": 1772661602907
-    },
-    "ASTER/USDT": {
-      "signal": {
-        "symbol": "ASTER/USDT",
-        "direction": "buy",
-        "score": 1.0,
-        "rank": 0,
-        "timestamp_ms": 1772661602724
-      },
-      "count": 1,
-      "first_seen_ms": 1772661602935
+      "first_seen_ms": 1772685003003
     },
     "BARD/USDT": {
       "signal": {
         "symbol": "BARD/USDT",
-        "direction": "sell",
-        "score": 2.008061869562649,
-        "rank": 99,
-        "timestamp_ms": 1772518502497
-      },
-      "count": 2,
-      "first_seen_ms": 1772518502501
-    },
-    "OKB/USDT": {
-      "signal": {
-        "symbol": "OKB/USDT",
         "direction": "buy",
-        "score": 0.9707885063136917,
+        "score": 1.0,
         "rank": 0,
-        "timestamp_ms": 1772661602724
+        "timestamp_ms": 1772696702882
       },
       "count": 1,
-      "first_seen_ms": 1772661602895
-    },
-    "HYPE/USDT": {
-      "signal": {
-        "symbol": "HYPE/USDT",
-        "direction": "buy",
-        "score": 0.3215036788062484,
-        "rank": 0,
-        "timestamp_ms": 1772661602724
-      },
-      "count": 1,
-      "first_seen_ms": 1772661602955
-    },
-    "NEAR/USDT": {
-      "signal": {
-        "symbol": "NEAR/USDT",
-        "direction": "buy",
-        "score": 2.0984054684468796,
-        "rank": 0,
-        "timestamp_ms": 1772661602725
-      },
-      "count": 1,
-      "first_seen_ms": 1772661602976
+      "first_seen_ms": 1772696702885
     },
     "AAVE/USDT": {
       "signal": {
         "symbol": "AAVE/USDT",
         "direction": "sell",
-        "score": 0.9722321984227498,
+        "score": 0.17200297744568302,
         "rank": 0,
-        "timestamp_ms": 1772661602724
-      },
-      "count": 1,
-      "first_seen_ms": 1772661602974
-    },
-    "IP/USDT": {
-      "signal": {
-        "symbol": "IP/USDT",
-        "direction": "sell",
-        "score": 2.7984421642363184,
-        "rank": 0,
-        "timestamp_ms": 1772631003063
-      },
-      "count": 1,
-      "first_seen_ms": 1772631003071
-    },
-    "UNI/USDT": {
-      "signal": {
-        "symbol": "UNI/USDT",
-        "direction": "buy",
-        "score": 1.482367664248141,
-        "rank": 0,
-        "timestamp_ms": 1772661602724
-      },
-      "count": 1,
-      "first_seen_ms": 1772661602975
-    },
-    "XPL/USDT": {
-      "signal": {
-        "symbol": "XPL/USDT",
-        "direction": "buy",
-        "score": 0.7546848713076179,
-        "rank": 0,
-        "timestamp_ms": 1772661602724
-      },
-      "count": 1,
-      "first_seen_ms": 1772661602974
-    },
-    "LINK/USDT": {
-      "signal": {
-        "symbol": "LINK/USDT",
-        "direction": "buy",
-        "score": 1.0,
-        "rank": 0,
-        "timestamp_ms": 1772655302359
+        "timestamp_ms": 1772685002970
       },
       "count": 2,
-      "first_seen_ms": 1772655302469
-    },
-    "BNB/USDT": {
-      "signal": {
-        "symbol": "BNB/USDT",
-        "direction": "buy",
-        "score": 1.0385140485147273,
-        "rank": 0,
-        "timestamp_ms": 1772655302359
-      },
-      "count": 2,
-      "first_seen_ms": 1772655302470
-    },
-    "TRX/USDT": {
-      "signal": {
-        "symbol": "TRX/USDT",
-        "direction": "buy",
-        "score": 0.6583283762741633,
-        "rank": 0,
-        "timestamp_ms": 1772678702860
-      },
-      "count": 1,
-      "first_seen_ms": 1772678702971
-    },
-    "CC/USDT": {
-      "signal": {
-        "symbol": "CC/USDT",
-        "direction": "sell",
-        "score": 0.49677107365904527,
-        "rank": 0,
-        "timestamp_ms": 1772678702860
-      },
-      "count": 1,
-      "first_seen_ms": 1772678702973
-    },
-    "AVAX/USDT": {
-      "signal": {
-        "symbol": "AVAX/USDT",
-        "direction": "buy",
-        "score": 0.847196699153948,
-        "rank": 0,
-        "timestamp_ms": 1772655302360
-      },
-      "count": 2,
-      "first_seen_ms": 1772655302472
-    },
-    "ADA/USDT": {
-      "signal": {
-        "symbol": "ADA/USDT",
-        "direction": "buy",
-        "score": 1.0,
-        "rank": 0,
-        "timestamp_ms": 1772661602724
-      },
-      "count": 1,
-      "first_seen_ms": 1772661602834
-    },
-    "FIL/USDT": {
-      "signal": {
-        "symbol": "FIL/USDT",
-        "direction": "buy",
-        "score": 0.8954161692922267,
-        "rank": 0,
-        "timestamp_ms": 1772661602724
-      },
-      "count": 1,
-      "first_seen_ms": 1772661602925
+      "first_seen_ms": 1772685003005
     },
     "PHA/USDT": {
       "signal": {
@@ -237,46 +75,156 @@
       "signal": {
         "symbol": "WLD/USDT",
         "direction": "buy",
-        "score": 0.8316983889499568,
+        "score": 0.42497963544186784,
         "rank": 0,
-        "timestamp_ms": 1772661602724
+        "timestamp_ms": 1772685002970
       },
       "count": 1,
-      "first_seen_ms": 1772661602977
+      "first_seen_ms": 1772685003006
     },
-    "DOGE/USDT": {
+    "BCH/USDT": {
       "signal": {
-        "symbol": "DOGE/USDT",
-        "direction": "buy",
-        "score": 1.0,
+        "symbol": "BCH/USDT",
+        "direction": "sell",
+        "score": 2.4539485147344795,
         "rank": 0,
-        "timestamp_ms": 1772670602792
+        "timestamp_ms": 1772685002970
       },
       "count": 1,
-      "first_seen_ms": 1772670602921
+      "first_seen_ms": 1772685003004
+    },
+    "NEAR/USDT": {
+      "signal": {
+        "symbol": "NEAR/USDT",
+        "direction": "buy",
+        "score": 1.0609360357033302,
+        "rank": 0,
+        "timestamp_ms": 1772776802624
+      },
+      "count": 1,
+      "first_seen_ms": 1772776802853
+    },
+    "ASTER/USDT": {
+      "signal": {
+        "symbol": "ASTER/USDT",
+        "direction": "sell",
+        "score": 0.4484101598894332,
+        "rank": 0,
+        "timestamp_ms": 1772795702357
+      },
+      "count": 1,
+      "first_seen_ms": 1772795702452
+    },
+    "UNI/USDT": {
+      "signal": {
+        "symbol": "UNI/USDT",
+        "direction": "buy",
+        "score": 0.7639364706275916,
+        "rank": 0,
+        "timestamp_ms": 1772801102954
+      },
+      "count": 1,
+      "first_seen_ms": 1772801102962
+    },
+    "HUMA/USDT": {
+      "signal": {
+        "symbol": "HUMA/USDT",
+        "direction": "sell",
+        "score": 0.32429008101398826,
+        "rank": 0,
+        "timestamp_ms": 1772812802954
+      },
+      "count": 1,
+      "first_seen_ms": 1772812802994
+    },
+    "TRX/USDT": {
+      "signal": {
+        "symbol": "TRX/USDT",
+        "direction": "sell",
+        "score": 0.3370694744052828,
+        "rank": 0,
+        "timestamp_ms": 1772832603508
+      },
+      "count": 1,
+      "first_seen_ms": 1772832603516
     },
     "BTC/USDT": {
       "signal": {
         "symbol": "BTC/USDT",
-        "direction": "buy",
-        "score": 0.93136567871772,
+        "direction": "sell",
+        "score": 1.0,
         "rank": 0,
-        "timestamp_ms": 1772680502116
+        "timestamp_ms": 1772832603508
       },
       "count": 1,
-      "first_seen_ms": 1772680502226
+      "first_seen_ms": 1772832603518
+    },
+    "SOL/USDT": {
+      "signal": {
+        "symbol": "SOL/USDT",
+        "direction": "sell",
+        "score": 1.0,
+        "rank": 0,
+        "timestamp_ms": 1772832603508
+      },
+      "count": 1,
+      "first_seen_ms": 1772832603518
+    },
+    "DOGE/USDT": {
+      "signal": {
+        "symbol": "DOGE/USDT",
+        "direction": "sell",
+        "score": 0.5328455817467661,
+        "rank": 0,
+        "timestamp_ms": 1772832603508
+      },
+      "count": 1,
+      "first_seen_ms": 1772832603518
+    },
+    "XRP/USDT": {
+      "signal": {
+        "symbol": "XRP/USDT",
+        "direction": "sell",
+        "score": 0.5684581419906041,
+        "rank": 0,
+        "timestamp_ms": 1772832603508
+      },
+      "count": 1,
+      "first_seen_ms": 1772832603519
+    },
+    "BNB/USDT": {
+      "signal": {
+        "symbol": "BNB/USDT",
+        "direction": "sell",
+        "score": 1.0,
+        "rank": 0,
+        "timestamp_ms": 1772832603508
+      },
+      "count": 1,
+      "first_seen_ms": 1772832603520
+    },
+    "ADA/USDT": {
+      "signal": {
+        "symbol": "ADA/USDT",
+        "direction": "sell",
+        "score": 0.4743396290299086,
+        "rank": 0,
+        "timestamp_ms": 1772832603508
+      },
+      "count": 1,
+      "first_seen_ms": 1772832603520
     },
     "LTC/USDT": {
       "signal": {
         "symbol": "LTC/USDT",
-        "direction": "buy",
-        "score": 0.5796675017310398,
+        "direction": "sell",
+        "score": 1.0,
         "rank": 0,
-        "timestamp_ms": 1772681402901
+        "timestamp_ms": 1772832603508
       },
       "count": 1,
-      "first_seen_ms": 1772681403013
+      "first_seen_ms": 1772832603521
     }
   },
-  "saved_at_ms": 1772681403014
+  "saved_at_ms": 1772832603521
 }

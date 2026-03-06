@@ -1,0 +1,17 @@
+{
+  "selected": [
+    "NEAR/USDT",
+    "UNI/USDT",
+    "XPL/USDT",
+    "ETH/USDT",
+    "BTC/USDT"
+  ],
+  "hold_cycles": {
+    "NEAR/USDT": 2,
+    "UNI/USDT": 2,
+    "XPL/USDT": 2,
+    "ETH/USDT": 2,
+    "BTC/USDT": 2
+  },
+  "updated_ts": 1772760745
+}

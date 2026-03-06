@@ -1,0 +1,2 @@
+ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
+2026-03-06T04:00:29.827000Z,20260306_040015,TRX/USDT,REBALANCE,sell,114.943875,0.28539,32.8038324863,0.0328038324862,,,

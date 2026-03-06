@@ -231,5 +231,397 @@
       "min_train_samples": 100,
       "early_stopping_rounds": 10
     }
+  },
+  {
+    "timestamp": "2026-03-06T00:30:05.052773",
+    "samples": 2088,
+    "train_ic": 0.8257688830061634,
+    "valid_ic": 0.040569580915181334,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 50,
+      "max_depth": 4,
+      "learning_rate": 0.05,
+      "subsample": 0.6,
+      "colsample_bytree": 0.6,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "min_child_samples": 30,
+      "reg_alpha": 2.0,
+      "reg_lambda": 5.0,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 200,
+      "early_stopping_rounds": 10
+    }
+  },
+  {
+    "timestamp": "2026-03-06T09:15:11.147529",
+    "samples": 2088,
+    "train_ic": 0.8389292200756898,
+    "valid_ic": -0.09953620924917216,
+    "cv_mean_ic": 0.04762399923183663,
+    "cv_std_ic": 0.31410556943775975,
+    "cv_scores": [
+      -0.31069456955793634,
+      0.04154576305183155,
+      -0.28949315181680013,
+      0.3475208096782416,
+      0.4492411448038465
+    ],
+    "feature_mode": "dynamic_active",
+    "selected_features": [
+      "macd_signal",
+      "volatility_24h",
+      "bb_position",
+      "obv",
+      "momentum_5d",
+      "returns_24h",
+      "volume_ratio",
+      "volatility_ratio",
+      "timestamp",
+      "momentum_20d"
+    ],
+    "mi_scores": {
+      "macd_signal": 3.623900758172014,
+      "volatility_24h": 3.6134635769467747,
+      "bb_position": 3.5762946476772215,
+      "obv": 3.5743437574235344,
+      "momentum_5d": 3.569529046790149,
+      "returns_24h": 3.5741491967351693,
+      "volume_ratio": 3.481833450356632,
+      "volatility_ratio": 3.4876999836818485,
+      "timestamp": 1.9331842075754158,
+      "momentum_20d": 0.0
+    },
+    "selector_reason": "ok",
+    "gate": {
+      "min_valid_ic": -0.1,
+      "max_ic_gap": 0.9,
+      "min_cv_mean_ic": 0.0,
+      "max_cv_std": 0.12,
+      "passed": false,
+      "fail_reasons": [
+        "ic_gap>0.90",
+        "cv_std_ic>0.12"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 50,
+      "max_depth": 4,
+      "learning_rate": 0.05,
+      "subsample": 0.6,
+      "colsample_bytree": 0.6,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "min_child_samples": 30,
+      "reg_alpha": 2.0,
+      "reg_lambda": 5.0,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 200,
+      "early_stopping_rounds": 10
+    }
+  },
+  {
+    "timestamp": "2026-03-06T09:17:40.091817",
+    "samples": 2088,
+    "train_ic": 0.8844517157421081,
+    "valid_ic": -0.10699180271772965,
+    "cv_mean_ic": -0.08426453289686243,
+    "cv_std_ic": 0.22246330343133783,
+    "cv_scores": [
+      -0.30513177146014553,
+      0.006208622249796778,
+      -0.360511301357678,
+      0.24453738510803302,
+      -0.006425599024318447
+    ],
+    "feature_mode": "dynamic_active",
+    "selected_features": [
+      "macd_signal",
+      "volatility_24h",
+      "bb_position",
+      "returns_24h",
+      "momentum_5d",
+      "obv",
+      "volume_ratio",
+      "volatility_ratio",
+      "hour_of_day",
+      "day_of_week",
+      "momentum_20d",
+      "price_position"
+    ],
+    "mi_scores": {
+      "macd_signal": 3.636270645285643,
+      "volatility_24h": 3.6071768329921867,
+      "bb_position": 3.5713803758796243,
+      "returns_24h": 3.5929326426574866,
+      "momentum_5d": 3.5656672461642684,
+      "obv": 3.5879376119253483,
+      "volume_ratio": 3.4874711303611776,
+      "volatility_ratio": 3.4979420983482346,
+      "hour_of_day": 2.000625233986338,
+      "day_of_week": 0.7718987348493638,
+      "momentum_20d": 0.01301479218929602,
+      "price_position": 0.009513371885475852
+    },
+    "selector_reason": "ok",
+    "gate": {
+      "min_valid_ic": -0.1,
+      "max_ic_gap": 0.9,
+      "min_cv_mean_ic": 0.0,
+      "max_cv_std": 0.35,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<-0.10",
+        "ic_gap>0.90",
+        "cv_mean_ic<0.00"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 50,
+      "max_depth": 4,
+      "learning_rate": 0.05,
+      "subsample": 0.6,
+      "colsample_bytree": 0.6,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "min_child_samples": 30,
+      "reg_alpha": 2.0,
+      "reg_lambda": 5.0,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 200,
+      "early_stopping_rounds": 10
+    }
+  },
+  {
+    "timestamp": "2026-03-06T09:21:04.628968",
+    "samples": 2088,
+    "train_ic": 0.8844517157421081,
+    "valid_ic": -0.10699180271772965,
+    "cv_mean_ic": -0.08426453289686243,
+    "cv_std_ic": 0.22246330343133783,
+    "cv_scores": [
+      -0.30513177146014553,
+      0.006208622249796778,
+      -0.360511301357678,
+      0.24453738510803302,
+      -0.006425599024318447
+    ],
+    "feature_mode": "dynamic_active",
+    "selected_features": [
+      "macd_signal",
+      "volatility_24h",
+      "bb_position",
+      "returns_24h",
+      "momentum_5d",
+      "obv",
+      "volume_ratio",
+      "volatility_ratio",
+      "hour_of_day",
+      "day_of_week",
+      "momentum_20d",
+      "price_position"
+    ],
+    "mi_scores": {
+      "macd_signal": 3.636270645285643,
+      "volatility_24h": 3.6071768329921867,
+      "bb_position": 3.5713803758796243,
+      "returns_24h": 3.5929326426574866,
+      "momentum_5d": 3.5656672461642684,
+      "obv": 3.5879376119253483,
+      "volume_ratio": 3.4874711303611776,
+      "volatility_ratio": 3.4979420983482346,
+      "hour_of_day": 2.000625233986338,
+      "day_of_week": 0.7718987348493638,
+      "momentum_20d": 0.01301479218929602,
+      "price_position": 0.009513371885475852
+    },
+    "selector_reason": "ok",
+    "gate": {
+      "min_valid_ic": -0.1,
+      "max_ic_gap": 0.9,
+      "min_cv_mean_ic": 0.0,
+      "max_cv_std": 0.35,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<-0.10",
+        "ic_gap>0.90",
+        "cv_mean_ic<0.00"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 50,
+      "max_depth": 4,
+      "learning_rate": 0.05,
+      "subsample": 0.6,
+      "colsample_bytree": 0.6,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "min_child_samples": 30,
+      "reg_alpha": 2.0,
+      "reg_lambda": 5.0,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 200,
+      "early_stopping_rounds": 10
+    }
+  },
+  {
+    "timestamp": "2026-03-06T09:24:29.939613",
+    "samples": 2088,
+    "train_ic": 0.816816626508161,
+    "valid_ic": -0.0076747876832003676,
+    "cv_mean_ic": 0.15181476431950763,
+    "cv_std_ic": 0.21687851640184688,
+    "cv_scores": [
+      -0.007412407524291987,
+      0.018113268408187357,
+      -0.07701235055367513,
+      0.3710052758478646,
+      0.4543800354194532
+    ],
+    "feature_mode": "dynamic_active",
+    "selected_features": [
+      "macd_signal",
+      "volatility_24h",
+      "bb_position",
+      "returns_24h",
+      "momentum_5d",
+      "obv",
+      "volatility_ratio",
+      "volume_ratio",
+      "momentum_20d",
+      "price_position"
+    ],
+    "mi_scores": {
+      "macd_signal": 3.623900758172014,
+      "volatility_24h": 3.6134635769467747,
+      "bb_position": 3.5762946476772215,
+      "returns_24h": 3.5658017196215215,
+      "momentum_5d": 3.569529046790149,
+      "obv": 3.5826912345371826,
+      "volatility_ratio": 3.475980298807541,
+      "volume_ratio": 3.5011279834507048,
+      "momentum_20d": 0.0,
+      "price_position": 0.0
+    },
+    "selector_reason": "ok",
+    "gate": {
+      "min_valid_ic": -0.1,
+      "max_ic_gap": 0.9,
+      "min_cv_mean_ic": 0.0,
+      "max_cv_std": 0.35,
+      "passed": true,
+      "fail_reasons": []
+    },
+    "model_saved": true,
+    "config": {
+      "model_type": "ridge",
+      "alpha": 10.0,
+      "n_estimators": 50,
+      "max_depth": 4,
+      "learning_rate": 0.05,
+      "subsample": 0.6,
+      "colsample_bytree": 0.6,
+      "num_leaves": 7,
+      "min_data_in_leaf": 50,
+      "min_child_samples": 30,
+      "reg_alpha": 2.0,
+      "reg_lambda": 5.0,
+      "random_state": 42,
+      "train_lookback_days": 60,
+      "prediction_horizon": 6,
+      "min_train_samples": 200,
+      "early_stopping_rounds": 10
+    }
+  },
+  {
+    "timestamp": "2026-03-07T00:34:08.675339",
+    "samples": 2088,
+    "train_ic": 0.816816626508161,
+    "valid_ic": -0.0076747876832003676,
+    "cv_mean_ic": 0.15181476431950763,
+    "cv_std_ic": 0.21687851640184688,
+    "cv_scores": [
+      -0.007412407524291987,
+      0.018113268408187357,
+      -0.07701235055367513,
+      0.3710052758478646,
+      0.4543800354194532
+    ],
+    "feature_mode": "dynamic_active",
+    "selected_features": [
+      "macd_signal",
+      "volatility_24h",
+      "bb_position",
+      "returns_24h",
+      "momentum_5d",
+      "obv",
+      "volatility_ratio",
+      "volume_ratio",
+      "momentum_20d",
+      "price_position"
+    ],
+    "mi_scores": {
+      "macd_signal": 3.623900758172014,
+      "volatility_24h": 3.6134635769467747,
+      "bb_position": 3.5762946476772215,
+      "returns_24h": 3.5658017196215215,
+      "momentum_5d": 3.569529046790149,
+      "obv": 3.5826912345371826,
+      "volatility_ratio": 3.475980298807541,
+      "volume_ratio": 3.5011279834507048,
+      "momentum_20d": 0.0,
+      "price_position": 0.0
+    },
+    "selector_reason": "ok",
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.816816626508161,
+        "valid_ic": -0.0076747876832003676,
+        "ic_gap": 0.8244914141913614
+      },
+      {
+        "model_type": "lightgbm",
+        "train_ic": 0.9053936407142174,
+        "valid_ic": -0.0695812777188076,
+        "ic_gap": 0.974974918433025
+      }
+    ],
+    "selected_model_type": "ridge",
+    "gate": {
+      "min_valid_ic": -0.1,
+      "max_ic_gap": 0.9,
+      "min_cv_mean_ic": 0.0,
+      "max_cv_std": 0.35,
+      "passed": true,
+      "fail_reasons": []
+    },
+    "model_saved": true,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge",
+        "lightgbm"
+      ]
+    }
   }
 ]
