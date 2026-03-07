@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-07T18:00:02.971693",
+  "timestamp": "2026-03-08T00:00:03.276638",
   "base": {
     "enabled": true,
     "check_interval_minutes": 15,
@@ -15,82 +15,82 @@
   },
   "best": {
     "params": {
-      "score_change_threshold": 0.35,
-      "rank_jump_threshold": 3,
-      "signal_confirmation_periods": 2,
-      "breakout_threshold_pct": 0.3
+      "score_change_threshold": 0.3,
+      "rank_jump_threshold": 5,
+      "signal_confirmation_periods": 3,
+      "breakout_threshold_pct": 0.8
     },
     "actions": 0,
-    "events_processed": 17,
-    "events_blocked": 17,
+    "events_processed": 13,
+    "events_blocked": 1,
     "should_trade": false,
-    "fitness": -17.0
+    "fitness": 9.75
   },
   "top5": [
     {
       "params": {
-        "score_change_threshold": 0.35,
-        "rank_jump_threshold": 3,
-        "signal_confirmation_periods": 2,
-        "breakout_threshold_pct": 0.3
-      },
-      "actions": 0,
-      "events_processed": 17,
-      "events_blocked": 17,
-      "should_trade": false,
-      "fitness": -17.0
-    },
-    {
-      "params": {
-        "score_change_threshold": 0.35,
-        "rank_jump_threshold": 3,
-        "signal_confirmation_periods": 3,
-        "breakout_threshold_pct": 0.3
-      },
-      "actions": 0,
-      "events_processed": 17,
-      "events_blocked": 17,
-      "should_trade": false,
-      "fitness": -17.0
-    },
-    {
-      "params": {
-        "score_change_threshold": 0.35,
-        "rank_jump_threshold": 4,
-        "signal_confirmation_periods": 2,
-        "breakout_threshold_pct": 0.3
-      },
-      "actions": 0,
-      "events_processed": 17,
-      "events_blocked": 17,
-      "should_trade": false,
-      "fitness": -17.0
-    },
-    {
-      "params": {
-        "score_change_threshold": 0.35,
-        "rank_jump_threshold": 4,
-        "signal_confirmation_periods": 3,
-        "breakout_threshold_pct": 0.3
-      },
-      "actions": 0,
-      "events_processed": 17,
-      "events_blocked": 17,
-      "should_trade": false,
-      "fitness": -17.0
-    },
-    {
-      "params": {
-        "score_change_threshold": 0.35,
+        "score_change_threshold": 0.3,
         "rank_jump_threshold": 5,
+        "signal_confirmation_periods": 3,
+        "breakout_threshold_pct": 0.8
+      },
+      "actions": 0,
+      "events_processed": 13,
+      "events_blocked": 1,
+      "should_trade": false,
+      "fitness": 9.75
+    },
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 3,
+        "signal_confirmation_periods": 2,
+        "breakout_threshold_pct": 0.3
+      },
+      "actions": 1,
+      "events_processed": 13,
+      "events_blocked": 11,
+      "should_trade": true,
+      "fitness": -4.0
+    },
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 3,
+        "signal_confirmation_periods": 3,
+        "breakout_threshold_pct": 0.3
+      },
+      "actions": 0,
+      "events_processed": 13,
+      "events_blocked": 13,
+      "should_trade": false,
+      "fitness": -13.0
+    },
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 4,
         "signal_confirmation_periods": 2,
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 17,
-      "events_blocked": 17,
+      "events_processed": 13,
+      "events_blocked": 13,
       "should_trade": false,
-      "fitness": -17.0
+      "fitness": -13.0
+    },
+    {
+      "params": {
+        "score_change_threshold": 0.35,
+        "rank_jump_threshold": 4,
+        "signal_confirmation_periods": 3,
+        "breakout_threshold_pct": 0.3
+      },
+      "actions": 0,
+      "events_processed": 13,
+      "events_blocked": 13,
+      "should_trade": false,
+      "fitness": -13.0
     }
   ],
   "count": 72,

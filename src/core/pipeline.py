@@ -928,6 +928,18 @@ class V5Pipeline:
             if audit:
                 audit.add_note(f"require_fused_signals_for_buy enabled: fused_buy_symbols={len(fused_buy_symbols)}")
 
+        # 预收集所有买入候选，用于比例现金分配
+        buy_candidates = []
+        for sym in symbols_all:
+            tw = float(target.get(sym, 0.0))
+            cw = float(current_w.get(sym, 0.0))
+            drift = float(tw) - cw
+            if drift > 0:
+                buy_candidates.append((sym, drift, tw))
+        
+        # 计算总买入权重，用于比例分配
+        total_buy_drift = sum(d for _, d, _ in buy_candidates) if buy_candidates else 0.0
+
         for sym in symbols_all:
             tw = float(target.get(sym, 0.0))
             # deadband check on weight drift with banding: new position vs existing
@@ -1041,8 +1053,14 @@ class V5Pipeline:
                 # drift > 0，需要加仓
                 side = "buy"
                 intent = "OPEN_LONG" if held is None else "REBALANCE"
-                # P0 FIX: notional 用 delta 计算
-                notional = abs(float(drift)) * float(equity)
+                # FIX: 按比例分配现金，而不是使用 drift * equity
+                # 这样可以避免第一个标的全额买入导致后续标的无法建仓
+                if total_buy_drift > 0 and cash_usdt > 0:
+                    # 按 drift 比例分配可用现金
+                    drift_ratio = abs(float(drift)) / total_buy_drift
+                    notional = drift_ratio * float(cash_usdt)
+                else:
+                    notional = abs(float(drift)) * float(equity)
                 if notional <= 0:
                     continue
 

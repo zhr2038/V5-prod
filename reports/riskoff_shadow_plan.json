@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-07T18:00:02.785594",
+  "timestamp": "2026-03-08T00:00:02.932219",
   "regime": "SIDEWAYS",
   "current_pos_mult_risk_off": 0.0,
   "equity_estimate_usdt": 134.938906,
@@ -19,9 +19,9 @@
       "gross_notional": 20.2408,
       "candidates": [
         {
-          "symbol": "HYPE/USDT",
-          "score": 0.7416736205000871,
-          "price": 30.734,
+          "symbol": "OKB/USDT",
+          "score": 1.0,
+          "price": 100.36,
           "shadow_target_usdt": 20.2408
         }
       ]
@@ -33,15 +33,15 @@
       "gross_notional": 33.7347,
       "candidates": [
         {
-          "symbol": "HYPE/USDT",
-          "score": 0.7416736205000871,
-          "price": 30.734,
+          "symbol": "OKB/USDT",
+          "score": 1.0,
+          "price": 100.36,
           "shadow_target_usdt": 16.8674
         },
         {
-          "symbol": "OKB/USDT",
-          "score": 0.581952996074687,
-          "price": 101.11,
+          "symbol": "HYPE/USDT",
+          "score": 0.6299327439974078,
+          "price": 30.731,
           "shadow_target_usdt": 16.8674
         }
       ]
