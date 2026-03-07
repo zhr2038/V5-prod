@@ -1,24 +1,23 @@
 {
-  "ts": 1772834405.548394,
+  "ts": 1772856005.416645,
   "ttl_sec": 3600,
   "symbols": [
     "BTC/USDT",
     "ETH/USDT",
     "SOL/USDT",
-    "OKB/USDT",
     "DOGE/USDT",
+    "OKB/USDT",
     "XRP/USDT",
     "CC/USDT",
     "SUI/USDT",
     "TRX/USDT",
     "HYPE/USDT",
-    "LINK/USDT",
     "IP/USDT",
-    "BNB/USDT",
+    "LINK/USDT",
     "ADA/USDT",
+    "BNB/USDT",
     "XPL/USDT",
-    "AVAX/USDT",
     "PUMP/USDT",
-    "LTC/USDT"
+    "AVAX/USDT"
   ]
 }

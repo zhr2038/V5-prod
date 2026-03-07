@@ -1,13 +1,13 @@
 {
-  "timestamp": "2026-03-07T06:00:03.191285",
+  "timestamp": "2026-03-07T12:00:03.139366",
   "enabled": true,
   "applied": false,
   "reason": "no_change",
   "regime": "SIDEWAYS",
   "lookback_runs": 12,
-  "recent_events_processed": 186,
-  "recent_events_blocked": 115,
-  "recent_block_ratio": 0.6183,
+  "recent_events_processed": 193,
+  "recent_events_blocked": 89,
+  "recent_block_ratio": 0.4611,
   "base": {
     "check_interval_minutes": 15,
     "global_cooldown_p2_minutes": 30,

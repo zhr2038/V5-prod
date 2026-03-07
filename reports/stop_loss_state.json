@@ -10,17 +10,6 @@
     "is_trailing": false,
     "profit_high_watermark": 0.0
   },
-  "HYPE/USDT": {
-    "symbol": "HYPE/USDT",
-    "entry_price": 31.454,
-    "entry_time": "2026-03-04T04:32:35.958874",
-    "highest_price": 31.914,
-    "current_stop_price": 29.8813,
-    "current_stop_type": "initial_normal",
-    "is_breakeven": false,
-    "is_trailing": false,
-    "profit_high_watermark": 0.014624531061232302
-  },
   "FIL/USDT": {
     "symbol": "FIL/USDT",
     "entry_price": 1.0011,

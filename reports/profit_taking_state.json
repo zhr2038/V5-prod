@@ -153,20 +153,6 @@
     "last_rank": null,
     "last_rank_exit_time": null
   },
-  "HYPE/USDT": {
-    "symbol": "HYPE/USDT",
-    "entry_price": 31.055,
-    "entry_time": "2026-03-07T05:00:25.734304",
-    "highest_price": 31.055,
-    "profit_high": 0.0,
-    "current_stop": 29.50225,
-    "current_action": "hold",
-    "partial_sold": false,
-    "partial_sell_time": null,
-    "rank_exit_streak": 0,
-    "last_rank": null,
-    "last_rank_exit_time": null
-  },
   "PAXG/USDT": {
     "symbol": "PAXG/USDT",
     "entry_price": 5429.5,

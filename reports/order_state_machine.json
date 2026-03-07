@@ -145,8 +145,8 @@
       "state": "LONG",
       "cooldown_until_ms": 0,
       "exit_pending_until_ms": 1772612235702,
-      "last_run_id": "20260306_210014",
-      "last_reason": "buy_selected"
+      "last_run_id": "20260307_000014",
+      "last_reason": "reduce_selected"
     },
     "PAXG/USDT": {
       "state": "FLAT",
@@ -252,6 +252,13 @@
       "exit_pending_until_ms": 1772690549761,
       "last_run_id": "20260305_060015",
       "last_reason": "close_dominates"
+    },
+    "OKB/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": "20260306_230014",
+      "last_reason": "reduce_selected"
     }
   }
 }

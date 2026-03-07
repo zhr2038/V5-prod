@@ -1,15 +1,12 @@
 {
   "target_weights": {
-    "SOL/USDT": 0.2127481273998651,
-    "HYPE/USDT": 0.25
+    "SOL/USDT": 0.25
   },
   "selected": [
-    "SOL/USDT",
-    "HYPE/USDT"
+    "SOL/USDT"
   ],
   "volatilities": {
-    "SOL/USDT": 0.009516166423971828,
-    "HYPE/USDT": 0.010936557310024889
+    "SOL/USDT": 0.009495624017195774
   },
   "notes": ""
 }
