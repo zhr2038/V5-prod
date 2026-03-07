@@ -1,13 +1,13 @@
 {
-  "timestamp": "2026-03-07T12:00:03.139366",
+  "timestamp": "2026-03-07T18:00:02.973350",
   "enabled": true,
-  "applied": false,
-  "reason": "no_change",
+  "applied": true,
+  "reason": "high_block_ratio_relax",
   "regime": "SIDEWAYS",
   "lookback_runs": 12,
-  "recent_events_processed": 193,
-  "recent_events_blocked": 89,
-  "recent_block_ratio": 0.4611,
+  "recent_events_processed": 186,
+  "recent_events_blocked": 147,
+  "recent_block_ratio": 0.7903,
   "base": {
     "check_interval_minutes": 15,
     "global_cooldown_p2_minutes": 30,
@@ -16,8 +16,8 @@
   },
   "effective": {
     "check_interval_minutes": 15,
-    "global_cooldown_p2_minutes": 30,
-    "symbol_cooldown_minutes": 60,
-    "signal_confirmation_periods": 2
+    "global_cooldown_p2_minutes": 15,
+    "symbol_cooldown_minutes": 30,
+    "signal_confirmation_periods": 1
   }
 }

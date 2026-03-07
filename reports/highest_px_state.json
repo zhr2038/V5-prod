@@ -1,1 +1,23 @@
-{}
+{
+  "XPL/USDT": {
+    "symbol": "XPL/USDT",
+    "highest_px": 0.10127,
+    "entry_px": 0.10126,
+    "updated_at": "2026-03-07T18:00:19.751278",
+    "source": "mark_to_market"
+  },
+  "HYPE/USDT": {
+    "symbol": "HYPE/USDT",
+    "highest_px": 30.738,
+    "entry_px": 30.734000000000005,
+    "updated_at": "2026-03-07T18:00:19.753428",
+    "source": "mark_to_market"
+  },
+  "LINK/USDT": {
+    "symbol": "LINK/USDT",
+    "highest_px": 8.811,
+    "entry_px": 8.811,
+    "updated_at": "2026-03-07T18:00:19.754993",
+    "source": "mark_to_market"
+  }
+}

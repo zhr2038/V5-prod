@@ -1,5 +1,5 @@
 {
-  "ts": 1772856005.416645,
+  "ts": 1772877614.8049247,
   "ttl_sec": 3600,
   "symbols": [
     "BTC/USDT",
@@ -12,12 +12,11 @@
     "SUI/USDT",
     "TRX/USDT",
     "HYPE/USDT",
-    "IP/USDT",
     "LINK/USDT",
     "ADA/USDT",
+    "IP/USDT",
     "BNB/USDT",
     "XPL/USDT",
-    "PUMP/USDT",
     "AVAX/USDT"
   ]
 }

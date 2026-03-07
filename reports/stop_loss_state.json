@@ -86,5 +86,38 @@
     "is_breakeven": false,
     "is_trailing": false,
     "profit_high_watermark": 0.0062745098039215744
+  },
+  "HYPE/USDT": {
+    "symbol": "HYPE/USDT",
+    "entry_price": 30.578,
+    "entry_time": "2026-03-07T13:00:25.849855",
+    "highest_price": 30.734,
+    "current_stop_price": 29.0491,
+    "current_stop_type": "initial_normal",
+    "is_breakeven": false,
+    "is_trailing": false,
+    "profit_high_watermark": 0.00510170710968678
+  },
+  "LINK/USDT": {
+    "symbol": "LINK/USDT",
+    "entry_price": 8.765,
+    "entry_time": "2026-03-07T17:00:25.433276",
+    "highest_price": 8.809,
+    "current_stop_price": 8.32675,
+    "current_stop_type": "initial_normal",
+    "is_breakeven": false,
+    "is_trailing": false,
+    "profit_high_watermark": 0.005019965772960491
+  },
+  "XPL/USDT": {
+    "symbol": "XPL/USDT",
+    "entry_price": 0.10126,
+    "entry_time": "2026-03-07T18:00:25.171663",
+    "highest_price": 0.10126,
+    "current_stop_price": 0.096197,
+    "current_stop_type": "initial_normal",
+    "is_breakeven": false,
+    "is_trailing": false,
+    "profit_high_watermark": 0.0
   }
 }

@@ -1,11 +1,15 @@
 {
   "selected": [
     "SOL/USDT",
-    "HYPE/USDT"
+    "ETH/USDT",
+    "HYPE/USDT",
+    "OKB/USDT"
   ],
   "hold_cycles": {
     "SOL/USDT": 1,
-    "HYPE/USDT": 1
+    "ETH/USDT": 1,
+    "HYPE/USDT": 2,
+    "OKB/USDT": 1
   },
-  "updated_ts": 1772856020
+  "updated_ts": 1772877625
 }

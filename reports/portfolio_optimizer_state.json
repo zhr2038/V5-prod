@@ -1,7 +1,8 @@
 {
   "weights": {
-    "SOL/USDT": 0.1902307142875056,
+    "SOL/USDT": 0.08784499358988859,
+    "ETH/USDT": 0.25,
     "HYPE/USDT": 0.25
   },
-  "updated_ts": 1772856020
+  "updated_ts": 1772877625
 }

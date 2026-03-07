@@ -1,17 +1,10 @@
 {
-  "updated_ts_ms": 1772852425143,
+  "updated_ts_ms": 1772877625173,
   "lookback_hours": 24,
   "min_closed_cycles": 4,
   "expectancy_threshold_usdt": 0.0,
   "cooldown_hours": 24,
   "symbols": {
-    "BTC/USDT": {
-      "cooldown_until_ms": 1772874026514,
-      "expectancy_usdt": -0.07944491896261664,
-      "closed_cycles": 4,
-      "pnl_sum_usdt": -0.31777967585046657,
-      "updated_ts_ms": 1772787626514
-    },
     "NEAR/USDT": {
       "cooldown_until_ms": 1772882117668,
       "expectancy_usdt": -0.03976479404445915,

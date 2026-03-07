@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-07T12:00:02.727570",
+  "timestamp": "2026-03-07T18:00:02.785156",
   "regime": "SIDEWAYS",
   "count": 10,
   "candidates": [
@@ -8,90 +8,90 @@
       "direction": "sell",
       "score": 1.0,
       "rank": 99,
-      "price": 68107.1,
-      "trigger_up": 68311.4213,
-      "trigger_down": 67902.77870000001
-    },
-    {
-      "symbol": "ETH/USDT",
-      "direction": "sell",
-      "score": 1.0,
-      "rank": 99,
-      "price": 1980.12,
-      "trigger_up": 1986.0603599999997,
-      "trigger_down": 1974.1796399999998
-    },
-    {
-      "symbol": "SOL/USDT",
-      "direction": "sell",
-      "score": 1.0,
-      "rank": 99,
-      "price": 84.56,
-      "trigger_up": 84.81367999999999,
-      "trigger_down": 84.30632
-    },
-    {
-      "symbol": "SUI/USDT",
-      "direction": "sell",
-      "score": 1.0,
-      "rank": 99,
-      "price": 0.9003,
-      "trigger_up": 0.9030008999999999,
-      "trigger_down": 0.8975991
-    },
-    {
-      "symbol": "LINK/USDT",
-      "direction": "sell",
-      "score": 1.0,
-      "rank": 99,
-      "price": 8.792,
-      "trigger_up": 8.818375999999999,
-      "trigger_down": 8.765623999999999
-    },
-    {
-      "symbol": "BNB/USDT",
-      "direction": "sell",
-      "score": 1.0,
-      "rank": 99,
-      "price": 627.1,
-      "trigger_up": 628.9812999999999,
-      "trigger_down": 625.2187
-    },
-    {
-      "symbol": "XPL/USDT",
-      "direction": "sell",
-      "score": 1.0,
-      "rank": 99,
-      "price": 0.09859,
-      "trigger_up": 0.09888576999999998,
-      "trigger_down": 0.09829423
-    },
-    {
-      "symbol": "AVAX/USDT",
-      "direction": "sell",
-      "score": 1.0,
-      "rank": 99,
-      "price": 9.02,
-      "trigger_up": 9.047059999999998,
-      "trigger_down": 8.992939999999999
+      "price": 68030.9,
+      "trigger_up": 68234.99269999999,
+      "trigger_down": 67826.8073
     },
     {
       "symbol": "IP/USDT",
       "direction": "sell",
-      "score": 0.9503707281626231,
+      "score": 0.8337561126370264,
       "rank": 99,
-      "price": 0.8361,
-      "trigger_up": 0.8386082999999999,
-      "trigger_down": 0.8335916999999999
+      "price": 0.8297,
+      "trigger_up": 0.8321890999999999,
+      "trigger_down": 0.8272109
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "direction": "buy",
+      "score": 0.7416736205000871,
+      "rank": 99,
+      "price": 30.734,
+      "trigger_up": 30.826202,
+      "trigger_down": 30.641798
+    },
+    {
+      "symbol": "TRX/USDT",
+      "direction": "sell",
+      "score": 0.712484217857363,
+      "rank": 99,
+      "price": 0.28351,
+      "trigger_up": 0.28436052999999994,
+      "trigger_down": 0.28265946999999997
+    },
+    {
+      "symbol": "OKB/USDT",
+      "direction": "buy",
+      "score": 0.581952996074687,
+      "rank": 99,
+      "price": 101.11,
+      "trigger_up": 101.41332999999999,
+      "trigger_down": 100.80667
+    },
+    {
+      "symbol": "CC/USDT",
+      "direction": "sell",
+      "score": 0.5284515125585478,
+      "rank": 99,
+      "price": 0.15324,
+      "trigger_up": 0.15369971999999998,
+      "trigger_down": 0.15278028
+    },
+    {
+      "symbol": "BNB/USDT",
+      "direction": "buy",
+      "score": 0.523156033149451,
+      "rank": 99,
+      "price": 629.9,
+      "trigger_up": 631.7896999999999,
+      "trigger_down": 628.0103
+    },
+    {
+      "symbol": "SOL/USDT",
+      "direction": "buy",
+      "score": 0.4966284326564012,
+      "rank": 99,
+      "price": 84.61,
+      "trigger_up": 84.86383,
+      "trigger_down": 84.35617
+    },
+    {
+      "symbol": "PUMP/USDT",
+      "direction": "sell",
+      "score": 0.4518096008619089,
+      "rank": 99,
+      "price": 0.001904,
+      "trigger_up": 0.0019097119999999998,
+      "trigger_down": 0.0018982880000000001
     },
     {
       "symbol": "DOGE/USDT",
       "direction": "sell",
-      "score": 0.7620406308512782,
+      "score": 0.44204628476296626,
       "rank": 99,
-      "price": 0.0911,
-      "trigger_up": 0.09137329999999999,
-      "trigger_down": 0.0908267
+      "price": 0.09043,
+      "trigger_up": 0.09070128999999999,
+      "trigger_down": 0.09015871
     }
   ]
 }

@@ -2,11 +2,11 @@
   "version": 1,
   "symbols": {
     "ETH/USDT": {
-      "state": "FLAT",
-      "cooldown_until_ms": 1772432754114,
+      "state": "LONG",
+      "cooldown_until_ms": 0,
       "exit_pending_until_ms": 1772432274114,
-      "last_run_id": "20260302_061541",
-      "last_reason": "close_dominates"
+      "last_run_id": "20260307_100013",
+      "last_reason": "buy_selected"
     },
     "XAUT/USDT": {
       "state": "FLAT",
@@ -145,8 +145,8 @@
       "state": "LONG",
       "cooldown_until_ms": 0,
       "exit_pending_until_ms": 1772612235702,
-      "last_run_id": "20260307_000014",
-      "last_reason": "reduce_selected"
+      "last_run_id": "20260307_040014",
+      "last_reason": "buy_selected"
     },
     "PAXG/USDT": {
       "state": "FLAT",
@@ -187,7 +187,7 @@
       "state": "LONG",
       "cooldown_until_ms": 0,
       "exit_pending_until_ms": 0,
-      "last_run_id": "20260302_062857",
+      "last_run_id": "20260307_080013",
       "last_reason": "buy_selected"
     },
     "BTC/USDT": {
@@ -215,8 +215,8 @@
       "state": "LONG",
       "cooldown_until_ms": 0,
       "exit_pending_until_ms": 1772618546539,
-      "last_run_id": "20260306_060014",
-      "last_reason": "reduce_selected"
+      "last_run_id": "20260307_090012",
+      "last_reason": "buy_selected"
     },
     "APT/USDT": {
       "state": "FLAT",
@@ -257,7 +257,7 @@
       "state": "LONG",
       "cooldown_until_ms": 0,
       "exit_pending_until_ms": 0,
-      "last_run_id": "20260306_230014",
+      "last_run_id": "20260307_071505",
       "last_reason": "reduce_selected"
     }
   }

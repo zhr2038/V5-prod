@@ -1,12 +1,18 @@
 {
   "target_weights": {
-    "SOL/USDT": 0.25
+    "SOL/USDT": 0.11452001619056305,
+    "ETH/USDT": 0.25,
+    "HYPE/USDT": 0.25
   },
   "selected": [
-    "SOL/USDT"
+    "SOL/USDT",
+    "ETH/USDT",
+    "HYPE/USDT"
   ],
   "volatilities": {
-    "SOL/USDT": 0.009495624017195774
+    "SOL/USDT": 0.009471716149108455,
+    "ETH/USDT": 0.00861462130552716,
+    "HYPE/USDT": 0.010987599982582533
   },
   "notes": ""
 }

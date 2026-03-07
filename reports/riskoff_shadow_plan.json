@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-07T12:00:02.728034",
+  "timestamp": "2026-03-07T18:00:02.785594",
   "regime": "SIDEWAYS",
   "current_pos_mult_risk_off": 0.0,
   "equity_estimate_usdt": 134.938906,
@@ -16,15 +16,35 @@
       "name": "probe_1",
       "pos_mult": 0.15,
       "max_positions": 1,
-      "gross_notional": 0.0,
-      "candidates": []
+      "gross_notional": 20.2408,
+      "candidates": [
+        {
+          "symbol": "HYPE/USDT",
+          "score": 0.7416736205000871,
+          "price": 30.734,
+          "shadow_target_usdt": 20.2408
+        }
+      ]
     },
     {
       "name": "probe_2",
       "pos_mult": 0.25,
       "max_positions": 2,
-      "gross_notional": 0.0,
-      "candidates": []
+      "gross_notional": 33.7347,
+      "candidates": [
+        {
+          "symbol": "HYPE/USDT",
+          "score": 0.7416736205000871,
+          "price": 30.734,
+          "shadow_target_usdt": 16.8674
+        },
+        {
+          "symbol": "OKB/USDT",
+          "score": 0.581952996074687,
+          "price": 101.11,
+          "shadow_target_usdt": 16.8674
+        }
+      ]
     }
   ],
   "note": "Shadow only. No execution triggered by this report."

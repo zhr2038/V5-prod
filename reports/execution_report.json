@@ -1,6 +1,23 @@
 {
-  "timestamp": "2026-03-07T03:00:27Z",
+  "timestamp": "2026-03-07T10:00:27Z",
   "dry_run": false,
-  "orders": [],
-  "notes": "regime=RegimeState.SIDEWAYS selected=['SOL/USDT'] orders=0"
+  "orders": [
+    {
+      "symbol": "ETH/USDT",
+      "side": "buy",
+      "intent": "OPEN_LONG",
+      "notional_usdt": 32.44976573251385,
+      "signal_price": 1987.0,
+      "meta": {
+        "target_w": 0.25,
+        "dd_mult": 1.0,
+        "regime": "Sideways",
+        "window_start_ts": null,
+        "window_end_ts": null,
+        "deadband_pct": 0.05,
+        "drift": 0.25
+      }
+    }
+  ],
+  "notes": "regime=RegimeState.SIDEWAYS selected=['SOL/USDT', 'ETH/USDT', 'HYPE/USDT'] orders=1"
 }
