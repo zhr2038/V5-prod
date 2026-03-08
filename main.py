@@ -537,7 +537,7 @@ def main() -> None:
         log.warning(f"Budget check skipped: {e}")
     # ========== 预算限制检查结束 ==========
 
-    pipe = V5Pipeline(cfg)
+    pipe = V5Pipeline(cfg, data_provider=provider)
     out = pipe.run(
         market_data_1h=md_1h,
         positions=held,

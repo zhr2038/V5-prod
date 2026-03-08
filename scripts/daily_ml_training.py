@@ -24,12 +24,15 @@ from src.execution.ml_data_collector import MLDataCollector
 from src.execution.ml_factor_model import MLFactorModel, MLFactorConfig
 from src.execution.ml_feature_optimizer import optimize_features_for_training
 from src.execution.ml_time_series_cv import TimeSeriesSplit, time_series_cv_score
+from src.data.okx_ccxt_provider import OKXCCXTProvider
 
 class DailyMLTrainer:
     """每日ML训练器"""
     
     def __init__(self):
-        self.collector = MLDataCollector()
+        # 创建data_provider用于从API获取历史K线（解决本地缓存过期问题）
+        self.data_provider = OKXCCXTProvider(rate_limit=True)
+        self.collector = MLDataCollector(data_provider=self.data_provider)
         self.model_path = Path("models/ml_factor_model")
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_file = Path("logs/ml_training.log")

@@ -134,11 +134,12 @@ class V5Pipeline:
     Designed so live(dry-run) and backtest can share the same semantics.
     """
 
-    def __init__(self, cfg: AppConfig, clock=None):
+    def __init__(self, cfg: AppConfig, clock=None, data_provider=None):
         self.cfg = cfg
         from src.core.clock import SystemClock
 
         self.clock = clock or SystemClock()
+        self._data_provider = data_provider  # 数据提供者（用于ML数据收集器从API获取历史K线）
         self.alpha_engine = AlphaEngine(cfg.alpha)
         
         # RegimeEngine选择：Ensemble（HMM+情绪）或传统MA
@@ -195,9 +196,9 @@ class V5Pipeline:
             )
         )
         
-        # Phase 3: 初始化ML数据收集器
+        # Phase 3: 初始化ML数据收集器（传入data_provider以便从API获取历史K线）
         from src.execution.ml_data_collector import MLDataCollector
-        self.data_collector = MLDataCollector()
+        self.data_collector = MLDataCollector(data_provider=self._data_provider)
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         """按市值计价更新持仓

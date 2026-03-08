@@ -82,8 +82,9 @@ class MLDataCollector:
     # 类级别的连接池
     _connection_pool = {}
 
-    def __init__(self, db_path: str = "reports/ml_training_data.db"):
+    def __init__(self, db_path: str = "reports/ml_training_data.db", data_provider=None):
         self.db_path = db_path
+        self._data_provider = data_provider  # 可选的数据提供者（用于从API获取历史K线）
         self._init_database()
         self._conn = None  # 实例连接缓存
 
@@ -339,88 +340,169 @@ class MLDataCollector:
     ) -> Optional[float]:
         """
         计算未来收益率
-        从K线缓存文件中获取价格数据
+        优先从API获取实时数据，如果失败则回退到本地缓存文件
 
         重要：确保不使用未来数据！只使用start_timestamp时刻已经存在的数据
         """
         try:
-            # 转换symbol格式: BTC/USDT -> BTC_USDT
-            symbol_file = symbol.replace('/', '_').replace('-', '_')
-
-            # 查找K线缓存文件
-            cache_dir = Path(self.db_path).parent.parent / 'data' / 'cache'
-            pattern = f"{symbol_file}_1H_*.csv"
-            cache_files = list(cache_dir.glob(pattern))
-
-            if not cache_files:
-                return None
-
-            # 关键修复：筛选缓存文件，只使用不包含未来数据的文件
-            # 文件命名格式: BTC_USDT_1H_YYYYMMDDHHMMSS.csv
-            # 只使用数据截止时间 <= start_timestamp + hours 的文件
-            end_timestamp = start_timestamp + hours * 3600 * 1000
-
-            valid_files = []
-            for f in cache_files:
-                # 从文件名解析数据截止时间
+            # 首先尝试使用data_provider从API获取数据
+            if self._data_provider is not None:
                 try:
-                    ts_str = f.stem.split('_')[-1]  # 获取YYYYMMDDHHMMSS部分
-                    file_end_ts = pd.to_datetime(ts_str, format='%Y%m%d%H%M%S').timestamp() * 1000
-                    # 只使用数据截止时间 >= 需要的结束时间的文件
-                    if file_end_ts >= end_timestamp:
-                        valid_files.append(f)
-                except:
-                    # 如果解析失败，使用文件修改时间作为fallback
-                    file_mtime = f.stat().st_mtime * 1000
-                    if file_mtime >= end_timestamp:
-                        valid_files.append(f)
+                    return self._fetch_future_return_from_api(symbol, start_timestamp, hours)
+                except Exception as e:
+                    logger.warning(f"[ML] API获取失败，回退到本地缓存: {e}")
 
-            if not valid_files:
-                # 如果没有包含足够数据的文件，使用最新的（但有泄露风险警告）
-                latest_file = max(cache_files, key=lambda x: x.stat().st_mtime)
-                logger.warning(f"[ML Warning] 可能使用不完整数据计算 {symbol} 的未来收益")
-            else:
-                # 使用包含足够数据的最早文件（最接近start_timestamp的文件）
-                latest_file = min(valid_files, key=lambda x: x.stat().st_mtime)
-
-            df = pd.read_csv(latest_file)
-
-            if df.empty or 'close' not in df.columns:
-                return None
-
-            # 转换timestamp到datetime
-            start_dt = pd.to_datetime(start_timestamp, unit='ms')
-            end_dt = start_dt + timedelta(hours=hours)
-
-            # 查找最接近的K线
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-
-            # 关键验证：确保数据不包含未来时间
-            max_data_time = df['timestamp'].max()
-            if max_data_time < end_dt:
-                logger.warning(f"[ML Warning] 缓存数据不足: 需要{end_dt}, 实际{max_data_time}")
-                return None
-
-            # 获取起始价格（最接近start_timestamp的K线收盘价）
-            start_mask = df['timestamp'] <= start_dt
-            if not start_mask.any():
-                return None
-            start_price = df.loc[start_mask, 'close'].iloc[-1]
-
-            # 获取结束价格（最接近end_timestamp的K线收盘价）
-            end_mask = df['timestamp'] <= end_dt
-            if not end_mask.any():
-                return None
-            end_price = df.loc[end_mask, 'close'].iloc[-1]
-
-            # 计算收益率
-            future_return = (end_price - start_price) / start_price
-
-            return float(future_return)
+            # 回退到本地缓存文件
+            return self._fetch_future_return_from_cache(symbol, start_timestamp, hours)
 
         except Exception as e:
             print(f"[ML] Error calculating future return for {symbol}: {e}")
             return None
+
+    def _fetch_future_return_from_api(
+        self,
+        symbol: str,
+        start_timestamp: int,
+        hours: int
+    ) -> Optional[float]:
+        """从API获取历史K线数据计算未来收益"""
+        if self._data_provider is None:
+            return None
+
+        # 计算需要获取的K线范围
+        # 需要包含 start_timestamp 和 start_timestamp + hours 的数据
+        # 多获取一些数据确保覆盖
+        limit = hours + 10  # 获取足够的数据
+
+        # 从API获取K线数据
+        series_dict = self._data_provider.fetch_ohlcv(
+            symbols=[symbol],
+            timeframe="1h",
+            limit=limit,
+            end_ts_ms=start_timestamp + hours * 3600 * 1000 + 3600 * 1000  # 结束时间后1小时，确保包含
+        )
+
+        if symbol not in series_dict:
+            raise MLDataCollectorError(f"API未返回 {symbol} 的数据")
+
+        series = series_dict[symbol]
+
+        if not series.ts or len(series.ts) == 0:
+            raise MLDataCollectorError(f"{symbol} 返回的K线数据为空")
+
+        # 转换为DataFrame便于处理
+        df = pd.DataFrame({
+            'timestamp': pd.to_datetime(series.ts, unit='ms'),
+            'close': series.close,
+            'open': series.open,
+            'high': series.high,
+            'low': series.low,
+            'volume': series.volume
+        })
+
+        # 转换timestamp到datetime进行比较
+        start_dt = pd.to_datetime(start_timestamp, unit='ms')
+        end_dt = start_dt + timedelta(hours=hours)
+
+        # 获取起始价格（最接近start_timestamp的K线收盘价）
+        start_mask = df['timestamp'] <= start_dt
+        if not start_mask.any():
+            raise MLDataCollectorError(f"未找到 {symbol} 在 {start_dt} 之前的K线数据")
+        start_price = df.loc[start_mask, 'close'].iloc[-1]
+
+        # 获取结束价格（最接近end_timestamp的K线收盘价）
+        end_mask = df['timestamp'] <= end_dt
+        if not end_mask.any():
+            raise MLDataCollectorError(f"未找到 {symbol} 在 {end_dt} 之前的K线数据")
+        end_price = df.loc[end_mask, 'close'].iloc[-1]
+
+        # 计算收益率
+        future_return = (end_price - start_price) / start_price
+
+        logger.debug(f"[ML] API获取成功 {symbol}: start={start_price}, end={end_price}, return={future_return:.4f}")
+        return float(future_return)
+
+    def _fetch_future_return_from_cache(
+        self,
+        symbol: str,
+        start_timestamp: int,
+        hours: int
+    ) -> Optional[float]:
+        """从本地缓存文件获取K线数据计算未来收益"""
+        # 转换symbol格式: BTC/USDT -> BTC_USDT
+        symbol_file = symbol.replace('/', '_').replace('-', '_')
+
+        # 查找K线缓存文件
+        cache_dir = Path(self.db_path).parent.parent / 'data' / 'cache'
+        pattern = f"{symbol_file}_1H_*.csv"
+        cache_files = list(cache_dir.glob(pattern))
+
+        if not cache_files:
+            logger.warning(f"[ML Warning] 未找到 {symbol} 的本地缓存文件")
+            return None
+
+        # 关键修复：筛选缓存文件，只使用不包含未来数据的文件
+        # 文件命名格式: BTC_USDT_1H_YYYYMMDDHHMMSS.csv
+        # 只使用数据截止时间 <= start_timestamp + hours 的文件
+        end_timestamp = start_timestamp + hours * 3600 * 1000
+
+        valid_files = []
+        for f in cache_files:
+            # 从文件名解析数据截止时间
+            try:
+                ts_str = f.stem.split('_')[-1]  # 获取YYYYMMDDHHMMSS部分
+                file_end_ts = pd.to_datetime(ts_str, format='%Y%m%d%H%M%S').timestamp() * 1000
+                # 只使用数据截止时间 >= 需要的结束时间的文件
+                if file_end_ts >= end_timestamp:
+                    valid_files.append(f)
+            except:
+                # 如果解析失败，使用文件修改时间作为fallback
+                file_mtime = f.stat().st_mtime * 1000
+                if file_mtime >= end_timestamp:
+                    valid_files.append(f)
+
+        if not valid_files:
+            # 如果没有包含足够数据的文件，使用最新的（但有泄露风险警告）
+            latest_file = max(cache_files, key=lambda x: x.stat().st_mtime)
+            logger.warning(f"[ML Warning] 可能使用不完整数据计算 {symbol} 的未来收益")
+        else:
+            # 使用包含足够数据的最早文件（最接近start_timestamp的文件）
+            latest_file = min(valid_files, key=lambda x: x.stat().st_mtime)
+
+        df = pd.read_csv(latest_file)
+
+        if df.empty or 'close' not in df.columns:
+            return None
+
+        # 转换timestamp到datetime
+        start_dt = pd.to_datetime(start_timestamp, unit='ms')
+        end_dt = start_dt + timedelta(hours=hours)
+
+        # 查找最接近的K线
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        # 关键验证：确保数据不包含未来时间
+        max_data_time = df['timestamp'].max()
+        if max_data_time < end_dt:
+            logger.warning(f"[ML Warning] 缓存数据不足: 需要{end_dt}, 实际{max_data_time}")
+            return None
+
+        # 获取起始价格（最接近start_timestamp的K线收盘价）
+        start_mask = df['timestamp'] <= start_dt
+        if not start_mask.any():
+            return None
+        start_price = df.loc[start_mask, 'close'].iloc[-1]
+
+        # 获取结束价格（最接近end_timestamp的K线收盘价）
+        end_mask = df['timestamp'] <= end_dt
+        if not end_mask.any():
+            return None
+        end_price = df.loc[end_mask, 'close'].iloc[-1]
+
+        # 计算收益率
+        future_return = (end_price - start_price) / start_price
+
+        return float(future_return)
 
     def export_training_data(
         self,
