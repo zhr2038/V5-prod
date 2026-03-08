@@ -1,13 +1,11 @@
 {
   "selected": [
-    "HYPE/USDT",
-    "OKB/USDT",
-    "LINK/USDT"
+    "LINK/USDT",
+    "OKB/USDT"
   ],
   "hold_cycles": {
-    "HYPE/USDT": 1,
-    "OKB/USDT": 19,
-    "LINK/USDT": 1
+    "LINK/USDT": 1,
+    "OKB/USDT": 2
   },
-  "updated_ts": 1772899223
+  "updated_ts": 1772956815
 }

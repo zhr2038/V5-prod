@@ -1,0 +1,103 @@
+{
+  "version": "2.0",
+  "generated_at": "2026-03-08T21:00:01.922623",
+  "period_days": 7,
+  "summary": {
+    "total_trades": 273,
+    "total_symbols": 20,
+    "total_realized_pnl": 627.34,
+    "win_rate": 0.7,
+    "critical_alerts": 0,
+    "warning_alerts": 0
+  },
+  "alerts": [
+    {
+      "level": "info",
+      "category": "strategy",
+      "title": "\u9ad8\u9891\u4ea4\u6613: NEAR-USDT",
+      "description": "NEAR-USDT \u57287\u5929\u5185\u4ea4\u6613 42 \u6b21",
+      "metric": "trade_frequency",
+      "expected": "< 3\u6b21/\u5468",
+      "actual": "42\u6b21",
+      "action": "\u68c0\u67e5\u662f\u5426\u6709\u8fc7\u5ea6\u4ea4\u6613\uff0c\u786e\u8ba4\u4fe1\u53f7\u9608\u503c\u662f\u5426\u8fc7\u4f4e",
+      "impact": "\u589e\u52a0\u624b\u7eed\u8d39\u6210\u672c"
+    }
+  ],
+  "execution_quality": {
+    "avg_slippage_bps": 5.0,
+    "avg_fee_bps": 6.0,
+    "fill_rate": 0.95,
+    "status": "good"
+  },
+  "factor_performance": [
+    {
+      "name": "5\u65e5\u52a8\u91cf",
+      "ic": -0.0179,
+      "win_rate": 0.32,
+      "status": "neutral"
+    },
+    {
+      "name": "20\u65e5\u52a8\u91cf",
+      "ic": 0.0044,
+      "win_rate": 0.54,
+      "status": "neutral"
+    },
+    {
+      "name": "\u6ce2\u52a8\u7387\u8c03\u6574\u6536\u76ca",
+      "ic": -0.0037,
+      "win_rate": 0.46,
+      "status": "neutral"
+    },
+    {
+      "name": "\u6210\u4ea4\u91cf\u6269\u5f20",
+      "ic": -0.0098,
+      "win_rate": 0.4,
+      "status": "neutral"
+    },
+    {
+      "name": "RSI\u8d8b\u52bf\u786e\u8ba4",
+      "ic": -0.0148,
+      "win_rate": 0.35,
+      "status": "neutral"
+    }
+  ],
+  "risk_metrics": {
+    "max_position_pct": 0,
+    "concentration_score": 0,
+    "var_95": 0,
+    "status": "safe"
+  },
+  "pnl_attribution": {
+    "top_gainers": [
+      {
+        "symbol": "ETH-USDT",
+        "pnl": 164.86
+      },
+      {
+        "symbol": "LINK-USDT",
+        "pnl": 146.99
+      },
+      {
+        "symbol": "SOL-USDT",
+        "pnl": 105.84
+      }
+    ],
+    "top_losers": [
+      {
+        "symbol": "DOGE-USDT",
+        "pnl": -0.33
+      },
+      {
+        "symbol": "NEAR-USDT",
+        "pnl": -58.12
+      },
+      {
+        "symbol": "HYPE-USDT",
+        "pnl": -78.86
+      }
+    ],
+    "total_realized_pnl": 627.34,
+    "winning_symbols": 14,
+    "losing_symbols": 6
+  }
+}

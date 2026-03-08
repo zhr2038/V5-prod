@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-08T00:00:02.932219",
+  "timestamp": "2026-03-08T16:00:02.765541",
   "regime": "SIDEWAYS",
   "current_pos_mult_risk_off": 0.0,
   "equity_estimate_usdt": 134.938906,
@@ -19,9 +19,9 @@
       "gross_notional": 20.2408,
       "candidates": [
         {
-          "symbol": "OKB/USDT",
-          "score": 1.0,
-          "price": 100.36,
+          "symbol": "TRX/USDT",
+          "score": 0.671223264667512,
+          "price": 0.28643,
           "shadow_target_usdt": 20.2408
         }
       ]
@@ -29,20 +29,14 @@
     {
       "name": "probe_2",
       "pos_mult": 0.25,
-      "max_positions": 2,
+      "max_positions": 1,
       "gross_notional": 33.7347,
       "candidates": [
         {
-          "symbol": "OKB/USDT",
-          "score": 1.0,
-          "price": 100.36,
-          "shadow_target_usdt": 16.8674
-        },
-        {
-          "symbol": "HYPE/USDT",
-          "score": 0.6299327439974078,
-          "price": 30.731,
-          "shadow_target_usdt": 16.8674
+          "symbol": "TRX/USDT",
+          "score": 0.671223264667512,
+          "price": 0.28643,
+          "shadow_target_usdt": 33.7347
         }
       ]
     }

@@ -1,23 +1,30 @@
 {
   "SOL/USDT": {
     "symbol": "SOL/USDT",
-    "highest_px": 83.75,
-    "entry_px": 83.67,
-    "updated_at": "2026-03-08T00:00:17.762062",
+    "highest_px": 82.98,
+    "entry_px": 82.95,
+    "updated_at": "2026-03-08T16:00:10.295024",
     "source": "mark_to_market"
   },
   "HYPE/USDT": {
     "symbol": "HYPE/USDT",
-    "highest_px": 30.731,
-    "entry_px": 30.716999999999995,
-    "updated_at": "2026-03-08T00:00:17.763730",
+    "highest_px": 30.183,
+    "entry_px": 30.178,
+    "updated_at": "2026-03-08T16:00:10.296831",
     "source": "mark_to_market"
   },
   "LINK/USDT": {
     "symbol": "LINK/USDT",
-    "highest_px": 8.751,
-    "entry_px": 8.751,
-    "updated_at": "2026-03-08T00:00:27.003034",
-    "source": "new_position"
+    "highest_px": 8.636,
+    "entry_px": 8.633,
+    "updated_at": "2026-03-08T16:00:10.298430",
+    "source": "mark_to_market"
+  },
+  "OKB/USDT": {
+    "symbol": "OKB/USDT",
+    "highest_px": 98.96,
+    "entry_px": 98.87,
+    "updated_at": "2026-03-08T16:00:10.300015",
+    "source": "mark_to_market"
   }
 }

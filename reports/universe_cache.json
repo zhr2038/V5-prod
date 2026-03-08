@@ -1,13 +1,13 @@
 {
-  "ts": 1772899205.6901445,
+  "ts": 1772953212.7700286,
   "ttl_sec": 3600,
   "symbols": [
     "BTC/USDT",
     "ETH/USDT",
     "OKB/USDT",
+    "CC/USDT",
     "SOL/USDT",
     "DOGE/USDT",
-    "CC/USDT",
     "XRP/USDT",
     "TRX/USDT",
     "HYPE/USDT",

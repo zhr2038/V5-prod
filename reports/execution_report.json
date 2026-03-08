@@ -1,39 +1,6 @@
 {
-  "timestamp": "2026-03-07T16:00:26Z",
+  "timestamp": "2026-03-08T08:00:19Z",
   "dry_run": false,
-  "orders": [
-    {
-      "symbol": "LINK/USDT",
-      "side": "buy",
-      "intent": "OPEN_LONG",
-      "notional_usdt": 19.410496470577634,
-      "signal_price": 8.75,
-      "meta": {
-        "target_w": 0.23985902781801074,
-        "dd_mult": 1.0,
-        "regime": "Sideways",
-        "window_start_ts": null,
-        "window_end_ts": null,
-        "deadband_pct": 0.05,
-        "drift": 0.23985902781801074
-      }
-    },
-    {
-      "symbol": "OKB/USDT",
-      "side": "buy",
-      "intent": "OPEN_LONG",
-      "notional_usdt": 15.015602682866778,
-      "signal_price": 100.37,
-      "meta": {
-        "target_w": 0.18555052762680618,
-        "dd_mult": 1.0,
-        "regime": "Sideways",
-        "window_start_ts": null,
-        "window_end_ts": null,
-        "deadband_pct": 0.05,
-        "drift": 0.18555052762680618
-      }
-    }
-  ],
-  "notes": "regime=RegimeState.SIDEWAYS selected=['HYPE/USDT', 'OKB/USDT', 'LINK/USDT'] orders=2"
+  "orders": [],
+  "notes": "regime=RegimeState.RISK_OFF selected=[] orders=0"
 }

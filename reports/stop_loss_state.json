@@ -34,14 +34,14 @@
   },
   "SOL/USDT": {
     "symbol": "SOL/USDT",
-    "entry_price": 84.45,
-    "entry_time": "2026-03-07T20:45:17.790871",
-    "highest_price": 84.47,
-    "current_stop_price": 80.22749999999999,
+    "entry_price": 82.54,
+    "entry_time": "2026-03-08T04:00:25.237731",
+    "highest_price": 83.29,
+    "current_stop_price": 78.413,
     "current_stop_type": "initial_normal",
     "is_breakeven": false,
     "is_trailing": false,
-    "profit_high_watermark": 0.0002368265245707048
+    "profit_high_watermark": 0.009086503513448025
   },
   "DOGE/USDT": {
     "symbol": "DOGE/USDT",
@@ -89,13 +89,35 @@
   },
   "HYPE/USDT": {
     "symbol": "HYPE/USDT",
-    "entry_price": 31.025999999999996,
-    "entry_time": "2026-03-07T22:45:17.141715",
-    "highest_price": 31.037,
-    "current_stop_price": 29.474699999999995,
+    "entry_price": 30.178,
+    "entry_time": "2026-03-08T16:00:15.934615",
+    "highest_price": 30.183,
+    "current_stop_price": 28.6691,
     "current_stop_type": "initial_normal",
     "is_breakeven": false,
     "is_trailing": false,
-    "profit_high_watermark": 0.0003545413524141941
+    "profit_high_watermark": 0.00016568361057720874
+  },
+  "LINK/USDT": {
+    "symbol": "LINK/USDT",
+    "entry_price": 8.552,
+    "entry_time": "2026-03-08T13:00:26.982124",
+    "highest_price": 8.636,
+    "current_stop_price": 8.1244,
+    "current_stop_type": "initial_normal",
+    "is_breakeven": false,
+    "is_trailing": false,
+    "profit_high_watermark": 0.009822263797941959
+  },
+  "OKB/USDT": {
+    "symbol": "OKB/USDT",
+    "entry_price": 98.13,
+    "entry_time": "2026-03-08T13:00:26.982676",
+    "highest_price": 98.95,
+    "current_stop_price": 93.22349999999999,
+    "current_stop_type": "initial_normal",
+    "is_breakeven": false,
+    "is_trailing": false,
+    "profit_high_watermark": 0.008356262101294277
   }
 }

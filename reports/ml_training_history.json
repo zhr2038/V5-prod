@@ -623,5 +623,229 @@
         "lightgbm"
       ]
     }
+  },
+  {
+    "timestamp": "2026-03-08T00:34:08.728827",
+    "samples": 2088,
+    "train_ic": 0.816816626508161,
+    "valid_ic": -0.0076747876832003676,
+    "cv_mean_ic": 0.15181476431950763,
+    "cv_std_ic": 0.21687851640184688,
+    "cv_scores": [
+      -0.007412407524291987,
+      0.018113268408187357,
+      -0.07701235055367513,
+      0.3710052758478646,
+      0.4543800354194532
+    ],
+    "feature_mode": "dynamic_active",
+    "selected_features": [
+      "macd_signal",
+      "volatility_24h",
+      "bb_position",
+      "returns_24h",
+      "momentum_5d",
+      "obv",
+      "volatility_ratio",
+      "volume_ratio",
+      "momentum_20d",
+      "price_position"
+    ],
+    "mi_scores": {
+      "macd_signal": 3.623900758172014,
+      "volatility_24h": 3.6134635769467747,
+      "bb_position": 3.5762946476772215,
+      "returns_24h": 3.5658017196215215,
+      "momentum_5d": 3.569529046790149,
+      "obv": 3.5826912345371826,
+      "volatility_ratio": 3.475980298807541,
+      "volume_ratio": 3.5011279834507048,
+      "momentum_20d": 0.0,
+      "price_position": 0.0
+    },
+    "selector_reason": "ok",
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.816816626508161,
+        "valid_ic": -0.0076747876832003676,
+        "ic_gap": 0.8244914141913614
+      },
+      {
+        "model_type": "lightgbm",
+        "train_ic": 0.9053936407142174,
+        "valid_ic": -0.0695812777188076,
+        "ic_gap": 0.974974918433025
+      }
+    ],
+    "selected_model_type": "ridge",
+    "gate": {
+      "min_valid_ic": -0.1,
+      "max_ic_gap": 0.9,
+      "min_cv_mean_ic": 0.0,
+      "max_cv_std": 0.35,
+      "passed": true,
+      "fail_reasons": []
+    },
+    "model_saved": true,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge",
+        "lightgbm"
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-03-08T04:14:11.941686",
+    "samples": 2088,
+    "train_ic": 0.816816626508161,
+    "valid_ic": -0.0076747876832003676,
+    "cv_mean_ic": 0.15181476431950763,
+    "cv_std_ic": 0.21687851640184688,
+    "cv_scores": [
+      -0.007412407524291987,
+      0.018113268408187357,
+      -0.07701235055367513,
+      0.3710052758478646,
+      0.4543800354194532
+    ],
+    "feature_mode": "dynamic_active",
+    "selected_features": [
+      "macd_signal",
+      "volatility_24h",
+      "bb_position",
+      "returns_24h",
+      "momentum_5d",
+      "obv",
+      "volatility_ratio",
+      "volume_ratio",
+      "momentum_20d",
+      "price_position"
+    ],
+    "mi_scores": {
+      "macd_signal": 3.623900758172014,
+      "volatility_24h": 3.6134635769467747,
+      "bb_position": 3.5762946476772215,
+      "returns_24h": 3.5658017196215215,
+      "momentum_5d": 3.569529046790149,
+      "obv": 3.5826912345371826,
+      "volatility_ratio": 3.475980298807541,
+      "volume_ratio": 3.5011279834507048,
+      "momentum_20d": 0.0,
+      "price_position": 0.0
+    },
+    "selector_reason": "ok",
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.816816626508161,
+        "valid_ic": -0.0076747876832003676,
+        "ic_gap": 0.8244914141913614
+      },
+      {
+        "model_type": "lightgbm",
+        "train_ic": 0.9053936407142174,
+        "valid_ic": -0.0695812777188076,
+        "ic_gap": 0.974974918433025
+      }
+    ],
+    "selected_model_type": "ridge",
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge",
+        "lightgbm"
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-03-08T04:14:19.508418",
+    "samples": 2088,
+    "train_ic": 0.816816626508161,
+    "valid_ic": -0.0076747876832003676,
+    "cv_mean_ic": 0.15181476431950763,
+    "cv_std_ic": 0.21687851640184688,
+    "cv_scores": [
+      -0.007412407524291987,
+      0.018113268408187357,
+      -0.07701235055367513,
+      0.3710052758478646,
+      0.4543800354194532
+    ],
+    "feature_mode": "dynamic_active",
+    "selected_features": [
+      "macd_signal",
+      "volatility_24h",
+      "bb_position",
+      "returns_24h",
+      "momentum_5d",
+      "obv",
+      "volatility_ratio",
+      "volume_ratio",
+      "momentum_20d",
+      "price_position"
+    ],
+    "mi_scores": {
+      "macd_signal": 3.623900758172014,
+      "volatility_24h": 3.6134635769467747,
+      "bb_position": 3.5762946476772215,
+      "returns_24h": 3.5658017196215215,
+      "momentum_5d": 3.569529046790149,
+      "obv": 3.5826912345371826,
+      "volatility_ratio": 3.475980298807541,
+      "volume_ratio": 3.5011279834507048,
+      "momentum_20d": 0.0,
+      "price_position": 0.0
+    },
+    "selector_reason": "ok",
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.816816626508161,
+        "valid_ic": -0.0076747876832003676,
+        "ic_gap": 0.8244914141913614
+      },
+      {
+        "model_type": "lightgbm",
+        "train_ic": 0.9053936407142174,
+        "valid_ic": -0.0695812777188076,
+        "ic_gap": 0.974974918433025
+      }
+    ],
+    "selected_model_type": "ridge",
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge",
+        "lightgbm"
+      ]
+    }
   }
 ]

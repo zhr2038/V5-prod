@@ -1,15 +1,15 @@
 {
-  "ts": "2026-03-08T00:00:08.075913",
+  "ts": "2026-03-09T02:00:05.174503",
   "current_level": "DEFENSE",
   "metrics": {
-    "dd_pct": 0.049398432261388514,
-    "conversion_rate": 0.37254901960784315,
+    "dd_pct": 0.06820900824604215,
+    "conversion_rate": 0.0,
     "dust_reject_rate": 0.0,
     "pnl_trend": "flat",
     "consecutive_losses": 0,
-    "sample_size": 19,
-    "total_selected": 51,
-    "total_rebalance": 19
+    "sample_size": 3,
+    "total_selected": 0,
+    "total_rebalance": 0
   },
   "reason": "维持当前档位"
 }
