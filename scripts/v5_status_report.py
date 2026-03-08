@@ -1,198 +1,181 @@
 #!/usr/bin/env python3
 """
-V5 交易审计报告 - 更新版
-反映最新修复：借贷检测阈值调整、资金规模感知回撤计算
+Generate a concise production status report for the V5 workspace.
 """
+
+from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import subprocess
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
-from datetime import datetime
+from typing import Any, Dict, Optional
 
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+WORKSPACE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(WORKSPACE))
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
-RUNS_DIR = REPORTS_DIR / 'runs'
-ORDERS_DB = REPORTS_DIR / 'orders.sqlite'
-CONFIG_PATH = Path('/home/admin/clawd/v5-trading-bot/configs/live_20u_real.yaml')
+REPORTS_DIR = WORKSPACE / "reports"
+RUNS_DIR = REPORTS_DIR / "runs"
+ORDERS_DB = REPORTS_DIR / "orders.sqlite"
 
-def load_config():
-    """加载配置"""
+
+def resolve_config_path() -> Path:
+    env_cfg = (os.getenv("V5_CONFIG") or "").strip()
+    if env_cfg:
+        path = Path(env_cfg)
+        if not path.is_absolute():
+            path = WORKSPACE / path
+        return path
+
+    for candidate in ("configs/live_prod.yaml", "configs/live_20u_real.yaml", "configs/config.yaml"):
+        path = WORKSPACE / candidate
+        if path.exists():
+            return path
+
+    return WORKSPACE / "configs/live_prod.yaml"
+
+
+CONFIG_PATH = resolve_config_path()
+
+
+def load_config() -> Dict[str, Any]:
     try:
         import yaml
-        with open(CONFIG_PATH, 'r') as f:
-            return yaml.safe_load(f)
-    except:
+
+        return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:
         return {}
 
-def get_latest_run_data():
-    """获取最新运行数据"""
+
+def get_latest_run_data() -> Optional[Dict[str, Any]]:
     if not RUNS_DIR.exists():
         return None
-    
-    run_dirs = [d for d in RUNS_DIR.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+
+    run_dirs = [path for path in RUNS_DIR.iterdir() if path.is_dir() and (path / "decision_audit.json").exists()]
     if not run_dirs:
         return None
-    
-    run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-    latest_dir = run_dirs[0]
-    
-    with open(latest_dir / 'decision_audit.json', 'r') as f:
-        return json.load(f)
 
-def get_service_status():
-    """获取服务状态"""
-    import subprocess
+    latest_dir = max(run_dirs, key=lambda path: path.stat().st_mtime)
     try:
-        result = subprocess.run(
-            ['systemctl', '--user', 'is-active', 'v5-live-20u.user.service'],
-            capture_output=True, text=True, timeout=5
-        )
-        return 'running' if result.returncode == 0 else 'stopped'
-    except:
-        return 'unknown'
+        return json.loads((latest_dir / "decision_audit.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
-def check_borrow_status():
-    """检查借贷检测状态"""
-    # 读取配置中的阈值
+
+def get_service_status() -> str:
+    try:
+        for unit in ("v5-prod.user.service", "v5-live-20u.user.service"):
+            result = subprocess.run(
+                ["systemctl", "--user", "is-active", unit],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return "running"
+        return "stopped"
+    except Exception:
+        return "unknown"
+
+
+def check_borrow_status() -> Dict[str, Any]:
     cfg = load_config()
-    borrow_config = {
-        'liab_eps': cfg.get('execution', {}).get('borrow_liab_eps', 0.01),
-        'neg_eq_eps': cfg.get('execution', {}).get('borrow_neg_eq_eps', 0.01),
-        'mode': cfg.get('execution', {}).get('borrow_block_mode', 'symbol_only')
-    }
-    
-    # 检查黑名单
-    blacklist_file = REPORTS_DIR / 'auto_blacklist.json'
-    blacklist = []
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+
+    blacklist_file = REPORTS_DIR / "auto_blacklist.json"
+    entries = []
     if blacklist_file.exists():
         try:
-            with open(blacklist_file, 'r') as f:
-                data = json.load(f)
-                blacklist = data.get('entries', [])
-        except:
-            pass
-    
+            payload = json.loads(blacklist_file.read_text(encoding="utf-8"))
+            entries = payload.get("entries", []) if isinstance(payload, dict) else []
+        except Exception:
+            entries = []
+
     return {
-        'config': borrow_config,
-        'blacklist_count': len(blacklist),
-        'blacklist_symbols': [e.get('symbol') for e in blacklist[:5]]
+        "config": {
+            "liab_eps": execution_cfg.get("borrow_liab_eps", 0.01),
+            "neg_eq_eps": execution_cfg.get("borrow_neg_eq_eps", 0.01),
+            "mode": execution_cfg.get("borrow_block_mode", "symbol_only"),
+        },
+        "blacklist_count": len(entries),
+        "blacklist_symbols": [item.get("symbol") for item in entries[:5] if isinstance(item, dict)],
     }
 
-def generate_report():
-    """生成完整报告"""
-    
-    # 获取最新运行数据
-    run_data = get_latest_run_data()
-    
-    # 获取服务状态
-    service_status = get_service_status()
-    
-    # 检查借贷状态
-    borrow_status = check_borrow_status()
-    
-    # 获取配置
+
+def get_last_filled_trade_ts() -> Optional[str]:
+    if not ORDERS_DB.exists():
+        return None
+
+    try:
+        conn = sqlite3.connect(str(ORDERS_DB))
+        row = conn.execute("SELECT MAX(created_ts) FROM orders WHERE state='FILLED'").fetchone()
+        conn.close()
+        ts_ms = row[0] if row else None
+        if not ts_ms:
+            return None
+        return datetime.fromtimestamp(ts_ms / 1000).isoformat(timespec="minutes")
+    except Exception:
+        return None
+
+
+def build_next_run_hint() -> str:
+    next_run = datetime.now().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return next_run.strftime("%Y-%m-%d %H:%M")
+
+
+def generate_report() -> str:
     cfg = load_config()
-    budget_cap = cfg.get('budget', {}).get('live_equity_cap_usdt', 20)
-    
-    # 构建报告
-    report = f"""📊 V5 Trading Bot 状态报告
-{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
+    run_data = get_latest_run_data() or {}
+    borrow = check_borrow_status()
+    service_status = get_service_status()
+    last_trade = get_last_filled_trade_ts() or "n/a"
+    budget_cap = cfg.get("budget", {}).get("live_equity_cap_usdt", "n/a") if isinstance(cfg, dict) else "n/a"
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    counts = run_data.get("counts", {}) if isinstance(run_data, dict) else {}
+    notes = run_data.get("notes", []) if isinstance(run_data, dict) else []
+    drawdown_note = next((note for note in notes if isinstance(note, str) and "drawdown" in note.lower()), "n/a")
 
-✅ 系统状态
-
-服务运行状态: {"🟢 正常" if service_status == 'running' else "🔴 停止"}
-资金上限设置: {budget_cap} USDT
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔧 借贷检测（已修复）
-
-当前配置:
-• 借贷检测阈值: {borrow_status['config']['liab_eps']} (原为 0.000001)
-• 负资产阈值: {borrow_status['config']['neg_eq_eps']} (原为 0.000001)
-• 阻止模式: {borrow_status['config']['mode']}
-
-修复说明:
-✅ 已放宽阈值到 0.01，忽略灰尘金额（< $0.01）
-✅ 不再因小数精度残留误报借贷
-✅ 当前黑名单币种: {borrow_status['blacklist_count']} 个
-
-状态: 🟢 正常，无借贷误报
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📈 最新交易运行
-"""
-    
-    if run_data:
-        regime = run_data.get('regime', 'Unknown')
-        counts = run_data.get('counts', {})
-        notes = run_data.get('notes', [])
-        
-        # 提取回撤信息
-        drawdown_info = "未记录"
-        for note in notes:
-            if 'drawdown' in note.lower():
-                drawdown_info = note
-                break
-        
-        report += f"""
-市场状态: {regime}
-选中币种: {counts.get('selected', 0)} 个
-目标权重: {counts.get('targets_pre_risk', 0)} 个
-再平衡订单: {counts.get('orders_rebalance', 0)} 个
-
-回撤信息: {drawdown_info}
-"""
-    else:
-        report += "\n暂无运行数据\n"
-    
-    report += """
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-💡 重要说明
-
-1. 回撤计算已修复
-   • 基于资金上限 {budget_cap}U 计算
-   • 不会因历史大峰值导致错误高回撤
-   • 加仓时会按比例调整峰值
-
-2. 借贷检测已修复
-   • 阈值从 0.000001 提高到 0.01
-   • 忽略灰尘金额误报
-   • 当前运行正常，无借贷问题
-
-3. 定时任务正常运行
-   • 每小时 :57 预计算趋势
-   • 每小时 :00 执行交易
-   • 下次运行: {next_run}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📋 当前状态: ✅ 系统正常，无需操作
-
-如有异常会立即告警。
-""".format(
-        budget_cap=budget_cap,
-        next_run=(datetime.now().replace(minute=0, second=0) + __import__('datetime').timedelta(hours=1)).strftime('%H:%M')
+    return "\n".join(
+        [
+            "V5 Status Report",
+            f"time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"workspace: {WORKSPACE}",
+            f"config: {CONFIG_PATH.name}",
+            "",
+            "System",
+            f"- live_service: {service_status}",
+            f"- live_equity_cap_usdt: {budget_cap}",
+            f"- next_expected_run: {build_next_run_hint()}",
+            "",
+            "Borrow Guard",
+            f"- liab_eps: {borrow['config']['liab_eps']}",
+            f"- neg_eq_eps: {borrow['config']['neg_eq_eps']}",
+            f"- mode: {borrow['config']['mode']}",
+            f"- blacklist_count: {borrow['blacklist_count']}",
+            f"- blacklist_symbols: {borrow['blacklist_symbols']}",
+            "",
+            "Latest Run",
+            f"- regime: {run_data.get('regime', 'n/a')}",
+            f"- selected: {counts.get('selected', 'n/a')}",
+            f"- targets_pre_risk: {counts.get('targets_pre_risk', 'n/a')}",
+            f"- orders_rebalance: {counts.get('orders_rebalance', 'n/a')}",
+            f"- drawdown_note: {drawdown_note}",
+            f"- last_filled_trade: {last_trade}",
+        ]
     )
-    
-    return report
 
-def main():
+
+def main() -> int:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     report = generate_report()
     print(report)
-    
-    # 保存报告
-    report_file = REPORTS_DIR / f'status_report_{datetime.now().strftime("%Y%m%d_%H%M")}.txt'
-    with open(report_file, 'w', encoding='utf-8') as f:
-        f.write(report)
-    
-    print(f"\n报告已保存: {report_file}")
+    output = REPORTS_DIR / f"status_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+    output.write_text(report, encoding="utf-8")
+    return 0
 
-if __name__ == '__main__':
-    main()
+
+if __name__ == "__main__":
+    raise SystemExit(main())

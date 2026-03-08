@@ -20,6 +20,9 @@ import pandas as pd
 import numpy as np
 from decimal import Decimal
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+REPORTS_DIR = PROJECT_ROOT / 'reports'
+
 
 class AlertLevel(Enum):
     """告警级别"""
@@ -80,9 +83,9 @@ class ReflectionAgentV2:
     
     def __init__(
         self,
-        db_path: str = '/home/admin/clawd/v5-trading-bot/reports/orders.sqlite',
-        report_dir: str = '/home/admin/clawd/v5-trading-bot/reports/reflection',
-        bills_db: str = '/home/admin/clawd/v5-trading-bot/reports/bills.sqlite'
+        db_path: str = str(REPORTS_DIR / 'orders.sqlite'),
+        report_dir: str = str(REPORTS_DIR / 'reflection'),
+        bills_db: str = str(REPORTS_DIR / 'bills.sqlite')
     ):
         self.db_path = db_path
         self.report_dir = Path(report_dir)
@@ -257,7 +260,7 @@ class ReflectionAgentV2:
         factors = []
         
         # 读取IC诊断数据
-        ic_file = Path('/home/admin/clawd/v5-trading-bot/reports/ic_diagnostics_30d_20u.json')
+        ic_file = REPORTS_DIR / 'ic_diagnostics_30d_20u.json'
         if ic_file.exists():
             with open(ic_file, 'r') as f:
                 ic_data = json.load(f)

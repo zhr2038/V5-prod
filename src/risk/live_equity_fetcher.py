@@ -3,6 +3,7 @@
 """
 import os
 import ccxt
+from pathlib import Path
 from typing import Dict, Optional
 
 
@@ -15,9 +16,9 @@ def get_live_equity_from_okx() -> Optional[float]:
     """
     try:
         # 加载API密钥
-        env_path = '/home/admin/clawd/v5-trading-bot/.env'
-        if os.path.exists(env_path):
-            with open(env_path) as f:
+        env_path = Path(__file__).resolve().parents[2] / ".env"
+        if env_path.exists():
+            with env_path.open(encoding="utf-8") as f:
                 for line in f:
                     if '=' in line and not line.startswith('#'):
                         key, val = line.strip().split('=', 1)

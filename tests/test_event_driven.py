@@ -4,7 +4,9 @@ Test script for event-driven trading system.
 Run this to verify all components work correctly.
 """
 import sys
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 print("=" * 60)
 print("事件驱动交易系统功能测试")

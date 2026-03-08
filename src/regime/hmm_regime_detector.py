@@ -17,7 +17,8 @@ import json
 from pathlib import Path
 from datetime import datetime, timedelta
 
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 from src.regime.hmm_model import SimpleGaussianHMM
 
 
@@ -27,7 +28,7 @@ class HMMRegimeDetector:
     def __init__(self, n_components: int = 3, model_path: Path = None):
         self.n_components = n_components
         self.model = SimpleGaussianHMM(n_components=n_components)
-        self.model_path = model_path or Path('/home/admin/clawd/v5-trading-bot/models/hmm_regime.pkl')
+        self.model_path = model_path or (PROJECT_ROOT / 'models' / 'hmm_regime.pkl')
         self.info_path = self.model_path.parent / 'hmm_regime_info.json'
         
         # 从info文件加载正确的状态标签
@@ -51,7 +52,7 @@ class HMMRegimeDetector:
     def load_training_data(self, db_path: Path = None, symbol: str = 'BTC/USDT', 
                            lookback_days: int = 60) -> np.ndarray:
         """从数据库加载训练数据（使用alpha_snapshots因子数据）"""
-        db_path = db_path or Path('/home/admin/clawd/v5-trading-bot/reports/alpha_history.db')
+        db_path = db_path or (PROJECT_ROOT / 'reports' / 'alpha_history.db')
         
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()

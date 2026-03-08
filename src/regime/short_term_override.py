@@ -42,7 +42,7 @@ def check_short_term_opportunity(
     
     # 如果未提供funding_sentiment，从cache读取
     if funding_sentiment is None:
-        cache_dir = cache_dir or Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
+        cache_dir = cache_dir or (Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache')
         try:
             funding_files = sorted(cache_dir.glob('funding_COMPOSITE_*.json'))
             if funding_files:
@@ -136,7 +136,7 @@ def apply_short_term_override(
         return regime_result
     
     # 获取必要数据
-    cache_dir = cache_dir or Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
+    cache_dir = cache_dir or (Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache')
     
     # 读取资金费率情绪
     funding_sentiment = 0.0

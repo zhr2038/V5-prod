@@ -17,6 +17,9 @@ from typing import Dict, List
 from pathlib import Path
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CACHE_DIR = PROJECT_ROOT / 'data' / 'sentiment_cache'
+
 # 尝试导入可选依赖
 try:
     from transformers import pipeline
@@ -42,7 +45,7 @@ class SentimentFactor:
     - f6_fear_greed_index: 恐惧贪婪指数 (0 ~ 100)
     """
     
-    def __init__(self, cache_dir: str = '/home/admin/clawd/v5-trading-bot/data/sentiment_cache'):
+    def __init__(self, cache_dir: str = str(DEFAULT_CACHE_DIR)):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         

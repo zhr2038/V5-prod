@@ -47,7 +47,7 @@ class EnsembleRegimeEngine:
     
     def __init__(self, cfg: RegimeConfig):
         self.cfg = cfg
-        self.project_root = Path('/home/admin/clawd/v5-trading-bot')
+        self.project_root = Path(__file__).resolve().parents[2]
         self.sentiment_cache_dir = self.project_root / 'data' / 'sentiment_cache'
 
         # 权重配置（可调整）

@@ -10,6 +10,7 @@ ML特征工程优化模块
 import numpy as np
 import pandas as pd
 from typing import List, Tuple
+from pathlib import Path
 from sklearn.feature_selection import mutual_info_regression
 
 
@@ -198,7 +199,7 @@ def optimize_features_for_training(df: pd.DataFrame, y: pd.Series = None) -> pd.
 if __name__ == '__main__':
     # 测试
     import sys
-    sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     
     # 创建测试数据
     np.random.seed(42)

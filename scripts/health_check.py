@@ -1,289 +1,265 @@
 #!/usr/bin/env python3
 """
-V5 系统健康检查脚本
-
-检查项：
-- 定时任务最近执行时间
-- 数据库连接状态
-- OKX API延迟
-- 磁盘空间
+Operational health check for the V5 workspace.
 """
 
+from __future__ import annotations
+
 import json
-import sqlite3
 import os
-import time
+import shutil
+import sqlite3
 import subprocess
+import time
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, timedelta
+from typing import Any, Dict, List
+
 import requests
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
-WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
+WORKSPACE = Path(__file__).resolve().parents[1]
+REPORTS_DIR = WORKSPACE / "reports"
+HEALTH_FILE = REPORTS_DIR / "health_status.json"
+
+
+def resolve_live_unit_name() -> str:
+    if shutil.which("systemctl") is None:
+        return "v5-prod"
+
+    for unit in ("v5-prod", "v5-live-20u"):
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "status", f"{unit}.user.service"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return unit
+        except Exception:
+            pass
+    return "v5-prod"
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
 
 class HealthChecker:
-    def __init__(self):
-        self.checks = []
-        self.status = 'healthy'  # healthy, warning, critical
-    
-    def check_timer_health(self):
-        """检查定时任务最近执行时间"""
+    def __init__(self) -> None:
+        self.status = "healthy"
+        self.checks: List[Dict[str, Any]] = []
+
+    def check_timer_health(self) -> Dict[str, Any]:
+        if shutil.which("systemctl") is None:
+            return {
+                "name": "timers",
+                "status": "warning",
+                "details": "systemctl not available in current environment",
+            }
+
         timers = [
-            ('v5-live-20u', 70),      # 每小时执行，允许70分钟延迟
-            ('v5-reconcile', 10),      # 每5分钟执行，允许10分钟延迟
-            ('v5-trade-auditor', 70),  # 每小时执行
+            (resolve_live_unit_name(), 70),
+            ("v5-reconcile", 10),
+            ("v5-trade-auditor", 70),
         ]
-        
-        issues = []
+        issues: List[Dict[str, Any]] = []
+
         for timer_name, max_delay_min in timers:
             try:
-                # 获取timer状态
                 result = subprocess.run(
-                    ['systemctl', '--user', 'show', f'{timer_name}.user.timer', '--property=LastTriggerUSec'],
-                    capture_output=True, text=True, timeout=5
+                    [
+                        "systemctl",
+                        "--user",
+                        "show",
+                        f"{timer_name}.user.timer",
+                        "--property=LastTriggerUSec",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
-                
-                last_trigger = None
-                for line in result.stdout.split('\n'):
-                    if line.startswith('LastTriggerUSec='):
-                        val = line.split('=', 1)[1].strip()
-                        if val and val != 'n/a':
-                            # 解析时间戳
+                last_trigger_usec = None
+                for line in result.stdout.splitlines():
+                    if line.startswith("LastTriggerUSec="):
+                        value = line.split("=", 1)[1].strip()
+                        if value and value != "n/a":
                             try:
-                                last_trigger = datetime.fromtimestamp(int(val) / 1_000_000)
-                            except:
+                                last_trigger_usec = int(value)
+                            except ValueError:
                                 pass
-                
-                if last_trigger:
-                    delay = (datetime.now() - last_trigger).total_seconds() / 60
-                    if delay > max_delay_min:
-                        issues.append({
-                            'timer': timer_name,
-                            'last_run': last_trigger.strftime('%Y-%m-%d %H:%M'),
-                            'delay_min': round(delay, 1),
-                            'status': 'stalled' if delay > max_delay_min * 2 else 'delayed'
-                        })
-            except Exception as e:
-                issues.append({'timer': timer_name, 'error': str(e)})
-        
-        return {
-            'name': '定时任务',
-            'status': 'critical' if any(i.get('status') == 'stalled' for i in issues) else ('warning' if issues else 'healthy'),
-            'details': issues if issues else '所有定时任务正常运行'
-        }
-    
-    def check_database_health(self):
-        """检查数据库状态"""
-        checks = []
-        
-        # 检查orders.sqlite
-        orders_db = REPORTS_DIR / 'orders.sqlite'
-        if orders_db.exists():
+                        break
+
+                if last_trigger_usec is None:
+                    issues.append({"timer": timer_name, "status": "unknown", "detail": "no trigger time"})
+                    continue
+
+                last_trigger = datetime.fromtimestamp(last_trigger_usec / 1_000_000)
+                delay = (datetime.now() - last_trigger).total_seconds() / 60
+                if delay > max_delay_min:
+                    issues.append(
+                        {
+                            "timer": timer_name,
+                            "status": "stalled" if delay > max_delay_min * 2 else "delayed",
+                            "last_run": last_trigger.isoformat(timespec="minutes"),
+                            "delay_min": round(delay, 1),
+                        }
+                    )
+            except Exception as exc:
+                issues.append({"timer": timer_name, "status": "error", "detail": str(exc)})
+
+        if any(item["status"] in {"stalled", "error"} for item in issues):
+            status = "critical"
+        elif issues:
+            status = "warning"
+        else:
+            status = "healthy"
+
+        return {"name": "timers", "status": status, "details": issues or "all timers healthy"}
+
+    def check_database_health(self) -> Dict[str, Any]:
+        checks: List[Dict[str, Any]] = []
+        for db_name, table_name in (("orders.sqlite", "orders"), ("positions.sqlite", "positions")):
+            db_path = REPORTS_DIR / db_name
+            if not db_path.exists():
+                checks.append({"db": db_name, "status": "warning", "detail": "missing"})
+                continue
+
             try:
-                conn = sqlite3.connect(str(orders_db))
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM orders")
-                count = cursor.fetchone()[0]
+                conn = sqlite3.connect(str(db_path))
+                count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
                 conn.close()
-                
-                # 检查文件大小
-                size_mb = orders_db.stat().st_size / (1024 * 1024)
-                
-                checks.append({
-                    'db': 'orders.sqlite',
-                    'records': count,
-                    'size_mb': round(size_mb, 2),
-                    'status': 'healthy'
-                })
-            except Exception as e:
-                checks.append({
-                    'db': 'orders.sqlite',
-                    'error': str(e),
-                    'status': 'critical'
-                })
-        
-        return {
-            'name': '数据库',
-            'status': 'critical' if any(c.get('status') == 'critical' for c in checks) else 'healthy',
-            'details': checks
-        }
-    
-    def check_okx_api(self):
-        """检查OKX API延迟"""
+                checks.append(
+                    {
+                        "db": db_name,
+                        "status": "healthy",
+                        "records": int(count),
+                        "size_mb": round(db_path.stat().st_size / (1024 * 1024), 2),
+                    }
+                )
+            except Exception as exc:
+                checks.append({"db": db_name, "status": "critical", "detail": str(exc)})
+
+        if any(item["status"] == "critical" for item in checks):
+            status = "critical"
+        elif any(item["status"] == "warning" for item in checks):
+            status = "warning"
+        else:
+            status = "healthy"
+
+        return {"name": "database", "status": status, "details": checks}
+
+    def check_okx_api(self) -> Dict[str, Any]:
+        load_env_file(WORKSPACE / ".env")
+        key = os.getenv("EXCHANGE_API_KEY") or os.getenv("OKX_API_KEY")
+        secret = os.getenv("EXCHANGE_API_SECRET") or os.getenv("OKX_API_SECRET")
+        passphrase = os.getenv("EXCHANGE_PASSPHRASE") or os.getenv("OKX_API_PASSPHRASE")
+
+        if not (key and secret and passphrase):
+            return {
+                "name": "okx_api",
+                "status": "warning",
+                "details": "API credentials missing in root .env",
+            }
+
+        started = time.time()
         try:
-            import hmac
-            import hashlib
-            import base64
-            from dotenv import load_dotenv
-            
-            load_dotenv(str(WORKSPACE / '.env'))
-            key = os.getenv('EXCHANGE_API_KEY')
-            sec = os.getenv('EXCHANGE_API_SECRET')
-            pp = os.getenv('EXCHANGE_PASSPHRASE')
-            
-            if not (key and sec and pp):
+            response = requests.get("https://www.okx.com/api/v5/public/time", timeout=10)
+            latency_ms = round((time.time() - started) * 1000, 1)
+            if response.status_code != 200:
                 return {
-                    'name': 'OKX API',
-                    'status': 'warning',
-                    'details': 'API密钥未配置'
+                    "name": "okx_api",
+                    "status": "critical",
+                    "details": {"status_code": response.status_code, "latency_ms": latency_ms},
                 }
-            
-            start = time.time()
-            ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
-            path = '/api/v5/account/balance'
-            msg = ts + 'GET' + path
-            sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
-            
-            headers = {
-                'OK-ACCESS-KEY': key,
-                'OK-ACCESS-SIGN': sig,
-                'OK-ACCESS-TIMESTAMP': ts,
-                'OK-ACCESS-PASSPHRASE': pp,
-            }
-            
-            resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=10)
-            latency = (time.time() - start) * 1000  # ms
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get('code') == '0':
-                    return {
-                        'name': 'OKX API',
-                        'status': 'healthy',
-                        'details': {
-                            'latency_ms': round(latency, 1),
-                            'status_code': resp.status_code
-                        }
-                    }
-            
-            return {
-                'name': 'OKX API',
-                'status': 'critical',
-                'details': {
-                    'latency_ms': round(latency, 1),
-                    'status_code': resp.status_code,
-                    'error': data.get('msg', 'Unknown')
-                }
-            }
-        except Exception as e:
-            return {
-                'name': 'OKX API',
-                'status': 'critical',
-                'details': f'请求失败: {str(e)}'
-            }
-    
-    def check_disk_space(self):
-        """检查磁盘空间"""
+            return {"name": "okx_api", "status": "healthy", "details": {"latency_ms": latency_ms}}
+        except Exception as exc:
+            return {"name": "okx_api", "status": "critical", "details": str(exc)}
+
+    def check_disk_space(self) -> Dict[str, Any]:
         try:
-            result = subprocess.run(['df', '-h', str(WORKSPACE)], capture_output=True, text=True)
-            lines = result.stdout.strip().split('\n')
-            if len(lines) >= 2:
-                parts = lines[1].split()
-                if len(parts) >= 6:
-                    size = parts[1]
-                    used = parts[2]
-                    available = parts[3]
-                    use_percent = int(parts[4].replace('%', ''))
-                    
-                    status = 'healthy'
-                    if use_percent > 90:
-                        status = 'critical'
-                    elif use_percent > 80:
-                        status = 'warning'
-                    
-                    # 检查reports目录大小
-                    reports_size = subprocess.run(
-                        ['du', '-sh', str(REPORTS_DIR)],
-                        capture_output=True, text=True
-                    ).stdout.split()[0]
-                    
-                    return {
-                        'name': '磁盘空间',
-                        'status': status,
-                        'details': {
-                            'total': size,
-                            'used': used,
-                            'available': available,
-                            'use_percent': use_percent,
-                            'reports_size': reports_size
-                        }
-                    }
-        except Exception as e:
+            usage = shutil.disk_usage(WORKSPACE)
+            used_pct = 0 if usage.total == 0 else round(usage.used / usage.total * 100, 1)
+            status = "healthy"
+            if used_pct >= 90:
+                status = "critical"
+            elif used_pct >= 80:
+                status = "warning"
             return {
-                'name': '磁盘空间',
-                'status': 'warning',
-                'details': f'检查失败: {str(e)}'
+                "name": "disk",
+                "status": status,
+                "details": {
+                    "total_gb": round(usage.total / (1024**3), 2),
+                    "used_gb": round(usage.used / (1024**3), 2),
+                    "free_gb": round(usage.free / (1024**3), 2),
+                    "used_pct": used_pct,
+                },
             }
-    
-    def run_all_checks(self):
-        """运行所有检查"""
+        except Exception as exc:
+            return {"name": "disk", "status": "warning", "details": str(exc)}
+
+    def run_all_checks(self) -> Dict[str, Any]:
         self.checks = [
             self.check_timer_health(),
             self.check_database_health(),
             self.check_okx_api(),
-            self.check_disk_space()
+            self.check_disk_space(),
         ]
-        
-        # 确定整体状态
-        if any(c['status'] == 'critical' for c in self.checks):
-            self.status = 'critical'
-        elif any(c['status'] == 'warning' for c in self.checks):
-            self.status = 'warning'
+
+        if any(item["status"] == "critical" for item in self.checks):
+            self.status = "critical"
+        elif any(item["status"] == "warning" for item in self.checks):
+            self.status = "warning"
         else:
-            self.status = 'healthy'
-        
+            self.status = "healthy"
+
         return {
-            'timestamp': datetime.now().isoformat(),
-            'overall_status': self.status,
-            'checks': self.checks
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "workspace": str(WORKSPACE),
+            "overall_status": self.status,
+            "checks": self.checks,
         }
-    
-    def print_report(self):
-        """打印报告"""
+
+    def print_report(self) -> Dict[str, Any]:
         result = self.run_all_checks()
-        
         print("=" * 60)
-        print("🩺 V5 系统健康检查报告")
+        print("V5 Health Check")
         print("=" * 60)
-        print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"整体状态: {result['overall_status'].upper()}")
+        print(f"time: {result['timestamp']}")
+        print(f"status: {result['overall_status']}")
         print()
-        
-        for check in result['checks']:
-            status_emoji = {'healthy': '✅', 'warning': '⚠️', 'critical': '❌'}
-            print(f"{status_emoji.get(check['status'], '❓')} {check['name']}: {check['status'].upper()}")
-            
-            if isinstance(check['details'], list):
-                for item in check['details']:
-                    if isinstance(item, dict):
-                        print(f"   - {item}")
-                    else:
-                        print(f"   - {item}")
-            elif isinstance(check['details'], dict):
-                for k, v in check['details'].items():
-                    print(f"   {k}: {v}")
+
+        for check in result["checks"]:
+            print(f"[{check['status'].upper()}] {check['name']}")
+            details = check["details"]
+            if isinstance(details, list):
+                for item in details:
+                    print(f"  - {item}")
             else:
-                print(f"   {check['details']}")
+                print(f"  {details}")
             print()
-        
-        print("=" * 60)
+
         return result
 
 
-def main():
+def main() -> int:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     checker = HealthChecker()
     result = checker.print_report()
-    
-    # 保存报告
-    health_file = REPORTS_DIR / 'health_status.json'
-    with open(health_file, 'w') as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
-    
-    # 如果有严重问题，返回非0退出码
-    if result['overall_status'] == 'critical':
-        exit(1)
-    exit(0)
+    HEALTH_FILE.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return 1 if result["overall_status"] == "critical" else 0
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    raise SystemExit(main())

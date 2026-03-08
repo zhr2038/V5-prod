@@ -395,7 +395,7 @@ class Alpha6FactorStrategy(BaseStrategy):
         )
         
         self.factor_weights = self.config['weights']
-        self.sentiment_cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
+        self.sentiment_cache_dir = Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache'
 
     def _resolve_dynamic_weights(self, static_weights: Dict[str, float]) -> Dict[str, float]:
         """根据 IC monitor 动态修正因子权重（可选）。"""

@@ -462,51 +462,54 @@ class LiveExecutionEngine:
             # Hard no-borrow guard (buy-side):
             # never allow buy notional to exceed available quote balance budget.
             if bool(getattr(self.cfg, "buy_quote_balance_safety_check", True)):
-                quote_ccy = "USDT"
-                avail_quote: Optional[float] = None
-                liab_quote = 0.0
+                if not hasattr(self.okx, "get_balance"):
+                    log.warning("BUY_QUOTE_GUARD skipped: client missing get_balance()")
+                else:
+                    quote_ccy = "USDT"
+                    avail_quote: Optional[float] = None
+                    liab_quote = 0.0
 
-                try:
-                    b = self.okx.get_balance(ccy=quote_ccy)
-                    rows = (b.data or {}).get("data") if isinstance(b.data, dict) else None
-                    details = ((rows[0] if isinstance(rows, list) and rows else {}) or {}).get("details")
-                    if isinstance(details, list):
-                        for d in details:
-                            if isinstance(d, dict) and str(d.get("ccy")) == quote_ccy:
-                                avail_quote = float(d.get("availBal") or d.get("eq") or 0.0)
-                                liab_quote = float(d.get("liab") or 0.0)
-                                break
-                except Exception as e:
-                    raise ValueError(f"NO_BORROW_BUY_BLOCK: quote balance query failed: {e}")
+                    try:
+                        b = self.okx.get_balance(ccy=quote_ccy)
+                        rows = (b.data or {}).get("data") if isinstance(b.data, dict) else None
+                        details = ((rows[0] if isinstance(rows, list) and rows else {}) or {}).get("details")
+                        if isinstance(details, list):
+                            for d in details:
+                                if isinstance(d, dict) and str(d.get("ccy")) == quote_ccy:
+                                    avail_quote = float(d.get("availBal") or d.get("eq") or 0.0)
+                                    liab_quote = float(d.get("liab") or 0.0)
+                                    break
+                    except Exception as e:
+                        raise ValueError(f"NO_BORROW_BUY_BLOCK: quote balance query failed: {e}")
 
-                liab_eps = float(getattr(self.cfg, "borrow_liab_eps", 1e-6) or 1e-6)
-                if liab_quote > liab_eps:
-                    raise ValueError(
-                        f"NO_BORROW_BUY_BLOCK: existing {quote_ccy} liability={liab_quote:.8f}"
+                    liab_eps = float(getattr(self.cfg, "borrow_liab_eps", 1e-6) or 1e-6)
+                    if liab_quote > liab_eps:
+                        raise ValueError(
+                            f"NO_BORROW_BUY_BLOCK: existing {quote_ccy} liability={liab_quote:.8f}"
+                        )
+
+                    if avail_quote is None:
+                        raise ValueError("NO_BORROW_BUY_BLOCK: unavailable quote balance")
+
+                    reserve = float(getattr(self.cfg, "buy_quote_reserve_usdt", 0.5) or 0.0)
+                    slack = float(getattr(self.cfg, "buy_quote_slack_ratio", 0.001) or 0.0)
+
+                    # Initialize per-run budget on first buy.
+                    if self._buy_quote_budget_remaining is None:
+                        self._buy_quote_budget_remaining = max(0.0, float(avail_quote) - float(reserve))
+
+                    allowed = max(0.0, float(self._buy_quote_budget_remaining))
+                    if float(notional) > allowed * (1.0 + max(0.0, slack)):
+                        raise ValueError(
+                            f"NO_BORROW_BUY_BLOCK: notional={float(notional):.6f} exceeds "
+                            f"quote_budget={allowed:.6f} {quote_ccy}"
+                        )
+
+                    self._buy_quote_budget_remaining = max(0.0, allowed - float(notional))
+                    log.info(
+                        "BUY_QUOTE_GUARD pass: notional=%.6f avail=%.6f reserve=%.6f remain=%.6f",
+                        float(notional), float(avail_quote), float(reserve), float(self._buy_quote_budget_remaining),
                     )
-
-                if avail_quote is None:
-                    raise ValueError("NO_BORROW_BUY_BLOCK: unavailable quote balance")
-
-                reserve = float(getattr(self.cfg, "buy_quote_reserve_usdt", 0.5) or 0.0)
-                slack = float(getattr(self.cfg, "buy_quote_slack_ratio", 0.001) or 0.0)
-
-                # Initialize per-run budget on first buy.
-                if self._buy_quote_budget_remaining is None:
-                    self._buy_quote_budget_remaining = max(0.0, float(avail_quote) - float(reserve))
-
-                allowed = max(0.0, float(self._buy_quote_budget_remaining))
-                if float(notional) > allowed * (1.0 + max(0.0, slack)):
-                    raise ValueError(
-                        f"NO_BORROW_BUY_BLOCK: notional={float(notional):.6f} exceeds "
-                        f"quote_budget={allowed:.6f} {quote_ccy}"
-                    )
-
-                self._buy_quote_budget_remaining = max(0.0, allowed - float(notional))
-                log.info(
-                    "BUY_QUOTE_GUARD pass: notional=%.6f avail=%.6f reserve=%.6f remain=%.6f",
-                    float(notional), float(avail_quote), float(reserve), float(self._buy_quote_budget_remaining),
-                )
 
             # Pre-check against minSz using signal price estimate to avoid predictable rejects.
             specs = OKXSpotInstrumentsCache().get_spec(inst_id)

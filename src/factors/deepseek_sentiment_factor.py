@@ -46,14 +46,15 @@ class DeepSeekSentimentFactor:
     """
     
     def __init__(self, 
-                 cache_dir: str = '/home/admin/clawd/v5-trading-bot/data/sentiment_cache',
+                 cache_dir: str = None,
                  api_key: str = None,
                  model: str = "deepseek-chat"):
-        self.cache_dir = Path(cache_dir)
+        repo_root = Path(__file__).resolve().parents[2]
+        self.cache_dir = Path(cache_dir) if cache_dir else repo_root / "data" / "sentiment_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # 自动加载项目 .env，避免不同启动方式下环境变量缺失
-        _load_env_file(Path('/home/admin/clawd/v5-trading-bot/.env'))
+        _load_env_file(repo_root / ".env")
 
         self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
         self.base_url = "https://api.deepseek.com/v1"

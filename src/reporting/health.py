@@ -12,7 +12,27 @@ from flask import Blueprint, jsonify
 health_bp = Blueprint('health', __name__)
 
 # 路径配置
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+REPORTS_DIR = PROJECT_ROOT / 'reports'
+CONFIGS_DIR = PROJECT_ROOT / 'configs'
+
+
+def _resolve_active_config_path() -> Path:
+    import os
+
+    env_cfg = (os.getenv("V5_CONFIG") or "").strip()
+    if env_cfg:
+        path = Path(env_cfg)
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        return path
+
+    for candidate in ("live_prod.yaml", "live_20u_real.yaml", "config.yaml"):
+        path = CONFIGS_DIR / candidate
+        if path.exists():
+            return path
+
+    return CONFIGS_DIR / "live_prod.yaml"
 
 
 def _load_json_safe(path: Path) -> dict:
@@ -125,10 +145,10 @@ def readiness_check():
         reasons.append(f"Database unavailable: {e}")
     
     # 检查配置存在
-    config_path = Path('/home/admin/clawd/v5-trading-bot/configs/live_20u_real.yaml')
+    config_path = _resolve_active_config_path()
     if not config_path.exists():
         ready = False
-        reasons.append("Config file missing")
+        reasons.append(f"Config file missing: {config_path.name}")
     
     return jsonify({
         "ready": ready,

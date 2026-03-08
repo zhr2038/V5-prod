@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import time
@@ -9,12 +9,12 @@ from typing import Any, Dict, Optional
 from configs.schema import ExecutionConfig
 from scripts.bills_sync import sync_once as bills_sync_once
 from src.execution.bills_store import BillsStore
+from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
+from src.execution.borrow_guard import check_okx_borrows
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 from src.execution.ledger_engine import LedgerEngine
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
-from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
-from src.execution.borrow_guard import check_okx_borrows
 from src.utils.auto_blacklist import add_symbol as auto_blacklist_add
 
 
@@ -32,6 +32,14 @@ def _read_json(path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _write_json(path: str, obj: Dict[str, Any]) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
 def _to_bool(v: Any) -> bool:
     if isinstance(v, bool):
         return v
@@ -43,7 +51,6 @@ def _to_bool(v: Any) -> bool:
 
 @dataclass
 class LivePreflightResult:
-    """LivePreflightResult类"""
     decision: str  # ALLOW|SELL_ONLY|ABORT
     reconcile_ok: bool
     ledger_ok: bool
@@ -53,13 +60,9 @@ class LivePreflightResult:
 
 
 class LivePreflight:
-    """Live preflight catch-up.
+    """Refresh live safety state before any live execution.
 
-    Goal: before any live execution, bring bills/ledger/reconcile to *fresh* states,
-    and produce an explicit decision: ALLOW / SELL_ONLY / ABORT.
-
-    This does not change strategy logic; it only refreshes safety files and supplies
-    a gating decision for main().
+    The preflight produces a gating decision only. It does not change strategy logic.
     """
 
     def __init__(
@@ -81,7 +84,10 @@ class LivePreflight:
         self.bills_db_path = str(bills_db_path)
         self.ledger_state_path = str(ledger_state_path)
         self.ledger_status_path = str(ledger_status_path)
-        self.reconcile_status_path = str(reconcile_status_path or getattr(cfg, "reconcile_status_path", "reports/reconcile_status.json"))
+        self.reconcile_status_path = str(
+            reconcile_status_path
+            or getattr(cfg, "reconcile_status_path", "reports/reconcile_status.json")
+        )
 
     def _status_is_fresh(self, obj: Optional[Dict[str, Any]], *, max_age_sec: int) -> bool:
         if not obj:
@@ -98,25 +104,155 @@ class LivePreflight:
         age_ms = max(0, _now_ms() - ts_ms_i)
         return age_ms <= int(max_age_sec) * 1000
 
+    def _build_guard_config(self) -> GuardConfig:
+        return GuardConfig(
+            reconcile_status_path=self.reconcile_status_path,
+            kill_switch_path=str(getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json")),
+        )
+
+    def _run_reconcile_guard(
+        self,
+        *,
+        eng: ReconcileEngine,
+        guard_cfg: GuardConfig,
+    ) -> Dict[str, Any]:
+        status = eng.reconcile(out_path=self.reconcile_status_path)
+        status["generated_ts_ms"] = int(status.get("ts_ms") or _now_ms())
+        _write_json(self.reconcile_status_path, status)
+        return KillSwitchGuard(guard_cfg).apply()
+
     def run(self, *, max_pages: int = 5, max_status_age_sec: int = 180) -> LivePreflightResult:
-        """Run"""
         details: Dict[str, Any] = {"ts_ms": _now_ms()}
 
-        # 1) Catch-up bills (source of truth)
         store = BillsStore(path=self.bills_db_path)
         new_bills = bills_sync_once(store=store, client=self.okx, limit=100, max_pages=int(max_pages))
         details["bills"] = {"new": int(new_bills), "total": int(store.count())}
 
-        # 2) Ledger once (bills -> expected -> balance)
         led = LedgerEngine(okx=self.okx, bills_store=store, state_path=self.ledger_state_path)
         ledger_obj = led.run(out_path=self.ledger_status_path)
         ledger_ok = bool(ledger_obj.get("ok"))
-        # Treat dust_reset as effectively ok for preflight (not a real mismatch)
         if not ledger_ok and ledger_obj.get("reason") == "dust_baseline_reset":
             ledger_ok = True
-        details["ledger"] = {"ok": ledger_ok, "reason": ledger_obj.get("reason"), "bill_count": (ledger_obj.get("bills_aggregate") or {}).get("count")}
+        details["ledger"] = {
+            "ok": ledger_ok,
+            "reason": ledger_obj.get("reason"),
+            "bill_count": (ledger_obj.get("bills_aggregate") or {}).get("count"),
+        }
 
-        # 2b) Borrow/liability safety check (before reconcile/decision)
+        th = ReconcileThresholds(
+            abs_usdt_tol=float(getattr(self.cfg, "reconcile_abs_usdt_tol", 50.0)),
+            abs_base_tol=1e-6,
+            dust_usdt_ignore=float(getattr(self.cfg, "reconcile_dust_usdt_ignore", 5.0) or 5.0),
+        )
+        eng = ReconcileEngine(
+            okx=self.okx,
+            position_store=self.position_store,
+            account_store=self.account_store,
+            thresholds=th,
+        )
+        guard_cfg = self._build_guard_config()
+
+        out = self._run_reconcile_guard(eng=eng, guard_cfg=guard_cfg)
+        reconcile_ok = bool(out.get("ok"))
+        reconcile_reason = out.get("reason")
+        kill_switch_enabled = bool((out.get("kill_switch") or {}).get("enabled"))
+        details["reconcile"] = {
+            "ok": reconcile_ok,
+            "reason": reconcile_reason,
+            "category": out.get("category"),
+        }
+        details["kill_switch"] = {
+            "enabled": kill_switch_enabled,
+            "trigger": (out.get("kill_switch") or {}).get("trigger"),
+        }
+
+        if (
+            (not reconcile_ok)
+            and bool(getattr(self.cfg, "preflight_bootstrap_patch_enabled", False))
+            and str(reconcile_reason) in {"base_mismatch", "usdt_mismatch"}
+            and bool(ledger_ok)
+        ):
+            pr = controlled_patch_from_okx_balance(
+                okx=self.okx,
+                position_store=self.position_store,
+                account_store=self.account_store,
+                max_total_drift_usdt=float(
+                    getattr(self.cfg, "preflight_bootstrap_patch_max_total_usdt", 50.0) or 50.0
+                ),
+                min_interval_sec=int(
+                    getattr(self.cfg, "preflight_bootstrap_patch_min_interval_sec", 300) or 300
+                ),
+            )
+            details["bootstrap_patch"] = {
+                "applied": bool(pr.applied),
+                "reason": pr.reason,
+                "est_total_drift_usdt": pr.est_total_drift_usdt,
+                "updated_cash": pr.updated_cash,
+                "updated_positions": pr.updated_positions,
+            }
+
+            out = self._run_reconcile_guard(eng=eng, guard_cfg=guard_cfg)
+            reconcile_ok = bool(out.get("ok"))
+            reconcile_reason = out.get("reason")
+            kill_switch_enabled = bool((out.get("kill_switch") or {}).get("enabled"))
+            details["reconcile_after_patch"] = {
+                "ok": reconcile_ok,
+                "reason": reconcile_reason,
+                "category": out.get("category"),
+            }
+            details["kill_switch_after_patch"] = {
+                "enabled": kill_switch_enabled,
+                "trigger": (out.get("kill_switch") or {}).get("trigger"),
+            }
+
+        rec_obj = _read_json(self.reconcile_status_path)
+        led_obj = _read_json(self.ledger_status_path)
+        fresh_reconcile = self._status_is_fresh(rec_obj, max_age_sec=int(max_status_age_sec))
+        fresh_ledger = self._status_is_fresh(led_obj, max_age_sec=int(max_status_age_sec))
+        details["fresh"] = {
+            "reconcile": fresh_reconcile,
+            "ledger": fresh_ledger,
+            "max_age_sec": int(max_status_age_sec),
+        }
+
+        if not fresh_reconcile or not fresh_ledger:
+            return LivePreflightResult(
+                decision="SELL_ONLY",
+                reconcile_ok=reconcile_ok,
+                ledger_ok=ledger_ok,
+                kill_switch_enabled=kill_switch_enabled,
+                reason="status_stale",
+                details=details,
+            )
+
+        if kill_switch_enabled:
+            try:
+                if (
+                    bool(getattr(self.cfg, "auto_clear_kill_switch_if_ok", False))
+                    and bool(reconcile_ok)
+                    and bool(ledger_ok)
+                ):
+                    ks_path = str(getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json"))
+                    ks_obj = _read_json(ks_path) or {}
+                    ks_obj["enabled"] = False
+                    ks_obj["auto_cleared_ts_ms"] = _now_ms()
+                    ks_obj["auto_cleared_reason"] = "preflight_ok"
+                    _write_json(ks_path, ks_obj)
+                    kill_switch_enabled = False
+                    details["kill_switch_auto_cleared"] = True
+            except Exception:
+                pass
+
+            if kill_switch_enabled:
+                return LivePreflightResult(
+                    decision="ABORT",
+                    reconcile_ok=reconcile_ok,
+                    ledger_ok=ledger_ok,
+                    kill_switch_enabled=True,
+                    reason="kill_switch",
+                    details=details,
+                )
+
         try:
             bal = self.okx.get_balance()
             borrow_res = check_okx_borrows(
@@ -141,25 +277,33 @@ class LivePreflight:
             }
 
             if (not borrow_res.ok) and bool(getattr(self.cfg, "abort_on_borrow", True)):
-                # Auto blacklist currencies with liabilities to prevent further trading in them.
                 try:
                     for it in (borrow_res.items or []):
                         sym = f"{it.ccy}/USDT"
-                        auto_blacklist_add(sym, reason="borrow_detected", ttl_sec=30 * 24 * 3600, meta={"eq": it.eq, "liab": it.liab, "cross_liab": it.cross_liab, "borrow_froz": it.borrow_froz})
+                        auto_blacklist_add(
+                            sym,
+                            reason="borrow_detected",
+                            ttl_sec=30 * 24 * 3600,
+                            meta={
+                                "eq": it.eq,
+                                "liab": it.liab,
+                                "cross_liab": it.cross_liab,
+                                "borrow_froz": it.borrow_froz,
+                            },
+                        )
                 except Exception:
                     pass
 
-                # borrow_block_mode:
-                # - global_abort (default): keep historical strict behavior
-                # - symbol_only: freeze only affected symbols via blacklist, continue preflight
-                borrow_block_mode = str(getattr(self.cfg, "borrow_block_mode", "global_abort") or "global_abort").lower()
+                borrow_block_mode = str(
+                    getattr(self.cfg, "borrow_block_mode", "global_abort") or "global_abort"
+                ).lower()
                 details["borrow_check"]["block_mode"] = borrow_block_mode
                 if borrow_block_mode == "symbol_only":
                     details["borrow_check"]["action"] = "symbol_blacklist_only"
                 else:
                     return LivePreflightResult(
                         decision="ABORT",
-                        reconcile_ok=False,
+                        reconcile_ok=reconcile_ok,
                         ledger_ok=ledger_ok,
                         kill_switch_enabled=False,
                         reason="borrow_detected",
@@ -167,195 +311,87 @@ class LivePreflight:
                     )
         except Exception as e:
             details["borrow_check"] = {"ok": False, "reason": f"error:{e}"}
-            # Conservative: do not allow buys when borrow check is unavailable
             return LivePreflightResult(
                 decision="SELL_ONLY",
-                reconcile_ok=False,
+                reconcile_ok=reconcile_ok,
                 ledger_ok=ledger_ok,
                 kill_switch_enabled=False,
                 reason="borrow_check_error",
                 details=details,
             )
 
-        # 2c) Account configuration safety check (buy gating by account mode/settings)
         try:
             if bool(getattr(self.cfg, "enforce_account_config_check", True)):
-                r = self.okx.get_account_config()
-                rows = (r.data or {}).get("data") if isinstance(r.data, dict) else None
-                cfg0 = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else {}
+                if not hasattr(self.okx, "get_account_config"):
+                    details["account_config"] = {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "client_missing_get_account_config",
+                    }
+                else:
+                    r = self.okx.get_account_config()
+                    rows = (r.data or {}).get("data") if isinstance(r.data, dict) else None
+                    cfg0 = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else {}
 
-                acct_lv = str(cfg0.get("acctLv", "") or "")
-                pos_mode = str(cfg0.get("posMode", "") or "")
-                auto_loan = _to_bool(cfg0.get("autoLoan"))
-                enable_spot_borrow = _to_bool(cfg0.get("enableSpotBorrow"))
-                spot_auto_repay = _to_bool(cfg0.get("spotBorrowAutoRepay"))
+                    acct_lv = str(cfg0.get("acctLv", "") or "")
+                    pos_mode = str(cfg0.get("posMode", "") or "")
+                    auto_loan = _to_bool(cfg0.get("autoLoan"))
+                    enable_spot_borrow = _to_bool(cfg0.get("enableSpotBorrow"))
+                    spot_auto_repay = _to_bool(cfg0.get("spotBorrowAutoRepay"))
 
-                violations = []
+                    violations = []
 
-                required_acct_lv = str(getattr(self.cfg, "required_acct_lv", "") or "").strip()
-                if required_acct_lv and acct_lv and acct_lv != required_acct_lv:
-                    violations.append(f"acctLv_mismatch:{acct_lv}!={required_acct_lv}")
+                    required_acct_lv = str(getattr(self.cfg, "required_acct_lv", "") or "").strip()
+                    if required_acct_lv and acct_lv and acct_lv != required_acct_lv:
+                        violations.append(f"acctLv_mismatch:{acct_lv}!={required_acct_lv}")
 
-                required_pos_mode = str(getattr(self.cfg, "required_pos_mode", "") or "").strip()
-                if required_pos_mode and pos_mode and pos_mode != required_pos_mode:
-                    violations.append(f"posMode_mismatch:{pos_mode}!={required_pos_mode}")
+                    required_pos_mode = str(getattr(self.cfg, "required_pos_mode", "") or "").strip()
+                    if required_pos_mode and pos_mode and pos_mode != required_pos_mode:
+                        violations.append(f"posMode_mismatch:{pos_mode}!={required_pos_mode}")
 
-                if bool(getattr(self.cfg, "require_auto_loan_false", True)) and auto_loan:
-                    violations.append("autoLoan_true")
+                    if bool(getattr(self.cfg, "require_auto_loan_false", True)) and auto_loan:
+                        violations.append("autoLoan_true")
 
-                if bool(getattr(self.cfg, "require_spot_borrow_disabled", False)) and enable_spot_borrow:
-                    violations.append("enableSpotBorrow_true")
+                    if bool(getattr(self.cfg, "require_spot_borrow_disabled", False)) and enable_spot_borrow:
+                        violations.append("enableSpotBorrow_true")
 
-                if bool(getattr(self.cfg, "ensure_spot_auto_repay_true", True)) and enable_spot_borrow and (not spot_auto_repay):
-                    violations.append("spotBorrowAutoRepay_false")
+                    if (
+                        bool(getattr(self.cfg, "ensure_spot_auto_repay_true", True))
+                        and enable_spot_borrow
+                        and (not spot_auto_repay)
+                    ):
+                        violations.append("spotBorrowAutoRepay_false")
 
-                details["account_config"] = {
-                    "ok": len(violations) == 0,
-                    "acctLv": acct_lv,
-                    "posMode": pos_mode,
-                    "autoLoan": auto_loan,
-                    "enableSpotBorrow": enable_spot_borrow,
-                    "spotBorrowAutoRepay": spot_auto_repay,
-                    "violations": violations,
-                }
+                    details["account_config"] = {
+                        "ok": len(violations) == 0,
+                        "acctLv": acct_lv,
+                        "posMode": pos_mode,
+                        "autoLoan": auto_loan,
+                        "enableSpotBorrow": enable_spot_borrow,
+                        "spotBorrowAutoRepay": spot_auto_repay,
+                        "violations": violations,
+                    }
 
-                if violations:
-                    return LivePreflightResult(
-                        decision="SELL_ONLY",
-                        reconcile_ok=False,
-                        ledger_ok=ledger_ok,
-                        kill_switch_enabled=False,
-                        reason="account_config_block",
-                        details=details,
-                    )
+                    if violations:
+                        return LivePreflightResult(
+                            decision="SELL_ONLY",
+                            reconcile_ok=reconcile_ok,
+                            ledger_ok=ledger_ok,
+                            kill_switch_enabled=False,
+                            reason="account_config_block",
+                            details=details,
+                        )
         except Exception as e:
             details["account_config"] = {"ok": False, "reason": f"error:{e}"}
             return LivePreflightResult(
                 decision="SELL_ONLY",
-                reconcile_ok=False,
+                reconcile_ok=reconcile_ok,
                 ledger_ok=ledger_ok,
                 kill_switch_enabled=False,
                 reason="account_config_check_error",
                 details=details,
             )
 
-        # 3) Reconcile once + kill-switch guard
-        # (Write reconcile_status.json; then guard will write failure_state/kill_switch)
-        th = ReconcileThresholds(
-            abs_usdt_tol=float(getattr(self.cfg, "reconcile_abs_usdt_tol", 50.0)),  # Use config or default 50
-            abs_base_tol=1e-6,
-            dust_usdt_ignore=float(getattr(self.cfg, "reconcile_dust_usdt_ignore", 5.0) or 5.0),
-        )
-        eng = ReconcileEngine(
-            okx=self.okx,
-            position_store=self.position_store,
-            account_store=self.account_store,
-            thresholds=th,
-        )
-
-        status = eng.reconcile(out_path=self.reconcile_status_path)
-        status["generated_ts_ms"] = int(status.get("ts_ms") or _now_ms())
-        # atomic rewrite (ensure generated_ts_ms persisted)
-        p = Path(self.reconcile_status_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(p)
-
-        out = KillSwitchGuard(GuardConfig(reconcile_status_path=self.reconcile_status_path)).apply()
-        reconcile_ok = bool(out.get("ok"))
-        reconcile_reason = out.get("reason")
-        kill_switch_enabled = bool((out.get("kill_switch") or {}).get("enabled"))
-        details["reconcile"] = {"ok": reconcile_ok, "reason": reconcile_reason, "category": out.get("category")}
-        details["kill_switch"] = {"enabled": kill_switch_enabled, "trigger": (out.get("kill_switch") or {}).get("trigger")}
-
-        # 3b) Optional controlled patch (only for state alignment)
-        if (
-            (not reconcile_ok)
-            and bool(getattr(self.cfg, "preflight_bootstrap_patch_enabled", False))
-            and str(reconcile_reason) in {"base_mismatch", "usdt_mismatch"}
-            and bool(ledger_ok)
-        ):
-            pr = controlled_patch_from_okx_balance(
-                okx=self.okx,
-                position_store=self.position_store,
-                account_store=self.account_store,
-                max_total_drift_usdt=float(getattr(self.cfg, "preflight_bootstrap_patch_max_total_usdt", 50.0) or 50.0),
-                min_interval_sec=int(getattr(self.cfg, "preflight_bootstrap_patch_min_interval_sec", 300) or 300),
-            )
-            details["bootstrap_patch"] = {
-                "applied": bool(pr.applied),
-                "reason": pr.reason,
-                "est_total_drift_usdt": pr.est_total_drift_usdt,
-                "updated_cash": pr.updated_cash,
-                "updated_positions": pr.updated_positions,
-            }
-
-            # rerun reconcile/guard after patch
-            status = eng.reconcile(out_path=self.reconcile_status_path)
-            status["generated_ts_ms"] = int(status.get("ts_ms") or _now_ms())
-            p = Path(self.reconcile_status_path)
-            tmp = p.with_suffix(p.suffix + ".tmp")
-            tmp.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(p)
-
-            out = KillSwitchGuard(GuardConfig(reconcile_status_path=self.reconcile_status_path)).apply()
-            reconcile_ok = bool(out.get("ok"))
-            reconcile_reason = out.get("reason")
-            kill_switch_enabled = bool((out.get("kill_switch") or {}).get("enabled"))
-            details["reconcile_after_patch"] = {"ok": reconcile_ok, "reason": reconcile_reason, "category": out.get("category")}
-            details["kill_switch_after_patch"] = {"enabled": kill_switch_enabled, "trigger": (out.get("kill_switch") or {}).get("trigger")}
-
-        # 4) Freshness check (avoid stale ok=true)
-        rec_obj = _read_json(self.reconcile_status_path)
-        led_obj = _read_json(self.ledger_status_path)
-        fresh_reconcile = self._status_is_fresh(rec_obj, max_age_sec=int(max_status_age_sec))
-        fresh_ledger = self._status_is_fresh(led_obj, max_age_sec=int(max_status_age_sec))
-        details["fresh"] = {"reconcile": fresh_reconcile, "ledger": fresh_ledger, "max_age_sec": int(max_status_age_sec)}
-
-        if not fresh_reconcile or not fresh_ledger:
-            decision = "SELL_ONLY"
-            reason = "status_stale"
-            return LivePreflightResult(
-                decision=decision,
-                reconcile_ok=reconcile_ok,
-                ledger_ok=ledger_ok,
-                kill_switch_enabled=kill_switch_enabled,
-                reason=reason,
-                details=details,
-            )
-
-        # 5) Decision with smart reconcile handling
-        if kill_switch_enabled:
-            # Optional: auto-clear kill-switch if everything is currently OK.
-            try:
-                if bool(getattr(self.cfg, "auto_clear_kill_switch_if_ok", False)) and bool(reconcile_ok) and bool(ledger_ok):
-                    ks_path = getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json")
-                    ks_obj = _read_json(str(ks_path)) or {}
-                    ks_obj["enabled"] = False
-                    ks_obj["auto_cleared_ts_ms"] = _now_ms()
-                    ks_obj["auto_cleared_reason"] = "preflight_ok"
-                    p = Path(str(ks_path))
-                    p.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = p.with_suffix(p.suffix + ".tmp")
-                    tmp.write_text(json.dumps(ks_obj, ensure_ascii=False, indent=2), encoding="utf-8")
-                    tmp.replace(p)
-                    kill_switch_enabled = False
-                    details["kill_switch_auto_cleared"] = True
-            except Exception:
-                pass
-
-            if kill_switch_enabled:
-                return LivePreflightResult(
-                    decision="ABORT",
-                    reconcile_ok=reconcile_ok,
-                    ledger_ok=ledger_ok,
-                    kill_switch_enabled=True,
-                    reason="kill_switch",
-                    details=details,
-                )
-
-        # 优化: 如果两者都ok，正常交易
         if reconcile_ok and ledger_ok:
             return LivePreflightResult(
                 decision="ALLOW",
@@ -366,34 +402,13 @@ class LivePreflight:
                 details=details,
             )
 
-        # 优化: ledger_ok 但 reconcile 有差异，允许交易（配置强制允许时）
         if ledger_ok and not reconcile_ok:
-            # 配置强制允许
-            force_allow = bool(getattr(self.cfg, "allow_trade_on_small_reconcile_drift", False))
-            
-            if force_allow:
-                details["reconcile_warn"] = {
-                    "original_ok": False,
-                    "allowed": True,
-                    "reason": "forced_by_config"
-                }
-                return LivePreflightResult(
-                    decision="ALLOW",
-                    reconcile_ok=True,
-                    ledger_ok=True,
-                    kill_switch_enabled=False,
-                    reason="ok_with_forced_config",
-                    details=details,
-                )
-        
-        # 紧急修复: 如果两者都不OK但配置允许小额差异，强制允许（初始化场景）
-        if not reconcile_ok and not ledger_ok:
             force_allow = bool(getattr(self.cfg, "allow_trade_on_small_reconcile_drift", False))
             if force_allow:
                 details["reconcile_warn"] = {
                     "original_ok": False,
                     "allowed": True,
-                    "reason": "forced_by_config_emergency"
+                    "reason": "forced_by_config",
                 }
                 return LivePreflightResult(
                     decision="ALLOW",
@@ -404,7 +419,23 @@ class LivePreflight:
                     details=details,
                 )
 
-        # 默认: 保守策略，只允许卖出
+        if not reconcile_ok and not ledger_ok:
+            force_allow = bool(getattr(self.cfg, "allow_trade_on_small_reconcile_drift", False))
+            if force_allow:
+                details["reconcile_warn"] = {
+                    "original_ok": False,
+                    "allowed": True,
+                    "reason": "forced_by_config_emergency",
+                }
+                return LivePreflightResult(
+                    decision="ALLOW",
+                    reconcile_ok=True,
+                    ledger_ok=True,
+                    kill_switch_enabled=False,
+                    reason="ok_with_forced_config",
+                    details=details,
+                )
+
         return LivePreflightResult(
             decision="SELL_ONLY",
             reconcile_ok=reconcile_ok,

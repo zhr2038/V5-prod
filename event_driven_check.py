@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger('event_driven_wrapper')
 
-PROJECT_ROOT = Path('/home/admin/clawd/v5-trading-bot')
+PROJECT_ROOT = Path(__file__).resolve().parent
 REPORTS_DIR = PROJECT_ROOT / 'reports'
 
 # Add project path
@@ -44,6 +44,7 @@ def resolve_config_path() -> Path:
     1) V5_CONFIG env
     2) configs/live_prod.yaml
     3) configs/live_20u_real.yaml
+    4) configs/config.yaml
     """
     env_cfg = os.getenv('V5_CONFIG', '').strip()
     if env_cfg:
@@ -56,12 +57,13 @@ def resolve_config_path() -> Path:
     candidates = [
         PROJECT_ROOT / 'configs/live_prod.yaml',
         PROJECT_ROOT / 'configs/live_20u_real.yaml',
+        PROJECT_ROOT / 'configs/config.yaml',
     ]
     for p in candidates:
         if p.exists():
             return p
 
-    return PROJECT_ROOT / 'configs/live_20u_real.yaml'
+    return PROJECT_ROOT / 'configs/live_prod.yaml'
 
 
 def resolve_live_service_unit(ev_cfg: dict) -> str:

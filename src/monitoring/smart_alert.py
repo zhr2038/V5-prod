@@ -10,11 +10,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 class SmartAlertEngine:
     """智能告警引擎"""
     
-    def __init__(self, workspace: Path = Path('/home/admin/clawd/v5-trading-bot')):
+    def __init__(self, workspace: Path = PROJECT_ROOT):
         self.workspace = workspace
         self.reports_dir = workspace / 'reports'
         self.alerts_state_file = self.reports_dir / 'alerts_state.json'

@@ -49,8 +49,8 @@ class GuardConfig:
     # G1.2.4: only stale_status triggers a SOFT-kill threshold
     stale_soft_threshold: int = 3
     
-    # Auto-clear kill switch when conditions improve
-    auto_clear_enabled: bool = True
+    # Auto-clear only when explicitly enabled by ops config.
+    auto_clear_enabled: bool = False
     auto_clear_after_ok_count: int = 1  # Clear after 1 consecutive OK reconcile
 
 
@@ -199,9 +199,12 @@ class KillSwitchGuard:
         ks = self._load_kill_switch()
 
         # Auto-clear kill switch if enabled and conditions improve
-        if (bool(ks.get("enabled")) and 
-            self.cfg.auto_clear_enabled and 
-            int(st.get("consecutive_ok") or 0) >= self.cfg.auto_clear_after_ok_count):
+        if (
+            bool(ks.get("enabled"))
+            and self.cfg.auto_clear_enabled
+            and str(ks.get("trigger") or "").lower() != "manual"
+            and int(st.get("consecutive_ok") or 0) >= self.cfg.auto_clear_after_ok_count
+        ):
             
             ks_cleared = {
                 "enabled": False,

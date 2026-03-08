@@ -1,729 +1,200 @@
-# V5 交易机器人
+﻿# V5 Trading Bot
 
-> 专业级量化交易系统 | OKX现货 | 多策略融合 | 机器学习驱动
+当前仓库已经按正式上线路径收口。
 
----
+核心目标：
+- OKX 现货实盘执行
+- 统一的预交易安全检查
+- 运行状态、对账、账本、成本统计分离
+- 保留本地研究历史，但不再让研究脚本污染 GitHub 主运行路径
 
-## 📖 项目简介
+## 当前正式入口
 
-V5是一个完整的横截面趋势轮动量化交易系统，专为OKX现货市场设计。系统采用模块化架构，支持多策略并行、动态风险管理、机器学习因子和实时Web监控。
+主入口：
+- `main.py`
+- `event_driven_check.py`
 
----
+正式配置：
+- `configs/live_prod.yaml`
 
-## 🆕 最近修改（2026-03-08）
+环境文件：
+- 根目录 `.env`
 
-### 1) ML数据回填修复：从OKX API实时获取历史K线
+正式 systemd 名称：
+- `v5-prod.user.service`
+- `v5-prod.user.timer`
+- `v5-event-driven.service`
+- `v5-event-driven.timer`
 
-- **问题**：本地K线缓存文件13天未更新（最后更新2026-02-25），导致ML回填6小时收益标签时频繁出现"缓存数据不足"警告
-- **解决**：ML数据收集器优先从OKX API获取历史K线，失败时自动回退到本地缓存
-- **改动文件**：
-  - `src/execution/ml_data_collector.py`: 新增 `_fetch_future_return_from_api()` 方法
-  - `src/core/pipeline.py`: V5Pipeline 传递 data_provider 给 MLDataCollector
-  - `main.py`: 创建 V5Pipeline 时传入 provider 实例
-  - `scripts/daily_ml_training.py`: 每日训练使用 API 数据源
-- **效果**：标签回填成功率提升至100%，ML训练数据质量显著改善
+## 当前业务流程
 
-### 2) Budget Cap 配置优化
+1. `main.py` 读取根目录 `.env` 和 `configs/live_prod.yaml`
+2. 拉取 OKX 市场数据和交易 universe
+3. 计算 alpha 与 regime
+4. 做组合构建与风险约束
+5. 执行 `live_preflight`
+6. 生成订单并进入 live execution
+7. 同步 fills、更新本地状态、写入 `reports/`
 
-- 修复 `live_equity_cap_usdt: null` 但 `action_enabled: true` 导致的警告
-- 建议：不设资金上限时将 `action_enabled` 设为 `false`
+预交易安全顺序：
+1. bills
+2. ledger
+3. reconcile
+4. kill-switch
+5. borrow 检查
+6. account config 检查
+7. 输出 `ALLOW / SELL_ONLY / ABORT`
 
-### 3) Reconcile Timer 缺失修复
+## 正式运行依赖
 
-- 创建 `v5-reconcile.user.timer`，每5分钟自动刷新对账状态
-- 避免余额不一致导致的 SELL_ONLY/ABORT 误判
+必须保留：
+- `src/`
+- `configs/live_prod.yaml`
+- `scripts/run_hourly_live_window.sh`
+- `scripts/bills_sync.py`
+- `scripts/ledger_once.py`
+- `scripts/reconcile_guard_once.py`
+- `scripts/rollup_last24h.py`
+- `scripts/rollup_costs.py`
+- `scripts/rollup_spreads.py`
+- `scripts/health_check.py`
+- `scripts/v5_status_report.py`
+- `scripts/okx_private_selfcheck.py`
+- `scripts/live_preflight_once.py`
+- `scripts/orders_gc_once.py`
+- `scripts/orders_repair_once.py`
 
----
+详细清单见：
+- `docs/PRODUCTION_MINIMAL_FILES.md`
+- `docs/CURRENT_PRODUCTION_FLOW.md`
+- `scripts/README.md`
 
-## 🆕 最近修改（2026-03-03 至 2026-03-07）
+## 脚本分层
 
-### 1) Qlib 迁移：Alpha158 因子与 IC 监控（2026-03-05）
+`scripts/` 根目录现在只保留三类内容：
+- 定时运行脚本
+- 手工运维 / 恢复脚本
+- 监控与状态脚本
 
-**核心改进**：
-- **Alpha158 因子 overlay**：新增6个量价因子（corr_pv, cord, rsqr, rank, imax, imin, imxd）
-- **IC 监控系统**：实时计算因子/评分与未来收益的信息系数
-- **TopkDropout**：限制每轮换仓数量，减少抖动
-- **负期望冷却**：自动识别高成本来回交易的币种，24小时冷却
+非生产脚本：
+- 已从 GitHub 主运行路径移除
+- 本地如需保留，可放在 `scripts/archive/`
+- `scripts/archive/` 按 `.gitignore` 规则不会上传 GitHub
 
-**新增配置**：
-```yaml
-alpha:
-  alpha158_overlay:
-    enabled: true
-    blend_weight: 0.35
-  dynamic_ic_weighting:
-    enabled: true
-  topk_dropout:
-    enabled: true
-    n_drop_per_cycle: 2
-    hold_cycles: 2
-```
+## 快速启动
 
-### 2) ML 训练防过拟合机制（2026-03-06）
+### 1. 安装依赖
 
-**问题**：LightGBM 严重过拟合（Train IC 0.95, Valid IC -0.09）
-
-**解决**：
-- **双候选模型**：Ridge + LightGBM，选择泛化能力更好的
-- **时序交叉验证**：5折时序CV，防止数据泄露
-- **动态特征选择**：剔除低信息特征（returns_1h/6h, volatility_6h）和高相关特征（rsi, macd）
-- **训练 Gate**：仅当 Valid IC > 0 且 IC Gap < 0.25 时才更新模型
-- **模型晋升机制**：新模型需 Walk-forward 验证优于旧模型才替换
-
-**当前模型性能**：
-```
-Train IC: 0.83
-Valid IC: 0.04
-CV Mean IC: 0.15
-```
-
-### 3) 组合优化器（Portfolio Optimizer）（2026-03-06）
-
-**功能**：
-- 基于上一周期持仓的**权重平滑**（prev_weight_penalty = 0.35）
-- 避免仓位剧烈抖动，降低换手成本
-- **最小仓位下限**：min_weight_floor = 0.01
-
-### 4) 抖动控制与持仓门槛（2026-03-04）
-
-**新增执行约束**：
-- **最短持仓时间**：`min_hold_minutes_before_rank_exit = 120`（2小时）
-- **成本感知开仓**：根据往返成本调整最小入场分数阈值
-- **每轮最大换手**：`max_rebalance_turnover_per_cycle = 0.30`（30%）
-- **Rank Exit 防抖**：需连续2轮跌出前3才触发，退出后1小时内禁止回补
-
-### 5) Web 面板决策归因优化（2026-03-03）
-
-**改进**：
-- **中文解释**：将技术术语翻译为易懂的中文（如"deadband拦截"→"仓位变化太小，不交易"）
-- **分离历史成交与当前轮次**：避免显示错位导致的"成功/失败"误判
-- **显示最新有序号的运行摘要**：当当前轮次无尝试时
-
-### 6) 其他修复与调优
-
-- **止损状态修复**：防止陈旧止损状态导致误判 NEAR 退出
-- **粉尘订单升级**：当减仓触发最小数量限制时，自动升级为整仓卖出
-- **事件驱动降噪**：降低事件噪声，减少误触发
-- **反追涨限制放宽**：add-notional 上限从 0.5x 放宽到 1.0x，便于平滑加仓
-- **黑名单更新**：新增 PI/USDT 避免合规拒绝
-- **建仓冷却缩短**：从 30 分钟缩短到 15 分钟
-
----
-
-## 🆕 最近修改（2026-03-02）
-
-### 1) 无交易根因修复（选币/评分链路）
-
-- 修复前现象：多轮 `selected=[]`、`orders=0`，`Alpha6Factor` 长期 `0 buy / 全 sell`。
-- 根因：
-  - Alpha6 绝对分阈值在同向偏空市场下退化为全卖；
-  - 多策略 Alpha6 权重存在硬编码，配置与运行链路不一致；
-  - 配置文件存在重复 `alpha` 段，存在覆盖风险。
-- 修复内容：
-  - `Alpha6Factor` 改为**截面相对评分**（`relative_score = score - cross_section_mean`）；
-  - 增加无买入兜底，避免长期 0 buy；
-  - Alpha6 权重改为统一读取 live 配置，不再硬编码；
-  - 启用动态 IC 符号修正（按 IC 方向修正因子方向）。
-- 验证结果：
-  - 策略从 `买=0 卖=4` 恢复到 `买=2 卖=2`；
-  - 实盘恢复成交（ETH/SOL OPEN_LONG）。
-
-### 2) 执行冲突与重复开仓防护（已上线）
-
-- 新增同币种 `OPEN_LONG` 冷却窗口（默认 10 分钟）；
-- 引入订单仲裁与币种状态机（`FLAT/LONG/EXIT_PENDING/COOLDOWN`）；
-- 避免同轮 close+open 冲突、降低抖动换手。
-
-### 3) 小资金粉尘与持仓识别修复（已上线）
-
-- 粉尘识别改为“价值优先”策略（默认 0.5U）；
-- 修复小账户下 ETH 等合法持仓被误判为 0 的问题；
-- 对账与本地持仓同步更稳定，减少误触发 SELL_ONLY/ABORT。
-
-### 4) 回测与IC现状
-
-- 1年 IC 重算完成，结论：
-  - 不适合全局统一反向；
-  - 必须按 Regime 做状态化权重/方向。
-- 已补充快速 A/B 验证入口并用于策略修正方向评估。
-
-### 5) 文档新增
-
-- 新增**完整程序运行流程图**（触发 → 预检 → 因子 → Regime → 组合 → 风控 → 执行 → 审计）。
-- 新增关键状态文件说明（orders.sqlite / decision_audit / order_state_machine 等）。
-
----
-
-## 🏗️ 系统架构
-
-### 六层流水线架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  数据层 (Data)                                                │
-│  ├─ OKX行情数据获取                                          │
-│  ├─ 资金费率数据                                             │
-│  └─ RSS新闻情绪数据                                          │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────────┐
-│  因子层 (Alpha)                                               │
-│  ├─ 5因子动态加权 (动量/波动率/成交量/反转/情绪)              │
-│  ├─ Ridge回归机器学习因子                                    │
-│  └─ 多策略信号融合                                           │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────────┐
-│  市场状态层 (Regime)                                          │
-│  └─ Ensemble三方法投票：HMM + 资金费率 + RSS情绪              │
-│     ├─ HMM模型 (35%权重)：隐马尔可夫趋势识别                 │
-│     ├─ 资金费率 (40%权重)：10币种分层加权                     │
-│     └─ RSS情绪 (25%权重)：新闻情绪分析                        │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────────┐
-│  组合层 (Portfolio)                                           │
-│  ├─ 横截面评分排序                                           │
-│  ├─ 动态仓位分配                                             │
-│  └─ Rebalance死区控制                                        │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────────┐
-│  风控层 (Risk)                                                │
-│  ├─ AutoRiskGuard：PROTECT/DEFENSE/NEUTRAL三档               │
-│  ├─ 固定止损 (Fixed Stop Loss)                               │
-│  ├─ 分阶段止盈 (Profit Taking)                               │
-│  │   ├─ 盈利5%+：保本止损                                    │
-│  │   ├─ 盈利10%+：保本+5%                                    │
-│  │   └─ 盈利15%+：追踪止损（保护80%利润）                    │
-│  └─ 回撤控制 (Drawdown Control)                              │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────────┐
-│  执行层 (Execution)                                           │
-│  ├─ OKX私有接口下单/查单/撤单                                │
-│  ├─ PositionBuilder分批建仓                                  │
-│  └─ 粉尘订单过滤 (Dust Skip)                                 │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🗺️ 完整程序运行流程图
-
-> 从定时器/手动触发到下单与审计落盘的完整链路（当前线上实现）
-
-```mermaid
-flowchart TD
-    A[触发入口\n- systemd timer\n- event-driven\n- 手动 main.py] --> B[加载配置\nconfigs/live_20u_real.yaml]
-    B --> C[Pre-Trade Auto Sync\n同步交易所余额/持仓到本地]
-    C --> D{预检是否通过?\n借贷检查/账户模式/预算检查}
-    D -- 否 --> D1[进入保护路径\nSELL_ONLY / ABORT\n写入reconcile_status]
-    D -- 是 --> E[拉取市场数据\nK线/成交量/情绪/资金费率]
-
-    E --> F[Universe筛选\n市值/成交额/点差/黑名单]
-    F --> G[Alpha层计算\n多策略并行:
-TrendFollowing + MeanReversion + Alpha6]
-
-    G --> H[信号融合\n同向加权/冲突过滤]
-    H --> I[Regime判断\nEnsemble: HMM + Funding + RSS]
-    I --> J[组合构建\n评分排序 + top_pct + min_score_threshold]
-
-    J --> K[风险控制\nAutoRiskGuard/止损止盈/回撤约束]
-    K --> L[订单仲裁\nOrderArbitrator + Symbol状态机]
-    L --> M[执行引擎\nOKX下单/查单/重试/冷却]
-
-    M --> N[成交回写\norders.sqlite / position_store]
-    N --> O[审计与报告\nrun目录、decision_audit、web API]
-    O --> P[下轮触发\n15分钟事件驱动 + 整点任务]
-```
-
-### 关键状态文件（运行时）
-
-- `reports/orders.sqlite`：订单与成交
-- `reports/portfolio.json`：目标组合/当前组合
-- `reports/reconcile_status.json`：对账与预检状态
-- `reports/order_state_machine.json`：按币种执行状态机
-- `reports/runs/<run_id>/decision_audit.json`：每轮决策归因
-- `reports/event_monitor_state.json`：事件驱动状态
-
----
-
-## 🚀 快速开始
-
-### 环境配置
-
-```bash
-# 克隆仓库
-git clone git@github.com:zhr2038/v5-trading-bot.git
-cd v5-trading-bot
-
-# 创建虚拟环境
-python3 -m venv .venv
-source .venv/bin/activate
-
-# 安装依赖
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 配置文件
+### 2. 准备环境
 
-```bash
-# 复制环境变量模板
-cp .env.example .env
+根目录 `.env` 至少需要：
 
-# 编辑.env文件，填写OKX API密钥
-# EXCHANGE_API_KEY=your_key
-# EXCHANGE_API_SECRET=your_secret
-# EXCHANGE_PASSPHRASE=your_passphrase
-# DEEPSEEK_API_KEY=your_key (可选，用于情绪分析)
+```env
+EXCHANGE_API_KEY=...
+EXCHANGE_API_SECRET=...
+EXCHANGE_PASSPHRASE=...
 ```
 
-### 运行模式
+### 3. 手工运行
 
-#### 1. Dry-Run模式（模拟交易，默认）
-```bash
-python3 main.py --config configs/live_20u_real.yaml
+Dry-run 或配置检查：
+
+```powershell
+python main.py
 ```
 
-#### 2. Live模式（实盘交易）
-```bash
-# 必须设置ARM环境变量
-export V5_LIVE_ARM=YES
-python3 main.py --config configs/live_20u_real.yaml
+显式指定正式配置：
+
+```powershell
+$env:V5_CONFIG='configs/live_prod.yaml'
+python main.py
 ```
 
-> ⚠️ **安全提示**：即使配置写了`mode: live`，也必须显式设置`V5_LIVE_ARM=YES`才会真正下单。
+实盘执行前必须显式 arm：
 
----
-
-## 📊 核心功能详解
-
-### 1. 多策略并行系统
-
-系统同时运行多个策略，通过信号融合生成最终决策：
-
-| 策略 | 类型 | 权重 | 核心逻辑 |
-|------|------|------|----------|
-| **TrendFollowing** | 趋势跟踪 | 15% | 双均线交叉 + ADX确认 |
-| **MeanReversion** | 均值回归 | 35% | RSI超买超卖 + 布林带 |
-| **Alpha6Factor** | 综合因子 | 50% | 5因子动态加权 + 机器学习 |
-
-**信号融合规则**：
-- 同向信号：加权平均
-- 反向信号：冲突解决（趋势优先）
-- 无信号：保持现状
-
-### 2. Ensemble市场状态判断
-
-三种方法投票决定市场状态：
-
-```yaml
-hmm_weight: 0.35      # HMM模型：基于价格序列的隐状态识别
-funding_weight: 0.40  # 资金费率：10币种分层加权综合
-rss_weight: 0.25      # RSS情绪：新闻情绪分析
+```powershell
+$env:V5_LIVE_ARM='YES'
+$env:V5_DATA_PROVIDER='okx'
+python main.py
 ```
 
-**输出状态**：
-- `TrendingUp`：趋势向上，满仓操作
-- `Sideways`：震荡行情，80%仓位
-- `TrendingDown`：趋势向下，60%仓位
-- `Risk-Off`：风控模式，只减仓不开新仓
+## 运维命令
 
-### 3. 三层风控体系
+健康检查：
 
-#### 3.1 AutoRiskGuard（自动风险档位）
-
-| 档位 | 触发条件 | 行为 |
-|------|----------|------|
-| **NEUTRAL** | 正常状态 | 正常交易 |
-| **DEFENSE** | 回撤5-10% | 限制新仓，最多3个持仓 |
-| **PROTECT** | 回撤>10% | 只减仓不开新仓 |
-
-#### 3.2 固定止损
-
-- 每币种独立止损线
-- 触发后自动市价卖出
-- 防止单边暴跌风险
-
-#### 3.3 分阶段止盈
-
-```python
-# 盈利阶梯
-if pnl >= 15%:  # 追踪止损，保护80%利润
-    stop = highest * 0.8
-elif pnl >= 10%:  # 保本+5%
-    stop = cost * 1.05
-elif pnl >= 5%:   # 保本
-    stop = cost
+```powershell
+python scripts/health_check.py
 ```
 
-### 4. 机器学习因子模型
+状态报告：
 
-**模型**：Ridge回归（L2正则化线性模型）
-
-选用Ridge而非树模型的原因：
-- 小数据集下树模型（LightGBM）严重过拟合
-- 线性模型泛化能力强，可解释性好
-- Ridge的正则化有效控制过拟合
-
-**特征工程**（11个精选特征）：
-- 动量类：returns_24h, momentum_5d, momentum_20d
-- 波动率：volatility_24h
-- 成交量：volume_ratio, obv
-- 技术指标：rsi, macd, macd_signal, bb_position, price_position
-
-> 已移除高相关性/泄露特征：returns_1h/6h, volatility_ratio
-
-**训练流程**：
-1. 每小时收集特征快照（所有币种当前状态）
-2. 6小时后回填标签（未来收益率）
-3. **标签回填数据源**（2026-03-08更新）：
-   - **优先**：从OKX API获取历史K线数据
-   - **回退**：本地缓存文件（当API失败时）
-   - 解决缓存过期导致的"数据不足"问题
-4. 每天00:30自动训练（需100+条记录）
-5. 计算IC（信息系数），验证IC>0时保存模型
-6. 生成特征系数报告
-
-**模型性能**（当前）：
-```
-Train IC: 0.83
-Valid IC: 0.04
+```powershell
+python scripts/v5_status_report.py
 ```
 
-**启用定时任务**：
-```bash
-systemctl --user enable v5-daily-ml-training.timer
-systemctl --user start v5-daily-ml-training.timer
+一次性 preflight：
+
+```powershell
+python scripts/live_preflight_once.py --config configs/live_prod.yaml --env .env
 ```
 
----
+一次性对账：
 
-## 🖥️ Web监控面板
-
-### 启动面板
-
-```bash
-python3 scripts/web_dashboard.py
-# 访问 http://localhost:5000
+```powershell
+python scripts/reconcile_guard_once.py --config configs/live_prod.yaml --env .env
 ```
 
-### 核心页面
+一次性账本刷新：
 
-#### 1. 监控首页 (/monitor)
-- **账户概览**：总权益、现金、持仓市值、持仓数量
-- **风险状态**：当前档位、回撤比例、最大回撤
-- **市场状态**：Ensemble三方法投票结果
-- **持仓明细**：成本价、现价、盈亏（与交易所同步）
-- **最近交易**：成交时间、币种、方向、金额
-
-#### 2. 策略信号 (/signals)
-- 各策略信号数量
-- 融合后选中币种
-- 信号时间戳（与run_id同步）
-
-#### 3. 决策归因 (/decision_audit)
-- "为什么没买"透明化分析
-- 策略层、风控层、执行层详细数据
-- 阻塞归因：deadband拦截、漂移值等
-
-### API端点
-
-| 端点 | 功能 |
-|------|------|
-| `/api/account` | 账户信息 |
-| `/api/positions` | 持仓明细（含盈亏） |
-| `/api/trades` | 交易记录 |
-| `/api/market_state` | 市场状态判断详情 |
-| `/api/scores` | 币种评分排名 |
-| `/api/decision_audit` | 决策审计 |
-
----
-
-## ⏰ 系统定时任务
-
-| Timer | 频率 | 功能 | 脚本 |
-|-------|------|------|------|
-| **v5-live-20u** | 每小时 | 实盘交易执行 | `run_hourly_live_window.sh` |
-| **v5-reconcile** | 每5分钟 | 对账状态刷新 | `reconcile_guard_once.py` |
-| **v5-daily-ml-training** | 每天00:30 | ML模型训练 | `daily_ml_training.py` |
-| **v5-reflection-agent** | 每天21:00 | 交易后分析 | `reflection_agent.py` |
-| **v5-trade-auditor** | 每小时 | 交易审计 | `trade_auditor_v2.py` |
-| **v5-smart-alert** | 每30分钟 | 智能异常检测 | `smart_alert_check.py` |
-| **v5-sentiment-collect** | 每小时 | 情绪数据收集 | `collect_funding_sentiment.py` + `collect_rss_sentiment.py` |
-| **v5-cost-rollup** | 每天08:20 | 成本统计汇总 | `rollup_costs.py` |
-| **v5-hmm-retrain** | 每周 | HMM模型重训练 | `train_hmm_regime.py` |
-
-**启用所有定时任务**：
-```bash
-# 安装user-level systemd服务
-bash deploy/install_systemd.sh --user
-
-# 启用linger（用户不登录也运行）
-sudo loginctl enable-linger admin
-
-# 启动所有timer
-systemctl --user start v5-live-20u.user.timer
-systemctl --user start v5-reconcile.user.timer
-# ... 其他timer
+```powershell
+python scripts/bills_sync.py --config configs/live_prod.yaml --env .env --db reports/bills.sqlite
+python scripts/ledger_once.py --config configs/live_prod.yaml --env .env --bills-db reports/bills.sqlite --out reports/ledger_status.json
 ```
 
----
+## systemd 说明
 
-## 📁 项目目录结构
+仓库内已经提供：
+- `deploy/systemd/v5-prod.user.service`
+- `deploy/systemd/v5-prod.user.timer`
+- `deploy/systemd/v5-event-driven.service`
+- `deploy/systemd/v5-event-driven.timer`
 
-```
-v5-trading-bot/
-├── configs/                    # 配置文件
-│   ├── live_20u_real.yaml     # 20U实盘配置
-│   ├── multi_strategy.yaml    # 多策略配置
-│   └── backtest_*.yaml        # 回测配置
-│
-├── src/                        # 源代码
-│   ├── core/                  # 核心流水线
-│   │   └── pipeline.py        # 主流程编排
-│   ├── alpha/                 # Alpha引擎
-│   │   └── alpha_engine.py    # 因子计算
-│   ├── strategy/              # 策略系统
-│   │   └── multi_strategy_system.py  # 多策略融合
-│   ├── regime/                # 市场状态
-│   │   ├── ensemble_regime_engine.py # Ensemble判断
-│   │   ├── hmm_regime_detector.py    # HMM模型
-│   │   └── regime_engine.py          # 传统判断
-│   ├── portfolio/             # 组合管理
-│   │   └── portfolio_engine.py
-│   ├── risk/                  # 风险管理
-│   │   ├── risk_engine.py           # 主风控
-│   │   ├── auto_risk_guard.py       # 自动档位
-│   │   ├── fixed_stop_loss.py       # 固定止损
-│   │   └── profit_taking.py         # 分阶段止盈
-│   ├── execution/             # 执行层
-│   │   ├── live_execution_engine.py # 实盘执行
-│   │   ├── position_builder.py      # 分批建仓
-│   │   ├── order_store.py           # 订单存储
-│   │   ├── fill_store.py            # 成交存储
-│   │   ├── reflection_agent.py      # 反思Agent
-│   │   └── ml_factor_model.py       # ML因子模型
-│   ├── data/                  # 数据层
-│   │   ├── market_data_provider.py
-│   │   └── okx_ccxt_provider.py
-│   ├── factors/               # 因子实现
-│   │   ├── sentiment_factor.py
-│   │   └── deepseek_sentiment_factor.py
-│   ├── backtest/              # 回测系统
-│   │   └── backtest_engine.py
-│   └── reporting/             # 报告生成
-│       ├── decision_audit.py
-│       └── summary_writer.py
-│
-├── scripts/                    # 工具脚本（核心56个）
-│   ├── daily_ml_training.py   # ML训练
-│   ├── trade_auditor_v2.py    # 交易审计
-│   ├── smart_alert_check.py   # 智能告警
-│   ├── web_dashboard.py       # Web面板
-│   ├── run_hourly_live_window.sh  # 主执行脚本
-│   └── ...
-│
-├── scripts/archive/           # 归档脚本（本地保留）
-│   # 110+个调试/修复/一次性脚本
-│   # 被.gitignore忽略，不上传GitHub
-│
-├── web/                       # Web前端
-│   └── templates/
-│       └── monitor_v2.html    # 监控页面
-│
-├── reports/                   # 报告输出（运行时生成）
-│   ├── runs/                  # 每次运行结果
-│   ├── cost_stats_real/       # 成本统计
-│   └── spread_stats/          # 价差统计
-│
-├── data/                      # 数据存储（运行时生成）
-│   ├── cache/                 # 行情缓存
-│   └── sentiment_cache/       # 情绪缓存
-│
-├── models/                    # 模型文件
-│   ├── hmm_regime.pkl         # HMM模型
-│   └── ml_model.pkl           # ML因子模型
-│
-├── deploy/                    # 部署配置
-│   └── systemd/               # systemd服务文件
-│
-├── docs/                      # 文档
-├── tests/                     # 测试用例
-├── requirements.txt           # 依赖列表
-├── README.md                  # 本文件
-└── .gitignore                 # 忽略规则
-```
+安装脚本：
+- `deploy/install_systemd.sh`
 
----
+注意：
+- 安装脚本会复制 unit 文件
+- 它不会自动开启正式实盘 timer
+- `v5-prod.user.timer` 应该由运维显式启用
 
-## ⚙️ 核心配置说明
+## 当前仓库状态
 
-### 实盘配置示例 (`configs/live_20u_real.yaml`)
+已经完成的收口方向：
+- 修复缺失依赖声明
+- 清理主路径中的硬编码绝对路径
+- 恢复 `RegimeEngine` 的合理回退逻辑
+- 修复 kill-switch 默认自动清除问题
+- 修复 live preflight 的顺序问题
+- 将非生产脚本从 GitHub 主运行目录移出
+- 补齐正式生产 deploy unit 和最小必需文件文档
 
-```yaml
-# 账户配置
-account:
-  live_equity_cap_usdt: 20.0    # 硬上限20USDT
-  prevent_borrow: true          # 禁止借贷
+## 后续文档
 
-# 执行模式
-execution:
-  mode: live                    # live或dry_run
-  preflight_enabled: true       # 预检开启
-  preflight_bootstrap_patch_enabled: true  # 自动状态对齐
+- 正式主流程：`docs/CURRENT_PRODUCTION_FLOW.md`
+- 最小部署面：`docs/PRODUCTION_MINIMAL_FILES.md`
+- 脚本分类：`scripts/README.md`
 
-# 市场状态
-regime:
-  engine: ensemble              # ensemble或traditional
-  hmm_weight: 0.35
-  funding_weight: 0.40
-  rss_weight: 0.25
+## 不再作为首页主内容的部分
 
-# 风控参数
-risk:
-  drawdown_trigger: 0.50        # 回撤触发线50%
-  drawdown_delever: 1.00        # 降杠杆比例
-  deadband_sideways: 0.03       # 震荡死区3%
-  
-# 多策略
-multi_strategy:
-  enabled: true
-  allocations:
-    TrendFollowing: 0.15
-    MeanReversion: 0.35
-    Alpha6Factor: 0.50
-
-# ML因子
-ml_factor:
-  enabled: true
-  min_training_samples: 100
-  ic_threshold: 0.02
-```
-
----
-
-## 🔍 故障排查
-
-### 常见问题
-
-#### 1. 持仓显示不正确
-```bash
-# 检查OKX API是否正常
-curl -s http://localhost:5000/api/positions
-
-# 手动同步持仓
-python3 scripts/sync_positions_from_okx.py
-```
-
-#### 2. 定时任务未运行
-```bash
-# 检查timer状态
-systemctl --user list-timers | grep v5
-
-# 查看日志
-journalctl --user -u v5-live-20u.user.service -n 50
-```
-
-#### 3. ML训练失败
-```bash
-# 检查样本数量
-python3 scripts/daily_ml_training.py --dry-run
-
-# 手动训练
-python3 scripts/daily_ml_training.py
-```
-
-#### 4. Web面板无法访问
-```bash
-# 检查服务状态
-systemctl --user status v5-web-dashboard.service
-
-# 重启服务
-systemctl --user restart v5-web-dashboard.service
-```
-
----
-
-## 📝 更新日志
-
-### 2026-02-28
-- ✅ **ML模型修复**：LightGBM严重过拟合 → 改用Ridge回归
-  - 修复前：Train IC 0.95, Valid IC -0.09（过拟合）
-  - 修复后：Train IC 0.83, Valid IC 0.04（有效）
-- ✅ **特征清理**：移除泄露特征（id列、returns_1h/6h、volatility_ratio）
-- ✅ **数据导出修复**：排除自增id列，避免伪相关
-- ✅ **训练脚本统一**：两个训练路径（直接传入/market_data）都使用安全特征
-
-#### 代码审查修复（26个问题）
-**Critical (3)**
-- ✅ ML数据泄露风险 - 添加缓存文件时间戳验证
-- ✅ 订单精度丢失 - 全程使用Decimal计算
-- ✅ 多策略信号合并 - 加权平均替代简单取最大
-
-**High (8)**
-- ✅ Pipeline类型检查 - 严谨的positions验证
-- ✅ 时间戳处理 - 明确阈值判断替代相对接近度
-- ✅ 配置验证 - AlphaWeights总和=1.0, RiskConfig逻辑校验
-- ✅ 价格无效告警 - 记录并汇总无效价格symbols
-- ✅ NaN传播修复 - 改进RSI/MACD/布林带计算
-- ✅ 硬编码路径 - 7个脚本改为动态路径检测
-
-**Medium (15)**
-- ✅ 数据库连接池 - MLDataCollector连接管理
-- ✅ 异常处理细化 - 区分可恢复/致命错误
-- ✅ 硬编码魔数 - 灰尘阈值提取到配置
-- ✅ 资源管理 - LiveExecutionEngine.close()和上下文管理器
-- ✅ 日志格式统一 - print改为logging
-- ✅ httpx.Client上下文管理器支持
-- ✅ 类型注解完善 - MLDataCollector方法
-- ✅ 代码重复消除 - 提取src/utils/features.py
-
-**Low (性能优化)**
-- ✅ 批量数据库更新 - executemany替代逐条更新
-- ✅ 代码风格修复 - 添加文档字符串(100%覆盖率)
-
-**提交**: `16a44db`, `26ec009`, `185f5a8`, `d8b17a9`, `9fd4b23`, `0489e8a`, `a505a6e`, `4537b51`, `3a5242b`, `32291e5`, `14b3725`, `ad974a9`, `91810a5`, `a0ca77c`, `1dc3176`, `c1608cc`, `964babc`, `25de912`, `9f3a44d`, `40e4e0d`, `508824f`
-
-### 2026-02-27
-- ✅ Web面板：持仓盈亏显示修复，与交易所同步
-- ✅ 实时价格：优先OKX API，缓存15分钟过期
-- ✅ 持仓同步：OKX返回空时不回退缓存
-- ✅ 策略信号：时间戳使用文件修改时间
-- ✅ 数据库：修复sz字段同步问题
-- ✅ 脚本清理：110+个脚本归档到scripts/archive/
-
-### 2026-02-26
-- ✅ 粉尘过滤：小于$1的持仓自动过滤
-- ✅ 退出加速：收紧close-only死区
-- ✅ 分阶段止盈：新增保本/部分止盈/追踪止损
-- ✅ 重启连续性：自动注册现有持仓
-
----
-
-## 🤝 贡献指南
-
-1. Fork本仓库
-2. 创建feature分支：`git checkout -b feature/xxx`
-3. 提交更改：`git commit -m "feat: xxx"`
-4. 推送分支：`git push origin feature/xxx`
-5. 创建Pull Request
-
----
-
-## 📄 许可证
-
-MIT License
-
----
-
-## ⚠️ 免责声明
-
-本系统仅供学习和研究使用，不构成投资建议。加密货币交易风险极高，请根据自身情况谨慎决策。
-
-**使用本系统进行交易，风险自负。**
-
----
-
-*V5 Trading Bot - 专业级量化交易系统*
+以下内容仍可能存在于本地工作区，但不是当前正式上线主路径：
+- 回测和研究脚本
+- 历史 20u 试运行内容
+- study notes
+- v4 导出内容
+- 历史迁移文档

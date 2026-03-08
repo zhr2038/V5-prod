@@ -11,6 +11,9 @@ from typing import Dict, List
 from pathlib import Path
 import requests
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CACHE_DIR = PROJECT_ROOT / 'data' / 'sentiment_cache'
+
 
 class GPTSentimentFactor:
     """
@@ -25,7 +28,7 @@ class GPTSentimentFactor:
     """
     
     def __init__(self, 
-                 cache_dir: str = '/home/admin/clawd/v5-trading-bot/data/sentiment_cache',
+                 cache_dir: str = str(DEFAULT_CACHE_DIR),
                  api_key: str = None,
                  base_url: str = None,
                  model: str = "gpt-3.5-turbo"):

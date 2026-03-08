@@ -235,8 +235,17 @@ def compute_orders(current_weights: Dict[str, float], target_weights: Dict[str, 
 
 
 def main() -> None:
-    cfg_path = os.getenv("V5_CONFIG") or "configs/config.yaml"
-    cfg = load_config(cfg_path, env_path=".env")
+    repo_root = Path(__file__).resolve().parent
+    cfg_path = os.getenv("V5_CONFIG")
+    if not cfg_path:
+        for candidate in ("configs/live_prod.yaml", "configs/live_20u_real.yaml", "configs/config.yaml"):
+            candidate_path = repo_root / candidate
+            if candidate_path.exists():
+                cfg_path = str(candidate_path)
+                break
+        else:
+            cfg_path = str(repo_root / "configs/live_prod.yaml")
+    cfg = load_config(cfg_path, env_path=str(repo_root / ".env"))
     setup_logging()
     log = logging.getLogger("v5")
 

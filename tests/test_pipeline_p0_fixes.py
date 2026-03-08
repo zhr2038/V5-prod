@@ -1,11 +1,13 @@
-"""
+﻿"""
 Test for pipeline P0 fixes:
 1. rebalance side should follow drift sign (drift<0 sell, drift>0 buy)
 2. notional should use abs(drift)*equity (delta), not tw*equity
 3. Risk-Off + regime_exit should suppress rebalance buy (close-only)
 """
 import sys
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.core.models import Order
 from src.core.pipeline import V5Pipeline
@@ -46,7 +48,6 @@ def test_rebalance_side_by_drift():
     # This would previously be handled incorrectly
     
     print("  [PASS] Logic verified: drift<0 -> sell, drift>0 -> buy")
-    return True
 
 def test_notional_uses_delta():
     """Test: notional should be abs(drift)*equity, not tw*equity"""
@@ -69,7 +70,6 @@ def test_notional_uses_delta():
     
     assert new_notional < old_notional, "Delta notional should be smaller than absolute notional"
     print("  [PASS]")
-    return True
 
 def test_risk_off_close_only():
     """Test: Risk-Off + regime_exit should suppress rebalance buy"""
@@ -101,7 +101,6 @@ def test_risk_off_close_only():
         assert should_skip_buy and should_allow_sell
     
     print("  [PASS]")
-    return True
 
 def main():
     print("="*60)
@@ -111,7 +110,7 @@ def main():
     all_passed = True
     
     try:
-        all_passed &= test_rebalance_side_by_drift()
+        test_rebalance_side_by_drift()
     except Exception as e:
         print(f"  [FAIL] {e}")
         all_passed = False
@@ -119,7 +118,7 @@ def main():
     print()
     
     try:
-        all_passed &= test_notional_uses_delta()
+        test_notional_uses_delta()
     except Exception as e:
         print(f"  [FAIL] {e}")
         all_passed = False
@@ -127,7 +126,7 @@ def main():
     print()
     
     try:
-        all_passed &= test_risk_off_close_only()
+        test_risk_off_close_only()
     except Exception as e:
         print(f"  [FAIL] {e}")
         all_passed = False
@@ -135,9 +134,9 @@ def main():
     print()
     print("="*60)
     if all_passed:
-        print("✅ All tests passed!")
+        print("鉁?All tests passed!")
     else:
-        print("❌ Some tests failed!")
+        print("鉂?Some tests failed!")
     print("="*60)
     
     return all_passed
@@ -145,3 +144,4 @@ def main():
 if __name__ == "__main__":
     import sys
     sys.exit(0 if main() else 1)
+
