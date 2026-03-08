@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-02-19T04:00:04.995081Z,20260219_04,ETH/USDT,REBALANCE,buy,0.00703226689516,1972.35,13.8700916107,0.0083220549664,0.00693504580533,,

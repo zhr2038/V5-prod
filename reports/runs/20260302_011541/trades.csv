@@ -1,3 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-02T01:15:50.909000Z,20260302_011541,ETH/USDT,OPEN_LONG,buy,0.004544,1980.3,8.9984832,0.0089984832,0.13947808,,
-2026-03-02T01:15:51.662000Z,20260302_011541,SOL/USDT,OPEN_LONG,buy,0.104956,85.75,8.999977,0.008999977,0.1600579,,

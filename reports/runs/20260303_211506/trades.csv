@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-03T21:15:18.803000Z,20260303_211506,NEAR/USDT,OPEN_LONG,buy,24.8318584,1.356,33.6719999904,0.0336719999904,,,

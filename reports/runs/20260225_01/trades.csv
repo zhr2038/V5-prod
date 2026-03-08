@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-02-25T01:00:27.130000Z,20260225_01,TRX/USDT,CLOSE_LONG,sell,12.658887,0.2843,3.5989215741,0.0035989215741,6.32944350004e-05,,

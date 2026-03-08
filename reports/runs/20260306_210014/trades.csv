@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-06T21:00:28.558000Z,20260306_210014,HYPE/USDT,OPEN_LONG,buy,1.0466,31.039,32.4854174,0.0324854174,,,

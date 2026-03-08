@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-06T02:00:30.533000Z,20260306_020015,UNI/USDT,REBALANCE,sell,7.48727,4.008,30.00897816,0.03000897816,,,

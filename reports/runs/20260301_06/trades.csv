@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-02-28T22:01:15.931000Z,20260301_06,PAXG/USDT,REBALANCE,buy,0.001113,5386.4,5.9950632,0.0059950632,0.00127995,,

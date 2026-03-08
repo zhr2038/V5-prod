@@ -1,3 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-06T02:30:22.047000Z,20260306_023006,NEAR/USDT,REBALANCE,sell,12.13155624,1.278,15.5041288747,0.0155041288747,,,
-2026-03-06T02:30:23.006000Z,20260306_023006,XPL/USDT,REBALANCE,sell,78.89,0.11994,9.4620666,0.0094620666,,,

@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-07T05:00:28.940000Z,20260307_050013,OKB/USDT,OPEN_LONG,buy,0.33447,96.72,32.3499384,0.0323499384,,,

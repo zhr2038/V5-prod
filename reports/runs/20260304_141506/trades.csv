@@ -1,3 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-04T14:15:22.262000Z,20260304_141506,FIL/USDT,CLOSE_LONG,sell,13.038345,1.021,13.312150245,0.013312150245,,,
-2026-03-04T14:15:23.262000Z,20260304_141506,UNI/USDT,REBALANCE,buy,2.929881,3.979,11.657996499,0.011657996499,,,

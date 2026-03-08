@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-06T04:45:20.536000Z,20260306_044505,BNB/USDT,REBALANCE,sell,0.05038,643.8,32.434644,0.032434644,,,

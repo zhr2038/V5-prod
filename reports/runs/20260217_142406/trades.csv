@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-1771338249027,20260217_142406,MERL/USDT,CLOSE_LONG,sell,135.623,0.06302,8.54696146,0.0005386295112092001,0,0,0

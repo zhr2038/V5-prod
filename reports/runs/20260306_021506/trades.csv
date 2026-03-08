@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-06T02:15:22.533000Z,20260306_021506,TRX/USDT,OPEN_LONG,buy,115.058934,0.2854,32.8378197636,0.0328378197636,,,

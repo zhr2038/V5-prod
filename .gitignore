@@ -42,3 +42,29 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# ============================================
+# 新增：本地归档/运行时文件不上传GitHub
+# ============================================
+
+# 备份文件（本地保留，GitHub删除）
+backups/*.tar.gz
+backups/*.zip
+
+# K线缓存数据（运行时下载，GitHub删除）
+data/cache/*.csv
+data/cache/*.json
+
+# 归档脚本（本地保留，GitHub删除）
+scripts/archive/
+
+# 运行历史记录（运行时生成，GitHub删除）
+reports/runs/
+reports/*.json
+reports/*.jsonl
+reports/cost_stats_real/
+reports/spread_stats/
+
+# 模型文件（训练生成，GitHub删除）
+models/*.pkl
+models/*.joblib

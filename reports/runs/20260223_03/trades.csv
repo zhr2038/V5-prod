@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-02-23T03:00:13.286078Z,20260223_03,DOGE/USDT,CLOSE_LONG,sell,9.912e-07,0.09264,9.1824768e-08,5.50948608e-11,4.5912384e-11,9.17237607552e-08,0

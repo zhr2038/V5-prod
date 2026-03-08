@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-02-23T00:00:18.063000Z,20260223_00,AGLD/USDT,OPEN_LONG,buy,9.338261,0.3855,3.5998996155,0.0035998996155,0.0158750437,,

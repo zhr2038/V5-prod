@@ -1,2 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-02-20T06:00:06.699616Z,20260220_06,BTC/USDT,REBALANCE,buy,0.000201448768327,67787.1,13.6556278034,0.00819337668206,0.00682781390172,,

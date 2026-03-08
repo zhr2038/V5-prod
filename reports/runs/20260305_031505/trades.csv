@@ -1,3 +1,0 @@
-ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct
-2026-03-05T03:15:23.184000Z,20260305_031505,NEAR/USDT,CLOSE_LONG,sell,12.9485165,1.271,16.4575644715,0.0164575644715,,,
-2026-03-05T03:15:24.145000Z,20260305_031505,TON/USDT,CLOSE_LONG,sell,12.4966,1.324,16.5454984,0.0165454984,,,
