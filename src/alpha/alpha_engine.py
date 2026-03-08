@@ -70,6 +70,7 @@ class AlphaEngine:
         # 初始化多策略系统（如果启用）
         self.use_multi_strategy = getattr(cfg, 'use_multi_strategy', False)
         self.multi_strategy_adapter = None
+        self.run_id = ""
 
         if self.use_multi_strategy and MULTI_STRATEGY_AVAILABLE:
             self._init_multi_strategy()
@@ -307,6 +308,16 @@ class AlphaEngine:
         print(f"              - 均值回归: 25%")
         print(f"              - 6因子Alpha: 55%")
 
+    def set_run_id(self, run_id: Optional[str]) -> None:
+        self.run_id = str(run_id or "").strip()
+        if self.multi_strategy_adapter:
+            self.multi_strategy_adapter.set_run_id(self.run_id)
+
+    def strategy_signals_path(self) -> Optional[Path]:
+        if self.multi_strategy_adapter:
+            return self.multi_strategy_adapter.strategy_signals_path()
+        return None
+
     def compute_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
         """计算Alpha评分
         
@@ -392,12 +403,11 @@ class AlphaEngine:
                 'side': target['side']
             })
         
-        # 加权平均合并同symbol的多个信号
-        # 取反：IC为负，反向使用因子
+        # Merge multi-strategy signals while preserving buy-positive / sell-negative semantics.
         scores = {}
         for sym, signals in symbol_signals.items():
             if len(signals) == 1:
-                scores[sym] = -signals[0]['score']  # 取反
+                scores[sym] = signals[0]['score']
             else:
                 # 分离买入和卖出信号
                 buy_signals = [s for s in signals if s['side'] == 'buy']
@@ -408,17 +418,17 @@ class AlphaEngine:
                     # 有冲突信号时，按权重加权平均
                     total_weight = sum(s['weight'] for s in signals)
                     weighted_score = sum(s['score'] * s['weight'] for s in signals) / total_weight
-                    scores[sym] = -weighted_score  # 取反
+                    scores[sym] = weighted_score
                 elif buy_signals:
                     # 只有买入信号
                     total_weight = sum(s['weight'] for s in buy_signals)
                     weighted_score = sum(s['score'] * s['weight'] for s in buy_signals) / total_weight
-                    scores[sym] = -weighted_score  # 取反
+                    scores[sym] = weighted_score
                 else:
                     # 只有卖出信号
                     total_weight = sum(s['weight'] for s in sell_signals)
                     weighted_score = sum(s['score'] * s['weight'] for s in sell_signals) / total_weight
-                    scores[sym] = -weighted_score  # 取反
+                    scores[sym] = weighted_score
         
         return scores
 

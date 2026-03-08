@@ -280,6 +280,15 @@ class V5Pipeline:
                     run_logger.warning(f"[Pipeline] positions格式异常: {type(first_pos)}")
         # caller can pass store via run_logger hook if desired; for now, marking is done by main.
 
+        run_id = ""
+        if run_logger is not None:
+            try:
+                run_id = Path(getattr(run_logger, 'run_dir', '')).name
+            except Exception:
+                run_id = ""
+        self.alpha_engine.set_run_id(run_id)
+        self.portfolio_engine.set_run_id(run_id)
+
         # 1) Regime detection (needed early if we want regime-aware alpha weights)
         # Regime检测后审计（显式处理空行情，避免 StopIteration）
         if not market_data_1h:
@@ -368,10 +377,10 @@ class V5Pipeline:
                     import json as _json
                     from datetime import datetime
                     from pathlib import Path
-                    # Load strategy signals from audit file
-                    strategy_audit_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
-                    if strategy_audit_file.exists():
-                        with open(strategy_audit_file, 'r') as f:
+                    # Load strategy signals from current run audit file
+                    strategy_audit_file = self.alpha_engine.strategy_signals_path()
+                    if strategy_audit_file is not None and strategy_audit_file.exists():
+                        with open(strategy_audit_file, 'r', encoding='utf-8') as f:
                             strategy_data = _json.load(f)
                         audit.strategy_signals = strategy_data.get('strategies', [])
                         # Add note about multi-strategy
@@ -895,34 +904,15 @@ class V5Pipeline:
         if require_fused_buy:
             try:
                 import json as _json
-                from pathlib import Path as _Path
-                from datetime import datetime as _dt
 
-                cand_files = []
-                same_hour = _Path(f"reports/runs/{_dt.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
-                if same_hour.exists():
-                    cand_files.append(same_hour)
-
-                runs_dir = _Path("reports/runs")
-                if runs_dir.exists():
-                    run_dirs = sorted(
-                        [d for d in runs_dir.iterdir() if d.is_dir() and (d / "strategy_signals.json").exists()],
-                        key=lambda x: x.stat().st_mtime,
-                        reverse=True,
-                    )
-                    for d in run_dirs[:5]:
-                        fp = d / "strategy_signals.json"
-                        if fp not in cand_files:
-                            cand_files.append(fp)
-
-                for fp in cand_files:
-                    obj = _json.loads(fp.read_text(encoding='utf-8'))
+                strategy_file = self.alpha_engine.strategy_signals_path()
+                if strategy_file is not None and strategy_file.exists():
+                    obj = _json.loads(strategy_file.read_text(encoding='utf-8'))
                     fused = obj.get('fused')
                     if isinstance(fused, dict) and fused:
                         for fsym, sig in fused.items():
                             if str((sig or {}).get('direction', '')).lower() == 'buy':
                                 fused_buy_symbols.add(str(fsym))
-                        break
             except Exception:
                 fused_buy_symbols = set()
 
