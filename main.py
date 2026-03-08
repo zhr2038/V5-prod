@@ -564,6 +564,7 @@ def main() -> None:
         precomputed_regime=regime,
     )
 
+    collector = None
     log.info(f"ALPHA_HISTORY_ENABLED={ALPHA_HISTORY_ENABLED}, AlphaHistoryCollector={AlphaHistoryCollector}")
     if ALPHA_HISTORY_ENABLED and AlphaHistoryCollector:
         try:
@@ -969,7 +970,7 @@ def main() -> None:
         reports_dir="reports",
         alpha=alpha_snap,
         regime=regime,
-        portfolio=portfolio,
+        portfolio=out.portfolio,
         execution=report,
     )
 
