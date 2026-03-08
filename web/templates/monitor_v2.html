@@ -296,7 +296,7 @@
                     </div>
                     
                     <div style="background: #0f172a; padding: 12px; border-radius: 8px;">
-                        <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">三方法判断</div>
+                        <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">三方法投票与缓存健康</div>
                         <div id="ensemble-votes" style="font-size: 0.85rem;">加载中...</div>
                     </div>
                 </div>
@@ -568,6 +568,8 @@
                 const state = data.state || 'SIDEWAYS';
                 const multiplier = typeof data.position_multiplier === 'number' ? data.position_multiplier : 0.7;
                 const votes = data.votes || {};
+                const signalHealth = data.signal_health || {};
+                const alerts = Array.isArray(data.alerts) ? data.alerts : [];
                 
                 const stateMap = {
                     'TRENDING': { text: '趋势', class: 'state-trending' },
@@ -578,17 +580,57 @@
                 
                 document.getElementById('market-state-val').innerHTML = 
                     `<span class="${stateInfo.class}" style="padding: 4px 10px; border-radius: 4px; font-size: 0.85rem;">${stateInfo.text}</span>`;
-                document.getElementById('market-detail').textContent = formatNumber(multiplier, 2) + 'x仓位';
+                document.getElementById('market-detail').textContent = `${formatNumber(multiplier, 2)}x仓位 / ${(data.method || '--')}`;
                 document.getElementById('market-state-detail').innerHTML = 
                     `<span class="${stateInfo.class}">${state}</span>`;
                 document.getElementById('position-multiplier').textContent = formatNumber(multiplier, 2) + 'x';
                 
-                // Ensemble votes
-                let votesHtml = '';
-                if (votes.hmm) votesHtml += `HMM: ${votes.hmm.state || '--'} `;
-                if (votes.funding) votesHtml += `资金: ${votes.funding.state || '--'} `;
-                if (votes.rss) votesHtml += `RSS: ${votes.rss.state || '--'}`;
-                document.getElementById('ensemble-votes').textContent = votesHtml || '无数据';
+                const voteDefs = [
+                    { key: 'hmm', label: 'HMM' },
+                    { key: 'funding', label: '资金费率' },
+                    { key: 'rss', label: 'RSS' },
+                ];
+                const pill = (text, bg, color) =>
+                    `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:${bg};color:${color};font-size:0.75rem;font-weight:600;">${text}</span>`;
+                const healthText = (health) => {
+                    if (!health) return '缓存 --';
+                    if (health.status === 'fresh') return `缓存 ${formatNumber(health.age_minutes, 1)}m`;
+                    if (health.status === 'stale') return `缓存过期 ${formatNumber(health.age_minutes, 1)}m`;
+                    return '缓存缺失';
+                };
+                const voteRows = voteDefs.map(({ key, label }) => {
+                    const vote = votes[key] || {};
+                    const health = signalHealth[key] || null;
+                    const stateText = vote.error
+                        ? vote.error
+                        : `${vote.state || '--'} / ${formatNumber((vote.confidence || 0) * 100, 1)}%`;
+                    const stateTone = vote.error || (health && health.is_fresh === false)
+                        ? ['rgba(239,68,68,0.18)', '#fca5a5']
+                        : ['rgba(59,130,246,0.15)', '#bfdbfe'];
+                    const healthTone = health && health.is_fresh
+                        ? ['rgba(34,197,94,0.18)', '#86efac']
+                        : ['rgba(245,158,11,0.18)', '#fcd34d'];
+                    const detail = [];
+                    detail.push(`权重 ${formatNumber(vote.weight || 0, 2)}`);
+                    if (vote.raw_state) detail.push(`raw ${vote.raw_state}`);
+                    if (health && health.last_file) detail.push(health.last_file);
+                    return `
+                        <div style="padding:10px 0;border-bottom:1px solid #1e293b;">
+                            <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">
+                                <strong>${label}</strong>
+                                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                    ${pill(stateText, stateTone[0], stateTone[1])}
+                                    ${health ? pill(healthText(health), healthTone[0], healthTone[1]) : ''}
+                                </div>
+                            </div>
+                            <div style="font-size:0.75rem;color:#64748b;margin-top:6px;">${detail.join(' / ') || '无附加信息'}</div>
+                        </div>
+                    `;
+                }).join('');
+                const alertHtml = alerts.length
+                    ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">${alerts.map(x => pill(x, 'rgba(245,158,11,0.18)', '#fcd34d')).join('')}</div>`
+                    : '';
+                document.getElementById('ensemble-votes').innerHTML = voteRows + alertHtml;
                 
                 return data;
             } catch (e) {
