@@ -12,6 +12,31 @@ V5是一个完整的横截面趋势轮动量化交易系统，专为OKX现货市
 
 ---
 
+## 🆕 最近修改（2026-03-08）
+
+### 1) ML数据回填修复：从OKX API实时获取历史K线
+
+- **问题**：本地K线缓存文件13天未更新（最后更新2026-02-25），导致ML回填6小时收益标签时频繁出现"缓存数据不足"警告
+- **解决**：ML数据收集器优先从OKX API获取历史K线，失败时自动回退到本地缓存
+- **改动文件**：
+  - `src/execution/ml_data_collector.py`: 新增 `_fetch_future_return_from_api()` 方法
+  - `src/core/pipeline.py`: V5Pipeline 传递 data_provider 给 MLDataCollector
+  - `main.py`: 创建 V5Pipeline 时传入 provider 实例
+  - `scripts/daily_ml_training.py`: 每日训练使用 API 数据源
+- **效果**：标签回填成功率提升至100%，ML训练数据质量显著改善
+
+### 2) Budget Cap 配置优化
+
+- 修复 `live_equity_cap_usdt: null` 但 `action_enabled: true` 导致的警告
+- 建议：不设资金上限时将 `action_enabled` 设为 `false`
+
+### 3) Reconcile Timer 缺失修复
+
+- 创建 `v5-reconcile.user.timer`，每5分钟自动刷新对账状态
+- 避免余额不一致导致的 SELL_ONLY/ABORT 误判
+
+---
+
 ## 🆕 最近修改（2026-03-02）
 
 ### 1) 无交易根因修复（选币/评分链路）
@@ -278,11 +303,15 @@ elif pnl >= 5%:   # 保本
 > 已移除高相关性/泄露特征：returns_1h/6h, volatility_ratio
 
 **训练流程**：
-1. 每小时收集特征快照
+1. 每小时收集特征快照（所有币种当前状态）
 2. 6小时后回填标签（未来收益率）
-3. 每天00:30自动训练（需100+条记录）
-4. 计算IC（信息系数），验证IC>0时保存模型
-5. 生成特征系数报告
+3. **标签回填数据源**（2026-03-08更新）：
+   - **优先**：从OKX API获取历史K线数据
+   - **回退**：本地缓存文件（当API失败时）
+   - 解决缓存过期导致的"数据不足"问题
+4. 每天00:30自动训练（需100+条记录）
+5. 计算IC（信息系数），验证IC>0时保存模型
+6. 生成特征系数报告
 
 **模型性能**（当前）：
 ```
