@@ -53,6 +53,7 @@ Primary production:
 Important:
 
 - `deploy/install_systemd.sh` installs these units, but does not auto-enable the live production timer.
+- `deploy/sync_prod_release.py` syncs the production-only release payload to the target host.
 - enabling `v5-prod.user.timer` should remain an explicit operator action.
 
 Safety and support:
@@ -68,6 +69,7 @@ Safety and support:
 - `deploy/systemd/v5-event-driven.service`
 - `deploy/systemd/v5-event-driven.timer`
 - `deploy/install_systemd.sh`
+- `deploy/sync_prod_release.py`
 
 ## Required source directories
 

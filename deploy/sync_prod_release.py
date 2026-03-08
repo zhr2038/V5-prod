@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import shlex
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+try:
+    import paramiko
+except ImportError as exc:  # pragma: no cover - exercised operationally
+    raise SystemExit("missing dependency: paramiko") from exc
+
+from deploy.prod_release import iter_production_files
+
+
+def _remote_join(root: str, rel_path: Path) -> str:
+    parts = [part for part in rel_path.as_posix().split("/") if part]
+    return "/".join([root.rstrip("/"), *parts])
+
+
+def _ensure_remote_dir(sftp: paramiko.SFTPClient, remote_dir: str) -> None:
+    parts = []
+    if remote_dir.startswith("/"):
+        prefix = "/"
+        segments = [segment for segment in remote_dir.split("/") if segment]
+    else:
+        prefix = ""
+        segments = [segment for segment in remote_dir.split("/") if segment]
+    for segment in segments:
+        parts.append(segment)
+        candidate = prefix + "/".join(parts)
+        try:
+            sftp.stat(candidate)
+        except FileNotFoundError:
+            sftp.mkdir(candidate)
+
+
+def _file_mode(path: Path) -> int:
+    if path.suffix in {".sh", ".py"}:
+        return 0o755
+    return 0o644
+
+
+def _should_upload(sftp: paramiko.SFTPClient, local_path: Path, remote_path: str) -> bool:
+    local_stat = local_path.stat()
+    try:
+        remote_stat = sftp.stat(remote_path)
+    except FileNotFoundError:
+        return True
+    return not (
+        int(remote_stat.st_size) == int(local_stat.st_size)
+        and int(getattr(remote_stat, "st_mtime", -1)) == int(local_stat.st_mtime)
+    )
+
+
+def _upload_files(sftp: paramiko.SFTPClient, workspace_root: Path, remote_root: str) -> tuple[int, int, list[str]]:
+    uploaded = 0
+    skipped = 0
+    rel_paths: list[str] = []
+    for local_path in iter_production_files(workspace_root):
+        rel_path = local_path.relative_to(workspace_root)
+        remote_path = _remote_join(remote_root, rel_path)
+        parent = remote_path.rsplit("/", 1)[0]
+        _ensure_remote_dir(sftp, parent)
+        if not _should_upload(sftp, local_path, remote_path):
+            skipped += 1
+            continue
+        sftp.put(str(local_path), remote_path)
+        sftp.chmod(remote_path, _file_mode(local_path))
+        local_mtime = int(local_path.stat().st_mtime)
+        try:
+            sftp.utime(remote_path, (local_mtime, local_mtime))
+        except OSError:
+            pass
+        uploaded += 1
+        rel_paths.append(rel_path.as_posix())
+    return uploaded, skipped, rel_paths
+
+
+def _run(client: paramiko.SSHClient, command: str) -> tuple[int, str, str]:
+    stdin, stdout, stderr = client.exec_command(command)
+    out = stdout.read().decode("utf-8", errors="replace")
+    err = stderr.read().decode("utf-8", errors="replace")
+    return stdout.channel.recv_exit_status(), out, err
+
+
+def _install_units(
+    client: paramiko.SSHClient,
+    remote_root: str,
+    service_user: str,
+    enable_prod_timer: bool,
+    enable_event_driven_timer: bool,
+) -> None:
+    cmd = [
+        "bash",
+        "deploy/install_systemd.sh",
+        "--user",
+        "--production-only",
+        "--root",
+        remote_root,
+    ]
+    if enable_prod_timer:
+        cmd.append("--enable-prod-timer")
+    if enable_event_driven_timer:
+        cmd.append("--enable-event-driven-timer")
+
+    inner = f"cd {shlex.quote(remote_root)} && {' '.join(shlex.quote(part) for part in cmd)}"
+    wrapped = f"sudo -Hiu {shlex.quote(service_user)} bash -lc {shlex.quote(inner)}"
+    code, out, err = _run(client, wrapped)
+    if code != 0:
+        raise RuntimeError(f"install_systemd failed\nSTDOUT:\n{out}\nSTDERR:\n{err}")
+
+
+def _validate_units(client: paramiko.SSHClient, service_user: str) -> str:
+    cmd = (
+        f"sudo -Hiu {shlex.quote(service_user)} bash -lc "
+        + shlex.quote(
+            "systemctl --user is-enabled v5-reconcile.timer "
+            "&& systemctl --user is-enabled v5-ledger.timer "
+            "&& systemctl --user is-enabled v5-cost-rollup-real.user.timer "
+            "&& systemctl --user show v5-prod.user.timer --property=UnitFileState "
+            "&& systemctl --user show v5-event-driven.timer --property=UnitFileState"
+        )
+    )
+    code, out, err = _run(client, cmd)
+    if code != 0:
+        raise RuntimeError(f"systemd validation failed\nSTDOUT:\n{out}\nSTDERR:\n{err}")
+    return out.strip()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--host", required=True)
+    ap.add_argument("--user", required=True)
+    ap.add_argument("--password", default="")
+    ap.add_argument("--port", type=int, default=22)
+    ap.add_argument("--key-file", default="")
+    ap.add_argument("--remote-root", default="/home/admin/clawd/v5-prod")
+    ap.add_argument("--service-user", default="admin")
+    ap.add_argument("--skip-install", action="store_true")
+    ap.add_argument("--enable-prod-timer", action="store_true")
+    ap.add_argument("--enable-event-driven-timer", action="store_true")
+    args = ap.parse_args()
+
+    workspace_root = Path(__file__).resolve().parents[1]
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    connect_kwargs = {
+        "hostname": args.host,
+        "port": args.port,
+        "username": args.user,
+        "timeout": 20,
+        "banner_timeout": 30,
+        "auth_timeout": 30,
+    }
+    if args.key_file:
+        connect_kwargs["key_filename"] = args.key_file
+    else:
+        connect_kwargs["password"] = args.password
+
+    client.connect(**connect_kwargs)
+    try:
+        sftp = client.open_sftp()
+        _ensure_remote_dir(sftp, args.remote_root)
+        uploaded, skipped, rel_paths = _upload_files(sftp, workspace_root, args.remote_root)
+        sftp.close()
+
+        print(f"uploaded_files={uploaded}")
+        print(f"skipped_files={skipped}")
+        if rel_paths:
+            print(f"first_file={rel_paths[0]}")
+            print(f"last_file={rel_paths[-1]}")
+
+        if not args.skip_install:
+            _install_units(
+                client,
+                remote_root=args.remote_root,
+                service_user=args.service_user,
+                enable_prod_timer=args.enable_prod_timer,
+                enable_event_driven_timer=args.enable_event_driven_timer,
+            )
+            print(_validate_units(client, args.service_user))
+    finally:
+        client.close()
+
+
+if __name__ == "__main__":
+    main()
