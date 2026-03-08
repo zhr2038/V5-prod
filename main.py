@@ -18,7 +18,7 @@ from src.execution.position_store import PositionStore
 from src.portfolio.portfolio_engine import PortfolioEngine
 from src.regime.regime_engine import RegimeEngine
 from src.reporting.reporting import dump_run_artifacts
-from src.core.models import Order, PositionState
+from src.core.models import MarketSeries, Order, PositionState
 from src.risk.risk_engine import RiskEngine
 
 # 预算限制（20 USDT硬限制）
@@ -213,6 +213,37 @@ def build_provider(cfg: AppConfig):
     return MockProvider(seed=7)
 
 
+def _validate_market_data_snapshot(
+    symbols: list[str],
+    market_data: Dict[str, MarketSeries],
+    *,
+    require_symbol: Optional[str],
+    min_coverage_ratio: float,
+) -> tuple[bool, str, Dict[str, MarketSeries]]:
+    valid = {
+        str(sym): series
+        for sym, series in (market_data or {}).items()
+        if getattr(series, "ts", None) and len(getattr(series, "ts", []) or []) > 0
+    }
+
+    requested = [str(s) for s in (symbols or []) if str(s).strip()]
+    if not valid:
+        return False, "No market data returned from provider", {}
+
+    if require_symbol and require_symbol in requested and require_symbol not in valid:
+        return False, f"Required benchmark symbol missing market data: {require_symbol}", valid
+
+    coverage = (float(len(valid)) / float(len(requested))) if requested else 1.0
+    if coverage < float(min_coverage_ratio):
+        return (
+            False,
+            f"Market data coverage too low: {len(valid)}/{len(requested)} ({coverage:.1%}) < {float(min_coverage_ratio):.1%}",
+            valid,
+        )
+
+    return True, "", valid
+
+
 def compute_orders(current_weights: Dict[str, float], target_weights: Dict[str, float], prices: Dict[str, float], equity_usdt: float):
     orders = []
     for sym, tw in target_weights.items():
@@ -299,6 +330,7 @@ def main() -> None:
                 max_spread_bps=getattr(cfg.universe, "max_spread_bps", None),
                 blacklist_path=cfg.universe.blacklist_path,
                 exclude_stablecoins=cfg.universe.exclude_stablecoins,
+                exclude_symbols=list(getattr(cfg.universe, "exclude_symbols", []) or []),
                 refine_with_single_ticker=bool(getattr(cfg.universe, "refine_with_single_ticker", False)),
                 refine_single_ticker_max_candidates=int(getattr(cfg.universe, "refine_single_ticker_max_candidates", 200) or 200),
                 refine_single_ticker_sleep_sec=float(getattr(cfg.universe, "refine_single_ticker_sleep_sec", 0.02) or 0.0),
@@ -337,17 +369,30 @@ def main() -> None:
         end_ts_ms=end_ts_ms,
     )
 
+    ok_md, md_reason, md_1h = _validate_market_data_snapshot(
+        symbols=symbols,
+        market_data=md_1h,
+        require_symbol="BTC/USDT" if bool(getattr(cfg.universe, "require_btc_benchmark", True)) else None,
+        min_coverage_ratio=float(getattr(cfg.universe, "min_data_coverage_ratio", 0.80) or 0.80),
+    )
+    if not ok_md:
+        log.error(md_reason)
+        audit.reject("market_data_coverage_insufficient")
+        audit.add_note(md_reason)
+        audit.save(f"reports/runs/{run_id}")
+        return
+    if len(md_1h) < len(symbols):
+        log.warning("Market data partial coverage: %d/%d symbols available", len(md_1h), len(symbols))
+        audit.add_note(f"market data partial coverage: {len(md_1h)}/{len(symbols)}")
+
     alpha_engine = AlphaEngine(cfg.alpha)
     alpha_snap = alpha_engine.compute_snapshot(md_1h)
 
-    # regime from BTC (handle empty market data explicitly)
-    if not md_1h:
-        log.error("No market data returned from provider (md_1h is empty); aborting run")
-        return
-
+    # regime from BTC (market data validated above)
     btc = md_1h.get("BTC/USDT")
     if btc is None:
-        # fallback to any available symbol
+        if bool(getattr(cfg.universe, "require_btc_benchmark", True)):
+            raise RuntimeError("BTC/USDT missing after market-data validation")
         btc = next(iter(md_1h.values()))
 
     regime_engine = RegimeEngine(cfg.regime)
