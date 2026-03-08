@@ -840,6 +840,32 @@ def main() -> None:
                     log.info(f"FILLS_SYNC new_fills={total_new} total={fs.count()}")
         except Exception as e:
             log.warning(f"fills sync/export failed: {e}")
+
+        # Keep local cash state aligned with exchange after live execution.
+        # Position qty is synced on fills; cash must also be refreshed or reconcile drifts
+        # will accumulate across sell cycles.
+        try:
+            live_client = getattr(exec_engine, "okx", None)
+            if live_client is not None:
+                bal = live_client.get_balance(ccy="USDT")
+                rows = (bal.data or {}).get("data") if isinstance(bal.data, dict) else None
+                details = ((rows[0] if isinstance(rows, list) and rows else {}) or {}).get("details")
+                usdt_cash = None
+                if isinstance(details, list):
+                    for d in details:
+                        if isinstance(d, dict) and str(d.get("ccy") or "").upper() == "USDT":
+                            try:
+                                usdt_cash = float(d.get("cashBal"))
+                            except Exception:
+                                usdt_cash = None
+                            break
+                if usdt_cash is not None:
+                    post_state = acc_store.get()
+                    post_state.cash_usdt = float(usdt_cash)
+                    acc_store.set(post_state)
+                    log.info(f"LIVE_CASH_SYNC usdt={usdt_cash:.8f}")
+        except Exception as e:
+            log.warning(f"live cash sync failed: {e}")
     
     # 鏇存柊 alpha 鍘嗗彶鏁版嵁涓殑浜ゆ槗淇℃伅
     if collector and hasattr(report, 'orders') and report.orders:
