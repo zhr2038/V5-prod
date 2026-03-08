@@ -318,6 +318,45 @@ def get_last_live_run_age_sec():
         return None, None
 
 
+def get_current_live_window_run_id(now: datetime = None) -> str:
+    """Return the run_id used by the hourly live wrapper for the current hour."""
+    dt = now or datetime.now()
+    return dt.strftime('%Y%m%d_%H')
+
+
+def evaluate_live_trigger_throttle(
+    *,
+    last_run_age_sec,
+    last_run_id,
+    current_run_id: str,
+    min_interval_minutes: int,
+):
+    """Decide whether a live trigger should be throttled."""
+    min_interval_sec = max(0, int(min_interval_minutes or 0) * 60)
+    current_id = str(current_run_id or '')
+    last_id = str(last_run_id or '')
+
+    if current_id and last_id and current_id == last_id:
+        return {
+            'throttled': True,
+            'reason': 'same_window_already_ran',
+            'min_interval_sec': min_interval_sec,
+        }
+
+    if last_run_age_sec is not None and float(last_run_age_sec) < float(min_interval_sec):
+        return {
+            'throttled': True,
+            'reason': 'min_interval',
+            'min_interval_sec': min_interval_sec,
+        }
+
+    return {
+        'throttled': False,
+        'reason': None,
+        'min_interval_sec': min_interval_sec,
+    }
+
+
 def build_candidate_watchlist(state: dict, breakout_threshold_pct: float = 0.5, top_n: int = 10):
     """Build top candidate watchlist with rough trigger prices."""
     out = []
@@ -631,6 +670,7 @@ def main():
     active_mode = False
     force_full_mode = False
     force_full_min_interval_minutes = 12
+    active_min_interval_minutes = 60
     ev_cfg = {}
     cfg = {}
 
@@ -653,6 +693,7 @@ def main():
         active_mode = bool(ev_cfg.get('active_mode', mode == 'active'))
         force_full_mode = bool(ev_cfg.get('force_full_run', mode in ('force_full', 'full')))
         force_full_min_interval_minutes = int(ev_cfg.get('force_full_min_interval_minutes', 12) or 12)
+        active_min_interval_minutes = int(ev_cfg.get('active_min_interval_minutes', 60) or 60)
     except Exception as e:
         logger.warning(f"Could not read config: {e}")
     
@@ -776,6 +817,7 @@ def main():
         'active_mode': active_mode,
         'force_full_mode': force_full_mode,
         'force_full_min_interval_minutes': force_full_min_interval_minutes,
+        'active_min_interval_minutes': active_min_interval_minutes,
         'adaptive_cooldown': adaptive_meta,
         'live_service_unit': live_service_unit,
         'live_service_triggered': False,
@@ -785,6 +827,7 @@ def main():
         'trigger_reason': None,
         'last_run_age_sec': None,
         'last_run_id': None,
+        'current_target_run_id': get_current_live_window_run_id(),
     }
 
     if force_full_mode:
@@ -792,13 +835,19 @@ def main():
         execution['last_run_age_sec'] = age_sec
         execution['last_run_id'] = last_run_id
 
-        min_interval_sec = max(0, int(force_full_min_interval_minutes) * 60)
-        if age_sec is not None and age_sec < min_interval_sec:
+        throttle = evaluate_live_trigger_throttle(
+            last_run_age_sec=age_sec,
+            last_run_id=last_run_id,
+            current_run_id=execution['current_target_run_id'],
+            min_interval_minutes=force_full_min_interval_minutes,
+        )
+        if throttle['throttled']:
             logger.info(
-                f"FORCE_FULL throttled: last run {last_run_id} {age_sec:.1f}s ago < {min_interval_sec}s"
+                f"FORCE_FULL throttled: reason={throttle['reason']} last_run_id={last_run_id} "
+                f"current_run_id={execution['current_target_run_id']} age_sec={age_sec}"
             )
             execution.update({
-                'trigger_reason': 'force_full_throttled',
+                'trigger_reason': f"force_full_throttled:{throttle['reason']}",
             })
         else:
             logger.info(f"FORCE_FULL mode: starting {live_service_unit}")
@@ -819,21 +868,39 @@ def main():
     elif result['should_trade'] and result['actions']:
         logger.info("Event-driven trading triggered - actions generated")
         if active_mode:
-            logger.info(f"ACTIVE mode: starting {live_service_unit}")
-            exec_res = trigger_live_execution_service(live_service_unit)
-            execution.update({
-                'live_service_triggered': True,
-                'live_service_ok': exec_res.get('ok'),
-                'live_service_returncode': exec_res.get('returncode'),
-                'live_service_stderr': exec_res.get('stderr', ''),
-                'trigger_reason': 'event_actions',
-            })
-            if exec_res.get('ok'):
-                logger.info("ACTIVE mode: live service start request accepted")
-            else:
-                logger.error(
-                    f"ACTIVE mode: failed to start live service rc={exec_res.get('returncode')} err={exec_res.get('stderr')}"
+            age_sec, last_run_id = get_last_live_run_age_sec()
+            execution['last_run_age_sec'] = age_sec
+            execution['last_run_id'] = last_run_id
+            throttle = evaluate_live_trigger_throttle(
+                last_run_age_sec=age_sec,
+                last_run_id=last_run_id,
+                current_run_id=execution['current_target_run_id'],
+                min_interval_minutes=active_min_interval_minutes,
+            )
+            if throttle['throttled']:
+                logger.info(
+                    f"ACTIVE mode throttled: reason={throttle['reason']} last_run_id={last_run_id} "
+                    f"current_run_id={execution['current_target_run_id']} age_sec={age_sec}"
                 )
+                execution.update({
+                    'trigger_reason': f"active_throttled:{throttle['reason']}",
+                })
+            else:
+                logger.info(f"ACTIVE mode: starting {live_service_unit}")
+                exec_res = trigger_live_execution_service(live_service_unit)
+                execution.update({
+                    'live_service_triggered': True,
+                    'live_service_ok': exec_res.get('ok'),
+                    'live_service_returncode': exec_res.get('returncode'),
+                    'live_service_stderr': exec_res.get('stderr', ''),
+                    'trigger_reason': 'event_actions',
+                })
+                if exec_res.get('ok'):
+                    logger.info("ACTIVE mode: live service start request accepted")
+                else:
+                    logger.error(
+                        f"ACTIVE mode: failed to start live service rc={exec_res.get('returncode')} err={exec_res.get('stderr')}"
+                    )
         else:
             logger.info("PASSIVE mode: actions logged only, no execution")
     else:

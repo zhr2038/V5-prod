@@ -260,6 +260,7 @@ backtest:
 event_driven:
   enabled: true
   active_mode: true
+  active_min_interval_minutes: 60
   force_full_run: false
   force_full_min_interval_minutes: 12
   check_interval_minutes: 15
