@@ -158,6 +158,8 @@ class RegimeConfig(BaseModel):
     hmm_weight: float = Field(default=0.40, ge=0, le=1, description="HMM权重")
     funding_weight: float = Field(default=0.35, ge=0, le=1, description="资金费率情绪权重")
     rss_weight: float = Field(default=0.25, ge=0, le=1, description="RSS新闻情绪权重")
+    funding_signal_max_age_minutes: int = Field(default=180, ge=1, le=1440)
+    rss_signal_max_age_minutes: int = Field(default=180, ge=1, le=1440)
 
     # 情绪驱动的风险状态修正（避免在强反弹初期被长期锁死）
     sentiment_regime_override_enabled: bool = Field(default=True)

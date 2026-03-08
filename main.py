@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import time
@@ -10,18 +10,15 @@ from typing import Dict, Optional
 
 from configs.loader import load_config
 from configs.schema import AppConfig
-from src.alpha.alpha_engine import AlphaEngine
 from src.data.mock_provider import MockProvider
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.execution_engine import ExecutionEngine
 from src.execution.position_store import PositionStore
-from src.portfolio.portfolio_engine import PortfolioEngine
-from src.regime.regime_engine import RegimeEngine
 from src.reporting.reporting import dump_run_artifacts
 from src.core.models import MarketSeries, Order, PositionState
 from src.risk.risk_engine import RiskEngine
 
-# 预算限制（20 USDT硬限制）
+# 棰勭畻闄愬埗锛?0 USDT纭檺鍒讹級
 try:
     from src.risk.budget_guard import BudgetGuard
     from src.risk.live_equity_fetcher import get_live_equity_from_okx, check_budget_limit
@@ -30,7 +27,7 @@ except ImportError:
     BUDGET_GUARD_ENABLED = False
     BudgetGuard = None
 
-# Alpha 历史数据收集（可选）
+# Alpha 鍘嗗彶鏁版嵁鏀堕泦锛堝彲閫夛級
 try:
     from scripts.collect_alpha_history import AlphaHistoryCollector
     ALPHA_HISTORY_ENABLED = True
@@ -51,14 +48,14 @@ def setup_logging(level: str = "INFO") -> None:
     )
 
 
-# ========== 趋势缓存功能 ==========
+# ========== 瓒嬪娍缂撳瓨鍔熻兘 ==========
 TREND_CACHE_PATH = Path("reports/trend_cache.json")
 
 
 def save_trend_cache(alpha_snapshot, regime_result, symbols: list, timestamp: float = None) -> None:
-    """保存趋势计算结果到缓存文件
+    """淇濆瓨瓒嬪娍璁＄畻缁撴灉鍒扮紦瀛樻枃浠?
 
-    用于趋势更新程序在 :57 计算，交易程序在 :00 读取
+    鐢ㄤ簬瓒嬪娍鏇存柊绋嬪簭鍦?:57 璁＄畻锛屼氦鏄撶▼搴忓湪 :00 璇诲彇
     """
     if timestamp is None:
         timestamp = time.time()
@@ -87,13 +84,13 @@ def save_trend_cache(alpha_snapshot, regime_result, symbols: list, timestamp: fl
 
 
 def load_trend_cache(max_age_sec: int = 300) -> Optional[dict]:
-    """从缓存文件读取趋势计算结果
+    """浠庣紦瀛樻枃浠惰鍙栬秼鍔胯绠楃粨鏋?
 
     Args:
-        max_age_sec: 缓存最大有效时间（秒），默认5分钟
+        max_age_sec: 缂撳瓨鏈€澶ф湁鏁堟椂闂达紙绉掞級锛岄粯璁?鍒嗛挓
 
     Returns:
-        缓存数据或None（如果缓存不存在或已过期）
+        缂撳瓨鏁版嵁鎴朜one锛堝鏋滅紦瀛樹笉瀛樺湪鎴栧凡杩囨湡锛?
     """
     if not TREND_CACHE_PATH.exists():
         return None
@@ -119,7 +116,7 @@ def load_trend_cache(max_age_sec: int = 300) -> Optional[dict]:
 
 
 class TrendCacheAlphaSnapshot:
-    """从缓存创建的 Alpha 快照对象"""
+    """浠庣紦瀛樺垱寤虹殑 Alpha 蹇収瀵硅薄"""
     def __init__(self, cache_data: dict):
         self.scores = cache_data.get("alpha", {}).get("scores", {})
         self.ranks = cache_data.get("alpha", {}).get("ranks", {})
@@ -127,7 +124,7 @@ class TrendCacheAlphaSnapshot:
 
 
 class TrendCacheRegimeResult:
-    """从缓存创建的 Regime 结果对象"""
+    """浠庣紦瀛樺垱寤虹殑 Regime 缁撴灉瀵硅薄"""
     def __init__(self, cache_data: dict, cfg):
         from configs.schema import RegimeState
         regime_data = cache_data.get("regime", {})
@@ -145,17 +142,17 @@ class TrendCacheRegimeResult:
         self.hmm_probs = None
 
 
-# ========== 趋势缓存功能结束 ==========
+# ========== 瓒嬪娍缂撳瓨鍔熻兘缁撴潫 ==========
 
 
 def _get_env_epoch_sec(name: str) -> Optional[int]:
-    """从环境变量读取时间戳（秒/毫秒/微秒兼容）
+    """浠庣幆澧冨彉閲忚鍙栨椂闂存埑锛堢/姣/寰鍏煎锛?
 
-    规则：
-    - 10位及以下：秒
-    - 13位：毫秒
-    - 16位及以上：微秒
-    - 其他位数：按数值兜底判定（>1e14 当微秒，>1e11 当毫秒）
+    瑙勫垯锛?
+    - 10浣嶅強浠ヤ笅锛氱
+    - 13浣嶏細姣
+    - 16浣嶅強浠ヤ笂锛氬井绉?
+    - 鍏朵粬浣嶆暟锛氭寜鏁板€煎厹搴曞垽瀹氾紙>1e14 褰撳井绉掞紝>1e11 褰撴绉掞級
     """
     v = os.getenv(name)
     if not v:
@@ -171,7 +168,7 @@ def _get_env_epoch_sec(name: str) -> Optional[int]:
         elif digits >= 16:
             x //= 1_000_000  # microseconds -> seconds
         else:
-            # 11/12/14/15 位：非常规输入，做保守兜底
+            # 11/12/14/15 浣嶏細闈炲父瑙勮緭鍏ワ紝鍋氫繚瀹堝厹搴?
             if abs(x) > 100_000_000_000_000:
                 x //= 1_000_000
             elif abs(x) > 100_000_000_000:
@@ -180,7 +177,7 @@ def _get_env_epoch_sec(name: str) -> Optional[int]:
                 "Unusual timestamp digits for %s: %s (%d digits)", name, v, digits
             )
 
-        # 放宽到 2000-2100，避免未来年份误判
+        # 鏀惧鍒?2000-2100锛岄伩鍏嶆湭鏉ュ勾浠借鍒?
         if x < 946684800 or x > 4102444800:  # 2000-01-01 to 2100-01-01
             logging.getLogger(__name__).warning(
                 "Timestamp %s out of reasonable range (2000-2100): %s", name, x
@@ -298,7 +295,7 @@ def main() -> None:
 
     Path("reports").mkdir(exist_ok=True)
 
-    # 创建DecisionAudit（需要先定义run_id）
+    # 鍒涘缓DecisionAudit锛堥渶瑕佸厛瀹氫箟run_id锛?
     from src.reporting.decision_audit import DecisionAudit
 
     run_id = os.getenv("V5_RUN_ID")
@@ -344,7 +341,7 @@ def main() -> None:
         except Exception as e:
             log.warning(f"Universe fetch failed, fallback to config symbols: {e}")
     
-    # 记录universe配置到audit
+    # 璁板綍universe閰嶇疆鍒癮udit
     audit.universe_config = {
         "enabled": cfg.universe.enabled,
         "use_universe_symbols": cfg.universe.use_universe_symbols,
@@ -354,13 +351,13 @@ def main() -> None:
     }
 
     # fetch 1h bars for alpha/regime and 4h for auxiliary (placeholder)
-    # 使用窗口时间过滤，只取已收盘bar
+    # 浣跨敤绐楀彛鏃堕棿杩囨护锛屽彧鍙栧凡鏀剁洏bar
     window_start_ts = _get_env_epoch_sec("V5_WINDOW_START_TS")
     window_end_ts = _get_env_epoch_sec("V5_WINDOW_END_TS")
     
     end_ts_ms = None
     if window_end_ts is not None:
-        end_ts_ms = window_end_ts * 1000  # 转换为毫秒
+        end_ts_ms = window_end_ts * 1000  # 杞崲涓烘绉?
     
     md_1h = provider.fetch_ohlcv(
         symbols,
@@ -385,8 +382,9 @@ def main() -> None:
         log.warning("Market data partial coverage: %d/%d symbols available", len(md_1h), len(symbols))
         audit.add_note(f"market data partial coverage: {len(md_1h)}/{len(symbols)}")
 
-    alpha_engine = AlphaEngine(cfg.alpha)
-    alpha_snap = alpha_engine.compute_snapshot(md_1h)
+    from src.core.pipeline import V5Pipeline
+
+    pipe = V5Pipeline(cfg, data_provider=provider)
 
     # regime from BTC (market data validated above)
     btc = md_1h.get("BTC/USDT")
@@ -395,65 +393,30 @@ def main() -> None:
             raise RuntimeError("BTC/USDT missing after market-data validation")
         btc = next(iter(md_1h.values()))
 
-    regime_engine = RegimeEngine(cfg.regime)
-    regime = regime_engine.detect(btc)
+    regime = pipe.regime_engine.detect(btc)
+    pipe.alpha_engine.set_regime_context(
+        regime.state.value if hasattr(regime.state, "value") else regime.state
+    )
+    alpha_snap = pipe.alpha_engine.compute_snapshot(md_1h)
 
-    # ========== 趋势缓存：保存或读取 ==========
+    # ========== 瓒嬪娍缂撳瓨锛氫繚瀛樻垨璇诲彇 ==========
     is_trend_update_only = str(os.getenv("V5_TREND_UPDATE_ONLY") or "").upper() == "1"
     use_cached_trend = str(os.getenv("V5_USE_CACHED_TREND") or "").upper() == "1"
 
     if is_trend_update_only:
-        # 趋势更新模式：计算并保存趋势
         save_trend_cache(alpha_snap, regime, symbols)
         log.info("[TrendUpdate] Trend cache saved, exiting (V5_TREND_UPDATE_ONLY=1)")
-        return  # 只更新趋势，不执行交易
+        return
 
     if use_cached_trend:
-        # 交易模式：尝试读取缓存的趋势
-        cached = load_trend_cache(max_age_sec=300)  # 5分钟有效期
+        cached = load_trend_cache(max_age_sec=300)
         if cached:
             log.info("[TrendCache] Using cached trend data")
-            # 使用缓存的 alpha 和 regime
             alpha_snap = TrendCacheAlphaSnapshot(cached)
             regime = TrendCacheRegimeResult(cached, cfg)
         else:
             log.warning("[TrendCache] No valid cache found, using freshly computed trend")
-    # ========== 趋势缓存结束 ==========
-
-    portfolio_engine = PortfolioEngine(alpha_cfg=cfg.alpha, risk_cfg=cfg.risk)
-    portfolio = portfolio_engine.allocate(scores=alpha_snap.scores, market_data=md_1h, regime_mult=regime.multiplier)
-    
-    # 收集 alpha 历史数据用于评估
-    collector = None
-    selected_symbols = []
-    log.info(f"ALPHA_HISTORY_ENABLED={ALPHA_HISTORY_ENABLED}, AlphaHistoryCollector={AlphaHistoryCollector}")
-    if ALPHA_HISTORY_ENABLED and AlphaHistoryCollector:
-        try:
-            collector = AlphaHistoryCollector()
-            log.info(f"AlphaHistoryCollector initialized")
-            
-            # 获取选中的币种
-            if hasattr(portfolio, 'targets'):
-                selected_symbols = list(portfolio.targets.keys())
-            elif hasattr(portfolio, 'allocations'):
-                selected_symbols = [s for s, w in portfolio.allocations.items() if w > 0]
-            
-            log.info(f"Selected symbols: {selected_symbols}")
-            
-            # 保存 snapshot
-            collector.save_snapshot(
-                run_id=run_id,
-                ts=int(datetime.utcnow().timestamp()),
-                snapshot=alpha_snap,
-                regime=regime.name if hasattr(regime, 'name') else str(regime),
-                regime_multiplier=regime.multiplier if hasattr(regime, 'multiplier') else 1.0,
-                selected_symbols=selected_symbols,
-                traded_symbols=[]  # 将在执行后更新
-            )
-            log.info(f"Alpha snapshot saved to history database (run_id={run_id})")
-        except Exception as e:
-            log.warning(f"Failed to save alpha history: {e}")
-            collector = None
+    # ========== 瓒嬪娍缂撳瓨缁撴潫 ==========
 
     # load persisted positions/account
     store = PositionStore(path="reports/positions.sqlite")
@@ -473,7 +436,6 @@ def main() -> None:
     held = store.list()
 
     # Run unified pipeline with equity/drawdown scaling
-    from src.core.pipeline import V5Pipeline
     from src.core.run_logger import RunLogger
 
     run_logger = RunLogger(run_dir=f"reports/runs/{run_id}")
@@ -505,7 +467,7 @@ def main() -> None:
     except Exception:
         pass
     
-    # 记录universe数量
+    # 璁板綍universe鏁伴噺
     audit.counts["universe"] = len(symbols)
 
     # Sanity-check equity peak: if an old corrupted peak is orders-of-magnitude above current equity,
@@ -518,11 +480,11 @@ def main() -> None:
                 eq_now += float(p.qty) * float(s.close[-1])
         peak = float(acc.equity_peak_usdt or 0.0)
         
-        # 动态阈值：基于配置的资金规模
-        # 小资金账户（<100U）使用更敏感的阈值
+        # 鍔ㄦ€侀槇鍊硷細鍩轰簬閰嶇疆鐨勮祫閲戣妯?
+        # 灏忚祫閲戣处鎴凤紙<100U锛変娇鐢ㄦ洿鏁忔劅鐨勯槇鍊?
         equity_cap = float(getattr(cfg.budget, 'live_equity_cap_usdt', 0) or eq_now)
         min_equity_threshold = min(100.0, equity_cap * 0.5) if equity_cap > 0 else 100.0
-        ratio_threshold = 3.0 if equity_cap < 100 else 5.0  # 小资金用3倍，大资金用5倍
+        ratio_threshold = 3.0 if equity_cap < 100 else 5.0  # 灏忚祫閲戠敤3鍊嶏紝澶ц祫閲戠敤5鍊?
         
         if peak > min_equity_threshold and peak > eq_now * ratio_threshold and eq_now > 0:
             log.warning(f"equity_peak_usdt seems corrupted: peak={peak} >> equity={eq_now} (cap={equity_cap}); clamping peak to equity")
@@ -531,20 +493,20 @@ def main() -> None:
     except Exception as e:
         log.debug("equity peak check skipped: %s", e)
 
-    # ========== 预算限制检查（可开关）==========
+    # ========== 棰勭畻闄愬埗妫€鏌ワ紙鍙紑鍏筹級==========
     try:
         budget_enabled = bool(getattr(cfg.budget, 'action_enabled', True))
         cap_raw = getattr(cfg.budget, 'live_equity_cap_usdt', None)
         equity_cap = float(cap_raw) if cap_raw is not None else None
 
-        # 获取实时权益（直接从OKX API，不依赖本地缓存）
+        # 鑾峰彇瀹炴椂鏉冪泭锛堢洿鎺ヤ粠OKX API锛屼笉渚濊禆鏈湴缂撳瓨锛?
         eq_now = get_live_equity_from_okx()
 
         if eq_now is None:
-            log.error("❌ 无法从OKX获取实时权益，跳过预算检查")
+            log.error("Failed to fetch live equity from OKX; skipping budget check")
         elif not budget_enabled:
             cap_txt = f"{equity_cap:.2f}" if (equity_cap is not None) else "None"
-            log.warning(f"⚠️ Budget action disabled: equity={eq_now:.2f} cap={cap_txt}, skip budget blocking")
+            log.warning(f"鈿狅笍 Budget action disabled: equity={eq_now:.2f} cap={cap_txt}, skip budget blocking")
             audit.budget = getattr(audit, 'budget', {}) or {}
             audit.budget['equity_cap_usdt'] = equity_cap
             audit.budget['current_equity_usdt'] = eq_now
@@ -553,20 +515,20 @@ def main() -> None:
         else:
             # If cap is not configured, skip blocking but keep observability
             if equity_cap is None or equity_cap <= 0:
-                log.warning(f"⚠️ Budget action enabled but cap is None/invalid, skip budget blocking (equity={eq_now:.2f})")
+                log.warning(f"鈿狅笍 Budget action enabled but cap is None/invalid, skip budget blocking (equity={eq_now:.2f})")
                 audit.budget = getattr(audit, 'budget', {}) or {}
                 audit.budget['equity_cap_usdt'] = equity_cap
                 audit.budget['current_equity_usdt'] = eq_now
                 audit.budget['utilization_pct'] = None
                 audit.budget['action_enabled'] = False
             else:
-                log.info(f"💰 实时权益检测: {eq_now:.2f} USDT (上限: {equity_cap:.2f} USDT)")
+                log.info(f"馃挵 瀹炴椂鏉冪泭妫€娴? {eq_now:.2f} USDT (涓婇檺: {equity_cap:.2f} USDT)")
 
                 budget_result = check_budget_limit(equity_cap)
 
                 if not budget_result['ok']:
-                    log.error(f"🚨 BUDGET EXCEEDED: {eq_now:.2f} USDT > {equity_cap:.2f} USDT. STOPPING ALL TRADING.")
-                    # 预算超限时直接终止本轮，避免继续进入交易流程
+                    log.error(f"馃毃 BUDGET EXCEEDED: {eq_now:.2f} USDT > {equity_cap:.2f} USDT. STOPPING ALL TRADING.")
+                    # 棰勭畻瓒呴檺鏃剁洿鎺ョ粓姝㈡湰杞紝閬垮厤缁х画杩涘叆浜ゆ槗娴佺▼
                     audit.add_note(f"BUDGET_LIMIT_EXCEEDED: {eq_now:.2f} > {equity_cap:.2f}")
                     audit.budget = getattr(audit, 'budget', {}) or {}
                     audit.budget['equity_cap_usdt'] = equity_cap
@@ -577,9 +539,9 @@ def main() -> None:
                     log.info("V5 live run completed (BUDGET LIMITED)")
                     return
                 elif budget_result['utilization'] > 90:
-                    log.warning(f"⚠️ BUDGET WARNING: {eq_now:.2f} / {equity_cap:.2f} USDT ({budget_result['utilization']:.0f}%)")
+                    log.warning(f"鈿狅笍 BUDGET WARNING: {eq_now:.2f} / {equity_cap:.2f} USDT ({budget_result['utilization']:.0f}%)")
                 else:
-                    log.info(f"✅ BUDGET OK: {eq_now:.2f} / {equity_cap:.2f} USDT ({budget_result['utilization']:.0f}%)")
+                    log.info(f"鉁?BUDGET OK: {eq_now:.2f} / {equity_cap:.2f} USDT ({budget_result['utilization']:.0f}%)")
 
                 audit.budget = getattr(audit, 'budget', {}) or {}
                 audit.budget['equity_cap_usdt'] = equity_cap
@@ -589,9 +551,8 @@ def main() -> None:
 
     except Exception as e:
         log.warning(f"Budget check skipped: {e}")
-    # ========== 预算限制检查结束 ==========
+    # ========== 棰勭畻闄愬埗妫€鏌ョ粨鏉?==========
 
-    pipe = V5Pipeline(cfg, data_provider=provider)
     out = pipe.run(
         market_data_1h=md_1h,
         positions=held,
@@ -599,7 +560,26 @@ def main() -> None:
         equity_peak_usdt=float(acc.equity_peak_usdt),
         run_logger=run_logger,
         audit=audit,
+        precomputed_alpha=alpha_snap,
+        precomputed_regime=regime,
     )
+
+    log.info(f"ALPHA_HISTORY_ENABLED={ALPHA_HISTORY_ENABLED}, AlphaHistoryCollector={AlphaHistoryCollector}")
+    if ALPHA_HISTORY_ENABLED and AlphaHistoryCollector:
+        try:
+            collector = AlphaHistoryCollector()
+            collector.save_snapshot(
+                run_id=run_id,
+                ts=int(datetime.utcnow().timestamp()),
+                snapshot=out.alpha,
+                regime=str(out.regime.state.value if hasattr(out.regime.state, "value") else out.regime.state),
+                regime_multiplier=float(getattr(out.regime, "multiplier", 1.0) or 1.0),
+                selected_symbols=list(getattr(out.portfolio, "selected", []) or []),
+                traded_symbols=[],
+            )
+            log.info(f"Alpha snapshot saved to history database (run_id={run_id})")
+        except Exception as e:
+            log.warning(f"Failed to save alpha history: {e}")
 
     # Qlib-style IC monitor update (score/rankIC + factor IC when available)
     try:
@@ -668,7 +648,7 @@ def main() -> None:
     except Exception as e:
         log.warning(f"spread snapshot failed: {e}")
     
-    # 保存DecisionAudit
+    # 淇濆瓨DecisionAudit
     audit.save(f"reports/runs/{run_id}")
 
     # Update account peak equity
@@ -860,13 +840,13 @@ def main() -> None:
         except Exception as e:
             log.warning(f"fills sync/export failed: {e}")
     
-    # 更新 alpha 历史数据中的交易信息
+    # 鏇存柊 alpha 鍘嗗彶鏁版嵁涓殑浜ゆ槗淇℃伅
     if collector and hasattr(report, 'orders') and report.orders:
         traded_symbols = set()
         for order in report.orders:
             if hasattr(order, 'symbol'):
                 traded_symbols.add(order.symbol)
-                # 如果有盈亏信息，可以更新
+                # 濡傛灉鏈夌泩浜忎俊鎭紝鍙互鏇存柊
                 # if hasattr(order, 'pnl'):
                 #     collector.update_trade_pnl(
                 #         symbol=order.symbol,
@@ -874,7 +854,7 @@ def main() -> None:
                 #         pnl=order.pnl
                 #     )
         
-        # 更新 traded_symbols（简化：在下次运行时更新）
+        # 鏇存柊 traded_symbols锛堢畝鍖栵細鍦ㄤ笅娆¤繍琛屾椂鏇存柊锛?
         log.info(f"Traded symbols: {list(traded_symbols)}")
 
     # post-trade equity point (after applying fees/slippage)
@@ -904,7 +884,7 @@ def main() -> None:
         window_start_ts = _get_env_epoch_sec("V5_WINDOW_START_TS")
         window_end_ts = _get_env_epoch_sec("V5_WINDOW_END_TS")
 
-        # 窗口长度校验（避免 silent bug）
+        # 绐楀彛闀垮害鏍￠獙锛堥伩鍏?silent bug锛?
         if window_start_ts is not None and window_end_ts is not None:
             if window_end_ts <= window_start_ts:
                 raise ValueError(f"Invalid window: {window_start_ts} -> {window_end_ts}")
@@ -1003,3 +983,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+

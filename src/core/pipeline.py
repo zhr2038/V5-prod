@@ -243,6 +243,8 @@ class V5Pipeline:
         equity_peak_usdt: float,
         run_logger=None,
         audit: Optional[DecisionAudit] = None,
+        precomputed_alpha: Optional[AlphaSnapshot] = None,
+        precomputed_regime: Optional[RegimeResult] = None,
     ) -> PipelineOutput:
         """运行完整的交易流水线
         
@@ -297,13 +299,18 @@ class V5Pipeline:
                 audit.add_note("market_data_1h is empty; cannot run pipeline")
             raise ValueError("market_data_1h is empty")
 
-        btc = market_data_1h.get("BTC/USDT")
-        if btc is None:
-            btc = next(iter(market_data_1h.values()))
-        regime = self.regime_engine.detect(btc)
+        if precomputed_regime is not None:
+            regime = precomputed_regime
+        else:
+            btc = market_data_1h.get("BTC/USDT")
+            if btc is None:
+                btc = next(iter(market_data_1h.values()))
+            regime = self.regime_engine.detect(btc)
         
         # 2) Alpha计算（用于短线覆盖判断）
-        alpha = self.alpha_engine.compute_snapshot(market_data_1h)
+        regime_key = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+        self.alpha_engine.set_regime_context(regime_key)
+        alpha = precomputed_alpha if precomputed_alpha is not None else self.alpha_engine.compute_snapshot(market_data_1h)
         
         # 3) 短线交易增强：Risk-Off 机会覆盖 (已禁用 - HMM标签已修复)
         # 当Alpha评分很高时，覆盖Risk-Off状态，允许短线交易
@@ -348,24 +355,6 @@ class V5Pipeline:
                     'funding_weight': getattr(self.cfg.regime, 'funding_weight', 0),
                     'rss_weight': getattr(self.cfg.regime, 'rss_weight', 0),
                 }
-
-        # Optional: override alpha weights by regime (research/shadow only)
-        if bool(getattr(self.cfg.alpha, 'dynamic_weights_by_regime_enabled', False)) and getattr(self.cfg.alpha, 'dynamic_weights_by_regime_path', None):
-            try:
-                import json
-                from pathlib import Path
-                from configs.schema import AlphaWeights
-
-                p = Path(str(getattr(self.cfg.alpha, 'dynamic_weights_by_regime_path')))
-                obj = json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
-                reg_key = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
-                w = ((obj.get('regimes') or {}).get(reg_key) or {}).get('weights')
-                if isinstance(w, dict) and w:
-                    self.alpha_engine.cfg.weights = AlphaWeights(**w)
-                    if audit:
-                        audit.add_note(f"alpha weights overridden by regime={reg_key} from {p}")
-            except Exception:
-                pass
 
         # 2) Alpha计算后审计 (alpha已在前面计算)
         if audit:

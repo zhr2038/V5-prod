@@ -105,6 +105,8 @@ regime:
   hmm_weight: 0.35
   funding_weight: 0.40
   rss_weight: 0.25
+  funding_signal_max_age_minutes: 180
+  rss_signal_max_age_minutes: 180
   
   atr_threshold: 0.02
   atr_very_low: 0.008

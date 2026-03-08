@@ -397,6 +397,12 @@ class Alpha6FactorStrategy(BaseStrategy):
         self.factor_weights = self.config['weights']
         self.sentiment_cache_dir = Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache'
 
+    def set_factor_weights(self, weights: Dict[str, float]) -> None:
+        merged = dict(self.config.get('weights') or {})
+        merged.update({k: float(v) for k, v in (weights or {}).items()})
+        self.config['weights'] = merged
+        self.factor_weights = merged
+
     def _resolve_dynamic_weights(self, static_weights: Dict[str, float]) -> Dict[str, float]:
         """根据 IC monitor 动态修正因子权重（可选）。"""
         try:
