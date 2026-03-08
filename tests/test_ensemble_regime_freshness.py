@@ -42,3 +42,19 @@ def test_rss_vote_accepts_fresh_cache(tmp_path):
 
     assert vote["state"] == "TRENDING"
     assert vote["weight"] == engine.weights["rss"]
+
+
+def test_runtime_alerts_include_missing_sentiment_sources():
+    engine = EnsembleRegimeEngine(RegimeConfig())
+
+    alerts = engine._collect_runtime_alerts(
+        {
+            "hmm": {"state": "SIDEWAYS", "probs": {"Sideways": 0.6}},
+            "funding": {"state": None, "error": "funding_signal_stale_or_missing"},
+            "rss": {"state": None, "error": "rss_signal_stale_or_missing"},
+        },
+        "SIDEWAYS",
+    )
+
+    assert "funding_signal_stale_or_missing" in alerts
+    assert "rss_signal_stale_or_missing" in alerts

@@ -16,7 +16,13 @@ import requests
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def get_cache_dir() -> Path:
+    return PROJECT_ROOT / "data" / "sentiment_cache"
 
 
 # 扩展币种列表，按市值分层
@@ -130,7 +136,7 @@ def collect_funding_sentiment():
     """收集资金费率情绪（扩展版，12个币种）"""
     
     all_symbols = get_all_symbols()
-    cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
+    cache_dir = get_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp = datetime.now().strftime('%Y%m%d_%H')

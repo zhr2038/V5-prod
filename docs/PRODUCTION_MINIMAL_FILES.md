@@ -20,6 +20,8 @@ Live runtime:
 Required operational scripts:
 
 - `scripts/run_hourly_live_window.sh`
+- `scripts/collect_funding_sentiment.py`
+- `scripts/collect_rss_sentiment.py`
 - `scripts/bills_sync.py`
 - `scripts/ledger_once.py`
 - `scripts/reconcile_guard_once.py`
@@ -49,6 +51,8 @@ Primary production:
 
 - `deploy/systemd/v5-prod.user.service`
 - `deploy/systemd/v5-prod.user.timer`
+- `deploy/systemd/v5-sentiment-collect.service`
+- `deploy/systemd/v5-sentiment-collect.timer`
 
 Important:
 

@@ -94,6 +94,8 @@ The production-only systemd install covers:
 - `v5-prod.user.timer`
 - `v5-event-driven.service`
 - `v5-event-driven.timer`
+- `v5-sentiment-collect.service`
+- `v5-sentiment-collect.timer`
 - `v5-reconcile.service`
 - `v5-reconcile.timer`
 - `v5-ledger.service`
@@ -101,7 +103,7 @@ The production-only systemd install covers:
 - `v5-cost-rollup-real.user.service`
 - `v5-cost-rollup-real.user.timer`
 
-Safety timers for reconcile and ledger are enabled by default.
+Operational timers for sentiment refresh, reconcile, and ledger are enabled by default.
 
 Live trading timers remain explicit operator choices:
 

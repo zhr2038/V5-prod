@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from deploy.prod_release import iter_production_files, render_unit_text
+from deploy.prod_release import PRODUCTION_USER_UNIT_MAPPINGS, iter_production_files, render_unit_text
 
 
 def test_render_unit_text_rewrites_known_roots() -> None:
@@ -31,3 +31,9 @@ def test_iter_production_files_excludes_runtime_state(tmp_path: Path) -> None:
     )
 
     assert files == ["main.py", "scripts/run.py"]
+
+
+def test_production_unit_mappings_include_sentiment_collect() -> None:
+    mappings = dict(PRODUCTION_USER_UNIT_MAPPINGS)
+    assert mappings["v5-sentiment-collect.service"] == "v5-sentiment-collect.service"
+    assert mappings["v5-sentiment-collect.timer"] == "v5-sentiment-collect.timer"

@@ -235,6 +235,14 @@ class EnsembleRegimeEngine:
         if not hmm.get('state'):
             alerts.append('hmm_predict_none')
 
+        funding_error = funding.get('error') if isinstance(funding, dict) else None
+        if funding_error:
+            alerts.append(str(funding_error))
+
+        rss_error = rss.get('error') if isinstance(rss, dict) else None
+        if rss_error:
+            alerts.append(str(rss_error))
+
         if self._model_type_mismatch:
             alerts.append('model_type_mismatch')
 
