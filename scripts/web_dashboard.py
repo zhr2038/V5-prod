@@ -1299,6 +1299,102 @@ def _signal_health(cache_dir: Path, patterns: List[str], max_age_minutes: int, e
     }
 
 
+def _load_json_payload(path: Optional[Path]) -> Dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def _build_live_funding_vote(cache_dir: Path, max_age_minutes: int, weight: float) -> Dict[str, Any]:
+    composite_file = _latest_signal_file(cache_dir, ['funding_COMPOSITE_*.json'])
+    if composite_file is not None:
+        health = _signal_health(cache_dir, [composite_file.name], max_age_minutes, 'funding_signal_stale_or_missing')
+        if health.get('is_fresh'):
+            data = _load_json_payload(composite_file)
+            sentiment = float(data.get('f6_sentiment', 0.0) or 0.0)
+            if sentiment > 0.3:
+                state = 'TRENDING'
+            elif sentiment < -0.3:
+                state = 'RISK_OFF'
+            else:
+                state = 'SIDEWAYS'
+            return {
+                'state': state,
+                'confidence': min(abs(sentiment) * 2, 1.0),
+                'weight': float(weight),
+                'sentiment': sentiment,
+                'composite': True,
+                'details': data.get('tier_breakdown', {}),
+                'raw_state': state,
+            }
+
+    vals = []
+    details: Dict[str, float] = {}
+    for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
+        latest = _latest_signal_file(cache_dir, [f'funding_{sym}_*.json'])
+        if latest is None:
+            continue
+        health = _signal_health(cache_dir, [latest.name], max_age_minutes, 'funding_signal_stale_or_missing')
+        if not health.get('is_fresh'):
+            continue
+        data = _load_json_payload(latest)
+        sentiment = max(-1.0, min(1.0, float(data.get('f6_sentiment', 0.0) or 0.0)))
+        vals.append(sentiment)
+        details[sym] = sentiment
+
+    if not vals:
+        return {}
+
+    avg_sentiment = float(sum(vals) / len(vals))
+    if avg_sentiment > 0.3:
+        state = 'TRENDING'
+    elif avg_sentiment < -0.3:
+        state = 'RISK_OFF'
+    else:
+        state = 'SIDEWAYS'
+
+    return {
+        'state': state,
+        'confidence': min(abs(avg_sentiment) * 2, 1.0),
+        'weight': float(weight),
+        'sentiment': avg_sentiment,
+        'composite': False,
+        'details': details,
+        'raw_state': state,
+    }
+
+
+def _build_live_rss_vote(cache_dir: Path, max_age_minutes: int, weight: float) -> Dict[str, Any]:
+    latest = _latest_signal_file(cache_dir, ['rss_MARKET_*.json', 'rss_BTC-USDT_*.json'])
+    if latest is None:
+        return {}
+
+    health = _signal_health(cache_dir, [latest.name], max_age_minutes, 'rss_signal_stale_or_missing')
+    if not health.get('is_fresh'):
+        return {}
+
+    data = _load_json_payload(latest)
+    sentiment = float(data.get('f6_sentiment', 0.0) or 0.0)
+    if sentiment > 0.3:
+        state = 'TRENDING'
+    elif sentiment < -0.2:
+        state = 'RISK_OFF'
+    else:
+        state = 'SIDEWAYS'
+
+    return {
+        'state': state,
+        'confidence': min(abs(sentiment) * 1.5 + 0.3, 1.0),
+        'weight': float(weight),
+        'sentiment': sentiment,
+        'summary': str(data.get('f6_sentiment_summary', '') or '')[:100],
+        'raw_state': state,
+    }
+
+
 def _load_latest_regime_history_snapshot(reports_dir: Path) -> Dict[str, Any]:
     db_path = reports_dir / 'regime_history.db'
     if not db_path.exists():
@@ -1448,17 +1544,51 @@ def api_market_state():
             ),
         }
 
+        configured_weights = {
+            'funding': float(regime_cfg.get('funding_weight', 0.35) or 0.35),
+            'rss': float(regime_cfg.get('rss_weight', 0.25) or 0.25),
+        }
+        live_votes = {
+            'funding': _build_live_funding_vote(
+                cache_dir,
+                int(regime_cfg.get('funding_signal_max_age_minutes', 180) or 180),
+                configured_weights['funding'],
+            ),
+            'rss': _build_live_rss_vote(
+                cache_dir,
+                int(regime_cfg.get('rss_signal_max_age_minutes', 180) or 180),
+                configured_weights['rss'],
+            ),
+        }
+        stale_errors = {
+            'funding': 'funding_signal_stale_or_missing',
+            'rss': 'rss_signal_stale_or_missing',
+        }
         for name in ('funding', 'rss'):
             vote = votes.get(name, {})
             if not isinstance(vote, dict):
                 vote = {}
-            if signal_health[name].get('error'):
+            live_vote = live_votes.get(name, {})
+            if live_vote.get('state') and (
+                not vote.get('state')
+                or vote.get('error') == stale_errors[name]
+                or float(vote.get('confidence', 0) or 0) <= 0
+            ):
+                vote.update(live_vote)
+                vote.pop('error', None)
+            elif signal_health[name].get('error'):
                 vote.setdefault('error', signal_health[name]['error'])
+            elif vote.get('error') == stale_errors[name]:
+                vote.pop('error', None)
             votes[name] = vote
 
         merged_alerts: List[str] = []
         for item in list(alerts) + [signal_health['funding'].get('error'), signal_health['rss'].get('error')]:
             if not item or item in merged_alerts:
+                continue
+            if item == 'funding_signal_stale_or_missing' and signal_health['funding'].get('is_fresh'):
+                continue
+            if item == 'rss_signal_stale_or_missing' and signal_health['rss'].get('is_fresh'):
                 continue
             merged_alerts.append(str(item))
 

@@ -182,3 +182,65 @@ def test_market_state_exposes_stale_signal_health(monkeypatch, tmp_path):
     assert "rss_signal_stale_or_missing" in payload["alerts"]
     assert payload["votes"]["funding"]["error"] == "funding_signal_stale_or_missing"
     assert payload["votes"]["rss"]["error"] == "rss_signal_stale_or_missing"
+
+
+def test_market_state_refreshes_live_votes_when_cache_is_fresh(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    _write_cache(
+        cache_dir / "funding_COMPOSITE_20260309_01.json",
+        {"f6_sentiment": 0.42, "tier_breakdown": {"BTC": 0.4}},
+        age_sec=60,
+    )
+    _write_cache(
+        cache_dir / "rss_MARKET_20260309_01.json",
+        {"f6_sentiment": -0.35, "f6_sentiment_summary": "risk off"},
+        age_sec=60,
+    )
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "regime": {
+                "funding_signal_max_age_minutes": 30,
+                "rss_signal_max_age_minutes": 30,
+                "funding_weight": 0.35,
+                "rss_weight": 0.25,
+            }
+        },
+    )
+    monkeypatch.setattr(module, "calculate_market_indicators", lambda: {"price": 12345.0})
+    monkeypatch.setattr(
+        module,
+        "_load_market_state_snapshot",
+        lambda reports_dir: {
+            "state": "SIDEWAYS",
+            "position_multiplier": 0.8,
+            "method": "decision_audit",
+            "final_score": 0.12,
+            "votes": {
+                "hmm": {"state": "SIDEWAYS", "weight": 0.35, "confidence": 0.6},
+                "funding": {"state": None, "weight": 0, "confidence": 0, "error": "funding_signal_stale_or_missing"},
+                "rss": {"state": None, "weight": 0, "confidence": 0, "error": "rss_signal_stale_or_missing"},
+            },
+            "alerts": ["funding_signal_stale_or_missing", "rss_signal_stale_or_missing"],
+            "monitor": {},
+        },
+    )
+
+    response = client.get("/api/market_state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["signal_health"]["funding"]["status"] == "fresh"
+    assert payload["signal_health"]["rss"]["status"] == "fresh"
+    assert payload["votes"]["funding"]["state"] == "TRENDING"
+    assert payload["votes"]["funding"].get("error") is None
+    assert payload["votes"]["rss"]["state"] == "RISK_OFF"
+    assert payload["votes"]["rss"].get("error") is None
+    assert "funding_signal_stale_or_missing" not in payload["alerts"]
+    assert "rss_signal_stale_or_missing" not in payload["alerts"]
