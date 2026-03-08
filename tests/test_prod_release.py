@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from deploy.prod_release import PRODUCTION_USER_UNIT_MAPPINGS, iter_production_files, render_unit_text
+from deploy.sync_prod_release import _user_bus_wrapped_command
 
 
 def test_render_unit_text_rewrites_known_roots() -> None:
@@ -37,3 +38,10 @@ def test_production_unit_mappings_include_sentiment_collect() -> None:
     mappings = dict(PRODUCTION_USER_UNIT_MAPPINGS)
     assert mappings["v5-sentiment-collect.service"] == "v5-sentiment-collect.service"
     assert mappings["v5-sentiment-collect.timer"] == "v5-sentiment-collect.timer"
+
+
+def test_user_bus_wrapped_command_exports_user_bus() -> None:
+    wrapped = _user_bus_wrapped_command("admin", "systemctl --user daemon-reload")
+    assert "id -u admin" in wrapped
+    assert "XDG_RUNTIME_DIR=/run/user/$uid" in wrapped
+    assert "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" in wrapped

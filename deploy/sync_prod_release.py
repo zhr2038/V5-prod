@@ -90,6 +90,18 @@ def _run(client: paramiko.SSHClient, command: str) -> tuple[int, str, str]:
     return stdout.channel.recv_exit_status(), out, err
 
 
+def _user_bus_wrapped_command(service_user: str, inner: str) -> str:
+    escaped_inner = shlex.quote(inner)
+    escaped_user = shlex.quote(service_user)
+    return (
+        "uid=$(id -u {user}) && "
+        "sudo -u {user} env "
+        "XDG_RUNTIME_DIR=/run/user/$uid "
+        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus "
+        "bash -lc {inner}"
+    ).format(user=escaped_user, inner=escaped_inner)
+
+
 def _install_units(
     client: paramiko.SSHClient,
     remote_root: str,
@@ -111,25 +123,23 @@ def _install_units(
         cmd.append("--enable-event-driven-timer")
 
     inner = f"cd {shlex.quote(remote_root)} && {' '.join(shlex.quote(part) for part in cmd)}"
-    wrapped = f"sudo -Hiu {shlex.quote(service_user)} bash -lc {shlex.quote(inner)}"
+    wrapped = _user_bus_wrapped_command(service_user, inner)
     code, out, err = _run(client, wrapped)
     if code != 0:
         raise RuntimeError(f"install_systemd failed\nSTDOUT:\n{out}\nSTDERR:\n{err}")
 
 
 def _validate_units(client: paramiko.SSHClient, service_user: str) -> str:
-    cmd = (
-        f"sudo -Hiu {shlex.quote(service_user)} bash -lc "
-        + shlex.quote(
-            "systemctl --user is-enabled v5-sentiment-collect.timer "
-            "&& systemctl --user is-enabled v5-reconcile.timer "
-            "&& systemctl --user is-enabled v5-ledger.timer "
-            "&& systemctl --user is-enabled v5-cost-rollup-real.user.timer "
-            "&& systemctl --user show v5-sentiment-collect.timer --property=UnitFileState "
-            "&& systemctl --user show v5-prod.user.timer --property=UnitFileState "
-            "&& systemctl --user show v5-event-driven.timer --property=UnitFileState"
-        )
+    inner = (
+        "systemctl --user is-enabled v5-sentiment-collect.timer "
+        "&& systemctl --user is-enabled v5-reconcile.timer "
+        "&& systemctl --user is-enabled v5-ledger.timer "
+        "&& systemctl --user is-enabled v5-cost-rollup-real.user.timer "
+        "&& systemctl --user show v5-sentiment-collect.timer --property=UnitFileState "
+        "&& systemctl --user show v5-prod.user.timer --property=UnitFileState "
+        "&& systemctl --user show v5-event-driven.timer --property=UnitFileState"
     )
+    cmd = _user_bus_wrapped_command(service_user, inner)
     code, out, err = _run(client, cmd)
     if code != 0:
         raise RuntimeError(f"systemd validation failed\nSTDOUT:\n{out}\nSTDERR:\n{err}")
