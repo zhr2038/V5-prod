@@ -39,6 +39,15 @@ class PortfolioEngine:
         """
         self.alpha_cfg = alpha_cfg
         self.risk_cfg = risk_cfg
+        self.run_id = ""
+
+    def set_run_id(self, run_id: Optional[str]) -> None:
+        self.run_id = str(run_id or "").strip()
+
+    def _strategy_signals_path(self) -> Optional[Path]:
+        if not self.run_id:
+            return None
+        return Path("reports") / "runs" / self.run_id / "strategy_signals.json"
 
     def _load_optimizer_state(self) -> Dict[str, Any]:
         try:
@@ -173,38 +182,27 @@ class PortfolioEngine:
         return merged
 
     def _load_fused_signals(self) -> Optional[Dict[str, float]]:
-        """Load fused signals from strategy_signals.json if available"""
+        """Load fused signals from the current run if available."""
         try:
-            from pathlib import Path
-            from datetime import datetime
-            import json
-            
-            strategy_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
-            if not strategy_file.exists():
-                # Try to find latest run
-                runs_dir = Path("reports/runs")
-                if runs_dir.exists():
-                    run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], reverse=True)
-                    if run_dirs:
-                        strategy_file = run_dirs[0] / "strategy_signals.json"
-            
-            if strategy_file.exists():
-                with open(strategy_file) as f:
-                    data = json.load(f)
-                    fused = data.get("fused", {})
-                    if fused:
-                        # Convert to score format (buy=positive, sell=negative)
-                        scores = {}
-                        for sym, sig in fused.items():
-                            direction = sig.get("direction", "hold")
-                            score = sig.get("score", 0)
-                            if direction == "buy":
-                                scores[sym] = float(score)
-                            elif direction == "sell":
-                                scores[sym] = -float(score)
-                            else:
-                                scores[sym] = 0.0
-                        return scores if scores else None
+            strategy_file = self._strategy_signals_path()
+            if strategy_file is None or not strategy_file.exists():
+                return None
+
+            with open(strategy_file, encoding='utf-8') as f:
+                data = json.load(f)
+                fused = data.get("fused", {})
+                if fused:
+                    scores = {}
+                    for sym, sig in fused.items():
+                        direction = sig.get("direction", "hold")
+                        score = sig.get("score", 0)
+                        if direction == "buy":
+                            scores[sym] = float(score)
+                        elif direction == "sell":
+                            scores[sym] = -float(score)
+                        else:
+                            scores[sym] = 0.0
+                    return scores if scores else None
         except Exception:
             pass
         return None

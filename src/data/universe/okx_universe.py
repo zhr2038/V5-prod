@@ -50,6 +50,7 @@ class OKXUniverseProvider:
         exclude_stablecoins: bool = True,
         timeout_sec: int = 10,
         max_spread_bps: Optional[float] = None,
+        exclude_symbols: Optional[List[str]] = None,
         *,
         refine_with_single_ticker: bool = False,
         refine_single_ticker_max_candidates: int = 200,
@@ -64,6 +65,7 @@ class OKXUniverseProvider:
         self.exclude_stablecoins = bool(exclude_stablecoins)
         self.timeout_sec = int(timeout_sec)
         self.max_spread_bps = (float(max_spread_bps) if max_spread_bps is not None else None)
+        self.exclude_symbols = [str(s) for s in (exclude_symbols or []) if str(s).strip()]
         self.refine_with_single_ticker = bool(refine_with_single_ticker)
         self.refine_single_ticker_max_candidates = int(refine_single_ticker_max_candidates)
         self.refine_single_ticker_sleep_sec = float(refine_single_ticker_sleep_sec)
@@ -85,7 +87,7 @@ class OKXUniverseProvider:
         if self.refine_with_single_ticker and items:
             items = self._refine_by_single_ticker(items)
 
-        syms = [it.symbol for it in items]
+        syms = self._apply_symbol_filters([it.symbol for it in items])
         self._save_cache(now_ts, syms)
         return syms
 
@@ -96,10 +98,12 @@ class OKXUniverseProvider:
             obj = json.loads(self.cache_path.read_text(encoding="utf-8"))
             ts = float(obj.get("ts") or 0.0)
             ttl = float(self.cache_ttl_sec)
+            if obj.get("config_signature") != self._cache_signature():
+                return None
             if ttl > 0 and (now_ts - ts) < ttl:
                 syms = obj.get("symbols")
                 if isinstance(syms, list) and syms:
-                    return [str(s) for s in syms]
+                    return self._apply_symbol_filters([str(s) for s in syms])
         except Exception:
             return None
         return None
@@ -108,11 +112,75 @@ class OKXUniverseProvider:
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             self.cache_path.write_text(
-                json.dumps({"ts": now_ts, "ttl_sec": self.cache_ttl_sec, "symbols": symbols}, ensure_ascii=False, indent=2),
+                json.dumps(
+                    {
+                        "ts": now_ts,
+                        "ttl_sec": self.cache_ttl_sec,
+                        "config_signature": self._cache_signature(),
+                        "symbols": list(symbols or []),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
         except Exception:
             pass
+
+    def _cache_signature(self) -> Dict[str, Any]:
+        return {
+            "base_url": self.base_url,
+            "min_24h_quote_volume_usdt": float(self.min_24h_quote_volume_usdt),
+            "exclude_stablecoins": bool(self.exclude_stablecoins),
+            "max_spread_bps": self.max_spread_bps,
+            "refine_with_single_ticker": bool(self.refine_with_single_ticker),
+            "refine_single_ticker_max_candidates": int(self.refine_single_ticker_max_candidates),
+            "exclude_symbols": sorted({str(s).upper() for s in self.exclude_symbols}),
+        }
+
+    def _blocked_symbols(self) -> set[str]:
+        blocked = set()
+        try:
+            bl = load_blacklist(self.blacklist_path)
+            for raw in (bl.get("symbols") or []):
+                s = str(raw).strip().upper()
+                if not s:
+                    continue
+                blocked.add(s)
+                blocked.add(s.replace("/", "-"))
+                blocked.add(s.replace("-", "/"))
+        except Exception:
+            pass
+
+        for raw in self.exclude_symbols:
+            s = str(raw).strip().upper()
+            if not s:
+                continue
+            blocked.add(s)
+            blocked.add(s.replace("/", "-"))
+            blocked.add(s.replace("-", "/"))
+        return blocked
+
+    def _apply_symbol_filters(self, symbols: List[str]) -> List[str]:
+        blocked = self._blocked_symbols()
+        out: List[str] = []
+        seen = set()
+        for raw in symbols or []:
+            symbol = str(raw).strip()
+            if not symbol:
+                continue
+            upper = symbol.upper()
+            if upper in blocked or upper.replace("/", "-") in blocked:
+                continue
+            if self.exclude_stablecoins:
+                base = upper.split("/", 1)[0]
+                if self._is_stablecoin(base):
+                    continue
+            if upper in seen:
+                continue
+            seen.add(upper)
+            out.append(symbol)
+        return out
 
     def _fetch_instruments(self) -> List[Dict[str, Any]]:
         url = f"{self.base_url}/api/v5/public/instruments"
@@ -196,6 +264,9 @@ class OKXUniverseProvider:
             inst_id = str(it.get("instId") or "")
             if not inst_id:
                 continue
+            state = str(it.get("state") or "").strip().lower()
+            if state and state != "live":
+                continue
             base = str(it.get("baseCcy") or "").upper()
             quote = str(it.get("quoteCcy") or "").upper()
             if quote != "USDT":
@@ -208,8 +279,7 @@ class OKXUniverseProvider:
                 min_sz = 0.0
             pairs[inst_id] = (base, quote, float(min_sz))
 
-        bl = load_blacklist(self.blacklist_path)
-        bl_syms = set(str(s).upper() for s in (bl.get("symbols") or []))
+        bl_syms = self._blocked_symbols()
 
         out: List[UniverseItem] = []
         for t in tickers or []:
@@ -218,7 +288,7 @@ class OKXUniverseProvider:
                 continue
             base, quote, min_sz = pairs[inst_id]
             sym = f"{base}/{quote}"
-            if sym.upper() in bl_syms or inst_id.upper().replace("-", "/") in bl_syms:
+            if sym.upper() in bl_syms or inst_id.upper() in bl_syms or inst_id.upper().replace("-", "/") in bl_syms:
                 continue
 
             qv_f = self._quote_vol_usdt_from_ticker(t)

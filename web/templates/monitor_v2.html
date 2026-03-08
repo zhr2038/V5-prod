@@ -1,1002 +1,112 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
-    <title>V5 交易监控</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0f172a;
-            color: #e2e8f0;
-            line-height: 1.6;
-        }
-        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
-        
-        /* Header */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #1e293b;
-        }
-        .header h1 { font-size: 1.5rem; color: #3b82f6; }
-        .update-time { font-size: 0.8rem; color: #64748b; }
-        
-        /* Grid Layout */
-        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
-        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
-        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-        
-        @media (max-width: 768px) {
-            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-            .container { padding: 10px; }
-            .header h1 { font-size: 1.2rem; }
-            .header { flex-direction: column; align-items: flex-start; gap: 10px; }
-            .update-time { font-size: 0.75rem; }
-            .status-bar { grid-template-columns: repeat(2, 1fr); }
-            .status-item { padding: 10px; }
-            .status-item .value { font-size: 1rem; }
-            .card { padding: 12px; }
-            .card-title { font-size: 0.9rem; }
-            th, td { padding: 8px 6px; font-size: 0.8rem; }
-            .strategy-grid { grid-template-columns: 1fr; }
-            .risk-metrics { grid-template-columns: repeat(2, 1fr); }
-        }
-        
-        @media (max-width: 480px) {
-            .status-bar { grid-template-columns: 1fr; }
-            .risk-metrics { grid-template-columns: 1fr; }
-            .btn { padding: 8px 12px; font-size: 0.85rem; }
-        }
-        
-        /* Status Cards */
-        .status-bar {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        .status-item {
-            background: #1e293b;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .status-item .label { font-size: 0.75rem; color: #64748b; }
-        .status-item .value { font-size: 1.2rem; font-weight: 600; margin-top: 5px; }
-        .status-item .sub { font-size: 0.7rem; color: #64748b; margin-top: 3px; }
-        
-        /* Cards */
-        .card {
-            background: #1e293b;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 15px;
-        }
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-        .card-title { font-size: 1rem; font-weight: 600; }
-        .card-subtitle { font-size: 0.8rem; color: #64748b; }
-        
-        /* Tables */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.85rem;
-        }
-        th, td {
-            padding: 10px 8px;
-            text-align: left;
-            border-bottom: 1px solid #334155;
-        }
-        th { color: #64748b; font-weight: 500; font-size: 0.75rem; }
-        tr:last-child td { border-bottom: none; }
-        .text-right { text-align: right; }
-        .text-center { text-align: center; }
-        .text-green { color: #22c55e; }
-        .text-red { color: #ef4444; }
-        .text-yellow { color: #f59e0b; }
-        
-        /* Risk Level Badge */
-        .risk-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-        .risk-attack { background: rgba(239,68,68,0.2); color: #fca5a5; }
-        .risk-neutral { background: rgba(59,130,246,0.2); color: #93c5fd; }
-        .risk-defense { background: rgba(245,158,11,0.2); color: #fcd34d; }
-        .risk-protect { background: rgba(34,197,94,0.2); color: #86efac; }
-        
-        /* Info Grid */
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-        }
-        .info-item {
-            background: #0f172a;
-            padding: 10px;
-            border-radius: 6px;
-        }
-        .info-item .label { font-size: 0.7rem; color: #64748b; }
-        .info-item .value { font-size: 0.9rem; font-weight: 600; margin-top: 3px; }
-        
-        /* Strategy Items */
-        .strategy-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 10px;
-        }
-        .strategy-item {
-            background: #0f172a;
-            padding: 12px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .strategy-item .name { font-size: 0.8rem; color: #94a3b8; }
-        .strategy-item .count { font-size: 1.1rem; font-weight: 600; margin: 5px 0; }
-        .strategy-item .detail { font-size: 0.75rem; color: #64748b; }
-        
-        /* Market State */
-        .market-state {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            padding: 12px;
-            background: #0f172a;
-            border-radius: 8px;
-        }
-        .market-state .state-box {
-            padding: 8px 15px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 0.9rem;
-        }
-        .state-trending { background: rgba(34,197,94,0.2); color: #86efac; }
-        .state-sideways { background: rgba(245,158,11,0.2); color: #fcd34d; }
-        .state-riskoff { background: rgba(239,68,68,0.2); color: #fca5a5; }
-        
-        /* Loading & Error */
-        .loading { text-align: center; color: #64748b; padding: 20px; }
-        .error { text-align: center; color: #ef4444; padding: 20px; }
-        .empty { text-align: center; color: #64748b; padding: 20px; font-size: 0.9rem; }
-        
-        /* Tabs */
-        .tabs {
-            display: flex;
-            gap: 5px;
-            margin-bottom: 15px;
-            border-bottom: 1px solid #334155;
-            padding-bottom: 10px;
-        }
-        .tab {
-            padding: 8px 16px;
-            background: transparent;
-            border: none;
-            color: #64748b;
-            cursor: pointer;
-            border-radius: 6px;
-            font-size: 0.9rem;
-        }
-        .tab.active {
-            background: #3b82f6;
-            color: white;
-        }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>V5 交易指挥台</title>
+<style>
+:root{--bg:#08111f;--panel:rgba(12,24,39,.84);--border:rgba(148,163,184,.18);--ink:#e6edf7;--muted:#8ca0bb;--cyan:#5eead4;--sky:#7dd3fc;--amber:#fbbf24;--red:#fb7185;--green:#4ade80;--shadow:0 24px 60px rgba(0,0,0,.32);--r1:28px;--r2:20px;--r3:14px;--body:"Space Grotesk","Avenir Next","Segoe UI",sans-serif;--mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 12% 14%,rgba(94,234,212,.18),transparent 24%),radial-gradient(circle at 82% 10%,rgba(251,191,36,.14),transparent 18%),radial-gradient(circle at 74% 78%,rgba(125,211,252,.12),transparent 22%),linear-gradient(140deg,#06101d 0%,#0a1626 45%,#0d2034 100%);color:var(--ink);font-family:var(--body)}
+body:before,body:after{content:"";position:fixed;pointer-events:none;filter:blur(36px);opacity:.5;z-index:0}body:before{width:240px;height:240px;top:80px;right:-40px;background:rgba(94,234,212,.14)}body:after{width:220px;height:220px;left:-40px;bottom:40px;background:rgba(251,191,36,.10)}
+.shell{position:relative;z-index:1;max-width:1480px;margin:0 auto;padding:26px}.hero{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.85fr);gap:18px;margin-bottom:18px}.hero-card,.panel,.metric,.chip{-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+.hero-card,.panel,.metric{background:linear-gradient(180deg,rgba(13,27,44,.94),rgba(8,20,33,.82));border:1px solid var(--border);box-shadow:var(--shadow)}.hero-card{border-radius:var(--r1);padding:26px;position:relative;overflow:hidden}.hero-card:after{content:"";position:absolute;inset:auto -80px -120px auto;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(125,211,252,.18),transparent 70%)}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:rgba(94,234,212,.12);color:var(--cyan);font:700 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}.hero-title{margin:18px 0 10px;font-size:clamp(2rem,4vw,3.8rem);line-height:.94;letter-spacing:-.05em}.hero-copy{max-width:760px;font-size:.98rem;color:var(--muted);line-height:1.7}.hero-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}.hero-aside{display:grid;gap:14px}.stack-label,.kicker,.label{color:var(--muted);font:700 11px/1.2 var(--mono);letter-spacing:.14em;text-transform:uppercase}.stack-value{font-size:1.15rem;font-weight:700;display:flex;flex-wrap:wrap;gap:10px;align-items:center}.chip,.pill,.tiny,.alert{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;font-size:.8rem;font-weight:700}.chip{background:rgba(8,18,31,.74);border:1px solid rgba(125,211,252,.12)}.dot{width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 6px rgba(94,234,212,.12)}
+.metric-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:18px}.metric{border-radius:var(--r2);padding:18px 18px 16px;min-height:126px}.metric-value{font-size:clamp(1.5rem,2.2vw,2.3rem);font-weight:700;letter-spacing:-.04em}.muted{margin-top:10px;font-size:.84rem;color:var(--muted)}
+.deck{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,.95fr);gap:18px}.column{display:grid;gap:18px}.panel{border-radius:var(--r1);padding:20px;overflow:hidden}.panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}.title{font-size:1.28rem;font-weight:700;letter-spacing:-.03em}.note{margin-top:6px;color:var(--muted);font-size:.9rem;line-height:1.6}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.info,.vote,.trade,.signal,.decision,.ops,.health,.alpha{background:rgba(5,13,24,.62);border:1px solid rgba(148,163,184,.1);border-radius:16px;padding:14px}.value{margin-top:10px;font-size:1.1rem;font-weight:700;line-height:1.35}.subtle{margin-top:8px;font-size:.82rem;color:var(--muted)}
+.state-trending,.risk-attack,.tone-positive{background:rgba(74,222,128,.14);color:#8ef0ad}.state-sideways,.risk-neutral,.tone-warn{background:rgba(251,191,36,.14);color:#f7d66d}.state-riskoff,.risk-defense,.risk-protect,.tone-negative{background:rgba(251,113,133,.14);color:#ff9aae}.alert{background:rgba(125,211,252,.14);color:#c4ebff;border:1px solid rgba(125,211,252,.14);margin:0 8px 8px 0}
+.vote-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}.vote-head,.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.vote-title{font-size:.82rem;color:var(--muted);text-transform:uppercase;letter-spacing:.14em;font-family:var(--mono)}.vote-value{font-size:1.04rem;font-weight:700}.vote-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.tiny{padding:6px 10px;background:rgba(15,29,47,.88);border:1px solid rgba(148,163,184,.12);color:var(--muted);font-weight:600}
+.table-shell{overflow:auto;border-radius:16px;border:1px solid rgba(148,163,184,.1);background:rgba(5,13,24,.62)}table{width:100%;border-collapse:collapse;min-width:560px}th,td{padding:12px 14px;border-bottom:1px solid rgba(148,163,184,.08);text-align:left;font-size:.9rem}th{color:var(--muted);font:700 11px/1.2 var(--mono);text-transform:uppercase;letter-spacing:.12em;background:rgba(10,20,34,.95);position:sticky;top:0}tr:last-child td{border-bottom:none}.text-right{text-align:right}.text-green{color:#8ef0ad}.text-red{color:#ff9aae}.mono{font-family:var(--mono)}.stack,.trade-list,.signal-grid,.decision-grid,.ops-grid,.health-list,.alpha-list{display:grid;gap:12px}.signal-grid,.ops-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}.bar{margin-top:10px;height:8px;border-radius:999px;background:rgba(148,163,184,.12);overflow:hidden}.bar>span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,rgba(94,234,212,.72),rgba(125,211,252,.88))}
+.loading,.empty,.error{padding:18px;border-radius:14px;text-align:center;background:rgba(5,13,24,.62);border:1px dashed rgba(148,163,184,.18)}.loading{color:var(--muted)}.error{color:var(--red)}.footer{margin-top:18px;color:var(--muted);font-size:.82rem;text-align:right}
+@media (max-width:1180px){.hero,.deck,.metric-row,.vote-grid,.grid2{grid-template-columns:1fr}}@media (max-width:720px){.shell{padding:14px}.hero-card,.panel,.metric{padding:16px;border-radius:20px}.hero-title{font-size:2rem}.chip,.pill,.tiny,.alert{white-space:normal}table{min-width:520px}}
+</style>
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <h1>🤖 V5 交易监控</h1>
-            <div class="update-time" id="update-time">加载中...</div>
-        </div>
-        
-        <!-- Account Overview -->
-        <div class="status-bar">
-            <div class="status-item">
-                <div class="label">总权益</div>
-                <div class="value" id="total-equity">--</div>
-                <div class="sub" id="total-pnl">--</div>
-            </div>
-            <div class="status-item">
-                <div class="label">可用现金</div>
-                <div class="value" id="cash-usdt">--</div>
-                <div class="sub" id="cash-ratio">--</div>
-            </div>
-            <div class="status-item">
-                <div class="label">持仓市值</div>
-                <div class="value" id="positions-value">--</div>
-                <div class="sub" id="positions-count-top">--</div>
-            </div>
-            <div class="status-item">
-                <div class="label">风险档位</div>
-                <div class="value" id="risk-level">--</div>
-                <div class="sub" id="risk-detail">--</div>
-            </div>
-            <div class="status-item">
-                <div class="label">市场状态</div>
-                <div class="value" id="market-state-val">--</div>
-                <div class="sub" id="market-detail">--</div>
-            </div>
-        </div>
-        
-        <!-- Two Column Layout -->
-        <div class="grid-2">
-            <!-- Left Column -->
-            <div>
-                <!-- Positions -->
-                <div class="card">
-                    <div class="card-header">
-                        <div>
-                            <div class="card-title">📊 当前持仓</div>
-                            <div class="card-subtitle" id="positions-subtitle">加载中...</div>
-                        </div>
-                    </div>
-                    <div id="positions-content">
-                        <div class="loading">加载中...</div>
-                    </div>
-                </div>
-                
-                <!-- Trades -->
-                <div class="card">
-                    <div class="card-header">
-                        <div>
-                            <div class="card-title">🔄 最近交易</div>
-                            <div class="card-subtitle">最近10笔</div>
-                        </div>
-                    </div>
-                    <div id="trades-content">
-                        <div class="loading">加载中...</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Right Column -->
-            <div>
-                <!-- Market & Risk -->
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">📈 市场与风控</div>
-                    </div>
-                    
-                    <div class="info-grid" style="margin-bottom: 15px;">
-                        <div class="info-item">
-                            <div class="label">市场状态</div>
-                            <div class="value" id="market-state-detail">--</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="label">仓位乘数</div>
-                            <div class="value" id="position-multiplier">--</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="label">当前回撤</div>
-                            <div class="value" id="current-drawdown">--</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="label">成交率</div>
-                            <div class="value" id="conversion-rate">--</div>
-                        </div>
-                    </div>
-                    
-                    <div style="background: #0f172a; padding: 12px; border-radius: 8px;">
-                        <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">三方法判断</div>
-                        <div id="ensemble-votes" style="font-size: 0.85rem;">加载中...</div>
-                    </div>
-                </div>
-                
-                <!-- Health Status -->
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">🩺 系统健康</div>
-                        <div class="card-subtitle" id="health-update-time">加载中...</div>
-                    </div>
-                    <div id="health-content">
-                        <div class="loading">加载中...</div>
-                    </div>
-                </div>
-                
-                <!-- Strategy Signals -->
-                <div class="card">
-                    <div class="card-header">
-                        <div>
-                            <div class="card-title">📡 策略信号</div>
-                            <div class="card-subtitle" id="signals-time">加载中...</div>
-                        </div>
-                    </div>
-                    <div id="signals-content">
-                        <div class="loading">加载中...</div>
-                    </div>
-                </div>
-                
-                <!-- Decision & Execution Flow -->
-                <div class="card">
-                    <div class="card-header">
-                        <div>
-                            <div class="card-title">🧠 决策与执行透视</div>
-                            <div class="card-subtitle" id="decision-flow-time">加载中...</div>
-                        </div>
-                    </div>
-                    <div id="decision-flow-content">
-                        <div class="loading">加载中...</div>
-                    </div>
-                </div>
-
-                <!-- System Status -->
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">⚙️ 系统状态</div>
-                    </div>
-                    <div id="system-content">
-                        <div class="loading">加载中...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // API Base
-        const API_BASE = '';
-        
-        // Format helpers
-        function formatNumber(num, decimals = 2) {
-            if (num === null || num === undefined || isNaN(num)) return '--';
-            return Number(num).toFixed(decimals);
-        }
-        
-        function formatCurrency(num) {
-            if (num === null || num === undefined || isNaN(num)) return '--';
-            return '$' + formatNumber(num, 2);
-        }
-        
-        function formatPercent(num, showSign = true) {
-            if (num === null || num === undefined || isNaN(num)) return '--';
-            const val = Number(num) * 100;
-            const sign = showSign && val > 0 ? '+' : '';
-            const color = val >= 0 ? 'text-green' : 'text-red';
-            return `<span class="${color}">${sign}${formatNumber(val, 1)}%</span>`;
-        }
-        
-        // Risk level styles
-        function getRiskClass(level) {
-            const map = {
-                'ATTACK': 'risk-attack',
-                'NEUTRAL': 'risk-neutral',
-                'DEFENSE': 'risk-defense',
-                'PROTECT': 'risk-protect'
-            };
-            return map[level] || 'risk-neutral';
-        }
-
-        // 术语翻译（把程序名词换成人话）
-        const TERM_EXPLAIN = {
-            OPEN_LONG_COOLDOWN: '开仓冷却中（防止同币短时间重复开仓）',
-            min_notional: '下单金额低于最小门槛',
-            MIN_NOTIONAL: '下单金额低于最小门槛',
-            exchange_min_notional: '低于交易所最小下单金额',
-            EXCHANGE_MIN_NOTIONAL: '低于交易所最小下单金额',
-            deadband: '仓位差在静默区（波动太小，不调整）',
-            DEADBAND: '仓位差在静默区（波动太小，不调整）',
-            GATE: '风控门控拦截',
-            SELL_ONLY: '仅允许卖出（买入被禁）',
-            DUST: '灰尘单/数量太小',
-            SAFETY: '安全规则拦截',
-            require_fused_symbol: '不在融合信号买入名单',
-            require_fused_missing: '缺少融合信号文件',
-            budget_hard_buy_block: '触发预算硬限制，禁止买入',
-            spread_gate: '点差过大被拦截',
-            dd_throttle: '回撤保护降速',
-            no_closed_bar: '缺少收盘数据',
-            insufficient_cash: '可用现金不足',
-            provider_error: '行情提供方异常',
-            high_risk_symbol: '高风险币种过滤',
-            min_price: '低价币过滤',
-            ok: '通过',
-            OK: '通过',
-        };
-
-        function sideZh(v) {
-            const s = String(v || '').toLowerCase();
-            if (s === 'buy') return '买入';
-            if (s === 'sell') return '卖出';
-            return v || '--';
-        }
-
-        function stateZh(v) {
-            const s = String(v || '').toUpperCase();
-            const map = {
-                FILLED: '已成交',
-                REJECTED: '已拒单',
-                OPEN: '已提交',
-                PARTIAL: '部分成交',
-                SENT: '已发送',
-                ACK: '已确认',
-                CANCELED: '已撤单',
-                CANCELLED: '已撤单',
-                UNKNOWN: '未知状态',
-            };
-            return map[s] || (v || '--');
-        }
-
-        function regimeZh(v) {
-            const s = String(v || '').toUpperCase();
-            const map = {
-                TRENDING: '趋势',
-                SIDEWAYS: '震荡',
-                RISK_OFF: '风险规避',
-            };
-            return map[s] || (v || '--');
-        }
-
-        function sourceZh(v) {
-            const s = String(v || '').toLowerCase();
-            if (s === 'fused') return '融合执行榜';
-            if (s === 'alpha') return 'Alpha评分榜';
-            return v || '--';
-        }
-
-        function explainTerm(raw) {
-            const txt = String(raw || '').trim();
-            if (!txt) return '正常';
-            if (TERM_EXPLAIN[txt]) return TERM_EXPLAIN[txt];
-            const up = txt.toUpperCase();
-            if (TERM_EXPLAIN[up]) return TERM_EXPLAIN[up];
-
-            if (up.includes('OPEN_LONG_COOLDOWN')) return TERM_EXPLAIN.OPEN_LONG_COOLDOWN;
-            if (up.includes('MIN_NOTIONAL')) return TERM_EXPLAIN.MIN_NOTIONAL;
-            if (up.includes('DEADBAND')) return TERM_EXPLAIN.deadband;
-            if (up.includes('SELL_ONLY')) return TERM_EXPLAIN.SELL_ONLY;
-            if (up.includes('DUST')) return TERM_EXPLAIN.DUST;
-            if (up.includes('EXCHANGE_MIN_NOTIONAL')) return TERM_EXPLAIN.EXCHANGE_MIN_NOTIONAL;
-            if (up.includes('SPREAD')) return TERM_EXPLAIN.spread_gate;
-            return txt;
-        }
-
-        function explainWithCode(raw) {
-            const txt = String(raw || '').trim();
-            if (!txt) return '通过';
-            const zh = explainTerm(txt);
-            if (zh === txt) return txt;
-            return `${zh}（${txt}）`;
-        }
-        
-        // Load account
-        async function loadAccount() {
-            try {
-                const res = await fetch('/api/account');
-                const data = await res.json();
-                
-                const total = data.total_equity_usdt || 0;
-                const cash = data.cash_usdt || 0;
-                const pos = data.positions_value_usdt || 0;
-                const pnl = data.total_pnl_pct || 0;
-                
-                // 分开设置，避免innerHTML问题
-                const equityEl = document.getElementById('total-equity');
-                const pnlEl = document.getElementById('total-pnl');
-                
-                if (equityEl) equityEl.textContent = formatCurrency(total);
-                if (pnlEl) pnlEl.innerHTML = formatPercent(pnl);
-                
-                document.getElementById('cash-usdt').textContent = formatCurrency(cash);
-                document.getElementById('cash-ratio').textContent = total > 0 ? formatNumber(cash/total*100, 0) + '%' : '--';
-                document.getElementById('positions-value').textContent = formatCurrency(pos);
-                document.getElementById('positions-count-top').textContent = (data.positions_count || 0) + '个持仓';
-                
-                return data;
-            } catch (e) {
-                console.error('账户加载失败:', e);
-                return null;
-            }
-        }
-        
-        // Load risk level
-        async function loadRiskLevel() {
-            try {
-                // 同时获取风险档位和账户数据（账户数据有修正后的回撤）
-                const [riskRes, accountRes] = await Promise.all([
-                    fetch('/api/auto_risk_guard'),
-                    fetch('/api/account')
-                ]);
-                
-                const data = await riskRes.json();
-                const accountData = await accountRes.json();
-                
-                const level = data.current_level || 'NEUTRAL';
-                const config = data.config || {};
-                const metrics = data.metrics || {};
-                
-                // 优先使用账户API的修正回撤（基于资金上限）
-                let dd = accountData.drawdown_pct;
-                if (dd === undefined || dd === null) {
-                    // 回退到旧数据
-                    dd = metrics.last_dd_pct || 0;
-                }
-                
-                // 显示预算上限提示（如果有）
-                const budgetCap = accountData.budget_cap_usdt;
-                const peakEquity = accountData.peak_equity_usdt;
-                let drawdownLabel = '当前回撤';
-                if (budgetCap) {
-                    drawdownLabel = `当前回撤 (基于${budgetCap}U上限)`;
-                }
-                
-                const badgeHtml = `<span class="risk-badge ${getRiskClass(level)}">${level}</span>`;
-                document.getElementById('risk-level').innerHTML = badgeHtml;
-                document.getElementById('risk-detail').textContent = `回撤 ${(dd*100).toFixed(1)}%`;
-                
-                document.getElementById('current-drawdown').innerHTML = formatPercent(dd);
-                document.getElementById('conversion-rate').textContent = 
-                    metrics.last_conversion_rate ? (metrics.last_conversion_rate*100).toFixed(0) + '%' : '--';
-                
-                // 更新标签
-                const ddLabelEl = document.querySelector('#current-drawdown').previousElementSibling;
-                if (ddLabelEl && budgetCap) {
-                    ddLabelEl.textContent = drawdownLabel;
-                }
-                
-                return data;
-            } catch (e) {
-                console.error('风险档位加载失败:', e);
-                return null;
-            }
-        }
-        
-        // Load market state
-        async function loadMarketState() {
-            try {
-                const res = await fetch('/api/market_state');
-                const data = await res.json();
-                
-                const state = data.state || 'SIDEWAYS';
-                const multiplier = typeof data.position_multiplier === 'number' ? data.position_multiplier : 0.7;
-                const votes = data.votes || {};
-                
-                const stateMap = {
-                    'TRENDING': { text: '趋势', class: 'state-trending' },
-                    'SIDEWAYS': { text: '震荡', class: 'state-sideways' },
-                    'RISK_OFF': { text: '风险规避', class: 'state-riskoff' }
-                };
-                const stateInfo = stateMap[state] || stateMap['SIDEWAYS'];
-                
-                document.getElementById('market-state-val').innerHTML = 
-                    `<span class="${stateInfo.class}" style="padding: 4px 10px; border-radius: 4px; font-size: 0.85rem;">${stateInfo.text}</span>`;
-                document.getElementById('market-detail').textContent = formatNumber(multiplier, 2) + 'x仓位';
-                document.getElementById('market-state-detail').innerHTML = 
-                    `<span class="${stateInfo.class}">${state}</span>`;
-                document.getElementById('position-multiplier').textContent = formatNumber(multiplier, 2) + 'x';
-                
-                // Ensemble votes
-                let votesHtml = '';
-                if (votes.hmm) votesHtml += `HMM: ${votes.hmm.state || '--'} `;
-                if (votes.funding) votesHtml += `资金: ${votes.funding.state || '--'} `;
-                if (votes.rss) votesHtml += `RSS: ${votes.rss.state || '--'}`;
-                document.getElementById('ensemble-votes').textContent = votesHtml || '无数据';
-                
-                return data;
-            } catch (e) {
-                console.error('市场状态加载失败:', e);
-                return null;
-            }
-        }
-        
-        // Load positions
-        async function loadPositions() {
-            try {
-                const res = await fetch('/api/positions');
-                const data = await res.json();
-                
-                const positions = data.positions || [];
-                const validPositions = positions.filter(p => (p.value || 0) > 1);
-                
-                document.getElementById('positions-subtitle').textContent = 
-                    validPositions.length > 0 ? `${validPositions.length}个有效持仓（已过滤灰尘仓）` : '无有效持仓';
-                
-                if (validPositions.length === 0) {
-                    document.getElementById('positions-content').innerHTML = '<div class="empty">当前没有有效持仓</div>';
-                    return;
-                }
-                
-                const html = `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>币种</th>
-                                <th class="text-right">数量</th>
-                                <th class="text-right">现价</th>
-                                <th class="text-right">市值</th>
-                                <th class="text-right">盈亏</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${validPositions.map(p => `
-                                <tr>
-                                    <td><strong>${p.symbol}</strong></td>
-                                    <td class="text-right">${formatNumber(p.quantity, 4)}</td>
-                                    <td class="text-right">${formatCurrency(p.price)}</td>
-                                    <td class="text-right">${formatCurrency(p.value)}</td>
-                                    <td class="text-right">${formatPercent(p.pnl_pct)}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                `;
-                document.getElementById('positions-content').innerHTML = html;
-            } catch (e) {
-                console.error('持仓加载失败:', e);
-                document.getElementById('positions-content').innerHTML = '<div class="error">加载失败</div>';
-            }
-        }
-        
-        // Load trades
-        async function loadTrades() {
-            try {
-                const res = await fetch('/api/trades?limit=10');
-                const data = await res.json();
-                
-                const trades = data.trades || [];
-                
-                if (trades.length === 0) {
-                    document.getElementById('trades-content').innerHTML = '<div class="empty">暂无交易记录</div>';
-                    return;
-                }
-                
-                const html = `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>时间</th>
-                                <th>币种</th>
-                                <th>方向</th>
-                                <th class="text-right">金额</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${trades.map(t => {
-                                const amount = t.amount || 0;
-                                return `
-                                <tr>
-                                    <td>${t.time?.slice(5, 16) || '--'}</td>
-                                    <td>${t.symbol}</td>
-                                    <td class="${t.side === 'buy' ? 'text-green' : 'text-red'}">${t.side === 'buy' ? '买入' : '卖出'}</td>
-                                    <td class="text-right">${formatCurrency(amount)}</td>
-                                </tr>
-                                `;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                `;
-                document.getElementById('trades-content').innerHTML = html;
-            } catch (e) {
-                console.error('交易加载失败:', e);
-                document.getElementById('trades-content').innerHTML = '<div class="error">加载失败</div>';
-            }
-        }
-        
-        // Load strategy signals
-        async function loadStrategySignals() {
-            try {
-                const res = await fetch(`/api/decision_audit?_=${Date.now()}`);
-                const data = await res.json();
-                
-                const strategies = data.strategy_signals || [];
-                const time = data.timestamp ? new Date(data.timestamp * 1000).toLocaleString('zh-CN', {
-                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                }) : '未知';
-                
-                document.getElementById('signals-time').textContent = time;
-                
-                if (strategies.length === 0) {
-                    document.getElementById('signals-content').innerHTML = '<div class="empty">暂无策略信号</div>';
-                    return;
-                }
-                
-                const totalSignals = strategies.reduce((sum, s) => sum + (s.total_signals || 0), 0);
-                
-                const html = `
-                    <div style="margin-bottom: 12px; font-size: 0.85rem; color: #94a3b8;">
-                        融合前共 ${totalSignals} 个信号
-                    </div>
-                    <div class="strategy-grid">
-                        ${strategies.map(s => `
-                            <div class="strategy-item">
-                                <div class="name">${s.strategy}</div>
-                                <div class="count">${s.total_signals || 0}</div>
-                                <div class="detail">
-                                    <span class="text-green">买${s.buy_signals || 0}</span> / 
-                                    <span class="text-red">卖${s.sell_signals || 0}</span>
-                                </div>
-                                <div class="detail" style="margin-top: 4px; font-size: 0.7rem;">
-                                    权重 ${((s.allocation || 0) * 100).toFixed(0)}%
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                    ${data.counts ? `
-                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155; font-size: 0.85rem; color: #94a3b8;">
-                        选中: ${data.counts.selected || 0}个 | 
-                        风控后: ${data.counts.targets_post_risk || 0}个 | 
-                        最终下单: ${(data.counts.orders_rebalance || 0) + (data.counts.orders_exit || 0)}个
-                    </div>
-                    ` : ''}
-                `;
-                document.getElementById('signals-content').innerHTML = html;
-            } catch (e) {
-                console.error('策略信号加载失败:', e);
-                document.getElementById('signals-content').innerHTML = '<div class="error">加载失败</div>';
-            }
-        }
-        
-        // Load decision/execution flow (signals -> routing -> order outcome)
-        async function loadDecisionFlow() {
-            try {
-                const res = await fetch(`/api/decision_audit?_=${Date.now()}`);
-                const data = await res.json();
-
-                const runId = data.run_id || '--';
-                const t = data.timestamp ? new Date(data.timestamp * 1000).toLocaleString('zh-CN', {
-                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
-                }) : '未知时间';
-                document.getElementById('decision-flow-time').textContent = `${t} · run ${runId}`;
-
-                const counts = data.counts || {};
-                const rejects = data.rejects || {};
-                const routerReasonCounts = data.router_reason_counts || {};
-                const exec = data.execution_summary || {};
-                const runOrders = data.run_orders || [];
-                const targetRank = data.target_rank || [];
-                const fusedRank = data.fused_buy_rank || [];
-                const fusedFallback = !!data.fused_source_is_fallback;
-                const fusedSourceRun = data.fused_rank_source_run || '--';
-                const selectedOrders = data.selected_orders || [];
-                const blockedRoutes = data.blocked_routes || [];
-                const recentFill = data.recent_fill_summary || {};
-                const latestFill = recentFill.latest_fill || null;
-                const latestOrderedRun = data.latest_ordered_run_summary || null;
-
-                const rejectList = Object.entries(rejects)
-                    .filter(([_, v]) => Number(v) > 0)
-                    .sort((a, b) => Number(b[1]) - Number(a[1]))
-                    .slice(0, 6);
-                const routerList = Object.entries(routerReasonCounts)
-                    .sort((a, b) => Number(b[1]) - Number(a[1]))
-                    .slice(0, 6);
-
-                const recentOrders = runOrders.slice(0, 8);
-                const selectedSymbols = selectedOrders.map(x => `${x.symbol}(${sideZh(x.side)})`).join('、') || '无';
-                const blockedSymbols = blockedRoutes.slice(0, 5).map(x => `${x.symbol}:${explainWithCode(x.reason)}`).join('；') || '无';
-                const topTarget = targetRank.slice(0, 6);
-                const topFused = fusedRank.slice(0, 6);
-
-                let latestFillText = '无';
-                if (latestFill && latestFill.inst_id) {
-                    const rawTs = Number(latestFill.created_ts || 0);
-                    const ms = rawTs > 1e12 ? rawTs : rawTs * 1000;
-                    const d = ms > 0 ? new Date(ms) : null;
-                    const tstr = d ? d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
-                    latestFillText = `${latestFill.inst_id} ${latestFill.side || ''} ${Number(latestFill.notional_usdt || 0).toFixed(2)}U @ ${tstr}`;
-                }
-
-                let latestOrderedRunText = '无';
-                if (latestOrderedRun && latestOrderedRun.run_id) {
-                    const rawTs = Number(latestOrderedRun.last_ts || 0);
-                    const ms = rawTs > 1e12 ? rawTs : rawTs * 1000;
-                    const d = ms > 0 ? new Date(ms) : null;
-                    const tstr = d ? d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
-                    latestOrderedRunText = `run ${latestOrderedRun.run_id}: 成功 ${latestOrderedRun.filled || 0} / 尝试 ${latestOrderedRun.total || 0} @ ${tstr}`;
-                }
-
-                let runResultClass = 'text-yellow';
-                let runResultText = `成功 ${exec.filled||0} / 尝试 ${exec.total||0}`;
-                if (Number(exec.total || 0) === 0) {
-                    runResultClass = '';
-                    runResultText = '本轮无下单尝试';
-                } else if (Number(exec.filled || 0) > 0) {
-                    runResultClass = 'text-green';
-                } else {
-                    runResultClass = 'text-red';
-                }
-
-                const html = `
-                    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:10px;">
-                        <div class="info-item"><div class="label">有没有信号</div><div class="value">${counts.selected || 0} 个候选</div></div>
-                        <div class="info-item"><div class="label">交易成功与否（本轮）</div><div class="value ${runResultClass}">${runResultText}</div></div>
-                    </div>
-
-                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
-                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">范围说明</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">本轮run：${runId}（上面的成功/失败只统计本run）</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">最近有下单尝试的一轮：${latestOrderedRunText}</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">最近60分钟成交：${Number(recentFill.count_60m || 0)} 笔；24小时成交：${Number(recentFill.count_24h || 0)} 笔</div>
-                        <div style="font-size:0.82rem;">最近一笔真实成交：${latestFillText}</div>
-                    </div>
-
-                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
-                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">原因是什么（执行结果）</div>
-                        <div style="font-size:0.84rem;">拒单 ${exec.rejected || 0} 笔，主要原因：${Object.entries(exec.reject_reasons || {}).map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
-                    </div>
-
-                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
-                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">被啥拦截（路由/审计）</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">路由：${routerList.map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
-                        <div style="font-size:0.82rem;">审计reject：${rejectList.map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
-                    </div>
-
-                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
-                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">怎么做的购买决策</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">决策来源：${sourceZh(data.selection_source)} | 市场状态：${regimeZh(data.regime)}（${data.regime || '--'}）</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">本轮目标仓位Top（真实执行基准）：${topTarget.map(x => `${x.symbol}(${(Number(x.target_weight||0)*100).toFixed(2)}%)`).join('；') || '无'}</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">融合分数Top（参考）：${topFused.map(x => `${x.rank}.${x.symbol}(${Number(x.score||0).toFixed(3)})`).join('；') || '无'}${fusedFallback ? `（来自 ${fusedSourceRun}，非本run文件）` : ''}</div>
-                        <div style="font-size:0.82rem; margin-bottom:4px;">路由通过：${selectedSymbols}</div>
-                        <div style="font-size:0.82rem;">路由拦截：${blockedSymbols}</div>
-                    </div>
-
-                    <div style="font-size:0.76rem;color:#64748b;margin-bottom:6px;">术语速查：deadband=仓位差静默区；min_notional=最小下单金额；OPEN_LONG_COOLDOWN=开仓冷却；run=一轮完整决策执行。</div>
-
-                    <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">本轮订单明细</div>
-                    ${recentOrders.length ? `
-                    <table>
-                        <thead>
-                            <tr><th>币种</th><th>方向</th><th>状态</th><th>原因</th></tr>
-                        </thead>
-                        <tbody>
-                            ${recentOrders.map(o => `
-                                <tr>
-                                    <td>${o.inst_id || '--'}</td>
-                                    <td class="${o.side==='buy'?'text-green':'text-red'}">${sideZh(o.side)}</td>
-                                    <td class="${o.state==='FILLED'?'text-green':(o.state==='REJECTED'?'text-red':'text-yellow')}">${stateZh(o.state)}</td>
-                                    <td style="font-size:0.78rem;color:#94a3b8;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${explainWithCode(o.last_error_code || o.last_error_msg || 'OK')}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                    ` : '<div class="empty">本轮无订单记录</div>'}
-                `;
-
-                document.getElementById('decision-flow-content').innerHTML = html;
-            } catch (e) {
-                console.error('决策透视加载失败:', e);
-                document.getElementById('decision-flow-content').innerHTML = '<div class="error">加载失败</div>';
-            }
-        }
-
-        // Load system status
-        async function loadSystemStatus() {
-            try {
-                const [timersRes, riskRes] = await Promise.all([
-                    fetch('/api/timers'),
-                    fetch('/api/auto_risk_guard')
-                ]);
-                
-                const timersData = await timersRes.json();
-                const riskData = await riskRes.json();
-                
-                const timers = timersData.timers || [];
-                const activeTimers = timers.filter(t => t.active).length;
-                const config = riskData.config || {};
-                
-                const html = `
-                    <table>
-                        <tr>
-                            <td>定时任务</td>
-                            <td class="text-right">${activeTimers}/${timers.length} 运行中</td>
-                        </tr>
-                        <tr>
-                            <td>下次运行</td>
-                            <td class="text-right">${timersData.next_run || '未知'}</td>
-                        </tr>
-                        <tr>
-                            <td>最大持仓</td>
-                            <td class="text-right">${config.max_positions || '--'}个</td>
-                        </tr>
-                        <tr>
-                            <td>最小下单</td>
-                            <td class="text-right">$${config.min_trade_notional_base || '--'}</td>
-                        </tr>
-                        <tr>
-                            <td>回撤触发线</td>
-                            <td class="text-right">${((config.drawdown_trigger || 0) * 100).toFixed(0)}%</td>
-                        </tr>
-                    </table>
-                `;
-                document.getElementById('system-content').innerHTML = html;
-            } catch (e) {
-                console.error('系统状态加载失败:', e);
-                document.getElementById('system-content').innerHTML = '<div class="error">加载失败</div>';
-            }
-        }
-        
-        // Load health status
-        async function loadHealthStatus() {
-            try {
-                const res = await fetch('/api/health');
-                const data = await res.json();
-                
-                const status = data.status || 'unknown';
-                const checks = data.checks || [];
-                
-                const statusColors = {
-                    'healthy': '#22c55e',
-                    'warning': '#f59e0b',
-                    'critical': '#ef4444',
-                    'unknown': '#64748b'
-                };
-                
-                const statusText = {
-                    'healthy': '健康',
-                    'warning': '警告',
-                    'critical': '严重',
-                    'unknown': '未知'
-                };
-                
-                const html = `
-                    <div style="margin-bottom: 12px; padding: 10px; background: ${statusColors[status]}22; border-radius: 6px; border-left: 3px solid ${statusColors[status]};">
-                        <div style="font-size: 1.1rem; font-weight: 600; color: ${statusColors[status]};">
-                            ${statusText[status]}
-                        </div>
-                    </div>
-                    <div style="font-size: 0.85rem;">
-                        ${checks.map(c => {
-                            const color = c.status === 'healthy' ? '#22c55e' : (c.status === 'critical' ? '#ef4444' : '#f59e0b');
-                            return `
-                                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1e293b;">
-                                    <span>${c.name}</span>
-                                    <span style="color: ${color};">${c.detail}</span>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                `;
-                
-                document.getElementById('health-content').innerHTML = html;
-                document.getElementById('health-update-time').textContent = 
-                    '更新于 ' + new Date().toLocaleString('zh-CN', {hour: '2-digit', minute: '2-digit'});
-            } catch (e) {
-                console.error('健康检查加载失败:', e);
-                document.getElementById('health-content').innerHTML = '<div class="error">加载失败</div>';
-            }
-        }
-        
-        // Load all
-        async function loadAll() {
-            await Promise.all([
-                loadAccount(),
-                loadRiskLevel(),
-                loadMarketState(),
-                loadPositions(),
-                loadTrades(),
-                loadStrategySignals(),
-                loadDecisionFlow(),
-                loadSystemStatus(),
-                loadHealthStatus()
-            ]);
-            
-            document.getElementById('update-time').textContent = 
-                '更新于 ' + new Date().toLocaleString('zh-CN', {
-                    hour: '2-digit', minute: '2-digit', second: '2-digit'
-                });
-        }
-        
-        // Start
-        loadAll();
-        setInterval(loadAll, 30000);
-    </script>
+<div class="shell">
+<section class="hero">
+<div class="hero-card">
+<div class="eyebrow">V5 交易控制台</div>
+<h1 class="hero-title">生产交易指挥台</h1>
+<p class="hero-copy">这块面板按程序真实链路重组：资金快照、市场投票、风控档位、持仓账本、执行路径和运维状态。目标不是堆指标，而是让你一眼判断现在能不能交易、为什么这样交易、系统有没有跑偏。</p>
+<div class="hero-meta"><div class="chip"><span class="dot"></span><span id="update-time">加载中...</span></div><div class="chip"><span>市场状态</span><strong id="market-state-detail">--</strong></div><div class="chip"><span>仓位暴露</span><strong id="position-multiplier">--</strong></div></div>
+</div>
+<div class="hero-aside">
+<div class="hero-card stack"><div class="stack-label">市场状态</div><div class="stack-value" id="market-state-val">--</div><div class="note" id="market-detail">等待市场状态...</div></div>
+<div class="hero-card stack"><div class="stack-label">风控姿态</div><div class="stack-value" id="risk-level">--</div><div class="note" id="risk-detail">等待风控数据...</div><div class="hero-meta"><div class="chip"><span>当前回撤</span><strong id="current-drawdown">--</strong></div><div class="chip"><span>转换率</span><strong id="conversion-rate">--</strong></div></div></div>
+</div>
+</section>
+<section class="metric-row">
+<div class="metric"><div class="metric-kicker">总权益</div><div class="metric-value" id="total-equity">--</div><div class="muted" id="total-pnl">--</div></div>
+<div class="metric"><div class="metric-kicker">现金缓冲</div><div class="metric-value" id="cash-usdt">--</div><div class="muted" id="cash-ratio">--</div></div>
+<div class="metric"><div class="metric-kicker">在仓资金</div><div class="metric-value" id="positions-value">--</div><div class="muted" id="positions-count-top">--</div></div>
+<div class="metric"><div class="metric-kicker">健康状态</div><div class="metric-value" id="health-update-time">--</div><div class="muted">系统健康与接口巡检</div></div>
+<div class="metric"><div class="metric-kicker">刷新周期</div><div class="metric-value mono">30s</div><div class="muted">自动拉取最新运行状态</div></div>
+</section>
+<section class="deck">
+<div class="column">
+<div class="panel"><div class="panel-head"><div><div class="kicker">市场雷达</div><div class="title">三路投票与缓存健康</div><div class="note">HMM、资金费率、RSS 同屏展示，新鲜或过期会直接标出来。</div></div></div><div id="ensemble-votes" class="vote-grid"><div class="loading">加载中...</div></div></div>
+<div class="panel"><div class="panel-head"><div><div class="kicker">持仓账本</div><div class="title">当前持仓</div><div class="note" id="positions-subtitle">等待持仓数据...</div></div></div><div id="positions-content"><div class="loading">加载中...</div></div></div>
+<div class="panel"><div class="panel-head"><div><div class="kicker">成交流水</div><div class="title">最近成交</div><div class="note">看最近的成交流水，而不是只看累计统计。</div></div></div><div id="trades-content" class="trade-list"><div class="loading">加载中...</div></div></div>
+</div>
+<div class="column">
+<div class="panel"><div class="panel-head"><div><div class="kicker">运行矩阵</div><div class="title">运行与定时任务</div><div class="note">主循环、事件驱动、情绪采集、对账、账本、成本汇总。</div></div></div><div id="system-content" class="ops-grid"><div class="loading">加载中...</div></div></div>
+<div class="panel"><div class="panel-head"><div><div class="kicker">因子看板</div><div class="title">高分标的</div><div class="note">当前排序靠前的标的，方便快速看模型偏向。</div></div></div><div id="alpha-content" class="alpha-list"><div class="loading">加载中...</div></div></div>
+<div class="panel"><div class="panel-head"><div><div class="kicker">策略信号</div><div class="title">策略信号汇总</div><div class="note" id="signals-time">等待策略信号...</div></div></div><div id="signals-content"><div class="loading">加载中...</div></div></div>
+<div class="panel"><div class="panel-head"><div><div class="kicker">执行路径</div><div class="title">从信号到订单</div><div class="note" id="decision-flow-time">等待执行路径...</div></div></div><div id="decision-flow-content"><div class="loading">加载中...</div></div></div>
+<div class="panel"><div class="panel-head"><div><div class="kicker">健康检查</div><div class="title">系统健康</div><div class="note">数据库、OKX、磁盘、定时任务。</div></div></div><div id="health-content" class="health-list"><div class="loading">加载中...</div></div></div>
+</div>
+</section>
+<div class="footer">页面每 30 秒自动刷新一次。</div>
+</div>
+<script>
+const REFRESH_MS=30000;
+const stateLabels={TRENDING:'趋势',SIDEWAYS:'震荡',RISK_OFF:'风险规避'};
+const stateClasses={TRENDING:'state-trending',SIDEWAYS:'state-sideways',RISK_OFF:'state-riskoff'};
+const riskClasses={ATTACK:'risk-attack',NEUTRAL:'risk-neutral',DEFENSE:'risk-defense',PROTECT:'risk-protect'};
+const riskLabels={ATTACK:'进攻',NEUTRAL:'中性',DEFENSE:'防守',PROTECT:'保护'};
+const healthTone={healthy:'tone-positive',warning:'tone-warn',critical:'tone-negative'};
+const statusLabels={healthy:'健康',warning:'告警',critical:'严重',fresh:'新鲜',stale:'过期',missing:'缺失',active:'运行中',armed:'待触发',idle:'空闲',ready:'就绪',running:'运行中',error:'异常',ok:'正常'};
+const modeLabels={live:'实盘',dry_run:'演练',paper:'模拟',unknown:'未知'};
+const cacheLabels={fresh:'新鲜',stale:'过期',missing:'缺失'};
+const sideLabels={buy:'买入',sell:'卖出'};
+const orderStateLabels={filled:'已成交',rejected:'已拒绝',open:'挂单',partial:'部分成交',partially_filled:'部分成交',live:'挂单中',canceled:'已撤单',cancelled:'已撤单',pending:'待处理',failed:'失败'};
+const methodLabels={ensemble:'综合投票',decision_audit:'运行快照',hmm:'HMM',hmm_only:'仅 HMM',ensemble_regime:'综合投票'};
+const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const fmtNum=(v,d=2)=>Number.isFinite(Number(v))?Number(v).toFixed(d):'--';
+const fmtUsd=v=>Number.isFinite(Number(v))?`$${Number(v).toFixed(2)}`:'--';
+const pctVal=v=>{const n=Number(v);if(!Number.isFinite(n))return null;return Math.abs(n)<=1?n*100:n};
+const fmtPct=(v,d=2)=>{const p=pctVal(v);if(p===null)return'--';const s=p>0?'+':'';const c=p>0?'text-green':(p<0?'text-red':'');return `<span class="${c}">${s}${p.toFixed(d)}%</span>`};
+const stateZh=v=>stateLabels[String(v||'').toUpperCase()]||v||'--';
+const riskZh=v=>riskLabels[String(v||'').toUpperCase()]||String(v||'--').toUpperCase();
+const messageLabels={stale_or_missing:'信号过期或缺失',funding_signal_stale_or_missing:'资金费率信号过期或缺失',rss_signal_stale_or_missing:'RSS 信号过期或缺失'};
+const statusZh=v=>messageLabels[String(v||'').toLowerCase()]||statusLabels[String(v||'').toLowerCase()]||v||'--';
+const modeZh=v=>modeLabels[String(v||'').toLowerCase()]||v||'--';
+const cacheZh=v=>cacheLabels[String(v||'').toLowerCase()]||v||'--';
+const sideZh=v=>sideLabels[String(v||'').toLowerCase()]||v||'--';
+const orderStateZh=v=>orderStateLabels[String(v||'').toLowerCase()]||v||'--';
+const methodZh=v=>methodLabels[String(v||'').toLowerCase()]||v||'--';
+const statePill=v=>`<span class="pill ${stateClasses[String(v||'').toUpperCase()]||'state-sideways'}">${esc(stateZh(v))}</span>`;
+const riskPill=v=>`<span class="pill ${riskClasses[String(v||'').toUpperCase()]||'risk-neutral'}">${esc(riskZh(v))}</span>`;
+const setHtml=(id,html)=>{const el=document.getElementById(id);if(el)el.innerHTML=html};
+const setText=(id,text)=>{const el=document.getElementById(id);if(el)el.textContent=text};
+async function fetchJson(url){try{const res=await fetch(`${url}${url.includes('?')?'&':'?'}_=${Date.now()}`);return await res.json()}catch(err){console.error('fetch failed',url,err);return null}}
+function voteCard(label,vote,cache){const conf=Number(vote?.confidence||0);const state=vote?.state||'--';const freshness=cache?.status||'missing';const tone=freshness==='fresh'?'tone-positive':(freshness==='stale'?'tone-warn':'tone-negative');const status=vote?.error?statusZh(vote.error):`${stateZh(state)} / ${(conf*100).toFixed(1)}%`;const extra=[vote?.weight!=null?`权重 ${fmtNum(vote.weight,2)}`:null,cache?.last_file||null,cache?.age_minutes!=null?`${fmtNum(cache.age_minutes,1)} 分钟前`:null].filter(Boolean);return `<div class="vote"><div class="vote-head"><div class="vote-title">${esc(label)}</div>${statePill(state)}</div><div class="vote-value">${esc(status)}</div><div class="vote-meta"><span class="tiny ${tone}">缓存 ${esc(cacheZh(freshness))}</span>${extra.map(x=>`<span class="tiny">${esc(x)}</span>`).join('')}</div></div>`}
+async function loadDashboard(){const data=await fetchJson('/api/dashboard');if(!data)return;const account=data.account||{};const positions=Array.isArray(data.positions)?data.positions:[];const trades=Array.isArray(data.trades)?data.trades:[];const alpha=Array.isArray(data.alphaScores)?data.alphaScores:[];const status=data.systemStatus||{};const timers=Array.isArray(data.timers?.timers)?data.timers.timers:[];const cost=data.costCalibration||{};const ic=data.icDiagnostics||{};const ml=data.mlTraining||{};const reflection=data.reflectionReports||{};setText('update-time',`最近刷新 ${new Date().toLocaleString('zh-CN')}`);setText('total-equity',fmtUsd(account.totalEquity));setHtml('total-pnl',`${fmtPct(account.totalPnlPercent)} <span class="subtle">盈亏 ${fmtUsd(account.totalPnl)}</span>`);setText('cash-usdt',fmtUsd(account.cash));setText('cash-ratio',account.totalEquity?`${fmtNum((account.cash/account.totalEquity)*100,1)}% 现金`:'--');setText('positions-value',fmtUsd(account.positionsValue));setText('positions-count-top',`${positions.length} 个持仓`);setText('positions-subtitle',positions.length?`${positions.length} 个有效持仓，按市值排序`:'当前没有有效持仓');
+if(!positions.length){setHtml('positions-content','<div class="empty">当前没有有效持仓。</div>')}else{const rows=positions.slice().sort((a,b)=>Number(b.value||0)-Number(a.value||0)).map(p=>`<tr><td><strong>${esc(p.symbol||'--')}</strong></td><td class="text-right mono">${fmtNum(p.qty??p.quantity,4)}</td><td class="text-right mono">${fmtUsd(p.currentPrice??p.price)}</td><td class="text-right mono">${fmtUsd(p.value)}</td><td class="text-right">${fmtPct(p.pnlPercent??p.pnl_pct,2)}</td></tr>`).join('');setHtml('positions-content',`<div class="table-shell"><table><thead><tr><th>标的</th><th class="text-right">数量</th><th class="text-right">现价</th><th class="text-right">市值</th><th class="text-right">浮盈亏</th></tr></thead><tbody>${rows}</tbody></table></div>`)}
+if(!trades.length){setHtml('trades-content','<div class="empty">最近没有成交。</div>')}else{setHtml('trades-content',trades.slice(0,10).map(t=>{const buy=String(t.side||'').toLowerCase()==='buy';return `<div class="trade"><div class="row"><div><div><strong>${esc(t.symbol||'--')}</strong></div><div class="subtle">${esc(t.timestamp||'--')}</div></div><div class="text-right"><div class="${buy?'text-green':'text-red'}"><strong>${buy?'买入':'卖出'}</strong></div><div class="mono">${fmtUsd(t.value)}</div></div></div></div>`}).join(''))}
+if(!alpha.length){setHtml('alpha-content','<div class="empty">当前没有因子排名。</div>')}else{setHtml('alpha-content',alpha.slice(0,8).map(a=>{const score=Number(a.score||0);const width=Math.max(8,Math.min(100,Math.abs(score)*100));return `<div class="alpha"><div class="row"><strong>${esc(a.symbol||'--')}</strong><span class="mono">${fmtNum(score,3)}</span></div><div class="bar"><span style="width:${width}%"></span></div></div>`}).join(''))}
+const errs=Array.isArray(status.errors)?status.errors:[];const ops=[];ops.push(`<div class="ops"><div class="label">系统状态</div><div class="value">${status.isRunning?'运行中':'未运行'}</div><div class="subtle">模式: ${esc(modeZh(status.mode||'--'))}</div>${errs.length?`<div class="subtle text-red">${errs.map(esc).join(' / ')}</div>`:''}</div>`);timers.forEach(t=>ops.push(`<div class="ops"><div class="label">${esc(t.desc||t.name||'定时器')}</div><div class="value">${statusZh(t.active?'active':(t.enabled?'armed':'idle'))}</div><div class="subtle mono">${esc(t.name||'--')}</div><div class="subtle">下次执行: ${esc(t.next_run||'--')}</div></div>`));ops.push(`<div class="ops"><div class="label">研究模块</div><div class="value">${esc(statusZh(ml.status||'--'))}</div><div class="subtle">成本: ${esc(statusZh(cost.status||'--'))} / IC: ${esc(statusZh(ic.status||'--'))} / 复盘: ${Array.isArray(reflection.reports)?reflection.reports.length:0}</div></div>`);setHtml('system-content',ops.join(''))}
+async function loadRisk(){const [risk,account]=await Promise.all([fetchJson('/api/auto_risk_guard'),fetchJson('/api/account')]);if(!risk)return;const level=String(risk.current_level||'NEUTRAL').toUpperCase();const metrics=risk.metrics||{};const dd=account?.drawdown_pct??metrics.last_dd_pct??null;setHtml('risk-level',riskPill(level));setText('risk-detail',`回撤 ${dd==null?'--':`${fmtNum(pctVal(dd),1)}%`} / 档位 ${riskZh(level)}`);setHtml('current-drawdown',dd==null?'--':fmtPct(dd,1));setText('conversion-rate',metrics.last_conversion_rate==null?'--':`${fmtNum(pctVal(metrics.last_conversion_rate),0)}%`)}
+async function loadMarket(){const data=await fetchJson('/api/market_state');if(!data)return;const state=String(data.state||'SIDEWAYS').toUpperCase();const votes=data.votes||{};const signal=data.signal_health||{};const alerts=Array.isArray(data.alerts)?data.alerts:[];setHtml('market-state-val',statePill(state));setText('market-state-detail',`${stateZh(state)} / ${methodZh(data.method)}`);setText('market-detail',`${fmtNum(data.position_multiplier,2)}x 仓位 · ${alerts.length?alerts.join(' / '):'当前无额外告警'}`);setText('position-multiplier',`${fmtNum(data.position_multiplier,2)}x`);const html=[voteCard('HMM',votes.hmm||{},null),voteCard('资金费率',votes.funding||{},signal.funding||null),voteCard('RSS',votes.rss||{},signal.rss||null)].join('');const alertHtml=alerts.length?`<div style="grid-column:1/-1">${alerts.map(a=>`<span class="alert">${esc(statusZh(a))}</span>`).join('')}</div>`:'';setHtml('ensemble-votes',html+alertHtml)}
+async function loadDecision(){const data=await fetchJson('/api/decision_audit');if(!data)return;const strategies=Array.isArray(data.strategy_signals)?data.strategy_signals:[];const counts=data.counts||{};const selected=Array.isArray(data.selected_orders)?data.selected_orders:[];const blocked=Array.isArray(data.blocked_routes)?data.blocked_routes:[];const runOrders=Array.isArray(data.run_orders)?data.run_orders:[];const exec=data.execution_summary||{};const latestFill=data.recent_fill_summary?.latest_fill||null;setText('signals-time',data.run_id?`运行 ${data.run_id}`:'最近一次策略汇总');if(!strategies.length){setHtml('signals-content','<div class="empty">当前没有策略信号。</div>')}else{const summary=`<div class="grid2" style="margin-bottom:14px"><div class="info"><div class="label">入池数量</div><div class="value">${counts.selected||0}</div><div class="subtle">进入候选池</div></div><div class="info"><div class="label">订单数量</div><div class="value">${(counts.orders_rebalance||0)+(counts.orders_exit||0)}</div><div class="subtle">最终订单数</div></div></div>`;const cards=strategies.map(s=>`<div class="signal"><div class="label">${esc(s.strategy||'策略')}</div><div class="value">${s.total_signals||0} 个信号</div><div class="subtle">买入 ${s.buy_signals||0} / 卖出 ${s.sell_signals||0} / 分配 ${(Number(s.allocation||0)*100).toFixed(0)}%</div></div>`).join('');setHtml('signals-content',`${summary}<div class="signal-grid">${cards}</div>`)}
+const topSelected=selected.slice(0,6).map(o=>`${o.symbol} ${sideZh(o.side||'')}`).join(' / ')||'无';const topBlocked=blocked.slice(0,5).map(o=>`${o.symbol}:${o.reason}`).join(' / ')||'无';const fillText=latestFill?`${latestFill.inst_id||'--'} ${sideZh(latestFill.side||'')} ${fmtUsd(latestFill.notional_usdt||0)}`:'无';const rows=runOrders.slice(0,8).map(o=>`<tr><td>${esc(o.inst_id||'--')}</td><td>${esc(sideZh(o.side||'--'))}</td><td>${esc(orderStateZh(o.state||'--'))}</td><td class="text-right mono">${fmtUsd(o.notional_usdt||0)}</td></tr>`).join('');setText('decision-flow-time',data.run_id?`运行 ${data.run_id} / 最新执行路径`:'最新执行路径');setHtml('decision-flow-content',`<div class="decision-grid"><div class="decision"><div class="label">执行摘要</div><div class="value">成交 ${exec.filled||0} / 总计 ${exec.total||0}</div><div class="subtle">拒绝 ${exec.rejected||0} / 挂单 ${exec.open_or_partial||0}</div></div><div class="decision"><div class="label">已选订单</div><div class="value">${esc(topSelected)}</div></div><div class="decision"><div class="label">拦截路径</div><div class="value">${esc(topBlocked)}</div></div><div class="decision"><div class="label">最近成交</div><div class="value">${esc(fillText)}</div></div><div class="decision"><div class="label">本轮订单</div>${rows?`<div class="table-shell" style="margin-top:12px"><table><thead><tr><th>标的</th><th>方向</th><th>状态</th><th class="text-right">名义金额</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="subtle">当前这轮没有订单尝试。</div>'}</div></div>`)}
+async function loadHealth(){const data=await fetchJson('/api/health');if(!data)return;setText('health-update-time',data.last_update||'--');const checks=Array.isArray(data.checks)?data.checks:[];if(!checks.length){setHtml('health-content','<div class="empty">当前没有健康检查结果。</div>');return}setHtml('health-content',checks.map(c=>`<div class="health"><div class="row"><strong>${esc(c.name||'--')}</strong><span class="tiny ${healthTone[c.status]||'tone-warn'}">${esc(statusZh(c.status||'--'))}</span></div><div class="subtle" style="margin-top:10px">${esc(c.detail||'--')}</div></div>`).join(''))}
+async function loadAll(){await Promise.all([loadDashboard(),loadRisk(),loadMarket(),loadDecision(),loadHealth()])}
+loadAll();
+setInterval(loadAll,REFRESH_MS);
+</script>
 </body>
 </html>

@@ -28,6 +28,18 @@ ACTIVE_POINTER_PATH = Path("models/ml_factor_model_active.txt")
 MODEL_PATH = Path("models/ml_factor_model")
 
 
+def _model_artifact_exists(base_path: Path) -> bool:
+    return any(
+        p.exists()
+        for p in (
+            base_path,
+            Path(f"{base_path}.pkl"),
+            Path(f"{base_path}.txt"),
+            Path(f"{base_path}_config.json"),
+        )
+    )
+
+
 def _load_history():
     if not HISTORY_PATH.exists():
         return []
@@ -46,6 +58,28 @@ def _safe_float(v, default=-999.0):
         return x
     except Exception:
         return default
+
+
+def _comparable_history_runs(hist: list[dict], latest: dict) -> list[dict]:
+    latest_cfg = latest.get("config") or {}
+    latest_model_type = latest.get("selected_model_type") or latest_cfg.get("model_type")
+    latest_target_mode = latest_cfg.get("target_mode")
+    latest_include_time = latest_cfg.get("include_time_features")
+
+    comparable = []
+    for item in hist:
+        item_cfg = item.get("config") or {}
+        item_model_type = item.get("selected_model_type") or item_cfg.get("model_type")
+        if item_model_type != latest_model_type:
+            continue
+        if item_cfg.get("target_mode") != latest_target_mode:
+            continue
+        if item_cfg.get("include_time_features") != latest_include_time:
+            continue
+        if "grouped_holdout" not in item:
+            continue
+        comparable.append(item)
+    return comparable
 
 
 def main() -> int:
@@ -74,7 +108,8 @@ def main() -> int:
     max_ic_gap = 0.25
 
     k = 5
-    recent = hist[-k:]
+    comparable_hist = _comparable_history_runs(hist, latest)
+    recent = comparable_hist[-k:] if comparable_hist else [latest]
     recent_valid_ics = [_safe_float(x.get("valid_ic"), default=0.0) for x in recent]
     recent_mean_valid_ic = sum(recent_valid_ics) / max(1, len(recent_valid_ics))
 
@@ -90,7 +125,7 @@ def main() -> int:
     if recent_mean_valid_ic < 0.0:
         fail_reasons.append("recent_mean_valid_ic<0")
 
-    passed = len(fail_reasons) == 0 and MODEL_PATH.exists()
+    passed = len(fail_reasons) == 0 and _model_artifact_exists(MODEL_PATH)
 
     decision = {
         "ts": datetime.now().isoformat(),

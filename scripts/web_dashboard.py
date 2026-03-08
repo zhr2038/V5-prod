@@ -10,29 +10,90 @@ V5 Web Dashboard - 交易可视化界面
 - 系统状态
 """
 
-import sys
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
-
 import os
-import sqlite3
 import json
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from flask import Flask, render_template, jsonify, send_from_directory
 import pandas as pd
 import yaml
 import requests
-import subprocess
 
-app = Flask(__name__, 
-            template_folder='/home/admin/clawd/v5-trading-bot/web/templates', 
-            static_folder='/home/admin/clawd/v5-trading-bot/web/static')
+
+def _detect_workspace() -> Path:
+    candidates: List[Path] = []
+
+    env_workspace = os.getenv('V5_WORKSPACE')
+    if env_workspace:
+        candidates.append(Path(env_workspace).expanduser())
+
+    script_workspace = Path(__file__).resolve().parents[1]
+    candidates.append(script_workspace)
+
+    cwd_workspace = Path.cwd()
+    if cwd_workspace not in candidates:
+        candidates.append(cwd_workspace)
+
+    for candidate in candidates:
+        if (candidate / 'web' / 'templates' / 'monitor_v2.html').exists():
+            return candidate
+
+    return script_workspace
+
+
+WORKSPACE = _detect_workspace()
+WORKSPACE_STR = str(WORKSPACE)
+if WORKSPACE_STR not in sys.path:
+    sys.path.insert(0, WORKSPACE_STR)
+
+WEB_DIR = WORKSPACE / 'web'
+REPORTS_DIR = WORKSPACE / 'reports'
+CACHE_DIR = WORKSPACE / 'data' / 'cache'
+
+
+def _resolve_react_build_path() -> Path:
+    candidates: List[Path] = []
+
+    env_dist = os.getenv('V5_DASHBOARD_DIST')
+    if env_dist:
+        candidates.append(Path(env_dist).expanduser())
+
+    candidates.extend([
+        WORKSPACE / 'web' / 'dist',
+        WORKSPACE / 'dist',
+        WORKSPACE / 'frontend' / 'dist',
+    ])
+
+    legacy_dist = Path('/home/admin/v5-trading-dashboard/dist')
+    if legacy_dist.exists():
+        candidates.append(legacy_dist)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return candidates[0]
+
+
+REACT_BUILD_PATH = _resolve_react_build_path()
+SYSTEMCTL_BIN = shutil.which('systemctl')
+TIMER_TS_RE = re.compile(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})')
+
+app = Flask(
+    __name__,
+    template_folder=str(WEB_DIR / 'templates'),
+    static_folder=str(WEB_DIR / 'static'),
+)
 
 # 注册健康检查蓝图
 try:
-    sys.path.insert(0, "/home/admin/clawd/v5-trading-bot")
     from src.reporting.health import health_bp
     app.register_blueprint(health_bp)
     print("[WebDashboard] Health check endpoints registered: /health, /ready, /liveness")
@@ -48,14 +109,9 @@ def add_no_cache_headers(resp):
     resp.headers['Expires'] = '0'
     return resp
 
-# 配置路径
-WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
-REPORTS_DIR = WORKSPACE / 'reports'
-
-
 def _resolve_config_path() -> Path:
     """Resolve config path from env V5_CONFIG (supports relative path)."""
-    raw = os.getenv('V5_CONFIG', 'configs/live_20u_real.yaml')
+    raw = os.getenv('V5_CONFIG', 'configs/live_prod.yaml')
     p = Path(raw)
     if not p.is_absolute():
         p = WORKSPACE / p
@@ -64,26 +120,193 @@ def _resolve_config_path() -> Path:
 
 CONFIG_PATH = _resolve_config_path()
 
-# 兼容新旧timer名称（生产与20u）
-TIMER_CANDIDATES = ['v5-prod.user.timer', 'v5-live-20u.user.timer']
+# 生产环境显示的 timer 列表
+TIMER_CANDIDATES = ['v5-prod.user.timer']
+PRODUCTION_TIMER_CONFIGS = [
+    {'name': 'v5-prod.user.timer', 'desc': '实盘主循环', 'icon': 'LIVE'},
+    {'name': 'v5-event-driven.timer', 'desc': '事件驱动检查', 'icon': 'EVENT'},
+    {'name': 'v5-sentiment-collect.timer', 'desc': '情绪采集', 'icon': 'SENT'},
+    {'name': 'v5-reconcile.timer', 'desc': '对账状态刷新', 'icon': 'RECON'},
+    {'name': 'v5-ledger.timer', 'desc': '账本状态刷新', 'icon': 'LEDGER'},
+    {'name': 'v5-cost-rollup-real.user.timer', 'desc': '真实成本汇总', 'icon': 'COST'},
+]
+
+
+def _run_systemctl_user(*args: str, timeout: int = 5) -> subprocess.CompletedProcess:
+    if not SYSTEMCTL_BIN:
+        raise FileNotFoundError('systemctl is not available')
+    return subprocess.run(
+        [SYSTEMCTL_BIN, '--user', *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _parse_systemctl_properties(stdout: str) -> Dict[str, str]:
+    props: Dict[str, str] = {}
+    for line in stdout.splitlines():
+        if '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        props[key.strip()] = value.strip()
+    return props
+
+
+def _parse_timer_datetime(value: str) -> Optional[datetime]:
+    value = str(value or '').strip()
+    if not value or value.lower() == 'n/a':
+        return None
+
+    match = TIMER_TS_RE.search(value)
+    if match:
+        try:
+            return datetime.strptime(match.group(1), '%a %Y-%m-%d %H:%M:%S')
+        except ValueError:
+            pass
+
+    cleaned = re.sub(r'\s+[A-Z]{2,5}$', '', value)
+    try:
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_time_left_seconds(value: Optional[str]) -> int:
+    text = str(value or '').strip().lower()
+    if not text:
+        return 0
+
+    total = 0
+    for pattern, multiplier in (
+        (r'(\d+)\s*h\b', 3600),
+        (r'(\d+)\s*min\b', 60),
+        (r'(\d+)\s*s\b', 1),
+    ):
+        for match in re.finditer(pattern, text):
+            total += int(match.group(1)) * multiplier
+    return total
+
+
+def _parse_timer_interval_minutes(on_calendar: str) -> int:
+    calendar = str(on_calendar or '').lower()
+    if not calendar:
+        return 60
+    if 'hourly' in calendar or '0/1' in calendar:
+        return 60
+    if '0/2' in calendar or '00/2' in calendar:
+        return 120
+
+    match = re.search(r'/(\d+)', calendar)
+    if match:
+        try:
+            return max(1, int(match.group(1))) * 60
+        except ValueError:
+            return 60
+    return 60
+
+
+def _timer_enabled(unit_file_state: str) -> bool:
+    return str(unit_file_state or '').startswith('enabled')
+
+
+def _get_timer_state(timer_name: str) -> Dict[str, Any]:
+    state: Dict[str, Any] = {
+        'name': timer_name,
+        'active': False,
+        'enabled': False,
+        'active_state': 'unknown',
+        'unit_file_state': 'unknown',
+        'error': None,
+    }
+    try:
+        result = _run_systemctl_user(
+            'show',
+            timer_name,
+            '--property=UnitFileState',
+            '--property=ActiveState',
+            timeout=5,
+        )
+        props = _parse_systemctl_properties(result.stdout)
+        unit_file_state = props.get('UnitFileState', 'unknown')
+        active_state = props.get('ActiveState', 'unknown')
+        state['unit_file_state'] = unit_file_state
+        state['active_state'] = active_state
+        state['enabled'] = _timer_enabled(unit_file_state)
+        state['active'] = active_state == 'active'
+    except Exception as exc:
+        state['error'] = str(exc)
+    return state
+
+
+def _get_timer_runtime(timer_name: str) -> Dict[str, Any]:
+    runtime = _get_timer_state(timer_name)
+    runtime.update({
+        'next_run': None,
+        'countdown_seconds': 0,
+        'interval_minutes': 60,
+        'time_left': None,
+    })
+
+    try:
+        result = _run_systemctl_user(
+            'show',
+            timer_name,
+            '--property=OnCalendar',
+            '--property=Trigger',
+            timeout=5,
+        )
+        props = _parse_systemctl_properties(result.stdout)
+        runtime['interval_minutes'] = _parse_timer_interval_minutes(props.get('OnCalendar', ''))
+        trigger_dt = _parse_timer_datetime(props.get('Trigger', ''))
+        if trigger_dt:
+            runtime['next_run'] = trigger_dt.strftime('%Y-%m-%d %H:%M:%S')
+            runtime['countdown_seconds'] = max(0, int((trigger_dt - datetime.now()).total_seconds()))
+    except Exception as exc:
+        if not runtime.get('error'):
+            runtime['error'] = str(exc)
+
+    if runtime['next_run'] is not None:
+        return runtime
+
+    try:
+        result = _run_systemctl_user('list-timers', timer_name, '--no-pager', timeout=5)
+        for line in result.stdout.splitlines():
+            if timer_name not in line:
+                continue
+
+            matches = list(TIMER_TS_RE.finditer(line))
+            if matches:
+                next_run_dt = _parse_timer_datetime(matches[0].group(1))
+                if next_run_dt:
+                    runtime['next_run'] = next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    runtime['countdown_seconds'] = max(0, int((next_run_dt - datetime.now()).total_seconds()))
+
+            if len(matches) >= 2:
+                left_str = line[matches[0].end():matches[1].start()].strip()
+                left_str = re.sub(r'^[A-Z]{2,5}\s+', '', left_str)
+                left_str = re.sub(r'\bleft\b', '', left_str).strip()
+                if left_str:
+                    runtime['time_left'] = left_str
+                    parsed_seconds = _parse_time_left_seconds(left_str)
+                    if parsed_seconds > 0:
+                        runtime['countdown_seconds'] = parsed_seconds
+            break
+    except Exception as exc:
+        if not runtime.get('error'):
+            runtime['error'] = str(exc)
+
+    return runtime
 
 
 def _pick_timer_name() -> str:
     """Pick active/enabled timer name, fallback to production timer."""
     for name in TIMER_CANDIDATES:
-        try:
-            r = subprocess.run(['systemctl', '--user', 'is-active', name], capture_output=True, text=True, timeout=3)
-            if r.returncode == 0:
-                return name
-        except Exception:
-            pass
+        if _get_timer_state(name).get('active'):
+            return name
     for name in TIMER_CANDIDATES:
-        try:
-            r = subprocess.run(['systemctl', '--user', 'is-enabled', name], capture_output=True, text=True, timeout=3)
-            if r.returncode == 0:
-                return name
-        except Exception:
-            pass
+        if _get_timer_state(name).get('enabled'):
+            return name
     return TIMER_CANDIDATES[0]
 
 # 排除测试/异常数据
@@ -128,11 +351,10 @@ def simple_dashboard():
 @app.route('/<path:filename>')
 def static_files(filename):
     """提供React静态文件"""
-    react_build_path = '/home/admin/v5-trading-dashboard/dist'
-    file_path = os.path.join(react_build_path, filename)
+    file_path = REACT_BUILD_PATH / filename
     
     # 检查文件是否存在
-    if os.path.exists(file_path) and os.path.isfile(file_path):
+    if file_path.exists() and file_path.is_file():
         # 根据扩展名设置Content-Type
         content_types = {
             '.js': 'application/javascript',
@@ -143,15 +365,15 @@ def static_files(filename):
             '.jpg': 'image/jpeg',
             '.svg': 'image/svg+xml',
         }
-        ext = os.path.splitext(filename)[1]
+        ext = file_path.suffix
         content_type = content_types.get(ext, 'application/octet-stream')
         
         with open(file_path, 'rb') as f:
             return f.read(), 200, {'Content-Type': content_type}
     
     # 如果文件不存在，返回index.html（支持React Router）
-    index_path = os.path.join(react_build_path, 'index.html')
-    if os.path.exists(index_path):
+    index_path = REACT_BUILD_PATH / 'index.html'
+    if index_path.exists():
         with open(index_path, 'r') as f:
             return f.read(), 200, {'Content-Type': 'text/html'}
     
@@ -973,23 +1195,17 @@ def api_status():
     """系统状态API"""
     try:
         config = load_config()
-        
-        # 检查timer状态
-        import subprocess
         timer_name = _pick_timer_name()
-        result = subprocess.run(
-            ['systemctl', '--user', 'status', timer_name],
-            capture_output=True, text=True
-        )
-        timer_active = 'active' in result.stdout.lower()
-        
+        timer_state = _get_timer_state(timer_name)
+
         return jsonify({
-            'timer_active': timer_active,
+            'timer_active': bool(timer_state.get('active')),
             'timer_name': timer_name,
+            'timer_error': timer_state.get('error'),
             'mode': config.get('execution', {}).get('mode', 'unknown'),
             'dry_run': config.get('execution', {}).get('dry_run', True),
             'equity_cap': config.get('budget', {}).get('live_equity_cap_usdt', 0),
-            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -999,7 +1215,7 @@ def calculate_market_indicators():
     """从BTC K线数据计算市场指标"""
     try:
         # 读取BTC缓存数据
-        cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/cache')
+        cache_dir = CACHE_DIR
         btc_files = list(cache_dir.glob('BTC_USDT_1H_*.csv'))
         
         if not btc_files:
@@ -1042,77 +1258,377 @@ def calculate_market_indicators():
         return {'ma20': 0, 'ma60': 0, 'atr_percent': 1.0, 'price': 0}
 
 
+def _latest_signal_file(cache_dir: Path, patterns: List[str]) -> Optional[Path]:
+    latest: Optional[Path] = None
+    latest_mtime = -1.0
+    for pattern in patterns:
+        for path in cache_dir.glob(pattern):
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > latest_mtime:
+                latest = path
+                latest_mtime = mtime
+    return latest
+
+
+def _signal_health(cache_dir: Path, patterns: List[str], max_age_minutes: int, error_name: str) -> Dict[str, Any]:
+    latest = _latest_signal_file(cache_dir, patterns)
+    if latest is None:
+        return {
+            'status': 'missing',
+            'is_fresh': False,
+            'error': error_name,
+            'last_file': None,
+            'last_mtime': None,
+            'age_minutes': None,
+            'max_age_minutes': int(max_age_minutes),
+        }
+
+    age_minutes = max(0.0, (datetime.now().timestamp() - latest.stat().st_mtime) / 60.0)
+    is_fresh = age_minutes <= max(int(max_age_minutes), 1)
+    return {
+        'status': 'fresh' if is_fresh else 'stale',
+        'is_fresh': bool(is_fresh),
+        'error': None if is_fresh else error_name,
+        'last_file': latest.name,
+        'last_mtime': datetime.fromtimestamp(latest.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+        'age_minutes': round(age_minutes, 1),
+        'max_age_minutes': int(max_age_minutes),
+    }
+
+
+def _load_json_payload(path: Optional[Path]) -> Dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def _build_live_funding_vote(cache_dir: Path, max_age_minutes: int, weight: float) -> Dict[str, Any]:
+    composite_file = _latest_signal_file(cache_dir, ['funding_COMPOSITE_*.json'])
+    if composite_file is not None:
+        health = _signal_health(cache_dir, [composite_file.name], max_age_minutes, 'funding_signal_stale_or_missing')
+        if health.get('is_fresh'):
+            data = _load_json_payload(composite_file)
+            sentiment = float(data.get('f6_sentiment', 0.0) or 0.0)
+            if sentiment > 0.3:
+                state = 'TRENDING'
+            elif sentiment < -0.3:
+                state = 'RISK_OFF'
+            else:
+                state = 'SIDEWAYS'
+            return {
+                'state': state,
+                'confidence': min(abs(sentiment) * 2, 1.0),
+                'weight': float(weight),
+                'sentiment': sentiment,
+                'composite': True,
+                'details': data.get('tier_breakdown', {}),
+                'raw_state': state,
+            }
+
+    vals = []
+    details: Dict[str, float] = {}
+    for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
+        latest = _latest_signal_file(cache_dir, [f'funding_{sym}_*.json'])
+        if latest is None:
+            continue
+        health = _signal_health(cache_dir, [latest.name], max_age_minutes, 'funding_signal_stale_or_missing')
+        if not health.get('is_fresh'):
+            continue
+        data = _load_json_payload(latest)
+        sentiment = max(-1.0, min(1.0, float(data.get('f6_sentiment', 0.0) or 0.0)))
+        vals.append(sentiment)
+        details[sym] = sentiment
+
+    if not vals:
+        return {}
+
+    avg_sentiment = float(sum(vals) / len(vals))
+    if avg_sentiment > 0.3:
+        state = 'TRENDING'
+    elif avg_sentiment < -0.3:
+        state = 'RISK_OFF'
+    else:
+        state = 'SIDEWAYS'
+
+    return {
+        'state': state,
+        'confidence': min(abs(avg_sentiment) * 2, 1.0),
+        'weight': float(weight),
+        'sentiment': avg_sentiment,
+        'composite': False,
+        'details': details,
+        'raw_state': state,
+    }
+
+
+def _build_live_rss_vote(cache_dir: Path, max_age_minutes: int, weight: float) -> Dict[str, Any]:
+    latest = _latest_signal_file(cache_dir, ['rss_MARKET_*.json', 'rss_BTC-USDT_*.json'])
+    if latest is None:
+        return {}
+
+    health = _signal_health(cache_dir, [latest.name], max_age_minutes, 'rss_signal_stale_or_missing')
+    if not health.get('is_fresh'):
+        return {}
+
+    data = _load_json_payload(latest)
+    sentiment = float(data.get('f6_sentiment', 0.0) or 0.0)
+    if sentiment > 0.3:
+        state = 'TRENDING'
+    elif sentiment < -0.2:
+        state = 'RISK_OFF'
+    else:
+        state = 'SIDEWAYS'
+
+    return {
+        'state': state,
+        'confidence': min(abs(sentiment) * 1.5 + 0.3, 1.0),
+        'weight': float(weight),
+        'sentiment': sentiment,
+        'summary': str(data.get('f6_sentiment_summary', '') or '')[:100],
+        'raw_state': state,
+    }
+
+
+def _load_latest_regime_history_snapshot(reports_dir: Path) -> Dict[str, Any]:
+    db_path = reports_dir / 'regime_history.db'
+    if not db_path.exists():
+        return {}
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+              ts_ms, final_state, final_score, confidence, multiplier,
+              hmm_state, hmm_confidence, hmm_trending_up_prob, hmm_trending_down_prob, hmm_sideways_prob,
+              funding_state, funding_confidence, funding_sentiment,
+              rss_state, rss_confidence, rss_sentiment,
+              alerts_json, weights_json
+            FROM regime_history
+            ORDER BY ts_ms DESC
+            LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        conn.close()
+        if row is None:
+            return {}
+
+        try:
+            weights = json.loads(row['weights_json'] or '{}')
+        except Exception:
+            weights = {}
+        try:
+            alerts = json.loads(row['alerts_json'] or '[]')
+        except Exception:
+            alerts = []
+
+        return {
+            'state': str(row['final_state'] or 'SIDEWAYS'),
+            'position_multiplier': float(row['multiplier'] or 0.0),
+            'final_score': float(row['final_score'] or 0.0),
+            'method': 'regime_history',
+            'votes': {
+                'hmm': {
+                    'state': row['hmm_state'],
+                    'confidence': float(row['hmm_confidence'] or 0.0),
+                    'weight': float(weights.get('hmm', 0.0) or 0.0),
+                    'raw_state': row['hmm_state'],
+                    'probs': {
+                        'TrendingUp': float(row['hmm_trending_up_prob'] or 0.0),
+                        'TrendingDown': float(row['hmm_trending_down_prob'] or 0.0),
+                        'Sideways': float(row['hmm_sideways_prob'] or 0.0),
+                    },
+                },
+                'funding': {
+                    'state': row['funding_state'],
+                    'confidence': float(row['funding_confidence'] or 0.0),
+                    'weight': float(weights.get('funding', 0.0) or 0.0),
+                    'sentiment': float(row['funding_sentiment'] or 0.0),
+                },
+                'rss': {
+                    'state': row['rss_state'],
+                    'confidence': float(row['rss_confidence'] or 0.0),
+                    'weight': float(weights.get('rss', 0.0) or 0.0),
+                    'sentiment': float(row['rss_sentiment'] or 0.0),
+                },
+            },
+            'alerts': alerts if isinstance(alerts, list) else [],
+            'monitor': {},
+        }
+    except Exception:
+        return {}
+
+
+def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
+    try:
+        runs_dir = reports_dir / 'runs'
+        if runs_dir.exists():
+            run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+            run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            if run_dirs:
+                audit = json.loads((run_dirs[0] / 'decision_audit.json').read_text(encoding='utf-8'))
+                regime = str(audit.get('regime') or 'SIDEWAYS')
+                details = audit.get('regime_details', {})
+                if isinstance(details, dict) and details:
+                    regime = str(details.get('final_state') or regime)
+                else:
+                    details = {}
+
+                votes = details.get('votes', {}) if isinstance(details.get('votes', {}), dict) else {}
+                alerts = []
+                for source in (details.get('alerts', []), votes.get('alerts', [])):
+                    if not isinstance(source, list):
+                        continue
+                    for item in source:
+                        if item and item not in alerts:
+                            alerts.append(item)
+
+                return {
+                    'state': regime,
+                    'position_multiplier': float(audit.get('regime_multiplier', details.get('multiplier', 0.0)) or 0.0),
+                    'final_score': float(details.get('final_score', 0.0) or 0.0),
+                    'method': str(details.get('method', 'decision_audit')),
+                    'votes': votes,
+                    'alerts': alerts,
+                    'monitor': details.get('monitor', {}) if isinstance(details.get('monitor', {}), dict) else {},
+                }
+    except Exception:
+        pass
+
+    return _load_latest_regime_history_snapshot(reports_dir)
+
+
 @app.route('/api/market_state')
 def api_market_state():
-    """市场状态API（显示Ensemble三种方法）"""
+    """市场状态 API，补齐投票详情和情绪缓存健康。"""
     try:
-        # 优先从最新 decision_audit 读取，避免 scores 接口与 market_state 口径不一致
-        regime = 'Risk-Off'
-        ensemble_data = {}
-        audit = {}
-        try:
-            runs_dir = REPORTS_DIR / 'runs'
-            if runs_dir.exists():
-                run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-                run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                if run_dirs:
-                    with open(run_dirs[0] / 'decision_audit.json', 'r') as f:
-                        audit = json.load(f)
-                        regime = audit.get('regime', regime)
-                        if 'regime_details' in audit:
-                            ensemble_data = audit['regime_details']
-                            # 若有final_state，优先使用它作为最终状态
-                            regime = ensemble_data.get('final_state', regime)
-        except Exception:
-            # 回退到 scores 口径
-            try:
-                scores_data = api_scores().get_json()
-                regime = scores_data.get('regime', regime)
-            except Exception:
-                pass
-        
-        # 计算市场指标
+        snapshot = _load_market_state_snapshot(REPORTS_DIR)
+        regime = str(snapshot.get('state') or 'SIDEWAYS')
+        votes = snapshot.get('votes', {}) if isinstance(snapshot.get('votes', {}), dict) else {}
+        alerts = snapshot.get('alerts', []) if isinstance(snapshot.get('alerts', []), list) else []
+        monitor = snapshot.get('monitor', {}) if isinstance(snapshot.get('monitor', {}), dict) else {}
+
+        config = load_config()
+        regime_cfg = config.get('regime', {}) if isinstance(config, dict) else {}
+        cache_dir = WORKSPACE / 'data' / 'sentiment_cache'
+        signal_health = {
+            'funding': _signal_health(
+                cache_dir,
+                [
+                    'funding_COMPOSITE_*.json',
+                    'funding_BTC-USDT_*.json',
+                    'funding_ETH-USDT_*.json',
+                    'funding_SOL-USDT_*.json',
+                    'funding_BNB-USDT_*.json',
+                ],
+                int(regime_cfg.get('funding_signal_max_age_minutes', 180) or 180),
+                'funding_signal_stale_or_missing',
+            ),
+            'rss': _signal_health(
+                cache_dir,
+                [
+                    'rss_MARKET_*.json',
+                    'rss_BTC-USDT_*.json',
+                ],
+                int(regime_cfg.get('rss_signal_max_age_minutes', 180) or 180),
+                'rss_signal_stale_or_missing',
+            ),
+        }
+
+        configured_weights = {
+            'funding': float(regime_cfg.get('funding_weight', 0.35) or 0.35),
+            'rss': float(regime_cfg.get('rss_weight', 0.25) or 0.25),
+        }
+        live_votes = {
+            'funding': _build_live_funding_vote(
+                cache_dir,
+                int(regime_cfg.get('funding_signal_max_age_minutes', 180) or 180),
+                configured_weights['funding'],
+            ),
+            'rss': _build_live_rss_vote(
+                cache_dir,
+                int(regime_cfg.get('rss_signal_max_age_minutes', 180) or 180),
+                configured_weights['rss'],
+            ),
+        }
+        stale_errors = {
+            'funding': 'funding_signal_stale_or_missing',
+            'rss': 'rss_signal_stale_or_missing',
+        }
+        for name in ('funding', 'rss'):
+            vote = votes.get(name, {})
+            if not isinstance(vote, dict):
+                vote = {}
+            live_vote = live_votes.get(name, {})
+            if live_vote.get('state') and (
+                not vote.get('state')
+                or vote.get('error') == stale_errors[name]
+                or float(vote.get('confidence', 0) or 0) <= 0
+            ):
+                vote.update(live_vote)
+                vote.pop('error', None)
+            elif signal_health[name].get('error'):
+                vote.setdefault('error', signal_health[name]['error'])
+            elif vote.get('error') == stale_errors[name]:
+                vote.pop('error', None)
+            votes[name] = vote
+
+        merged_alerts: List[str] = []
+        for item in list(alerts) + [signal_health['funding'].get('error'), signal_health['rss'].get('error')]:
+            if not item or item in merged_alerts:
+                continue
+            if item == 'funding_signal_stale_or_missing' and signal_health['funding'].get('is_fresh'):
+                continue
+            if item == 'rss_signal_stale_or_missing' and signal_health['rss'].get('is_fresh'):
+                continue
+            merged_alerts.append(str(item))
+
         indicators = calculate_market_indicators()
-        
-        # 仓位乘数：优先使用最新审计中的真实值，回退到配置映射
         multiplier_map = {
             'Risk-Off': 0.0,
             'RISK_OFF': 0.0,
             'Trending': 1.2,
             'TRENDING': 1.2,
             'Sideways': 0.8,
-            'SIDEWAYS': 0.8
+            'SIDEWAYS': 0.8,
         }
-        multiplier = float(audit.get('regime_multiplier', multiplier_map.get(regime, 0.3)))
-        
-        # 描述
+        multiplier = float(snapshot.get('position_multiplier', multiplier_map.get(regime, 0.3)) or 0.0)
+
         descriptions = {
             'Risk-Off': '风险规避模式，空仓保护中',
             'RISK_OFF': '风险规避模式，空仓保护中',
             'Trending': '趋势行情，增加仓位暴露',
             'TRENDING': '趋势行情，增加仓位暴露',
             'Sideways': '震荡行情，正常仓位',
-            'SIDEWAYS': '震荡行情，正常仓位'
+            'SIDEWAYS': '震荡行情，正常仓位',
         }
-        
-        # 构建响应（显示三种判断标准）
-        response = {
+
+        return jsonify({
             'state': regime.upper().replace('-', '_'),
             'position_multiplier': multiplier,
             'description': descriptions.get(regime, '市场状态监控中'),
-            'method': ensemble_data.get('method', '传统MA'),
+            'method': snapshot.get('method', 'unknown'),
             'votes': {
-                'hmm': ensemble_data.get('votes', {}).get('hmm', {'state': 'N/A', 'weight': 0}),
-                'funding': ensemble_data.get('votes', {}).get('funding', {'state': 'N/A', 'weight': 0}),
-                'rss': ensemble_data.get('votes', {}).get('rss', {'state': 'N/A', 'weight': 0})
+                'hmm': votes.get('hmm', {'state': 'N/A', 'weight': 0}),
+                'funding': votes.get('funding', {'state': 'N/A', 'weight': 0}),
+                'rss': votes.get('rss', {'state': 'N/A', 'weight': 0}),
             },
-            'alerts': ensemble_data.get('votes', {}).get('alerts', []),
-            'monitor': ensemble_data.get('votes', {}).get('monitor', {}),
-            'final_score': ensemble_data.get('final_score', 0),
-            'price': indicators['price']
-        }
-        
-        return jsonify(response)
+            'alerts': merged_alerts,
+            'monitor': monitor,
+            'final_score': float(snapshot.get('final_score', 0.0) or 0.0),
+            'price': indicators['price'],
+            'signal_health': signal_health,
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        })
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
@@ -1236,15 +1752,27 @@ def api_dashboard():
         
         # 获取持仓
         positions_data = api_positions().get_json()
+        if isinstance(positions_data, dict):
+            positions_data = positions_data.get('positions', positions_data.get('data', []))
+        if not isinstance(positions_data, list):
+            positions_data = []
         
         # 获取交易
         trades_data = api_trades().get_json()
+        if isinstance(trades_data, dict):
+            trades_data = trades_data.get('trades', trades_data.get('data', []))
+        if not isinstance(trades_data, list):
+            trades_data = []
         
         # 获取评分
         scores_data = api_scores().get_json()
+        if not isinstance(scores_data, dict):
+            scores_data = {'scores': []}
         
         # 获取状态
         status_data = api_status().get_json()
+        if not isinstance(status_data, dict):
+            status_data = {}
         
         # 获取权益曲线
         equity_data = api_equity_history().get_json()
@@ -1300,22 +1828,32 @@ def api_dashboard():
                 'weight': 0.1
             })
         
-        positions_value = sum(float(p.get('value', 0) or 0) for p in positions)
+        positions_value = float(account_data.get('positions_value_usdt', 0) or 0)
+        if positions_value <= 0:
+            positions_value = sum(float(p.get('value', 0) or 0) for p in positions)
         cash_usdt = float(account_data.get('cash_usdt', 0) or 0)
-        total_equity = cash_usdt + positions_value
+        total_equity = float(account_data.get('total_equity_usdt', 0) or 0)
+        if total_equity <= 0:
+            total_equity = cash_usdt + positions_value
+        total_pnl = float(account_data.get('equity_delta_usdt', account_data.get('realized_pnl', 0)) or 0)
+        total_pnl_pct = float(account_data.get('total_pnl_pct', 0) or 0)
+        drawdown_pct = float(account_data.get('drawdown_pct', 0) or 0)
         realized_pnl = float(account_data.get('realized_pnl', 0) or 0)
+        initial_capital = float(account_data.get('initial_capital_usdt', 0) or 0)
 
         dashboard_data = {
             'account': {
                 'totalEquity': round(total_equity, 4),
                 'cash': round(cash_usdt, 4),
                 'positionsValue': round(positions_value, 4),
-                'totalPnl': round(realized_pnl, 4),
-                'totalPnlPercent': round((realized_pnl / max(total_equity, 1e-9)) * 100, 2) if total_equity > 0 else 0,
+                'initialCapital': round(initial_capital, 4),
+                'totalPnl': round(total_pnl, 4),
+                'realizedPnl': round(realized_pnl, 4),
+                'totalPnlPercent': round(total_pnl_pct * 100, 2) if abs(total_pnl_pct) <= 1 else round(total_pnl_pct, 2),
                 'todayPnl': 0,
                 'todayPnlPercent': 0,
                 'sharpeRatio': 0,
-                'maxDrawdown': 0,
+                'maxDrawdown': round(drawdown_pct * 100, 2) if abs(drawdown_pct) <= 1 else round(drawdown_pct, 2),
                 'winRate': 0,
                 'totalTrades': account_data.get('total_trades', 0)
             },
@@ -1328,7 +1866,7 @@ def api_dashboard():
                 'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',
                 'lastUpdate': account_data.get('last_update', ''),
                 'killSwitch': False,
-                'errors': []
+                'errors': [status_data['timer_error']] if status_data.get('timer_error') else []
             },
             'equityCurve': equity_data if isinstance(equity_data, list) else [],
             # 新增：系统进度数据
@@ -1349,98 +1887,15 @@ def api_dashboard():
 def api_timer():
     """定时任务信息API"""
     try:
-        import subprocess
-        import re
-        from datetime import datetime, timedelta
-        
         timer_name = _pick_timer_name()
-        # 获取timer状态 - 使用show命令获取更准确的信息
-        result = subprocess.run(
-            ['systemctl', '--user', 'show', timer_name,
-             '--property=OnCalendar', '--property=Trigger'],
-            capture_output=True, text=True
-        )
-        
-        next_run = None
-        countdown_seconds = 0
-        interval_minutes = 60  # 默认1小时
-        
-        # 解析配置获取间隔
-        for line in result.stdout.split('\n'):
-            if line.startswith('OnCalendar='):
-                calendar_str = line.split('=', 1)[1].strip()
-                # 解析 OnCalendar 格式
-                if '0/2' in calendar_str or '00/2' in calendar_str:
-                    interval_minutes = 120  # 2小时
-                elif 'hourly' in calendar_str.lower():
-                    interval_minutes = 60  # 1小时
-                elif '0/1' in calendar_str:
-                    interval_minutes = 60  # 1小时
-            
-            if line.startswith('Trigger='):
-                trigger_str = line.split('=', 1)[1].strip()
-                if trigger_str and trigger_str != 'n/a':
-                    try:
-                        # 解析 "Tue 2026-02-24 14:52:00 CST" 格式
-                        # 去掉时区缩写
-                        trigger_clean = re.sub(r'\s+[A-Z]{3}$', '', trigger_str)
-                        next_run_dt = datetime.strptime(trigger_clean, '%a %Y-%m-%d %H:%M:%S')
-                        next_run = next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        
-                        # 计算倒计时
-                        now = datetime.now()
-                        diff = next_run_dt - now
-                        countdown_seconds = max(0, int(diff.total_seconds()))
-                    except Exception as e:
-                        print(f"解析Trigger时间失败: {e}, trigger_str={trigger_str}")
-        
-        # 如果上面的方法失败，尝试使用list-timers
-        if not next_run:
-            result2 = subprocess.run(
-                ['systemctl', '--user', 'list-timers', timer_name, '--no-pager'],
-                capture_output=True, text=True
-            )
-            
-            for line in result2.stdout.split('\n'):
-                if timer_name in line:
-                    # 格式: "Tue 2026-02-24 14:52:00 CST  1min 4s left ..."
-                    # 或: "n/a  n/a  ..."
-                    match = re.search(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', line)
-                    if match:
-                        time_str = match.group(1)
-                        try:
-                            next_run_dt = datetime.strptime(time_str, '%a %Y-%m-%d %H:%M:%S')
-                            next_run = next_run_dt.strftime('%Y-%m-%d %H:%M:%S')
-                            
-                            now = datetime.now()
-                            diff = next_run_dt - now
-                            countdown_seconds = max(0, int(diff.total_seconds()))
-                            
-                            # 尝试解析LEFT列获取倒计时
-                            left_match = re.search(r'\d{2}:\d{2}:\d{2}\s+([\d\w\s]+?)\s+\w{3}\s+', line)
-                            if left_match:
-                                left_str = left_match.group(1).strip()
-                                # 解析类似 "1min 4s" 或 "45s" 或 "1h 30min"
-                                total_seconds = 0
-                                for part in left_str.split():
-                                    if 'h' in part:
-                                        total_seconds += int(part.replace('h', '')) * 3600
-                                    elif 'min' in part:
-                                        total_seconds += int(part.replace('min', '')) * 60
-                                    elif 's' in part:
-                                        total_seconds += int(part.replace('s', ''))
-                                if total_seconds > 0:
-                                    countdown_seconds = total_seconds
-                        except Exception as e:
-                            print(f"解析list-timers失败: {e}")
-                    break
-        
+        runtime = _get_timer_runtime(timer_name)
         return jsonify({
             'timer_name': timer_name,
-            'next_run': next_run,
-            'countdown_seconds': countdown_seconds,
-            'interval_minutes': interval_minutes,
-            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'next_run': runtime.get('next_run'),
+            'countdown_seconds': int(runtime.get('countdown_seconds') or 0),
+            'interval_minutes': int(runtime.get('interval_minutes') or 60),
+            'error': runtime.get('error'),
+            'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
         import traceback
@@ -1458,73 +1913,29 @@ def api_timer():
 def api_timers():
     """所有定时任务状态API"""
     try:
-        import subprocess
-        import re
-        
-        # 定义要监控的timer（兼容新旧交易timer）
-        primary_timer = _pick_timer_name()
-        timer_configs = [
-            {'name': primary_timer, 'desc': '实盘交易执行', 'icon': '🔄'},
-            {'name': 'v5-reconcile.timer', 'desc': '对账状态刷新', 'icon': '🔍'},
-            {'name': 'v5-daily-ml-training.timer', 'desc': 'ML模型训练', 'icon': '🧠'},
-            {'name': 'v5-reflection-agent.timer', 'desc': '交易后分析', 'icon': '📊'},
-        ]
-        
         timers = []
-        
-        for config in timer_configs:
+
+        for config in PRODUCTION_TIMER_CONFIGS:
             timer_name = config['name']
-            
-            # 获取timer状态
-            result = subprocess.run(
-                ['systemctl', '--user', 'show', timer_name,
-                 '--property=UnitFileState', '--property=ActiveState'],
-                capture_output=True, text=True
-            )
-            
-            enabled = False
-            active = False
-            
-            for line in result.stdout.split('\n'):
-                if line.startswith('UnitFileState='):
-                    enabled = line.split('=', 1)[1].strip() == 'enabled'
-                if line.startswith('ActiveState='):
-                    active = line.split('=', 1)[1].strip() == 'active'
-            
-            # 获取下次执行时间
-            result2 = subprocess.run(
-                ['systemctl', '--user', 'list-timers', timer_name, '--no-pager'],
-                capture_output=True, text=True
-            )
-            
-            next_run = None
-            left_str = None
-            
-            for line in result2.stdout.split('\n'):
-                if timer_name in line:
-                    # 解析 LEFT 列
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        left_str = parts[-3] if 'left' in line else None
-                        # 解析下次执行时间
-                        match = re.search(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', line)
-                        if match:
-                            next_run = match.group(1)
-                    break
-            
+            runtime = _get_timer_runtime(timer_name)
             timers.append({
                 'name': timer_name,
                 'desc': config['desc'],
                 'icon': config['icon'],
-                'enabled': enabled,
-                'active': active,
-                'next_run': next_run,
-                'time_left': left_str
+                'enabled': bool(runtime.get('enabled')),
+                'active': bool(runtime.get('active')),
+                'active_state': runtime.get('active_state'),
+                'unit_file_state': runtime.get('unit_file_state'),
+                'next_run': runtime.get('next_run'),
+                'time_left': runtime.get('time_left'),
+                'countdown_seconds': int(runtime.get('countdown_seconds') or 0),
+                'interval_minutes': int(runtime.get('interval_minutes') or 60),
+                'error': runtime.get('error'),
             })
-        
+
         return jsonify({
             'timers': timers,
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
         import traceback
@@ -1891,6 +2302,7 @@ def api_ml_training():
         model_candidates = []
         if model_dir.exists():
             model_candidates += list(model_dir.glob('ml_factor_model.txt'))
+            model_candidates += list(model_dir.glob('ml_factor_model.pkl'))
             model_candidates += list(model_dir.glob('lgb_model_*.pkl'))
         latest_model = max(model_candidates, key=lambda p: p.stat().st_mtime) if model_candidates else None
         model_time = datetime.fromtimestamp(latest_model.stat().st_mtime) if latest_model else None
@@ -2759,15 +3171,14 @@ def api_health():
         
         # 1. 检查定时任务
         try:
-            import subprocess
             timer_name = _pick_timer_name()
-            result = subprocess.run(
-                ['systemctl', '--user', 'is-active', timer_name],
-                capture_output=True, text=True, timeout=5
-            )
-            timer_active = result.returncode == 0
-            
-            if timer_active:
+            timer_state = _get_timer_state(timer_name)
+
+            if timer_state.get('error'):
+                checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(timer_state.get('error'))})
+                if overall_status == 'healthy':
+                    overall_status = 'warning'
+            elif timer_state.get('active'):
                 checks.append({'name': '定时任务', 'status': 'healthy', 'detail': f'{timer_name}运行中'})
             else:
                 checks.append({'name': '定时任务', 'status': 'critical', 'detail': f'{timer_name}未运行'})

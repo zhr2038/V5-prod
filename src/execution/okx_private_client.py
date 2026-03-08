@@ -154,6 +154,7 @@ class OKXPrivateClient:
         params: Optional[Dict[str, Any]] = None,
         json_body: Optional[Dict[str, Any]] = None,
         exp_time_ms: Optional[int] = None,
+        retry_on_transport_errors: bool = True,
     ) -> OKXResponse:
         method_u = str(method).upper()
         request_path = self._build_request_path(path, params)
@@ -195,15 +196,22 @@ class OKXPrivateClient:
             if isinstance(e, OKXRateLimitError):
                 return True
             if isinstance(e, OKXPrivateClientError):
-                # network/timeout errors: retry
-                return True
+                # For non-idempotent requests like order placement, never replay POST on
+                # transport ambiguity. The caller should query by clOrdId instead.
+                return bool(retry_on_transport_errors)
             return False
 
         return retry(_do, should_retry=_should_retry, cfg=self.retry_cfg)
 
     # --- Convenience wrappers (G0.2) ---
     def place_order(self, payload: Dict[str, Any], *, exp_time_ms: Optional[int] = None) -> OKXResponse:
-        return self.request("POST", "/api/v5/trade/order", json_body=payload, exp_time_ms=exp_time_ms)
+        return self.request(
+            "POST",
+            "/api/v5/trade/order",
+            json_body=payload,
+            exp_time_ms=exp_time_ms,
+            retry_on_transport_errors=False,
+        )
 
     def get_order(
         self,

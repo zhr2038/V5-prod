@@ -397,6 +397,12 @@ class Alpha6FactorStrategy(BaseStrategy):
         self.factor_weights = self.config['weights']
         self.sentiment_cache_dir = Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache'
 
+    def set_factor_weights(self, weights: Dict[str, float]) -> None:
+        merged = dict(self.config.get('weights') or {})
+        merged.update({k: float(v) for k, v in (weights or {}).items()})
+        self.config['weights'] = merged
+        self.factor_weights = merged
+
     def _resolve_dynamic_weights(self, static_weights: Dict[str, float]) -> Dict[str, float]:
         """根据 IC monitor 动态修正因子权重（可选）。"""
         try:
@@ -733,6 +739,7 @@ class StrategyOrchestrator:
         }
         
         self.performance_history: List[Dict] = []
+        self.run_id: str = ""
     
     def register_strategy(self, strategy: BaseStrategy, allocation: Optional[Decimal] = None):
         """注册策略"""
@@ -744,6 +751,14 @@ class StrategyOrchestrator:
         self.strategy_allocations[strategy.name] = allocation
         print(f"[Orchestrator] 注册策略: {strategy.name}, 资金分配: {allocation}")
     
+    def set_run_id(self, run_id: Optional[str]) -> None:
+        self.run_id = str(run_id or "").strip()
+
+    def strategy_signals_path(self) -> Optional[Path]:
+        if not self.run_id:
+            return None
+        return Path("reports") / "runs" / self.run_id / "strategy_signals.json"
+
     def generate_combined_signals(self, market_data: pd.DataFrame) -> List[Signal]:
         """生成融合后的交易信号"""
         all_signals = []
@@ -800,27 +815,34 @@ class StrategyOrchestrator:
         
         # 保存策略信号审计到文件（包括融合结果）
         try:
-            audit_file = Path(f"reports/runs/{datetime.now().strftime('%Y%m%d_%H')}/strategy_signals.json")
-            audit_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            # 构建融合信号审计
-            fused_audit = []
-            for s in combined:
-                fused_audit.append({
-                    'symbol': s.symbol,
-                    'direction': s.side,
-                    'score': float(s.score),
-                    'confidence': float(s.confidence),
-                    'strategy': s.strategy,
-                    'rank': 0  # Will be calculated later
-                })
-            
-            with open(audit_file, 'w', encoding='utf-8') as f:
-                json.dump({
+            audit_file = self.strategy_signals_path()
+            if audit_file is not None:
+                audit_file.parent.mkdir(parents=True, exist_ok=True)
+
+                # Build fused signal audit for the current run.
+                fused_audit = []
+                for s in combined:
+                    fused_audit.append({
+                        'symbol': s.symbol,
+                        'direction': s.side,
+                        'score': float(s.score),
+                        'confidence': float(s.confidence),
+                        'strategy': s.strategy,
+                        'rank': 0  # Will be calculated later
+                    })
+
+                payload = {
                     'timestamp': datetime.now().isoformat(),
+                    'run_id': self.run_id,
                     'strategies': strategy_signal_audit,
                     'fused': {s['symbol']: s for s in fused_audit}  # Add fused signals
-                }, f, indent=2, ensure_ascii=False, default=str)
+                }
+                tmp_file = audit_file.with_suffix('.tmp')
+                tmp_file.write_text(
+                    json.dumps(payload, indent=2, ensure_ascii=False, default=str),
+                    encoding='utf-8',
+                )
+                tmp_file.replace(audit_file)
         except Exception as e:
             print(f"[Orchestrator] 审计记录失败: {e}")
         
@@ -976,6 +998,30 @@ class MultiStrategyAdapter:
     def __init__(self, orchestrator: StrategyOrchestrator):
         self.orchestrator = orchestrator
     
+    def set_run_id(self, run_id: Optional[str]) -> None:
+        self.orchestrator.set_run_id(run_id)
+
+    def strategy_signals_path(self) -> Optional[Path]:
+        return self.orchestrator.strategy_signals_path()
+
+    def _normalize_targets_to_total_capital(self, targets: List[Dict]) -> List[Dict]:
+        positive_targets = [
+            t for t in targets
+            if float(t.get('target_position_usdt', 0.0) or 0.0) > 0.0
+        ]
+        if not positive_targets:
+            return targets
+
+        total_requested = sum(float(t.get('target_position_usdt', 0.0) or 0.0) for t in positive_targets)
+        max_capital = float(self.orchestrator.total_capital)
+        if total_requested <= 0.0 or total_requested <= max_capital + 1e-9:
+            return targets
+
+        scale = max_capital / total_requested
+        for target in positive_targets:
+            target['target_position_usdt'] = float(target.get('target_position_usdt', 0.0) or 0.0) * scale
+        return targets
+
     def run_strategy_cycle(self, market_data: pd.DataFrame) -> List[Dict]:
         """运行一个策略周期，返回目标持仓"""
 
@@ -1048,7 +1094,7 @@ class MultiStrategyAdapter:
                     'metadata': signal.metadata
                 })
 
-        return targets
+        return self._normalize_targets_to_total_capital(targets)
 
 
 # ============ 使用示例 ============

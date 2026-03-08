@@ -116,7 +116,10 @@ class LivePreflight:
         eng: ReconcileEngine,
         guard_cfg: GuardConfig,
     ) -> Dict[str, Any]:
-        status = eng.reconcile(out_path=self.reconcile_status_path)
+        status = eng.reconcile(
+            out_path=self.reconcile_status_path,
+            ccy_mode=str(getattr(self.cfg, "reconcile_ccy_mode", "universe_only") or "universe_only"),
+        )
         status["generated_ts_ms"] = int(status.get("ts_ms") or _now_ms())
         _write_json(self.reconcile_status_path, status)
         return KillSwitchGuard(guard_cfg).apply()

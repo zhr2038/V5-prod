@@ -1,242 +1,202 @@
 """
-时序交叉验证模块
-
-针对金融时间序列数据的交叉验证，避免未来数据泄露
+Time-series cross-validation helpers for ML training.
 """
+
+from __future__ import annotations
+
+from typing import Generator
 
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Generator
 from sklearn.model_selection import BaseCrossValidator
 
 
 class TimeSeriesSplit(BaseCrossValidator):
-    """
-    时间序列交叉验证分割器
-    
-    特点：
-    - 训练集只包含过去数据
-    - 验证集只包含未来数据
-    - 模拟真实交易场景
-    """
-    
-    def __init__(self, n_splits: int = 5, test_size: int = None, gap: int = 0):
-        """
-        Args:
-            n_splits: 分割次数
-            test_size: 验证集大小，None则自动计算
-            gap: 训练集和验证集之间的间隔（防止泄露）
-        """
-        self.n_splits = n_splits
+    def __init__(self, n_splits: int = 5, test_size: int | None = None, gap: int = 0):
+        self.n_splits = int(n_splits)
         self.test_size = test_size
-        self.gap = gap
-    
+        self.gap = int(gap)
+
     def split(self, X, y=None, groups=None):
-        """生成训练和验证索引"""
         n_samples = len(X)
         indices = np.arange(n_samples)
-        
-        if self.test_size is None:
-            test_size = n_samples // (self.n_splits + 1)
-        else:
-            test_size = self.test_size
-        
+        test_size = self.test_size or max(1, n_samples // (self.n_splits + 1))
+
         for i in range(self.n_splits):
-            # 验证集结束位置
             test_end = n_samples - i * test_size
-            # 验证集开始位置
             test_start = test_end - test_size
-            # 训练集结束位置（考虑gap）
             train_end = test_start - self.gap
-            
             if train_end <= 0:
                 break
-            
-            train_indices = indices[:train_end]
-            test_indices = indices[test_start:test_end]
-            
-            yield train_indices, test_indices
-    
+            yield indices[:train_end], indices[test_start:test_end]
+
     def get_n_splits(self, X=None, y=None, groups=None):
-        """Get n splits"""
         return self.n_splits
 
 
 class PurgedKFold(BaseCrossValidator):
-    """
-    清洗K折交叉验证
-    
-    在训练集和验证集之间添加清洗期，防止重叠样本泄露
-    参考：Advances in Financial Machine Learning (Marcos Lopez de Prado)
-    """
-    
     def __init__(self, n_splits: int = 5, purge_gap: int = 10):
-        """
-        Args:
-            n_splits: 折数
-            purge_gap: 清洗期大小（样本数）
-        """
-        self.n_splits = n_splits
-        self.purge_gap = purge_gap
-    
+        self.n_splits = int(n_splits)
+        self.purge_gap = int(purge_gap)
+
     def split(self, X, y=None, groups=None):
-        """生成带清洗期的分割"""
         n_samples = len(X)
-        fold_size = n_samples // self.n_splits
-        
+        fold_size = max(1, n_samples // self.n_splits)
+
         for i in range(self.n_splits):
-            # 验证集范围
             test_start = i * fold_size
             test_end = min((i + 1) * fold_size, n_samples)
-            
-            # 训练集范围（排除验证集和清洗期）
-            train_indices = list(range(0, test_start - self.purge_gap)) + \
-                          list(range(test_end + self.purge_gap, n_samples))
-            
+            train_indices = list(range(0, max(0, test_start - self.purge_gap))) + list(
+                range(min(n_samples, test_end + self.purge_gap), n_samples)
+            )
             test_indices = list(range(test_start, test_end))
-            
             yield np.array(train_indices), np.array(test_indices)
-    
+
     def get_n_splits(self, X=None, y=None, groups=None):
-        """Get n splits"""
         return self.n_splits
 
 
-def time_series_cv_score(model, X: pd.DataFrame, y: pd.Series, 
-                         cv=None, metric='ic') -> dict:
-    """
-    时序交叉验证评分
-    
-    Args:
-        model: 模型对象（需要有fit和predict方法）
-        X: 特征矩阵
-        y: 目标变量
-        cv: 交叉验证分割器，None则使用默认TimeSeriesSplit
-        metric: 评估指标 ('ic', 'rmse', 'mae')
-        
-    Returns:
-        包含各折分数和统计信息的字典
-    """
+class GroupedTimeSeriesSplit(BaseCrossValidator):
+    def __init__(self, n_splits: int = 5, test_group_size: int | None = None, gap_groups: int = 0):
+        self.n_splits = int(n_splits)
+        self.test_group_size = test_group_size
+        self.gap_groups = int(gap_groups)
+
+    def split(self, X, y=None, groups=None):
+        if groups is None:
+            raise ValueError("GroupedTimeSeriesSplit requires groups")
+
+        groups_s = pd.Series(groups).reset_index(drop=True)
+        unique_groups = pd.Index(groups_s.drop_duplicates().tolist())
+        n_groups = len(unique_groups)
+        test_group_size = self.test_group_size or max(1, n_groups // (self.n_splits + 1))
+
+        for i in range(self.n_splits):
+            test_end = n_groups - i * test_group_size
+            test_start = test_end - test_group_size
+            train_end = test_start - self.gap_groups
+            if train_end <= 0:
+                break
+
+            train_groups = set(unique_groups[:train_end].tolist())
+            test_groups = set(unique_groups[test_start:test_end].tolist())
+            train_idx = np.flatnonzero(groups_s.isin(train_groups).to_numpy())
+            test_idx = np.flatnonzero(groups_s.isin(test_groups).to_numpy())
+            yield train_idx, test_idx
+
+    def get_n_splits(self, X=None, y=None, groups=None):
+        return self.n_splits
+
+
+def cross_sectional_ic(group_values, y_true, y_pred) -> float:
+    frame = pd.DataFrame({"group": group_values, "y": y_true, "pred": y_pred})
+    vals = []
+    for _, g in frame.groupby("group"):
+        if len(g) < 2:
+            continue
+        y_std = float(pd.Series(g["y"]).std(ddof=0))
+        pred_std = float(pd.Series(g["pred"]).std(ddof=0))
+        if y_std <= 0.0 or pred_std <= 0.0:
+            continue
+        score = float(np.corrcoef(g["y"], g["pred"])[0, 1])
+        if np.isfinite(score):
+            vals.append(score)
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def time_series_cv_score(model, X: pd.DataFrame, y: pd.Series, cv=None, metric: str = "ic", groups=None) -> dict:
     if cv is None:
-        cv = TimeSeriesSplit(n_splits=5, gap=24)  # 默认6小时间隔
-    
+        cv = TimeSeriesSplit(n_splits=5, gap=24)
+
     scores = []
     fold_details = []
-    
-    print("="*60)
-    print("📊 Time-Series Cross Validation")
-    print("="*60)
-    
-    for fold, (train_idx, test_idx) in enumerate(cv.split(X)):
+
+    print("=" * 60)
+    print("Time-Series Cross Validation")
+    print("=" * 60)
+
+    splitter = cv.split(X, y, groups=groups) if groups is not None else cv.split(X, y)
+
+    for fold, (train_idx, test_idx) in enumerate(splitter):
         X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-        
-        # 训练模型
+
         model.fit(X_train, y_train)
-        
-        # 预测
         y_pred = model.predict(X_test)
-        
-        # 计算指标
-        if metric == 'ic':
-            # 信息系数（Pearson相关系数）
-            score = np.corrcoef(y_test, y_pred)[0, 1]
-            if np.isnan(score):
-                score = 0
-        elif metric == 'rmse':
-            score = -np.sqrt(np.mean((y_test - y_pred)**2))  # 负值越大越好
-        elif metric == 'mae':
-            score = -np.mean(np.abs(y_test - y_pred))
+
+        if metric == "ic":
+            score = float(np.corrcoef(y_test, y_pred)[0, 1])
+            if not np.isfinite(score):
+                score = 0.0
+        elif metric == "cs_ic":
+            if groups is None:
+                raise ValueError("cs_ic requires groups")
+            groups_test = pd.Series(groups).iloc[test_idx].reset_index(drop=True)
+            score = cross_sectional_ic(groups_test, y_test.reset_index(drop=True), pd.Series(y_pred))
+        elif metric == "rmse":
+            score = -float(np.sqrt(np.mean((y_test - y_pred) ** 2)))
+        elif metric == "mae":
+            score = -float(np.mean(np.abs(y_test - y_pred)))
         else:
             raise ValueError(f"Unknown metric: {metric}")
-        
+
         scores.append(score)
-        fold_details.append({
-            'fold': fold + 1,
-            'train_size': len(train_idx),
-            'test_size': len(test_idx),
-            'score': score
-        })
-        
-        print(f"  Fold {fold+1}: Train={len(train_idx)}, Test={len(test_idx)}, IC={score:.4f}")
-    
-    # 统计结果
-    mean_score = np.mean(scores)
-    std_score = np.std(scores)
-    
-    print(f"\n{'='*60}")
+        fold_details.append(
+            {
+                "fold": fold + 1,
+                "train_size": len(train_idx),
+                "test_size": len(test_idx),
+                "score": score,
+            }
+        )
+        print(f"  Fold {fold + 1}: Train={len(train_idx)}, Test={len(test_idx)}, IC={score:.4f}")
+
+    mean_score = float(np.mean(scores))
+    std_score = float(np.std(scores))
+
+    print(f"\n{'=' * 60}")
     print(f"CV Results ({metric.upper()}):")
     print(f"  Mean: {mean_score:.4f}")
     print(f"  Std:  {std_score:.4f}")
-    print(f"  Min:  {np.min(scores):.4f}")
-    print(f"  Max:  {np.max(scores):.4f}")
-    print(f"{'='*60}")
-    
+    print(f"  Min:  {float(np.min(scores)):.4f}")
+    print(f"  Max:  {float(np.max(scores)):.4f}")
+    print(f"{'=' * 60}")
+
     return {
-        'mean_score': mean_score,
-        'std_score': std_score,
-        'scores': scores,
-        'fold_details': fold_details
+        "mean_score": mean_score,
+        "std_score": std_score,
+        "scores": scores,
+        "fold_details": fold_details,
     }
 
 
-def create_walk_forward_splits(df: pd.DataFrame, train_days: int = 30, 
-                               test_days: int = 7, step_days: int = 7) -> Generator:
-    """
-    生成Walk-Forward分割
-    
-    每次滚动窗口，用过去N天训练，预测未来M天
-    
-    Args:
-        df: DataFrame（需要有时间索引）
-        train_days: 训练集天数
-        test_days: 测试集天数
-        step_days: 滚动步长
-        
-    Yields:
-        (train_df, test_df, train_start, train_end, test_start, test_end)
-    """
+def create_walk_forward_splits(
+    df: pd.DataFrame,
+    train_days: int = 30,
+    test_days: int = 7,
+    step_days: int = 7,
+) -> Generator:
     if not isinstance(df.index, pd.DatetimeIndex):
-        if 'timestamp' in df.columns:
-            df = df.set_index('timestamp')
+        if "timestamp" in df.columns:
+            df = df.set_index("timestamp")
         else:
             raise ValueError("DataFrame needs DatetimeIndex or 'timestamp' column")
-    
+
     start_date = df.index.min()
     end_date = df.index.max()
-    
     current_train_start = start_date
-    
+
     while True:
         train_start = current_train_start
         train_end = train_start + pd.Timedelta(days=train_days)
         test_start = train_end
         test_end = test_start + pd.Timedelta(days=test_days)
-        
         if test_end > end_date:
             break
-        
+
         train_df = df[(df.index >= train_start) & (df.index < train_end)]
         test_df = df[(df.index >= test_start) & (df.index < test_end)]
-        
         if len(train_df) > 0 and len(test_df) > 0:
             yield train_df, test_df, train_start, train_end, test_start, test_end
-        
+
         current_train_start += pd.Timedelta(days=step_days)
-
-
-if __name__ == '__main__':
-    # 测试
-    from sklearn.linear_model import LinearRegression
-    
-    # 创建测试数据
-    np.random.seed(42)
-    n_samples = 1000
-    X = pd.DataFrame(np.random.randn(n_samples, 5), columns=['f1', 'f2', 'f3', 'f4', 'f5'])
-    y = pd.Series(X.sum(axis=1) + np.random.randn(n_samples) * 0.5)
-    
-    # 时序交叉验证
-    model = LinearRegression()
-    results = time_series_cv_score(model, X, y, metric='ic')
-    
-    print(f"\nFinal Score: {results['mean_score']:.4f} ± {results['std_score']:.4f}")

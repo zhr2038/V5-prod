@@ -24,6 +24,7 @@ class UniverseConfig(BaseModel):
     enabled: bool = Field(default=False, description="Enable dynamic universe selection")
     use_universe_symbols: bool = Field(default=False, description="Use universe output as trading symbols")
     include_symbols: List[str] = Field(default_factory=list, description="Always include these symbols when use_universe_symbols=true (e.g. BTC/USDT).")
+    exclude_symbols: List[str] = Field(default_factory=list, description="Always exclude these symbols from universe output.")
     cache_path: str = Field(default="reports/universe_cache.json")
     cache_ttl_sec: int = Field(default=3600, ge=0)
 
@@ -39,6 +40,8 @@ class UniverseConfig(BaseModel):
     refine_with_single_ticker: bool = Field(default=False)
     refine_single_ticker_max_candidates: int = Field(default=200, ge=1)
     refine_single_ticker_sleep_sec: float = Field(default=0.02, ge=0)
+    min_data_coverage_ratio: float = Field(default=0.80, ge=0.0, le=1.0)
+    require_btc_benchmark: bool = Field(default=True)
 
 
 class AlphaWeights(BaseModel):
@@ -155,6 +158,8 @@ class RegimeConfig(BaseModel):
     hmm_weight: float = Field(default=0.40, ge=0, le=1, description="HMM权重")
     funding_weight: float = Field(default=0.35, ge=0, le=1, description="资金费率情绪权重")
     rss_weight: float = Field(default=0.25, ge=0, le=1, description="RSS新闻情绪权重")
+    funding_signal_max_age_minutes: int = Field(default=180, ge=1, le=1440)
+    rss_signal_max_age_minutes: int = Field(default=180, ge=1, le=1440)
 
     # 情绪驱动的风险状态修正（避免在强反弹初期被长期锁死）
     sentiment_regime_override_enabled: bool = Field(default=True)
