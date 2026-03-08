@@ -1891,6 +1891,7 @@ def api_ml_training():
         model_candidates = []
         if model_dir.exists():
             model_candidates += list(model_dir.glob('ml_factor_model.txt'))
+            model_candidates += list(model_dir.glob('ml_factor_model.pkl'))
             model_candidates += list(model_dir.glob('lgb_model_*.pkl'))
         latest_model = max(model_candidates, key=lambda p: p.stat().st_mtime) if model_candidates else None
         model_time = datetime.fromtimestamp(latest_model.stat().st_mtime) if latest_model else None
