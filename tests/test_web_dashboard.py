@@ -79,8 +79,8 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
         "last_update": "2026-03-08 21:00:00",
     }
 
-    monkeypatch.setattr(module, "_load_positions_data", lambda: positions_rows)
-    monkeypatch.setattr(module, "_build_account_payload", lambda rows=None: account_payload)
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": positions_rows}))
+    monkeypatch.setattr(module, "api_account", lambda: module.jsonify(account_payload))
     monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": [{
         "time": "2026-03-08 20:00:00",
         "symbol": "BTC-USDT",
