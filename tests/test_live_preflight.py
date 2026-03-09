@@ -264,3 +264,49 @@ def test_preflight_kill_switch_short_circuits_buy_gating_checks(monkeypatch):
         assert res.reason == "kill_switch"
         assert calls["balance"] == 0
         assert calls["account_config"] == 0
+
+
+def test_preflight_passes_configured_reconcile_mode(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+
+    class CapturingRecon(DummyRecon):
+        def reconcile(self, *, out_path: str, **kwargs):
+            captured["kwargs"] = dict(kwargs)
+            return super().reconcile(out_path=out_path, **kwargs)
+
+    monkeypatch.setattr(lp, "ReconcileEngine", CapturingRecon)
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {"ok": True, "reason": "ok", "category": "OK", "kill_switch": {"enabled": False}}
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    cfg = SimpleNamespace(
+        reconcile_status_path="reconcile.json",
+        reconcile_dust_usdt_ignore=1.0,
+        reconcile_ccy_mode="all",
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        pf = lp.LivePreflight(
+            cfg,
+            okx=DummyOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "ALLOW"
+        assert captured["kwargs"]["ccy_mode"] == "all"
