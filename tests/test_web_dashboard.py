@@ -128,12 +128,56 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["account"]["totalEquity"] == 5600.0
-    assert payload["account"]["totalPnlPercent"] == 25.0
-    assert payload["account"]["maxDrawdown"] == 5.0
+    assert payload["account"]["totalPnlPercent"] == 0.25
+    assert payload["account"]["maxDrawdown"] == 0.05
     assert payload["positions"][0]["symbol"] == "BTC"
+    assert payload["positions"][0]["pnlPercent"] == 0.1
     assert payload["trades"][0]["symbol"] == "BTC/USDT"
     assert payload["alphaScores"][0]["symbol"] == "BTC/USDT"
     assert payload["systemStatus"]["errors"] == ["systemctl is not available"]
+
+
+def test_dashboard_api_keeps_sub_one_percent_pnl_as_ratio(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": [{
+        "symbol": "OKB",
+        "qty": 0.67,
+        "avg_px": 97.197842,
+        "last_price": 96.67,
+        "value_usdt": 65.2311,
+        "pnl_value": -0.3562,
+        "pnl_pct": -0.0054,
+    }]}))
+    monkeypatch.setattr(module, "api_account", lambda: module.jsonify({
+        "cash_usdt": 100.0,
+        "positions_value_usdt": 65.2311,
+        "total_equity_usdt": 165.2311,
+        "total_pnl_pct": 0.005,
+        "drawdown_pct": 0.0075,
+        "realized_pnl": 1.25,
+        "total_trades": 3,
+        "last_update": "2026-03-09 21:00:00",
+    }))
+    monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": []}))
+    monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({}))
+    monkeypatch.setattr(module, "api_equity_history", lambda: module.jsonify([]))
+    monkeypatch.setattr(module, "api_market_state", lambda: module.jsonify({}))
+    monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": [], "next_run": None}))
+    monkeypatch.setattr(module, "api_cost_calibration", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ic_diagnostics", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ml_training", lambda: module.jsonify({"status": "idle"}))
+    monkeypatch.setattr(module, "api_reflection_reports", lambda: module.jsonify({"reports": []}))
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["account"]["totalPnlPercent"] == 0.005
+    assert payload["account"]["maxDrawdown"] == 0.0075
+    assert payload["positions"][0]["pnlPercent"] == -0.0054
 
 
 def test_market_state_backfills_hmm_vote_from_regime_history(monkeypatch):

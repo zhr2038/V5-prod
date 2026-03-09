@@ -1926,11 +1926,9 @@ def api_dashboard():
             pnl = float(pos.get('pnl_value', 0) or 0)
             raw_pnl_pct = pos.get('pnl_pct', None)
             if raw_pnl_pct is None:
-                pnl_pct = ((cur_price - avg_price) / avg_price * 100) if avg_price > 0 and cur_price > 0 else 0
+                pnl_pct = ((cur_price - avg_price) / avg_price) if avg_price > 0 and cur_price > 0 else 0
             else:
                 pnl_pct = float(raw_pnl_pct or 0)
-                if abs(pnl_pct) <= 1:
-                    pnl_pct *= 100
             positions.append({
                 'symbol': pos.get('symbol', ''),
                 'qty': qty,
@@ -1938,7 +1936,8 @@ def api_dashboard():
                 'currentPrice': round(cur_price, 6),
                 'value': round(value, 4),
                 'pnl': round(pnl, 4),
-                'pnlPercent': round(pnl_pct, 2)
+                # Keep ratios in decimal form; monitor_v2.html formats them as percentages.
+                'pnlPercent': round(pnl_pct, 4)
             })
         
         # 转换交易格式
@@ -1996,11 +1995,12 @@ def api_dashboard():
                 'initialCapital': round(initial_capital, 4),
                 'totalPnl': round(total_pnl, 4),
                 'realizedPnl': round(realized_pnl, 4),
-                'totalPnlPercent': round(total_pnl_pct * 100, 2) if abs(total_pnl_pct) <= 1 else round(total_pnl_pct, 2),
+                # Keep ratios in decimal form; monitor_v2.html formats them as percentages.
+                'totalPnlPercent': round(total_pnl_pct, 4),
                 'todayPnl': 0,
                 'todayPnlPercent': 0,
                 'sharpeRatio': 0,
-                'maxDrawdown': round(drawdown_pct * 100, 2) if abs(drawdown_pct) <= 1 else round(drawdown_pct, 2),
+                'maxDrawdown': round(drawdown_pct, 4),
                 'winRate': 0,
                 'totalTrades': account_data.get('total_trades', 0)
             },

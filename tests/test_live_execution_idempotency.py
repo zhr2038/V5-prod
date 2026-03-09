@@ -71,6 +71,24 @@ class FakeOKX:
         return SimpleNamespace(data={"code": "0", "data": rows})
 
 
+class ImmediateFillOKX(FakeOKX):
+    def place_order(self, payload, exp_time_ms=None):
+        resp = super().place_order(payload, exp_time_ms=exp_time_ms)
+        clid = payload.get("clOrdId")
+        row = self._orders[clid]
+        row["state"] = "filled"
+        row["accFillSz"] = "0.706776"
+        row["avgPx"] = "97.4"
+        self.fills_by_ord_id[row["ordId"]] = [
+            {
+                "fillSz": "0.706776",
+                "fee": "-0.000706776",
+                "feeCcy": "OKB",
+            }
+        ]
+        return resp
+
+
 def test_place_idempotent_same_intent() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
@@ -176,6 +194,24 @@ def test_buy_fill_uses_net_base_qty_when_fee_is_charged_in_base() -> None:
 
         result = eng.place(o)
         p = pos.get("OKB/USDT")
+        assert result.state == "FILLED"
+        assert p is not None
+        assert p.qty == pytest.approx(0.706069224)
+
+
+def test_immediate_buy_fill_updates_position_only_once() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = ImmediateFillOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        cfg = ExecutionConfig(reconcile_status_path=f"{td}/reconcile_status.json", kill_switch_path=f"{td}/kill_switch.json")
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+        o = Order(symbol="OKB/USDT", side="buy", intent="OPEN_LONG", notional_usdt=97.4, signal_price=97.4, meta={"decision_hash": "h7"})
+
+        result = eng.place(o)
+        p = pos.get("OKB/USDT")
+
         assert result.state == "FILLED"
         assert p is not None
         assert p.qty == pytest.approx(0.706069224)

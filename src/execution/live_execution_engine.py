@@ -975,8 +975,9 @@ class LiveExecutionEngine:
             # follow-up poll to get state if possible
             polled_state, polled_ord_id = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
 
-            # Best-effort position sync on FILLED to keep local store consistent and avoid
-            # NO_BORROW false positives on subsequent sells.
+            # Keep filled-order position sync centralized in _query_and_update().
+            # place() already calls that path once after ACK; repeating the sync here
+            # double-counts immediate fills.
             try:
                 if polled_state == "FILLED":
                     # Record rank-exit fill for re-entry cooldown gate.
@@ -986,62 +987,6 @@ class LiveExecutionEngine:
                             _record_rank_exit_fill(o.symbol, reason)
                     except Exception:
                         pass
-
-                    row = self.order_store.get(clid)
-                    # parse last_query to extract accFillSz/avgPx if present
-                    last_q = None
-                    if row is not None and getattr(row, "last_query_json", None):
-                        import json as _json
-
-                        last_q = _json.loads(row.last_query_json)
-                    elif row is not None and getattr(row, "ack_json", None):
-                        import json as _json
-
-                        last_q = _json.loads(row.ack_json)
-
-                    r0 = None
-                    if isinstance(last_q, dict):
-                        rows = last_q.get("data")
-                        if isinstance(rows, list) and rows:
-                            r0 = rows[0] if isinstance(rows[0], dict) else None
-
-                    acc_fill_sz = float((r0 or {}).get("accFillSz") or 0.0) if r0 else 0.0
-                    avg_px = float((r0 or {}).get("avgPx") or 0.0) if r0 else 0.0
-                    if acc_fill_sz > 0:
-                        fill_base_delta = self._compute_base_delta_from_fills(
-                            inst_id=str(getattr(row, "inst_id", "") or inst_id),
-                            ord_id=str(polled_ord_id or getattr(row, "ord_id", "") or ""),
-                            side=str(o.side),
-                        )
-                        if str(o.side).lower() == "buy":
-                            net_buy_qty = float(fill_base_delta) if fill_base_delta is not None else float(acc_fill_sz)
-                            if net_buy_qty > 0:
-                                self.position_store.upsert_buy(
-                                    o.symbol,
-                                    qty=float(net_buy_qty),
-                                    px=float(avg_px or o.signal_price or 0.0),
-                                )
-                        elif str(o.side).lower() == "sell":
-                            # reduce qty; if becomes dust, close
-                            p = self.position_store.get(o.symbol)
-                            if p is not None:
-                                reduce_qty = abs(float(fill_base_delta)) if fill_base_delta is not None else float(acc_fill_sz)
-                                new_qty = max(0.0, float(p.qty) - float(reduce_qty))
-                                if new_qty <= 0:
-                                    self.position_store.close_long(o.symbol)
-                                    clear_risk_state_on_full_close(o.symbol)
-                                else:
-                                    # If remaining is dust (very small notional), close it to avoid stale trailing state.
-                                    try:
-                                        last_px = float(o.signal_price or avg_px or 0.0)
-                                        if last_px > 0 and float(new_qty) * last_px < DUST_NOTIONAL_USDT:
-                                            self.position_store.close_long(o.symbol)
-                                            clear_risk_state_on_full_close(o.symbol)
-                                        else:
-                                            # keep avg_px unchanged on partial close
-                                            self.position_store.set_qty(o.symbol, qty=new_qty)
-                                    except Exception:
-                                        self.position_store.set_qty(o.symbol, qty=new_qty)
             except Exception:
                 pass
 
