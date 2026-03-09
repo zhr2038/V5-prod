@@ -1274,6 +1274,141 @@ def calculate_market_indicators():
         return {'ma20': 0, 'ma60': 0, 'atr_percent': 1.0, 'price': 0}
 
 
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _rss_vote_state(sentiment: float) -> str:
+    if sentiment > 0.3:
+        return 'TRENDING'
+    if sentiment < -0.2:
+        return 'RISK_OFF'
+    return 'SIDEWAYS'
+
+
+def _rss_vote_confidence(sentiment: float, source_confidence: float = 0.7) -> float:
+    source_confidence = _clamp(float(source_confidence or 0.7), 0.3, 1.0)
+    magnitude = _clamp(abs(float(sentiment or 0.0)) / 0.6, 0.0, 1.0)
+    if abs(float(sentiment or 0.0)) < 0.15:
+        magnitude *= 0.4
+    return source_confidence * magnitude
+
+
+def _short_rss_summary(summary: str, sentiment: float, state: str) -> str:
+    text = re.sub(r'^\[RSS[^\]]*\]\s*', '', str(summary or '')).strip()
+    text = re.sub(r'\s+', ' ', text)
+    state = str(state or 'SIDEWAYS').upper()
+    if state == 'TRENDING':
+        if sentiment >= 0.45:
+            return '\u65b0\u95fb\u504f\u591a\uff0c\u98ce\u9669\u504f\u597d\u660e\u663e\u56de\u5347'
+        return '\u65b0\u95fb\u504f\u591a\uff0c\u4f46\u5f3a\u5ea6\u6709\u9650'
+    if state == 'RISK_OFF':
+        if sentiment <= -0.45:
+            return '\u65b0\u95fb\u504f\u7a7a\uff0c\u907f\u9669\u60c5\u7eea\u5347\u6e29'
+        return '\u65b0\u95fb\u504f\u7a7a\uff0c\u4f46\u672a\u5230\u6781\u7aef'
+
+    if any(token in text for token in (
+        '\u98ce\u9669\u504f\u597d',
+        '\u504f\u591a',
+        '\u4e50\u89c2',
+        '\u56de\u5347',
+        '\u53cd\u5f39',
+        '\u8d70\u5f3a',
+    )):
+        return '\u65b0\u95fb\u4e2d\u6027\u504f\u591a\uff0c\u60c5\u7eea\u7565\u6709\u56de\u6696'
+    if any(token in text for token in (
+        '\u907f\u9669',
+        '\u504f\u7a7a',
+        '\u627f\u538b',
+        '\u8d70\u5f31',
+        '\u56de\u843d',
+        '\u8c28\u614e',
+    )):
+        return '\u65b0\u95fb\u4e2d\u6027\u504f\u7a7a\uff0c\u76d8\u4e2d\u4ecd\u504f\u8c28\u614e'
+    return text[:24] if text else '\u65b0\u95fb\u4e2d\u6027\uff0c\u65b9\u5411\u6027\u6682\u4e0d\u5f3a'
+
+
+def _downsample_history(points: List[Dict[str, Any]], max_points: int = 24) -> List[Dict[str, Any]]:
+    if len(points) <= max_points:
+        return points
+    if max_points <= 1:
+        return [points[-1]]
+    step = (len(points) - 1) / float(max_points - 1)
+    out = []
+    used = set()
+    for idx in range(max_points):
+        pos = int(round(idx * step))
+        pos = max(0, min(len(points) - 1, pos))
+        if pos in used:
+            continue
+        used.add(pos)
+        out.append(points[pos])
+    if out[-1] != points[-1]:
+        out[-1] = points[-1]
+    return out
+
+
+def _load_market_vote_history(reports_dir: Path, hours: int = 24, max_points: int = 24) -> List[Dict[str, Any]]:
+    db_path = reports_dir / 'regime_history.db'
+    if not db_path.exists():
+        return []
+
+    cutoff_ms = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+              ts_ms, final_state, final_score, confidence,
+              hmm_state, hmm_confidence,
+              funding_state, funding_confidence,
+              rss_state, rss_confidence
+            FROM regime_history
+            WHERE ts_ms >= ?
+            ORDER BY ts_ms ASC
+            LIMIT 288
+            """,
+            (cutoff_ms,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return []
+
+    points = []
+    for row in rows:
+        ts_ms = int(row['ts_ms'] or 0)
+        if ts_ms <= 0:
+            continue
+        points.append({
+            'ts_ms': ts_ms,
+            'label': datetime.fromtimestamp(ts_ms / 1000).strftime('%m-%d %H:%M'),
+            'final': {
+                'state': str(row['final_state'] or 'SIDEWAYS'),
+                'confidence': float(row['confidence'] or 0.0),
+                'score': float(row['final_score'] or 0.0),
+            },
+            'votes': {
+                'hmm': {
+                    'state': str(row['hmm_state'] or 'SIDEWAYS'),
+                    'confidence': float(row['hmm_confidence'] or 0.0),
+                },
+                'funding': {
+                    'state': str(row['funding_state'] or 'SIDEWAYS'),
+                    'confidence': float(row['funding_confidence'] or 0.0),
+                },
+                'rss': {
+                    'state': str(row['rss_state'] or 'SIDEWAYS'),
+                    'confidence': float(row['rss_confidence'] or 0.0),
+                },
+            },
+        })
+
+    return _downsample_history(points, max_points=max_points)
+
+
 def _latest_signal_file(cache_dir: Path, patterns: List[str]) -> Optional[Path]:
     latest: Optional[Path] = None
     latest_mtime = -1.0
@@ -1394,19 +1529,17 @@ def _build_live_rss_vote(cache_dir: Path, max_age_minutes: int, weight: float) -
 
     data = _load_json_payload(latest)
     sentiment = float(data.get('f6_sentiment', 0.0) or 0.0)
-    if sentiment > 0.3:
-        state = 'TRENDING'
-    elif sentiment < -0.2:
-        state = 'RISK_OFF'
-    else:
-        state = 'SIDEWAYS'
-
+    source_confidence = float(data.get('f6_sentiment_confidence', 0.7) or 0.7)
+    state = _rss_vote_state(sentiment)
+    summary = str(data.get('f6_sentiment_summary', '') or '')[:100]
     return {
         'state': state,
-        'confidence': min(abs(sentiment) * 1.5 + 0.3, 1.0),
+        'confidence': _rss_vote_confidence(sentiment, source_confidence),
         'weight': float(weight),
         'sentiment': sentiment,
-        'summary': str(data.get('f6_sentiment_summary', '') or '')[:100],
+        'summary': summary,
+        'summary_short': _short_rss_summary(summary, sentiment, state),
+        'source_confidence': source_confidence,
         'raw_state': state,
     }
 
@@ -1579,6 +1712,7 @@ def api_market_state():
                 configured_weights['rss'],
             ),
         }
+        history_24h = _load_market_vote_history(REPORTS_DIR, hours=24, max_points=24)
         hmm_history_vote = history_votes.get('hmm', {}) if isinstance(history_votes.get('hmm', {}), dict) else {}
         hmm_vote = votes.get('hmm', {})
         if not isinstance(hmm_vote, dict):
@@ -1609,7 +1743,11 @@ def api_market_state():
             ):
                 vote.update(live_vote)
                 vote.pop('error', None)
-            elif signal_health[name].get('error'):
+            else:
+                for field in ('summary', 'summary_short', 'source_confidence', 'sentiment'):
+                    if live_vote.get(field) is not None:
+                        vote[field] = live_vote[field]
+            if signal_health[name].get('error'):
                 vote.setdefault('error', signal_health[name]['error'])
             elif vote.get('error') == stale_errors[name]:
                 vote.pop('error', None)
@@ -1660,6 +1798,7 @@ def api_market_state():
             'final_score': float(snapshot.get('final_score', 0.0) or 0.0),
             'price': indicators['price'],
             'signal_health': signal_health,
+            'history_24h': history_24h,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:

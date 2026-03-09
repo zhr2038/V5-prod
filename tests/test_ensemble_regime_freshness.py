@@ -42,6 +42,7 @@ def test_rss_vote_accepts_fresh_cache(tmp_path):
 
     assert vote["state"] == "TRENDING"
     assert vote["weight"] == engine.weights["rss"]
+    assert 0 < vote["confidence"] < 0.75
 
 
 def test_runtime_alerts_include_missing_sentiment_sources():

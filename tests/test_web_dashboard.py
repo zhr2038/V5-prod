@@ -25,8 +25,11 @@ def test_index_renders_monitor_template():
     body = response.get_data(as_text=True)
     assert 'id="update-time"' in body
     assert 'id="health-content"' in body
+    assert 'id="vote-history"' in body
     assert "renderHmmProbRows" in body
+    assert "renderVoteHistory" in body
     assert "showHmmProbs:true" in body
+    assert "showSummary:true" in body
     assert "loadAll();" in body
 
 
@@ -165,3 +168,48 @@ def test_market_state_backfills_hmm_vote_from_regime_history(monkeypatch):
     assert hmm["confidence"] == 0.62
     assert hmm["weight"] == 0.35
     assert hmm["probs"]["TrendingUp"] == 0.62
+
+
+def test_market_state_returns_vote_history_and_live_rss_summary(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "_load_market_state_snapshot", lambda _: {
+        "state": "SIDEWAYS",
+        "position_multiplier": 0.8,
+        "method": "decision_audit",
+        "votes": {
+            "hmm": {"state": "SIDEWAYS", "confidence": 0.7, "probs": {"TrendingUp": 0.1, "Sideways": 0.7, "TrendingDown": 0.2}},
+            "rss": {"state": "SIDEWAYS", "confidence": 0.1},
+        },
+        "alerts": [],
+        "monitor": {},
+    })
+    monkeypatch.setattr(module, "_load_latest_regime_history_snapshot", lambda _: {"votes": {}})
+    monkeypatch.setattr(module, "_load_market_vote_history", lambda *args, **kwargs: [{
+        "label": "03-09 14:00",
+        "final": {"state": "SIDEWAYS", "confidence": 0.3, "score": 0.2},
+        "votes": {
+            "hmm": {"state": "SIDEWAYS", "confidence": 0.7},
+            "funding": {"state": "SIDEWAYS", "confidence": 0.2},
+            "rss": {"state": "RISK_OFF", "confidence": 0.35},
+        },
+    }])
+    monkeypatch.setattr(module, "load_config", lambda: {"regime": {"hmm_weight": 0.35, "funding_weight": 0.4, "rss_weight": 0.25}})
+    monkeypatch.setattr(module, "_signal_health", lambda *args, **kwargs: {"status": "fresh", "is_fresh": True, "error": None})
+    monkeypatch.setattr(module, "_build_live_funding_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_build_live_rss_vote", lambda *args, **kwargs: {
+        "state": "RISK_OFF",
+        "confidence": 0.35,
+        "weight": 0.25,
+        "sentiment": -0.3,
+        "summary_short": "\u65b0\u95fb\u504f\u7a7a\uff0c\u4f46\u672a\u5230\u6781\u7aef",
+    })
+    monkeypatch.setattr(module, "calculate_market_indicators", lambda: {"price": 0.0})
+
+    response = client.get("/api/market_state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["history_24h"][0]["votes"]["rss"]["state"] == "RISK_OFF"
+    assert payload["votes"]["rss"]["summary_short"] == "\u65b0\u95fb\u504f\u7a7a\uff0c\u4f46\u672a\u5230\u6781\u7aef"
