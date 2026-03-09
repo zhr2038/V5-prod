@@ -1,17 +1,6 @@
 {
-  "timestamp": "2026-03-08T23:00:32Z",
+  "timestamp": "2026-03-09T21:00:40Z",
   "dry_run": false,
-  "orders": [
-    {
-      "symbol": "OKB/USDT",
-      "side": "sell",
-      "intent": "CLOSE_LONG",
-      "notional_usdt": 31.69977859999999,
-      "signal_price": 98.35,
-      "meta": {
-        "reason": "regime_exit"
-      }
-    }
-  ],
-  "notes": "regime=RegimeState.RISK_OFF selected=[] orders=1"
+  "orders": [],
+  "notes": "regime=RegimeState.SIDEWAYS selected=['ETH/USDT', 'UNI/USDT', 'BTC/USDT'] orders=0"
 }

@@ -1,10 +1,18 @@
 {
   "target_weights": {
-    "LINK/USDT": 0.0
+    "ETH/USDT": 0.2288317686922796,
+    "UNI/USDT": 0.21238304511574344,
+    "BTC/USDT": 0.21424797861077308
   },
-  "selected": [],
+  "selected": [
+    "ETH/USDT",
+    "UNI/USDT",
+    "BTC/USDT"
+  ],
   "volatilities": {
-    "LINK/USDT": 0.007823546212395423
+    "ETH/USDT": 0.007400017702953565,
+    "UNI/USDT": 0.008967479863238596,
+    "BTC/USDT": 0.005936347251126814
   },
   "notes": ""
 }

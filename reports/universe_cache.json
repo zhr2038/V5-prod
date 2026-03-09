@@ -1,5 +1,5 @@
 {
-  "ts": 1773028840.6709604,
+  "ts": 1773090010.1425939,
   "ttl_sec": 3600,
   "config_signature": {
     "base_url": "https://www.okx.com",
@@ -30,11 +30,16 @@
     "CC/USDT",
     "XRP/USDT",
     "HYPE/USDT",
-    "ADA/USDT",
+    "OKB/USDT",
     "SUI/USDT",
-    "LINK/USDT",
-    "LTC/USDT",
     "BNB/USDT",
-    "PUMP/USDT"
+    "ADA/USDT",
+    "LINK/USDT",
+    "AVAX/USDT",
+    "IP/USDT",
+    "LTC/USDT",
+    "ROBO/USDT",
+    "UNI/USDT",
+    "PENGU/USDT"
   ]
 }

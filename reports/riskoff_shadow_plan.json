@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-09T12:15:02.506774",
+  "timestamp": "2026-03-10T06:00:02.880571",
   "regime": "SIDEWAYS",
   "current_pos_mult_risk_off": 0.0,
   "equity_estimate_usdt": 134.938906,
@@ -19,9 +19,9 @@
       "gross_notional": 20.2408,
       "candidates": [
         {
-          "symbol": "ETH/USDT",
-          "score": 0.0034198312675668987,
-          "price": 1975.33,
+          "symbol": "OKB/USDT",
+          "score": 1.5236654254581115,
+          "price": 97.71,
           "shadow_target_usdt": 20.2408
         }
       ]
@@ -29,14 +29,20 @@
     {
       "name": "probe_2",
       "pos_mult": 0.25,
-      "max_positions": 1,
+      "max_positions": 2,
       "gross_notional": 33.7347,
       "candidates": [
         {
-          "symbol": "ETH/USDT",
-          "score": 0.0034198312675668987,
-          "price": 1975.33,
-          "shadow_target_usdt": 33.7347
+          "symbol": "OKB/USDT",
+          "score": 1.5236654254581115,
+          "price": 97.71,
+          "shadow_target_usdt": 16.8674
+        },
+        {
+          "symbol": "HYPE/USDT",
+          "score": 1.3245106047362292,
+          "price": 35.288,
+          "shadow_target_usdt": 16.8674
         }
       ]
     }

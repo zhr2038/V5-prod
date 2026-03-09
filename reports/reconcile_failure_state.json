@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_ts_ms": 1773030307841,
+  "updated_ts_ms": 1773093608217,
   "consecutive_hard": 0,
   "consecutive_soft": 0,
   "consecutive_stale": 0,
   "last_stale_ts_ms": 0,
   "last_reason": "ok",
-  "last_ok_ts_ms": 1773030307840,
-  "last_reconcile_ts_ms": 1773030307840,
+  "last_ok_ts_ms": 1773093608207,
+  "last_reconcile_ts_ms": 1773093608207,
   "consecutive_ok": 1
 }

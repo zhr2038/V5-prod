@@ -4,8 +4,8 @@
     "ETH/USDT": {
       "state": "LONG",
       "cooldown_until_ms": 0,
-      "exit_pending_until_ms": 1772432274114,
-      "last_run_id": "20260307_103006",
+      "exit_pending_until_ms": 1773050583190,
+      "last_run_id": "20260309_22",
       "last_reason": "buy_selected"
     },
     "XAUT/USDT": {
@@ -145,8 +145,8 @@
       "state": "LONG",
       "cooldown_until_ms": 0,
       "exit_pending_until_ms": 1772612235702,
-      "last_run_id": "20260308_21",
-      "last_reason": "reduce_selected"
+      "last_run_id": "20260309_21",
+      "last_reason": "buy_selected"
     },
     "PAXG/USDT": {
       "state": "FLAT",
@@ -173,8 +173,8 @@
       "state": "LONG",
       "cooldown_until_ms": 0,
       "exit_pending_until_ms": 1772679750095,
-      "last_run_id": "20260306_100013",
-      "last_reason": "reduce_selected"
+      "last_run_id": "20260309_15",
+      "last_reason": "buy_selected"
     },
     "ADA/USDT": {
       "state": "LONG",
@@ -254,11 +254,39 @@
       "last_reason": "close_dominates"
     },
     "OKB/USDT": {
-      "state": "FLAT",
-      "cooldown_until_ms": 1773011730812,
+      "state": "LONG",
+      "cooldown_until_ms": 0,
       "exit_pending_until_ms": 1773010950812,
-      "last_run_id": "20260309_07",
-      "last_reason": "close_dominates"
+      "last_run_id": "20260309_20",
+      "last_reason": "buy_selected"
+    },
+    "PUMP/USDT": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": "20260309_15",
+      "last_reason": "buy_selected"
+    },
+    "BNB": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": null,
+      "last_reason": null
+    },
+    "OKB": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": null,
+      "last_reason": null
+    },
+    "HYPE": {
+      "state": "LONG",
+      "cooldown_until_ms": 0,
+      "exit_pending_until_ms": 0,
+      "last_run_id": null,
+      "last_reason": null
     }
   }
 }

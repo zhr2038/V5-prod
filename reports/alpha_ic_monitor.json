@@ -1,100 +1,39 @@
 {
-  "updated_at": "2026-03-09T04:01:10.863323Z",
+  "updated_at": "2026-03-09T21:00:38.227586Z",
   "points_short": 24,
-  "points_long": 94,
+  "points_long": 96,
   "score_ic_short": {
-    "mean": 0.032270418216204265,
-    "std": 0.33184821868208547,
-    "ir": 0.09724451239896427,
-    "positive_ratio": 0.375,
+    "mean": 0.11210605695487114,
+    "std": 0.25061341160254613,
+    "ir": 0.44732664639936687,
+    "positive_ratio": 0.5416666666666666,
     "count": 24
   },
   "score_rank_ic_short": {
-    "mean": -0.03177114028968375,
-    "std": 0.27072953706473185,
-    "ir": -0.11735380126656525,
-    "positive_ratio": 0.3333333333333333,
+    "mean": 0.06734542010277306,
+    "std": 0.2404816294419678,
+    "ir": 0.28004392792516664,
+    "positive_ratio": 0.5833333333333334,
     "count": 24
   },
   "score_ic_long": {
-    "mean": 0.10007398360809078,
-    "std": 0.3566064846993075,
-    "ir": 0.2806286141781008,
-    "positive_ratio": 0.574468085106383,
-    "count": 94
+    "mean": 0.07554277453916076,
+    "std": 0.3225578281566758,
+    "ir": 0.23419916661414097,
+    "positive_ratio": 0.53125,
+    "count": 96
   },
   "score_rank_ic_long": {
-    "mean": 0.06123198874956732,
-    "std": 0.28399130019697516,
-    "ir": 0.21561219906066514,
-    "positive_ratio": 0.5106382978723404,
-    "count": 94
+    "mean": 0.05142472722898241,
+    "std": 0.2722888382701214,
+    "ir": 0.1888609447074251,
+    "positive_ratio": 0.5,
+    "count": 96
   },
-  "factor_ic": {
-    "f1": {
-      "ic_short": {
-        "mean": 0.0,
-        "std": 0.0,
-        "ir": 0.0,
-        "positive_ratio": 0.0,
-        "count": 0
-      },
-      "rank_ic_short": {
-        "mean": 0.0,
-        "std": 0.0,
-        "ir": 0.0,
-        "positive_ratio": 0.0,
-        "count": 0
-      },
-      "ic_long": {
-        "mean": 0.9998984382622589,
-        "std": 0.0,
-        "ir": 0.0,
-        "positive_ratio": 1.0,
-        "count": 1
-      },
-      "rank_ic_long": {
-        "mean": 1.0,
-        "std": 0.0,
-        "ir": 0.0,
-        "positive_ratio": 1.0,
-        "count": 1
-      }
-    },
-    "f2": {
-      "ic_short": {
-        "mean": 0.0,
-        "std": 0.0,
-        "ir": 0.0,
-        "positive_ratio": 0.0,
-        "count": 0
-      },
-      "rank_ic_short": {
-        "mean": 0.0,
-        "std": 0.0,
-        "ir": 0.0,
-        "positive_ratio": 0.0,
-        "count": 0
-      },
-      "ic_long": {
-        "mean": 0.9998984382622589,
-        "std": 0.0,
-        "ir": 0.0,
-        "positive_ratio": 1.0,
-        "count": 1
-      },
-      "rank_ic_long": {
-        "mean": 1.0,
-        "std": 0.0,
-        "ir": 0.0,
-        "positive_ratio": 1.0,
-        "count": 1
-      }
-    }
-  },
+  "factor_ic": {},
   "decay": {
-    "short_mean_ic": 0.032270418216204265,
-    "long_mean_ic": 0.10007398360809078,
-    "decay_ratio": 0.32246561046856603
+    "short_mean_ic": 0.11210605695487114,
+    "long_mean_ic": 0.07554277453916076,
+    "decay_ratio": 1.4840076716636381
   }
 }

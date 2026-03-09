@@ -1,7 +1,6 @@
 {
   "schema_version": 1,
   "symbols": [
-    "OKB/USDT",
     "BARD/USDT"
   ],
   "entries": [
@@ -13,19 +12,8 @@
       "meta": {
         "spread_bps": 55.06030414263216
       }
-    },
-    {
-      "symbol": "OKB/USDT",
-      "reason": "borrow_detected",
-      "ts_ms": 1773028872747,
-      "expires_ts_ms": 1775620872747,
-      "meta": {
-        "eq": -0.0007057800582217,
-        "liab": 0.0007057800582217,
-        "cross_liab": 0.0007057800582217,
-        "borrow_froz": 0.013978679833139
-      }
     }
   ],
-  "updated_ts_ms": 1773028872747
+  "updated_ts_ms": 1773041460000,
+  "note": "OKB/USDT manually removed at 2026-03-09 13:31 (borrow resolved)"
 }

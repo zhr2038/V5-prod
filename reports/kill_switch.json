@@ -1,1 +1,7 @@
-{"enabled": false}
+{
+  "enabled": false,
+  "ts_ms": 1773046200000,
+  "trigger": "manual_reset",
+  "reason": "position_synced",
+  "note": "Manual reset after position sync - OKB/ETH/BNB quantities corrected"
+}

@@ -1,51 +1,66 @@
 {
-  "state": "Risk-Off",
-  "atr_pct": 0.004554407443075672,
-  "ma20": 67177.86000000002,
-  "ma60": 67741.77166666667,
-  "multiplier": 0.0,
+  "state": "Sideways",
+  "atr_pct": 0.005048772072117942,
+  "ma20": 67996.82499999998,
+  "ma60": 67542.645,
+  "multiplier": 0.6554627924187961,
   "votes": {
     "hmm": {
-      "state": "RISK_OFF",
-      "confidence": 0.772834951030669,
+      "state": "SIDEWAYS",
+      "confidence": 0.7718393010638673,
       "weight": 0.35,
-      "sentiment": -0.5693460048182573,
-      "raw_state": "TrendingDown",
+      "sentiment": 0.22792053337565601,
+      "raw_state": "Sideways",
+      "latent_probability": 0.7718393010638673,
       "probs": {
-        "Sideways": 0.023676102756919015,
-        "TrendingUp": 0.20348894621241173,
-        "TrendingDown": 0.772834951030669
+        "TrendingUp": 0.22804061615589438,
+        "TrendingDown": 0.00012008278023837165,
+        "Sideways": 0.7718393010638673
       }
     },
     "funding": {
       "state": "SIDEWAYS",
-      "confidence": 0.2,
+      "confidence": 0.071,
       "weight": 0.4,
-      "sentiment": -0.1,
+      "sentiment": 0.0355,
       "composite": true,
       "details": {
         "large": {
-          "avg": -0.06375,
+          "avg": 0.012,
           "count": 2
         },
         "mid": {
-          "avg": -0.10810000000000002,
+          "avg": 0.1,
           "count": 4
         },
         "small": {
-          "avg": -0.17845,
+          "avg": -0.0026000000000000003,
           "count": 4
         }
       }
     },
     "rss": {
-      "state": "SIDEWAYS",
-      "confidence": 0.6000000000000001,
+      "state": "TRENDING",
+      "confidence": 0.4666666666666667,
       "weight": 0.25,
-      "sentiment": 0.2,
-      "summary": "[RSS情报] 加密货币市场情绪总体中性偏积极，主流化趋势增强，但面临技术面压力和监管不确定性。"
+      "sentiment": 0.4,
+      "summary": "[RSS情报] 加密货币市场情绪整体偏乐观，受地缘政治和监管消息影响，比特币和以太坊价格表现强劲，市场呈现中性偏贪婪状态。",
+      "summary_short": "新闻偏多，但强度有限",
+      "source_confidence": 0.7,
+      "raw_state": "TRENDING"
+    },
+    "alerts": [
+      "regime_stuck_sideways"
+    ],
+    "monitor": {
+      "enabled": true,
+      "db_path": "/home/admin/clawd/v5-prod/reports/regime_history.db",
+      "sideways_prob_warn_threshold": 0.8,
+      "sideways_consecutive_warn": 10
     }
   },
-  "final_score": 0.27049223286073415,
-  "alerts": []
+  "final_score": 0.2985437553723535,
+  "alerts": [
+    "regime_stuck_sideways"
+  ]
 }

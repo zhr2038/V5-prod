@@ -1,0 +1,16 @@
+[Unit]
+Description=V5 Trading Monitor - Check trade health and send alerts
+After=network.target
+
+[Service]
+Type=oneshot
+User=admin
+WorkingDirectory=/home/admin/clawd/v5-prod
+Environment="PATH=/home/admin/clawd/v5-prod/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/admin/clawd/v5-prod"
+ExecStart=/home/admin/clawd/v5-prod/.venv/bin/python /home/admin/clawd/v5-prod/scripts/v5_trade_monitor.py --silent
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

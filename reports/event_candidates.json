@@ -1,97 +1,97 @@
 {
-  "timestamp": "2026-03-09T12:15:02.506396",
+  "timestamp": "2026-03-10T06:00:02.880217",
   "regime": "SIDEWAYS",
   "count": 10,
   "candidates": [
     {
+      "symbol": "IP/USDT",
+      "direction": "sell",
+      "score": 3.2485262900672764,
+      "rank": 99,
+      "price": 0.7892,
+      "trigger_up": 0.7915675999999999,
+      "trigger_down": 0.7868324
+    },
+    {
+      "symbol": "OKB/USDT",
+      "direction": "buy",
+      "score": 1.5236654254581115,
+      "rank": 1,
+      "price": 97.71,
+      "trigger_up": 98.00312999999998,
+      "trigger_down": 97.41686999999999
+    },
+    {
+      "symbol": "HYPE/USDT",
+      "direction": "buy",
+      "score": 1.3245106047362292,
+      "rank": 1,
+      "price": 35.288,
+      "trigger_up": 35.39386399999999,
+      "trigger_down": 35.182136
+    },
+    {
       "symbol": "CC/USDT",
       "direction": "sell",
-      "score": 0.16099999999999998,
-      "rank": 58,
-      "price": 0.15007,
-      "trigger_up": 0.15052021,
-      "trigger_down": 0.14961979
+      "score": 0.9386566754664751,
+      "rank": 96,
+      "price": 0.14527,
+      "trigger_up": 0.14570581,
+      "trigger_down": 0.14483419
     },
     {
-      "symbol": "ADA/USDT",
-      "direction": "sell",
-      "score": 0.08921145176206871,
-      "rank": 54,
-      "price": 0.2535,
-      "trigger_up": 0.2542605,
-      "trigger_down": 0.2527395
-    },
-    {
-      "symbol": "BTC/USDT",
-      "direction": "sell",
-      "score": 0.06269664014361676,
-      "rank": 53,
-      "price": 67178.0,
-      "trigger_up": 67379.534,
-      "trigger_down": 66976.466
+      "symbol": "UNI/USDT",
+      "direction": "buy",
+      "score": 0.8728338984282886,
+      "rank": 7,
+      "price": 3.912,
+      "trigger_up": 3.9237359999999994,
+      "trigger_down": 3.900264
     },
     {
       "symbol": "XRP/USDT",
       "direction": "sell",
-      "score": 0.03649403914289933,
-      "rank": 51,
-      "price": 1.3517,
-      "trigger_up": 1.3557550999999997,
-      "trigger_down": 1.3476449
-    },
-    {
-      "symbol": "SOL/USDT",
-      "direction": "sell",
-      "score": 0.03005115950560804,
-      "rank": 51,
-      "price": 83.15,
-      "trigger_up": 83.39945,
-      "trigger_down": 82.90055000000001
-    },
-    {
-      "symbol": "LINK/USDT",
-      "direction": "sell",
-      "score": 0.026538717480989762,
-      "rank": 51,
-      "price": 8.69,
-      "trigger_up": 8.716069999999998,
-      "trigger_down": 8.663929999999999
-    },
-    {
-      "symbol": "SUI/USDT",
-      "direction": "sell",
-      "score": 0.019590085979008753,
-      "rank": 50,
-      "price": 0.8971,
-      "trigger_up": 0.8997913,
-      "trigger_down": 0.8944087000000001
+      "score": 0.8282206637831292,
+      "rank": 91,
+      "price": 1.3748,
+      "trigger_up": 1.3789243999999998,
+      "trigger_down": 1.3706756
     },
     {
       "symbol": "LTC/USDT",
-      "direction": "sell",
-      "score": 0.018461650767108363,
-      "rank": 50,
-      "price": 53.31,
-      "trigger_up": 53.46993,
-      "trigger_down": 53.15007
-    },
-    {
-      "symbol": "HYPE/USDT",
-      "direction": "sell",
-      "score": 0.01005342667741593,
-      "rank": 50,
-      "price": 30.59,
-      "trigger_up": 30.681769999999997,
-      "trigger_down": 30.49823
-    },
-    {
-      "symbol": "ETH/USDT",
       "direction": "buy",
-      "score": 0.0034198312675668987,
-      "rank": 50,
-      "price": 1975.33,
-      "trigger_up": 1981.2559899999997,
-      "trigger_down": 1969.40401
+      "score": 0.6869362637175291,
+      "rank": 16,
+      "price": 54.15,
+      "trigger_up": 54.31244999999999,
+      "trigger_down": 53.98755
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "direction": "buy",
+      "score": 0.6551411555329585,
+      "rank": 18,
+      "price": 9.356,
+      "trigger_up": 9.384068,
+      "trigger_down": 9.327932
+    },
+    {
+      "symbol": "BNB/USDT",
+      "direction": "buy",
+      "score": 0.6542227408040855,
+      "rank": 18,
+      "price": 640.6,
+      "trigger_up": 642.5218,
+      "trigger_down": 638.6782000000001
+    },
+    {
+      "symbol": "SUI/USDT",
+      "direction": "buy",
+      "score": 0.6242608892709811,
+      "rank": 19,
+      "price": 0.9669,
+      "trigger_up": 0.9698006999999998,
+      "trigger_down": 0.9639993
     }
   ]
 }
