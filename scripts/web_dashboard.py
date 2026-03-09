@@ -323,6 +323,118 @@ def get_db_connection():
     return None
 
 
+def _to_inst_id(symbol: str, quote_ccy: str = 'USDT') -> str:
+    raw = str(symbol or '').strip().upper()
+    if not raw:
+        return ''
+    if '-' in raw:
+        return raw
+    if '/' in raw:
+        base, quote = raw.split('/', 1)
+        return f'{base}-{quote}'
+    return f'{raw}-{quote_ccy}'
+
+
+def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Optional[Path] = None) -> Optional[float]:
+    if float(current_qty or 0.0) <= 0:
+        return None
+
+    base_symbol = str(symbol or '').split('/')[0].split('-')[0].upper()
+    inst_id = _to_inst_id(base_symbol)
+    fills_db = (reports_dir or REPORTS_DIR) / 'fills.sqlite'
+    if not fills_db.exists() or not inst_id:
+        return None
+
+    try:
+        conn = sqlite3.connect(str(fills_db))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT side, fill_px, fill_sz, fill_notional, fee, fee_ccy
+            FROM fills
+            WHERE inst_id = ?
+            ORDER BY ts_ms ASC, created_ts_ms ASC, trade_id ASC
+            """,
+            (inst_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+
+    quote_symbol = inst_id.split('-', 1)[1].upper() if '-' in inst_id else 'USDT'
+    queue: List[List[float]] = []
+
+    for side, fill_px, fill_sz, fill_notional, fee, fee_ccy in rows:
+        side = str(side or '').lower()
+        qty = float(fill_sz or 0.0)
+        if qty <= 0:
+            continue
+
+        px = float(fill_px or 0.0)
+        notional = float(fill_notional or 0.0)
+        if notional <= 0 and px > 0:
+            notional = px * qty
+        fee_val = float(fee or 0.0)
+        fee_ccy_norm = str(fee_ccy or '').upper()
+
+        if side == 'buy':
+            net_base_qty = qty + (fee_val if fee_ccy_norm == base_symbol else 0.0)
+            if net_base_qty <= 1e-12:
+                continue
+            total_quote_cost = notional
+            if fee_ccy_norm == quote_symbol:
+                total_quote_cost += abs(fee_val)
+            queue.append([net_base_qty, total_quote_cost / net_base_qty])
+            continue
+
+        if side != 'sell':
+            continue
+
+        remove_qty = qty
+        if fee_ccy_norm == base_symbol:
+            remove_qty += abs(fee_val)
+        while remove_qty > 1e-12 and queue:
+            head_qty, _ = queue[0]
+            if head_qty <= remove_qty + 1e-12:
+                remove_qty -= head_qty
+                queue.pop(0)
+            else:
+                queue[0][0] = head_qty - remove_qty
+                remove_qty = 0.0
+
+    remaining_qty = sum(qty for qty, _ in queue)
+    if remaining_qty <= 1e-12:
+        return None
+
+    trim_qty = remaining_qty - float(current_qty)
+    if trim_qty > 1e-8:
+        while trim_qty > 1e-12 and queue:
+            head_qty, _ = queue[0]
+            if head_qty <= trim_qty + 1e-12:
+                trim_qty -= head_qty
+                queue.pop(0)
+            else:
+                queue[0][0] = head_qty - trim_qty
+                trim_qty = 0.0
+
+    remaining_qty = sum(qty for qty, _ in queue)
+    if remaining_qty <= 1e-12:
+        return None
+
+    qty_gap = float(current_qty) - remaining_qty
+    if qty_gap > max(1e-4, float(current_qty) * 0.02):
+        return None
+
+    total_cost = sum(qty * cost for qty, cost in queue)
+    if total_cost <= 0:
+        return None
+    return total_cost / remaining_qty
+
+
 def load_config():
     """加载配置"""
     try:
@@ -920,101 +1032,16 @@ def api_positions():
                         break
 
         positions.sort(key=lambda x: x.get('value_usdt', 0), reverse=True)
-        
-        # 从交易记录计算真实成本价和盈亏（使用FIFO方法）
-        try:
-            conn = get_db_connection()
-            if conn:
-                cursor = conn.cursor()
-                for p in positions:
-                    symbol = p.get('symbol', '')
-                    if not symbol:
-                        continue
-                    
-                    current_qty = float(p.get('qty', 0))
-                    if current_qty <= 0:
-                        continue
-                    
-                    # 查询该币种所有成交记录（按时间正序，FIFO）
-                    cursor.execute("""
-                        SELECT side, notional_usdt, sz, avg_px, created_ts
-                        FROM orders 
-                        WHERE inst_id LIKE ? AND state='FILLED'
-                        ORDER BY created_ts ASC
-                    """, (f"%{symbol}%",))
-                    
-                    rows = cursor.fetchall()
-                    
-                    # 构建买入队列（FIFO）
-                    buy_queue = []  # [(qty, cost_per_unit), ...]
-                    
-                    for row in rows:
-                        side, notional, sz, avg_px, ts = row
-                        notional_val = float(notional or 0)
-                        
-                        # 计算数量
-                        if sz and float(sz) > 0:
-                            qty_val = float(sz)
-                        elif avg_px and float(avg_px) > 0:
-                            qty_val = notional_val / float(avg_px)
-                        else:
-                            continue
-                        
-                        cost_per_unit = notional_val / qty_val if qty_val > 0 else 0
-                        
-                        if side == 'buy':
-                            # 买入加入队列
-                            buy_queue.append([qty_val, cost_per_unit])
-                        elif side == 'sell':
-                            # 卖出按FIFO减少买入队列
-                            sell_qty = qty_val
-                            while sell_qty > 0 and buy_queue:
-                                first_buy = buy_queue[0]
-                                if first_buy[0] <= sell_qty:
-                                    # 第一笔买入全部卖出
-                                    sell_qty -= first_buy[0]
-                                    buy_queue.pop(0)
-                                else:
-                                    # 第一笔买入部分卖出
-                                    first_buy[0] -= sell_qty
-                                    sell_qty = 0
-                    
-                    # 计算剩余持仓的成本
-                    total_cost = 0.0
-                    total_qty = 0.0
-                    for qty, cost in buy_queue:
-                        total_cost += qty * cost
-                        total_qty += qty
-                    
-                    # 当前持仓应该和队列剩余匹配
-                    if total_qty > 0 and abs(total_qty - current_qty) < 0.001:
-                        avg_cost = total_cost / total_qty
-                        p['avg_px'] = round(avg_cost, 6)
-                    elif current_qty > 0:
-                        # 如果不匹配，用最新一次买入价格
-                        # 查询最近买入记录
-                        cursor.execute("""
-                            SELECT avg_px, notional_usdt, sz
-                            FROM orders 
-                            WHERE inst_id LIKE ? AND state='FILLED' AND side='buy'
-                            ORDER BY created_ts DESC
-                            LIMIT 1
-                        """, (f"%{symbol}%",))
-                        last_buy = cursor.fetchone()
-                        if last_buy:
-                            px, notional, sz = last_buy
-                            if px:
-                                p['avg_px'] = round(float(px), 6)
-                            elif notional and sz and float(sz) > 0:
-                                p['avg_px'] = round(float(notional) / float(sz), 6)
-                
-                conn.close()
-        except Exception as e:
-            import traceback
-            print(f"[positions] FIFO成本计算错误: {e}")
-            print(traceback.format_exc())
-        
-        # 计算持仓盈亏
+
+        # 优先用 fills.sqlite 重建净持仓成本，避免 orders 聚合值、模糊匹配和 base fee 漂移。
+        for p in positions:
+            symbol = p.get('symbol', '')
+            if not symbol:
+                continue
+            avg_cost = _load_avg_cost_from_fills(symbol, float(p.get('qty', 0) or 0.0))
+            if avg_cost and avg_cost > 0:
+                p['avg_px'] = round(avg_cost, 6)
+
         for p in positions:
             avg_px = float(p.get('avg_px', 0))
             last_px = float(p.get('last_price', 0))
