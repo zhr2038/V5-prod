@@ -59,9 +59,11 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     body = MONITOR_V2_JS_PATH.read_text(encoding="utf-8")
 
     assert "renderHmmProbRows" in body
+    assert "renderDerivedVoteRows" in body
     assert "renderVoteHistory" in body
     assert "showHistoryTooltip" in body
     assert "showHmmProbs:true" in body
+    assert "showStateBars:true" in body
     assert "showSummary:true" in body
     assert "metrics.conversion_rate??metrics.last_conversion_rate??null" in body
     assert "account?.drawdown_pct??metrics.dd_pct??metrics.last_dd_pct??null" in body
