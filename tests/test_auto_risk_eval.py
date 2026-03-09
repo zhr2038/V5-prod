@@ -1,4 +1,6 @@
 import importlib.util
+import sqlite3
+import types
 import uuid
 from pathlib import Path
 
@@ -44,3 +46,36 @@ def test_evaluate_and_switch_writes_snapshot_when_sample_is_insufficient(monkeyp
     assert payload["config"]["max_positions"] == 3
     assert payload["metrics"]["sample_size"] == 0
     assert payload["reason"] == "样本不足 (0轮)，维持当前档位"
+
+
+def test_calculate_metrics_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
+    module = load_auto_risk_eval_module()
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    db_path = reports_dir / "positions.sqlite"
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    cur.execute(
+        """
+        CREATE TABLE account_state (
+          k TEXT PRIMARY KEY,
+          cash_usdt REAL NOT NULL,
+          equity_peak_usdt REAL NOT NULL,
+          scale_basis_usdt REAL DEFAULT 0.0
+        )
+        """
+    )
+    cur.execute(
+        "INSERT INTO account_state(k, cash_usdt, equity_peak_usdt, scale_basis_usdt) VALUES ('default', 10.0, 10.0, 0.0)"
+    )
+    con.commit()
+    con.close()
+
+    fake_live_equity_fetcher = types.SimpleNamespace(get_live_equity_from_okx=lambda: 100.0)
+    monkeypatch.setitem(module.sys.modules, "src.risk.live_equity_fetcher", fake_live_equity_fetcher)
+
+    metrics = module.calculate_metrics([{"counts": {}}])
+
+    assert metrics["dd_pct"] == 1.0 - (100.0 / 120.0)

@@ -1,5 +1,6 @@
 import importlib.util
 import shutil
+import sqlite3
 import subprocess
 import uuid
 from pathlib import Path
@@ -62,6 +63,8 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     assert "showHistoryTooltip" in body
     assert "showHmmProbs:true" in body
     assert "showSummary:true" in body
+    assert "metrics.conversion_rate??metrics.last_conversion_rate??null" in body
+    assert "account?.drawdown_pct??metrics.dd_pct??metrics.last_dd_pct??null" in body
     assert "浮盈亏 / 收益率" in body
     assert "fmtUsd(pnlValue)" in body
     assert "p.pnl??p.pnl_value||0" not in body
@@ -262,6 +265,61 @@ def test_dashboard_api_keeps_sub_one_percent_pnl_as_ratio(monkeypatch):
     assert payload["account"]["totalPnlPercent"] == 0.005
     assert payload["account"]["maxDrawdown"] == 0.0075
     assert payload["positions"][0]["pnlPercent"] == -0.0054
+
+
+def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "get_db_connection", lambda: None)
+    monkeypatch.setattr(module, "load_config", lambda: {})
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": [{
+        "symbol": "OKB",
+        "value_usdt": 115.6686,
+    }]}))
+
+    reconcile_path = tmp_path / "reconcile_status.json"
+    reconcile_path.write_text(
+        """
+        {
+          "exchange_snapshot": {
+            "ccy_cashBal": {
+              "USDT": 11.48
+            }
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    db_path = tmp_path / "positions.sqlite"
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    cur.execute(
+        """
+        CREATE TABLE account_state (
+          k TEXT PRIMARY KEY,
+          cash_usdt REAL NOT NULL,
+          equity_peak_usdt REAL NOT NULL,
+          scale_basis_usdt REAL DEFAULT 0.0
+        )
+        """
+    )
+    cur.execute(
+        "INSERT INTO account_state(k, cash_usdt, equity_peak_usdt, scale_basis_usdt) VALUES ('default', 11.48, 11.48, 0.0)"
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/account")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["cash_usdt"] == 11.48
+    assert payload["total_equity_usdt"] == 127.1486
+    assert payload["peak_equity_usdt"] == 127.15
+    assert payload["drawdown_pct"] == 0.0
 
 
 def test_auto_risk_guard_api_uses_auto_risk_eval_file(monkeypatch, tmp_path):

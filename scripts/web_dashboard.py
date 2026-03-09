@@ -445,6 +445,21 @@ def load_config():
         return {}
 
 
+def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equity: float) -> float:
+    total_equity = float(total_equity or 0.0)
+    initial_capital = float(initial_capital or 0.0)
+    peak_equity = float(peak_equity or 0.0)
+    sane_floor = max(total_equity, initial_capital)
+
+    if peak_equity <= 0:
+        return sane_floor
+    if peak_equity < sane_floor:
+        return sane_floor
+    if total_equity > 0 and peak_equity > total_equity * 2:
+        return sane_floor
+    return peak_equity
+
+
 def _static_asset_version(filename: str) -> str:
     asset_path = WEB_DIR / 'static' / Path(filename)
     try:
@@ -623,10 +638,10 @@ def api_account():
         budget_cap = float(config.get('budget', {}).get('live_equity_cap_usdt', 0) or 0)
         drawdown_pct = 0.0
         peak_equity = initial_capital  # 默认使用初始资金作为峰值
-        
+
         if budget_cap > 0:
             # 如果设置了资金上限，使用上限作为峰值基准
-            peak_equity = budget_cap
+            peak_equity = max(float(budget_cap), float(total_equity))
             drawdown_pct = (peak_equity - total_equity) / peak_equity if peak_equity > 0 else 0
             # 如果当前权益超过峰值，回撤为0（不更新峰值，只是计算）
             if total_equity > peak_equity:
@@ -640,13 +655,7 @@ def api_account():
                 cursor2.execute("SELECT equity_peak_usdt FROM account_state WHERE k='default'")
                 row2 = cursor2.fetchone()
                 if row2 and row2[0]:
-                    db_peak = float(row2[0])
-                    # 如果数据库峰值超过当前权益太多（超过2倍），可能是历史数据
-                    # 使用当前权益和初始资金的较大值
-                    if db_peak > total_equity * 2:
-                        peak_equity = max(total_equity, initial_capital)
-                    else:
-                        peak_equity = db_peak
+                    peak_equity = _sanitize_peak_equity(total_equity, initial_capital, float(row2[0]))
                 conn2.close()
             except Exception:
                 peak_equity = max(total_equity, initial_capital)

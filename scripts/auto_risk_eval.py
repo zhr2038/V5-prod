@@ -29,6 +29,21 @@ RUNS_DIR = REPORTS_DIR / "runs"
 AUTO_RISK_EVAL_PATH = REPORTS_DIR / "auto_risk_eval.json"
 
 
+def _sanitize_peak_equity(live_equity: float, peak_equity: float, initial_capital: float = 120.0) -> float:
+    live_equity = float(live_equity or 0.0)
+    peak_equity = float(peak_equity or 0.0)
+    initial_capital = float(initial_capital or 0.0)
+    sane_floor = max(live_equity, initial_capital)
+
+    if peak_equity <= 0:
+        return sane_floor
+    if peak_equity < sane_floor:
+        return sane_floor
+    if live_equity > 0 and peak_equity > live_equity * 2:
+        return sane_floor
+    return peak_equity
+
+
 def load_recent_runs(hours: int = 24) -> List[Dict]:
     runs: List[Dict] = []
     cutoff = datetime.now() - timedelta(hours=hours)
@@ -132,6 +147,8 @@ def calculate_metrics(runs: List[Dict]) -> Dict:
             if row and row[0] is not None:
                 peak = float(row[0])
 
+        if eq_live is not None:
+            peak = _sanitize_peak_equity(eq_live, peak)
         if eq_live is not None and peak > 0:
             dd_pct = max(0.0, 1.0 - float(eq_live) / float(peak))
             live_dd_computed = True

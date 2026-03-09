@@ -12,7 +12,13 @@ import time
 import logging
 from pathlib import Path
 
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+ENV_WORKSPACE = os.getenv('V5_WORKSPACE')
+WORKSPACE = Path(ENV_WORKSPACE).expanduser() if ENV_WORKSPACE else PROJECT_ROOT
+if str(WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +67,17 @@ def _balance_details(balance_resp):
         return []
 
 
+def _resolve_config_path():
+    env_config = os.getenv('V5_CONFIG')
+    if env_config:
+        return env_config
+
+    for candidate in ('configs/live_prod.yaml', 'configs/live_20u_real.yaml', 'configs/config.yaml'):
+        if (WORKSPACE / candidate).exists():
+            return candidate
+    return 'configs/live_prod.yaml'
+
+
 def main():
     """Auto-sync positions from OKX to local store."""
     logger.info("=" * 60)
@@ -78,10 +95,10 @@ def main():
         from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
         
         # Load config (prefer active V5_CONFIG)
-        cfg_path = os.getenv('V5_CONFIG', 'configs/live_20u_real.yaml')
+        cfg_path = _resolve_config_path()
         cfg = load_config(
             cfg_path,
-            env_path='/home/admin/clawd/v5-trading-bot/.env'
+            env_path=str(WORKSPACE / '.env')
         )
         logger.info(f"Using config: {cfg_path}")
         
@@ -255,7 +272,13 @@ def main():
                     except Exception as e:
                         logger.warning(f"  Could not sync {sym}: {e}")
             
-            # Update cash
+            total_position_equity = sum(
+                _as_float(meta.get('eq_usd'))
+                for meta in okx_positions.values()
+                if isinstance(meta, dict)
+            )
+
+            # Update cash / peak equity
             for detail in balance_details:
                 if str(detail.get('ccy') or '').upper() == 'USDT':
                     cash = max(
@@ -265,11 +288,18 @@ def main():
                     )
                     try:
                         st = account_store.get()
-                        # keep peak at least as large as current cash to avoid fake DD on empty portfolio
+                        synced_total_equity = float(cash) + float(total_position_equity)
                         st.cash_usdt = float(cash)
-                        st.equity_peak_usdt = max(float(st.equity_peak_usdt), float(cash))
+                        st.equity_peak_usdt = max(
+                            float(st.equity_peak_usdt),
+                            float(synced_total_equity),
+                            float(cash),
+                        )
                         account_store.set(st)
-                        logger.info(f"  Synced cash: {cash} USDT")
+                        logger.info(
+                            f"  Synced cash: {cash} USDT | total_equity={synced_total_equity:.4f} | "
+                            f"peak={st.equity_peak_usdt:.4f}"
+                        )
                     except Exception as e:
                         logger.warning(f"  Could not sync cash: {e}")
                     break
