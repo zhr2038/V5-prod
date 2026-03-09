@@ -26,8 +26,10 @@ def test_index_renders_monitor_template():
     assert 'id="update-time"' in body
     assert 'id="health-content"' in body
     assert 'id="vote-history"' in body
+    assert 'id="history-tooltip"' in body
     assert "renderHmmProbRows" in body
     assert "renderVoteHistory" in body
+    assert "showHistoryTooltip" in body
     assert "showHmmProbs:true" in body
     assert "showSummary:true" in body
     assert "loadAll();" in body
@@ -191,8 +193,8 @@ def test_market_state_returns_vote_history_and_live_rss_summary(monkeypatch):
         "final": {"state": "SIDEWAYS", "confidence": 0.3, "score": 0.2},
         "votes": {
             "hmm": {"state": "SIDEWAYS", "confidence": 0.7},
-            "funding": {"state": "SIDEWAYS", "confidence": 0.2},
-            "rss": {"state": "RISK_OFF", "confidence": 0.35},
+            "funding": {"state": "SIDEWAYS", "confidence": 0.2, "sentiment": 0.01},
+            "rss": {"state": "RISK_OFF", "confidence": 0.35, "sentiment": -0.3},
         },
     }])
     monkeypatch.setattr(module, "load_config", lambda: {"regime": {"hmm_weight": 0.35, "funding_weight": 0.4, "rss_weight": 0.25}})
@@ -212,4 +214,5 @@ def test_market_state_returns_vote_history_and_live_rss_summary(monkeypatch):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["history_24h"][0]["votes"]["rss"]["state"] == "RISK_OFF"
+    assert payload["history_24h"][0]["votes"]["rss"]["sentiment"] == -0.3
     assert payload["votes"]["rss"]["summary_short"] == "\u65b0\u95fb\u504f\u7a7a\uff0c\u4f46\u672a\u5230\u6781\u7aef"
