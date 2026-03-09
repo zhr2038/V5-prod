@@ -1,8 +1,8 @@
 #!/bin/bash
 # V5 Trading Bot Monitor Script - Updated for v5-live-20u service
 
-LOG_FILE="/home/admin/clawd/v5-trading-bot/logs/monitor.log"
-BOT_DIR="/home/admin/clawd/v5-trading-bot"
+LOG_FILE="/home/admin/clawd/v5-prod/logs/monitor.log"
+BOT_DIR="/home/admin/clawd/v5-prod"
 DATE=$(date '+%Y-%m-%d %H:%M:%S')
 
 echo "[$DATE] ====== V5 Bot Monitor Check ======" >> $LOG_FILE

@@ -1,18 +1,40 @@
 {
-  "ts": 1772899205.6901445,
+  "ts": 1773028840.6709604,
   "ttl_sec": 3600,
+  "config_signature": {
+    "base_url": "https://www.okx.com",
+    "min_24h_quote_volume_usdt": 5000000.0,
+    "exclude_stablecoins": true,
+    "max_spread_bps": 30.0,
+    "refine_with_single_ticker": false,
+    "refine_single_ticker_max_candidates": 100,
+    "exclude_symbols": [
+      "BONK/USDT",
+      "DAI/USDT",
+      "DOGE/USDT",
+      "FLOKI/USDT",
+      "PAXG/USDT",
+      "PEPE/USDT",
+      "SHIB/USDT",
+      "TRX/USDT",
+      "TUSD/USDT",
+      "USDC/USDT",
+      "USDT/USDT",
+      "XAUT/USDT"
+    ]
+  },
   "symbols": [
     "BTC/USDT",
     "ETH/USDT",
-    "OKB/USDT",
     "SOL/USDT",
-    "DOGE/USDT",
     "CC/USDT",
     "XRP/USDT",
-    "TRX/USDT",
     "HYPE/USDT",
-    "SUI/USDT",
     "ADA/USDT",
-    "LINK/USDT"
+    "SUI/USDT",
+    "LINK/USDT",
+    "LTC/USDT",
+    "BNB/USDT",
+    "PUMP/USDT"
   ]
 }

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
@@ -71,9 +71,80 @@ class AlphaEngine:
         self.use_multi_strategy = getattr(cfg, 'use_multi_strategy', False)
         self.multi_strategy_adapter = None
         self.run_id = ""
+        self.current_regime_key: Optional[str] = None
+        self.alpha6_strategy = None
+        self._alpha6_static_weights: Dict[str, float] = {}
 
         if self.use_multi_strategy and MULTI_STRATEGY_AVAILABLE:
             self._init_multi_strategy()
+
+    @staticmethod
+    def _normalize_regime_key(regime_key: Optional[Any]) -> Optional[str]:
+        raw = str(regime_key or "").strip()
+        if not raw:
+            return None
+        mapping = {
+            "TRENDING": "Trending",
+            "Trending": "Trending",
+            "SIDEWAYS": "Sideways",
+            "Sideways": "Sideways",
+            "RISK_OFF": "Risk-Off",
+            "Risk-Off": "Risk-Off",
+            "Risk_Off": "Risk-Off",
+            "RiskOff": "Risk-Off",
+        }
+        return mapping.get(raw, raw)
+
+    def set_regime_context(self, regime_key: Optional[Any]) -> None:
+        self.current_regime_key = self._normalize_regime_key(regime_key)
+
+    def _load_regime_weight_override(self) -> Dict[str, float]:
+        if not bool(getattr(self.cfg, "dynamic_weights_by_regime_enabled", False)):
+            return {}
+
+        regime_key = self._normalize_regime_key(self.current_regime_key)
+        if not regime_key:
+            return {}
+
+        try:
+            p = Path(str(getattr(self.cfg, "dynamic_weights_by_regime_path", "") or ""))
+            if not p.exists():
+                return {}
+            data = json.loads(p.read_text(encoding="utf-8"))
+            weights = (((data.get("regimes") or {}).get(regime_key) or {}).get("weights"))
+            if not isinstance(weights, dict):
+                return {}
+            return {str(k): float(v) for k, v in weights.items()}
+        except Exception:
+            return {}
+
+    def _resolve_classic_base_weights(self, static_base_w: Dict[str, float]) -> Dict[str, float]:
+        weights = dict(static_base_w)
+        regime_override = self._load_regime_weight_override()
+        for key in static_base_w.keys():
+            if key in regime_override:
+                weights[key] = float(regime_override[key])
+        return self._load_dynamic_ic_weights(weights)
+
+    def _resolve_multi_strategy_alpha6_weights(self) -> Dict[str, float]:
+        weights = dict(self._alpha6_static_weights)
+        regime_override = self._load_regime_weight_override()
+        remap = {
+            "f1_mom_5d": "f1_mom_5d",
+            "f2_mom_20d": "f2_mom_20d",
+            "f3_vol_adj_ret_20d": "f3_vol_adj_ret",
+            "f4_volume_expansion": "f4_volume_expansion",
+            "f5_rsi_trend_confirm": "f5_rsi_trend_confirm",
+        }
+        for src_key, dst_key in remap.items():
+            if src_key in regime_override:
+                weights[dst_key] = float(regime_override[src_key])
+        return weights
+
+    def _apply_multi_strategy_regime_weights(self) -> None:
+        if self.alpha6_strategy is None:
+            return
+        self.alpha6_strategy.set_factor_weights(self._resolve_multi_strategy_alpha6_weights())
 
     def _load_dynamic_ic_weights(self, default_weights: Dict[str, float]) -> Dict[str, float]:
         """Load dynamic factor weights from IC monitor summary.
@@ -264,27 +335,6 @@ class AlphaEngine:
                     }
                 )
 
-        # 若启用动态IC权重文件，按IC符号修正方向（根治“全卖/全空”偏置）
-        if getattr(self.cfg, 'dynamic_weights_by_regime_enabled', False):
-            try:
-                p = Path(str(getattr(self.cfg, 'dynamic_weights_by_regime_path', '') or ''))
-                if p.exists():
-                    data = json.loads(p.read_text(encoding='utf-8'))
-                    overall = data.get('overall', {})
-                    ic = overall.get('ic_spearman_mean', {})
-                    sign_map = {
-                        'f1_mom_5d': -1.0 if float(ic.get('f1_mom_5d', 0.0)) < 0 else 1.0,
-                        'f2_mom_20d': -1.0 if float(ic.get('f2_mom_20d', 0.0)) < 0 else 1.0,
-                        'f3_vol_adj_ret': -1.0 if float(ic.get('f3_vol_adj_ret_20d', 0.0)) < 0 else 1.0,
-                        'f4_volume_expansion': -1.0 if float(ic.get('f4_volume_expansion', 0.0)) < 0 else 1.0,
-                        'f5_rsi_trend_confirm': -1.0 if float(ic.get('f5_rsi_trend_confirm', 0.0)) < 0 else 1.0,
-                    }
-                    for k in ('f1_mom_5d', 'f2_mom_20d', 'f3_vol_adj_ret', 'f4_volume_expansion', 'f5_rsi_trend_confirm'):
-                        alpha_weights[k] = float(alpha_weights[k]) * sign_map[k]
-                    print(f"[AlphaEngine] 已按动态IC符号修正Alpha6权重: {sign_map}")
-            except Exception as e:
-                print(f"[AlphaEngine] 动态IC符号修正失败，回退静态权重: {e}")
-
         alpha6_strategy = Alpha6FactorStrategy(config={
             'weights': alpha_weights,
             'position_size_pct': 0.30,
@@ -299,6 +349,8 @@ class AlphaEngine:
                 'fallback_to_static': bool(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'fallback_to_static', True)),
             },
         })
+        self.alpha6_strategy = alpha6_strategy
+        self._alpha6_static_weights = dict(alpha_weights)
         orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.55'))
 
         # 创建适配器
@@ -341,6 +393,8 @@ class AlphaEngine:
         """
         import pandas as pd
         from datetime import datetime
+
+        self._apply_multi_strategy_regime_weights()
 
         # 将 MarketSeries 转换为 DataFrame
         all_data = []
@@ -393,12 +447,13 @@ class AlphaEngine:
             effective_weight = max(effective_weight, 1e-6)
 
             # 买入信号为正分，卖出为负分
-            score = base_score * effective_weight
+            score = base_score
             if target['side'] == 'sell':
                 score = -score
 
             symbol_signals[sym].append({
                 'score': score,
+                'weighted_score': score * effective_weight,
                 'weight': effective_weight,
                 'side': target['side']
             })
@@ -407,7 +462,7 @@ class AlphaEngine:
         scores = {}
         for sym, signals in symbol_signals.items():
             if len(signals) == 1:
-                scores[sym] = signals[0]['score']
+                scores[sym] = signals[0]['weighted_score']
             else:
                 # 分离买入和卖出信号
                 buy_signals = [s for s in signals if s['side'] == 'buy']
@@ -417,17 +472,17 @@ class AlphaEngine:
                 if buy_signals and sell_signals:
                     # 有冲突信号时，按权重加权平均
                     total_weight = sum(s['weight'] for s in signals)
-                    weighted_score = sum(s['score'] * s['weight'] for s in signals) / total_weight
+                    weighted_score = sum(s['weighted_score'] for s in signals) / total_weight
                     scores[sym] = weighted_score
                 elif buy_signals:
                     # 只有买入信号
                     total_weight = sum(s['weight'] for s in buy_signals)
-                    weighted_score = sum(s['score'] * s['weight'] for s in buy_signals) / total_weight
+                    weighted_score = sum(s['weighted_score'] for s in buy_signals) / total_weight
                     scores[sym] = weighted_score
                 else:
                     # 只有卖出信号
                     total_weight = sum(s['weight'] for s in sell_signals)
-                    weighted_score = sum(s['score'] * s['weight'] for s in sell_signals) / total_weight
+                    weighted_score = sum(s['weighted_score'] for s in sell_signals) / total_weight
                     scores[sym] = weighted_score
         
         return scores
@@ -543,7 +598,7 @@ class AlphaEngine:
             "f4_volume_expansion": float(self.cfg.weights.f4_volume_expansion),
             "f5_rsi_trend_confirm": float(self.cfg.weights.f5_rsi_trend_confirm),
         }
-        base_w = self._load_dynamic_ic_weights(static_base_w)
+        base_w = self._resolve_classic_base_weights(static_base_w)
 
         ov_cfg = getattr(self.cfg, "alpha158_overlay", None)
         ov_enabled = bool(getattr(ov_cfg, "enabled", False))

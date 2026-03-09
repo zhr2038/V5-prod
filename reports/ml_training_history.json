@@ -623,5 +623,220 @@
         "lightgbm"
       ]
     }
+  },
+  {
+    "timestamp": "2026-03-08T16:23:02.307873",
+    "samples": 2051,
+    "train_ic": 0.6318173528044697,
+    "valid_ic": 0.9999999999999999,
+    "cv_mean_ic": 0.28694300565798386,
+    "cv_std_ic": 0.36093001762359106,
+    "cv_scores": [
+      1.0,
+      0.06153896563574664,
+      0.2103667576220008,
+      0.05191585224736758,
+      0.11089345278480439
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "macd",
+      "volatility_24h",
+      "rsi",
+      "bb_position",
+      "obv",
+      "returns_24h",
+      "momentum_5d",
+      "volatility_ratio",
+      "volume_ratio"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 385,
+      "train_groups": 302,
+      "valid_groups": 77,
+      "purge_gap_groups": 6
+    },
+    "candidate_models": [
+      {
+        "model_type": "hist_gbm",
+        "train_ic": 0.6318173528044697,
+        "valid_ic": 0.9999999999999999,
+        "cv_mean_ic": 0.28694300565798386,
+        "cv_std_ic": 0.36093001762359106,
+        "cv_scores": [
+          1.0,
+          0.06153896563574664,
+          0.2103667576220008,
+          0.05191585224736758,
+          0.11089345278480439
+        ],
+        "ic_gap": -0.3681826471955302,
+        "config": {
+          "model_type": "hist_gbm",
+          "alpha": 10.0,
+          "n_estimators": 50,
+          "max_depth": 1,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "raw",
+          "include_time_features": false,
+          "min_symbol_samples": 100,
+          "min_symbol_target_std": 1e-06
+        }
+      },
+      {
+        "model_type": "ridge",
+        "train_ic": 0.2538549629408945,
+        "valid_ic": 0.9999999999999999,
+        "cv_mean_ic": 0.11034541523165882,
+        "cv_std_ic": 0.5173614680190374,
+        "cv_scores": [
+          1.0,
+          0.06204271383649128,
+          -0.537982544651008,
+          -0.21588131607272756,
+          0.24354822304553847
+        ],
+        "ic_gap": -0.7461450370591054,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 10.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "raw",
+          "include_time_features": false,
+          "min_symbol_samples": 100,
+          "min_symbol_target_std": 1e-06
+        }
+      },
+      {
+        "model_type": "lightgbm",
+        "train_ic": 0.32567812295267295,
+        "valid_ic": 0.0,
+        "cv_mean_ic": -0.05919109444503216,
+        "cv_std_ic": 0.17083283576634695,
+        "cv_scores": [
+          0.0,
+          0.09660598822108513,
+          -0.3925614604462459,
+          0.0,
+          0.0
+        ],
+        "ic_gap": 0.32567812295267295,
+        "config": {
+          "model_type": "lightgbm",
+          "alpha": 10.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "raw",
+          "include_time_features": false,
+          "min_symbol_samples": 100,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "hist_gbm",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "raw",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "HYPE/USDT",
+        "LINK/USDT",
+        "OKB/USDT",
+        "ROBO/USDT",
+        "TRX/USDT",
+        "XRP/USDT"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2051
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "hist_gbm",
+      "candidates": [
+        "hist_gbm",
+        "ridge",
+        "lightgbm"
+      ],
+      "target_mode": "raw",
+      "include_time_features": false
+    }
   }
 ]

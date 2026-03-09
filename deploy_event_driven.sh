@@ -6,7 +6,7 @@
 
 set -e
 
-ROOT="/home/admin/clawd/v5-trading-bot"
+ROOT="/home/admin/clawd/v5-prod"
 cd "$ROOT"
 
 echo "=================================="
@@ -57,10 +57,10 @@ Description=V5 Event-Driven Trading Check (15min)
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/admin/clawd/v5-trading-bot
-Environment=PYTHONPATH=/home/admin/clawd/v5-trading-bot
-EnvironmentFile=/home/admin/clawd/v5-trading-bot/.env
-ExecStart=/home/admin/clawd/v5-trading-bot/.venv/bin/python /home/admin/clawd/v5-trading-bot/event_driven_check.py
+WorkingDirectory=/home/admin/clawd/v5-prod
+Environment=PYTHONPATH=/home/admin/clawd/v5-prod
+EnvironmentFile=/home/admin/clawd/v5-prod/.env
+ExecStart=/home/admin/clawd/v5-prod/.venv/bin/python /home/admin/clawd/v5-prod/event_driven_check.py
 EOF
 
 echo "✅ Timer configured"

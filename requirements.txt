@@ -9,3 +9,4 @@ scipy>=1.10
 ccxt>=4.0
 flask>=3.0
 scikit-learn>=1.4
+paramiko>=3.5

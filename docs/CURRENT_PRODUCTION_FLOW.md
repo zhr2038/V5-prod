@@ -11,6 +11,8 @@ Primary runtime:
 - `main.py`
 
 Operational helpers:
+- `scripts/collect_funding_sentiment.py`
+- `scripts/collect_rss_sentiment.py`
 - `event_driven_check.py`
 - `scripts/run_hourly_live_window.sh`
 - `scripts/bills_sync.py`
@@ -31,6 +33,8 @@ Primary production units:
 - `deploy/systemd/v5-prod.user.timer`
 - `deploy/systemd/v5-event-driven.service`
 - `deploy/systemd/v5-event-driven.timer`
+- `deploy/systemd/v5-sentiment-collect.service`
+- `deploy/systemd/v5-sentiment-collect.timer`
 
 Primary production config:
 - `configs/live_prod.yaml`
@@ -58,6 +62,7 @@ Primary environment file:
 ### 3. Alpha and regime
 
 `main.py` and `src/core/pipeline.py`:
+- sentiment cache is refreshed by `v5-sentiment-collect.timer`
 - alpha snapshot from `src/alpha/alpha_engine.py`
 - regime from `src/regime/ensemble_regime_engine.py` or fallback `src/regime/regime_engine.py`
 - optional trend cache read/write in `main.py`

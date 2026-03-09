@@ -1,7 +1,7 @@
 #!/bin/bash
 # V5 Trading Deep Analysis Script - 深度分析交易逻辑
 
-BOT_DIR="/home/admin/clawd/v5-trading-bot"
+BOT_DIR="/home/admin/clawd/v5-prod"
 DATE=$(date '+%Y-%m-%d %H:%M:%S')
 REPORT_FILE="$BOT_DIR/logs/deep_analysis.log"
 

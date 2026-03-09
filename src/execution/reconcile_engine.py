@@ -28,6 +28,13 @@ def _base_ccy_from_symbol(symbol: str) -> str:
     return str(symbol).split("/")[0]
 
 
+def _to_float(x: Any, default: float = 0.0) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return float(default)
+
+
 @dataclass
 class ReconcileThresholds:
     abs_usdt_tol: float = 1.0
@@ -57,11 +64,12 @@ class ReconcileEngine:
         self.account_store = account_store
         self.thresholds = thresholds or ReconcileThresholds()
 
-    def _fetch_exchange_cash(self) -> Tuple[Dict[str, str], Dict[str, str], int, Dict[str, Any]]:
+    def _fetch_exchange_cash(self) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], int, Dict[str, Any]]:
         r = self.okx.get_balance(ccy=None)
         data = (r.data or {}).get("data")
         cash: Dict[str, str] = {}
         frozen: Dict[str, str] = {}
+        eq_usd: Dict[str, str] = {}
         u_max = 0
         if isinstance(data, list) and data:
             details = (data[0] or {}).get("details") or []
@@ -73,11 +81,14 @@ class ReconcileEngine:
                     continue
                 cb = d.get("cashBal")
                 of = d.get("ordFrozen")
+                eq = d.get("eqUsd")
                 ut = d.get("uTime")
                 if cb is not None:
                     cash[ccy] = str(cb)
                 if of is not None:
                     frozen[ccy] = str(of)
+                if eq is not None:
+                    eq_usd[ccy] = str(eq)
                 try:
                     u_max = max(u_max, int(ut or 0))
                 except Exception:
@@ -88,7 +99,7 @@ class ReconcileEngine:
             "okx_code": getattr(r, "okx_code", None),
             "okx_msg": getattr(r, "okx_msg", None),
         }
-        return cash, frozen, int(u_max), meta
+        return cash, frozen, eq_usd, int(u_max), meta
 
     def _local_snapshot(self) -> Tuple[str, Dict[str, str]]:
         acc = self.account_store.get()
@@ -106,7 +117,7 @@ class ReconcileEngine:
         universe_bases: Optional[List[str]] = None,
         ccy_mode: str = "universe_only",
     ) -> Dict[str, Any]:
-        cash, ord_frozen, u_max, meta = self._fetch_exchange_cash()
+        cash, ord_frozen, eq_usd, u_max, meta = self._fetch_exchange_cash()
         local_cash_usdt, local_ccy_qty = self._local_snapshot()
 
         ccys_all = sorted(set(cash.keys()) | set(local_ccy_qty.keys()) | {"USDT"})
@@ -124,6 +135,8 @@ class ReconcileEngine:
         reason = None
         max_abs_usdt = 0.0
         max_abs_base = 0.0
+        ignored_dust_ccys: List[Dict[str, Any]] = []
+        ignored_dust_usdt_total = 0.0
 
         # OKX top-level code/msg
         okx_code = meta.get("okx_code")
@@ -146,17 +159,14 @@ class ReconcileEngine:
         for ccy in ccys:
             ex = cash.get(ccy) or "0"
             lo = local_ccy_qty.get(ccy) or "0"
-            try:
-                ex_f = float(ex)
-            except Exception:
-                ex_f = 0.0
-            try:
-                lo_f = float(lo)
-            except Exception:
-                lo_f = 0.0
+            ex_f = _to_float(ex)
+            lo_f = _to_float(lo)
 
             delta = ex_f - lo_f
             delta_usdt = None
+            estimated_delta_usdt = None
+            ignored_as_dust = False
+            exchange_eq_usdt = _to_float(eq_usd.get(ccy), default=0.0)
             
             # Special handling for MERL - was negative, now positive after repayment
             # Allow normal reconciliation for MERL now
@@ -181,21 +191,36 @@ class ReconcileEngine:
 
                 # dust ignore (best-effort using mid from spread snapshots)
                 dust_ignore = float(getattr(self.thresholds, "dust_usdt_ignore", 0.0) or 0.0)
-                est_usdt = None
-                try:
-                    snap = ss.get_latest_before(symbol=f"{ccy}/USDT", ts_ms=_now_ms())
-                    if snap is not None and snap.mid and float(snap.mid) > 0:
-                        est_usdt = abs(float(delta)) * float(snap.mid)
-                except Exception:
-                    est_usdt = None
+                if abs(ex_f) > float(self.thresholds.abs_base_tol) and abs(exchange_eq_usdt) > 0:
+                    try:
+                        unit_px = abs(exchange_eq_usdt) / abs(ex_f)
+                        if unit_px > 0:
+                            estimated_delta_usdt = abs(float(delta)) * unit_px
+                    except Exception:
+                        estimated_delta_usdt = None
+
+                if estimated_delta_usdt is None:
+                    try:
+                        snap = ss.get_latest_before(symbol=f"{ccy}/USDT", ts_ms=_now_ms())
+                        if snap is not None and snap.mid and float(snap.mid) > 0:
+                            estimated_delta_usdt = abs(float(delta)) * float(snap.mid)
+                    except Exception:
+                        estimated_delta_usdt = None
 
                 is_universe = (ccy.upper() in bases) if bases else True
                 enforce = True if (mode == "all") else is_universe
 
                 if enforce and abs(float(delta)) > float(self.thresholds.abs_base_tol):
-                    if est_usdt is not None and est_usdt < dust_ignore:
-                        # ignore dust
-                        pass
+                    if estimated_delta_usdt is not None and estimated_delta_usdt < dust_ignore:
+                        ignored_as_dust = True
+                        ignored_dust_usdt_total += float(estimated_delta_usdt)
+                        ignored_dust_ccys.append(
+                            {
+                                "ccy": ccy,
+                                "delta": f"{float(delta):.12g}",
+                                "estimated_delta_usdt": f"{float(estimated_delta_usdt):.12g}",
+                            }
+                        )
                     else:
                         ok = False
                         reason = reason or "base_mismatch"
@@ -207,6 +232,10 @@ class ReconcileEngine:
                     "local": str(lo),
                     "delta": f"{float(delta):.12g}",
                     "delta_usdt": None if delta_usdt is None else f"{float(delta_usdt):.12g}",
+                    "exchange_eq_usdt": f"{float(exchange_eq_usdt):.12g}" if abs(exchange_eq_usdt) > 0 else None,
+                    "estimated_delta_usdt": None if estimated_delta_usdt is None else f"{float(estimated_delta_usdt):.12g}",
+                    "ignored_as_dust": bool(ignored_as_dust),
+                    "enforced": bool(ccy.upper() == "USDT" or (True if (mode == "all") else is_universe)),
                 }
             )
 
@@ -220,6 +249,7 @@ class ReconcileEngine:
                 "uTime_max_ms": int(u_max),
                 "ccy_cashBal": dict(cash),
                 "ccy_ordFrozen": dict(ord_frozen),
+                "ccy_eqUsd": dict(eq_usd),
             },
             "local_snapshot": {
                 "cash_usdt": str(local_cash_usdt),
@@ -231,7 +261,17 @@ class ReconcileEngine:
                 "abs_base_tol": float(self.thresholds.abs_base_tol),
                 "dust_usdt_ignore": float(self.thresholds.dust_usdt_ignore),
             },
-            "stats": {"max_abs_usdt_delta": float(max_abs_usdt), "max_abs_base_delta": float(max_abs_base)},
+            "stats": {
+                "max_abs_usdt_delta": float(max_abs_usdt),
+                "max_abs_base_delta": float(max_abs_base),
+                "ignored_dust_count": int(len(ignored_dust_ccys)),
+                "ignored_dust_usdt_total": float(ignored_dust_usdt_total),
+            },
+            "ignored_dust": {
+                "count": int(len(ignored_dust_ccys)),
+                "total_estimated_usdt": float(ignored_dust_usdt_total),
+                "ccys": ignored_dust_ccys,
+            },
             "error": {"http_status": http_status, "okx_code": okx_code, "okx_msg": okx_msg} if okx_code or okx_msg or http_status else None,
             "open_orders": {
                 "note": "using cashBal avoids false mismatch from ordFrozen",

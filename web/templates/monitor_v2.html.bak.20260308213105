@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>V5 交易监控</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            line-height: 1.6;
+        }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #1e293b;
+        }
+        .header h1 { font-size: 1.5rem; color: #3b82f6; }
+        .update-time { font-size: 0.8rem; color: #64748b; }
+        
+        /* Grid Layout */
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        
+        @media (max-width: 768px) {
+            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+            .container { padding: 10px; }
+            .header h1 { font-size: 1.2rem; }
+            .header { flex-direction: column; align-items: flex-start; gap: 10px; }
+            .update-time { font-size: 0.75rem; }
+            .status-bar { grid-template-columns: repeat(2, 1fr); }
+            .status-item { padding: 10px; }
+            .status-item .value { font-size: 1rem; }
+            .card { padding: 12px; }
+            .card-title { font-size: 0.9rem; }
+            th, td { padding: 8px 6px; font-size: 0.8rem; }
+            .strategy-grid { grid-template-columns: 1fr; }
+            .risk-metrics { grid-template-columns: repeat(2, 1fr); }
+        }
+        
+        @media (max-width: 480px) {
+            .status-bar { grid-template-columns: 1fr; }
+            .risk-metrics { grid-template-columns: 1fr; }
+            .btn { padding: 8px 12px; font-size: 0.85rem; }
+        }
+        
+        /* Status Cards */
+        .status-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .status-item {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .status-item .label { font-size: 0.75rem; color: #64748b; }
+        .status-item .value { font-size: 1.2rem; font-weight: 600; margin-top: 5px; }
+        .status-item .sub { font-size: 0.7rem; color: #64748b; margin-top: 3px; }
+        
+        /* Cards */
+        .card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .card-title { font-size: 1rem; font-weight: 600; }
+        .card-subtitle { font-size: 0.8rem; color: #64748b; }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        th, td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid #334155;
+        }
+        th { color: #64748b; font-weight: 500; font-size: 0.75rem; }
+        tr:last-child td { border-bottom: none; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .text-green { color: #22c55e; }
+        .text-red { color: #ef4444; }
+        .text-yellow { color: #f59e0b; }
+        
+        /* Risk Level Badge */
+        .risk-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .risk-attack { background: rgba(239,68,68,0.2); color: #fca5a5; }
+        .risk-neutral { background: rgba(59,130,246,0.2); color: #93c5fd; }
+        .risk-defense { background: rgba(245,158,11,0.2); color: #fcd34d; }
+        .risk-protect { background: rgba(34,197,94,0.2); color: #86efac; }
+        
+        /* Info Grid */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .info-item {
+            background: #0f172a;
+            padding: 10px;
+            border-radius: 6px;
+        }
+        .info-item .label { font-size: 0.7rem; color: #64748b; }
+        .info-item .value { font-size: 0.9rem; font-weight: 600; margin-top: 3px; }
+        
+        /* Strategy Items */
+        .strategy-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+        }
+        .strategy-item {
+            background: #0f172a;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .strategy-item .name { font-size: 0.8rem; color: #94a3b8; }
+        .strategy-item .count { font-size: 1.1rem; font-weight: 600; margin: 5px 0; }
+        .strategy-item .detail { font-size: 0.75rem; color: #64748b; }
+        
+        /* Market State */
+        .market-state {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px;
+            background: #0f172a;
+            border-radius: 8px;
+        }
+        .market-state .state-box {
+            padding: 8px 15px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .state-trending { background: rgba(34,197,94,0.2); color: #86efac; }
+        .state-sideways { background: rgba(245,158,11,0.2); color: #fcd34d; }
+        .state-riskoff { background: rgba(239,68,68,0.2); color: #fca5a5; }
+        
+        /* Loading & Error */
+        .loading { text-align: center; color: #64748b; padding: 20px; }
+        .error { text-align: center; color: #ef4444; padding: 20px; }
+        .empty { text-align: center; color: #64748b; padding: 20px; font-size: 0.9rem; }
+        
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 10px;
+        }
+        .tab {
+            padding: 8px 16px;
+            background: transparent;
+            border: none;
+            color: #64748b;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        .tab.active {
+            background: #3b82f6;
+            color: white;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🤖 V5 交易监控</h1>
+            <div class="update-time" id="update-time">加载中...</div>
+        </div>
+        
+        <!-- Account Overview -->
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="label">总权益</div>
+                <div class="value" id="total-equity">--</div>
+                <div class="sub" id="total-pnl">--</div>
+            </div>
+            <div class="status-item">
+                <div class="label">可用现金</div>
+                <div class="value" id="cash-usdt">--</div>
+                <div class="sub" id="cash-ratio">--</div>
+            </div>
+            <div class="status-item">
+                <div class="label">持仓市值</div>
+                <div class="value" id="positions-value">--</div>
+                <div class="sub" id="positions-count-top">--</div>
+            </div>
+            <div class="status-item">
+                <div class="label">风险档位</div>
+                <div class="value" id="risk-level">--</div>
+                <div class="sub" id="risk-detail">--</div>
+            </div>
+            <div class="status-item">
+                <div class="label">市场状态</div>
+                <div class="value" id="market-state-val">--</div>
+                <div class="sub" id="market-detail">--</div>
+            </div>
+        </div>
+        
+        <!-- Two Column Layout -->
+        <div class="grid-2">
+            <!-- Left Column -->
+            <div>
+                <!-- Positions -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">📊 当前持仓</div>
+                            <div class="card-subtitle" id="positions-subtitle">加载中...</div>
+                        </div>
+                    </div>
+                    <div id="positions-content">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+                
+                <!-- Trades -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">🔄 最近交易</div>
+                            <div class="card-subtitle">最近10笔</div>
+                        </div>
+                    </div>
+                    <div id="trades-content">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Column -->
+            <div>
+                <!-- Market & Risk -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">📈 市场与风控</div>
+                    </div>
+                    
+                    <div class="info-grid" style="margin-bottom: 15px;">
+                        <div class="info-item">
+                            <div class="label">市场状态</div>
+                            <div class="value" id="market-state-detail">--</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="label">仓位乘数</div>
+                            <div class="value" id="position-multiplier">--</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="label">当前回撤</div>
+                            <div class="value" id="current-drawdown">--</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="label">成交率</div>
+                            <div class="value" id="conversion-rate">--</div>
+                        </div>
+                    </div>
+                    
+                    <div style="background: #0f172a; padding: 12px; border-radius: 8px;">
+                        <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">三方法判断</div>
+                        <div id="ensemble-votes" style="font-size: 0.85rem;">加载中...</div>
+                    </div>
+                </div>
+                
+                <!-- Health Status -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">🩺 系统健康</div>
+                        <div class="card-subtitle" id="health-update-time">加载中...</div>
+                    </div>
+                    <div id="health-content">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+                
+                <!-- Strategy Signals -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">📡 策略信号</div>
+                            <div class="card-subtitle" id="signals-time">加载中...</div>
+                        </div>
+                    </div>
+                    <div id="signals-content">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+                
+                <!-- Decision & Execution Flow -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">🧠 决策与执行透视</div>
+                            <div class="card-subtitle" id="decision-flow-time">加载中...</div>
+                        </div>
+                    </div>
+                    <div id="decision-flow-content">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">⚙️ 系统状态</div>
+                    </div>
+                    <div id="system-content">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API Base
+        const API_BASE = '';
+        
+        // Format helpers
+        function formatNumber(num, decimals = 2) {
+            if (num === null || num === undefined || isNaN(num)) return '--';
+            return Number(num).toFixed(decimals);
+        }
+        
+        function formatCurrency(num) {
+            if (num === null || num === undefined || isNaN(num)) return '--';
+            return '$' + formatNumber(num, 2);
+        }
+        
+        function formatPercent(num, showSign = true) {
+            if (num === null || num === undefined || isNaN(num)) return '--';
+            const val = Number(num) * 100;
+            const sign = showSign && val > 0 ? '+' : '';
+            const color = val >= 0 ? 'text-green' : 'text-red';
+            return `<span class="${color}">${sign}${formatNumber(val, 1)}%</span>`;
+        }
+        
+        // Risk level styles
+        function getRiskClass(level) {
+            const map = {
+                'ATTACK': 'risk-attack',
+                'NEUTRAL': 'risk-neutral',
+                'DEFENSE': 'risk-defense',
+                'PROTECT': 'risk-protect'
+            };
+            return map[level] || 'risk-neutral';
+        }
+
+        // 术语翻译（把程序名词换成人话）
+        const TERM_EXPLAIN = {
+            OPEN_LONG_COOLDOWN: '开仓冷却中（防止同币短时间重复开仓）',
+            min_notional: '下单金额低于最小门槛',
+            MIN_NOTIONAL: '下单金额低于最小门槛',
+            exchange_min_notional: '低于交易所最小下单金额',
+            EXCHANGE_MIN_NOTIONAL: '低于交易所最小下单金额',
+            deadband: '仓位差在静默区（波动太小，不调整）',
+            DEADBAND: '仓位差在静默区（波动太小，不调整）',
+            GATE: '风控门控拦截',
+            SELL_ONLY: '仅允许卖出（买入被禁）',
+            DUST: '灰尘单/数量太小',
+            SAFETY: '安全规则拦截',
+            require_fused_symbol: '不在融合信号买入名单',
+            require_fused_missing: '缺少融合信号文件',
+            budget_hard_buy_block: '触发预算硬限制，禁止买入',
+            spread_gate: '点差过大被拦截',
+            dd_throttle: '回撤保护降速',
+            no_closed_bar: '缺少收盘数据',
+            insufficient_cash: '可用现金不足',
+            provider_error: '行情提供方异常',
+            high_risk_symbol: '高风险币种过滤',
+            min_price: '低价币过滤',
+            ok: '通过',
+            OK: '通过',
+        };
+
+        function sideZh(v) {
+            const s = String(v || '').toLowerCase();
+            if (s === 'buy') return '买入';
+            if (s === 'sell') return '卖出';
+            return v || '--';
+        }
+
+        function stateZh(v) {
+            const s = String(v || '').toUpperCase();
+            const map = {
+                FILLED: '已成交',
+                REJECTED: '已拒单',
+                OPEN: '已提交',
+                PARTIAL: '部分成交',
+                SENT: '已发送',
+                ACK: '已确认',
+                CANCELED: '已撤单',
+                CANCELLED: '已撤单',
+                UNKNOWN: '未知状态',
+            };
+            return map[s] || (v || '--');
+        }
+
+        function regimeZh(v) {
+            const s = String(v || '').toUpperCase();
+            const map = {
+                TRENDING: '趋势',
+                SIDEWAYS: '震荡',
+                RISK_OFF: '风险规避',
+            };
+            return map[s] || (v || '--');
+        }
+
+        function sourceZh(v) {
+            const s = String(v || '').toLowerCase();
+            if (s === 'fused') return '融合执行榜';
+            if (s === 'alpha') return 'Alpha评分榜';
+            return v || '--';
+        }
+
+        function explainTerm(raw) {
+            const txt = String(raw || '').trim();
+            if (!txt) return '正常';
+            if (TERM_EXPLAIN[txt]) return TERM_EXPLAIN[txt];
+            const up = txt.toUpperCase();
+            if (TERM_EXPLAIN[up]) return TERM_EXPLAIN[up];
+
+            if (up.includes('OPEN_LONG_COOLDOWN')) return TERM_EXPLAIN.OPEN_LONG_COOLDOWN;
+            if (up.includes('MIN_NOTIONAL')) return TERM_EXPLAIN.MIN_NOTIONAL;
+            if (up.includes('DEADBAND')) return TERM_EXPLAIN.deadband;
+            if (up.includes('SELL_ONLY')) return TERM_EXPLAIN.SELL_ONLY;
+            if (up.includes('DUST')) return TERM_EXPLAIN.DUST;
+            if (up.includes('EXCHANGE_MIN_NOTIONAL')) return TERM_EXPLAIN.EXCHANGE_MIN_NOTIONAL;
+            if (up.includes('SPREAD')) return TERM_EXPLAIN.spread_gate;
+            return txt;
+        }
+
+        function explainWithCode(raw) {
+            const txt = String(raw || '').trim();
+            if (!txt) return '通过';
+            const zh = explainTerm(txt);
+            if (zh === txt) return txt;
+            return `${zh}（${txt}）`;
+        }
+        
+        // Load account
+        async function loadAccount() {
+            try {
+                const res = await fetch('/api/account');
+                const data = await res.json();
+                
+                const total = data.total_equity_usdt || 0;
+                const cash = data.cash_usdt || 0;
+                const pos = data.positions_value_usdt || 0;
+                const pnl = data.total_pnl_pct || 0;
+                
+                // 分开设置，避免innerHTML问题
+                const equityEl = document.getElementById('total-equity');
+                const pnlEl = document.getElementById('total-pnl');
+                
+                if (equityEl) equityEl.textContent = formatCurrency(total);
+                if (pnlEl) pnlEl.innerHTML = formatPercent(pnl);
+                
+                document.getElementById('cash-usdt').textContent = formatCurrency(cash);
+                document.getElementById('cash-ratio').textContent = total > 0 ? formatNumber(cash/total*100, 0) + '%' : '--';
+                document.getElementById('positions-value').textContent = formatCurrency(pos);
+                document.getElementById('positions-count-top').textContent = (data.positions_count || 0) + '个持仓';
+                
+                return data;
+            } catch (e) {
+                console.error('账户加载失败:', e);
+                return null;
+            }
+        }
+        
+        // Load risk level
+        async function loadRiskLevel(accountData = null) {
+            try {
+                const riskRes = await fetch('/api/auto_risk_guard');
+                const data = await riskRes.json();
+                const account = accountData || {};
+                
+                const level = data.current_level || 'NEUTRAL';
+                const metrics = data.metrics || {};
+                
+                // 优先使用账户API的修正回撤（基于资金上限）
+                let dd = account.drawdown_pct;
+                if (dd === undefined || dd === null) {
+                    // 回退到旧数据
+                    dd = metrics.last_dd_pct || 0;
+                }
+                
+                // 显示预算上限提示（如果有）
+                const budgetCap = account.budget_cap_usdt;
+                let drawdownLabel = '当前回撤';
+                if (budgetCap) {
+                    drawdownLabel = `当前回撤 (基于${budgetCap}U上限)`;
+                }
+                
+                const badgeHtml = `<span class="risk-badge ${getRiskClass(level)}">${level}</span>`;
+                document.getElementById('risk-level').innerHTML = badgeHtml;
+                document.getElementById('risk-detail').textContent = `回撤 ${(dd*100).toFixed(1)}%`;
+                
+                document.getElementById('current-drawdown').innerHTML = formatPercent(dd);
+                document.getElementById('conversion-rate').textContent = 
+                    metrics.last_conversion_rate ? (metrics.last_conversion_rate*100).toFixed(0) + '%' : '--';
+                
+                // 更新标签
+                const ddLabelEl = document.querySelector('#current-drawdown').previousElementSibling;
+                if (ddLabelEl) {
+                    ddLabelEl.textContent = drawdownLabel;
+                }
+                
+                return data;
+            } catch (e) {
+                console.error('风险档位加载失败:', e);
+                return null;
+            }
+        }
+        
+        // Load market state
+        async function loadMarketState() {
+            try {
+                const res = await fetch('/api/market_state');
+                const data = await res.json();
+                
+                const state = data.state || 'SIDEWAYS';
+                const multiplier = typeof data.position_multiplier === 'number' ? data.position_multiplier : 0.7;
+                const votes = data.votes || {};
+                
+                const stateMap = {
+                    'TRENDING': { text: '趋势', class: 'state-trending' },
+                    'SIDEWAYS': { text: '震荡', class: 'state-sideways' },
+                    'RISK_OFF': { text: '风险规避', class: 'state-riskoff' }
+                };
+                const stateInfo = stateMap[state] || stateMap['SIDEWAYS'];
+                
+                document.getElementById('market-state-val').innerHTML = 
+                    `<span class="${stateInfo.class}" style="padding: 4px 10px; border-radius: 4px; font-size: 0.85rem;">${stateInfo.text}</span>`;
+                document.getElementById('market-detail').textContent = formatNumber(multiplier, 2) + 'x仓位';
+                document.getElementById('market-state-detail').innerHTML = 
+                    `<span class="${stateInfo.class}">${state}</span>`;
+                document.getElementById('position-multiplier').textContent = formatNumber(multiplier, 2) + 'x';
+                
+                // Ensemble votes
+                let votesHtml = '';
+                if (votes.hmm) votesHtml += `HMM: ${votes.hmm.state || '--'} `;
+                if (votes.funding) votesHtml += `资金: ${votes.funding.state || '--'} `;
+                if (votes.rss) votesHtml += `RSS: ${votes.rss.state || '--'}`;
+                document.getElementById('ensemble-votes').textContent = votesHtml || '无数据';
+                
+                return data;
+            } catch (e) {
+                console.error('市场状态加载失败:', e);
+                return null;
+            }
+        }
+        
+        // Load positions
+        async function loadPositions() {
+            try {
+                const res = await fetch('/api/positions');
+                const data = await res.json();
+                
+                const positions = data.positions || [];
+                const validPositions = positions.filter(p => (p.value || 0) > 1);
+                
+                document.getElementById('positions-subtitle').textContent = 
+                    validPositions.length > 0 ? `${validPositions.length}个有效持仓（已过滤灰尘仓）` : '无有效持仓';
+                
+                if (validPositions.length === 0) {
+                    document.getElementById('positions-content').innerHTML = '<div class="empty">当前没有有效持仓</div>';
+                    return;
+                }
+                
+                const html = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>币种</th>
+                                <th class="text-right">数量</th>
+                                <th class="text-right">现价</th>
+                                <th class="text-right">市值</th>
+                                <th class="text-right">盈亏</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${validPositions.map(p => `
+                                <tr>
+                                    <td><strong>${p.symbol}</strong></td>
+                                    <td class="text-right">${formatNumber(p.quantity, 4)}</td>
+                                    <td class="text-right">${formatCurrency(p.price)}</td>
+                                    <td class="text-right">${formatCurrency(p.value)}</td>
+                                    <td class="text-right">${formatPercent(p.pnl_pct)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                document.getElementById('positions-content').innerHTML = html;
+            } catch (e) {
+                console.error('持仓加载失败:', e);
+                document.getElementById('positions-content').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+        
+        // Load trades
+        async function loadTrades() {
+            try {
+                const res = await fetch('/api/trades?limit=10');
+                const data = await res.json();
+                
+                const trades = data.trades || [];
+                
+                if (trades.length === 0) {
+                    document.getElementById('trades-content').innerHTML = '<div class="empty">暂无交易记录</div>';
+                    return;
+                }
+                
+                const html = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>币种</th>
+                                <th>方向</th>
+                                <th class="text-right">金额</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${trades.map(t => {
+                                const amount = t.amount || 0;
+                                return `
+                                <tr>
+                                    <td>${t.time?.slice(5, 16) || '--'}</td>
+                                    <td>${t.symbol}</td>
+                                    <td class="${t.side === 'buy' ? 'text-green' : 'text-red'}">${t.side === 'buy' ? '买入' : '卖出'}</td>
+                                    <td class="text-right">${formatCurrency(amount)}</td>
+                                </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+                document.getElementById('trades-content').innerHTML = html;
+            } catch (e) {
+                console.error('交易加载失败:', e);
+                document.getElementById('trades-content').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+        
+        async function fetchDecisionAudit() {
+            try {
+                const res = await fetch(`/api/decision_audit?_=${Date.now()}`);
+                return await res.json();
+            } catch (e) {
+                console.error('决策审计加载失败:', e);
+                return null;
+            }
+        }
+
+        // Load strategy signals
+        async function loadStrategySignals(data = null) {
+            try {
+                const audit = data || await fetchDecisionAudit();
+                if (!audit) throw new Error('decision_audit unavailable');
+                
+                const strategies = audit.strategy_signals || [];
+                const time = audit.timestamp ? new Date(audit.timestamp * 1000).toLocaleString('zh-CN', {
+                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                }) : '未知';
+                
+                document.getElementById('signals-time').textContent = time;
+                
+                if (strategies.length === 0) {
+                    document.getElementById('signals-content').innerHTML = '<div class="empty">暂无策略信号</div>';
+                    return;
+                }
+                
+                const totalSignals = strategies.reduce((sum, s) => sum + (s.total_signals || 0), 0);
+                
+                const html = `
+                    <div style="margin-bottom: 12px; font-size: 0.85rem; color: #94a3b8;">
+                        融合前共 ${totalSignals} 个信号
+                    </div>
+                    <div class="strategy-grid">
+                        ${strategies.map(s => `
+                            <div class="strategy-item">
+                                <div class="name">${s.strategy}</div>
+                                <div class="count">${s.total_signals || 0}</div>
+                                <div class="detail">
+                                    <span class="text-green">买${s.buy_signals || 0}</span> / 
+                                    <span class="text-red">卖${s.sell_signals || 0}</span>
+                                </div>
+                                <div class="detail" style="margin-top: 4px; font-size: 0.7rem;">
+                                    权重 ${((s.allocation || 0) * 100).toFixed(0)}%
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ${audit.counts ? `
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155; font-size: 0.85rem; color: #94a3b8;">
+                        选中: ${audit.counts.selected || 0}个 | 
+                        风控后: ${audit.counts.targets_post_risk || 0}个 | 
+                        最终下单: ${(audit.counts.orders_rebalance || 0) + (audit.counts.orders_exit || 0)}个
+                    </div>
+                    ` : ''}
+                `;
+                document.getElementById('signals-content').innerHTML = html;
+            } catch (e) {
+                console.error('策略信号加载失败:', e);
+                document.getElementById('signals-content').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+        
+        // Load decision/execution flow (signals -> routing -> order outcome)
+        async function loadDecisionFlow(data = null) {
+            try {
+                const audit = data || await fetchDecisionAudit();
+                if (!audit) throw new Error('decision_audit unavailable');
+
+                const runId = audit.run_id || '--';
+                const t = audit.timestamp ? new Date(audit.timestamp * 1000).toLocaleString('zh-CN', {
+                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+                }) : '未知时间';
+                document.getElementById('decision-flow-time').textContent = `${t} · run ${runId}`;
+
+                const counts = audit.counts || {};
+                const rejects = audit.rejects || {};
+                const routerReasonCounts = audit.router_reason_counts || {};
+                const exec = audit.execution_summary || {};
+                const runOrders = audit.run_orders || [];
+                const targetRank = audit.target_rank || [];
+                const fusedRank = audit.fused_buy_rank || [];
+                const fusedFallback = !!audit.fused_source_is_fallback;
+                const fusedSourceRun = audit.fused_rank_source_run || '--';
+                const selectedOrders = audit.selected_orders || [];
+                const blockedRoutes = audit.blocked_routes || [];
+                const recentFill = audit.recent_fill_summary || {};
+                const latestFill = recentFill.latest_fill || null;
+                const latestOrderedRun = audit.latest_ordered_run_summary || null;
+
+                const rejectList = Object.entries(rejects)
+                    .filter(([_, v]) => Number(v) > 0)
+                    .sort((a, b) => Number(b[1]) - Number(a[1]))
+                    .slice(0, 6);
+                const routerList = Object.entries(routerReasonCounts)
+                    .sort((a, b) => Number(b[1]) - Number(a[1]))
+                    .slice(0, 6);
+
+                const recentOrders = runOrders.slice(0, 8);
+                const selectedSymbols = selectedOrders.map(x => `${x.symbol}(${sideZh(x.side)})`).join('、') || '无';
+                const blockedSymbols = blockedRoutes.slice(0, 5).map(x => `${x.symbol}:${explainWithCode(x.reason)}`).join('；') || '无';
+                const topTarget = targetRank.slice(0, 6);
+                const topFused = fusedRank.slice(0, 6);
+
+                let latestFillText = '无';
+                if (latestFill && latestFill.inst_id) {
+                    const rawTs = Number(latestFill.created_ts || 0);
+                    const ms = rawTs > 1e12 ? rawTs : rawTs * 1000;
+                    const d = ms > 0 ? new Date(ms) : null;
+                    const tstr = d ? d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
+                    latestFillText = `${latestFill.inst_id} ${latestFill.side || ''} ${Number(latestFill.notional_usdt || 0).toFixed(2)}U @ ${tstr}`;
+                }
+
+                let latestOrderedRunText = '无';
+                if (latestOrderedRun && latestOrderedRun.run_id) {
+                    const rawTs = Number(latestOrderedRun.last_ts || 0);
+                    const ms = rawTs > 1e12 ? rawTs : rawTs * 1000;
+                    const d = ms > 0 ? new Date(ms) : null;
+                    const tstr = d ? d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
+                    latestOrderedRunText = `run ${latestOrderedRun.run_id}: 成功 ${latestOrderedRun.filled || 0} / 尝试 ${latestOrderedRun.total || 0} @ ${tstr}`;
+                }
+
+                let runResultClass = 'text-yellow';
+                let runResultText = `成功 ${exec.filled||0} / 尝试 ${exec.total||0}`;
+                if (Number(exec.total || 0) === 0) {
+                    runResultClass = '';
+                    runResultText = '本轮无下单尝试';
+                } else if (Number(exec.filled || 0) > 0) {
+                    runResultClass = 'text-green';
+                } else {
+                    runResultClass = 'text-red';
+                }
+
+                const html = `
+                    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:10px;">
+                        <div class="info-item"><div class="label">有没有信号</div><div class="value">${counts.selected || 0} 个候选</div></div>
+                        <div class="info-item"><div class="label">交易成功与否（本轮）</div><div class="value ${runResultClass}">${runResultText}</div></div>
+                    </div>
+
+                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">范围说明</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">本轮run：${runId}（上面的成功/失败只统计本run）</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">最近有下单尝试的一轮：${latestOrderedRunText}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">最近60分钟成交：${Number(recentFill.count_60m || 0)} 笔；24小时成交：${Number(recentFill.count_24h || 0)} 笔</div>
+                        <div style="font-size:0.82rem;">最近一笔真实成交：${latestFillText}</div>
+                    </div>
+
+                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">原因是什么（执行结果）</div>
+                        <div style="font-size:0.84rem;">拒单 ${exec.rejected || 0} 笔，主要原因：${Object.entries(exec.reject_reasons || {}).map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
+                    </div>
+
+                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">被啥拦截（路由/审计）</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">路由：${routerList.map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
+                        <div style="font-size:0.82rem;">审计reject：${rejectList.map(([k,v]) => `${explainWithCode(k)}×${v}`).join('，') || '无'}</div>
+                    </div>
+
+                    <div style="background:#0f172a;padding:10px;border-radius:8px;margin-bottom:8px;">
+                        <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">怎么做的购买决策</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">决策来源：${sourceZh(audit.selection_source)} | 市场状态：${regimeZh(audit.regime)}（${audit.regime || '--'}）</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">本轮目标仓位Top（真实执行基准）：${topTarget.map(x => `${x.symbol}(${(Number(x.target_weight||0)*100).toFixed(2)}%)`).join('；') || '无'}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">融合分数Top（参考）：${topFused.map(x => `${x.rank}.${x.symbol}(${Number(x.score||0).toFixed(3)})`).join('；') || '无'}${fusedFallback ? `（来自 ${fusedSourceRun}，非本run文件）` : ''}</div>
+                        <div style="font-size:0.82rem; margin-bottom:4px;">路由通过：${selectedSymbols}</div>
+                        <div style="font-size:0.82rem;">路由拦截：${blockedSymbols}</div>
+                    </div>
+
+                    <div style="font-size:0.76rem;color:#64748b;margin-bottom:6px;">术语速查：deadband=仓位差静默区；min_notional=最小下单金额；OPEN_LONG_COOLDOWN=开仓冷却；run=一轮完整决策执行。</div>
+
+                    <div style="font-size:0.78rem;color:#64748b;margin-bottom:4px;">本轮订单明细</div>
+                    ${recentOrders.length ? `
+                    <table>
+                        <thead>
+                            <tr><th>币种</th><th>方向</th><th>状态</th><th>原因</th></tr>
+                        </thead>
+                        <tbody>
+                            ${recentOrders.map(o => `
+                                <tr>
+                                    <td>${o.inst_id || '--'}</td>
+                                    <td class="${o.side==='buy'?'text-green':'text-red'}">${sideZh(o.side)}</td>
+                                    <td class="${o.state==='FILLED'?'text-green':(o.state==='REJECTED'?'text-red':'text-yellow')}">${stateZh(o.state)}</td>
+                                    <td style="font-size:0.78rem;color:#94a3b8;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${explainWithCode(o.last_error_code || o.last_error_msg || 'OK')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    ` : '<div class="empty">本轮无订单记录</div>'}
+                `;
+
+                document.getElementById('decision-flow-content').innerHTML = html;
+            } catch (e) {
+                console.error('决策透视加载失败:', e);
+                document.getElementById('decision-flow-content').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+
+        // Load system status
+        async function loadSystemStatus() {
+            try {
+                const [timersRes, riskRes] = await Promise.all([
+                    fetch('/api/timers'),
+                    fetch('/api/auto_risk_guard')
+                ]);
+                
+                const timersData = await timersRes.json();
+                const riskData = await riskRes.json();
+                
+                const timers = timersData.timers || [];
+                const activeTimers = timers.filter(t => t.active).length;
+                const config = riskData.config || {};
+                const nextRun = timersData.next_run || timers.find(t => t.active || t.enabled)?.next_run || timers[0]?.next_run || '未知';
+                
+                const html = `
+                    <table>
+                        <tr>
+                            <td>定时任务</td>
+                            <td class="text-right">${activeTimers}/${timers.length} 运行中</td>
+                        </tr>
+                        <tr>
+                            <td>下次运行</td>
+                            <td class="text-right">${nextRun}</td>
+                        </tr>
+                        <tr>
+                            <td>最大持仓</td>
+                            <td class="text-right">${config.max_positions || '--'}个</td>
+                        </tr>
+                        <tr>
+                            <td>最小下单</td>
+                            <td class="text-right">$${config.min_trade_notional_base || '--'}</td>
+                        </tr>
+                        <tr>
+                            <td>回撤触发线</td>
+                            <td class="text-right">${((config.drawdown_trigger || 0) * 100).toFixed(0)}%</td>
+                        </tr>
+                    </table>
+                `;
+                document.getElementById('system-content').innerHTML = html;
+            } catch (e) {
+                console.error('系统状态加载失败:', e);
+                document.getElementById('system-content').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+        
+        // Load health status
+        async function loadHealthStatus() {
+            try {
+                const res = await fetch('/api/health');
+                const data = await res.json();
+                
+                const status = data.status || 'unknown';
+                const checks = data.checks || [];
+                
+                const statusColors = {
+                    'healthy': '#22c55e',
+                    'warning': '#f59e0b',
+                    'critical': '#ef4444',
+                    'unknown': '#64748b'
+                };
+                
+                const statusText = {
+                    'healthy': '健康',
+                    'warning': '警告',
+                    'critical': '严重',
+                    'unknown': '未知'
+                };
+                
+                const html = `
+                    <div style="margin-bottom: 12px; padding: 10px; background: ${statusColors[status]}22; border-radius: 6px; border-left: 3px solid ${statusColors[status]};">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: ${statusColors[status]};">
+                            ${statusText[status]}
+                        </div>
+                    </div>
+                    <div style="font-size: 0.85rem;">
+                        ${checks.map(c => {
+                            const color = c.status === 'healthy' ? '#22c55e' : (c.status === 'critical' ? '#ef4444' : '#f59e0b');
+                            return `
+                                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1e293b;">
+                                    <span>${c.name}</span>
+                                    <span style="color: ${color};">${c.detail}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+                
+                document.getElementById('health-content').innerHTML = html;
+                document.getElementById('health-update-time').textContent = 
+                    '更新于 ' + new Date().toLocaleString('zh-CN', {hour: '2-digit', minute: '2-digit'});
+            } catch (e) {
+                console.error('健康检查加载失败:', e);
+                document.getElementById('health-content').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+        
+        // Load all
+        async function loadAll() {
+            const accountPromise = loadAccount();
+            const decisionAuditPromise = fetchDecisionAudit();
+
+            await Promise.all([
+                accountPromise,
+                accountPromise.then(data => loadRiskLevel(data)),
+                loadMarketState(),
+                loadPositions(),
+                loadTrades(),
+                decisionAuditPromise.then(data => loadStrategySignals(data)),
+                decisionAuditPromise.then(data => loadDecisionFlow(data)),
+                loadSystemStatus(),
+                loadHealthStatus()
+            ]);
+            
+            document.getElementById('update-time').textContent = 
+                '更新于 ' + new Date().toLocaleString('zh-CN', {
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                });
+        }
+        
+        // Start
+        loadAll();
+        setInterval(loadAll, 30000);
+    </script>
+</body>
+</html>

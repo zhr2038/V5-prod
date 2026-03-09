@@ -18,7 +18,7 @@ echo "✅ Event-driven timer stopped"
 echo ""
 echo "[2/3] Restoring configuration..."
 # Remove event-driven config section
-CONFIG_FILE="/home/admin/clawd/v5-trading-bot/configs/live_20u_real.yaml"
+CONFIG_FILE="/home/admin/clawd/v5-prod/configs/live_20u_real.yaml"
 if grep -q "event_driven:" "$CONFIG_FILE"; then
     # Create temp file without event_driven section
     head -n $(grep -n "event_driven:" "$CONFIG_FILE" | head -1 | cut -d: -f1) "$CONFIG_FILE" > /tmp/config_restore.yaml

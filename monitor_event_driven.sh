@@ -8,7 +8,7 @@ echo "Event-Driven Trading Monitor"
 echo "=================================="
 echo ""
 
-ROOT="/home/admin/clawd/v5-trading-bot"
+ROOT="/home/admin/clawd/v5-prod"
 
 # Check timer status
 echo "[Service Status]"
@@ -49,7 +49,7 @@ import json
 from pathlib import Path
 import time
 
-data = json.loads(Path('/home/admin/clawd/v5-trading-bot/reports/cooldown_state.json').read_text())
+data = json.loads(Path('/home/admin/clawd/v5-prod/reports/cooldown_state.json').read_text())
 now = time.time()
 
 print(f"  Last global trade: {time.strftime('%H:%M:%S', time.localtime(data['last_global_trade_ms']/1000))}")

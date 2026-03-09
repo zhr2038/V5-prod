@@ -20,6 +20,8 @@ Live runtime:
 Required operational scripts:
 
 - `scripts/run_hourly_live_window.sh`
+- `scripts/collect_funding_sentiment.py`
+- `scripts/collect_rss_sentiment.py`
 - `scripts/bills_sync.py`
 - `scripts/ledger_once.py`
 - `scripts/reconcile_guard_once.py`
@@ -49,10 +51,13 @@ Primary production:
 
 - `deploy/systemd/v5-prod.user.service`
 - `deploy/systemd/v5-prod.user.timer`
+- `deploy/systemd/v5-sentiment-collect.service`
+- `deploy/systemd/v5-sentiment-collect.timer`
 
 Important:
 
 - `deploy/install_systemd.sh` installs these units, but does not auto-enable the live production timer.
+- `deploy/sync_prod_release.py` syncs the production-only release payload to the target host.
 - enabling `v5-prod.user.timer` should remain an explicit operator action.
 
 Safety and support:
@@ -68,6 +73,7 @@ Safety and support:
 - `deploy/systemd/v5-event-driven.service`
 - `deploy/systemd/v5-event-driven.timer`
 - `deploy/install_systemd.sh`
+- `deploy/sync_prod_release.py`
 
 ## Required source directories
 

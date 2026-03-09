@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>V5 交易执行运行台</title>
+  <style>
+    :root{--bg:#07131f;--bg2:#0d2030;--panel:rgba(11,24,38,.88);--line:rgba(148,173,201,.14);--text:#edf4fb;--muted:#93a9c0;--green:#38d78a;--amber:#ffbf59;--red:#ff7171;--blue:#67a7ff;--cyan:#4fd6ff;--shadow:0 24px 50px rgba(0,0,0,.28)}
+    *{margin:0;padding:0;box-sizing:border-box}body{font:15px/1.5 "IBM Plex Sans","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;color:var(--text);background:radial-gradient(circle at 10% 0,rgba(79,214,255,.18),transparent 28%),radial-gradient(circle at 90% 10%,rgba(56,215,138,.14),transparent 22%),radial-gradient(circle at 50% 100%,rgba(255,191,89,.12),transparent 20%),linear-gradient(160deg,var(--bg),#08111a 48%,var(--bg2));min-height:100vh}
+    body:before,body:after{content:"";position:fixed;pointer-events:none;filter:blur(18px);opacity:.3;z-index:0}body:before{top:80px;right:-80px;width:280px;height:280px;background:radial-gradient(circle,rgba(103,167,255,.3),transparent 66%)}body:after{bottom:-80px;left:-50px;width:260px;height:260px;background:radial-gradient(circle,rgba(255,191,89,.22),transparent 66%)}
+    .wrap{position:relative;z-index:1;max-width:1460px;margin:0 auto;padding:18px}
+    .panel{background:linear-gradient(180deg,rgba(13,28,44,.95),rgba(8,18,30,.92));border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);padding:20px;overflow:hidden}
+    .panel+.panel,.grid{margin-top:18px}.hero,.grid,.wide{display:grid;gap:18px}.hero{grid-template-columns:1.45fr .85fr}.grid,.wide{grid-template-columns:repeat(2,minmax(0,1fr))}.wide{grid-template-columns:1.22fr .92fr}
+    .eyebrow{display:inline-flex;padding:6px 11px;border-radius:999px;background:rgba(79,214,255,.1);color:var(--cyan);font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}
+    h1{font-size:clamp(34px,5vw,60px);line-height:1.02;letter-spacing:-.05em;margin:12px 0}p.lead{max-width:760px;color:#bed0e3}
+    .headbox{display:flex;flex-direction:column;justify-content:space-between;min-height:180px;padding:18px;border-radius:18px;background:linear-gradient(150deg,rgba(15,34,53,.98),rgba(7,16,27,.84))}
+    .mini{color:var(--muted);font-size:13px}.big{font-size:clamp(24px,3vw,36px);font-weight:700;line-height:1.1}
+    .pills{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;border:1px solid transparent;font-size:13px;font-weight:600}.pill:before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}.pos{color:var(--green);background:rgba(56,215,138,.12);border-color:rgba(56,215,138,.2)}.warn{color:var(--amber);background:rgba(255,191,89,.12);border-color:rgba(255,191,89,.2)}.neg{color:var(--red);background:rgba(255,113,113,.12);border-color:rgba(255,113,113,.2)}.info{color:var(--cyan);background:rgba(79,214,255,.12);border-color:rgba(79,214,255,.2)}.mute{color:#c3d2e2;background:rgba(147,169,192,.11);border-color:rgba(147,169,192,.18)}
+    .title{display:flex;justify-content:space-between;gap:12px;margin-bottom:14px}.k{color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}.t{font-size:21px;font-weight:700;letter-spacing:-.03em}.sub{color:var(--muted);font-size:13px}.meta{color:var(--muted);font-size:13px;white-space:nowrap}
+    .loading,.empty,.error{padding:18px;border-radius:16px;border:1px dashed rgba(148,173,201,.18);background:rgba(8,20,31,.6);color:#bfd0e0}.error{color:#ffd2d2;border-color:rgba(255,113,113,.2);background:rgba(66,21,21,.25)}
+    .heroBox{display:grid;gap:16px}.topline{display:grid;grid-template-columns:1.25fr .9fr;gap:14px;padding:18px;border-radius:20px;background:radial-gradient(circle at top right,rgba(103,167,255,.18),transparent 36%),linear-gradient(145deg,rgba(15,35,54,.98),rgba(7,16,27,.9))}.label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.1em}.equity{font-size:clamp(40px,5vw,62px);font-weight:700;line-height:1;letter-spacing:-.06em;margin-top:8px}.muted{color:#bfd0e0}
+    .sidecol,.metricWall,.pulseWall,.cards2,.signalGrid,.auditTop{display:grid;gap:12px}.metricWall{grid-template-columns:repeat(4,minmax(0,1fr))}.pulseWall,.cards2,.signalGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.auditTop{grid-template-columns:repeat(4,minmax(0,1fr))}
+    .card{padding:15px;border-radius:16px;background:rgba(8,20,31,.65);border:1px solid rgba(148,173,201,.09)}.card .v{font-size:22px;font-weight:700;line-height:1.1;margin-top:8px}.card .s{color:#bfd0e0;font-size:13px;margin-top:7px}
+    .rows,.timeline{display:grid;gap:12px}.row{padding:15px;border-radius:16px;background:rgba(8,20,31,.62);border:1px solid rgba(148,173,201,.09)}.rowTop,.rowBot{display:flex;justify-content:space-between;gap:12px}.rowTop{align-items:center;margin-bottom:10px}.name{display:flex;align-items:center;gap:10px;font-weight:700}.dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(180deg,var(--amber),#ff8f5a);box-shadow:0 0 15px rgba(255,191,89,.35)}.rowBot{margin-top:10px;color:#bfd0e0;font-size:13px}
+    .bar{height:10px;border-radius:999px;background:rgba(148,173,201,.12);overflow:hidden}.fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--cyan),var(--blue))}
+    .chart{padding:16px;border-radius:20px;background:linear-gradient(180deg,rgba(10,24,38,.9),rgba(7,16,27,.76));border:1px solid rgba(148,173,201,.1)}.chartBox{position:relative;min-height:290px;border-radius:16px;overflow:hidden;background:linear-gradient(180deg,rgba(79,214,255,.03),transparent),repeating-linear-gradient(to bottom,rgba(255,255,255,.04) 0,rgba(255,255,255,.04) 1px,transparent 1px,transparent 54px);border:1px solid rgba(148,173,201,.08)}.chartBox svg{display:block;width:100%;height:290px}.axis{position:absolute;left:16px;right:16px;bottom:14px;display:flex;justify-content:space-between;color:var(--muted);font-size:12px}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px}.list{display:grid;gap:10px}.item{display:flex;justify-content:space-between;gap:12px;padding-bottom:10px;border-bottom:1px solid rgba(148,173,201,.08)}.item:last-child{padding-bottom:0;border-bottom:0}.rk{color:var(--muted);width:24px;flex:0 0 auto}.body{min-width:0;flex:1}.body b{font-size:14px}.body span{display:block;margin-top:4px;color:#bfd0e0;font-size:12px}.val{font-size:13px;font-weight:700;white-space:nowrap}
+    .scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:620px}th,td{padding:11px 9px;text-align:left;border-bottom:1px solid rgba(148,173,201,.1)}th{color:var(--muted);font-size:11px;letter-spacing:.14em;text-transform:uppercase}tr:last-child td{border-bottom:0}.r{text-align:right}
+    .timeItem{position:relative;padding:14px 14px 14px 18px;border-radius:16px;background:rgba(8,20,31,.62);border:1px solid rgba(148,173,201,.09)}.timeItem:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:999px;background:linear-gradient(180deg,var(--cyan),var(--green))}.timeItem .tm{color:var(--muted);font-size:12px;margin-bottom:5px}
+    @media (max-width:1220px){.hero,.grid,.wide{grid-template-columns:1fr}.metricWall,.stats,.auditTop,.pulseWall,.cards2,.signalGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media (max-width:760px){.wrap{padding:12px}.panel{padding:16px}.topline,.metricWall,.stats,.auditTop,.pulseWall,.cards2,.signalGrid{grid-template-columns:1fr}.title,.rowTop,.rowBot{flex-direction:column;align-items:flex-start}.meta{white-space:normal}.chartBox{min-height:240px}.chartBox svg{height:240px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="panel hero">
+      <div>
+        <span class="eyebrow">V5 Live Operations</span>
+        <h1>交易执行运行台</h1>
+        <p class="lead">把账户、风控、市场判断和真实下单放在一张面板里，先看结果，再看程序为什么这么做。</p>
+        <div class="pills">
+          <span class="pill mute" id="mode-pill">模式 --</span>
+          <span class="pill mute" id="health-pill">健康 --</span>
+          <span class="pill mute" id="market-pill">市场 --</span>
+          <span class="pill mute" id="timer-pill">任务 --</span>
+        </div>
+      </div>
+      <div class="headbox">
+        <div>
+          <div class="mini">页面状态</div>
+          <div class="big" id="page-status">初始化中</div>
+          <div class="muted" id="page-note" style="margin-top:8px">正在等待后端返回</div>
+        </div>
+        <div class="mini" id="update-time">页面更新时间 --</div>
+      </div>
+    </section>
+
+    <section class="hero">
+      <div class="panel"><div class="title"><div><div class="k">Capital Overview</div><div class="t">账户总览</div><div class="sub">先看权益、暴露和节奏。</div></div><div class="meta" id="overview-meta">--</div></div><div id="overview-content" class="loading">正在加载账户概览...</div></div>
+      <div class="panel"><div class="title"><div><div class="k">Execution Pulse</div><div class="t">执行脉冲</div><div class="sub">这一轮到底有没有成交。</div></div><div class="meta" id="pulse-meta">--</div></div><div id="pulse-content" class="loading">正在加载执行脉冲...</div></div>
+    </section>
+
+    <section class="wide">
+      <div class="panel"><div class="title"><div><div class="k">Equity Curve</div><div class="t">权益曲线</div><div class="sub">近 48 小时资金轨迹。</div></div><div class="meta" id="equity-meta">--</div></div><div id="equity-content" class="loading">正在加载权益曲线...</div></div>
+      <div class="panel"><div class="title"><div><div class="k">Market + Guard</div><div class="t">市场与风控</div><div class="sub">程序如何看市场、又允许自己冒多大风险。</div></div><div class="meta" id="market-meta">--</div></div><div id="market-risk-content" class="loading">正在加载市场与风控...</div></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel"><div class="title"><div><div class="k">Positions</div><div class="t">当前持仓</div><div class="sub">现有风险敞口与仓位状态。</div></div><div class="meta" id="positions-meta">--</div></div><div id="positions-content" class="loading">正在加载持仓...</div></div>
+      <div class="panel"><div class="title"><div><div class="k">Recent Trades</div><div class="t">最近成交</div><div class="sub">快速确认成交质量与频率。</div></div><div class="meta" id="trades-meta">--</div></div><div id="trades-content" class="loading">正在加载成交...</div></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel"><div class="title"><div><div class="k">Signals</div><div class="t">信号与目标</div><div class="sub">买卖候选、目标权重和 alpha 排序。</div></div><div class="meta" id="signals-meta">--</div></div><div id="signals-content" class="loading">正在加载信号...</div></div>
+      <div class="panel"><div class="title"><div><div class="k">Execution Audit</div><div class="t">执行审计</div><div class="sub">解释为什么下单，或者为什么没有下单。</div></div><div class="meta" id="decision-meta">--</div></div><div id="decision-flow-content" class="loading">正在加载执行审计...</div></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel"><div class="title"><div><div class="k">Schedulers</div><div class="t">定时器与研究管线</div><div class="sub">交易任务和旁路分析任务是否都在跑。</div></div><div class="meta" id="system-meta">--</div></div><div id="system-content" class="loading">正在加载系统任务...</div></div>
+      <div class="panel"><div class="title"><div><div class="k">Health</div><div class="t">系统健康</div><div class="sub">数据库、交易所和机器状态。</div></div><div class="meta" id="health-meta">--</div></div><div id="health-content" class="loading">正在加载健康检查...</div></div>
+    </section>
+  </div>
+  <script>
+    const POLL=30000; let busy=false;
+    const cls={positive:'pos',warning:'warn',negative:'neg',info:'info',neutral:'mute'};
+    const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const num=v=>Number.isFinite(Number(v))?Number(v):0;
+    const money=(v,d=2)=>'$'+num(v).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d});
+    const pct=(v,d=2)=>`${num(v)>0?'+':''}${num(v).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d})}%`;
+    const fmt=(v,d=2)=>num(v).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d});
+    const dtt=v=>{if(!v)return'--';const t=String(v),x=new Date(t.includes('T')?t:t.replace(' ','T'));return Number.isNaN(x.getTime())?t:x.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})};
+    const short=v=>{if(!v)return'--';const t=String(v),x=new Date(t.includes('T')?t:t.replace(' ','T'));return Number.isNaN(x.getTime())?t:x.toLocaleString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})};
+    const setText=(id,text)=>{const el=document.getElementById(id);if(el)el.textContent=text};
+    const setHtml=(id,html)=>{const el=document.getElementById(id);if(el)el.innerHTML=html};
+    const tone=s=>{s=String(s||'').toLowerCase();if(['healthy','ok','ready','running','active','enabled','live'].includes(s))return'positive';if(['warning','idle','unknown','no_data','sideways'].includes(s))return'warning';if(['critical','error','failed','disabled','riskoff'].includes(s))return'negative';return'info'};
+    const riskTone=s=>({PROTECT:'positive',DEFENSE:'warning',ATTACK:'negative',NEUTRAL:'info'}[String(s||'').toUpperCase()]||'neutral');
+    const pill=(text,kind='neutral')=>`<span class="pill ${cls[kind]||cls.neutral}">${esc(text)}</span>`;
+    const empty=t=>`<div class="empty">${esc(t)}</div>`;
+    const error=(t,e)=>`<div class="error"><strong>${esc(t)}</strong><div style="margin-top:8px">${esc(e&&e.message?e.message:e||'未知错误')}</div></div>`;
+    async function json(url){const r=await fetch(`${url}${url.includes('?')?'&':'?'}_=${Date.now()}`,{cache:'no-store'});if(!r.ok)throw new Error(`${url} 返回 ${r.status}`);return r.json()}
+    function head(d,h,r,f){
+      const m=(d&&d.systemStatus)||{},mk=(d&&d.marketState)||{},ts=((d&&d.timers)||{}).timers||[],next=((d&&d.timers)||{}).next_run||(ts[0]&&ts[0].next_run)||'--';
+      setText('page-status',f.length?'部分数据降级':'实时视图已同步');
+      setText('page-note',f.length?`有 ${f.length} 个接口暂不可用：${f.map(x=>x.label).join('、')}`:'所有关键接口都已更新');
+      setText('update-time','页面更新时间 '+new Date().toLocaleString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+      setText('mode-pill',`模式 ${String(m.mode||'--').toUpperCase()}`);document.getElementById('mode-pill').className=`pill ${cls[m.mode==='live'?'positive':'warning']}`;
+      setText('health-pill',`健康 ${(h&&h.status)||'--'}`);document.getElementById('health-pill').className=`pill ${cls[tone((f.length&&'warning')||(h&&h.status)||'unknown')]}`;
+      setText('market-pill',`市场 ${mk.state||'--'}`);document.getElementById('market-pill').className=`pill ${cls[tone(mk.state)]}`;
+      setText('timer-pill',`任务 ${next==='--'?'待确认':short(next)}`);document.getElementById('timer-pill').className=`pill ${cls[ts.some(x=>x.active)?'info':'warning']}`;
+      setText('overview-meta',m.lastUpdate?`账户更新 ${short(m.lastUpdate)}`:'--');
+      setText('pulse-meta',d&&d.trades?`成交 ${d.trades.length} 笔`:'--');
+      setText('market-meta',r&&r.last_update?`风控更新 ${short(r.last_update)}`:'--');
+      setText('positions-meta',d&&d.positions?`${d.positions.length} 个仓位`:'--');
+      setText('trades-meta',d&&d.trades?`最近 ${Math.min(d.trades.length,20)} 笔`:'--');
+      setText('signals-meta',r&&r.current_level?`档位 ${r.current_level}`:'--');
+      setText('decision-meta',dtt((r&&r.last_update)||(h&&h.timestamp)||'')); setText('system-meta',next==='--'?'--':`下次 ${short(next)}`); setText('health-meta',h&&h.timestamp?dtt(h.timestamp):'--');
+    }
+    function overview(d,r){
+      if(!d||!d.account)return empty('账户数据暂不可用');
+      const a=d.account,m=d.systemStatus||{},mk=d.marketState||{},lv=(r&&(r.current_level||((r.config||{}).name)))||'--',next=((d.timers||{}).next_run)||((((d.timers||{}).timers||[])[0]||{}).next_run)||'--';
+      const er=a.totalEquity?num(a.positionsValue)/num(a.totalEquity)*100:0,cr=a.totalEquity?num(a.cash)/num(a.totalEquity)*100:0;
+      return `<div class="heroBox"><div class="topline"><div><div class="label">当前总权益</div><div class="equity">${money(a.totalEquity)}</div><div class="muted" style="margin-top:12px"><span class="${num(a.totalPnlPercent)>=0?'pos':'neg'}">总收益率 ${pct(a.totalPnlPercent)}</span> <span style="margin-left:14px">最大回撤 ${pct(a.maxDrawdown)}</span></div></div><div class="sidecol"><div class="card"><div class="label">已实现盈亏</div><div class="v ${num(a.totalPnl)>=0?'pos':'neg'}">${money(a.totalPnl)}</div><div class="s">累计成交 ${fmt(a.totalTrades,0)} 笔</div></div><div class="card"><div class="label">下一次执行</div><div class="v">${esc(next==='--'?'--':dtt(next))}</div><div class="s">市场 ${esc(mk.state||'--')} / 档位 ${esc(lv)}</div></div></div></div><div class="metricWall"><div class="card"><div class="label">现金余额</div><div class="v">${money(a.cash)}</div><div class="s">现金占比 ${pct(cr,1)}</div></div><div class="card"><div class="label">持仓市值</div><div class="v">${money(a.positionsValue)}</div><div class="s">风险暴露 ${pct(er,1)}</div></div><div class="card"><div class="label">风控档位</div><div class="v">${esc(lv)}</div><div class="s">${esc(((r||{}).config||{}).description||'等待风控描述')}</div></div><div class="card"><div class="label">市场状态</div><div class="v">${esc(mk.state||'--')}</div><div class="s">${esc(mk.description||'等待市场描述')}</div></div></div><div class="pills">${pill(`程序 ${m.isRunning?'运行中':'未运行'}`,m.isRunning?'positive':'negative')}${pill(`风控 ${lv}`,riskTone(lv))}${pill(`市场 ${mk.state||'--'}`,tone(mk.state))}${pill(`更新时间 ${m.lastUpdate?short(m.lastUpdate):'--'}`,'neutral')}</div></div>`;
+    }
+    function pulse(d,a,h){
+      if(!a)return empty('执行审计数据暂不可用');
+      const c=a.counts||{},e=a.execution_summary||{},b=Array.isArray(a.blocked_routes)?a.blocked_routes.length:0,lf=((a.recent_fill_summary||{}).latest_fill)||null,lr=a.latest_ordered_run_summary||null,rr=Object.entries(a.router_reason_counts||{}).sort((x,y)=>num(y[1])-num(x[1]))[0];
+      const fill=lf&&lf.inst_id?`${lf.inst_id} ${String(lf.side||'').toUpperCase()} ${money(lf.notional_usdt)} / ${dtt(lf.created_ts)}`:'最近没有成交记录';
+      const run=lr&&lr.run_id?`run ${lr.run_id}，尝试 ${num(lr.total)} 笔，成交 ${num(lr.filled)} 笔`:'最近没有可统计的订单轮次';
+      return `<div class="pulseWall"><div class="card"><div class="label">本轮候选</div><div class="v">${fmt(c.selected,0)}</div><div class="s">Universe ${fmt(c.universe,0)} / 已评分 ${fmt(c.scored,0)}</div></div><div class="card"><div class="label">实际成交</div><div class="v">${fmt(e.filled,0)}</div><div class="s">尝试 ${fmt(e.total,0)} / 拒单 ${fmt(e.rejected,0)}</div></div><div class="card"><div class="label">路由拦截</div><div class="v">${fmt(b,0)}</div><div class="s">${rr?`${esc(rr[0])} × ${fmt(rr[1],0)}`:'当前没有明显拦截原因'}</div></div><div class="card"><div class="label">系统健康</div><div class="v">${esc(String((h&&h.status)||'--').toUpperCase())}</div><div class="s">${d&&d.systemStatus&&d.systemStatus.errors&&d.systemStatus.errors.length?esc(d.systemStatus.errors[0]):'未发现系统级错误'}</div></div></div><div class="rows"><div class="row"><b>最新成交</b><div class="muted" style="margin-top:6px">${esc(fill)}</div></div><div class="row"><b>最新有订单的一轮</b><div class="muted" style="margin-top:6px">${esc(run)}</div></div><div class="row"><b>决策语境</b><div class="muted" style="margin-top:6px">run ${esc(a.run_id||'--')}，来源 ${esc(String(a.selection_source||'--').toUpperCase())}，regime ${esc(a.regime||'--')}</div></div></div>`;
+    }
+    function svg(values){
+      if(!values||!values.length)return'';const w=960,h=290,p=20,min=Math.min(...values),max=Math.max(...values),r=max-min||1,pts=values.map((v,i)=>[p+i/Math.max(values.length-1,1)*(w-p*2),p+(max-v)/r*(h-p*2)]);
+      const line=pts.map(x=>`${x[0].toFixed(1)},${x[1].toFixed(1)}`).join(' '),area=[`M ${pts[0][0].toFixed(1)} ${h-p}`,...pts.map(x=>`L ${x[0].toFixed(1)} ${x[1].toFixed(1)}`),`L ${pts[pts.length-1][0].toFixed(1)} ${h-p}`,'Z'].join(' '),last=pts[pts.length-1];
+      return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="权益曲线"><defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(79,214,255,.28)"/><stop offset="100%" stop-color="rgba(79,214,255,.02)"/></linearGradient><linearGradient id="l" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#4fd6ff"/><stop offset="100%" stop-color="#67a7ff"/></linearGradient></defs><path d="${area}" fill="url(#a)"/><polyline fill="none" stroke="url(#l)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="${line}"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="7" fill="#4fd6ff" stroke="#edf4fb" stroke-width="3"/></svg>`;
+    }
+    function equity(c){
+      if(!c||!Array.isArray(c.values)||!c.values.length)return empty('没有可展示的权益曲线数据');
+      setText('equity-meta',`${c.values.length} 个采样点`);
+      const ds=Array.isArray(c.dates)?c.dates:[],fd=ds.length?dtt(ds[0]):'--',ld=ds.length?dtt(ds[ds.length-1]):'--';
+      return `<div class="chart"><div class="chartBox">${svg(c.values)}<div class="axis"><span>${esc(fd)}</span><span>${esc(ld)}</span></div></div><div class="stats"><div class="card"><div class="label">起始权益</div><div class="v">${money(c.initial)}</div><div class="s">曲线区间开始</div></div><div class="card"><div class="label">当前权益</div><div class="v">${money(c.current)}</div><div class="s">曲线区间结束</div></div><div class="card"><div class="label">区间收益率</div><div class="v ${num(c.total_return)>=0?'pos':'neg'}">${pct(c.total_return)}</div><div class="s">近 ${fmt(c.days,0)} 天聚合</div></div><div class="card"><div class="label">采样点数</div><div class="v">${fmt(c.values.length,0)}</div><div class="s">点越密，越能看清波动</div></div></div></div>`;
+    }
+    function market(d,r){
+      const m=(d&&d.marketState)||{},cfg=(r&&r.config)||{},mt=(r&&r.metrics)||{},his=(r&&r.history)||[],votes=m.votes||{},ve=Object.entries(votes),mul=Math.max(0,Math.min(100,num(m.position_multiplier)*100));
+      const voteHtml=ve.length?ve.map(([n,p])=>{const c=num(p&&p.confidence)*100,k=p&&p.error?'negative':(c>=55?'positive':'warning');return `<div class="row"><div class="rowTop"><div class="name"><span class="dot"></span>${esc(n.toUpperCase())}</div>${pill((p&&p.error)||`${(p&&p.state)||'--'} / ${pct(c,1)}`,k)}</div><div class="bar"><div class="fill" style="width:${Math.max(6,Math.min(100,c||0))}%"></div></div><div class="rowBot"><span>权重 ${fmt(num(p&&p.weight),2)}</span><span>${esc((p&&p.raw_state)||'无原始状态')}</span></div></div>`}).join(''):empty('没有 market vote 数据');
+      const hist=his.length?his.slice().reverse().map(x=>`<div class="timeItem"><div><b>${esc(x.from||'--')} → ${esc(x.to||'--')}</b></div><div class="tm">${esc(dtt(x.ts))}</div><div class="muted">${esc(x.reason||'没有记录原因')}</div></div>`).join(''):empty('最近没有风控切换记录');
+      return `<div class="cards2"><div class="card"><div class="label">市场判断</div><div class="pills" style="margin:10px 0 12px">${pill(`状态 ${m.state||'--'}`,tone(m.state))}${pill(`风控 ${(r&&r.current_level)||'--'}`,riskTone(r&&r.current_level))}</div><div class="muted">${esc(m.description||'当前没有市场状态描述')}</div><div style="margin-top:14px"><div class="label" style="margin-bottom:8px">Position Multiplier</div><div class="bar"><div class="fill" style="width:${Math.max(5,mul)}%"></div></div><div class="s">仓位乘数 ${pct(mul,1)}，方法 ${esc(m.method||'--')}，final score ${fmt(m.final_score,3)}</div></div><div class="pills" style="margin-top:12px">${(m.alerts||[]).length?(m.alerts||[]).map(x=>pill(x,'warning')).join(''):pill('暂无市场告警','neutral')}</div></div><div class="card"><div class="label">自动风控配置</div><div class="list" style="margin-top:10px"><div class="item"><div class="body"><b>最大持仓数</b><span>${esc(cfg.description||'无描述')}</span></div><div class="val">${fmt(cfg.max_positions,0)}</div></div><div class="item"><div class="body"><b>最小下单额</b><span>min_trade_notional_base</span></div><div class="val">${money(cfg.min_trade_notional_base)}</div></div><div class="item"><div class="body"><b>回撤触发线</b><span>drawdown_trigger</span></div><div class="val">${pct(num(cfg.drawdown_trigger)*100,0)}</div></div><div class="item"><div class="body"><b>最近成交转化率</b><span>last_conversion_rate</span></div><div class="val">${pct(num(mt.last_conversion_rate)*100,1)}</div></div></div></div></div><div class="card"><div class="label">市场投票</div><div class="rows" style="margin-top:10px">${voteHtml}</div></div><div class="card"><div class="label">风控切换历史</div><div class="timeline" style="margin-top:10px">${hist}</div></div>`;
+    }
+    function positions(d){
+      const ps=(d&&d.positions)||[]; if(!ps.length)return empty('当前没有持仓'); const max=Math.max(...ps.map(x=>num(x.value)),1);
+      return `<div class="rows">${ps.map(p=>`<div class="row"><div class="rowTop"><div class="name"><span class="dot"></span>${esc(p.symbol||'--')}</div>${pill(`PnL ${pct(p.pnlPercent)}`,num(p.pnl)>=0?'positive':'negative')}</div><div class="bar"><div class="fill" style="width:${Math.max(8,num(p.value)/max*100)}%"></div></div><div class="rowBot"><span>数量 ${fmt(p.qty,6)}</span><span>均价 ${money(p.avgPrice,4)} / 现价 ${money(p.currentPrice,4)}</span><span>${money(p.value)} / ${money(p.pnl)}</span></div></div>`).join('')}</div>`;
+    }
+    function trades(d){
+      const ts=(d&&d.trades)||[]; if(!ts.length)return empty('最近没有成交记录');
+      return `<div class="scroll"><table><thead><tr><th>时间</th><th>币种</th><th>方向</th><th class="r">金额</th><th class="r">手续费</th><th>类型</th></tr></thead><tbody>${ts.slice(0,10).map(t=>`<tr><td>${esc(dtt(t.timestamp))}</td><td>${esc(t.symbol||'--')}</td><td class="${String(t.side).toLowerCase()==='buy'?'pos':'neg'}">${esc(String(t.side||'--').toUpperCase())}</td><td class="r">${money(t.value)}</td><td class="r">${money(t.fee)}</td><td>${esc(t.type||'--')}</td></tr>`).join('')}</tbody></table></div>`;
+    }
+    function orderList(arr,valFn,emptyText){
+      if(!arr.length)return empty(emptyText);
+      return `<div class="list">${arr.map((x,i)=>`<div class="item"><div class="rk">${i+1}</div><div class="body"><b>${esc(x.title)}</b><span>${esc(x.text)}</span></div><div class="val">${valFn(x)}</div></div>`).join('')}</div>`;
+    }
+    function signals(d,a){
+      if(!d&&!a)return empty('没有可展示的信号数据');
+      const ac=(a&&a.actionable_signals)||{},bu=(ac.buy_candidates||[]).slice(0,6).map(x=>({title:x.symbol||'--',text:`方向 ${String(x.side||'').toUpperCase()}`,value:num(x.score)})),se=(ac.sell_candidates||[]).slice(0,6).map(x=>({title:x.symbol||'--',text:`方向 ${String(x.side||'').toUpperCase()}`,value:num(x.score)})),tg=((a&&a.target_rank)||[]).slice(0,6).map(x=>({title:x.symbol||'--',text:'目标仓位',value:num(x.target_weight)})),al=((d&&d.alphaScores)||[]).slice(0,6).map(x=>({title:x.symbol||'--',text:'综合分数',value:num(x.score)})),held=ac.held_symbols||[];
+      return `<div class="pills">${held.length?held.map(x=>pill(`已持有 ${x}`,'neutral')).join(''):pill('当前没有持有标的映射','neutral')}</div><div class="signalGrid" style="margin-top:12px"><div class="card"><div class="label">买入候选</div>${orderList(bu,x=>fmt(x.value,3),'当前没有新的买入候选')}</div><div class="card"><div class="label">卖出候选</div>${orderList(se,x=>fmt(x.value,3),'当前没有卖出候选')}</div><div class="card"><div class="label">目标权重</div>${orderList(tg,x=>pct(x.value*100,1),'本轮没有目标权重结果')}</div><div class="card"><div class="label">Alpha 排名</div>${orderList(al,x=>fmt(x.value,3),'没有 alpha 分数数据')}</div></div>`;
+    }
+    function audit(a){
+      if(!a)return empty('执行审计数据暂不可用');
+      const c=a.counts||{},e=a.execution_summary||{},rej=a.rejects||{},br=(a.blocked_routes||[]),rr=Object.entries(a.router_reason_counts||{}).sort((x,y)=>num(y[1])-num(x[1])),ro=a.run_orders||[],so=a.selected_orders||[];
+      const ss=so.length?so.slice(0,4).map(x=>`${x.symbol} ${String(x.side||'').toUpperCase()} ${money(x.notional)}`).join(' / '):'本轮没有 create 动作';
+      const bs=br.length?br.slice(0,4).map(x=>`${x.symbol} · ${x.reason}`).join(' / '):'当前没有 blocked route';
+      const rs=Object.entries(rej).length?Object.entries(rej).slice(0,4).map(([k,v])=>`${k} × ${v}`).join(' / '):'没有 audit reject';
+      setText('decision-meta',a.timestamp?`run ${a.run_id||'--'} / ${short(a.timestamp)}`:`run ${a.run_id||'--'}`);
+      return `<div class="auditTop"><div class="card"><div class="label">Universe</div><div class="v">${fmt(c.universe,0)}</div><div class="s">已评分 ${fmt(c.scored,0)}</div></div><div class="card"><div class="label">本轮入选</div><div class="v">${fmt(c.selected,0)}</div><div class="s">pre-risk ${fmt(c.targets_pre_risk,0)}</div></div><div class="card"><div class="label">实际成交</div><div class="v">${fmt(e.filled,0)}</div><div class="s">尝试 ${fmt(e.total,0)} / reject ${fmt(e.rejected,0)}</div></div><div class="card"><div class="label">路由拦截</div><div class="v">${fmt(br.length,0)}</div><div class="s">selection ${esc(String(a.selection_source||'--').toUpperCase())}</div></div></div><div class="cards2" style="margin-top:12px"><div class="card"><div class="label">本轮摘要</div><div class="muted" style="margin-top:10px">${esc(ss)}</div><div class="s">audit reject：${esc(rs)}</div></div><div class="card"><div class="label">被挡住的原因</div><div class="muted" style="margin-top:10px">${esc(bs)}</div><div class="s">${rr.length?rr.map(([k,v])=>`${k} × ${v}`).join(' / '):'当前没有 router reason count'}</div></div></div><div class="card" style="margin-top:12px"><div class="label">本轮订单结果</div>${ro.length?`<div class="scroll" style="margin-top:10px"><table><thead><tr><th>时间</th><th>标的</th><th>方向</th><th>状态</th><th class="r">金额</th><th>原因</th></tr></thead><tbody>${ro.slice(0,8).map(o=>`<tr><td>${esc(dtt(o.created_ts))}</td><td>${esc(o.inst_id||'--')}</td><td class="${String(o.side).toLowerCase()==='buy'?'pos':'neg'}">${esc(String(o.side||'--').toUpperCase())}</td><td>${esc(o.state||'--')}</td><td class="r">${money(o.notional_usdt)}</td><td>${esc(o.last_error_code||o.last_error_msg||'OK')}</td></tr>`).join('')}</tbody></table></div>`:empty('这一轮没有订单结果记录')}</div>`;
+    }
+    function system(d){
+      if(!d)return empty('系统任务数据暂不可用');
+      const td=d.timers||{},ts=td.timers||[],rc=Array.isArray((d.reflectionReports||{}).reports)?d.reflectionReports.reports.length:0;
+      const pipe=[['成本校准',(d.costCalibration||{}).status||'unknown'],['IC 诊断',(d.icDiagnostics||{}).status||'unknown'],['ML 训练',(d.mlTraining||{}).status||'unknown'],['复盘报告',`${rc} 份`]];
+      return `<div class="rows">${ts.length?ts.map(t=>`<div class="row"><div class="rowTop"><div><b>${esc(t.desc||t.name||'--')}</b><div class="muted" style="margin-top:4px">${esc(t.name||'--')}</div></div><div>${pill(t.active?'运行中':(t.enabled?'已启用':'未启用'),t.active?'positive':(t.enabled?'warning':'negative'))}</div></div><div class="rowBot"><span>${esc(t.next_run||'--')}</span><span>${esc(t.time_left||'--')}</span></div></div>`).join(''):empty('没有定时器信息')}</div><div class="signalGrid" style="margin-top:12px">${pipe.map(x=>`<div class="card"><div class="label">${esc(x[0])}</div><div class="pills" style="margin-top:10px">${pill(x[1],tone(x[1]))}</div></div>`).join('')}</div>`;
+    }
+    function health(h,d){
+      if(!h)return empty('健康检查暂不可用'); const cs=h.checks||[],errs=((d&&d.systemStatus&&d.systemStatus.errors)||[]);
+      return `<div class="card"><div class="label">总体健康度</div><div class="pills" style="margin:10px 0 12px">${pill(String(h.status||'--').toUpperCase(),tone(h.status))}${pill(`检查项 ${cs.length}`,'info')}</div><div class="muted">最近检查时间 ${esc(dtt(h.timestamp))}</div></div><div class="rows" style="margin-top:12px">${cs.length?cs.map(c=>`<div class="row"><div class="rowTop"><div><b>${esc(c.name||'--')}</b><div class="muted" style="margin-top:4px">${esc(c.detail||'--')}</div></div><div>${pill(c.status||'--',tone(c.status))}</div></div></div>`).join(''):empty('没有健康检查项')}</div>${errs.length?`<div class="card" style="margin-top:12px"><div class="label">系统错误</div><div class="list" style="margin-top:10px">${errs.map(e=>`<div class="item"><div class="body"><b>systemStatus.errors</b><span>${esc(e)}</span></div><div class="val neg">ERROR</div></div>`).join('')}</div></div>`:''}`;
+    }
+    async function loadAll(){
+      if(busy)return; busy=true; const fail=[];
+      try{
+        const [dr,ar,hr,rr,cr]=await Promise.allSettled([json('/api/dashboard'),json('/api/decision_audit'),json('/api/health'),json('/api/auto_risk_guard'),json('/api/equity_curve')]);
+        const d=dr.status==='fulfilled'?dr.value:null,a=ar.status==='fulfilled'?ar.value:null,h=hr.status==='fulfilled'?hr.value:null,r=rr.status==='fulfilled'?rr.value:null,c=cr.status==='fulfilled'?cr.value:null;
+        [['dashboard',dr],['decision_audit',ar],['health',hr],['auto_risk_guard',rr],['equity_curve',cr]].forEach(([label,res])=>{if(res.status==='rejected')fail.push({label,error:res.reason})});
+        head(d,h,r,fail);
+        setHtml('overview-content',d?overview(d,r):error('账户总览不可用',dr.reason));
+        setHtml('pulse-content',a?pulse(d,a,h):error('执行脉冲不可用',ar.reason));
+        setHtml('equity-content',c?equity(c):error('权益曲线不可用',cr.reason));
+        setHtml('market-risk-content',(d||r)?market(d,r):error('市场与风控不可用',(rr.reason||dr.reason)));
+        setHtml('positions-content',d?positions(d):error('持仓数据不可用',dr.reason));
+        setHtml('trades-content',d?trades(d):error('成交数据不可用',dr.reason));
+        setHtml('signals-content',(d||a)?signals(d,a):error('信号数据不可用',(dr.reason||ar.reason)));
+        setHtml('decision-flow-content',a?audit(a):error('执行审计不可用',ar.reason));
+        setHtml('system-content',d?system(d):error('系统任务不可用',dr.reason));
+        setHtml('health-content',h?health(h,d):error('健康检查不可用',hr.reason));
+      }catch(e){
+        setText('page-status','页面加载失败'); setText('page-note',e&&e.message?e.message:'未知错误');
+      }finally{busy=false}
+    }
+    loadAll();
+    setInterval(loadAll,POLL);
+  </script>
+</body>
+</html>

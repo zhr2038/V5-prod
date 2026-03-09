@@ -16,8 +16,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 from html.parser import HTMLParser
 
-sys.path.insert(0, '/home/admin/clawd/v5-trading-bot')
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 from src.factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
+
+
+def get_cache_dir() -> Path:
+    return PROJECT_ROOT / "data" / "sentiment_cache"
 
 
 class MLStripper(HTMLParser):
@@ -142,7 +148,7 @@ def collect_rss_sentiment():
         }
     ]
     
-    cache_dir = Path('/home/admin/clawd/v5-trading-bot/data/sentiment_cache')
+    cache_dir = get_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp = datetime.now().strftime('%Y%m%d_%H')
@@ -189,7 +195,7 @@ def collect_rss_sentiment():
     
     # 使用DeepSeek分析情绪
     try:
-        factor = DeepSeekSentimentFactor()
+        factor = DeepSeekSentimentFactor(cache_dir=str(cache_dir))
         combined_text = "\n\n".join(texts)
         
         print(f"[RSS] 发送 {len(texts)} 篇文章到DeepSeek分析...")

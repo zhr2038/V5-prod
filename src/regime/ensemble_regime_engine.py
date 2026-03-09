@@ -49,6 +49,8 @@ class EnsembleRegimeEngine:
         self.cfg = cfg
         self.project_root = Path(__file__).resolve().parents[2]
         self.sentiment_cache_dir = self.project_root / 'data' / 'sentiment_cache'
+        self.funding_signal_max_age_minutes = int(getattr(cfg, 'funding_signal_max_age_minutes', 180))
+        self.rss_signal_max_age_minutes = int(getattr(cfg, 'rss_signal_max_age_minutes', 180))
 
         # 权重配置（可调整）
         self.weights = {
@@ -233,6 +235,14 @@ class EnsembleRegimeEngine:
         if not hmm.get('state'):
             alerts.append('hmm_predict_none')
 
+        funding_error = funding.get('error') if isinstance(funding, dict) else None
+        if funding_error:
+            alerts.append(str(funding_error))
+
+        rss_error = rss.get('error') if isinstance(rss, dict) else None
+        if rss_error:
+            alerts.append(str(rss_error))
+
         if self._model_type_mismatch:
             alerts.append('model_type_mismatch')
 
@@ -334,6 +344,17 @@ class EnsembleRegimeEngine:
         except Exception as e:
             print(f"[EnsembleRegime] persist regime history failed: {e}")
 
+    def _latest_fresh_file(self, pattern: str, max_age_minutes: int) -> Optional[Path]:
+        files = sorted(self.sentiment_cache_dir.glob(pattern))
+        if not files:
+            return None
+        candidate = files[-1]
+        max_age_sec = max(int(max_age_minutes), 1) * 60
+        age_sec = max(0.0, time.time() - candidate.stat().st_mtime)
+        if age_sec > max_age_sec:
+            return None
+        return candidate
+
     def _get_hmm_vote(self, btc_data: MarketSeries) -> dict:
         """HMM投票"""
         if self.hmm_detector is None:
@@ -411,10 +432,13 @@ class EnsembleRegimeEngine:
         """资金费率投票（使用综合情绪）"""
         try:
             # 优先读取综合资金费率情绪文件
-            composite_files = sorted(self.sentiment_cache_dir.glob('funding_COMPOSITE_*.json'))
-            
-            if composite_files:
-                data = json.loads(composite_files[-1].read_text())
+            composite_file = self._latest_fresh_file(
+                'funding_COMPOSITE_*.json',
+                self.funding_signal_max_age_minutes,
+            )
+
+            if composite_file is not None:
+                data = json.loads(composite_file.read_text())
                 sentiment = float(data.get('f6_sentiment', 0.0))
                 
                 # 映射到状态
@@ -439,14 +463,17 @@ class EnsembleRegimeEngine:
             # 回退：读取旧格式（单个币种）
             vals = []
             for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
-                files = sorted(self.sentiment_cache_dir.glob(f'funding_{sym}_*.json'))
-                if files:
-                    data = json.loads(files[-1].read_text())
+                latest = self._latest_fresh_file(
+                    f'funding_{sym}_*.json',
+                    self.funding_signal_max_age_minutes,
+                )
+                if latest is not None:
+                    data = json.loads(latest.read_text())
                     v = float(data.get('f6_sentiment', 0.0))
                     vals.append(max(-1.0, min(1.0, v)))
             
             if not vals:
-                return {'state': None, 'confidence': 0, 'weight': 0}
+                return {'state': None, 'confidence': 0, 'weight': 0, 'error': 'funding_signal_stale_or_missing'}
             
             avg_sentiment = np.mean(vals)
             
@@ -475,15 +502,21 @@ class EnsembleRegimeEngine:
         """RSS新闻投票"""
         try:
             # 读取RSS市场情绪
-            rss_files = sorted(self.sentiment_cache_dir.glob('rss_MARKET_*.json'))
-            if not rss_files:
+            latest_rss = self._latest_fresh_file(
+                'rss_MARKET_*.json',
+                self.rss_signal_max_age_minutes,
+            )
+            if latest_rss is None:
                 # 尝试币种特定文件
-                rss_files = sorted(self.sentiment_cache_dir.glob('rss_BTC-USDT_*.json'))
-            
-            if not rss_files:
-                return {'state': None, 'confidence': 0, 'weight': 0}
-            
-            data = json.loads(rss_files[-1].read_text())
+                latest_rss = self._latest_fresh_file(
+                    'rss_BTC-USDT_*.json',
+                    self.rss_signal_max_age_minutes,
+                )
+
+            if latest_rss is None:
+                return {'state': None, 'confidence': 0, 'weight': 0, 'error': 'rss_signal_stale_or_missing'}
+
+            data = json.loads(latest_rss.read_text())
             sentiment = float(data.get('f6_sentiment', 0.0))
             
             # 新闻情绪映射到状态

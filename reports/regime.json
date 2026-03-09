@@ -1,10 +1,51 @@
 {
-  "state": "Sideways",
-  "atr_pct": 0.004596703227052192,
-  "ma20": 68034.86,
-  "ma60": 69888.10833333334,
-  "multiplier": 0.7,
-  "hmm_state": null,
-  "hmm_probability": null,
-  "hmm_probs": null
+  "state": "Risk-Off",
+  "atr_pct": 0.004554407443075672,
+  "ma20": 67177.86000000002,
+  "ma60": 67741.77166666667,
+  "multiplier": 0.0,
+  "votes": {
+    "hmm": {
+      "state": "RISK_OFF",
+      "confidence": 0.772834951030669,
+      "weight": 0.35,
+      "sentiment": -0.5693460048182573,
+      "raw_state": "TrendingDown",
+      "probs": {
+        "Sideways": 0.023676102756919015,
+        "TrendingUp": 0.20348894621241173,
+        "TrendingDown": 0.772834951030669
+      }
+    },
+    "funding": {
+      "state": "SIDEWAYS",
+      "confidence": 0.2,
+      "weight": 0.4,
+      "sentiment": -0.1,
+      "composite": true,
+      "details": {
+        "large": {
+          "avg": -0.06375,
+          "count": 2
+        },
+        "mid": {
+          "avg": -0.10810000000000002,
+          "count": 4
+        },
+        "small": {
+          "avg": -0.17845,
+          "count": 4
+        }
+      }
+    },
+    "rss": {
+      "state": "SIDEWAYS",
+      "confidence": 0.6000000000000001,
+      "weight": 0.25,
+      "sentiment": 0.2,
+      "summary": "[RSS情报] 加密货币市场情绪总体中性偏积极，主流化趋势增强，但面临技术面压力和监管不确定性。"
+    }
+  },
+  "final_score": 0.27049223286073415,
+  "alerts": []
 }
