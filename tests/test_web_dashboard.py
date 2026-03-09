@@ -140,6 +140,51 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     assert payload["systemStatus"]["errors"] == ["systemctl is not available"]
 
 
+def test_dashboard_positions_prefer_precomputed_pnl(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify([{
+        "symbol": "OKB",
+        "qty": 1.0,
+        "avg_px": 40.0,
+        "last_price": 40.0,
+        "value_usdt": 40.0,
+        "pnl_value": 5.5,
+        "pnl_pct": 0.1375,
+    }]))
+    monkeypatch.setattr(module, "api_account", lambda: module.jsonify({
+        "cash_usdt": 10.0,
+        "positions_value_usdt": 40.0,
+        "total_equity_usdt": 50.0,
+        "initial_capital_usdt": 45.0,
+        "equity_delta_usdt": 5.0,
+        "total_pnl_pct": 0.1111,
+        "drawdown_pct": 0.02,
+        "realized_pnl": -12.0,
+        "total_trades": 3,
+        "last_update": "2026-03-09 12:00:00",
+    }))
+    monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": []}))
+    monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({"timer_active": True, "dry_run": False}))
+    monkeypatch.setattr(module, "api_equity_history", lambda: module.jsonify([]))
+    monkeypatch.setattr(module, "api_market_state", lambda: module.jsonify({"state": "SIDEWAYS", "position_multiplier": 1.0}))
+    monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": [], "next_run": None}))
+    monkeypatch.setattr(module, "api_cost_calibration", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ic_diagnostics", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ml_training", lambda: module.jsonify({"status": "idle"}))
+    monkeypatch.setattr(module, "api_reflection_reports", lambda: module.jsonify({"reports": []}))
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["positions"][0]["pnl"] == 5.5
+    assert payload["positions"][0]["pnlPercent"] == 13.75
+    assert payload["account"]["totalPnl"] == 5.0
+
+
 def _write_cache(path: Path, payload: dict, *, age_sec: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -244,3 +289,17 @@ def test_market_state_refreshes_live_votes_when_cache_is_fresh(monkeypatch, tmp_
     assert payload["votes"]["rss"].get("error") is None
     assert "funding_signal_stale_or_missing" not in payload["alerts"]
     assert "rss_signal_stale_or_missing" not in payload["alerts"]
+
+
+def test_health_endpoint_exposes_summary_fields():
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert "status" in payload
+    assert "last_update" in payload
+    assert "warning_count" in payload
+    assert "critical_count" in payload

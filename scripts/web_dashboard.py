@@ -475,10 +475,9 @@ def api_account():
             pass
 
         total_equity = float(cash or 0) + positions_value
-        
-        # 计算盈亏百分比（假设初始资金为120 USDT）
         initial_capital = 120.0
-        total_pnl_pct = (total_equity - initial_capital) / initial_capital if initial_capital > 0 else 0
+        equity_delta = total_equity - initial_capital
+        total_pnl_pct = equity_delta / initial_capital if initial_capital > 0 else 0
         
         # 获取持仓数量
         positions_count = 0
@@ -531,6 +530,8 @@ def api_account():
             'cash_usdt': round(float(cash), 2),
             'positions_value_usdt': round(float(positions_value), 4),
             'total_equity_usdt': round(float(total_equity), 4),
+            'initial_capital_usdt': round(float(initial_capital), 4),
+            'equity_delta_usdt': round(float(equity_delta), 4),
             'total_pnl_pct': round(float(total_pnl_pct), 4),
             'drawdown_pct': round(float(drawdown_pct), 4),
             'peak_equity_usdt': round(float(peak_equity), 2),
@@ -724,6 +725,21 @@ def api_positions():
         pos_db = REPORTS_DIR / 'positions.sqlite'
         positions = []
         live_okx_used = False
+        avg_price_hints: Dict[str, float] = {}
+
+        if pos_db.exists():
+            try:
+                conn = sqlite3.connect(str(pos_db))
+                cur = conn.cursor()
+                cur.execute("SELECT symbol, avg_px FROM positions")
+                for symbol_raw, avg_px in cur.fetchall():
+                    base = str(symbol_raw or '').split('/')[0] if '/' in str(symbol_raw or '') else str(symbol_raw or '').split('-')[0]
+                    avg_price = float(avg_px or 0)
+                    if base and avg_price > 0:
+                        avg_price_hints[base] = avg_price
+                conn.close()
+            except Exception:
+                avg_price_hints = {}
 
         # 0) 优先实时OKX余额（与用户手动操作一致）
         okx_error = None
@@ -804,7 +820,7 @@ def api_positions():
                             positions.append({
                                 'symbol': ccy,
                                 'qty': round(qty, 8),
-                                'avg_px': round(px, 6),
+                                'avg_px': round(avg_price_hints.get(ccy, 0.0), 6),
                                 'last_price': round(px, 6),
                                 'value_usdt': round(value, 4)
                             })
@@ -1787,8 +1803,14 @@ def api_dashboard():
             cur_price = float(pos.get('last_price', 0) or 0)
             qty = float(pos.get('qty', 0) or 0)
             value = float(pos.get('value_usdt', 0) or 0)
-            pnl = (cur_price - avg_price) * qty if avg_price > 0 and cur_price > 0 else 0
-            pnl_pct = ((cur_price - avg_price) / avg_price * 100) if avg_price > 0 and cur_price > 0 else 0
+            pnl = float(pos.get('pnl_value', 0) or 0)
+            raw_pnl_pct = pos.get('pnl_pct', None)
+            if raw_pnl_pct is None:
+                pnl_pct = ((cur_price - avg_price) / avg_price * 100) if avg_price > 0 and cur_price > 0 else 0
+            else:
+                pnl_pct = float(raw_pnl_pct or 0)
+                if abs(pnl_pct) <= 1:
+                    pnl_pct *= 100
             positions.append({
                 'symbol': pos.get('symbol', ''),
                 'qty': qty,
@@ -1835,11 +1857,16 @@ def api_dashboard():
         total_equity = float(account_data.get('total_equity_usdt', 0) or 0)
         if total_equity <= 0:
             total_equity = cash_usdt + positions_value
-        total_pnl = float(account_data.get('equity_delta_usdt', account_data.get('realized_pnl', 0)) or 0)
+        initial_capital = float(account_data.get('initial_capital_usdt', 0) or 0)
+        if initial_capital <= 0:
+            initial_capital = 120.0
+        total_pnl = account_data.get('equity_delta_usdt', None)
+        if total_pnl is None:
+            total_pnl = total_equity - initial_capital if initial_capital > 0 else account_data.get('realized_pnl', 0)
+        total_pnl = float(total_pnl or 0)
         total_pnl_pct = float(account_data.get('total_pnl_pct', 0) or 0)
         drawdown_pct = float(account_data.get('drawdown_pct', 0) or 0)
         realized_pnl = float(account_data.get('realized_pnl', 0) or 0)
-        initial_capital = float(account_data.get('initial_capital_usdt', 0) or 0)
 
         dashboard_data = {
             'account': {
@@ -3259,10 +3286,16 @@ def api_health():
         except Exception as e:
             checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': str(e)})
         
+        warning_count = sum(1 for item in checks if item.get('status') == 'warning')
+        critical_count = sum(1 for item in checks if item.get('status') == 'critical')
+        checked_at = datetime.now()
         return jsonify({
             'status': overall_status,
             'checks': checks,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': checked_at.isoformat(),
+            'last_update': checked_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'warning_count': warning_count,
+            'critical_count': critical_count,
         })
         
     except Exception as e:
