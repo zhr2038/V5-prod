@@ -222,5 +222,33 @@
     "rank_exit_streak": 0,
     "last_rank": null,
     "last_rank_exit_time": null
+  },
+  "BTC/USDT": {
+    "symbol": "BTC/USDT",
+    "entry_price": 100.0,
+    "entry_time": "2026-03-09T14:19:59.319466",
+    "highest_price": 105.0,
+    "profit_high": 0.0,
+    "current_stop": 95.0,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null,
+    "rank_exit_streak": 0,
+    "last_rank": null,
+    "last_rank_exit_time": null
+  },
+  "SOL/USDT": {
+    "symbol": "SOL/USDT",
+    "entry_price": 100.0,
+    "entry_time": "2026-03-09T14:20:00.184975",
+    "highest_price": 100.0,
+    "profit_high": 0.0,
+    "current_stop": 95.0,
+    "current_action": "hold",
+    "partial_sold": false,
+    "partial_sell_time": null,
+    "rank_exit_streak": 0,
+    "last_rank": null,
+    "last_rank_exit_time": null
   }
 }

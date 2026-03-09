@@ -1,7 +1,7 @@
 {
   "last_global_trade_ms": 1773008103238,
   "symbol_cooldowns": {
-    "BTC/USDT": 1773000903011,
+    "BTC/USDT": 1773037174739,
     "DOGE/USDT": 1772792102379,
     "XRP/USDT": 1772915403452,
     "SUI/USDT": 1772925302855,
@@ -228,13 +228,13 @@
     "BTC/USDT": {
       "signal": {
         "symbol": "BTC/USDT",
-        "direction": "sell",
-        "score": 0.06269664014361676,
-        "rank": 53,
-        "timestamp_ms": 1773011702631
+        "direction": "buy",
+        "score": 0.9,
+        "rank": 1,
+        "timestamp_ms": 4000
       },
       "count": 1,
-      "first_seen_ms": 1773011702859
+      "first_seen_ms": 1773037174732
     },
     "HYPE/USDT": {
       "signal": {
@@ -281,5 +281,5 @@
       "first_seen_ms": 1773028801681
     }
   },
-  "saved_at_ms": 1773028801682
+  "saved_at_ms": 1773037174740
 }

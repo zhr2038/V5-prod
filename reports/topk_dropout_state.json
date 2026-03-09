@@ -1,5 +1,11 @@
 {
-  "selected": [],
-  "hold_cycles": {},
-  "updated_ts": 1773028869
+  "selected": [
+    "B/USDT",
+    "A/USDT"
+  ],
+  "hold_cycles": {
+    "B/USDT": 2,
+    "A/USDT": 1
+  },
+  "updated_ts": 1773044524
 }
