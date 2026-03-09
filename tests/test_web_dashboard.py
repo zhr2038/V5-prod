@@ -1,9 +1,14 @@
 import importlib.util
+import shutil
+import subprocess
 import uuid
 from pathlib import Path
 
+import pytest
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "web_dashboard.py"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MODULE_PATH = REPO_ROOT / "scripts" / "web_dashboard.py"
+MONITOR_V2_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "monitor_v2.js"
 
 
 def load_web_dashboard_module():
@@ -13,6 +18,24 @@ def load_web_dashboard_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def _find_headless_browser() -> str | None:
+    candidates = [
+        shutil.which("chrome"),
+        shutil.which("google-chrome"),
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+        shutil.which("msedge"),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ]
+
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return str(Path(candidate))
+    return None
 
 
 def test_index_renders_monitor_template():
@@ -27,6 +50,13 @@ def test_index_renders_monitor_template():
     assert 'id="health-content"' in body
     assert 'id="vote-history"' in body
     assert 'id="history-tooltip"' in body
+    assert "风险档位（持仓上限）" in body
+    assert 'src="/static/js/monitor_v2.js?v=' in body
+
+
+def test_monitor_v2_static_script_contains_expected_entrypoints():
+    body = MONITOR_V2_JS_PATH.read_text(encoding="utf-8")
+
     assert "renderHmmProbRows" in body
     assert "renderVoteHistory" in body
     assert "showHistoryTooltip" in body
@@ -37,7 +67,58 @@ def test_index_renders_monitor_template():
     assert "p.pnl??p.pnl_value||0" not in body
     assert "p.pnlPercent??p.pnl_pct||0" not in body
     assert "loadAll();" in body
-    assert "风险档位（持仓上限）" in body
+
+
+def test_monitor_v2_static_script_executes_in_headless_browser(tmp_path):
+    browser = _find_headless_browser()
+    if not browser:
+        pytest.skip("No Chromium-based browser available for JS syntax check")
+
+    script_path = tmp_path / "monitor_v2.js"
+    script_path.write_text(MONITOR_V2_JS_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+
+    harness_path = tmp_path / "monitor_v2_harness.html"
+    harness_path.write_text(
+        f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>monitor_v2 harness</title></head>
+<body>
+<div id="update-time"></div>
+<script>
+window.fetch = async () => ({{ json: async () => ({{}}) }});
+window.setInterval = () => 0;
+</script>
+<script src="{script_path.as_uri()}"></script>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            browser,
+            "--headless",
+            "--disable-gpu",
+            "--allow-file-access-from-files",
+            "--enable-logging=stderr",
+            "--v=1",
+            "--virtual-time-budget=3000",
+            "--dump-dom",
+            harness_path.as_uri(),
+        ],
+        capture_output=True,
+        text=False,
+        timeout=30,
+        check=False,
+    )
+
+    stdout = (result.stdout or b"").decode("utf-8", errors="ignore")
+    stderr = (result.stderr or b"").decode("utf-8", errors="ignore")
+    combined_output = "\n".join(part for part in [stdout, stderr] if part)
+    assert "SyntaxError" not in combined_output
+    assert "Uncaught" not in combined_output
+    assert "最近刷新" in stdout
 
 
 def test_timer_endpoints_degrade_without_systemctl(monkeypatch):

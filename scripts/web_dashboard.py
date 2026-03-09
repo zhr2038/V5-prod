@@ -445,22 +445,37 @@ def load_config():
         return {}
 
 
+def _static_asset_version(filename: str) -> str:
+    asset_path = WEB_DIR / 'static' / Path(filename)
+    try:
+        return str(asset_path.stat().st_mtime_ns)
+    except OSError:
+        return '0'
+
+
+def _render_monitor_v2():
+    return render_template(
+        'monitor_v2.html',
+        monitor_v2_js_version=_static_asset_version('js/monitor_v2.js'),
+    )
+
+
 @app.route('/')
 def index():
     """主页面 - 新版监控面板"""
-    return render_template('monitor_v2.html')
+    return _render_monitor_v2()
 
 
 @app.route('/monitor')
 def monitor():
     """旧版监控页面（保留兼容）"""
-    return render_template('monitor_v2.html')
+    return _render_monitor_v2()
 
 
 @app.route('/simple')
 def simple_dashboard():
     """简洁版监控页"""
-    return render_template('monitor_v2.html')
+    return _render_monitor_v2()
 
 
 @app.route('/<path:filename>')
