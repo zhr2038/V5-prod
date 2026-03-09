@@ -115,11 +115,11 @@ def health_check():
     
     # 5. 自动风险档位状态
     try:
-        risk = _load_json_safe(REPORTS_DIR / 'auto_risk_guard.json')
+        risk = _load_json_safe(REPORTS_DIR / 'auto_risk_eval.json')
         checks["checks"]["risk_guard"] = {
             "status": "ok",
             "level": risk.get("current_level", "UNKNOWN"),
-            "drawdown": risk.get("metrics", {}).get("last_dd_pct", 0)
+            "drawdown": risk.get("metrics", {}).get("dd_pct", risk.get("metrics", {}).get("last_dd_pct", 0))
         }
     except Exception as e:
         checks["checks"]["risk_guard"] = {"status": "error", "error": str(e)}

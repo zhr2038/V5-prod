@@ -17,6 +17,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -2900,14 +2901,35 @@ def api_smart_alerts():
 def api_auto_risk_guard():
     """自动风险档位API - 显示当前风险档位和配置"""
     try:
-        from src.risk.auto_risk_guard import get_auto_risk_guard
+        from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard
+
+        eval_path = REPORTS_DIR / 'auto_risk_eval.json'
+        if eval_path.exists():
+            with open(eval_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            level = str(data.get('current_level', 'NEUTRAL') or 'NEUTRAL').upper()
+            risk_level = AutoRiskGuard.LEVELS.get(level, AutoRiskGuard.LEVELS['NEUTRAL'])
+            config = data.get('config')
+            if not isinstance(config, dict):
+                config = asdict(risk_level)
+
+            return jsonify({
+                'current_level': level,
+                'config': config,
+                'history': data.get('history', [])[-5:],
+                'metrics': data.get('metrics', {}),
+                'reason': data.get('reason', ''),
+                'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            })
+
         guard = get_auto_risk_guard()
-        config = guard.get_current_config()
         return jsonify({
             'current_level': guard.current_level,
-            'config': config,
+            'config': guard.get_current_config(),
             'history': guard.history[-5:],  # 最近5次切换
             'metrics': guard.metrics,
+            'reason': '',
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:

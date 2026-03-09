@@ -41,6 +41,8 @@ PRODUCTION_USER_UNIT_MAPPINGS = (
     ("v5-event-driven.timer", "v5-event-driven.timer"),
     ("v5-sentiment-collect.service", "v5-sentiment-collect.service"),
     ("v5-sentiment-collect.timer", "v5-sentiment-collect.timer"),
+    ("v5-auto-risk-eval.service", "v5-auto-risk-eval.service"),
+    ("v5-auto-risk-eval.timer", "v5-auto-risk-eval.timer"),
     ("v5-reconcile.user.service", "v5-reconcile.service"),
     ("v5-reconcile.timer", "v5-reconcile.timer"),
     ("v5-ledger.user.service", "v5-ledger.service"),

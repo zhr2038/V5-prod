@@ -132,10 +132,12 @@ def _install_units(
 def _validate_units(client: paramiko.SSHClient, service_user: str) -> str:
     inner = (
         "systemctl --user is-enabled v5-sentiment-collect.timer "
+        "&& systemctl --user is-enabled v5-auto-risk-eval.timer "
         "&& systemctl --user is-enabled v5-reconcile.timer "
         "&& systemctl --user is-enabled v5-ledger.timer "
         "&& systemctl --user is-enabled v5-cost-rollup-real.user.timer "
         "&& systemctl --user show v5-sentiment-collect.timer --property=UnitFileState "
+        "&& systemctl --user show v5-auto-risk-eval.timer --property=UnitFileState "
         "&& systemctl --user show v5-prod.user.timer --property=UnitFileState "
         "&& systemctl --user show v5-event-driven.timer --property=UnitFileState"
     )

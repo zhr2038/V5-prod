@@ -35,6 +35,7 @@ def test_index_renders_monitor_template():
     assert "浮盈亏 / 收益率" in body
     assert "fmtUsd(pnlValue)" in body
     assert "loadAll();" in body
+    assert "风险档位（持仓上限）" in body
 
 
 def test_timer_endpoints_degrade_without_systemctl(monkeypatch):
@@ -178,6 +179,36 @@ def test_dashboard_api_keeps_sub_one_percent_pnl_as_ratio(monkeypatch):
     assert payload["account"]["totalPnlPercent"] == 0.005
     assert payload["account"]["maxDrawdown"] == 0.0075
     assert payload["positions"][0]["pnlPercent"] == -0.0054
+
+
+def test_auto_risk_guard_api_uses_auto_risk_eval_file(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+
+    (tmp_path / "auto_risk_eval.json").write_text(
+        """
+        {
+          "ts": "2026-03-09T22:30:02",
+          "current_level": "DEFENSE",
+          "metrics": {
+            "dd_pct": 0.0682,
+            "conversion_rate": 0.0
+          },
+          "reason": "样本不足 (0轮)，维持当前档位"
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_level"] == "DEFENSE"
+    assert payload["metrics"]["dd_pct"] == 0.0682
+    assert payload["reason"] == "样本不足 (0轮)，维持当前档位"
+    assert payload["config"]["max_positions"] == 3
 
 
 def test_market_state_backfills_hmm_vote_from_regime_history(monkeypatch):
