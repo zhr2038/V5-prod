@@ -32,6 +32,8 @@ def test_index_renders_monitor_template():
     assert "showHistoryTooltip" in body
     assert "showHmmProbs:true" in body
     assert "showSummary:true" in body
+    assert "浮盈亏 / 收益率" in body
+    assert "fmtUsd(pnlValue)" in body
     assert "loadAll();" in body
 
 

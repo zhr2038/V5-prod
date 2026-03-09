@@ -922,9 +922,9 @@ def api_positions():
                             if eq_usd <= 0:
                                 continue
 
-                            # fallback: if ticker unavailable, infer a synthetic last price
-                            if px <= 0 and qty > 0:
-                                px = eq_usd / qty
+                            effective_px = eq_usd / qty if qty > 0 else 0.0
+                            if effective_px > 0:
+                                px = effective_px
                             if px <= 0:
                                 continue
 
