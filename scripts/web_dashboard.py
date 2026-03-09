@@ -1725,17 +1725,11 @@ def api_market_state():
             if not isinstance(vote, dict):
                 vote = {}
             live_vote = live_votes.get(name, {})
-            if live_vote.get('state') and (
-                not vote.get('state')
-                or vote.get('error') == stale_errors[name]
-                or float(vote.get('confidence', 0) or 0) <= 0
-            ):
-                vote.update(live_vote)
-                vote.pop('error', None)
-            else:
-                for field in ('summary', 'summary_short', 'source_confidence', 'sentiment'):
-                    if live_vote.get(field) is not None:
-                        vote[field] = live_vote[field]
+            if live_vote.get('state'):
+                merged_vote = dict(vote)
+                merged_vote.update(live_vote)
+                merged_vote.pop('error', None)
+                vote = merged_vote
             if signal_health[name].get('error'):
                 vote.setdefault('error', signal_health[name]['error'])
             elif vote.get('error') == stale_errors[name]:

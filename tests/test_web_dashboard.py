@@ -434,3 +434,45 @@ def test_market_state_returns_vote_history_and_live_rss_summary(monkeypatch):
     assert payload["history_24h"][0]["votes"]["rss"]["state"] == "RISK_OFF"
     assert payload["history_24h"][0]["votes"]["rss"]["sentiment"] == -0.3
     assert payload["votes"]["rss"]["summary_short"] == "\u65b0\u95fb\u504f\u7a7a\uff0c\u4f46\u672a\u5230\u6781\u7aef"
+
+
+def test_market_state_prefers_live_funding_vote_over_snapshot(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "_load_market_state_snapshot", lambda _: {
+        "state": "SIDEWAYS",
+        "position_multiplier": 0.8,
+        "method": "decision_audit",
+        "votes": {
+            "hmm": {"state": "SIDEWAYS", "confidence": 0.7, "probs": {"TrendingUp": 0.1, "Sideways": 0.7, "TrendingDown": 0.2}},
+            "funding": {"state": "SIDEWAYS", "confidence": 0.54, "sentiment": -0.027},
+        },
+        "alerts": [],
+        "monitor": {},
+    })
+    monkeypatch.setattr(module, "_load_latest_regime_history_snapshot", lambda _: {"votes": {}})
+    monkeypatch.setattr(module, "_load_market_vote_history", lambda *args, **kwargs: [])
+    monkeypatch.setattr(module, "load_config", lambda: {"regime": {"hmm_weight": 0.35, "funding_weight": 0.4, "rss_weight": 0.25}})
+    monkeypatch.setattr(module, "_signal_health", lambda *args, **kwargs: {"status": "fresh", "is_fresh": True, "error": None})
+    monkeypatch.setattr(module, "_build_live_funding_vote", lambda *args, **kwargs: {
+        "state": "TRENDING",
+        "confidence": 0.18,
+        "weight": 0.4,
+        "sentiment": 0.09,
+        "composite": True,
+        "details": {"large": {"avg": 0.1, "count": 2}},
+        "raw_state": "TRENDING",
+    })
+    monkeypatch.setattr(module, "_build_live_rss_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "calculate_market_indicators", lambda: {"price": 0.0})
+
+    response = client.get("/api/market_state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    funding = payload["votes"]["funding"]
+    assert funding["state"] == "TRENDING"
+    assert funding["confidence"] == 0.18
+    assert funding["sentiment"] == 0.09
+    assert funding["composite"] is True
