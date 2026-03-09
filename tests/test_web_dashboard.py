@@ -25,6 +25,8 @@ def test_index_renders_monitor_template():
     body = response.get_data(as_text=True)
     assert 'id="update-time"' in body
     assert 'id="health-content"' in body
+    assert "renderHmmProbRows" in body
+    assert "showHmmProbs:true" in body
     assert "loadAll();" in body
 
 
@@ -125,3 +127,41 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     assert payload["trades"][0]["symbol"] == "BTC/USDT"
     assert payload["alphaScores"][0]["symbol"] == "BTC/USDT"
     assert payload["systemStatus"]["errors"] == ["systemctl is not available"]
+
+
+def test_market_state_backfills_hmm_vote_from_regime_history(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "_load_market_state_snapshot", lambda _: {
+        "state": "TRENDING",
+        "position_multiplier": 1.2,
+        "method": "decision_audit",
+        "votes": {"hmm": {"state": "TRENDING", "confidence": 0.0}},
+        "alerts": [],
+        "monitor": {},
+    })
+    monkeypatch.setattr(module, "_load_latest_regime_history_snapshot", lambda _: {
+        "votes": {
+            "hmm": {
+                "state": "TRENDING",
+                "confidence": 0.62,
+                "weight": 0.35,
+                "probs": {"TrendingUp": 0.62, "Sideways": 0.28, "TrendingDown": 0.10},
+            }
+        }
+    })
+    monkeypatch.setattr(module, "load_config", lambda: {"regime": {"hmm_weight": 0.35, "funding_weight": 0.4, "rss_weight": 0.25}})
+    monkeypatch.setattr(module, "_signal_health", lambda *args, **kwargs: {"status": "fresh", "is_fresh": True, "error": None})
+    monkeypatch.setattr(module, "_build_live_funding_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_build_live_rss_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "calculate_market_indicators", lambda: {"price": 0.0})
+
+    response = client.get("/api/market_state")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    hmm = payload["votes"]["hmm"]
+    assert hmm["confidence"] == 0.62
+    assert hmm["weight"] == 0.35
+    assert hmm["probs"]["TrendingUp"] == 0.62

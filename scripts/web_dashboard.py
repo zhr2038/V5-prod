@@ -1528,8 +1528,10 @@ def api_market_state():
     """市场状态 API，补齐投票详情和情绪缓存健康。"""
     try:
         snapshot = _load_market_state_snapshot(REPORTS_DIR)
+        history_snapshot = _load_latest_regime_history_snapshot(REPORTS_DIR)
         regime = str(snapshot.get('state') or 'SIDEWAYS')
         votes = snapshot.get('votes', {}) if isinstance(snapshot.get('votes', {}), dict) else {}
+        history_votes = history_snapshot.get('votes', {}) if isinstance(history_snapshot.get('votes', {}), dict) else {}
         alerts = snapshot.get('alerts', []) if isinstance(snapshot.get('alerts', []), list) else []
         monitor = snapshot.get('monitor', {}) if isinstance(snapshot.get('monitor', {}), dict) else {}
 
@@ -1561,6 +1563,7 @@ def api_market_state():
         }
 
         configured_weights = {
+            'hmm': float(regime_cfg.get('hmm_weight', 0.40) or 0.40),
             'funding': float(regime_cfg.get('funding_weight', 0.35) or 0.35),
             'rss': float(regime_cfg.get('rss_weight', 0.25) or 0.25),
         }
@@ -1576,6 +1579,20 @@ def api_market_state():
                 configured_weights['rss'],
             ),
         }
+        hmm_history_vote = history_votes.get('hmm', {}) if isinstance(history_votes.get('hmm', {}), dict) else {}
+        hmm_vote = votes.get('hmm', {})
+        if not isinstance(hmm_vote, dict):
+            hmm_vote = {}
+        if hmm_history_vote.get('state') and (
+            not hmm_vote.get('state')
+            or not isinstance(hmm_vote.get('probs'), dict)
+            or float(hmm_vote.get('confidence', 0) or 0) <= 0
+        ):
+            hmm_vote.update(hmm_history_vote)
+            hmm_vote.pop('error', None)
+        if hmm_vote:
+            hmm_vote.setdefault('weight', configured_weights['hmm'])
+        votes['hmm'] = hmm_vote
         stale_errors = {
             'funding': 'funding_signal_stale_or_missing',
             'rss': 'rss_signal_stale_or_missing',
