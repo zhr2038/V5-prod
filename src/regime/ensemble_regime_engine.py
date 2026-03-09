@@ -356,47 +356,17 @@ class EnsembleRegimeEngine:
         return candidate
 
     def _get_hmm_vote(self, btc_data: MarketSeries) -> dict:
-        """HMM投票"""
+        """HMM vote built from the detector's canonical price features."""
         if self.hmm_detector is None:
             return {'state': None, 'confidence': 0, 'weight': 0, 'error': 'hmm_detector_missing'}
 
         try:
-            # 构造特征
-            features = []
             closes = list(btc_data.close)
-            for i in range(len(closes)):
-                if i < 14:
-                    continue
-                ret_1h = (closes[i] - closes[i - 1]) / closes[i - 1] if closes[i - 1] > 0 else 0
-                ret_6h = (
-                    (closes[i] - closes[max(0, i - 6)]) / closes[max(0, i - 6)]
-                    if closes[max(0, i - 6)] > 0
-                    else 0
-                )
-
-                window = closes[max(0, i - 14): i + 1]
-                vol = np.std(np.diff(window) / window[:-1]) if len(window) > 1 else 0
-
-                gains = [
-                    closes[j] - closes[j - 1]
-                    for j in range(max(0, i - 14), i + 1)
-                    if closes[j] > closes[j - 1]
-                ]
-                losses = [
-                    closes[j - 1] - closes[j]
-                    for j in range(max(0, i - 14), i + 1)
-                    if closes[j] < closes[j - 1]
-                ]
-                avg_gain = np.mean(gains) if gains else 0
-                avg_loss = np.mean(losses) if losses else 0.001
-                rsi = 100 - (100 / (1 + avg_gain / avg_loss))
-
-                features.append([ret_1h, ret_6h, vol, rsi])
-
+            features = self.hmm_detector.build_features_from_closes(closes)
             if len(features) < 10:
                 return {'state': None, 'confidence': 0, 'weight': 0, 'error': 'hmm_features_insufficient'}
 
-            result = self.hmm_detector.predict(np.array(features))
+            result = self.hmm_detector.predict(features)
             if not isinstance(result, dict):
                 return {'state': None, 'confidence': 0, 'weight': 0, 'error': 'hmm_predict_invalid'}
 
@@ -422,12 +392,13 @@ class EnsembleRegimeEngine:
                 'weight': self.weights['hmm'],
                 'sentiment': sentiment,
                 'raw_state': hmm_state,
+                'latent_probability': float(result.get('latent_probability') or 0.0),
                 'probs': all_states,
             }
         except Exception as e:
-            print(f"[EnsembleRegime] HMM投票失败: {e}")
+            print(f"[EnsembleRegime] HMM vote failed: {e}")
             return {'state': None, 'confidence': 0, 'weight': 0, 'error': 'hmm_predict_exception'}
-    
+
     def _get_funding_vote(self) -> dict:
         """资金费率投票（使用综合情绪）"""
         try:

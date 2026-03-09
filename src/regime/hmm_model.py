@@ -187,11 +187,13 @@ class SimpleGaussianHMM:
         return states
     
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """返回状态概率分布"""
+        """Return the smoothed posterior state probabilities."""
         alpha, scale = self._forward(X)
-        # 归一化
-        probs = alpha / (alpha.sum(axis=1, keepdims=True) + 1e-10)
-        return probs
+        beta = self._backward(X, scale)
+        gamma = alpha * beta
+        gamma_sum = gamma.sum(axis=1, keepdims=True)
+        gamma_sum[gamma_sum == 0] = 1
+        return gamma / gamma_sum
     
     def score(self, X: np.ndarray) -> float:
         """计算对数似然"""
