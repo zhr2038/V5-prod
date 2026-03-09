@@ -34,6 +34,8 @@ def test_index_renders_monitor_template():
     assert "showSummary:true" in body
     assert "浮盈亏 / 收益率" in body
     assert "fmtUsd(pnlValue)" in body
+    assert "p.pnl??p.pnl_value||0" not in body
+    assert "p.pnlPercent??p.pnl_pct||0" not in body
     assert "loadAll();" in body
     assert "风险档位（持仓上限）" in body
 
