@@ -256,6 +256,8 @@ class ExecutionConfig(BaseModel):
     auto_fix_auto_loan: bool = Field(default=False, description="Try set-auto-loan=false before rejecting (acctLv 3/4 only)")
     require_spot_borrow_disabled: bool = Field(default=False, description="Reject buys if enableSpotBorrow=true")
     ensure_spot_auto_repay_true: bool = Field(default=True, description="When spot borrow is enabled, ensure auto repay=true")
+    require_fee_type_zero: bool = Field(default=False, description="Reject buys if feeType!=0 (buy fee in quote can overrun quote balance)")
+    auto_fix_fee_type_zero: bool = Field(default=False, description="Try set feeType=0 before rejecting buys")
 
     # Per-order quote balance guard: never submit buy larger than available quote balance.
     buy_quote_balance_safety_check: bool = Field(default=True)

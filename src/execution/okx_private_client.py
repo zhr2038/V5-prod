@@ -329,3 +329,7 @@ class OKXPrivateClient:
     def set_auto_loan(self, auto_loan: bool) -> OKXResponse:
         """Set auto-loan flag (only applicable to multi-currency/portfolio margin)."""
         return self.request("POST", "/api/v5/account/set-auto-loan", json_body={"autoLoan": bool(auto_loan)})
+
+    def set_fee_type(self, fee_type: str | int) -> OKXResponse:
+        """Set spot fee charge type. '0' keeps buy fees in base; '1' charges buy fees in quote."""
+        return self.request("POST", "/api/v5/account/set-fee-type", json_body={"feeType": str(fee_type)})

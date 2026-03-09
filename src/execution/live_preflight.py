@@ -371,6 +371,30 @@ class LivePreflight:
                     auto_loan = _to_bool(cfg0.get("autoLoan"))
                     enable_spot_borrow = _to_bool(cfg0.get("enableSpotBorrow"))
                     spot_auto_repay = _to_bool(cfg0.get("spotBorrowAutoRepay"))
+                    fee_type = str(cfg0.get("feeType", "") or "")
+                    fee_type_auto_fixed = False
+
+                    if (
+                        bool(getattr(self.cfg, "auto_fix_fee_type_zero", False))
+                        and fee_type not in {"", "0"}
+                        and hasattr(self.okx, "set_fee_type")
+                    ):
+                        try:
+                            rr = self.okx.set_fee_type("0")
+                            ok_code = str((rr.data or {}).get("code") or "")
+                            if ok_code in {"", "0"}:
+                                r = self.okx.get_account_config()
+                                rows = (r.data or {}).get("data") if isinstance(r.data, dict) else None
+                                cfg0 = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else cfg0
+                                acct_lv = str(cfg0.get("acctLv", "") or "")
+                                pos_mode = str(cfg0.get("posMode", "") or "")
+                                auto_loan = _to_bool(cfg0.get("autoLoan"))
+                                enable_spot_borrow = _to_bool(cfg0.get("enableSpotBorrow"))
+                                spot_auto_repay = _to_bool(cfg0.get("spotBorrowAutoRepay"))
+                                fee_type = str(cfg0.get("feeType", "") or "")
+                                fee_type_auto_fixed = fee_type == "0"
+                        except Exception as e:
+                            details["account_config_auto_fix_fee_type_error"] = str(e)
 
                     violations = []
 
@@ -395,6 +419,9 @@ class LivePreflight:
                     ):
                         violations.append("spotBorrowAutoRepay_false")
 
+                    if bool(getattr(self.cfg, "require_fee_type_zero", False)) and fee_type not in {"", "0"}:
+                        violations.append(f"feeType_mismatch:{fee_type}!=0")
+
                     details["account_config"] = {
                         "ok": len(violations) == 0,
                         "acctLv": acct_lv,
@@ -402,6 +429,8 @@ class LivePreflight:
                         "autoLoan": auto_loan,
                         "enableSpotBorrow": enable_spot_borrow,
                         "spotBorrowAutoRepay": spot_auto_repay,
+                        "feeType": fee_type,
+                        "feeTypeAutoFixed": fee_type_auto_fixed,
                         "violations": violations,
                     }
 

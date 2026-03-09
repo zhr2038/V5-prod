@@ -226,6 +226,8 @@ execution:
   min_trade_value_usdt: 10.0
   max_fee_ratio: 0.05
   check_fee_currency_balance: true
+  require_fee_type_zero: true
+  auto_fix_fee_type_zero: true
   high_risk_blacklist_path: configs/borrow_prevention_rules.json
 
 budget:

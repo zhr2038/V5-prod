@@ -5,6 +5,8 @@ import tempfile
 
 from types import SimpleNamespace
 
+import pytest
+
 from configs.schema import ExecutionConfig
 from src.core.models import Order
 from src.execution.live_execution_engine import LiveExecutionEngine
@@ -17,7 +19,9 @@ class FakeOKX:
         self.place_calls = 0
         self.get_calls = 0
         self.cancel_calls = 0
+        self.next_ord_id = 1001
         self._orders = {}
+        self.fills_by_ord_id = {}
         self.balance_by_ccy = {
             "USDT": {"eq": "1000", "availBal": "1000", "cashBal": "1000", "liab": "0"},
         }
@@ -25,15 +29,17 @@ class FakeOKX:
     def place_order(self, payload, exp_time_ms=None):
         self.place_calls += 1
         clid = payload.get("clOrdId")
+        ord_id = str(self.next_ord_id)
+        self.next_ord_id += 1
         self._orders[clid] = {
             "instId": payload.get("instId"),
             "clOrdId": clid,
-            "ordId": "1001",
+            "ordId": ord_id,
             "state": "live",
             "accFillSz": "0",
             "avgPx": "",
         }
-        return SimpleNamespace(data={"code": "0", "data": [{"ordId": "1001", "clOrdId": clid}]})
+        return SimpleNamespace(data={"code": "0", "data": [{"ordId": ord_id, "clOrdId": clid}]})
 
     def get_order(self, *, inst_id, ord_id=None, cl_ord_id=None):
         self.get_calls += 1
@@ -59,6 +65,10 @@ class FakeOKX:
             for sym, payload in self.balance_by_ccy.items():
                 details.append({"ccy": sym, **payload})
         return SimpleNamespace(data={"data": [{"details": details}]})
+
+    def get_fills(self, *, inst_type="SPOT", inst_id=None, ord_id=None, after=None, before=None, begin=None, end=None, limit=100):
+        rows = list(self.fills_by_ord_id.get(str(ord_id), []))
+        return SimpleNamespace(data={"code": "0", "data": rows})
 
 
 def test_place_idempotent_same_intent() -> None:
@@ -116,3 +126,56 @@ def test_sell_market_caps_qty_to_okx_available_balance() -> None:
         row = store.list_open(limit=10)[0]
         req = json.loads(row.req_json)
         assert req["sz"] == "1.4"
+
+
+def test_sell_budget_blocks_second_sell_when_exchange_balance_is_stale() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["ETH"] = {"eq": "1.4", "availBal": "1.4", "cashBal": "1.4", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        pos.upsert_buy("ETH/USDT", qty=2.0, px=100.0)
+
+        cfg = ExecutionConfig(reconcile_status_path=f"{td}/reconcile_status.json", kill_switch_path=f"{td}/kill_switch.json")
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        first = Order(symbol="ETH/USDT", side="sell", intent="CLOSE_LONG", notional_usdt=150.0, signal_price=100.0, meta={"decision_hash": "h4"})
+        second = Order(symbol="ETH/USDT", side="sell", intent="CLOSE_LONG", notional_usdt=150.0, signal_price=100.0, meta={"decision_hash": "h5"})
+
+        eng.place(first)
+        row = store.list_open(limit=10)[0]
+        req = json.loads(row.req_json)
+        assert req["sz"] == "1.4"
+
+        result = eng.place(second)
+        assert result.state == "REJECTED"
+
+
+def test_buy_fill_uses_net_base_qty_when_fee_is_charged_in_base() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        cfg = ExecutionConfig(reconcile_status_path=f"{td}/reconcile_status.json", kill_switch_path=f"{td}/kill_switch.json")
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+        o = Order(symbol="OKB/USDT", side="buy", intent="OPEN_LONG", notional_usdt=97.4, signal_price=97.4, meta={"decision_hash": "h6"})
+
+        result = eng.place(o)
+        row = okx._orders[result.cl_ord_id]
+        row["state"] = "filled"
+        row["accFillSz"] = "0.706776"
+        row["avgPx"] = "97.4"
+        okx.fills_by_ord_id[row["ordId"]] = [
+            {
+                "fillSz": "0.706776",
+                "fee": "-0.000706776",
+                "feeCcy": "OKB",
+            }
+        ]
+
+        result = eng.place(o)
+        p = pos.get("OKB/USDT")
+        assert result.state == "FILLED"
+        assert p is not None
+        assert p.qty == pytest.approx(0.706069224)

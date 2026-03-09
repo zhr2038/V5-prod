@@ -7,6 +7,7 @@ import time
 
 import requests
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -298,6 +299,45 @@ class LiveExecutionEngine:
         self._closed = False  # 跟踪资源状态
         # In-run quote budget cache for buy-side no-borrow protection.
         self._buy_quote_budget_remaining: Optional[float] = None
+        self._sell_base_budget_remaining: Dict[str, float] = {}
+
+    @staticmethod
+    def _base_ccy(symbol: str) -> str:
+        return str(symbol).split("/")[0].upper()
+
+    def _compute_base_delta_from_fills(
+        self,
+        *,
+        inst_id: str,
+        ord_id: Optional[str],
+        side: str,
+    ) -> Optional[float]:
+        if not ord_id or not hasattr(self.okx, "get_fills"):
+            return None
+        try:
+            r = self.okx.get_fills(inst_id=str(inst_id), ord_id=str(ord_id), limit=100)
+            data = (r.data or {}).get("data") or []
+            if not isinstance(data, list) or not data:
+                return None
+
+            base_ccy = str(inst_id).split("-")[0].upper()
+            delta = Decimal("0")
+            side_l = str(side).lower()
+            for it in data:
+                if not isinstance(it, dict):
+                    continue
+                fill_sz = Decimal(str(it.get("fillSz") or "0"))
+                fee = Decimal(str(it.get("fee") or "0"))
+                fee_ccy = str(it.get("feeCcy") or "").upper()
+                base_fee = fee if fee_ccy == base_ccy else Decimal("0")
+                if side_l == "buy":
+                    delta += fill_sz + base_fee
+                elif side_l == "sell":
+                    delta += (-fill_sz) + base_fee
+            return float(delta)
+        except Exception as e:
+            log.warning("fill-based position delta fallback failed for %s/%s: %s", inst_id, ord_id, e)
+            return None
 
     def close(self):
         """关闭执行引擎，释放资源"""
@@ -410,6 +450,7 @@ class LiveExecutionEngine:
             "side": side,
             "ordType": ord_type,
             "clOrdId": cl_ord_id,
+            "banAmend": True,
         }
         
         # STRICT NO-BORROW ENFORCEMENT
@@ -591,6 +632,13 @@ class LiveExecutionEngine:
             elif okx_base_eq is not None:
                 sellable_qty = min(sellable_qty, max(0.0, float(okx_base_eq)))
 
+            budget_key = str(o.symbol)
+            cached_budget = self._sell_base_budget_remaining.get(budget_key)
+            if cached_budget is None:
+                self._sell_base_budget_remaining[budget_key] = max(0.0, float(sellable_qty))
+            else:
+                sellable_qty = min(sellable_qty, max(0.0, float(cached_budget)))
+
             if sellable_qty <= 0:
                 raise ValueError(
                     f"NO_BORROW_SAFETY: no sellable balance on OKX for {o.symbol}. "
@@ -631,6 +679,8 @@ class LiveExecutionEngine:
                 qty_rounded = round_down_to_lot(qty, float(specs.lot_sz))
             else:
                 qty_rounded = qty
+
+            self._sell_base_budget_remaining[budget_key] = max(0.0, float(sellable_qty) - float(qty_rounded))
 
             min_sz = float(specs.min_sz) if specs is not None else 0.0
             lot_sz = float(specs.lot_sz) if specs is not None else 0.0
@@ -958,13 +1008,25 @@ class LiveExecutionEngine:
                     acc_fill_sz = float((r0 or {}).get("accFillSz") or 0.0) if r0 else 0.0
                     avg_px = float((r0 or {}).get("avgPx") or 0.0) if r0 else 0.0
                     if acc_fill_sz > 0:
+                        fill_base_delta = self._compute_base_delta_from_fills(
+                            inst_id=str(getattr(row, "inst_id", "") or inst_id),
+                            ord_id=str(polled_ord_id or getattr(row, "ord_id", "") or ""),
+                            side=str(o.side),
+                        )
                         if str(o.side).lower() == "buy":
-                            self.position_store.upsert_buy(o.symbol, qty=float(acc_fill_sz), px=float(avg_px or o.signal_price or 0.0))
+                            net_buy_qty = float(fill_base_delta) if fill_base_delta is not None else float(acc_fill_sz)
+                            if net_buy_qty > 0:
+                                self.position_store.upsert_buy(
+                                    o.symbol,
+                                    qty=float(net_buy_qty),
+                                    px=float(avg_px or o.signal_price or 0.0),
+                                )
                         elif str(o.side).lower() == "sell":
                             # reduce qty; if becomes dust, close
                             p = self.position_store.get(o.symbol)
                             if p is not None:
-                                new_qty = max(0.0, float(p.qty) - float(acc_fill_sz))
+                                reduce_qty = abs(float(fill_base_delta)) if fill_base_delta is not None else float(acc_fill_sz)
+                                new_qty = max(0.0, float(p.qty) - float(reduce_qty))
                                 if new_qty <= 0:
                                     self.position_store.close_long(o.symbol)
                                     clear_risk_state_on_full_close(o.symbol)
@@ -1036,6 +1098,37 @@ class LiveExecutionEngine:
             fee=r0.get("fee"),
             event_type="POLL",
         )
+        if st == "FILLED":
+            try:
+                row = self.order_store.get(cl_ord_id)
+                if row is not None:
+                    acc_fill_sz = float(r0.get("accFillSz") or r0.get("acc_fill_sz") or 0.0)
+                    avg_px = float(r0.get("avgPx") or r0.get("avg_px") or 0.0)
+                    base_delta = self._compute_base_delta_from_fills(
+                        inst_id=str(inst_id),
+                        ord_id=str(ord_id or ""),
+                        side=str(row.side or ""),
+                    )
+                    if str(row.side).lower() == "buy":
+                        net_buy_qty = float(base_delta) if base_delta is not None else float(acc_fill_sz)
+                        if net_buy_qty > 0:
+                            self.position_store.upsert_buy(
+                                str(row.inst_id).replace("-", "/"),
+                                qty=net_buy_qty,
+                                px=float(avg_px or 0.0),
+                            )
+                    elif str(row.side).lower() == "sell":
+                        p = self.position_store.get(str(row.inst_id).replace("-", "/"))
+                        if p is not None:
+                            reduce_qty = abs(float(base_delta)) if base_delta is not None else float(acc_fill_sz)
+                            new_qty = max(0.0, float(p.qty) - float(reduce_qty))
+                            if new_qty <= 0:
+                                self.position_store.close_long(str(row.inst_id).replace("-", "/"))
+                                clear_risk_state_on_full_close(str(row.inst_id).replace("-", "/"))
+                            else:
+                                self.position_store.set_qty(str(row.inst_id).replace("-", "/"), qty=new_qty)
+            except Exception as e:
+                log.warning("position sync on query fill failed for %s: %s", cl_ord_id, e)
         return st, (str(ord_id) if ord_id else None)
 
     def cancel(self, *, symbol: str, cl_ord_id: str) -> bool:
@@ -1075,6 +1168,7 @@ class LiveExecutionEngine:
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         # Reset per-run quote budget cache.
         self._buy_quote_budget_remaining = None
+        self._sell_base_budget_remaining = {}
         placed: List[Order] = []
         for o in order_batch or []:
             try:

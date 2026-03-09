@@ -416,3 +416,135 @@ def test_preflight_quote_liability_degrades_to_sell_only(monkeypatch):
         assert res.decision == "SELL_ONLY"
         assert res.reason == "borrow_detected_quote_liability"
         assert res.details["borrow_check"]["quote_liability_ccys"] == ["USDT"]
+
+
+def test_preflight_auto_fixes_fee_type_before_allowing_buys(monkeypatch):
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {"ok": True, "reason": "ok", "category": "OK", "kill_switch": {"enabled": False}}
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+
+    class FeeTypeOKX(DummyOKX):
+        def __init__(self):
+            self.fee_type = "1"
+            self.calls = 0
+
+        def get_account_config(self):
+            self.calls += 1
+            return SimpleNamespace(
+                data={
+                    "data": [
+                        {
+                            "acctLv": "1",
+                            "posMode": "net_mode",
+                            "autoLoan": False,
+                            "enableSpotBorrow": False,
+                            "spotBorrowAutoRepay": True,
+                            "feeType": self.fee_type,
+                        }
+                    ]
+                }
+            )
+
+        def set_fee_type(self, fee_type):
+            self.fee_type = str(fee_type)
+            return SimpleNamespace(data={"code": "0", "data": []})
+
+    cfg = SimpleNamespace(
+        reconcile_status_path="reconcile.json",
+        reconcile_dust_usdt_ignore=1.0,
+        enforce_account_config_check=True,
+        required_acct_lv="1",
+        required_pos_mode="net_mode",
+        require_auto_loan_false=True,
+        require_fee_type_zero=True,
+        auto_fix_fee_type_zero=True,
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        okx = FeeTypeOKX()
+        pf = lp.LivePreflight(
+            cfg,
+            okx=okx,
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "ALLOW"
+        assert res.details["account_config"]["feeType"] == "0"
+        assert res.details["account_config"]["feeTypeAutoFixed"] is True
+        assert okx.calls >= 2
+
+
+def test_preflight_fee_type_mismatch_degrades_to_sell_only_when_not_fixed(monkeypatch):
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {"ok": True, "reason": "ok", "category": "OK", "kill_switch": {"enabled": False}}
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+
+    class FeeTypeOKX(DummyOKX):
+        def get_account_config(self):
+            return SimpleNamespace(
+                data={
+                    "data": [
+                        {
+                            "acctLv": "1",
+                            "posMode": "net_mode",
+                            "autoLoan": False,
+                            "enableSpotBorrow": False,
+                            "spotBorrowAutoRepay": True,
+                            "feeType": "1",
+                        }
+                    ]
+                }
+            )
+
+    cfg = SimpleNamespace(
+        reconcile_status_path="reconcile.json",
+        reconcile_dust_usdt_ignore=1.0,
+        enforce_account_config_check=True,
+        required_acct_lv="1",
+        required_pos_mode="net_mode",
+        require_auto_loan_false=True,
+        require_fee_type_zero=True,
+        auto_fix_fee_type_zero=False,
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        pf = lp.LivePreflight(
+            cfg,
+            okx=FeeTypeOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "SELL_ONLY"
+        assert "feeType_mismatch:1!=0" in res.details["account_config"]["violations"]
