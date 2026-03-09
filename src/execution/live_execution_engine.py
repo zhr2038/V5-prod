@@ -541,6 +541,7 @@ class LiveExecutionEngine:
                 balance_resp = self.okx.get_balance()
                 base_ccy = o.symbol.split('/')[0]
                 okx_base_eq = None
+                okx_base_avail = None
 
                 rows = (balance_resp.data or {}).get("data") if isinstance(balance_resp.data, dict) else None
                 details = ((rows[0] if isinstance(rows, list) and rows else {}) or {}).get("details")
@@ -548,6 +549,7 @@ class LiveExecutionEngine:
                     for d in details:
                         if isinstance(d, dict) and str(d.get("ccy")) == str(base_ccy):
                             okx_base_eq = float(d.get("eq") or 0.0)
+                            okx_base_avail = float(d.get("availBal") or d.get("cashBal") or d.get("eq") or 0.0)
                             break
 
                 if okx_base_eq is not None:
@@ -557,10 +559,15 @@ class LiveExecutionEngine:
                             f"Would increase borrow. Aborting."
                         )
 
-                    # Allow 10% tolerance for local store drift, but do not allow obvious oversell.
-                    if okx_base_eq < float(p.qty) * 0.9:
+                    if okx_base_avail is not None and okx_base_avail <= 0:
                         raise ValueError(
-                            f"NO_BORROW_SAFETY: OKX balance ({okx_base_eq}) < local position ({p.qty}) "
+                            f"NO_BORROW_SAFETY: OKX available balance ({okx_base_avail}) <= 0 "
+                            f"for {o.symbol}. Risk of borrow. Aborting."
+                        )
+
+                    if okx_base_eq <= 0 and (okx_base_avail is None or okx_base_avail <= 0):
+                        raise ValueError(
+                            f"NO_BORROW_SAFETY: OKX balance ({okx_base_eq}) <= 0 "
                             f"for {o.symbol}. Risk of borrow. Aborting."
                         )
 
@@ -578,7 +585,29 @@ class LiveExecutionEngine:
             # CRITICAL: 全程使用Decimal避免精度丢失
             from decimal import Decimal
             
-            qty_full_dec = Decimal(str(p.qty))
+            sellable_qty = float(p.qty)
+            if okx_base_avail is not None:
+                sellable_qty = min(sellable_qty, max(0.0, float(okx_base_avail)))
+            elif okx_base_eq is not None:
+                sellable_qty = min(sellable_qty, max(0.0, float(okx_base_eq)))
+
+            if sellable_qty <= 0:
+                raise ValueError(
+                    f"NO_BORROW_SAFETY: no sellable balance on OKX for {o.symbol}. "
+                    f"local={p.qty} okx_eq={okx_base_eq} okx_avail={okx_base_avail}"
+                )
+
+            if sellable_qty + 1e-12 < float(p.qty):
+                log.warning(
+                    "SELL_QTY_CAPPED_BY_OKX: %s local_qty=%.12g okx_eq=%s okx_avail=%s capped_qty=%.12g",
+                    o.symbol,
+                    float(p.qty),
+                    okx_base_eq,
+                    okx_base_avail,
+                    sellable_qty,
+                )
+
+            qty_full_dec = Decimal(str(max(0.0, sellable_qty)))
             if str(o.intent).upper() == "CLOSE_LONG":
                 qty_dec = qty_full_dec
             else:

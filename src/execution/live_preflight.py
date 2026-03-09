@@ -49,6 +49,13 @@ def _to_bool(v: Any) -> bool:
     return s in {"1", "true", "yes", "on"}
 
 
+def _borrow_symbol_for_ccy(ccy: Any) -> Optional[str]:
+    base = str(ccy or "").strip().upper()
+    if not base or base in {"USDT", "USDC", "USD"}:
+        return None
+    return f"{base}/USDT"
+
+
 @dataclass
 class LivePreflightResult:
     decision: str  # ALLOW|SELL_ONLY|ABORT
@@ -267,6 +274,8 @@ class LivePreflight:
                 "ok": bool(borrow_res.ok),
                 "reason": borrow_res.reason,
                 "count": len(borrow_res.items),
+                "blocked_symbols": [],
+                "quote_liability_ccys": [],
                 "items": [
                     {
                         "ccy": i.ccy,
@@ -280,28 +289,49 @@ class LivePreflight:
             }
 
             if (not borrow_res.ok) and bool(getattr(self.cfg, "abort_on_borrow", True)):
+                blocked_symbols = []
+                quote_liability_ccys = []
                 try:
                     for it in (borrow_res.items or []):
-                        sym = f"{it.ccy}/USDT"
-                        auto_blacklist_add(
-                            sym,
-                            reason="borrow_detected",
-                            ttl_sec=30 * 24 * 3600,
-                            meta={
-                                "eq": it.eq,
-                                "liab": it.liab,
-                                "cross_liab": it.cross_liab,
-                                "borrow_froz": it.borrow_froz,
-                            },
-                        )
+                        sym = _borrow_symbol_for_ccy(it.ccy)
+                        if sym:
+                            blocked_symbols.append(sym)
+                            auto_blacklist_add(
+                                sym,
+                                reason="borrow_detected",
+                                ttl_sec=30 * 24 * 3600,
+                                meta={
+                                    "eq": it.eq,
+                                    "liab": it.liab,
+                                    "cross_liab": it.cross_liab,
+                                    "borrow_froz": it.borrow_froz,
+                                },
+                            )
+                        else:
+                            quote_liability_ccys.append(str(it.ccy or "").strip().upper())
                 except Exception:
                     pass
+
+                blocked_symbols = sorted({str(sym) for sym in blocked_symbols if str(sym)})
+                quote_liability_ccys = sorted({str(ccy) for ccy in quote_liability_ccys if str(ccy)})
+                details["borrow_check"]["blocked_symbols"] = blocked_symbols
+                details["borrow_check"]["quote_liability_ccys"] = quote_liability_ccys
 
                 borrow_block_mode = str(
                     getattr(self.cfg, "borrow_block_mode", "global_abort") or "global_abort"
                 ).lower()
                 details["borrow_check"]["block_mode"] = borrow_block_mode
                 if borrow_block_mode == "symbol_only":
+                    if quote_liability_ccys:
+                        details["borrow_check"]["action"] = "sell_only_quote_liability"
+                        return LivePreflightResult(
+                            decision="SELL_ONLY",
+                            reconcile_ok=reconcile_ok,
+                            ledger_ok=ledger_ok,
+                            kill_switch_enabled=False,
+                            reason="borrow_detected_quote_liability",
+                            details=details,
+                        )
                     details["borrow_check"]["action"] = "symbol_blacklist_only"
                 else:
                     return LivePreflightResult(

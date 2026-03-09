@@ -103,6 +103,27 @@ def test_multi_strategy_same_symbol_merge_applies_weight_once():
     assert scores["BTC/USDT"] == pytest.approx(1.0)
 
 
+def test_multi_strategy_single_signal_keeps_raw_signal_scale():
+    engine = AlphaEngine(AlphaConfig())
+    engine.use_multi_strategy = True
+    engine.multi_strategy_adapter = _StubAdapter(
+        [
+            {
+                "symbol": "BTC-USDT",
+                "side": "buy",
+                "target_position_usdt": 11.0,
+                "signal_score": 0.18,
+                "confidence": 0.18,
+                "strategy_weight": 0.55,
+            },
+        ]
+    )
+
+    scores = engine.compute_scores({"BTC/USDT": _series("BTC/USDT")})
+
+    assert scores["BTC/USDT"] == pytest.approx(0.18)
+
+
 def test_portfolio_engine_loads_only_current_run_fused_signals(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     current = tmp_path / "reports" / "runs" / "current_run"

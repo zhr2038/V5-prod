@@ -246,6 +246,7 @@ class ExecutionConfig(BaseModel):
     abort_on_borrow: bool = Field(default=True, description="If OKX balance shows any liabilities/negative eq, abort preflight")
     borrow_liab_eps: float = Field(default=1e-6, ge=0)
     borrow_neg_eq_eps: float = Field(default=1e-6, ge=0)
+    borrow_block_mode: str = Field(default="global_abort", description="global_abort|symbol_only")
 
     # Account config safety (OKX API): enforce account mode/settings before allowing buys.
     enforce_account_config_check: bool = Field(default=True)
@@ -419,6 +420,14 @@ class ExecutionConfig(BaseModel):
         vv = str(v or "sell_only").strip().lower()
         if vv not in {"sell_only", "abort", "allow"}:
             raise ValueError("execution.preflight_fail_action must be 'sell_only', 'abort', or 'allow'")
+        return vv
+
+    @field_validator("borrow_block_mode")
+    @classmethod
+    def _borrow_block_mode(cls, v: str) -> str:
+        vv = str(v or "global_abort").strip().lower()
+        if vv not in {"global_abort", "symbol_only"}:
+            raise ValueError("execution.borrow_block_mode must be 'global_abort' or 'symbol_only'")
         return vv
 
 

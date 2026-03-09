@@ -222,6 +222,7 @@ execution:
   
   # 借币预防
   borrow_prevention: true
+  borrow_block_mode: symbol_only
   min_trade_value_usdt: 10.0
   max_fee_ratio: 0.05
   check_fee_currency_balance: true

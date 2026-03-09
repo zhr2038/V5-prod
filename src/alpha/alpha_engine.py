@@ -430,11 +430,11 @@ class AlphaEngine:
         for target in targets:
             sym = target['symbol'].replace('-', '/')
 
-            # 基础信号强度
-            base_score = float(target['signal_score']) * float(target['confidence'])
+            signal_score = float(target.get('signal_score', 0.0) or 0.0)
+            confidence = max(0.0, float(target.get('confidence', 0.0) or 0.0))
 
             # 让“策略分配权重”真正进入打分链路
-            strategy_weight = float(target.get('strategy_weight', target.get('confidence', 0.0)) or 0.0)
+            strategy_weight = float(target.get('strategy_weight', confidence) or 0.0)
             position_usdt = float(target.get('target_position_usdt', 0.0) or 0.0)
             position_weight = max(0.0, position_usdt) / total_capital
 
@@ -442,19 +442,19 @@ class AlphaEngine:
             if strategy_weight > 0 and position_weight > 0:
                 effective_weight = 0.7 * strategy_weight + 0.3 * position_weight
             else:
-                effective_weight = max(strategy_weight, position_weight, float(target.get('confidence', 0.0) or 0.0))
+                effective_weight = max(strategy_weight, position_weight, confidence)
 
             effective_weight = max(effective_weight, 1e-6)
+            merge_weight = max(effective_weight * max(confidence, 0.05), 1e-6)
 
             # 买入信号为正分，卖出为负分
-            score = base_score
+            score = abs(signal_score)
             if target['side'] == 'sell':
                 score = -score
 
             symbol_signals[sym].append({
                 'score': score,
-                'weighted_score': score * effective_weight,
-                'weight': effective_weight,
+                'merge_weight': merge_weight,
                 'side': target['side']
             })
         
@@ -462,28 +462,11 @@ class AlphaEngine:
         scores = {}
         for sym, signals in symbol_signals.items():
             if len(signals) == 1:
-                scores[sym] = signals[0]['weighted_score']
+                scores[sym] = signals[0]['score']
             else:
-                # 分离买入和卖出信号
-                buy_signals = [s for s in signals if s['side'] == 'buy']
-                sell_signals = [s for s in signals if s['side'] == 'sell']
-                
-                # 计算加权平均
-                if buy_signals and sell_signals:
-                    # 有冲突信号时，按权重加权平均
-                    total_weight = sum(s['weight'] for s in signals)
-                    weighted_score = sum(s['weighted_score'] for s in signals) / total_weight
-                    scores[sym] = weighted_score
-                elif buy_signals:
-                    # 只有买入信号
-                    total_weight = sum(s['weight'] for s in buy_signals)
-                    weighted_score = sum(s['weighted_score'] for s in buy_signals) / total_weight
-                    scores[sym] = weighted_score
-                else:
-                    # 只有卖出信号
-                    total_weight = sum(s['weight'] for s in sell_signals)
-                    weighted_score = sum(s['weighted_score'] for s in sell_signals) / total_weight
-                    scores[sym] = weighted_score
+                total_weight = sum(s['merge_weight'] for s in signals)
+                weighted_score = sum(s['score'] * s['merge_weight'] for s in signals) / max(total_weight, 1e-9)
+                scores[sym] = weighted_score
         
         return scores
 

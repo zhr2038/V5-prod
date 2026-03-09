@@ -784,6 +784,22 @@ def main() -> None:
                 if res.decision == "ABORT" or (res.decision == "SELL_ONLY" and fail_action == "abort"):
                     raise RuntimeError(f"live preflight blocked: {res.decision} {res.reason}")
 
+                borrow_blocked = {
+                    str(sym)
+                    for sym in (((res.details or {}).get("borrow_check") or {}).get("blocked_symbols") or [])
+                    if str(sym)
+                }
+                if borrow_blocked:
+                    before_n = len(orders)
+                    orders = [o for o in orders if str(getattr(o, "symbol", "")) not in borrow_blocked]
+                    after_n = len(orders)
+                    if before_n != after_n:
+                        log.warning(
+                            "live preflight filtered borrow-blocked symbols: blocked=%s removed=%d",
+                            sorted(borrow_blocked),
+                            before_n - after_n,
+                        )
+
                 if res.decision == "SELL_ONLY":
                     orders = [o for o in orders if str(o.side).lower() == "sell" or str(o.intent) == "CLOSE_LONG"]
         except Exception as e:

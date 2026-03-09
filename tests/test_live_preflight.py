@@ -310,3 +310,109 @@ def test_preflight_passes_configured_reconcile_mode(monkeypatch):
         res = pf.run(max_pages=1, max_status_age_sec=180)
         assert res.decision == "ALLOW"
         assert captured["kwargs"]["ccy_mode"] == "all"
+
+
+def test_preflight_symbol_only_borrow_blocks_only_affected_symbols(monkeypatch):
+    recorded = []
+
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+    monkeypatch.setattr(lp, "auto_blacklist_add", lambda sym, **kwargs: recorded.append(sym))
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {"ok": True, "reason": "ok", "category": "OK", "kill_switch": {"enabled": False}}
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+    monkeypatch.setattr(
+        lp,
+        "check_okx_borrows",
+        lambda *a, **k: SimpleNamespace(
+            ok=False,
+            items=[SimpleNamespace(ccy="OKB", eq=-0.2, liab=0.2, cross_liab=0.0, borrow_froz=0.0)],
+            reason="borrow_detected",
+            raw={},
+        ),
+    )
+
+    cfg = SimpleNamespace(
+        reconcile_status_path="reconcile.json",
+        reconcile_dust_usdt_ignore=1.0,
+        abort_on_borrow=True,
+        borrow_block_mode="symbol_only",
+        enforce_account_config_check=False,
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        pf = lp.LivePreflight(
+            cfg,
+            okx=DummyOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "ALLOW"
+        assert res.details["borrow_check"]["action"] == "symbol_blacklist_only"
+        assert res.details["borrow_check"]["blocked_symbols"] == ["OKB/USDT"]
+        assert recorded == ["OKB/USDT"]
+
+
+def test_preflight_quote_liability_degrades_to_sell_only(monkeypatch):
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {"ok": True, "reason": "ok", "category": "OK", "kill_switch": {"enabled": False}}
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+    monkeypatch.setattr(
+        lp,
+        "check_okx_borrows",
+        lambda *a, **k: SimpleNamespace(
+            ok=False,
+            items=[SimpleNamespace(ccy="USDT", eq=-3.0, liab=3.0, cross_liab=0.0, borrow_froz=0.0)],
+            reason="borrow_detected",
+            raw={},
+        ),
+    )
+
+    cfg = SimpleNamespace(
+        reconcile_status_path="reconcile.json",
+        reconcile_dust_usdt_ignore=1.0,
+        abort_on_borrow=True,
+        borrow_block_mode="symbol_only",
+        enforce_account_config_check=False,
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        pf = lp.LivePreflight(
+            cfg,
+            okx=DummyOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "SELL_ONLY"
+        assert res.reason == "borrow_detected_quote_liability"
+        assert res.details["borrow_check"]["quote_liability_ccys"] == ["USDT"]
