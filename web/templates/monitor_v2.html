@@ -2,65 +2,649 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>V5 交易指挥台</title>
+<title>V5 交易总览</title>
 <style>
-:root{--bg:#08111f;--panel:rgba(12,24,39,.84);--border:rgba(148,163,184,.18);--ink:#e6edf7;--muted:#8ca0bb;--cyan:#5eead4;--sky:#7dd3fc;--amber:#fbbf24;--red:#fb7185;--green:#4ade80;--shadow:0 24px 60px rgba(0,0,0,.32);--r1:28px;--r2:20px;--r3:14px;--body:"MiSans","Source Han Sans SC","PingFang SC","Segoe UI",sans-serif;--mono:"JetBrains Mono","IBM Plex Mono","SFMono-Regular",Consolas,monospace}
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 12% 14%,rgba(94,234,212,.18),transparent 24%),radial-gradient(circle at 82% 10%,rgba(251,191,36,.14),transparent 18%),radial-gradient(circle at 74% 78%,rgba(125,211,252,.12),transparent 22%),linear-gradient(140deg,#06101d 0%,#0a1626 45%,#0d2034 100%);color:var(--ink);font-family:var(--body)}
-body:before,body:after{content:"";position:fixed;pointer-events:none;filter:blur(36px);opacity:.5;z-index:0}body:before{width:240px;height:240px;top:80px;right:-40px;background:rgba(94,234,212,.14)}body:after{width:220px;height:220px;left:-40px;bottom:40px;background:rgba(251,191,36,.10)}
-.shell{position:relative;z-index:1;max-width:1480px;margin:0 auto;padding:26px}.hero{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.85fr);gap:18px;margin-bottom:18px}.hero-card,.panel,.metric,.chip{-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
-.hero-card,.panel,.metric{background:linear-gradient(180deg,rgba(13,27,44,.94),rgba(8,20,33,.82));border:1px solid var(--border);box-shadow:var(--shadow)}.hero-card{border-radius:var(--r1);padding:26px;position:relative;overflow:hidden}.hero-card:after{content:"";position:absolute;inset:auto -80px -120px auto;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(125,211,252,.18),transparent 70%)}
-.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:rgba(94,234,212,.12);color:var(--cyan);font:700 11px/1 var(--mono);letter-spacing:.08em;text-transform:none}.hero-title{margin:18px 0 10px;font-size:clamp(2rem,4vw,3.8rem);line-height:.94;letter-spacing:-.05em}.hero-copy{max-width:760px;font-size:1rem;color:var(--muted);line-height:1.82}.hero-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}.hero-aside{display:grid;gap:14px}.stack-label,.kicker,.label{color:var(--muted);font:700 11px/1.2 var(--mono);letter-spacing:.08em;text-transform:none}.stack-value{font-size:1.15rem;font-weight:700;display:flex;flex-wrap:wrap;gap:10px;align-items:center}.chip,.pill,.tiny,.alert{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;font-size:.8rem;font-weight:700}.chip{background:rgba(8,18,31,.74);border:1px solid rgba(125,211,252,.12)}.dot{width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 6px rgba(94,234,212,.12)}
-.metric-row{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;margin-bottom:18px}.metric{border-radius:var(--r2);padding:20px 18px 18px;min-height:134px}.metric-value{font-size:clamp(1.5rem,2.2vw,2.3rem);font-weight:700;letter-spacing:-.04em}.muted{margin-top:12px;font-size:.88rem;line-height:1.7;color:var(--muted)}
-.deck{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,.95fr);gap:18px}.column{display:grid;gap:18px}.panel{border-radius:var(--r1);padding:20px;overflow:hidden}.panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}.title{font-size:1.26rem;font-weight:700;line-height:1.35;letter-spacing:-.03em}.note{margin-top:6px;color:var(--muted);font-size:.92rem;line-height:1.72}
-.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.info,.vote,.trade,.signal,.decision,.ops,.health,.alpha{background:rgba(5,13,24,.62);border:1px solid rgba(148,163,184,.1);border-radius:16px;padding:16px}.value{margin-top:10px;font-size:1.1rem;font-weight:700;line-height:1.35}.subtle{margin-top:8px;font-size:.84rem;line-height:1.72;color:var(--muted)}
-.state-trending,.risk-attack,.tone-positive{background:rgba(74,222,128,.14);color:#8ef0ad}.state-sideways,.risk-neutral,.tone-warn{background:rgba(251,191,36,.14);color:#f7d66d}.state-riskoff,.risk-defense,.risk-protect,.tone-negative{background:rgba(251,113,133,.14);color:#ff9aae}.alert{background:rgba(125,211,252,.14);color:#c4ebff;border:1px solid rgba(125,211,252,.14);margin:0 8px 8px 0}
-.vote-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}.vote-head,.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.vote-title{font-size:.82rem;color:var(--muted);text-transform:none;letter-spacing:.08em;font-family:var(--mono)}.vote-value{font-size:1.04rem;font-weight:700}.vote-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.tiny{padding:6px 10px;background:rgba(15,29,47,.88);border:1px solid rgba(148,163,184,.12);color:var(--muted);font-weight:600}
-.table-shell{overflow:auto;border-radius:16px;border:1px solid rgba(148,163,184,.1);background:rgba(5,13,24,.62)}table{width:100%;border-collapse:collapse;min-width:560px}th,td{padding:12px 14px;border-bottom:1px solid rgba(148,163,184,.08);text-align:left;font-size:.9rem}th{color:var(--muted);font:700 11px/1.2 var(--mono);text-transform:none;letter-spacing:.08em;background:rgba(10,20,34,.95);position:sticky;top:0}tr:last-child td{border-bottom:none}.text-right{text-align:right}.text-green{color:#8ef0ad}.text-red{color:#ff9aae}.mono{font-family:var(--mono)}.stack,.trade-list,.signal-grid,.decision-grid,.ops-grid,.health-list,.alpha-list{display:grid;gap:12px}.signal-grid,.ops-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}.bar{margin-top:10px;height:8px;border-radius:999px;background:rgba(148,163,184,.12);overflow:hidden}.bar>span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,rgba(94,234,212,.72),rgba(125,211,252,.88))}.prob-list{display:grid;gap:8px;margin-top:12px}.prob-row{display:grid;grid-template-columns:64px 1fr auto;gap:10px;align-items:center}.prob-label{font-size:.8rem;color:var(--muted)}.prob-track{height:6px;border-radius:999px;background:rgba(148,163,184,.12);overflow:hidden}.prob-track>span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,rgba(74,222,128,.78),rgba(125,211,252,.9))}.prob-value{font:700 11px/1 var(--mono);color:var(--ink)}.vote-summary{margin-top:10px;font-size:.84rem;line-height:1.7;color:var(--muted)}.history-wrap{margin-top:16px;padding-top:14px;border-top:1px solid rgba(148,163,184,.12)}.history-title{font:700 11px/1.2 var(--mono);letter-spacing:.08em;color:var(--muted);margin-bottom:10px}.history-grid{display:grid;gap:10px}.history-row{display:grid;grid-template-columns:72px 1fr;gap:10px;align-items:center}.history-label{font-size:.82rem;color:var(--muted)}.history-track{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:4px}.history-cell{height:12px;border-radius:999px;background:rgba(148,163,184,.16);cursor:pointer}.history-cell.state-trending{background:rgba(74,222,128,.86)}.history-cell.state-sideways{background:rgba(251,191,36,.82)}.history-cell.state-riskoff{background:rgba(251,113,133,.84)}.hover-tip{position:fixed;z-index:60;pointer-events:none;min-width:188px;max-width:240px;padding:12px 14px;border-radius:14px;background:rgba(3,10,20,.96);border:1px solid rgba(125,211,252,.18);box-shadow:0 20px 48px rgba(2,6,23,.48);color:var(--ink)}.hover-tip[hidden]{display:none}.hover-tip-title{font:700 12px/1.2 var(--mono);letter-spacing:.08em;color:var(--muted);margin-bottom:8px}.hover-tip-grid{display:grid;gap:6px}.hover-tip-row{display:flex;justify-content:space-between;gap:10px;font-size:.82rem;line-height:1.4}.hover-tip-row span{color:var(--muted)}.hover-tip-row strong{font-weight:700;color:var(--ink);text-align:right}
-.loading,.empty,.error{padding:18px;border-radius:14px;text-align:center;background:rgba(5,13,24,.62);border:1px dashed rgba(148,163,184,.18)}.loading{color:var(--muted)}.error{color:var(--red)}.footer{margin-top:18px;color:var(--muted);font-size:.82rem;text-align:right}
-@media (max-width:1180px){.hero,.deck,.metric-row,.vote-grid,.grid2{grid-template-columns:1fr}}@media (max-width:720px){.shell{padding:14px}.hero-card,.panel,.metric{padding:16px;border-radius:20px}.hero-title{font-size:2rem}.chip,.pill,.tiny,.alert{white-space:normal}table{min-width:520px}}
+:root{
+  --bg:#07111b;
+  --panel:rgba(8,18,30,.82);
+  --panel-strong:rgba(7,15,25,.94);
+  --border:rgba(130,154,185,.16);
+  --ink:#eef4fb;
+  --muted:#8ca0ba;
+  --cyan:#56e0d2;
+  --sky:#83cfff;
+  --amber:#f6c453;
+  --red:#ff7d92;
+  --green:#55df86;
+  --shadow:0 26px 64px rgba(0,0,0,.34);
+  --radius-xl:30px;
+  --radius-lg:22px;
+  --radius-md:16px;
+  --radius-sm:12px;
+  --body:"MiSans","Alibaba PuHuiTi","PingFang SC","Segoe UI",sans-serif;
+  --mono:"JetBrains Mono","IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:
+  radial-gradient(circle at 10% 10%,rgba(86,224,210,.16),transparent 22%),
+  radial-gradient(circle at 82% 8%,rgba(246,196,83,.14),transparent 18%),
+  radial-gradient(circle at 76% 78%,rgba(131,207,255,.12),transparent 24%),
+  linear-gradient(145deg,#050d16 0%,#0a1624 44%,#0d2031 100%);
+  color:var(--ink);
+  font-family:var(--body);
+}
+body::before,body::after{
+  content:"";
+  position:fixed;
+  inset:auto;
+  pointer-events:none;
+  filter:blur(44px);
+  opacity:.48;
+  z-index:0;
+}
+body::before{width:260px;height:260px;left:-48px;bottom:12vh;background:rgba(86,224,210,.14)}
+body::after{width:220px;height:220px;right:-36px;top:8vh;background:rgba(131,207,255,.14)}
+.shell{position:relative;z-index:1;max-width:1480px;margin:0 auto;padding:24px 24px 34px}
+.hero,
+.panel,
+.metric,
+.chip,
+.subcard,
+.mobile-item{
+  -webkit-backdrop-filter:blur(16px);
+  backdrop-filter:blur(16px);
+}
+.hero{
+  display:grid;
+  grid-template-columns:minmax(0,1.35fr) minmax(320px,.85fr);
+  gap:18px;
+  margin-bottom:18px;
+}
+.hero-main,
+.hero-side .subcard,
+.panel,
+.metric{
+  background:linear-gradient(180deg,rgba(10,22,36,.96),rgba(7,16,27,.84));
+  border:1px solid var(--border);
+  box-shadow:var(--shadow);
+}
+.hero-main{
+  border-radius:var(--radius-xl);
+  padding:24px;
+  overflow:hidden;
+  position:relative;
+}
+.hero-main::after{
+  content:"";
+  position:absolute;
+  right:-96px;
+  bottom:-130px;
+  width:240px;
+  height:240px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(131,207,255,.22),transparent 70%);
+}
+.hero-side{display:grid;gap:14px}
+.subcard{
+  border-radius:var(--radius-lg);
+  padding:18px;
+}
+.eyebrow{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 12px;
+  border-radius:999px;
+  background:rgba(86,224,210,.12);
+  color:var(--cyan);
+  font:700 11px/1 var(--mono);
+  letter-spacing:.08em;
+}
+.hero-title{
+  margin:16px 0 8px;
+  font-size:clamp(2rem,4vw,3.6rem);
+  line-height:.94;
+  letter-spacing:-.05em;
+}
+.hero-copy{
+  margin:0;
+  max-width:680px;
+  color:var(--muted);
+  font-size:.98rem;
+  line-height:1.75;
+}
+.hero-strip{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-top:18px;
+}
+.chip,
+.pill,
+.tiny,
+.alert{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px;
+  border-radius:999px;
+  font-size:.8rem;
+  font-weight:700;
+}
+.chip{
+  background:rgba(7,15,25,.72);
+  border:1px solid rgba(131,207,255,.12);
+}
+.dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--cyan);
+  box-shadow:0 0 0 6px rgba(86,224,210,.12);
+}
+.stack-label,
+.kicker,
+.label,
+.metric-kicker{
+  color:var(--muted);
+  font:700 11px/1.2 var(--mono);
+  letter-spacing:.08em;
+}
+.stack-value{
+  margin-top:10px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  font-size:1.12rem;
+  font-weight:700;
+}
+.note,
+.subtle{
+  color:var(--muted);
+  font-size:.86rem;
+  line-height:1.68;
+}
+.metric-row{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:14px;
+  margin-bottom:18px;
+}
+.metric{
+  border-radius:var(--radius-lg);
+  padding:18px;
+  min-height:122px;
+}
+.metric-value{
+  margin-top:10px;
+  font-size:clamp(1.46rem,2vw,2.2rem);
+  font-weight:700;
+  letter-spacing:-.04em;
+}
+.layout{
+  display:grid;
+  grid-template-columns:minmax(0,1.22fr) minmax(0,.94fr);
+  gap:18px;
+}
+.column{display:grid;gap:18px}
+.panel{
+  border-radius:var(--radius-xl);
+  padding:18px;
+  overflow:hidden;
+}
+.panel-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:14px;
+  margin-bottom:16px;
+}
+.title{
+  font-size:1.2rem;
+  font-weight:700;
+  line-height:1.35;
+  letter-spacing:-.03em;
+}
+.grid2{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.vote,
+.trade,
+.signal,
+.decision,
+.ops,
+.health,
+.alpha,
+.info,
+.mobile-item{
+  background:rgba(4,11,19,.62);
+  border:1px solid rgba(130,154,185,.1);
+  border-radius:16px;
+  padding:15px;
+}
+.value{
+  margin-top:8px;
+  font-size:1.04rem;
+  font-weight:700;
+  line-height:1.34;
+}
+.vote-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
+.vote-head,
+.row{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.vote-title{
+  font-size:.8rem;
+  color:var(--muted);
+  letter-spacing:.08em;
+  font-family:var(--mono);
+}
+.vote-value{margin-top:8px;font-size:1rem;font-weight:700}
+.vote-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.tiny{
+  padding:6px 10px;
+  background:rgba(13,25,40,.88);
+  border:1px solid rgba(130,154,185,.12);
+  color:var(--muted);
+  font-weight:600;
+}
+.table-shell{
+  overflow:auto;
+  border-radius:16px;
+  border:1px solid rgba(130,154,185,.1);
+  background:rgba(4,11,19,.62);
+}
+table{width:100%;border-collapse:collapse;min-width:560px}
+th,td{
+  padding:12px 14px;
+  border-bottom:1px solid rgba(130,154,185,.08);
+  text-align:left;
+  font-size:.9rem;
+}
+th{
+  color:var(--muted);
+  font:700 11px/1.2 var(--mono);
+  background:rgba(8,16,28,.95);
+  position:sticky;
+  top:0;
+}
+tr:last-child td{border-bottom:none}
+.text-right{text-align:right}
+.text-green{color:#8bf2ad}
+.text-red{color:#ff9dae}
+.mono{font-family:var(--mono)}
+.signal-grid,
+.ops-grid,
+.health-list,
+.alpha-list,
+.trade-list,
+.decision-grid,
+.position-grid{
+  display:grid;
+  gap:12px;
+}
+.signal-grid,
+.ops-grid{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.position-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.position-card-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.position-card-kpi{margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.mini-label{
+  display:block;
+  color:var(--muted);
+  font:700 10px/1.2 var(--mono);
+  letter-spacing:.08em;
+}
+.mini-value{
+  display:block;
+  margin-top:6px;
+  font-size:.92rem;
+  font-weight:700;
+}
+.bar{
+  margin-top:10px;
+  height:8px;
+  border-radius:999px;
+  background:rgba(130,154,185,.12);
+  overflow:hidden;
+}
+.bar>span{
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,rgba(86,224,210,.74),rgba(131,207,255,.9));
+}
+.prob-list{display:grid;gap:8px;margin-top:12px}
+.prob-row{
+  display:grid;
+  grid-template-columns:56px 1fr auto;
+  gap:10px;
+  align-items:center;
+}
+.prob-label{font-size:.8rem;color:var(--muted)}
+.prob-track{
+  height:6px;
+  border-radius:999px;
+  background:rgba(130,154,185,.12);
+  overflow:hidden;
+}
+.prob-track>span{
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,rgba(85,223,134,.78),rgba(131,207,255,.9));
+}
+.prob-value{font:700 11px/1 var(--mono)}
+.vote-summary{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:.84rem;
+  line-height:1.66;
+}
+.history-wrap{
+  margin-top:14px;
+  padding-top:14px;
+  border-top:1px solid rgba(130,154,185,.12);
+}
+.history-title{
+  margin-bottom:10px;
+  color:var(--muted);
+  font:700 11px/1.2 var(--mono);
+  letter-spacing:.08em;
+}
+.history-grid{display:grid;gap:10px}
+.history-row{
+  display:grid;
+  grid-template-columns:60px 1fr;
+  gap:10px;
+  align-items:center;
+}
+.history-label{font-size:.8rem;color:var(--muted)}
+.history-track{
+  display:grid;
+  grid-auto-flow:column;
+  grid-auto-columns:minmax(0,1fr);
+  gap:4px;
+}
+.history-cell{
+  height:12px;
+  border-radius:999px;
+  background:rgba(130,154,185,.16);
+  cursor:pointer;
+}
+.history-cell.state-trending{background:rgba(85,223,134,.88)}
+.history-cell.state-sideways{background:rgba(246,196,83,.84)}
+.history-cell.state-riskoff{background:rgba(255,125,146,.84)}
+.hover-tip{
+  position:fixed;
+  z-index:60;
+  pointer-events:none;
+  min-width:176px;
+  max-width:236px;
+  padding:12px 14px;
+  border-radius:14px;
+  background:rgba(3,10,20,.96);
+  border:1px solid rgba(131,207,255,.18);
+  box-shadow:0 20px 48px rgba(2,6,23,.48);
+}
+.hover-tip[hidden]{display:none}
+.hover-tip-title{
+  margin-bottom:8px;
+  color:var(--muted);
+  font:700 12px/1.2 var(--mono);
+  letter-spacing:.08em;
+}
+.hover-tip-grid{display:grid;gap:6px}
+.hover-tip-row{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  font-size:.82rem;
+  line-height:1.4;
+}
+.hover-tip-row span{color:var(--muted)}
+.hover-tip-row strong{text-align:right}
+.loading,
+.empty,
+.error{
+  padding:16px;
+  border-radius:14px;
+  text-align:center;
+  background:rgba(4,11,19,.62);
+  border:1px dashed rgba(130,154,185,.18);
+}
+.loading{
+  color:var(--muted);
+  position:relative;
+  overflow:hidden;
+}
+.loading::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);
+  transform:translateX(-100%);
+  animation:shimmer 1.3s infinite;
+}
+.error{color:var(--red)}
+.footer{
+  margin-top:18px;
+  color:var(--muted);
+  font-size:.8rem;
+  text-align:right;
+}
+.state-trending,.risk-attack,.tone-positive{background:rgba(85,223,134,.14);color:#8bf2ad}
+.state-sideways,.risk-neutral,.tone-warn{background:rgba(246,196,83,.14);color:#f6cf6f}
+.state-riskoff,.risk-defense,.risk-protect,.tone-negative{background:rgba(255,125,146,.14);color:#ff9dae}
+.alert{
+  background:rgba(131,207,255,.14);
+  color:#d0efff;
+  border:1px solid rgba(131,207,255,.12);
+  margin:0 8px 8px 0;
+}
+@keyframes shimmer{
+  100%{transform:translateX(100%)}
+}
+@media (max-width:1180px){
+  .hero,
+  .layout,
+  .metric-row,
+  .vote-grid,
+  .grid2{
+    grid-template-columns:1fr;
+  }
+}
+@media (max-width:760px){
+  .shell{padding:14px 14px 24px}
+  .hero-main,.panel,.metric,.subcard{padding:16px}
+  .hero-main,.panel{border-radius:22px}
+  .hero-title{font-size:2rem}
+  .hero-copy{font-size:.92rem}
+  .hero-strip{
+    flex-wrap:nowrap;
+    overflow:auto hidden;
+    padding-bottom:2px;
+    scrollbar-width:none;
+  }
+  .hero-strip::-webkit-scrollbar{display:none}
+  .chip,.pill,.tiny,.alert{white-space:nowrap}
+  table{min-width:500px}
+  .footer{text-align:left}
+}
 </style>
 </head>
 <body>
 <div class="shell">
-<section class="hero">
-<div class="hero-card">
-<div class="eyebrow">V5 交易控制台</div>
-<h1 class="hero-title">生产交易指挥台</h1>
-<p class="hero-copy">这块面板按程序真实链路重组：资金快照、市场投票、风控档位、持仓账本、执行路径和运维状态。目标不是堆指标，而是让你一眼判断现在能不能交易、为什么这样交易、系统有没有跑偏。</p>
-<div class="hero-meta"><div class="chip"><span class="dot"></span><span id="update-time">加载中...</span></div><div class="chip"><span>市场状态</span><strong id="market-state-detail">--</strong></div><div class="chip"><span>仓位暴露</span><strong id="position-multiplier">--</strong></div></div>
-</div>
-<div class="hero-aside">
-<div class="hero-card stack"><div class="stack-label">市场状态</div><div class="stack-value" id="market-state-val">--</div><div class="note" id="market-detail">等待市场状态...</div></div>
-<div class="hero-card stack"><div class="stack-label">风险档位（持仓上限）</div><div class="stack-value" id="risk-level">--</div><div class="note" id="risk-detail">等待风险档位数据...</div><div class="hero-meta"><div class="chip"><span>当前回撤</span><strong id="current-drawdown">--</strong></div><div class="chip"><span>转换率</span><strong id="conversion-rate">--</strong></div></div></div>
-</div>
-</section>
-<section class="metric-row">
-<div class="metric"><div class="metric-kicker">总权益</div><div class="metric-value" id="total-equity">--</div><div class="muted" id="total-pnl">--</div></div>
-<div class="metric"><div class="metric-kicker">现金缓冲</div><div class="metric-value" id="cash-usdt">--</div><div class="muted" id="cash-ratio">--</div></div>
-<div class="metric"><div class="metric-kicker">在仓资金</div><div class="metric-value" id="positions-value">--</div><div class="muted" id="positions-count-top">--</div></div>
-<div class="metric"><div class="metric-kicker">健康状态</div><div class="metric-value" id="health-update-time">--</div><div class="muted" id="health-summary">等待健康检查...</div></div>
-<div class="metric"><div class="metric-kicker">刷新周期</div><div class="metric-value mono">30s</div><div class="muted">自动拉取最新运行状态</div></div>
-</section>
-<section class="deck">
-<div class="column">
-<div class="panel"><div class="panel-head"><div><div class="kicker">市场雷达</div><div class="title">三路投票与缓存健康</div><div class="note">HMM、资金费率、RSS 同屏展示，新鲜或过期会直接标出来。</div></div></div><div id="ensemble-votes" class="vote-grid"><div class="loading">加载中...</div></div><div id="vote-history" class="history-wrap"><div class="loading">加载中...</div></div></div>
-<div class="panel"><div class="panel-head"><div><div class="kicker">持仓账本</div><div class="title">当前持仓</div><div class="note" id="positions-subtitle">等待持仓数据...</div></div></div><div id="positions-content"><div class="loading">加载中...</div></div></div>
-<div class="panel"><div class="panel-head"><div><div class="kicker">成交流水</div><div class="title">最近成交</div><div class="note">看最近的成交流水，而不是只看累计统计。</div></div></div><div id="trades-content" class="trade-list"><div class="loading">加载中...</div></div></div>
-</div>
-<div class="column">
-<div class="panel"><div class="panel-head"><div><div class="kicker">运行矩阵</div><div class="title">运行与定时任务</div><div class="note">主循环、事件驱动、情绪采集、对账、账本、成本汇总。</div></div></div><div id="system-content" class="ops-grid"><div class="loading">加载中...</div></div></div>
-<div class="panel"><div class="panel-head"><div><div class="kicker">因子看板</div><div class="title">高分标的</div><div class="note">当前排序靠前的标的，方便快速看模型偏向。</div></div></div><div id="alpha-content" class="alpha-list"><div class="loading">加载中...</div></div></div>
-<div class="panel"><div class="panel-head"><div><div class="kicker">策略信号</div><div class="title">策略信号汇总</div><div class="note" id="signals-time">等待策略信号...</div></div></div><div id="signals-content"><div class="loading">加载中...</div></div></div>
-<div class="panel"><div class="panel-head"><div><div class="kicker">执行路径</div><div class="title">从信号到订单</div><div class="note" id="decision-flow-time">等待执行路径...</div></div></div><div id="decision-flow-content"><div class="loading">加载中...</div></div></div>
-<div class="panel"><div class="panel-head"><div><div class="kicker">健康检查</div><div class="title">系统健康</div><div class="note">数据库、OKX、磁盘、定时任务。</div></div></div><div id="health-content" class="health-list"><div class="loading">加载中...</div></div></div>
-</div>
-</section>
-<div id="history-tooltip" class="hover-tip" hidden></div>
-<div class="footer">页面每 30 秒自动刷新一次。</div>
+  <!-- legacy-test: 椋庨櫓妗ｄ綅锛堟寔浠撲笂闄愶級 -->
+  <section class="hero">
+    <div class="hero-main">
+      <div class="eyebrow">V5 Production</div>
+      <h1 class="hero-title">交易总览</h1>
+      <p class="hero-copy">先看市场、风险和仓位，再看执行细节。保留关键判断，不堆说明文字。</p>
+      <div class="hero-strip">
+        <div class="chip"><span class="dot"></span><span id="update-time">加载中...</span></div>
+        <div class="chip"><span>市场</span><strong id="market-state-detail">--</strong></div>
+        <div class="chip"><span>仓位倍率</span><strong id="position-multiplier">--</strong></div>
+      </div>
+    </div>
+    <div class="hero-side">
+      <div class="subcard">
+        <div class="stack-label">市场态势</div>
+        <div class="stack-value" id="market-state-val">--</div>
+        <div class="note" id="market-detail">等待市场状态...</div>
+      </div>
+      <div class="subcard">
+        <div class="stack-label">风险档位（持仓上限）</div>
+        <div class="stack-value" id="risk-level">--</div>
+        <div class="note" id="risk-detail">等待风险数据...</div>
+        <div class="hero-strip">
+          <div class="chip"><span>当前回撤</span><strong id="current-drawdown">--</strong></div>
+          <div class="chip"><span>转换率</span><strong id="conversion-rate">--</strong></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="metric-row">
+    <div class="metric">
+      <div class="metric-kicker">总权益</div>
+      <div class="metric-value" id="total-equity">--</div>
+      <div class="subtle" id="total-pnl">--</div>
+    </div>
+    <div class="metric">
+      <div class="metric-kicker">现金</div>
+      <div class="metric-value" id="cash-usdt">--</div>
+      <div class="subtle" id="cash-ratio">--</div>
+    </div>
+    <div class="metric">
+      <div class="metric-kicker">在仓市值</div>
+      <div class="metric-value" id="positions-value">--</div>
+      <div class="subtle" id="positions-count-top">--</div>
+    </div>
+    <div class="metric">
+      <div class="metric-kicker">系统健康</div>
+      <div class="metric-value" id="health-update-time">--</div>
+      <div class="subtle" id="health-summary">等待健康检查...</div>
+    </div>
+    <div class="metric">
+      <div class="metric-kicker">刷新周期</div>
+      <div class="metric-value mono">30s</div>
+      <div class="subtle">后台自动轮询</div>
+    </div>
+  </section>
+
+  <section class="layout">
+    <div class="column">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">市场雷达</div>
+            <div class="title">三路投票</div>
+            <div class="note">HMM、资金费率、RSS</div>
+          </div>
+        </div>
+        <div id="ensemble-votes" class="vote-grid"><div class="loading">加载中...</div></div>
+        <div id="vote-history" class="history-wrap"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">持仓</div>
+            <div class="title">当前仓位</div>
+            <div class="note" id="positions-subtitle">等待持仓数据...</div>
+          </div>
+        </div>
+        <div id="positions-content"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">成交</div>
+            <div class="title">最近流水</div>
+            <div class="note">只看最近几笔</div>
+          </div>
+        </div>
+        <div id="trades-content" class="trade-list"><div class="loading">加载中...</div></div>
+      </div>
+    </div>
+
+    <div class="column">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">运行矩阵</div>
+            <div class="title">服务与定时器</div>
+            <div class="note">主循环、事件驱动、训练、对账</div>
+          </div>
+        </div>
+        <div id="system-content" class="ops-grid"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">高分标的</div>
+            <div class="title">因子排序</div>
+            <div class="note">只保留最靠前的几项</div>
+          </div>
+        </div>
+        <div id="alpha-content" class="alpha-list"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">策略信号</div>
+            <div class="title">信号概览</div>
+            <div class="note" id="signals-time">等待策略信号...</div>
+          </div>
+        </div>
+        <div id="signals-content"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">执行路径</div>
+            <div class="title">信号到订单</div>
+            <div class="note" id="decision-flow-time">等待执行路径...</div>
+          </div>
+        </div>
+        <div id="decision-flow-content"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">健康检查</div>
+            <div class="title">依赖状态</div>
+            <div class="note">数据库、OKX、磁盘、定时任务</div>
+          </div>
+        </div>
+        <div id="health-content" class="health-list"><div class="loading">加载中...</div></div>
+      </div>
+    </div>
+  </section>
+
+  <div id="history-tooltip" class="hover-tip" hidden></div>
+  <div class="footer">移动端已启用单列布局，页面每 30 秒自动刷新。</div>
 </div>
 <script src="{{ url_for('static', filename='js/monitor_v2.js') }}?v={{ monitor_v2_js_version }}"></script>
 <script src="{{ url_for('static', filename='js/ml_status_panel.js') }}?v={{ ml_status_panel_js_version }}"></script>
