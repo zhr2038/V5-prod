@@ -14,6 +14,9 @@ def test_v5_daily_ml_training_service_targets_prod_workspace():
     assert "WorkingDirectory=/home/admin/clawd/v5-prod" in text
     assert "Environment=PYTHONPATH=/home/admin/clawd/v5-prod" in text
     assert "Environment=V5_WORKSPACE=/home/admin/clawd/v5-prod" in text
+    assert "Environment=V5_ML_TARGET_MODE=cross_sectional_rank" in text
+    assert "Environment=V5_ML_CANDIDATES=ridge" in text
+    assert "Environment=V5_ML_RIDGE_ALPHA=50" in text
     assert "ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/daily_ml_training.py'" in text
 
 

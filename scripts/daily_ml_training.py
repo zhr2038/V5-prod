@@ -96,16 +96,16 @@ def _trim_prep_meta(prep_meta: dict) -> dict:
 
 
 def _candidate_models() -> list[str]:
-    raw = os.getenv("V5_ML_CANDIDATES", "hist_gbm,ridge,lightgbm")
+    raw = os.getenv("V5_ML_CANDIDATES", "ridge")
     out = [x.strip().lower() for x in raw.split(",") if x.strip()]
     if not LIGHTGBM_AVAILABLE:
         out = [x for x in out if x != "lightgbm"]
-    return out or ["hist_gbm", "ridge"]
+    return out or ["ridge"]
 
 
 def _build_base_config() -> MLFactorConfig:
     return MLFactorConfig(
-        target_mode=os.getenv("V5_ML_TARGET_MODE", "raw").strip().lower(),
+        target_mode=os.getenv("V5_ML_TARGET_MODE", "cross_sectional_rank").strip().lower(),
         include_time_features=_env_bool("V5_ML_INCLUDE_TIME_FEATURES", False),
         min_symbol_samples=int(os.getenv("V5_ML_MIN_SYMBOL_SAMPLES", "100")),
         min_symbol_target_std=float(os.getenv("V5_ML_MIN_SYMBOL_TARGET_STD", "1e-6")),
@@ -117,7 +117,7 @@ def _config_for_candidate(model_type: str, base_cfg: MLFactorConfig) -> MLFactor
     params = dict(base_cfg.__dict__)
     params["model_type"] = model_type
     if model_type == "ridge":
-        params["alpha"] = float(os.getenv("V5_ML_RIDGE_ALPHA", str(base_cfg.alpha)))
+        params["alpha"] = float(os.getenv("V5_ML_RIDGE_ALPHA", "50.0"))
     elif model_type == "hist_gbm":
         params["max_depth"] = int(os.getenv("V5_ML_HGB_MAX_DEPTH", "1"))
         params["learning_rate"] = float(os.getenv("V5_ML_HGB_LEARNING_RATE", "0.05"))
