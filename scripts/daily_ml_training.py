@@ -66,6 +66,31 @@ def _coerce_group_datetimes(groups: pd.Series) -> pd.Series:
     return pd.to_datetime(groups_s, errors="coerce")
 
 
+def _align_cycle_samples(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    if df.empty or "timestamp" not in df.columns or "symbol" not in df.columns:
+        rows = int(len(df))
+        return df, {"rows_before": rows, "rows_after": rows, "duplicates_removed": 0}
+
+    out = df.copy()
+    ts = pd.to_numeric(out["timestamp"], errors="coerce")
+    hour_ms = 3600 * 1000
+    out["timestamp"] = ((ts // hour_ms) * hour_ms).astype("Int64")
+    out = out.dropna(subset=["timestamp"]).copy()
+    out["timestamp"] = out["timestamp"].astype("int64")
+    rows_before = int(len(out))
+    out = (
+        out.sort_values(["timestamp", "symbol"])
+        .drop_duplicates(subset=["timestamp", "symbol"], keep="last")
+        .reset_index(drop=True)
+    )
+    rows_after = int(len(out))
+    return out, {
+        "rows_before": rows_before,
+        "rows_after": rows_after,
+        "duplicates_removed": rows_before - rows_after,
+    }
+
+
 def _apply_rolling_window(
     X: pd.DataFrame,
     y: pd.Series,
@@ -320,6 +345,13 @@ def main() -> int:
         return 0
 
     df = pd.read_csv(CSV_PATH)
+    df, cycle_meta = _align_cycle_samples(df)
+    if cycle_meta["duplicates_removed"] > 0:
+        print(
+            "cycle alignment removed "
+            f"{cycle_meta['duplicates_removed']} duplicate rows "
+            f"({cycle_meta['rows_before']} -> {cycle_meta['rows_after']})"
+        )
     cfg = _build_base_config()
     feature_selector = os.getenv("V5_ML_FEATURE_SELECTOR", "stable").strip().lower()
     rolling_window_days = float(os.getenv("V5_ML_ROLLING_WINDOW_DAYS", str(cfg.train_lookback_days)))
@@ -465,6 +497,7 @@ def main() -> int:
             "purge_gap_groups": purge_gap,
         },
         "rolling_window": window_meta,
+        "cycle_alignment": cycle_meta,
         "recency_weighting": {
             "half_life_days": recency_half_life_days,
             "max_weight": recency_max_weight,

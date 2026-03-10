@@ -258,6 +258,23 @@ class V5Pipeline:
             eq += float(p.qty) * float(s.close[-1])
         return float(eq)
 
+    def _resolve_ml_snapshot_timestamp_ms(
+        self,
+        *,
+        audit: Optional[DecisionAudit],
+    ) -> int:
+        if audit is not None:
+            try:
+                window_end_ts = getattr(audit, "window_end_ts", None)
+                if window_end_ts is not None:
+                    return int(window_end_ts) * 1000
+            except Exception:
+                pass
+
+        now_ms = int(self.clock.now().timestamp() * 1000)
+        hour_ms = 3600 * 1000
+        return now_ms - (now_ms % hour_ms)
+
     def run(
         self,
         market_data_1h: Dict[str, MarketSeries],
@@ -1516,12 +1533,14 @@ class V5Pipeline:
         # 收集特征快照用于训练ML模型
         try:
             current_ts = int(self.clock.now().timestamp() * 1000)
-            for sym in symbols_all:
+            snapshot_ts = self._resolve_ml_snapshot_timestamp_ms(audit=audit)
+            ml_symbols = sorted(str(sym) for sym in market_data_1h.keys())
+            for sym in ml_symbols:
                 if sym in market_data_1h:
                     px = float(prices.get(sym, 0))
                     if px > 0:
                         self.data_collector.collect_features(
-                            timestamp=current_ts,
+                            timestamp=snapshot_ts,
                             symbol=sym,
                             market_data={
                                 'close': list(market_data_1h[sym].close) if hasattr(market_data_1h[sym], 'close') else [px],

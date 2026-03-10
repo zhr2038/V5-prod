@@ -86,3 +86,26 @@ def test_rolling_window_keeps_only_recent_groups():
     assert meta["enabled"] is True
     assert len(X_out) == len(y_out) == len(groups_out) == 4
     assert int(groups_out.nunique()) == 2
+
+
+def test_align_cycle_samples_dedupes_same_hour_duplicates():
+    base_ts = 1_700_000_300_000
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                base_ts,
+                base_ts + 15 * 60 * 1000,
+                base_ts,
+                base_ts + 20 * 60 * 1000,
+            ],
+            "symbol": ["BTC/USDT", "BTC/USDT", "ETH/USDT", "ETH/USDT"],
+            "future_return_6h": [0.01, 0.02, 0.03, 0.04],
+        }
+    )
+
+    out, meta = daily_training._align_cycle_samples(df)
+
+    assert meta["duplicates_removed"] == 2
+    assert len(out) == 2
+    assert out["timestamp"].nunique() == 1
+    assert set(out["symbol"]) == {"BTC/USDT", "ETH/USDT"}

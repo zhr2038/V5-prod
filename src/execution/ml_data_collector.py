@@ -179,9 +179,59 @@ class MLDataCollector:
                  OR future_return_24h IS NULL
               )
         ''')
+        self._dedupe_feature_snapshots(conn)
+        cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_ts_symbol_unique
+            ON feature_snapshots(timestamp, symbol)
+        ''')
 
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def _dedupe_feature_snapshots(conn: sqlite3.Connection) -> int:
+        """Keep one best row per (timestamp, symbol) before enforcing uniqueness."""
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            '''
+            SELECT
+                id,
+                timestamp,
+                symbol,
+                label_filled,
+                future_return_6h,
+                future_return_12h,
+                future_return_24h
+            FROM feature_snapshots
+            ORDER BY id
+            '''
+        ).fetchall()
+        if not rows:
+            return 0
+
+        keep_by_key = {}
+        drop_ids = []
+        for row_id, ts, symbol, label_filled, future_6h, future_12h, future_24h in rows:
+            key = (int(ts), str(symbol))
+            label_count = sum(
+                1 for value in (future_6h, future_12h, future_24h)
+                if value is not None
+            )
+            score = (int(label_filled or 0), label_count, int(row_id))
+            previous = keep_by_key.get(key)
+            if previous is None or score > previous[0]:
+                if previous is not None:
+                    drop_ids.append(previous[1])
+                keep_by_key[key] = (score, int(row_id))
+            else:
+                drop_ids.append(int(row_id))
+
+        if drop_ids:
+            cursor.executemany(
+                'DELETE FROM feature_snapshots WHERE id = ?',
+                [(row_id,) for row_id in drop_ids],
+            )
+        return len(drop_ids)
 
     def collect_features(
         self,
@@ -274,6 +324,23 @@ class MLDataCollector:
                     bb_position, price_position, regime,
                     future_return_6h, future_return_12h, future_return_24h, label_filled
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(timestamp, symbol) DO UPDATE SET
+                    returns_1h = excluded.returns_1h,
+                    returns_6h = excluded.returns_6h,
+                    returns_24h = excluded.returns_24h,
+                    momentum_5d = excluded.momentum_5d,
+                    momentum_20d = excluded.momentum_20d,
+                    volatility_6h = excluded.volatility_6h,
+                    volatility_24h = excluded.volatility_24h,
+                    volatility_ratio = excluded.volatility_ratio,
+                    volume_ratio = excluded.volume_ratio,
+                    obv = excluded.obv,
+                    rsi = excluded.rsi,
+                    macd = excluded.macd,
+                    macd_signal = excluded.macd_signal,
+                    bb_position = excluded.bb_position,
+                    price_position = excluded.price_position,
+                    regime = excluded.regime
             ''', (
                 record.timestamp, record.symbol, record.returns_1h, record.returns_6h,
                 record.returns_24h, record.momentum_5d, record.momentum_20d,
@@ -287,6 +354,31 @@ class MLDataCollector:
         except sqlite3.Error as e:
             conn.rollback()
             raise MLDataCollectorError(f"Database error saving record: {e}") from e
+
+    @staticmethod
+    def _align_export_cycles(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str, int]]:
+        if df.empty or "timestamp" not in df.columns or "symbol" not in df.columns:
+            rows = int(len(df))
+            return df, {"rows_before": rows, "rows_after": rows, "duplicates_removed": 0}
+
+        out = df.copy()
+        ts = pd.to_numeric(out["timestamp"], errors="coerce")
+        hour_ms = 3600 * 1000
+        out["timestamp"] = ((ts // hour_ms) * hour_ms).astype("Int64")
+        out = out.dropna(subset=["timestamp"]).copy()
+        out["timestamp"] = out["timestamp"].astype("int64")
+        rows_before = int(len(out))
+        out = (
+            out.sort_values(["timestamp", "symbol"])
+            .drop_duplicates(subset=["timestamp", "symbol"], keep="last")
+            .reset_index(drop=True)
+        )
+        rows_after = int(len(out))
+        return out, {
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+            "duplicates_removed": rows_before - rows_after,
+        }
 
     def fill_labels(self, current_timestamp: int) -> int:
         """
@@ -612,6 +704,7 @@ class MLDataCollector:
             '''
 
             df = pd.read_sql_query(query, conn)
+            df, align_meta = self._align_export_cycles(df)
 
             if len(df) < min_samples:
                 logger.warning(f"Insufficient samples: {len(df)} < {min_samples}")
@@ -630,6 +723,13 @@ class MLDataCollector:
             logger.info(f"  Avg future return 12h: {df['future_return_12h'].mean():.4f}")
             logger.info(f"  Avg future return 24h: {df['future_return_24h'].mean():.4f}")
             logger.info(f"  Return std 6h: {df['future_return_6h'].std():.4f}")
+            if align_meta["duplicates_removed"] > 0:
+                logger.info(
+                    "  Cycle alignment removed %d duplicate rows (%d -> %d)",
+                    align_meta["duplicates_removed"],
+                    align_meta["rows_before"],
+                    align_meta["rows_after"],
+                )
 
             return True
 

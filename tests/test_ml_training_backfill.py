@@ -91,6 +91,142 @@ def test_backfill_from_csv_relabels_existing_pending_rows(tmp_path: Path) -> Non
     assert row == (0.01, 0.02, 0.03, 1)
 
 
+def test_collect_features_is_idempotent_for_same_timestamp_symbol(tmp_path: Path) -> None:
+    db_path = tmp_path / "ml_training_data.db"
+    collector = MLDataCollector(db_path=str(db_path))
+    market_data = {
+        "close": [100.0 + i for i in range(30)],
+        "high": [101.0 + i for i in range(30)],
+        "low": [99.0 + i for i in range(30)],
+        "volume": [10.0 + i for i in range(30)],
+    }
+
+    assert collector.collect_features(timestamp=1000, symbol="BTC/USDT", market_data=market_data, regime="SIDEWAYS")
+    assert collector.collect_features(timestamp=1000, symbol="BTC/USDT", market_data=market_data, regime="TRENDING")
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM feature_snapshots WHERE timestamp = 1000 AND symbol = 'BTC/USDT'"
+            ).fetchone()[0]
+        )
+        regime = conn.execute(
+            "SELECT regime FROM feature_snapshots WHERE timestamp = 1000 AND symbol = 'BTC/USDT'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert count == 1
+    assert regime == "TRENDING"
+
+
+def test_export_training_data_dedupes_legacy_same_hour_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "ml_training_data.db"
+    collector = MLDataCollector(db_path=str(db_path))
+    hour_ms = 3600 * 1000
+    base_ts = 1_700_000_000_000
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executemany(
+            """
+            INSERT INTO feature_snapshots (
+                timestamp, symbol, returns_1h, returns_6h, returns_24h,
+                momentum_5d, momentum_20d, volatility_6h, volatility_24h,
+                volatility_ratio, volume_ratio, obv, rsi, macd, macd_signal,
+                bb_position, price_position, regime,
+                future_return_6h, future_return_12h, future_return_24h, label_filled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            [
+                (
+                    base_ts + 5 * 60 * 1000,
+                    "BTC/USDT",
+                    0.1,
+                    0.2,
+                    0.3,
+                    1.0,
+                    2.0,
+                    0.01,
+                    0.02,
+                    0.5,
+                    1.5,
+                    10.0,
+                    50.0,
+                    0.1,
+                    0.05,
+                    0.2,
+                    0.6,
+                    "SIDEWAYS",
+                    0.01,
+                    0.02,
+                    0.03,
+                ),
+                (
+                    base_ts + 35 * 60 * 1000,
+                    "BTC/USDT",
+                    0.11,
+                    0.21,
+                    0.31,
+                    1.1,
+                    2.1,
+                    0.011,
+                    0.021,
+                    0.51,
+                    1.6,
+                    11.0,
+                    51.0,
+                    0.11,
+                    0.051,
+                    0.21,
+                    0.61,
+                    "TRENDING",
+                    0.011,
+                    0.021,
+                    0.031,
+                ),
+                (
+                    base_ts + hour_ms + 5 * 60 * 1000,
+                    "BTC/USDT",
+                    0.12,
+                    0.22,
+                    0.32,
+                    1.2,
+                    2.2,
+                    0.012,
+                    0.022,
+                    0.52,
+                    1.7,
+                    12.0,
+                    52.0,
+                    0.12,
+                    0.052,
+                    0.22,
+                    0.62,
+                    "TRENDING",
+                    0.012,
+                    0.022,
+                    0.032,
+                ),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    output_path = tmp_path / "ml_training_data.csv"
+    assert collector.export_training_data(str(output_path), min_samples=2) is True
+
+    df = pd.read_csv(output_path)
+    assert len(df) == 2
+    assert df["timestamp"].tolist() == [
+        (base_ts // hour_ms) * hour_ms,
+        ((base_ts + hour_ms) // hour_ms) * hour_ms,
+    ]
+    assert df.iloc[0]["regime"] == "TRENDING"
+
+
 def test_fill_labels_waits_for_24h_before_marking_row_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = tmp_path / "ml_training_data.db"
     collector = MLDataCollector(db_path=str(db_path))
