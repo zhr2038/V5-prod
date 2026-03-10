@@ -310,3 +310,93 @@ def test_multi_strategy_adapter_normalizes_total_target_notional():
     total_target = sum(t["target_position_usdt"] for t in targets)
     assert total_target == pytest.approx(100.0, rel=1e-6)
     assert all(t["target_position_usdt"] == pytest.approx(100.0 / 3.0, rel=1e-6) for t in targets)
+
+
+def test_alpha6_strategy_keeps_factor_snapshot_for_non_signal_symbols(monkeypatch):
+    strategy = Alpha6FactorStrategy(
+        config={
+            "score_threshold": 0.80,
+            "use_sentiment": False,
+            "alpha158_enabled": False,
+        }
+    )
+
+    def _fake_calc_factors(_df, symbol):
+        return {"f1_mom_5d": 1.2 if symbol == "FLOW/USDT" else -0.2}
+
+    monkeypatch.setattr(strategy, "_calculate_factors", _fake_calc_factors)
+    monkeypatch.setattr(strategy, "_zscore_factors", lambda factors: dict(factors))
+    monkeypatch.setattr(
+        strategy,
+        "_calculate_score",
+        lambda z_factors, _weights: float(z_factors["f1_mom_5d"]),
+    )
+
+    market_df = pd.DataFrame(
+        {
+            "symbol": ["FLOW/USDT"] * 60 + ["HYPE/USDT"] * 60,
+            "close": [1.0] * 120,
+            "high": [1.0] * 120,
+            "low": [1.0] * 120,
+            "volume": [1.0] * 120,
+        }
+    )
+
+    signals = strategy.generate_signals(market_df)
+    snapshot = strategy.get_latest_factor_snapshot()
+
+    assert len(signals) == 1
+    assert signals[0].symbol == "FLOW/USDT"
+    assert set(snapshot.keys()) == {"FLOW/USDT", "HYPE/USDT"}
+    assert snapshot["HYPE/USDT"]["raw_factors"]["f1_mom_5d"] == pytest.approx(-0.2)
+    assert snapshot["FLOW/USDT"]["relative_score"] > 0
+    assert snapshot["HYPE/USDT"]["relative_score"] < 0
+
+
+def test_multi_strategy_snapshot_exposes_alpha6_factor_telemetry():
+    engine = AlphaEngine(AlphaConfig())
+    engine.use_multi_strategy = True
+    engine.multi_strategy_adapter = _StubAdapter(
+        [
+            {
+                "symbol": "FLOW-USDT",
+                "side": "buy",
+                "target_position_usdt": 15.0,
+                "signal_score": 0.75,
+                "raw_signal_score": 2.20,
+                "confidence": 0.85,
+                "strategy_weight": 0.55,
+            },
+        ]
+    )
+    strategy = Alpha6FactorStrategy(config={"use_sentiment": False, "alpha158_enabled": False})
+    strategy.last_factor_snapshot = {
+        "FLOW/USDT": {
+            "raw_factors": {"f1_mom_5d": 0.60, "f2_mom_20d": 0.40},
+            "z_factors": {"f1_mom_5d": 1.20, "f2_mom_20d": 0.80},
+            "final_score": 0.42,
+            "relative_score": 0.35,
+            "display_score": 0.33,
+        },
+        "HYPE/USDT": {
+            "raw_factors": {"f1_mom_5d": -0.10, "f2_mom_20d": 0.15},
+            "z_factors": {"f1_mom_5d": -0.20, "f2_mom_20d": 0.30},
+            "final_score": -0.08,
+            "relative_score": -0.22,
+            "display_score": 0.21,
+        },
+    }
+    engine.alpha6_strategy = strategy
+
+    snapshot = engine.compute_snapshot(
+        {
+            "FLOW/USDT": _series("FLOW/USDT"),
+            "HYPE/USDT": _series("HYPE/USDT"),
+        }
+    )
+
+    assert snapshot.scores == {"FLOW/USDT": pytest.approx(0.75)}
+    assert snapshot.telemetry_scores["FLOW/USDT"] == pytest.approx(0.35)
+    assert snapshot.telemetry_scores["HYPE/USDT"] == pytest.approx(-0.22)
+    assert snapshot.raw_factors["FLOW/USDT"]["f1_mom_5d"] == pytest.approx(0.60)
+    assert snapshot.z_factors["HYPE/USDT"]["f2_mom_20d"] == pytest.approx(0.30)

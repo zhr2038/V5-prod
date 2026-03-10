@@ -38,6 +38,7 @@ def dump_run_artifacts(
         "raw_factors": alpha.raw_factors,
         "z_factors": alpha.z_factors,
         "scores": alpha.scores,
+        "telemetry_scores": alpha.telemetry_scores,
     })
     write_json(f"{reports_dir}/regime.json", asdict(regime))
     write_json(f"{reports_dir}/portfolio.json", asdict(portfolio))

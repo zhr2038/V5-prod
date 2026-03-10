@@ -9,6 +9,7 @@
 """
 
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
@@ -396,6 +397,8 @@ class Alpha6FactorStrategy(BaseStrategy):
         
         self.factor_weights = self.config['weights']
         self.sentiment_cache_dir = Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache'
+        self.last_factor_snapshot: Dict[str, Dict[str, Any]] = {}
+        self.last_resolved_weights: Dict[str, float] = dict(self.factor_weights)
 
     def _compress_signal_score(self, raw_score: float) -> float:
         """Compress raw cross-sectional strength into a stable display/routing scale."""
@@ -414,6 +417,22 @@ class Alpha6FactorStrategy(BaseStrategy):
         self.config['weights'] = merged
         self.factor_weights = merged
 
+    def get_latest_factor_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        return deepcopy(self.last_factor_snapshot)
+
+    @staticmethod
+    def _extract_ic_mean(rec: Dict[str, Any], short_key: str, long_key: str) -> Tuple[Optional[float], Optional[float]]:
+        def _nested_mean(bucket_key: str) -> Optional[float]:
+            try:
+                bucket = rec.get(bucket_key) or {}
+                if isinstance(bucket, dict) and bucket.get("count", 0):
+                    return float(bucket.get("mean"))
+            except Exception:
+                return None
+            return None
+
+        return _nested_mean(short_key), _nested_mean(long_key)
+
     def _resolve_dynamic_weights(self, static_weights: Dict[str, float]) -> Dict[str, float]:
         """根据 IC monitor 动态修正因子权重（可选）。"""
         try:
@@ -431,22 +450,35 @@ class Alpha6FactorStrategy(BaseStrategy):
                 return dict(static_weights)
 
             min_abs_ic = float(cfg.get('min_abs_ic', 0.003) or 0.003)
-            dyn = {}
+            dyn: Dict[str, float] = {}
             for k in static_weights.keys():
                 rec = factor_ic.get(k) or {}
-                ic = None
-                try:
-                    ic = float((rec.get('rank_ic_short') or {}).get('mean'))
-                except Exception:
-                    ic = None
-                if ic is None:
-                    try:
-                        ic = float((rec.get('ic_short') or {}).get('mean'))
-                    except Exception:
-                        ic = None
-                if ic is None or abs(ic) < min_abs_ic:
+                short_ic, long_ic = self._extract_ic_mean(rec, 'rank_ic_short', 'rank_ic_long')
+                if short_ic is None and long_ic is None:
+                    short_ic, long_ic = self._extract_ic_mean(rec, 'ic_short', 'ic_long')
+
+                base_mag = abs(float(static_weights.get(k, 0.0)))
+                if base_mag <= 1e-12:
                     continue
-                dyn[k] = (1.0 if ic >= 0 else -1.0) * abs(ic)
+
+                positive_short = max(0.0, float(short_ic or 0.0))
+                positive_long = max(0.0, float(long_ic or 0.0))
+                quality = 0.65 * positive_short + 0.35 * positive_long
+
+                if quality >= min_abs_ic:
+                    multiplier = 1.0 + min(2.0, quality / max(min_abs_ic, 1e-9))
+                else:
+                    multiplier = 0.35
+                    if (short_ic is not None and float(short_ic) <= -min_abs_ic) or (
+                        long_ic is not None and float(long_ic) <= -min_abs_ic
+                    ):
+                        multiplier = 0.15
+                    elif short_ic is not None and float(short_ic) < 0:
+                        multiplier = 0.25
+                    elif long_ic is not None and float(long_ic) < 0:
+                        multiplier = 0.20
+
+                dyn[k] = base_mag * multiplier
 
             if not dyn:
                 return dict(static_weights)
@@ -460,7 +492,8 @@ class Alpha6FactorStrategy(BaseStrategy):
             out = dict(static_weights)
             for k in out.keys():
                 if k in dyn:
-                    out[k] = float(dyn[k]) * scale
+                    sign = -1.0 if float(out[k]) < 0 else 1.0
+                    out[k] = round(sign * float(dyn[k]) * scale, 12)
             return out
         except Exception:
             return dict(static_weights)
@@ -475,6 +508,8 @@ class Alpha6FactorStrategy(BaseStrategy):
         signals: List[Signal] = []
         per_symbol = []
         weights_resolved = self._resolve_dynamic_weights(self.factor_weights)
+        self.last_resolved_weights = dict(weights_resolved)
+        self.last_factor_snapshot = {}
 
         for symbol in market_data['symbol'].unique():
             df = market_data[market_data['symbol'] == symbol].copy()
@@ -493,11 +528,25 @@ class Alpha6FactorStrategy(BaseStrategy):
         cs_mean = float(np.mean([x[3] for x in per_symbol]))
         threshold = float(self.config['score_threshold'])
 
+        for symbol, factors, z_factors, score in per_symbol:
+            rel_score = float(score - cs_mean)
+            display_score = self._compress_signal_score(rel_score)
+            self.last_factor_snapshot[symbol] = {
+                'raw_factors': {str(k): float(v) for k, v in (factors or {}).items()},
+                'z_factors': {str(k): float(v) for k, v in (z_factors or {}).items()},
+                'final_score': float(score),
+                'cross_section_mean': cs_mean,
+                'relative_score': rel_score,
+                'raw_score': abs(rel_score),
+                'display_score': float(display_score),
+            }
+
         buy_count = 0
         for symbol, factors, z_factors, score in per_symbol:
-            rel_score = score - cs_mean
-            display_score = self._compress_signal_score(rel_score)
-            raw_score = abs(float(rel_score))
+            telemetry = self.last_factor_snapshot.get(symbol, {})
+            rel_score = float(telemetry.get('relative_score', score - cs_mean))
+            display_score = float(telemetry.get('display_score', self._compress_signal_score(rel_score)))
+            raw_score = float(telemetry.get('raw_score', abs(rel_score)))
             if display_score <= threshold:
                 continue
 
@@ -514,9 +563,9 @@ class Alpha6FactorStrategy(BaseStrategy):
                 strategy=self.name,
                 timestamp=datetime.now(),
                 metadata={
-                    'raw_factors': factors,
-                    'z_factors': z_factors,
-                    'final_score': score,
+                    'raw_factors': telemetry.get('raw_factors', factors),
+                    'z_factors': telemetry.get('z_factors', z_factors),
+                    'final_score': float(telemetry.get('final_score', score)),
                     'cross_section_mean': cs_mean,
                     'relative_score': rel_score,
                     'relative_score_raw': rel_score,
@@ -535,6 +584,7 @@ class Alpha6FactorStrategy(BaseStrategy):
             rel_top = float(top[3] - cs_mean)
             display_top = self._compress_signal_score(rel_top)
             if rel_top > -threshold:
+                telemetry = self.last_factor_snapshot.get(top[0], {})
                 signals.append(
                     Signal(
                         symbol=top[0],
@@ -545,7 +595,9 @@ class Alpha6FactorStrategy(BaseStrategy):
                         timestamp=datetime.now(),
                         metadata={
                             'fallback_buy': True,
-                            'final_score': float(top[3]),
+                            'raw_factors': telemetry.get('raw_factors', top[1]),
+                            'z_factors': telemetry.get('z_factors', top[2]),
+                            'final_score': float(telemetry.get('final_score', top[3])),
                             'cross_section_mean': cs_mean,
                             'relative_score': rel_top,
                             'relative_score_raw': rel_top,

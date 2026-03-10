@@ -76,10 +76,15 @@ class AlphaICMonitor:
         p.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in rows[-keep_last:]) + "\n", encoding="utf-8")
 
     def _build_snapshot(self, *, now_ts_ms: int, alpha_snapshot: Any, closes: Dict[str, float]) -> Dict[str, Any]:
+        raw_scores = dict(getattr(alpha_snapshot, "scores", {}) or {})
+        telemetry_scores = dict(getattr(alpha_snapshot, "telemetry_scores", {}) or {})
+        score_source = telemetry_scores or raw_scores
         return {
             "ts_ms": int(now_ts_ms),
             "ts_iso": datetime.utcfromtimestamp(int(now_ts_ms) / 1000.0).isoformat() + "Z",
-            "scores": dict(getattr(alpha_snapshot, "scores", {}) or {}),
+            "scores": score_source,
+            "routing_scores": raw_scores,
+            "score_source": "telemetry_scores" if telemetry_scores else "scores",
             "z_factors": dict(getattr(alpha_snapshot, "z_factors", {}) or {}),
             "closes": closes,
         }
@@ -201,6 +206,7 @@ class AlphaICMonitor:
 
         return {
             "updated_at": datetime.utcnow().isoformat() + "Z",
+            "score_source": (rows[-1].get("score_source") if rows else "scores"),
             "points_short": len(rows_short),
             "points_long": len(rows),
             "score_ic_short": self._agg(score_ic_short),
@@ -229,6 +235,7 @@ class AlphaICMonitor:
         ts = self._compute_step_ic(prev, snap)
         if ts is None:
             return None
+        ts["score_source"] = snap.get("score_source", prev.get("score_source", "scores"))
 
         self._append_jsonl(self.cfg.timeseries_path, ts)
         self._trim_jsonl(self.cfg.timeseries_path, keep_last=max(50, int(self.cfg.max_history_points)))

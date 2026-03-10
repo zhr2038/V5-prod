@@ -55,6 +55,7 @@ class AlphaSnapshot:
     z_factors: Dict[str, Dict[str, float]]
     scores: Dict[str, float]
     raw_scores: Dict[str, float] | None = None
+    telemetry_scores: Dict[str, float] | None = None
 
 
 class AlphaEngine:
@@ -161,7 +162,8 @@ class AlphaEngine:
         """Load dynamic factor weights from IC monitor summary.
 
         规则：
-        - 若启用 dynamic_ic_weighting 且有可用IC，按 sign(IC) * abs(IC) 生成新权重
+        - 若启用 dynamic_ic_weighting 且有可用IC，按 short/long IC 质量做正向放大
+        - 长期负 IC 因子先降权，不直接翻转方向
         - 再缩放到与静态权重同等 L1 强度，避免分值尺度漂移
         - 失败时回退静态权重
         """
@@ -180,29 +182,34 @@ class AlphaEngine:
                 return dict(default_weights)
 
             min_abs_ic = float(getattr(ic_cfg, 'min_abs_ic', 0.003) or 0.003)
-            dyn = {}
+            dyn: Dict[str, float] = {}
             has_any = False
-            for k, w in (default_weights or {}).items():
+            for k in (default_weights or {}).keys():
                 rec = factor_ic.get(k) or {}
-                # 优先 short，再 long
-                ic_mean = None
-                try:
-                    ic_mean = float((rec.get('rank_ic_short') or {}).get('mean'))
-                except Exception:
-                    ic_mean = None
-                if ic_mean is None:
-                    try:
-                        ic_mean = float((rec.get('ic_short') or {}).get('mean'))
-                    except Exception:
-                        ic_mean = None
-                if ic_mean is None:
+                short_ic, long_ic = self._extract_factor_ic_means(rec)
+
+                base_mag = abs(float(default_weights.get(k, 0.0)))
+                if base_mag <= 1e-12:
                     continue
 
-                if abs(ic_mean) < min_abs_ic:
-                    continue
+                positive_short = max(0.0, float(short_ic or 0.0))
+                positive_long = max(0.0, float(long_ic or 0.0))
+                quality = 0.65 * positive_short + 0.35 * positive_long
 
-                sign = 1.0 if ic_mean >= 0 else -1.0
-                dyn[k] = sign * abs(ic_mean)
+                if quality >= min_abs_ic:
+                    multiplier = 1.0 + min(2.0, quality / max(min_abs_ic, 1e-9))
+                else:
+                    multiplier = 0.35
+                    if (short_ic is not None and float(short_ic) <= -min_abs_ic) or (
+                        long_ic is not None and float(long_ic) <= -min_abs_ic
+                    ):
+                        multiplier = 0.15
+                    elif short_ic is not None and float(short_ic) < 0:
+                        multiplier = 0.25
+                    elif long_ic is not None and float(long_ic) < 0:
+                        multiplier = 0.20
+
+                dyn[k] = base_mag * multiplier
                 has_any = True
 
             if not has_any:
@@ -217,10 +224,29 @@ class AlphaEngine:
             out = dict(default_weights)
             for k in out.keys():
                 if k in dyn:
-                    out[k] = float(dyn[k]) * scale
+                    sign = -1.0 if float(out[k]) < 0 else 1.0
+                    out[k] = round(sign * float(dyn[k]) * scale, 12)
             return out
         except Exception:
             return dict(default_weights)
+
+    @staticmethod
+    def _extract_factor_ic_means(rec: Dict[str, Any]) -> tuple[Optional[float], Optional[float]]:
+        def _nested_mean(bucket_key: str) -> Optional[float]:
+            try:
+                bucket = rec.get(bucket_key) or {}
+                if isinstance(bucket, dict) and bucket.get("count", 0):
+                    return float(bucket.get("mean"))
+            except Exception:
+                return None
+            return None
+
+        short_mean = _nested_mean("rank_ic_short")
+        long_mean = _nested_mean("rank_ic_long")
+        if short_mean is None and long_mean is None:
+            short_mean = _nested_mean("ic_short")
+            long_mean = _nested_mean("ic_long")
+        return short_mean, long_mean
 
     def _resolve_total_capital_usdt(self) -> float:
         """Resolve dynamic capital base for multi-strategy sizing.
@@ -642,6 +668,8 @@ class AlphaEngine:
         return snap.scores
 
     def _compute_multi_strategy_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
+        if not callable(getattr(self.multi_strategy_adapter, "run_strategy_cycle", None)):
+            return {}
         scores, _ = self._compute_multi_strategy_score_bundle(market_data)
         return scores
 
@@ -741,6 +769,39 @@ class AlphaEngine:
         
         return scores, raw_scores
 
+    def _get_alpha6_factor_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        if self.alpha6_strategy is None:
+            return {}
+        try:
+            getter = getattr(self.alpha6_strategy, "get_latest_factor_snapshot", None)
+            if callable(getter):
+                snapshot = getter()
+            else:
+                snapshot = getattr(self.alpha6_strategy, "last_factor_snapshot", {}) or {}
+            if not isinstance(snapshot, dict):
+                return {}
+            return {
+                str(sym): dict(payload)
+                for sym, payload in snapshot.items()
+                if isinstance(payload, dict)
+            }
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _build_multi_strategy_telemetry_scores(
+        factor_snapshot: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, float]:
+        telemetry: Dict[str, float] = {}
+        for sym, payload in (factor_snapshot or {}).items():
+            try:
+                telemetry[str(sym)] = float(
+                    payload.get("relative_score", payload.get("final_score", 0.0))
+                )
+            except Exception:
+                continue
+        return telemetry
+
     def compute_snapshot(self, market_data: Dict[str, MarketSeries], use_robust_zscore: bool = True) -> AlphaSnapshot:
         """计算完整的Alpha快照（包含原始因子、标准化因子和评分）
         
@@ -753,7 +814,13 @@ class AlphaEngine:
         """
         # 如果使用多策略，直接返回多策略结果
         if self.use_multi_strategy and self.multi_strategy_adapter:
-            scores, raw_scores = self._compute_multi_strategy_score_bundle(market_data)
+            if callable(getattr(self.multi_strategy_adapter, "run_strategy_cycle", None)):
+                scores, raw_scores = self._compute_multi_strategy_score_bundle(market_data)
+            else:
+                scores = dict(self._compute_multi_strategy_scores(market_data))
+                raw_scores = dict(scores)
+            factor_snapshot = self._get_alpha6_factor_snapshot()
+            telemetry_scores = self._build_multi_strategy_telemetry_scores(factor_snapshot)
             ml_overlay_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
             ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
             if ml_overlay_scores and ml_weight > 0:
@@ -777,25 +844,36 @@ class AlphaEngine:
             if ml_runtime and ml_runtime.get("used_in_latest_snapshot"):
                 ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
                 self._write_ml_runtime_status(ml_runtime)
-            symbols = sorted(set(scores.keys()) | set(ml_raw_preds.keys()))
-            # 构建简化的AlphaSnapshot（多策略模式下部分字段为空）
+            symbols = sorted(set(scores.keys()) | set(ml_raw_preds.keys()) | set(factor_snapshot.keys()))
+            raw_factors: Dict[str, Dict[str, float]] = {}
+            z_factors: Dict[str, Dict[str, float]] = {}
+            for sym in symbols:
+                factor_entry = factor_snapshot.get(sym) or {}
+                raw_bucket = {
+                    str(k): float(v)
+                    for k, v in ((factor_entry.get("raw_factors") or {}).items())
+                }
+                raw_bucket["multi_strategy_raw_score"] = float(raw_scores.get(sym, scores.get(sym, 0.0)))
+                raw_bucket["alpha6_relative_score"] = float(factor_entry.get("relative_score", 0.0))
+                raw_bucket["alpha6_final_score"] = float(factor_entry.get("final_score", 0.0))
+                raw_bucket["ml_pred_raw"] = float(ml_raw_preds.get(sym, 0.0))
+                raw_factors[sym] = raw_bucket
+
+                z_bucket = {
+                    str(k): float(v)
+                    for k, v in ((factor_entry.get("z_factors") or {}).items())
+                }
+                z_bucket["multi_strategy_score"] = float(scores.get(sym, 0.0))
+                z_bucket["alpha6_display_score"] = float(factor_entry.get("display_score", 0.0))
+                z_bucket["ml_pred_zscore"] = float(ml_overlay_scores.get(sym, 0.0))
+                z_factors[sym] = z_bucket
+
             return AlphaSnapshot(
-                raw_factors={
-                    sym: {
-                        "multi_strategy_raw_score": float(raw_scores.get(sym, scores.get(sym, 0.0))),
-                        "ml_pred_raw": float(ml_raw_preds.get(sym, 0.0)),
-                    }
-                    for sym in symbols
-                },
-                z_factors={
-                    sym: {
-                        "multi_strategy_score": float(scores.get(sym, 0.0)),
-                        "ml_pred_zscore": float(ml_overlay_scores.get(sym, 0.0)),
-                    }
-                    for sym in symbols
-                },
+                raw_factors=raw_factors,
+                z_factors=z_factors,
                 scores=scores,
                 raw_scores=raw_scores,
+                telemetry_scores=telemetry_scores or dict(scores),
             )
 
         # 否则使用传统5因子 + Alpha158 overlay（可选）
@@ -950,4 +1028,10 @@ class AlphaEngine:
             ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
             self._write_ml_runtime_status(ml_runtime)
 
-        return AlphaSnapshot(raw_factors=raw_factors, z_factors=z_factors, scores=scores, raw_scores=dict(scores))
+        return AlphaSnapshot(
+            raw_factors=raw_factors,
+            z_factors=z_factors,
+            scores=scores,
+            raw_scores=dict(scores),
+            telemetry_scores=dict(scores),
+        )
