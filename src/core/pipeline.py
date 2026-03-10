@@ -1501,7 +1501,7 @@ class V5Pipeline:
                 continue
             
             # 检查cash是否足够（按批次累计扣减，避免多单同时通过导致超额下单）
-            if notional > cash_remaining:
+            if side == "buy" and notional > cash_remaining:
                 if audit:
                     audit.reject("insufficient_cash")
                     router_decisions.append(
