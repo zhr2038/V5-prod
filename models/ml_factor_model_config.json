@@ -1,10 +1,12 @@
 {
   "config": {
     "model_type": "ridge",
-    "alpha": 10.0,
+    "alpha": 50.0,
     "n_estimators": 50,
     "max_depth": 4,
     "learning_rate": 0.05,
+    "hgb_max_iter": 120,
+    "hgb_min_samples_leaf": 120,
     "subsample": 0.6,
     "colsample_bytree": 0.6,
     "num_leaves": 7,
@@ -16,19 +18,23 @@
     "train_lookback_days": 60,
     "prediction_horizon": 6,
     "min_train_samples": 200,
-    "early_stopping_rounds": 10
+    "early_stopping_rounds": 10,
+    "target_mode": "forward_edge_rank",
+    "include_time_features": false,
+    "min_symbol_samples": 48,
+    "min_symbol_target_std": 1e-06,
+    "min_cross_sectional_group_size": 2,
+    "min_group_coverage_ratio": 0.9
   },
   "feature_names": [
-    "macd_signal",
-    "volatility_24h",
-    "bb_position",
     "returns_24h",
     "momentum_5d",
-    "obv",
+    "volatility_24h",
     "volatility_ratio",
     "volume_ratio",
-    "momentum_20d",
-    "price_position"
+    "obv",
+    "rsi",
+    "macd"
   ],
   "model_type": "ridge"
 }
