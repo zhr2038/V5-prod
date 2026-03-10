@@ -209,6 +209,22 @@ class RebalanceConfig(BaseModel):
     close_only_weight_eps: float = Field(default=0.001, ge=0.0, le=0.05, description="Treat target weight < eps as close-only")
 
 
+class PeakDrawdownExitConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Enable profit-taking exits based on retrace from peak profit")
+
+    tier1_profit_pct: float = Field(default=0.08, ge=0.0, le=5.0)
+    tier1_retrace_pct: float = Field(default=0.025, ge=0.0, le=1.0)
+    tier1_sell_pct: float = Field(default=0.33, ge=0.0, le=1.0)
+
+    tier2_profit_pct: float = Field(default=0.15, ge=0.0, le=5.0)
+    tier2_retrace_pct: float = Field(default=0.04, ge=0.0, le=1.0)
+    tier2_sell_pct: float = Field(default=0.50, ge=0.0, le=1.0)
+
+    tier3_profit_pct: float = Field(default=0.25, ge=0.0, le=5.0)
+    tier3_retrace_pct: float = Field(default=0.06, ge=0.0, le=1.0)
+    tier3_sell_pct: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class ExecutionConfig(BaseModel):
     # Mode selector (preferred). Keep dry_run for backward compatibility.
     mode: str = Field(default="dry_run", description="dry_run|live")
@@ -333,12 +349,17 @@ class ExecutionConfig(BaseModel):
         le=10,
         description="Require N consecutive rounds beyond rank_exit_max_rank before exiting",
     )
+    rank_exit_strict_mode: bool = Field(
+        default=False,
+        description="Ignore positive target weight and profit-based max-rank relaxation when rank-exit confirms",
+    )
     rank_exit_reentry_cooldown_minutes: int = Field(
         default=60,
         ge=0,
         le=24 * 60,
         description="After a FILLED rank-exit sell, block OPEN_LONG re-entry for this many minutes",
     )
+    peak_drawdown_exit: PeakDrawdownExitConfig = Field(default_factory=PeakDrawdownExitConfig)
 
     # qlib-style hold threshold: avoid ultra-short churn exits.
     # Applied in pipeline to rank_exit / regime_exit only (stop-loss exits are not delayed).

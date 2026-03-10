@@ -72,7 +72,7 @@ from src.regime.regime_engine import RegimeEngine, RegimeResult
 from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
 from src.risk.fixed_stop_loss import FixedStopLossManager, FixedStopLossConfig
-from src.risk.profit_taking import ProfitTakingManager  # 程序化利润管理
+from src.risk.profit_taking import PeakDrawdownLevel, ProfitTakingManager  # 程序化利润管理
 from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard  # 自动风险档位
 from src.risk.negative_expectancy_cooldown import (
     NegativeExpectancyCooldown,
@@ -178,7 +178,30 @@ class V5Pipeline:
         )
         
         # 程序化利润管理
-        self.profit_taking = ProfitTakingManager()
+        peak_drawdown_cfg = getattr(cfg.execution, "peak_drawdown_exit", None)
+        peak_drawdown_levels = []
+        if peak_drawdown_cfg is not None and bool(getattr(peak_drawdown_cfg, "enabled", False)):
+            peak_drawdown_levels = [
+                PeakDrawdownLevel(
+                    profit_pct=float(getattr(peak_drawdown_cfg, "tier1_profit_pct", 0.08) or 0.08),
+                    retrace_pct=float(getattr(peak_drawdown_cfg, "tier1_retrace_pct", 0.025) or 0.025),
+                    sell_pct=float(getattr(peak_drawdown_cfg, "tier1_sell_pct", 0.33) or 0.33),
+                ),
+                PeakDrawdownLevel(
+                    profit_pct=float(getattr(peak_drawdown_cfg, "tier2_profit_pct", 0.15) or 0.15),
+                    retrace_pct=float(getattr(peak_drawdown_cfg, "tier2_retrace_pct", 0.04) or 0.04),
+                    sell_pct=float(getattr(peak_drawdown_cfg, "tier2_sell_pct", 0.50) or 0.50),
+                ),
+                PeakDrawdownLevel(
+                    profit_pct=float(getattr(peak_drawdown_cfg, "tier3_profit_pct", 0.25) or 0.25),
+                    retrace_pct=float(getattr(peak_drawdown_cfg, "tier3_retrace_pct", 0.06) or 0.06),
+                    sell_pct=float(getattr(peak_drawdown_cfg, "tier3_sell_pct", 1.0) or 1.0),
+                ),
+            ]
+        self.profit_taking = ProfitTakingManager(
+            rank_exit_strict_mode=bool(getattr(cfg.execution, "rank_exit_strict_mode", False)),
+            peak_drawdown_levels=peak_drawdown_levels,
+        )
         
         # 自动风险档位守卫
         self.auto_risk_guard = get_auto_risk_guard()
@@ -542,24 +565,32 @@ class V5Pipeline:
             # 1st priority: 程序化利润管理（利润回撤锁盈）
             action, value, reason = self.profit_taking.evaluate(p.symbol, current_price)
             
-            if action == 'sell_all' and float(p.qty) > 0:
+            if action in {'sell_all', 'sell_partial'} and float(p.qty) > 0:
+                sell_fraction = 1.0 if action == 'sell_all' else max(0.0, min(float(value or 0.0), 1.0))
+                if sell_fraction <= 0:
+                    continue
+                is_full_exit = sell_fraction >= 0.999
+                exit_reason = f"profit_taking_{reason}" if is_full_exit else f"profit_partial_{reason}"
                 profit_orders.append(
                     Order(
                         symbol=p.symbol,
                         side="sell",
-                        intent="CLOSE_LONG",
-                        notional_usdt=float(p.qty) * current_price,
+                        intent="CLOSE_LONG" if is_full_exit else "REBALANCE",
+                        notional_usdt=float(p.qty) * current_price * sell_fraction,
                         signal_price=current_price,
                         meta={
-                            "reason": f"profit_taking_{reason}",
+                            "reason": exit_reason,
                             "action": action,
                             "value": value,
+                            "sell_fraction": sell_fraction,
                         },
                     )
                 )
                 profit_symbols.add(p.symbol)
                 if audit:
-                    audit.add_note(f"Profit taking: {p.symbol} {reason}")
+                    audit.add_note(
+                        f"Profit taking: {p.symbol} {reason}, sell_fraction={sell_fraction:.2f}"
+                    )
                 continue  # Skip other exit checks for this symbol
             
             # 2nd priority: 多级动态止损（取代固定止损，更智能）
@@ -642,6 +673,7 @@ class V5Pipeline:
             target_hold_eps = float(getattr(self.cfg.rebalance, 'close_only_weight_eps', 0.001) or 0.001)
             rank_exit_max_rank = int(getattr(self.cfg.execution, 'rank_exit_max_rank', 3) or 3)
             rank_exit_confirm_rounds = int(getattr(self.cfg.execution, 'rank_exit_confirm_rounds', 2) or 2)
+            rank_exit_strict_mode = bool(getattr(self.cfg.execution, 'rank_exit_strict_mode', False))
 
             if audit:
                 audit.add_note(
@@ -652,14 +684,17 @@ class V5Pipeline:
                 if p.qty <= 0 or p.symbol in profit_symbols:
                     continue  # Skip if already handled by profit-taking or stop loss
 
-                # Guard: if strategy still wants to hold this symbol (target_w > eps), skip rank exit.
                 tw = float(target.get(p.symbol, 0.0) or 0.0)
-                if tw > target_hold_eps:
+                if not rank_exit_strict_mode and tw > target_hold_eps:
                     if audit:
                         audit.add_note(
                             f"Rank exit skipped: {p.symbol} target_w={tw:.4f} > eps={target_hold_eps:.4f}"
                         )
                     continue
+                if rank_exit_strict_mode and tw > target_hold_eps and audit:
+                    audit.add_note(
+                        f"Rank exit strict mode: {p.symbol} ignoring target_w={tw:.4f} > eps={target_hold_eps:.4f}"
+                    )
 
                 current_rank = symbol_ranks.get(p.symbol, 999)
 
@@ -747,8 +782,10 @@ class V5Pipeline:
             prio_map = {
                 'profit_taking_stop_loss_hit': 100,
                 'dynamic_stop': 95,  # 动态止损优先级高于固定止损
+                'profit_taking_': 93,
                 'fixed_stop_loss': 90,
                 'atr_trailing': 80,
+                'rank_exit_': 75,
                 'regime_exit': 70,
                 'profit_partial': 60,
             }
@@ -764,6 +801,7 @@ class V5Pipeline:
                 if cur is None or prio > cur[0]:
                     best[o.symbol] = (prio, o)
             exit_orders = [v[1] for v in best.values()]
+        exit_symbols = {o.symbol for o in exit_orders}
         
         if audit:
             audit.counts["orders_exit"] = len(exit_orders)
@@ -927,6 +965,16 @@ class V5Pipeline:
             drift = float(tw) - cw
 
             held = next((p for p in positions if p.symbol == sym and float(getattr(p, 'qty', 0.0) or 0.0) > 0), None)
+
+            if sym in exit_symbols:
+                if audit:
+                    audit.add_note(f"Rebalance skipped due to exit order: {sym}")
+                    router_decisions.append({
+                        "symbol": sym,
+                        "action": "skip",
+                        "reason": "exit_order_selected",
+                    })
+                continue
 
             # User hard rule: if symbol is held but absent from scoring list, force CLOSE_LONG.
             if force_close_unscored and held is not None and scored_symbols and sym not in scored_symbols:

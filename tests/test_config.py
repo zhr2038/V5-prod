@@ -20,3 +20,13 @@ def test_live_prod_preflight_self_heal_loads():
     assert cfg.execution.preflight_bootstrap_patch_enabled is True
     assert cfg.execution.preflight_bootstrap_patch_max_total_usdt == 100.0
     assert cfg.execution.preflight_bootstrap_patch_min_interval_sec == 300
+
+
+def test_live_prod_rank_exit_and_peak_drawdown_loads():
+    cfg = load_config("configs/live_prod.yaml", env_path=None)
+    assert cfg.execution.rank_exit_strict_mode is True
+    assert cfg.execution.peak_drawdown_exit.enabled is True
+    assert cfg.execution.peak_drawdown_exit.tier1_profit_pct == 0.08
+    assert cfg.execution.peak_drawdown_exit.tier1_retrace_pct == 0.025
+    assert cfg.execution.peak_drawdown_exit.tier1_sell_pct == 0.33
+    assert cfg.execution.peak_drawdown_exit.tier3_sell_pct == 1.0

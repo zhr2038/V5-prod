@@ -184,7 +184,20 @@ execution:
   # 排名退出防抖：需连续2轮跌出前3才触发rank_exit；且退出后1小时内禁止回补
   rank_exit_max_rank: 3
   rank_exit_confirm_rounds: 2
+  rank_exit_strict_mode: true
   rank_exit_reentry_cooldown_minutes: 60
+
+  peak_drawdown_exit:
+    enabled: true
+    tier1_profit_pct: 0.08
+    tier1_retrace_pct: 0.025
+    tier1_sell_pct: 0.33
+    tier2_profit_pct: 0.15
+    tier2_retrace_pct: 0.04
+    tier2_sell_pct: 0.50
+    tier3_profit_pct: 0.25
+    tier3_retrace_pct: 0.06
+    tier3_sell_pct: 1.0
 
   # qlib经验迁移：最短持仓门槛（先控超短抖动）
   min_hold_minutes_before_rank_exit: 120
