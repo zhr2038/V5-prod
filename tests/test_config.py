@@ -51,3 +51,12 @@ def test_live_prod_conflict_penalty_and_negative_expectancy_loads():
     assert cfg.execution.negative_expectancy_score_penalty_per_bps == 0.015
     assert cfg.execution.negative_expectancy_open_block_enabled is True
     assert cfg.execution.negative_expectancy_open_block_floor_bps == 5.0
+
+
+def test_live_prod_funding_thresholds_load():
+    cfg = load_config("configs/live_prod.yaml", env_path=None)
+    assert cfg.regime.funding_trending_threshold == 0.10
+    assert cfg.regime.funding_risk_off_threshold == -0.10
+    assert cfg.regime.funding_breadth_threshold == 0.68
+    assert cfg.regime.funding_extreme_sentiment_threshold == 0.12
+    assert cfg.regime.funding_extreme_breadth_threshold == 0.55

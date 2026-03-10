@@ -124,6 +124,11 @@ regime:
   rss_weight: 0.25
   funding_signal_max_age_minutes: 180
   rss_signal_max_age_minutes: 180
+  funding_trending_threshold: 0.10
+  funding_risk_off_threshold: -0.10
+  funding_breadth_threshold: 0.68
+  funding_extreme_sentiment_threshold: 0.12
+  funding_extreme_breadth_threshold: 0.55
   
   atr_threshold: 0.02
   atr_very_low: 0.008

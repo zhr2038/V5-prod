@@ -197,6 +197,11 @@ class RegimeConfig(BaseModel):
     rss_weight: float = Field(default=0.25, ge=0, le=1, description="RSS新闻情绪权重")
     funding_signal_max_age_minutes: int = Field(default=180, ge=1, le=1440)
     rss_signal_max_age_minutes: int = Field(default=180, ge=1, le=1440)
+    funding_trending_threshold: float = Field(default=0.10, ge=0.0, le=1.0)
+    funding_risk_off_threshold: float = Field(default=-0.10, ge=-1.0, le=0.0)
+    funding_breadth_threshold: float = Field(default=0.68, ge=0.5, le=1.0)
+    funding_extreme_sentiment_threshold: float = Field(default=0.12, ge=0.0, le=1.0)
+    funding_extreme_breadth_threshold: float = Field(default=0.55, ge=0.5, le=1.0)
 
     # 情绪驱动的风险状态修正（避免在强反弹初期被长期锁死）
     sentiment_regime_override_enabled: bool = Field(default=True)
@@ -210,6 +215,16 @@ class RegimeConfig(BaseModel):
     regime_sideways_prob_warn_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     regime_sideways_consecutive_warn: int = Field(default=10, ge=2, le=200)
     regime_monitor_keep_rows: int = Field(default=5000, ge=100, le=500000)
+
+    @model_validator(mode='after')
+    def _validate_funding_thresholds(self):
+        if self.funding_risk_off_threshold >= 0:
+            raise ValueError("funding_risk_off_threshold must be < 0")
+        if self.funding_trending_threshold <= 0:
+            raise ValueError("funding_trending_threshold must be > 0")
+        if self.funding_extreme_breadth_threshold > self.funding_breadth_threshold:
+            raise ValueError("funding_extreme_breadth_threshold must be <= funding_breadth_threshold")
+        return self
 
 
 class RiskConfig(BaseModel):

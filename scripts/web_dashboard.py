@@ -28,6 +28,7 @@ import yaml
 import requests
 from configs.loader import load_config as load_app_config
 
+from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
 from src.regime.rss_vote_utils import build_rss_vote
 
 
@@ -1463,30 +1464,44 @@ def _load_json_payload(path: Optional[Path]) -> Dict[str, Any]:
         return {}
 
 
-def _build_live_funding_vote(cache_dir: Path, max_age_minutes: int, weight: float) -> Dict[str, Any]:
+def _build_live_funding_vote(
+    cache_dir: Path,
+    max_age_minutes: int,
+    weight: float,
+    regime_cfg: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    regime_cfg = regime_cfg or {}
+    funding_kwargs = {
+        'trending_threshold': float(regime_cfg.get('funding_trending_threshold', 0.10) or 0.10),
+        'risk_off_threshold': float(regime_cfg.get('funding_risk_off_threshold', -0.10) or -0.10),
+        'breadth_threshold': float(regime_cfg.get('funding_breadth_threshold', 0.68) or 0.68),
+        'extreme_sentiment_threshold': float(
+            regime_cfg.get('funding_extreme_sentiment_threshold', 0.12) or 0.12
+        ),
+        'extreme_breadth_threshold': float(
+            regime_cfg.get('funding_extreme_breadth_threshold', 0.55) or 0.55
+        ),
+    }
     composite_file = _latest_signal_file(cache_dir, ['funding_COMPOSITE_*.json'])
     if composite_file is not None:
         health = _signal_health(cache_dir, [composite_file.name], max_age_minutes, 'funding_signal_stale_or_missing')
         if health.get('is_fresh'):
             data = _load_json_payload(composite_file)
-            sentiment = float(data.get('f6_sentiment', 0.0) or 0.0)
-            if sentiment > 0.3:
-                state = 'TRENDING'
-            elif sentiment < -0.3:
-                state = 'RISK_OFF'
-            else:
-                state = 'SIDEWAYS'
-            return {
-                'state': state,
-                'confidence': min(abs(sentiment) * 2, 1.0),
-                'weight': float(weight),
-                'sentiment': sentiment,
-                'composite': True,
-                'details': data.get('tier_breakdown', {}),
-                'raw_state': state,
-            }
+            return build_funding_vote(
+                sentiment=float(data.get('f6_sentiment', 0.0) or 0.0),
+                weight=float(weight),
+                details=data.get('tier_breakdown', {}),
+                composite=True,
+                positive_weight_share=float(data.get('positive_weight_share', 0.0) or 0.0),
+                negative_weight_share=float(data.get('negative_weight_share', 0.0) or 0.0),
+                strongest_sentiment=float(data.get('strongest_sentiment', 0.0) or 0.0),
+                max_abs_sentiment=float(data.get('max_abs_sentiment', 0.0) or 0.0),
+                extreme_positive_weight_share=float(data.get('extreme_positive_weight_share', 0.0) or 0.0),
+                extreme_negative_weight_share=float(data.get('extreme_negative_weight_share', 0.0) or 0.0),
+                **funding_kwargs,
+            )
 
-    vals = []
+    rows = []
     details: Dict[str, float] = {}
     for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
         latest = _latest_signal_file(cache_dir, [f'funding_{sym}_*.json'])
@@ -1497,29 +1512,29 @@ def _build_live_funding_vote(cache_dir: Path, max_age_minutes: int, weight: floa
             continue
         data = _load_json_payload(latest)
         sentiment = max(-1.0, min(1.0, float(data.get('f6_sentiment', 0.0) or 0.0)))
-        vals.append(sentiment)
+        rows.append({'symbol': sym, 'sentiment': sentiment, 'weight': 1.0})
         details[sym] = sentiment
 
-    if not vals:
+    if not rows:
         return {}
 
-    avg_sentiment = float(sum(vals) / len(vals))
-    if avg_sentiment > 0.3:
-        state = 'TRENDING'
-    elif avg_sentiment < -0.3:
-        state = 'RISK_OFF'
-    else:
-        state = 'SIDEWAYS'
-
-    return {
-        'state': state,
-        'confidence': min(abs(avg_sentiment) * 2, 1.0),
-        'weight': float(weight),
-        'sentiment': avg_sentiment,
-        'composite': False,
-        'details': details,
-        'raw_state': state,
-    }
+    metrics = summarize_funding_rows(
+        rows,
+        extreme_sentiment_threshold=funding_kwargs['extreme_sentiment_threshold'],
+    )
+    return build_funding_vote(
+        sentiment=metrics['sentiment'],
+        weight=float(weight),
+        details=details,
+        composite=False,
+        positive_weight_share=metrics['positive_weight_share'],
+        negative_weight_share=metrics['negative_weight_share'],
+        strongest_sentiment=metrics['strongest_sentiment'],
+        max_abs_sentiment=metrics['max_abs_sentiment'],
+        extreme_positive_weight_share=metrics['extreme_positive_weight_share'],
+        extreme_negative_weight_share=metrics['extreme_negative_weight_share'],
+        **funding_kwargs,
+    )
 
 
 def _build_live_rss_vote(cache_dir: Path, max_age_minutes: int, weight: float) -> Dict[str, Any]:
@@ -1696,6 +1711,7 @@ def api_market_state():
                 cache_dir,
                 int(regime_cfg.get('funding_signal_max_age_minutes', 180) or 180),
                 configured_weights['funding'],
+                regime_cfg=regime_cfg,
             ),
             'rss': _build_live_rss_vote(
                 cache_dir,

@@ -10,6 +10,7 @@ import numpy as np
 
 from configs.schema import RegimeConfig, RegimeState
 from src.core.models import MarketSeries
+from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
 from src.regime.rss_vote_utils import build_rss_vote
 
 # 导入HMM检测器
@@ -470,6 +471,77 @@ class EnsembleRegimeEngine:
             print(f"[EnsembleRegime] 资金费率投票失败: {e}")
             return {'state': None, 'confidence': 0, 'weight': 0}
     
+    def _get_funding_vote_v2(self) -> dict:
+        funding_kwargs = {
+            'trending_threshold': float(getattr(self.cfg, 'funding_trending_threshold', 0.10) or 0.10),
+            'risk_off_threshold': float(getattr(self.cfg, 'funding_risk_off_threshold', -0.10) or -0.10),
+            'breadth_threshold': float(getattr(self.cfg, 'funding_breadth_threshold', 0.68) or 0.68),
+            'extreme_sentiment_threshold': float(
+                getattr(self.cfg, 'funding_extreme_sentiment_threshold', 0.12) or 0.12
+            ),
+            'extreme_breadth_threshold': float(
+                getattr(self.cfg, 'funding_extreme_breadth_threshold', 0.55) or 0.55
+            ),
+        }
+        try:
+            composite_file = self._latest_fresh_file(
+                'funding_COMPOSITE_*.json',
+                self.funding_signal_max_age_minutes,
+            )
+            if composite_file is not None:
+                data = json.loads(composite_file.read_text())
+                return build_funding_vote(
+                    sentiment=float(data.get('f6_sentiment', 0.0) or 0.0),
+                    weight=self.weights['funding'],
+                    details=data.get('tier_breakdown', {}),
+                    composite=True,
+                    positive_weight_share=float(data.get('positive_weight_share', 0.0) or 0.0),
+                    negative_weight_share=float(data.get('negative_weight_share', 0.0) or 0.0),
+                    strongest_sentiment=float(data.get('strongest_sentiment', 0.0) or 0.0),
+                    max_abs_sentiment=float(data.get('max_abs_sentiment', 0.0) or 0.0),
+                    extreme_positive_weight_share=float(data.get('extreme_positive_weight_share', 0.0) or 0.0),
+                    extreme_negative_weight_share=float(data.get('extreme_negative_weight_share', 0.0) or 0.0),
+                    **funding_kwargs,
+                )
+
+            rows = []
+            details = {}
+            for sym in ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']:
+                latest = self._latest_fresh_file(
+                    f'funding_{sym}_*.json',
+                    self.funding_signal_max_age_minutes,
+                )
+                if latest is None:
+                    continue
+                data = json.loads(latest.read_text())
+                sentiment = max(-1.0, min(1.0, float(data.get('f6_sentiment', 0.0) or 0.0)))
+                rows.append({'symbol': sym, 'sentiment': sentiment, 'weight': 1.0})
+                details[sym] = sentiment
+
+            if not rows:
+                return {'state': None, 'confidence': 0, 'weight': 0, 'error': 'funding_signal_stale_or_missing'}
+
+            metrics = summarize_funding_rows(
+                rows,
+                extreme_sentiment_threshold=funding_kwargs['extreme_sentiment_threshold'],
+            )
+            return build_funding_vote(
+                sentiment=metrics['sentiment'],
+                weight=self.weights['funding'],
+                details=details,
+                composite=False,
+                positive_weight_share=metrics['positive_weight_share'],
+                negative_weight_share=metrics['negative_weight_share'],
+                strongest_sentiment=metrics['strongest_sentiment'],
+                max_abs_sentiment=metrics['max_abs_sentiment'],
+                extreme_positive_weight_share=metrics['extreme_positive_weight_share'],
+                extreme_negative_weight_share=metrics['extreme_negative_weight_share'],
+                **funding_kwargs,
+            )
+        except Exception as e:
+            print(f"[EnsembleRegime] funding vote v2 failed: {e}")
+            return {'state': None, 'confidence': 0, 'weight': 0}
+
     def _get_rss_vote(self) -> dict:
         """RSS vote"""
         try:
@@ -539,7 +611,7 @@ class EnsembleRegimeEngine:
         """
         # 1. 收集投票
         hmm_vote = self._get_hmm_vote(btc_data)
-        funding_vote = self._get_funding_vote()
+        funding_vote = self._get_funding_vote_v2()
         rss_vote = self._get_rss_vote()
 
         votes = {
