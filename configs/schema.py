@@ -158,6 +158,28 @@ class AlphaConfig(BaseModel):
 
     # 多策略模式
     use_multi_strategy: bool = Field(default=False, description="Enable multi-strategy mode (trend + mean reversion)")
+    multi_strategy_conflict_penalty_enabled: bool = Field(
+        default=True,
+        description="Downweight fused signals when buy/sell strategies disagree on the same symbol",
+    )
+    multi_strategy_conflict_dominance_ratio: float = Field(
+        default=1.35,
+        ge=1.0,
+        le=5.0,
+        description="Required confidence dominance ratio to keep the winning side when strategies conflict",
+    )
+    multi_strategy_conflict_min_confidence: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description="Minimum dominant confidence required to keep a conflicted fused signal",
+    )
+    multi_strategy_conflict_penalty_strength: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        description="Strength of the score/confidence attenuation applied to conflicted fused signals",
+    )
 
 
 class RegimeConfig(BaseModel):
@@ -427,6 +449,34 @@ class ExecutionConfig(BaseModel):
     negative_expectancy_threshold_usdt: float = Field(default=0.0, ge=-1000, le=1000)
     negative_expectancy_cooldown_hours: int = Field(default=24, ge=1, le=24 * 30)
     negative_expectancy_state_path: str = Field(default="reports/negative_expectancy_cooldown.json")
+    negative_expectancy_score_penalty_enabled: bool = Field(default=True)
+    negative_expectancy_score_penalty_min_closed_cycles: int = Field(default=2, ge=1, le=200)
+    negative_expectancy_score_penalty_floor_bps: float = Field(
+        default=5.0,
+        ge=-10000,
+        le=10000,
+        description="Apply score penalty when recent realized expectancy is below this threshold in bps",
+    )
+    negative_expectancy_score_penalty_per_bps: float = Field(
+        default=0.015,
+        ge=0.0,
+        le=10.0,
+        description="Score penalty added per 1 bps of recent expectancy shortfall",
+    )
+    negative_expectancy_score_penalty_max: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=10.0,
+        description="Cap for recent negative expectancy score penalty",
+    )
+    negative_expectancy_open_block_enabled: bool = Field(default=True)
+    negative_expectancy_open_block_min_closed_cycles: int = Field(default=2, ge=1, le=200)
+    negative_expectancy_open_block_floor_bps: float = Field(
+        default=5.0,
+        ge=-10000,
+        le=10000,
+        description="Block new OPEN_LONG orders when recent realized expectancy stays below this threshold in bps",
+    )
 
     order_state_machine_path: str = Field(
         default="reports/order_state_machine.json",

@@ -291,7 +291,21 @@ class AlphaEngine:
         total_capital = Decimal(str(cap_usdt))
 
         # 创建策略编排器
-        orchestrator = StrategyOrchestrator(total_capital=total_capital)
+        orchestrator = StrategyOrchestrator(
+            total_capital=total_capital,
+            conflict_penalty_enabled=bool(
+                getattr(self.cfg, "multi_strategy_conflict_penalty_enabled", True)
+            ),
+            conflict_dominance_ratio=float(
+                getattr(self.cfg, "multi_strategy_conflict_dominance_ratio", 1.35) or 1.35
+            ),
+            conflict_min_confidence=float(
+                getattr(self.cfg, "multi_strategy_conflict_min_confidence", 0.60) or 0.60
+            ),
+            conflict_penalty_strength=float(
+                getattr(self.cfg, "multi_strategy_conflict_penalty_strength", 0.65) or 0.65
+            ),
+        )
         print(f"[AlphaEngine] 多策略资金基数: {float(total_capital):.4f} USDT (dynamic)")
 
         # 注册趋势跟踪策略 (20%资金)

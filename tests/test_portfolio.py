@@ -70,3 +70,52 @@ def test_topk_dropout_reorders_before_cap_and_persists_final_selection(tmp_path:
 
     saved = json.loads(state_path.read_text(encoding="utf-8"))
     assert saved["selected"] == ["OKB/USDT", "HYPE/USDT", "SUI/USDT"]
+
+
+def test_portfolio_fused_selection_respects_lower_alpha_adjusted_score(tmp_path: Path):
+    alpha_cfg = AlphaConfig(long_top_pct=0.5, use_fused_score_for_weighting=True)
+    alpha_cfg.topk_dropout.enabled = False
+    pe = PortfolioEngine(alpha_cfg=alpha_cfg, risk_cfg=RiskConfig(max_single_weight=0.5))
+    pe.set_run_id("fused-adjusted")
+
+    run_dir = tmp_path / "reports" / "runs" / "fused-adjusted"
+    run_dir.mkdir(parents=True)
+    (run_dir / "strategy_signals.json").write_text(
+        json.dumps(
+            {
+                "fused": {
+                    "OKB/USDT": {"direction": "buy", "score": 1.20},
+                    "HYPE/USDT": {"direction": "buy", "score": 0.90},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    md = {}
+    for sym in ("OKB/USDT", "HYPE/USDT"):
+        md[sym] = MarketSeries(
+            symbol=sym,
+            timeframe="1h",
+            ts=list(range(200)),
+            open=[1.0] * 200,
+            high=[1.0] * 200,
+            low=[1.0] * 200,
+            close=[1.0 + i * 0.0001 for i in range(200)],
+            volume=[1000.0] * 200,
+        )
+
+    cwd = Path.cwd()
+    try:
+        import os
+
+        os.chdir(tmp_path)
+        snap = pe.allocate(
+            scores={"OKB/USDT": 0.05, "HYPE/USDT": 0.80},
+            market_data=md,
+            regime_mult=1.0,
+        )
+    finally:
+        os.chdir(cwd)
+
+    assert snap.selected == ["HYPE/USDT"]

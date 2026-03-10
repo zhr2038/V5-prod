@@ -70,6 +70,10 @@ alpha:
   dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
   dynamic_weights_by_regime_enabled: true
   use_multi_strategy: true
+  multi_strategy_conflict_penalty_enabled: true
+  multi_strategy_conflict_dominance_ratio: 1.35
+  multi_strategy_conflict_min_confidence: 0.60
+  multi_strategy_conflict_penalty_strength: 0.65
 
   ml_factor:
     enabled: true
@@ -232,6 +236,14 @@ execution:
   negative_expectancy_threshold_usdt: 0.0
   negative_expectancy_cooldown_hours: 24
   negative_expectancy_state_path: reports/negative_expectancy_cooldown.json
+  negative_expectancy_score_penalty_enabled: true
+  negative_expectancy_score_penalty_min_closed_cycles: 2
+  negative_expectancy_score_penalty_floor_bps: 5.0
+  negative_expectancy_score_penalty_per_bps: 0.015
+  negative_expectancy_score_penalty_max: 0.60
+  negative_expectancy_open_block_enabled: true
+  negative_expectancy_open_block_min_closed_cycles: 2
+  negative_expectancy_open_block_floor_bps: 5.0
 
   order_state_machine_path: reports/order_state_machine.json
 

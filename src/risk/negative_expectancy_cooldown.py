@@ -100,7 +100,14 @@ class NegativeExpectancyCooldown:
 
             inv_qty.setdefault(sym, 0.0)
             inv_cost.setdefault(sym, 0.0)
-            by_symbol.setdefault(sym, {"closed_cycles": 0.0, "pnl_sum_usdt": 0.0})
+            by_symbol.setdefault(
+                sym,
+                {
+                    "closed_cycles": 0.0,
+                    "pnl_sum_usdt": 0.0,
+                    "closed_notional_usdt": 0.0,
+                },
+            )
 
             if side == "buy":
                 inv_cost[sym] += qty * px
@@ -113,6 +120,7 @@ class NegativeExpectancyCooldown:
                 pnl = (px - avg_cost) * close_qty
                 by_symbol[sym]["closed_cycles"] += 1.0
                 by_symbol[sym]["pnl_sum_usdt"] += float(pnl)
+                by_symbol[sym]["closed_notional_usdt"] += float(avg_cost * close_qty)
 
                 # reduce inventory
                 inv_cost[sym] = max(0.0, inv_cost[sym] - avg_cost * close_qty)
@@ -123,11 +131,15 @@ class NegativeExpectancyCooldown:
         for sym, st in by_symbol.items():
             n = int(st.get("closed_cycles") or 0)
             pnl_sum = float(st.get("pnl_sum_usdt") or 0.0)
+            closed_notional = float(st.get("closed_notional_usdt") or 0.0)
             exp = pnl_sum / n if n > 0 else 0.0
+            exp_bps = (pnl_sum / closed_notional * 10000.0) if closed_notional > 1e-12 else 0.0
             out[sym] = {
                 "closed_cycles": n,
                 "pnl_sum_usdt": pnl_sum,
+                "closed_notional_usdt": closed_notional,
                 "expectancy_usdt": exp,
+                "expectancy_bps": exp_bps,
             }
         return out
 
@@ -153,15 +165,26 @@ class NegativeExpectancyCooldown:
             if until_ms > 0 and now_ms >= until_ms:
                 symbols.pop(sym, None)
 
+        stats_cache: Dict[str, Dict[str, Any]] = {}
         for sym, st in stats.items():
             n = int(st.get("closed_cycles") or 0)
             exp = float(st.get("expectancy_usdt") or 0.0)
+            stats_cache[sym] = {
+                "closed_cycles": n,
+                "pnl_sum_usdt": float(st.get("pnl_sum_usdt") or 0.0),
+                "closed_notional_usdt": float(st.get("closed_notional_usdt") or 0.0),
+                "expectancy_usdt": exp,
+                "expectancy_bps": float(st.get("expectancy_bps") or 0.0),
+                "updated_ts_ms": now_ms,
+            }
             if n >= min_cycles and exp < exp_th:
                 symbols[sym] = {
                     "cooldown_until_ms": now_ms + cd_ms,
                     "expectancy_usdt": exp,
+                    "expectancy_bps": float(st.get("expectancy_bps") or 0.0),
                     "closed_cycles": n,
                     "pnl_sum_usdt": float(st.get("pnl_sum_usdt") or 0.0),
+                    "closed_notional_usdt": float(st.get("closed_notional_usdt") or 0.0),
                     "updated_ts_ms": now_ms,
                 }
 
@@ -172,6 +195,7 @@ class NegativeExpectancyCooldown:
             "expectancy_threshold_usdt": exp_th,
             "cooldown_hours": int(self.cfg.cooldown_hours),
             "symbols": symbols,
+            "stats": stats_cache,
         }
         self._last_refresh_ms = now_ms
         self._save_state()
@@ -181,7 +205,7 @@ class NegativeExpectancyCooldown:
         if not self.cfg.enabled:
             return None
         now_ms = int(time.time() * 1000)
-        st = (self._cache.get("symbols") or {}).get(symbol)
+        st = (self._cache.get("symbols") or {}).get(self._norm_symbol(symbol))
         if not isinstance(st, dict):
             return None
         until_ms = int(st.get("cooldown_until_ms") or 0)
@@ -190,3 +214,24 @@ class NegativeExpectancyCooldown:
         out = dict(st)
         out["remain_seconds"] = float(max(0, until_ms - now_ms) / 1000.0)
         return out
+
+    def get_symbol_stats(self, symbol: str) -> Optional[Dict[str, Any]]:
+        if not self.cfg.enabled:
+            return None
+        sym = self._norm_symbol(symbol)
+        stats = (self._cache.get("stats") or {}).get(sym)
+        if not isinstance(stats, dict):
+            return None
+        out = dict(stats)
+        blocked = self.is_blocked(sym)
+        out["cooldown_active"] = blocked is not None
+        if blocked:
+            out["cooldown_until_ms"] = int(blocked.get("cooldown_until_ms") or 0)
+            out["remain_seconds"] = float(blocked.get("remain_seconds") or 0.0)
+        return out
+
+    def get_all_stats(self) -> Dict[str, Dict[str, Any]]:
+        if not self.cfg.enabled:
+            return {}
+        stats = self._cache.get("stats") or {}
+        return {str(sym): dict(st) for sym, st in stats.items() if isinstance(st, dict)}

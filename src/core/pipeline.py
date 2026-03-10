@@ -207,9 +207,16 @@ class V5Pipeline:
         self.auto_risk_guard = get_auto_risk_guard()
 
         # 负期望标的自动冷却（根因级抑制高成本来回交易）
+        neg_feedback_enabled = any(
+            [
+                bool(getattr(cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
+                bool(getattr(cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
+                bool(getattr(cfg.execution, 'negative_expectancy_open_block_enabled', False)),
+            ]
+        )
         self.negative_expectancy_cooldown = NegativeExpectancyCooldown(
             NegativeExpectancyConfig(
-                enabled=bool(getattr(cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
+                enabled=neg_feedback_enabled,
                 lookback_hours=int(getattr(cfg.execution, 'negative_expectancy_lookback_hours', 24) or 24),
                 min_closed_cycles=int(getattr(cfg.execution, 'negative_expectancy_min_closed_cycles', 4) or 4),
                 expectancy_threshold_usdt=float(getattr(cfg.execution, 'negative_expectancy_threshold_usdt', 0.0) or 0.0),
@@ -274,6 +281,89 @@ class V5Pipeline:
         now_ms = int(self.clock.now().timestamp() * 1000)
         hour_ms = 3600 * 1000
         return now_ms - (now_ms % hour_ms)
+
+    def _refresh_negative_expectancy_state(self, audit: Optional[DecisionAudit] = None) -> Dict[str, Any]:
+        neg_feedback_enabled = any(
+            [
+                bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
+                bool(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
+                bool(getattr(self.cfg.execution, 'negative_expectancy_open_block_enabled', False)),
+            ]
+        )
+        if not neg_feedback_enabled:
+            return {}
+        try:
+            state = self.negative_expectancy_cooldown.refresh(force=False) or {}
+            if audit:
+                blocked_n = len((state.get('symbols') or {}))
+                stats_n = len((state.get('stats') or {}))
+                audit.add_note(
+                    f"NegativeExpectancy refresh: stats={stats_n}, cooldown_active={blocked_n}"
+                )
+            return state
+        except Exception as e:
+            if audit:
+                audit.add_note(f"NegativeExpectancy refresh error: {e}")
+            return {}
+
+    def _apply_negative_expectancy_score_penalty(
+        self,
+        alpha: AlphaSnapshot,
+        neg_cd_state: Dict[str, Any],
+        audit: Optional[DecisionAudit] = None,
+    ) -> AlphaSnapshot:
+        if not getattr(alpha, 'scores', None):
+            return alpha
+        if not bool(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_enabled', False)):
+            return alpha
+
+        stats_map = (neg_cd_state.get('stats') or {}) if isinstance(neg_cd_state, dict) else {}
+        if not stats_map:
+            return alpha
+
+        min_cycles = int(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_min_closed_cycles', 2) or 2)
+        floor_bps = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_floor_bps', 5.0) or 5.0)
+        penalty_per_bps = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_per_bps', 0.015) or 0.015)
+        penalty_cap = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_max', 0.60) or 0.60)
+
+        adjusted_scores = dict(alpha.scores or {})
+        penalized = []
+        for sym, raw_score in list(adjusted_scores.items()):
+            score = float(raw_score)
+            if score <= 0.0:
+                continue
+            stat = stats_map.get(sym)
+            if not isinstance(stat, dict):
+                continue
+            closed_cycles = int(stat.get('closed_cycles') or 0)
+            if closed_cycles < min_cycles:
+                continue
+            expectancy_bps = float(stat.get('expectancy_bps') or 0.0)
+            shortfall_bps = float(floor_bps) - expectancy_bps
+            if shortfall_bps <= 0.0:
+                continue
+            penalty = min(float(penalty_cap), float(shortfall_bps) * float(penalty_per_bps))
+            if penalty <= 0.0:
+                continue
+            adjusted_scores[sym] = score - penalty
+            penalized.append((sym, score, adjusted_scores[sym], expectancy_bps, closed_cycles, penalty))
+
+            raw_bucket = alpha.raw_factors.setdefault(sym, {})
+            raw_bucket["negative_expectancy_bps"] = expectancy_bps
+            raw_bucket["negative_expectancy_closed_cycles"] = float(closed_cycles)
+            z_bucket = alpha.z_factors.setdefault(sym, {})
+            z_bucket["negative_expectancy_score_penalty"] = -float(penalty)
+
+        if penalized and audit:
+            for sym, score_before, score_after, expectancy_bps, closed_cycles, penalty in penalized:
+                audit.add_note(
+                    "NegativeExpectancy penalty: "
+                    f"{sym} cycles={closed_cycles} expectancy_bps={expectancy_bps:.2f} "
+                    f"penalty={penalty:.4f} score={score_before:.4f}->{score_after:.4f}"
+                )
+
+        alpha.scores = adjusted_scores
+        return alpha
 
     def run(
         self,
@@ -351,6 +441,16 @@ class V5Pipeline:
         regime_key = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
         self.alpha_engine.set_regime_context(regime_key)
         alpha = precomputed_alpha if precomputed_alpha is not None else self.alpha_engine.compute_snapshot(market_data_1h)
+        neg_feedback_enabled = any(
+            [
+                bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
+                bool(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
+                bool(getattr(self.cfg.execution, 'negative_expectancy_open_block_enabled', False)),
+            ]
+        )
+        neg_cd_enabled = bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False))
+        neg_cd_state = self._refresh_negative_expectancy_state(audit=audit) if neg_feedback_enabled else {}
+        alpha = self._apply_negative_expectancy_score_penalty(alpha, neg_cd_state, audit=audit)
         
         # 3) 短线交易增强：Risk-Off 机会覆盖 (已禁用 - HMM标签已修复)
         # 当Alpha评分很高时，覆盖Risk-Off状态，允许短线交易
@@ -928,19 +1028,6 @@ class V5Pipeline:
         held_symbols = {p.symbol for p in positions if float(getattr(p, 'qty', 0.0) or 0.0) > 0}
         symbols_all = sorted(set(current_w.keys()) | set(target.keys()) | held_symbols)
 
-        # 负期望冷却状态刷新
-        neg_cd_enabled = bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False))
-        neg_cd_state = {}
-        if neg_cd_enabled:
-            try:
-                neg_cd_state = self.negative_expectancy_cooldown.refresh(force=False) or {}
-                if audit:
-                    blocked_n = len((neg_cd_state.get('symbols') or {}))
-                    audit.add_note(f"NegativeExpectancy cooldown active symbols={blocked_n}")
-            except Exception as e:
-                if audit:
-                    audit.add_note(f"NegativeExpectancy refresh error: {e}")
-
         # Optional hard rule: force-close held symbols that are no longer in current scored universe.
         scored_symbols = set(alpha.scores.keys()) if alpha and getattr(alpha, 'scores', None) else set()
         force_close_unscored = bool(getattr(self.cfg.execution, 'force_close_unscored_positions', False))
@@ -1125,6 +1212,13 @@ class V5Pipeline:
                     )
                 continue
 
+            neg_stats = None
+            if side == "buy" and neg_feedback_enabled:
+                try:
+                    neg_stats = self.negative_expectancy_cooldown.get_symbol_stats(sym)
+                except Exception:
+                    neg_stats = None
+
             # Negative expectancy cooldown gate
             if side == "buy" and neg_cd_enabled:
                 blocked = self.negative_expectancy_cooldown.is_blocked(sym)
@@ -1139,6 +1233,35 @@ class V5Pipeline:
                                 "expectancy_usdt": float(blocked.get("expectancy_usdt") or 0.0),
                                 "closed_cycles": int(blocked.get("closed_cycles") or 0),
                                 "remain_seconds": float(blocked.get("remain_seconds") or 0.0),
+                            }
+                        )
+                    continue
+
+            if (
+                side == "buy"
+                and intent == "OPEN_LONG"
+                and neg_feedback_enabled
+                and bool(getattr(self.cfg.execution, "negative_expectancy_open_block_enabled", False))
+            ):
+                min_cycles = int(
+                    getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2
+                )
+                floor_bps = float(
+                    getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0) or 5.0
+                )
+                closed_cycles = int((neg_stats or {}).get("closed_cycles") or 0)
+                expectancy_bps = float((neg_stats or {}).get("expectancy_bps") or 0.0)
+                if closed_cycles >= min_cycles and expectancy_bps < floor_bps:
+                    if audit:
+                        audit.reject("negative_expectancy_open_block")
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": "negative_expectancy_open_block",
+                                "expectancy_bps": expectancy_bps,
+                                "closed_cycles": closed_cycles,
+                                "required_expectancy_bps": floor_bps,
                             }
                         )
                     continue

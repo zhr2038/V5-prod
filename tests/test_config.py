@@ -39,3 +39,15 @@ def test_live_prod_ml_factor_loads():
     assert cfg.alpha.ml_factor.ml_weight == 0.20
     assert cfg.alpha.ml_factor.require_promotion_passed is True
     assert cfg.alpha.ml_factor.model_path == "models/ml_factor_model"
+
+
+def test_live_prod_conflict_penalty_and_negative_expectancy_loads():
+    cfg = load_config("configs/live_prod.yaml", env_path=None)
+    assert cfg.alpha.multi_strategy_conflict_penalty_enabled is True
+    assert cfg.alpha.multi_strategy_conflict_dominance_ratio == 1.35
+    assert cfg.alpha.multi_strategy_conflict_penalty_strength == 0.65
+    assert cfg.execution.negative_expectancy_score_penalty_enabled is True
+    assert cfg.execution.negative_expectancy_score_penalty_floor_bps == 5.0
+    assert cfg.execution.negative_expectancy_score_penalty_per_bps == 0.015
+    assert cfg.execution.negative_expectancy_open_block_enabled is True
+    assert cfg.execution.negative_expectancy_open_block_floor_bps == 5.0

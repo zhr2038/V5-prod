@@ -244,6 +244,29 @@ class PortfolioEngine:
             pass
         return None
 
+    @staticmethod
+    def _merge_fused_scores_with_scores(
+        fused_scores: Optional[Dict[str, float]],
+        scores: Optional[Dict[str, float]],
+    ) -> Optional[Dict[str, float]]:
+        if not fused_scores:
+            return scores if scores else None
+        merged = {str(sym): float(val) for sym, val in (fused_scores or {}).items()}
+        for sym, raw_base in (scores or {}).items():
+            base = float(raw_base)
+            if sym not in merged:
+                merged[sym] = base
+                continue
+
+            fused = float(merged[sym])
+            if fused >= 0.0 and base >= 0.0:
+                merged[sym] = min(fused, base)
+            elif fused <= 0.0 and base <= 0.0:
+                merged[sym] = max(fused, base)
+            else:
+                merged[sym] = base
+        return merged
+
     def _get_dynamic_max_positions(self) -> Optional[int]:
         """Return effective max positions cap.
 
@@ -297,11 +320,11 @@ class PortfolioEngine:
         # Try to use fused signals from multi-strategy if available
         fused_scores = self._load_fused_signals()
         if fused_scores:
-            # Use fused signals for selection, but keep original scores for weight calculation
-            # This ensures we select symbols that multi-strategy wants to trade
-            selection_scores = fused_scores
+            selection_scores = self._merge_fused_scores_with_scores(fused_scores, scores)
             if audit:
-                audit.add_note(f"Using fused signals for selection: {list(fused_scores.keys())[:5]}")
+                audit.add_note(
+                    f"Using fused signals for selection with alpha adjustments: {list(fused_scores.keys())[:5]}"
+                )
         else:
             selection_scores = scores
         
@@ -356,9 +379,9 @@ class PortfolioEngine:
         # - fallback: use original alpha scores
         use_fused_for_weighting = bool(getattr(self.alpha_cfg, 'use_fused_score_for_weighting', True))
         if fused_scores and use_fused_for_weighting:
-            weights_scores = fused_scores
+            weights_scores = self._merge_fused_scores_with_scores(fused_scores, scores)
             if audit:
-                audit.add_note("Using fused scores for weighting")
+                audit.add_note("Using fused scores for weighting with alpha adjustments")
         else:
             weights_scores = scores if scores else fused_scores
         

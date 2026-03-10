@@ -124,6 +124,48 @@ def test_multi_strategy_single_signal_keeps_raw_signal_scale():
     assert scores["BTC/USDT"] == pytest.approx(0.18)
 
 
+def test_strategy_orchestrator_downweights_conflicting_signals():
+    orchestrator = StrategyOrchestrator(
+        total_capital=Decimal("100"),
+        conflict_penalty_enabled=True,
+        conflict_dominance_ratio=1.35,
+        conflict_min_confidence=0.60,
+        conflict_penalty_strength=0.65,
+    )
+    now = datetime(2026, 3, 10)
+    signals = [
+        Signal(
+            symbol="OKB/USDT",
+            side="buy",
+            score=0.90,
+            confidence=0.90,
+            strategy="TrendFollowing",
+            timestamp=now,
+        ),
+        Signal(
+            symbol="OKB/USDT",
+            side="sell",
+            score=0.55,
+            confidence=0.66,
+            strategy="MeanReversion",
+            timestamp=now,
+        ),
+    ]
+
+    fused = orchestrator._fuse_signals(signals)
+
+    assert len(fused) == 1
+    result = fused[0]
+    assert result.symbol == "OKB/USDT"
+    assert result.side == "buy"
+    assert result.strategy == "FUSED"
+    assert 0.0 < result.score < 0.90
+    assert 0.0 < result.confidence < 0.90
+    assert result.metadata["conflict_detected"] is True
+    assert result.metadata["conflict_penalty_factor"] < 1.0
+    assert result.metadata["opposing_strategies"] == ["MeanReversion"]
+
+
 def test_portfolio_engine_loads_only_current_run_fused_signals(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     current = tmp_path / "reports" / "runs" / "current_run"

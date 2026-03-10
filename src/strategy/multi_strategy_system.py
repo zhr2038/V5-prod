@@ -10,7 +10,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
 import pandas as pd
 import numpy as np
@@ -726,10 +726,22 @@ class StrategyOrchestrator:
     4. 动态资金分配
     """
     
-    def __init__(self, total_capital: Decimal = Decimal('100')):
+    def __init__(
+        self,
+        total_capital: Decimal = Decimal('100'),
+        *,
+        conflict_penalty_enabled: bool = True,
+        conflict_dominance_ratio: float = 1.35,
+        conflict_min_confidence: float = 0.60,
+        conflict_penalty_strength: float = 0.65,
+    ):
         self.strategies: Dict[str, BaseStrategy] = {}
         self.total_capital = total_capital
         self.strategy_allocations: Dict[str, Decimal] = {}  # 资金分配比例
+        self.conflict_penalty_enabled = bool(conflict_penalty_enabled)
+        self.conflict_dominance_ratio = max(1.0, float(conflict_dominance_ratio))
+        self.conflict_min_confidence = float(max(0.0, min(conflict_min_confidence, 1.0)))
+        self.conflict_penalty_strength = float(max(0.0, min(conflict_penalty_strength, 1.0)))
         
         # 默认资金分配
         self.default_allocations = {
@@ -740,6 +752,35 @@ class StrategyOrchestrator:
         
         self.performance_history: List[Dict] = []
         self.run_id: str = ""
+
+    @staticmethod
+    def _build_fused_signal(
+        *,
+        symbol: str,
+        side: str,
+        signals: List[Signal],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Signal:
+        avg_score = float(np.mean([float(s.score) for s in signals])) if signals else 0.0
+        avg_confidence = float(np.mean([float(s.confidence) for s in signals])) if signals else 0.0
+        fused_metadata = {
+            "source_strategies": [s.strategy for s in signals],
+            "original_scores": [float(s.score) for s in signals],
+            "original_confidences": [float(s.confidence) for s in signals],
+            "conflict_detected": False,
+            "conflict_penalty_factor": 1.0,
+        }
+        if metadata:
+            fused_metadata.update(metadata)
+        return Signal(
+            symbol=symbol,
+            side=side,
+            score=max(0.0, avg_score),
+            confidence=max(0.0, min(avg_confidence, 1.0)),
+            strategy="FUSED",
+            timestamp=datetime.now(),
+            metadata=fused_metadata,
+        )
     
     def register_strategy(self, strategy: BaseStrategy, allocation: Optional[Decimal] = None):
         """注册策略"""
@@ -828,6 +869,7 @@ class StrategyOrchestrator:
                         'score': float(s.score),
                         'confidence': float(s.confidence),
                         'strategy': s.strategy,
+                        'metadata': s.metadata,
                         'rank': 0  # Will be calculated later
                     })
 
@@ -873,61 +915,87 @@ class StrategyOrchestrator:
             
             # 策略：同向信号加权，反向信号抵消
             if buy_signals and not sell_signals:
-                # 纯买入信号，加权平均
-                avg_score = np.mean([s.score for s in buy_signals])
-                avg_confidence = np.mean([s.confidence for s in buy_signals])
-                
-                fused = Signal(
+                fused = self._build_fused_signal(
                     symbol=symbol,
                     side='buy',
-                    score=avg_score,
-                    confidence=avg_confidence,
-                    strategy="FUSED",
-                    timestamp=datetime.now(),
+                    signals=buy_signals,
                     metadata={
-                        'source_strategies': [s.strategy for s in buy_signals],
-                        'original_scores': [s.score for s in buy_signals]
-                    }
+                        'opposing_strategies': [],
+                        'opposing_scores': [],
+                        'opposing_confidences': [],
+                    },
                 )
                 fused_signals.append(fused)
             
             elif sell_signals and not buy_signals:
-                # 纯卖出信号
-                avg_score = np.mean([s.score for s in sell_signals])
-                avg_confidence = np.mean([s.confidence for s in sell_signals])
-                
-                fused = Signal(
+                fused = self._build_fused_signal(
                     symbol=symbol,
                     side='sell',
-                    score=avg_score,
-                    confidence=avg_confidence,
-                    strategy="FUSED",
-                    timestamp=datetime.now(),
+                    signals=sell_signals,
                     metadata={
-                        'source_strategies': [s.strategy for s in sell_signals],
-                        'original_scores': [s.score for s in sell_signals]
-                    }
+                        'opposing_strategies': [],
+                        'opposing_scores': [],
+                        'opposing_confidences': [],
+                    },
                 )
                 fused_signals.append(fused)
             
             else:
-                # 多空冲突 - 选择置信度更高的一方
+                # 多空冲突 - 只保留显著占优的一方，同时对分数/置信度做降权
                 buy_conf = max([s.confidence for s in buy_signals])
                 sell_conf = max([s.confidence for s in sell_signals])
-                
-                # 提高冲突过滤阈值，降低噪声交易
-                if buy_conf > sell_conf * 1.35:  # 买入置信度显著更高
-                    best_buy = max(buy_signals, key=lambda s: s.confidence)
-                    if best_buy.confidence >= 0.60:
-                        fused_signals.append(best_buy)
-                elif sell_conf > buy_conf * 1.35:
-                    best_sell = max(sell_signals, key=lambda s: s.confidence)
-                    if best_sell.confidence >= 0.60:
-                        fused_signals.append(best_sell)
+
+                dominant_side = None
+                dominant_signals: List[Signal] = []
+                opposing_signals: List[Signal] = []
+                dominant_conf = 0.0
+                opposing_conf = 0.0
+                if buy_conf > sell_conf * self.conflict_dominance_ratio:
+                    dominant_side = 'buy'
+                    dominant_signals = buy_signals
+                    opposing_signals = sell_signals
+                    dominant_conf = float(buy_conf)
+                    opposing_conf = float(sell_conf)
+                elif sell_conf > buy_conf * self.conflict_dominance_ratio:
+                    dominant_side = 'sell'
+                    dominant_signals = sell_signals
+                    opposing_signals = buy_signals
+                    dominant_conf = float(sell_conf)
+                    opposing_conf = float(buy_conf)
                 else:
-                    # 置信度接近，放弃该币种
                     print(f"[Orchestrator] {symbol} 多空冲突且置信度接近，放弃交易")
-        
+                    continue
+
+                if dominant_conf < self.conflict_min_confidence:
+                    print(
+                        f"[Orchestrator] {symbol} 冲突后主导侧置信度不足，放弃交易: "
+                        f"dominant_conf={dominant_conf:.2f}"
+                    )
+                    continue
+
+                penalty_factor = 1.0
+                if self.conflict_penalty_enabled and opposing_signals:
+                    conflict_ratio = min(1.0, opposing_conf / max(dominant_conf, 1e-9))
+                    penalty_factor = max(0.05, 1.0 - conflict_ratio * self.conflict_penalty_strength)
+
+                fused = self._build_fused_signal(
+                    symbol=symbol,
+                    side=str(dominant_side),
+                    signals=dominant_signals,
+                    metadata={
+                        'conflict_detected': True,
+                        'dominant_confidence': dominant_conf,
+                        'opposing_confidence': opposing_conf,
+                        'conflict_penalty_factor': float(penalty_factor),
+                        'opposing_strategies': [s.strategy for s in opposing_signals],
+                        'opposing_scores': [float(s.score) for s in opposing_signals],
+                        'opposing_confidences': [float(s.confidence) for s in opposing_signals],
+                    },
+                )
+                fused.score = float(max(0.0, fused.score * penalty_factor))
+                fused.confidence = float(max(0.0, min(fused.confidence * penalty_factor, 1.0)))
+                fused_signals.append(fused)
+
         return fused_signals
     
     def get_strategy_capital(self, strategy_name: str) -> Decimal:
