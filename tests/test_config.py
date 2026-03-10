@@ -30,3 +30,11 @@ def test_live_prod_rank_exit_and_peak_drawdown_loads():
     assert cfg.execution.peak_drawdown_exit.tier1_retrace_pct == 0.025
     assert cfg.execution.peak_drawdown_exit.tier1_sell_pct == 0.33
     assert cfg.execution.peak_drawdown_exit.tier3_sell_pct == 1.0
+
+
+def test_live_prod_ml_factor_loads():
+    cfg = load_config("configs/live_prod.yaml", env_path=None)
+    assert cfg.alpha.ml_factor.enabled is True
+    assert cfg.alpha.ml_factor.ml_weight == 0.20
+    assert cfg.alpha.ml_factor.require_promotion_passed is True
+    assert cfg.alpha.ml_factor.model_path == "models/ml_factor_model"

@@ -1,0 +1,21 @@
+[Unit]
+Description=V5 Daily ML Model Training
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-prod
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/clawd/v5-prod
+Environment=V5_WORKSPACE=/home/admin/clawd/v5-prod
+Environment=V5_CONFIG=configs/live_prod.yaml
+Environment=V5_ML_MIN_SAMPLES=200
+Environment=V5_ML_MIN_VALID_IC=0.00
+Environment=V5_ML_MAX_IC_GAP=0.25
+Environment=V5_ML_MIN_CV_MEAN_IC=0.01
+Environment=V5_ML_MAX_CV_STD=0.15
+ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/daily_ml_training.py'
+
+[Install]
+WantedBy=default.target

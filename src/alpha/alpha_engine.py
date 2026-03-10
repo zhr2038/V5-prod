@@ -3,15 +3,20 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+from contextlib import redirect_stdout
+from datetime import datetime, timezone
+from io import StringIO
 import os
 import json
 import numpy as np
+import pandas as pd
 
 from src.core.models import MarketSeries
 from src.utils.math import safe_pct_change, zscore_cross_section
 from configs.schema import AlphaConfig
 from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
 from src.alpha.qlib_factors import compute_alpha158_style_factors
+from src.utils.features import calculate_all_features
 
 # 多策略集成
 try:
@@ -74,6 +79,11 @@ class AlphaEngine:
         self.current_regime_key: Optional[str] = None
         self.alpha6_strategy = None
         self._alpha6_static_weights: Dict[str, float] = {}
+        self.repo_root = Path(__file__).resolve().parents[2]
+        self._ml_model = None
+        self._ml_model_base_path: Optional[Path] = None
+        self._ml_model_signature: Optional[str] = None
+        self._ml_model_error: Optional[str] = None
 
         if self.use_multi_strategy and MULTI_STRATEGY_AVAILABLE:
             self._init_multi_strategy()
@@ -370,6 +380,233 @@ class AlphaEngine:
             return self.multi_strategy_adapter.strategy_signals_path()
         return None
 
+    def _resolve_repo_path(self, raw_path: Optional[str], default: str) -> Path:
+        path = Path(str(raw_path or default))
+        if not path.is_absolute():
+            path = self.repo_root / path
+        return path
+
+    @staticmethod
+    def _normalize_ml_base_path(path: Path) -> Path:
+        p = Path(path)
+        if p.name.endswith("_config.json"):
+            return p.with_name(p.name[: -len("_config.json")])
+        if p.suffix in {".txt", ".pkl"}:
+            return p.with_suffix("")
+        return p
+
+    @staticmethod
+    def _ml_artifact_candidates(base_path: Path) -> List[Path]:
+        return [
+            Path(f"{base_path}.txt"),
+            Path(f"{base_path}.pkl"),
+            Path(f"{base_path}_config.json"),
+        ]
+
+    @classmethod
+    def _ml_artifact_exists(cls, base_path: Path) -> bool:
+        return any(p.exists() for p in cls._ml_artifact_candidates(base_path))
+
+    @classmethod
+    def _ml_artifact_signature(cls, base_path: Path) -> Optional[str]:
+        existing = [p for p in cls._ml_artifact_candidates(base_path) if p.exists()]
+        if not existing:
+            return None
+        parts = [f"{p.name}:{p.stat().st_mtime_ns}" for p in existing]
+        return "|".join(sorted(parts))
+
+    def _write_ml_runtime_status(self, payload: Dict[str, Any]) -> None:
+        ml_cfg = getattr(self.cfg, "ml_factor", None)
+        if ml_cfg is None or not bool(getattr(ml_cfg, "enabled", False)):
+            return
+        try:
+            status_path = self._resolve_repo_path(
+                getattr(ml_cfg, "runtime_status_path", "reports/ml_runtime_status.json"),
+                "reports/ml_runtime_status.json",
+            )
+            status_path.parent.mkdir(parents=True, exist_ok=True)
+            status_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _build_ml_inference_frame(self, market_data: Dict[str, MarketSeries], feature_names: List[str]) -> pd.DataFrame:
+        rows: List[Dict[str, float]] = []
+        include_time = any(name in {"hour_of_day", "day_of_week"} for name in feature_names)
+        for sym, series in (market_data or {}).items():
+            close = pd.Series(list(getattr(series, "close", []) or []), dtype=float)
+            if len(close) < 2:
+                continue
+            volume = pd.Series(list(getattr(series, "volume", []) or [0.0] * len(close)), dtype=float)
+            high = pd.Series(list(getattr(series, "high", []) or list(close)), dtype=float)
+            low = pd.Series(list(getattr(series, "low", []) or list(close)), dtype=float)
+            features = calculate_all_features(close, volume, high, low)
+            row: Dict[str, float] = {"symbol": sym}
+            row.update({str(k): float(v) for k, v in features.items()})
+            if include_time:
+                ts_list = list(getattr(series, "ts", []) or [])
+                latest_ts = ts_list[-1] if ts_list else None
+                dt = pd.to_datetime(latest_ts, unit="ms", errors="coerce")
+                if pd.isna(dt):
+                    dt = datetime.now(timezone.utc)
+                row["hour_of_day"] = float(dt.hour)
+                row["day_of_week"] = float(dt.dayofweek)
+            rows.append(row)
+
+        if not rows:
+            return pd.DataFrame(columns=["symbol", *feature_names])
+
+        df = pd.DataFrame(rows)
+        for col in feature_names:
+            if col not in df.columns:
+                df[col] = 0.0
+        df = df[["symbol", *feature_names]].replace([np.inf, -np.inf], np.nan)
+        valid = df[feature_names].notna().all(axis=1)
+        return df.loc[valid].reset_index(drop=True)
+
+    def _compute_ml_overlay_scores(self, market_data: Dict[str, MarketSeries]) -> tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
+        ml_cfg = getattr(self.cfg, "ml_factor", None)
+        status: Dict[str, Any] = {
+            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "configured_enabled": bool(getattr(ml_cfg, "enabled", False)) if ml_cfg is not None else False,
+            "promotion_passed": False,
+            "trained": False,
+            "used_in_latest_snapshot": False,
+            "reason": "disabled",
+            "model_path": None,
+            "prediction_count": 0,
+            "ml_weight": float(getattr(ml_cfg, "ml_weight", 0.0) or 0.0) if ml_cfg is not None else 0.0,
+        }
+        if ml_cfg is None or not status["configured_enabled"]:
+            return {}, {}, status
+
+        if len(market_data or {}) < int(getattr(ml_cfg, "min_symbols", 3) or 3):
+            status["reason"] = "insufficient_symbols"
+            self._write_ml_runtime_status(status)
+            return {}, {}, status
+
+        pointer_path = self._resolve_repo_path(
+            getattr(ml_cfg, "active_model_pointer_path", "models/ml_factor_model_active.txt"),
+            "models/ml_factor_model_active.txt",
+        )
+        decision_path = self._resolve_repo_path(
+            getattr(ml_cfg, "promotion_decision_path", "reports/model_promotion_decision.json"),
+            "reports/model_promotion_decision.json",
+        )
+        model_base_path = self._normalize_ml_base_path(
+            self._resolve_repo_path(getattr(ml_cfg, "model_path", "models/ml_factor_model"), "models/ml_factor_model")
+        )
+
+        if decision_path.exists():
+            try:
+                decision = json.loads(decision_path.read_text(encoding="utf-8"))
+                status["promotion_passed"] = bool(decision.get("passed"))
+                if decision.get("fail_reasons"):
+                    status["promotion_fail_reasons"] = [str(x) for x in decision.get("fail_reasons") or []]
+            except Exception:
+                status["reason"] = "promotion_decision_unreadable"
+
+        if pointer_path.exists():
+            try:
+                pointer_value = pointer_path.read_text(encoding="utf-8").strip()
+                if pointer_value:
+                    pointer_base = self._normalize_ml_base_path(self._resolve_repo_path(pointer_value, pointer_value))
+                    if self._ml_artifact_exists(pointer_base):
+                        model_base_path = pointer_base
+            except Exception:
+                status["reason"] = "active_pointer_unreadable"
+
+        status["model_path"] = str(model_base_path)
+        status["trained"] = self._ml_artifact_exists(model_base_path)
+        if not status["trained"]:
+            status["reason"] = "model_artifact_missing"
+            self._write_ml_runtime_status(status)
+            return {}, {}, status
+
+        if bool(getattr(ml_cfg, "require_promotion_passed", True)):
+            if not status["promotion_passed"]:
+                status["reason"] = "promotion_not_passed"
+                self._write_ml_runtime_status(status)
+                return {}, {}, status
+            if not pointer_path.exists():
+                status["reason"] = "active_pointer_missing"
+                self._write_ml_runtime_status(status)
+                return {}, {}, status
+
+        latest_mtime_ns = max(
+            p.stat().st_mtime_ns for p in self._ml_artifact_candidates(model_base_path) if p.exists()
+        )
+        max_age_hours = float(getattr(ml_cfg, "max_model_age_hours", 72) or 72)
+        model_age_hours = max(0.0, (datetime.now().timestamp() - (latest_mtime_ns / 1_000_000_000.0)) / 3600.0)
+        status["model_age_hours"] = model_age_hours
+        if model_age_hours > max_age_hours:
+            status["reason"] = "model_too_old"
+            self._write_ml_runtime_status(status)
+            return {}, {}, status
+
+        signature = self._ml_artifact_signature(model_base_path)
+        if self._ml_model is None or self._ml_model_base_path != model_base_path or self._ml_model_signature != signature:
+            try:
+                from src.execution.ml_factor_model import MLFactorModel
+
+                model = MLFactorModel()
+                with redirect_stdout(StringIO()):
+                    model.load_model(str(model_base_path))
+                self._ml_model = model
+                self._ml_model_base_path = model_base_path
+                self._ml_model_signature = signature
+                self._ml_model_error = None
+            except Exception as exc:
+                self._ml_model = None
+                self._ml_model_base_path = None
+                self._ml_model_signature = None
+                self._ml_model_error = str(exc)
+                status["reason"] = "model_load_failed"
+                status["error"] = str(exc)
+                self._write_ml_runtime_status(status)
+                return {}, {}, status
+
+        inference_df = self._build_ml_inference_frame(market_data, list(self._ml_model.feature_names))
+        if inference_df.empty:
+            status["reason"] = "inference_frame_empty"
+            self._write_ml_runtime_status(status)
+            return {}, {}, status
+
+        try:
+            preds = self._ml_model.predict_batch(inference_df)
+        except Exception as exc:
+            status["reason"] = "prediction_failed"
+            status["error"] = str(exc)
+            self._write_ml_runtime_status(status)
+            return {}, {}, status
+
+        raw_preds = {
+            str(sym): float(pred)
+            for sym, pred in zip(inference_df["symbol"].tolist(), preds.tolist())
+            if np.isfinite(float(pred))
+        }
+        if not raw_preds:
+            status["reason"] = "prediction_empty"
+            self._write_ml_runtime_status(status)
+            return {}, {}, status
+
+        if bool(getattr(ml_cfg, "use_robust_zscore", True)):
+            overlay_scores = robust_zscore_cross_section(raw_preds, winsorize_pct=0.05)
+        else:
+            overlay_scores = zscore_cross_section(raw_preds)
+
+        status["used_in_latest_snapshot"] = bool(overlay_scores)
+        status["prediction_count"] = int(len(overlay_scores))
+        status["reason"] = "ok" if overlay_scores else "prediction_empty"
+        self._write_ml_runtime_status(status)
+        return (
+            {str(k): float(v) for k, v in overlay_scores.items()},
+            raw_preds,
+            status,
+        )
+
     def compute_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
         """计算Alpha评分
         
@@ -483,10 +720,27 @@ class AlphaEngine:
         # 如果使用多策略，直接返回多策略结果
         if self.use_multi_strategy and self.multi_strategy_adapter:
             scores = self._compute_multi_strategy_scores(market_data)
+            ml_overlay_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
+            ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
+            if ml_overlay_scores and ml_weight > 0:
+                blended_scores: Dict[str, float] = {}
+                for sym in sorted(set(scores.keys()) | set(ml_overlay_scores.keys())):
+                    base_score = float(scores.get(sym, 0.0))
+                    if sym in ml_overlay_scores:
+                        blended_scores[sym] = float(
+                            (1.0 - ml_weight) * base_score + ml_weight * float(ml_overlay_scores[sym])
+                        )
+                    else:
+                        blended_scores[sym] = base_score
+                scores = blended_scores
+            if ml_runtime and ml_runtime.get("used_in_latest_snapshot"):
+                ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
+                self._write_ml_runtime_status(ml_runtime)
+            symbols = sorted(set(scores.keys()) | set(ml_raw_preds.keys()))
             # 构建简化的AlphaSnapshot（多策略模式下部分字段为空）
             return AlphaSnapshot(
-                raw_factors={},
-                z_factors={},
+                raw_factors={sym: {"ml_pred_raw": float(ml_raw_preds.get(sym, 0.0))} for sym in symbols},
+                z_factors={sym: {"ml_pred_zscore": float(ml_overlay_scores.get(sym, 0.0))} for sym in symbols},
                 scores=scores
             )
 
@@ -600,6 +854,8 @@ class AlphaEngine:
                 "f12_imxd_14": float(getattr(ow, "f12_imxd_14", 0.35)),
             }
         ov_w = self._load_dynamic_ic_weights(static_ov_w) if static_ov_w else {}
+        ml_overlay_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
+        ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
 
         raw_factors: Dict[str, Dict[str, float]] = {}
         z_factors: Dict[str, Dict[str, float]] = {}
@@ -616,10 +872,12 @@ class AlphaEngine:
             }
             for k in ov_names:
                 raw_factors[sym][k] = float(ov_vals.get(k, {}).get(sym, 0.0))
+            raw_factors[sym]["ml_pred_raw"] = float(ml_raw_preds.get(sym, 0.0))
 
             z_factors[sym] = {}
             for k, zv in z_map.items():
                 z_factors[sym][k] = float(zv.get(sym, 0.0))
+            z_factors[sym]["ml_pred_zscore"] = float(ml_overlay_scores.get(sym, 0.0))
 
             base_score = float(sum(float(base_w.get(k, 0.0)) * float(z_factors[sym].get(k, 0.0)) for k in static_base_w.keys()))
             if ov_enabled and ov_w:
@@ -628,7 +886,14 @@ class AlphaEngine:
             else:
                 raw_score = base_score
 
-            # 保持与现有线上口径一致：反向使用（历史IC偏负）
-            scores[sym] = float(-raw_score)
+            classic_score = float(-raw_score)
+            if sym in ml_overlay_scores and ml_weight > 0:
+                scores[sym] = float((1.0 - ml_weight) * classic_score + ml_weight * float(ml_overlay_scores[sym]))
+            else:
+                scores[sym] = classic_score
+
+        if ml_runtime and ml_runtime.get("used_in_latest_snapshot"):
+            ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
+            self._write_ml_runtime_status(ml_runtime)
 
         return AlphaSnapshot(raw_factors=raw_factors, z_factors=z_factors, scores=scores)

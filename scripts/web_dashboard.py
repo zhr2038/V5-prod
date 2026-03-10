@@ -26,6 +26,7 @@ from flask import Flask, render_template, jsonify, send_from_directory
 import pandas as pd
 import yaml
 import requests
+from configs.loader import load_config as load_app_config
 
 from src.regime.rss_vote_utils import build_rss_vote
 
@@ -472,6 +473,7 @@ def _render_monitor_v2():
     return render_template(
         'monitor_v2.html',
         monitor_v2_js_version=_static_asset_version('js/monitor_v2.js'),
+        ml_status_panel_js_version=_static_asset_version('js/ml_status_panel.js'),
     )
 
 
@@ -2460,8 +2462,167 @@ def api_ic_diagnostics():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
+def _api_ml_training_v2():
+    def _resolve_workspace_path(raw_path: str | None, default: str) -> Path:
+        p = Path(str(raw_path or default))
+        if not p.is_absolute():
+            p = WORKSPACE / p
+        return p
+
+    def _normalize_model_base_path(path: Path) -> Path:
+        p = Path(path)
+        if p.name.endswith('_config.json'):
+            return p.with_name(p.name[:-len('_config.json')])
+        if p.suffix in {'.txt', '.pkl'}:
+            return p.with_suffix('')
+        return p
+
+    def _model_artifact_candidates(base_path: Path) -> List[Path]:
+        return [
+            Path(f'{base_path}.txt'),
+            Path(f'{base_path}.pkl'),
+            Path(f'{base_path}_config.json'),
+        ]
+
+    def _model_artifact_exists(base_path: Path) -> bool:
+        return any(p.exists() for p in _model_artifact_candidates(base_path))
+
+    def _latest_model_file(base_path: Path) -> Optional[Path]:
+        existing = [p for p in _model_artifact_candidates(base_path) if p.exists()]
+        return max(existing, key=lambda p: p.stat().st_mtime) if existing else None
+
+    configured_enabled = False
+    min_samples = 200
+    model_base_path = WORKSPACE / 'models' / 'ml_factor_model'
+    pointer_path = WORKSPACE / 'models' / 'ml_factor_model_active.txt'
+    promotion_path = REPORTS_DIR / 'model_promotion_decision.json'
+    runtime_path = REPORTS_DIR / 'ml_runtime_status.json'
+    try:
+        cfg = load_app_config(str(CONFIG_PATH), env_path=None)
+        ml_cfg = getattr(getattr(cfg, 'alpha', None), 'ml_factor', None)
+        if ml_cfg is not None:
+            configured_enabled = bool(getattr(ml_cfg, 'enabled', False))
+            model_base_path = _normalize_model_base_path(
+                _resolve_workspace_path(getattr(ml_cfg, 'model_path', 'models/ml_factor_model'), 'models/ml_factor_model')
+            )
+            pointer_path = _resolve_workspace_path(
+                getattr(ml_cfg, 'active_model_pointer_path', 'models/ml_factor_model_active.txt'),
+                'models/ml_factor_model_active.txt',
+            )
+            promotion_path = _resolve_workspace_path(
+                getattr(ml_cfg, 'promotion_decision_path', 'reports/model_promotion_decision.json'),
+                'reports/model_promotion_decision.json',
+            )
+            runtime_path = _resolve_workspace_path(
+                getattr(ml_cfg, 'runtime_status_path', 'reports/ml_runtime_status.json'),
+                'reports/ml_runtime_status.json',
+            )
+    except Exception:
+        pass
+
+    total_samples = 0
+    labeled_samples = 0
+    db_path = REPORTS_DIR / 'ml_training_data.db'
+    if db_path.exists():
+        conn = sqlite3.connect(str(db_path))
+        cur = conn.cursor()
+        cur.execute('SELECT COUNT(*) FROM feature_snapshots')
+        total_samples = int(cur.fetchone()[0] or 0)
+        cur.execute('SELECT COUNT(*) FROM feature_snapshots WHERE label_filled = 1')
+        labeled_samples = int(cur.fetchone()[0] or 0)
+        conn.close()
+
+    latest_history = {}
+    history_path = REPORTS_DIR / 'ml_training_history.json'
+    if history_path.exists():
+        try:
+            hist_obj = json.loads(history_path.read_text(encoding='utf-8'))
+            if isinstance(hist_obj, list) and hist_obj:
+                latest_history = hist_obj[-1] if isinstance(hist_obj[-1], dict) else {}
+        except Exception:
+            pass
+
+    decision = {}
+    if promotion_path.exists():
+        try:
+            decision = json.loads(promotion_path.read_text(encoding='utf-8'))
+        except Exception:
+            decision = {}
+
+    runtime = {}
+    if runtime_path.exists():
+        try:
+            runtime = json.loads(runtime_path.read_text(encoding='utf-8'))
+        except Exception:
+            runtime = {}
+
+    latest_model = _latest_model_file(model_base_path)
+    model_time = datetime.fromtimestamp(latest_model.stat().st_mtime) if latest_model else None
+
+    active_model_base = model_base_path
+    if pointer_path.exists():
+        try:
+            pointer_value = pointer_path.read_text(encoding='utf-8').strip()
+            if pointer_value:
+                active_model_base = _normalize_model_base_path(
+                    _resolve_workspace_path(pointer_value, pointer_value)
+                )
+        except Exception:
+            pass
+
+    effective_samples = labeled_samples if labeled_samples > 0 else total_samples
+    stages = {
+        'sampling': effective_samples > 0,
+        'trained': _model_artifact_exists(model_base_path),
+        'promoted': bool(decision.get('passed')) and pointer_path.exists() and _model_artifact_exists(active_model_base),
+        'liveActive': bool(runtime.get('used_in_latest_snapshot')),
+    }
+    if stages['liveActive']:
+        phase = 'live_active'
+    elif stages['promoted']:
+        phase = 'promoted'
+    elif stages['trained']:
+        phase = 'trained'
+    elif stages['sampling']:
+        phase = 'collecting'
+    else:
+        phase = 'no_data'
+    stage_display = ' / '.join([
+        f"采样中 {'是' if stages['sampling'] else '否'}",
+        f"已训练 {'是' if stages['trained'] else '否'}",
+        f"已通过门控 {'是' if stages['promoted'] else '否'}",
+        f"已被实盘使用 {'是' if stages['liveActive'] else '否'}",
+    ])
+
+    return jsonify({
+        'status': phase,
+        'phase': phase,
+        'display_status': stage_display,
+        'configured_enabled': configured_enabled,
+        'stages': stages,
+        'total_samples': total_samples,
+        'labeled_samples': labeled_samples,
+        'samples_needed': min_samples,
+        'progress_percent': min(100, int((effective_samples / min_samples) * 100)) if effective_samples else 0,
+        'latest_model': latest_model.name if latest_model else None,
+        'model_date': model_time.strftime('%Y-%m-%d %H:%M') if model_time else None,
+        'last_ic': round(float(latest_history.get('valid_ic')), 4) if latest_history.get('valid_ic') is not None else None,
+        'last_training_ts': latest_history.get('timestamp'),
+        'last_training_gate_passed': bool(((latest_history.get('gate') or {}).get('passed'))),
+        'last_promotion_ts': decision.get('ts'),
+        'promotion_fail_reasons': [str(x) for x in (decision.get('fail_reasons') or [])],
+        'last_runtime_ts': runtime.get('ts'),
+        'runtime_reason': runtime.get('reason'),
+        'runtime_prediction_count': int(runtime.get('prediction_count') or 0),
+        'model_path': str(model_base_path),
+        'active_model_path': str(active_model_base) if pointer_path.exists() else None,
+        'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    })
+
+
 @app.route('/api/ml_training')
 def api_ml_training():
+    return _api_ml_training_v2()
     """机器学习训练进度API（对齐当前项目文件结构）"""
     try:
         model_dir = WORKSPACE / 'models'

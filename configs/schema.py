@@ -110,6 +110,20 @@ class DynamicICWeightingConfig(BaseModel):
     fallback_to_static: bool = Field(default=True)
 
 
+class MLFactorLiveConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Blend promoted ML factor predictions into alpha scores")
+    ml_weight: float = Field(default=0.20, ge=0.0, le=1.0, description="ML overlay blend weight")
+    traditional_weight: float = Field(default=0.80, ge=0.0, le=1.0, description="Legacy display field for config readability")
+    model_path: str = Field(default="models/ml_factor_model")
+    active_model_pointer_path: str = Field(default="models/ml_factor_model_active.txt")
+    promotion_decision_path: str = Field(default="reports/model_promotion_decision.json")
+    runtime_status_path: str = Field(default="reports/ml_runtime_status.json")
+    require_promotion_passed: bool = Field(default=True, description="Only use models that passed promotion gate")
+    max_model_age_hours: int = Field(default=72, ge=1, le=24 * 30)
+    min_symbols: int = Field(default=3, ge=1, le=500)
+    use_robust_zscore: bool = Field(default=True)
+
+
 class AlphaConfig(BaseModel):
     weights: AlphaWeights = Field(default_factory=AlphaWeights)
     long_top_pct: float = Field(default=0.20, gt=0, le=1)
@@ -129,6 +143,7 @@ class AlphaConfig(BaseModel):
 
     # 动态IC权重（基于 reports/alpha_ic_monitor.json）
     dynamic_ic_weighting: DynamicICWeightingConfig = Field(default_factory=DynamicICWeightingConfig)
+    ml_factor: MLFactorLiveConfig = Field(default_factory=MLFactorLiveConfig)
 
     # 最低分阈值：避免买入负分币种
     min_score_threshold: float = Field(default=0.0, description="Minimum alpha score required to enter a position (0=disabled)")

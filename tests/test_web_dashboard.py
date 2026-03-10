@@ -53,6 +53,7 @@ def test_index_renders_monitor_template():
     assert 'id="history-tooltip"' in body
     assert "风险档位（持仓上限）" in body
     assert 'src="/static/js/monitor_v2.js?v=' in body
+    assert 'src="/static/js/ml_status_panel.js?v=' in body
 
 
 def test_monitor_v2_static_script_contains_expected_entrypoints():
@@ -267,6 +268,83 @@ def test_dashboard_api_keeps_sub_one_percent_pnl_as_ratio(monkeypatch):
     assert payload["account"]["totalPnlPercent"] == 0.005
     assert payload["account"]["maxDrawdown"] == 0.0075
     assert payload["positions"][0]["pnlPercent"] == -0.0054
+
+
+def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    models_dir = module.WORKSPACE / "models"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    db_path = reports_dir / "ml_training_data.db"
+    conn = sqlite3.connect(str(db_path))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE feature_snapshots(id INTEGER PRIMARY KEY, label_filled INTEGER NOT NULL)")
+    cur.executemany(
+        "INSERT INTO feature_snapshots(label_filled) VALUES (?)",
+        [(1,), (1,), (0,), (1,)],
+    )
+    conn.commit()
+    conn.close()
+
+    (reports_dir / "ml_training_history.json").write_text(
+        """
+        [
+          {
+            "timestamp": "2026-03-10T00:30:00Z",
+            "valid_ic": 0.12,
+            "gate": {"passed": true}
+          }
+        ]
+        """.strip(),
+        encoding="utf-8",
+    )
+    (reports_dir / "model_promotion_decision.json").write_text(
+        """
+        {
+          "ts": "2026-03-10T00:40:00Z",
+          "passed": true,
+          "fail_reasons": []
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_runtime_status.json").write_text(
+        """
+        {
+          "ts": "2026-03-10T01:00:00Z",
+          "used_in_latest_snapshot": true,
+          "reason": "ok",
+          "prediction_count": 3
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+    (models_dir / "ml_factor_model.pkl").write_bytes(b"test")
+    (models_dir / "ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+    (models_dir / "ml_factor_model_active.txt").write_text("models/ml_factor_model", encoding="utf-8")
+
+    response = client.get("/api/ml_training")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["phase"] == "live_active"
+    assert payload["status"] == "live_active"
+    assert payload["display_status"] == "采样中 是 / 已训练 是 / 已通过门控 是 / 已被实盘使用 是"
+    assert payload["stages"] == {
+        "sampling": True,
+        "trained": True,
+        "promoted": True,
+        "liveActive": True,
+    }
+    assert payload["latest_model"] in {"ml_factor_model.pkl", "ml_factor_model_config.json"}
+    assert payload["runtime_prediction_count"] == 3
 
 
 def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):

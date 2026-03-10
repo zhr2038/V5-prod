@@ -71,6 +71,19 @@ alpha:
   dynamic_weights_by_regime_enabled: true
   use_multi_strategy: true
 
+  ml_factor:
+    enabled: true
+    ml_weight: 0.20
+    traditional_weight: 0.80
+    model_path: models/ml_factor_model
+    active_model_pointer_path: models/ml_factor_model_active.txt
+    promotion_decision_path: reports/model_promotion_decision.json
+    runtime_status_path: reports/ml_runtime_status.json
+    require_promotion_passed: true
+    max_model_age_hours: 72
+    min_symbols: 3
+    use_robust_zscore: true
+
   # Qlib Alpha158 因子 overlay（增强量价/趋势质量）
   alpha158_overlay:
     enabled: true
