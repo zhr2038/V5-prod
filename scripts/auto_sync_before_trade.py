@@ -51,6 +51,12 @@ def _extract_spot_qty(detail):
     return qty if qty > 0 else 0.0
 
 
+def _okx_qty(detail):
+    if isinstance(detail, dict):
+        return _as_float(detail.get('qty'))
+    return _as_float(detail)
+
+
 def _balance_details(balance_resp):
     """Normalize OKX balance payload to details list."""
     try:
@@ -76,6 +82,65 @@ def _resolve_config_path():
         if (WORKSPACE / candidate).exists():
             return candidate
     return 'configs/live_prod.yaml'
+
+
+def _sync_local_store_to_okx_snapshot(position_store, local_positions, okx_positions, logger=None):
+    """Apply an incremental OKX snapshot to the local position store.
+
+    Preserve existing rows when the symbol is still held so entry_ts/highest_px/avg_px
+    survive the pre-trade sync. Only close symbols that are absent from OKX, and only
+    create rows for symbols that are genuinely new.
+    """
+    stats = {
+        'closed': 0,
+        'updated': 0,
+        'created': 0,
+    }
+
+    local_symbols = {str(sym) for sym in (local_positions or {}).keys() if sym}
+    okx_symbols = {str(sym) for sym in (okx_positions or {}).keys() if sym}
+
+    for sym in sorted(local_symbols - okx_symbols):
+        try:
+            if position_store.close_long(sym):
+                stats['closed'] += 1
+                if logger:
+                    logger.info(f"  Closed stale local position: {sym}")
+        except Exception as e:
+            if logger:
+                logger.warning(f"  Could not close stale local position {sym}: {e}")
+
+    for sym in sorted(okx_symbols):
+        meta = okx_positions.get(sym) or {}
+        qty = _okx_qty(meta)
+        if qty <= 1e-8:
+            continue
+        try:
+            existing = position_store.get(sym)
+            eq_usd = _as_float(meta.get('eq_usd')) if isinstance(meta, dict) else 0.0
+            px_hint = (float(eq_usd) / float(qty)) if (float(qty) > 0 and float(eq_usd) > 0) else 0.0
+            if existing is not None and float(existing.qty or 0.0) > 0:
+                position_store.set_qty(sym, qty=float(qty))
+                stats['updated'] += 1
+                if logger:
+                    logger.info(
+                        f"  Synced existing {sym}: qty={qty:.8f}, "
+                        f"entry_ts_preserved={existing.entry_ts}"
+                    )
+            else:
+                if px_hint <= 0:
+                    px_hint = float(getattr(existing, 'avg_px', 0.0) or 0.0)
+                if px_hint <= 0:
+                    px_hint = 1.0
+                position_store.upsert_buy(sym, qty=float(qty), px=float(px_hint))
+                stats['created'] += 1
+                if logger:
+                    logger.info(f"  Synced new {sym}: qty={qty:.8f}, px_hint={px_hint:.8f}")
+        except Exception as e:
+            if logger:
+                logger.warning(f"  Could not sync {sym}: {e}")
+
+    return stats
 
 
 def main():
@@ -143,11 +208,6 @@ def main():
 
             okx_positions = {}
             skipped_dust = []
-
-            def _okx_qty(d):
-                if isinstance(d, dict):
-                    return _as_float(d.get('qty'))
-                return _as_float(d)
 
             # 1) Bulk balance parse
             for detail in balance_details:
@@ -244,33 +304,18 @@ def main():
             else:
                 logger.info("Diff is small (<5), proceeding with auto-sync...")
             
-            # Clear existing positions by setting qty to 0
-            for sym in list(local_positions.keys()):
-                try:
-                    position_store.set_qty(sym, qty=0)
-                except Exception as e:
-                    logger.warning(f"  Could not clear {sym}: {e}")
-            
-            # Sync from OKX
-            for sym, meta in okx_positions.items():
-                qty = _okx_qty(meta)
-                if qty > 1e-8:
-                    try:
-                        existing = position_store.get(sym)
-                        # price hint from OKX eqUsd/qty, used when creating a new local row
-                        eq_usd = _as_float(meta.get('eq_usd')) if isinstance(meta, dict) else 0.0
-                        px_hint = (float(eq_usd) / float(qty)) if (float(qty) > 0 and float(eq_usd) > 0) else 0.0
-                        if existing is not None:
-                            position_store.set_qty(sym, qty=float(qty))
-                        else:
-                            # set_qty() only updates existing rows; for new symbols we must upsert.
-                            # Use px_hint to avoid zero avg_px.
-                            if px_hint <= 0:
-                                px_hint = 1.0
-                            position_store.upsert_buy(sym, qty=float(qty), px=float(px_hint))
-                        logger.info(f"  Synced {sym}: qty={qty:.8f}, px_hint={px_hint:.8f}")
-                    except Exception as e:
-                        logger.warning(f"  Could not sync {sym}: {e}")
+            sync_stats = _sync_local_store_to_okx_snapshot(
+                position_store,
+                local_positions,
+                okx_positions,
+                logger=logger,
+            )
+            logger.info(
+                "Sync summary: "
+                f"closed={sync_stats['closed']}, "
+                f"updated={sync_stats['updated']}, "
+                f"created={sync_stats['created']}"
+            )
             
             total_position_equity = sum(
                 _as_float(meta.get('eq_usd'))
