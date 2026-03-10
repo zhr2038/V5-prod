@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import json
@@ -20,6 +20,7 @@ class PortfolioSnapshot:
     selected: List[str]
     volatilities: Dict[str, float]
     notes: str = ""
+    entry_candidates: List[str] = field(default_factory=list)
 
 
 class PortfolioEngine:
@@ -116,7 +117,34 @@ class PortfolioEngine:
         except Exception:
             pass
 
-    def _apply_topk_dropout(self, selected: List[str], selection_scores: Dict[str, float], audit: Optional[Any] = None) -> List[str]:
+    @staticmethod
+    def _sort_symbols_by_priority(
+        symbols: List[str],
+        *,
+        selection_scores: Dict[str, float],
+        preferred: Optional[List[str]] = None,
+    ) -> List[str]:
+        preferred = list(preferred or [])
+        preferred_set = set(preferred)
+        preferred_rank = {sym: idx for idx, sym in enumerate(preferred)}
+        uniq_symbols = list(dict.fromkeys(symbols or []))
+        return sorted(
+            uniq_symbols,
+            key=lambda sym: (
+                0 if sym in preferred_set else 1,
+                -float(selection_scores.get(sym, -1e9)),
+                preferred_rank.get(sym, len(preferred_rank) + 10_000),
+                str(sym),
+            ),
+        )
+
+    def _apply_topk_dropout(
+        self,
+        selected: List[str],
+        selection_scores: Dict[str, float],
+        audit: Optional[Any] = None,
+        target_k: Optional[int] = None,
+    ) -> List[str]:
         """TopkDropout: 每轮最多替换 n_drop，且仅替换满足最短持有轮次的旧标的。"""
         cfg = getattr(self.alpha_cfg, "topk_dropout", None)
         if not cfg or not bool(getattr(cfg, "enabled", False)):
@@ -128,12 +156,18 @@ class PortfolioEngine:
         st = self._load_topk_state()
         prev_selected = [s for s in (st.get("selected") or []) if isinstance(s, str)]
         prev_hold = st.get("hold_cycles") or {}
+        target_k = int(target_k or len(selected) or 0)
 
         # 冷启动
         if not prev_selected:
-            hold_new = {s: 1 for s in selected}
-            self._save_topk_state(selected, hold_new)
-            return selected
+            selected_sorted = self._sort_symbols_by_priority(
+                list(selected or []),
+                selection_scores=selection_scores,
+                preferred=list(selected or []),
+            )[:target_k]
+            hold_new = {s: 1 for s in selected_sorted}
+            self._save_topk_state(selected_sorted, hold_new)
+            return selected_sorted
 
         candidate = list(selected)
         candidate_set = set(candidate)
@@ -160,8 +194,11 @@ class PortfolioEngine:
                 merged.append(s)
 
         # 保持与候选同样容量
-        target_k = len(candidate)
-        merged = merged[:target_k]
+        merged = self._sort_symbols_by_priority(
+            merged,
+            selection_scores=selection_scores,
+            preferred=candidate,
+        )[:target_k]
 
         # 更新 hold cycle
         hold_new: Dict[str, int] = {}
@@ -269,7 +306,7 @@ class PortfolioEngine:
             selection_scores = scores
         
         if not selection_scores:
-            return PortfolioSnapshot(target_weights={}, selected=[], volatilities={}, notes="no_scores")
+            return PortfolioSnapshot(target_weights={}, selected=[], volatilities={}, notes="no_scores", entry_candidates=[])
 
         # Select top pct by score (using fused signals if available)
         items = sorted(selection_scores.items(), key=lambda kv: float(kv[1]), reverse=True)
@@ -286,12 +323,29 @@ class PortfolioEngine:
             pass
 
         selected = [s for s, score in items[:k] if score >= float(getattr(self.alpha_cfg, "min_score_threshold", 0.0))]
+        max_pos = self._get_dynamic_max_positions()
+        entry_candidates = list(selected)
+        if max_pos is not None and max_pos >= 0 and len(entry_candidates) > max_pos:
+            entry_candidates = self._sort_symbols_by_priority(
+                entry_candidates,
+                selection_scores=selection_scores,
+                preferred=entry_candidates,
+            )[:max_pos]
 
         # TopkDropout limited replacement（在风险cap之前，先控换手）
-        selected = self._apply_topk_dropout(selected, selection_scores=selection_scores, audit=audit)
+        selected = self._apply_topk_dropout(
+            selected,
+            selection_scores=selection_scores,
+            audit=audit,
+            target_k=min(len(selected), int(max_pos)) if max_pos is not None and max_pos >= 0 else len(selected),
+        )
+        selected = self._sort_symbols_by_priority(
+            selected,
+            selection_scores=selection_scores,
+            preferred=entry_candidates or selected,
+        )
 
         # Enforce dynamic risk-level position cap (PROTECT/DEFENSE/NEUTRAL/ATTACK)
-        max_pos = self._get_dynamic_max_positions()
         if max_pos is not None and max_pos >= 0 and len(selected) > max_pos:
             selected = selected[:max_pos]
             if audit:
@@ -317,7 +371,13 @@ class PortfolioEngine:
         selected = valid_selected
         
         if not selected:
-            return PortfolioSnapshot(target_weights={}, selected=[], volatilities={}, notes="no_valid_selection")
+            return PortfolioSnapshot(
+                target_weights={},
+                selected=[],
+                volatilities={},
+                notes="no_valid_selection",
+                entry_candidates=entry_candidates,
+            )
         
         vols: Dict[str, float] = {}
         inv: Dict[str, float] = {}
@@ -447,7 +507,12 @@ class PortfolioEngine:
         if bool(getattr(self.alpha_cfg, 'optimizer_enabled', False)):
             self._save_optimizer_state(capped)
 
-        return PortfolioSnapshot(target_weights=capped, selected=selected, volatilities=vols)
+        return PortfolioSnapshot(
+            target_weights=capped,
+            selected=selected,
+            volatilities=vols,
+            entry_candidates=entry_candidates,
+        )
 
     def scale_targets(self, targets: Dict[str, float], mult: float) -> Dict[str, float]:
         """Scale portfolio target weights by exposure multiplier, keeping caps."""

@@ -537,6 +537,9 @@ class V5Pipeline:
         target = self.portfolio_engine.scale_targets(target0, dd_mult)
         if audit:
             audit.targets_post_risk = target
+        eligible_buy_symbols = set(
+            getattr(portfolio, "entry_candidates", None) or list(portfolio.selected or [])
+        )
 
         # 4.4 确保已有持仓都注册到止损/利润管理（避免重启后状态丢失）
         for p in positions:
@@ -1091,6 +1094,19 @@ class V5Pipeline:
                     notional = abs(float(drift)) * float(equity)
                 if notional <= 0:
                     continue
+
+            if side == "buy" and eligible_buy_symbols and sym not in eligible_buy_symbols:
+                if audit:
+                    audit.reject("off_ranking_buy_block")
+                    router_decisions.append(
+                        {
+                            "symbol": sym,
+                            "action": "skip",
+                            "reason": "off_ranking_buy_block",
+                            "eligible_buy_symbols": sorted(eligible_buy_symbols),
+                        }
+                    )
+                continue
 
             # Negative expectancy cooldown gate
             if side == "buy" and neg_cd_enabled:
