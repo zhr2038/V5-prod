@@ -35,11 +35,16 @@ TRAINING_COLUMNS = [
     "price_position",
     "regime",
     "future_return_6h",
+    "future_return_12h",
+    "future_return_24h",
 ]
 
 
 def _load_csv(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
+    for optional_col in ("future_return_12h", "future_return_24h"):
+        if optional_col not in df.columns:
+            df[optional_col] = pd.NA
     missing = [col for col in TRAINING_COLUMNS if col not in df.columns]
     if missing:
         raise ValueError(f"training csv missing columns: {missing}")
@@ -54,7 +59,18 @@ def _load_csv(csv_path: Path) -> pd.DataFrame:
 def _db_stats(conn: sqlite3.Connection) -> dict:
     cur = conn.cursor()
     total = int(cur.execute("SELECT COUNT(*) FROM feature_snapshots").fetchone()[0])
-    labeled = int(cur.execute("SELECT COUNT(*) FROM feature_snapshots WHERE label_filled = 1").fetchone()[0])
+    labeled = int(
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM feature_snapshots
+            WHERE label_filled = 1
+              AND future_return_6h IS NOT NULL
+              AND future_return_12h IS NOT NULL
+              AND future_return_24h IS NOT NULL
+            """
+        ).fetchone()[0]
+    )
     pending = int(cur.execute("SELECT COUNT(*) FROM feature_snapshots WHERE label_filled = 0").fetchone()[0])
     symbols = int(cur.execute("SELECT COUNT(DISTINCT symbol) FROM feature_snapshots").fetchone()[0])
     return {
@@ -109,6 +125,13 @@ def backfill_from_csv(
             float(row.price_position),
             str(row.regime),
             float(row.future_return_6h),
+            float(row.future_return_12h),
+            float(row.future_return_24h),
+            int(
+                pd.notna(row.future_return_6h)
+                and pd.notna(row.future_return_12h)
+                and pd.notna(row.future_return_24h)
+            ),
         )
 
         existing_row = existing.get(key)
@@ -128,8 +151,9 @@ def backfill_from_csv(
                 timestamp, symbol, returns_1h, returns_6h, returns_24h,
                 momentum_5d, momentum_20d, volatility_6h, volatility_24h,
                 volatility_ratio, volume_ratio, obv, rsi, macd, macd_signal,
-                bb_position, price_position, regime, future_return_6h, label_filled
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                bb_position, price_position, regime,
+                future_return_6h, future_return_12h, future_return_24h, label_filled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             insert_rows,
         )
@@ -158,7 +182,9 @@ def backfill_from_csv(
                 price_position = ?,
                 regime = ?,
                 future_return_6h = ?,
-                label_filled = 1
+                future_return_12h = ?,
+                future_return_24h = ?,
+                label_filled = ?
             WHERE id = ?
             """,
             update_rows,

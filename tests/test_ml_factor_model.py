@@ -49,10 +49,14 @@ def test_build_training_frame_filters_sparse_symbols_and_removes_timestamp_featu
             "bb_position": [0.2, -0.1, 0.0, 0.3, -0.2, 0.0, 0.4, -0.3, 0.0],
             "price_position": [0.7, 0.3, 0.5, 0.8, 0.2, 0.5, 0.9, 0.1, 0.5],
             "future_return_6h": [0.03, 0.01, 0.02, 0.04, -0.01, 0.02, 0.05, -0.02, 0.02],
+            "future_return_12h": [0.04, 0.00, 0.02, 0.05, -0.02, 0.02, 0.06, -0.03, 0.02],
+            "future_return_24h": [0.05, -0.01, 0.02, 0.06, -0.03, 0.02, 0.07, -0.04, 0.02],
         }
     )
     # Symbol C is zero variance on the target and should be dropped.
     df.loc[df["symbol"] == "C", "future_return_6h"] = 0.02
+    df.loc[df["symbol"] == "C", "future_return_12h"] = 0.02
+    df.loc[df["symbol"] == "C", "future_return_24h"] = 0.02
 
     X, y, meta = model.build_training_frame(df, target_col="future_return_6h")
 
@@ -86,18 +90,66 @@ def test_build_training_frame_supports_forward_edge_rank_target_mode() -> None:
             "macd_signal": [0.005, 0.01, -0.005, 0.007, 0.012, -0.002],
             "bb_position": [0.1, 0.2, -0.1, 0.05, 0.15, -0.05],
             "price_position": [0.7, 0.8, 0.4, 0.65, 0.75, 0.45],
-            "future_return_6h": [0.03, 0.02, 0.01, 0.02, 0.03, 0.01],
+            "future_return_6h": [0.03, 0.02, 0.01, 0.03, 0.02, 0.01],
+            "future_return_12h": [0.01, 0.03, 0.02, 0.01, 0.03, 0.02],
+            "future_return_24h": [0.01, 0.03, 0.02, 0.01, 0.03, 0.02],
         }
     )
 
-    X, y, _ = model.build_training_frame(df, target_col="future_return_6h")
+    X, y, meta = model.build_training_frame(df, target_col="future_return_6h")
 
     assert "timestamp" not in X.columns
     assert len(y) == len(X)
     assert len(y) >= 4
     assert y.abs().max() <= 0.5
-    assert y.iloc[0] > y.iloc[1]
-    assert y.iloc[2] < y.iloc[3]
+    assert meta["horizon_target_cols"] == [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h",
+    ]
+    assert y.iloc[1] > y.iloc[0] > y.iloc[2]
+    assert y.iloc[4] > y.iloc[3] > y.iloc[5]
+
+
+def test_build_training_frame_drops_incomplete_cross_sections() -> None:
+    cfg = MLFactorConfig(
+        min_symbol_samples=1,
+        min_symbol_target_std=1e-8,
+        target_mode="forward_edge_rank",
+        min_cross_sectional_group_size=2,
+        min_group_coverage_ratio=0.9,
+    )
+    model = MLFactorModel(cfg)
+    df = pd.DataFrame(
+        {
+            "timestamp": [1, 1, 1, 2, 2, 2, 3],
+            "symbol": ["A", "B", "C", "A", "B", "C", "A"],
+            "returns_24h": [0.1, 0.2, 0.15, 0.11, 0.21, 0.16, 0.12],
+            "momentum_5d": [0.3, 0.2, 0.1, 0.31, 0.19, 0.09, 0.28],
+            "momentum_20d": [0.2, 0.3, 0.4, 0.22, 0.32, 0.42, 0.18],
+            "volatility_24h": [0.10, 0.12, 0.14, 0.10, 0.12, 0.14, 0.11],
+            "volatility_ratio": [1.0, 1.1, 1.2, 1.0, 1.1, 1.2, 1.0],
+            "volume_ratio": [1.2, 1.1, 1.0, 1.3, 1.2, 1.1, 1.1],
+            "obv": [10, 11, 12, 13, 14, 15, 16],
+            "rsi": [50, 55, 60, 51, 56, 61, 52],
+            "macd": [0.1, 0.2, 0.3, 0.11, 0.21, 0.31, 0.12],
+            "macd_signal": [0.05, 0.15, 0.25, 0.06, 0.16, 0.26, 0.07],
+            "bb_position": [0.1, 0.2, 0.3, 0.11, 0.21, 0.31, 0.12],
+            "price_position": [0.7, 0.8, 0.9, 0.71, 0.81, 0.91, 0.72],
+            "future_return_6h": [0.03, 0.02, 0.01, 0.04, 0.03, 0.02, 0.05],
+            "future_return_12h": [0.04, 0.03, 0.02, 0.05, 0.04, 0.03, 0.06],
+            "future_return_24h": [0.05, 0.04, 0.03, 0.06, 0.05, 0.04, 0.07],
+        }
+    )
+
+    X, y, meta = model.build_training_frame(df, target_col="future_return_6h")
+
+    assert len(X) == len(y) == 6
+    assert meta["group_filter"]["enabled"] is True
+    assert meta["group_filter"]["required_group_size"] == 3
+    assert meta["group_filter"]["groups_before"] == 3
+    assert meta["group_filter"]["groups_after"] == 2
+    assert set(meta["timestamps"]) == {1, 2}
 
 
 @pytest.mark.parametrize("model_type", ["ridge", "hist_gbm"])

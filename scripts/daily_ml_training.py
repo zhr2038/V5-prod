@@ -9,6 +9,7 @@ from datetime import datetime
 from io import StringIO
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +55,101 @@ def _build_group_series(prep_meta: dict, expected_len: int) -> pd.Series:
     if len(groups) != expected_len:
         raise ValueError(f"timestamp groups mismatch: {len(groups)} != {expected_len}")
     return groups
+
+
+def _coerce_group_datetimes(groups: pd.Series) -> pd.Series:
+    groups_s = pd.Series(groups).reset_index(drop=True)
+    if pd.api.types.is_numeric_dtype(groups_s):
+        ts = pd.to_datetime(groups_s, unit="ms", errors="coerce")
+        if ts.notna().any():
+            return ts
+    return pd.to_datetime(groups_s, errors="coerce")
+
+
+def _apply_rolling_window(
+    X: pd.DataFrame,
+    y: pd.Series,
+    groups: pd.Series,
+    *,
+    lookback_days: float,
+):
+    base_meta = {
+        "enabled": bool(lookback_days > 0),
+        "lookback_days": float(max(lookback_days, 0.0)),
+        "rows_before": int(len(X)),
+        "groups_before": int(pd.Series(groups).nunique()),
+    }
+    if lookback_days <= 0:
+        base_meta["rows_after"] = int(len(X))
+        base_meta["groups_after"] = int(pd.Series(groups).nunique())
+        return (
+            X.reset_index(drop=True),
+            y.reset_index(drop=True),
+            pd.Series(groups).reset_index(drop=True),
+            base_meta,
+        )
+
+    group_ts = _coerce_group_datetimes(groups)
+    if group_ts.isna().all():
+        base_meta["enabled"] = False
+        base_meta["fallback"] = "invalid_group_timestamps"
+        base_meta["rows_after"] = int(len(X))
+        base_meta["groups_after"] = int(pd.Series(groups).nunique())
+        return (
+            X.reset_index(drop=True),
+            y.reset_index(drop=True),
+            pd.Series(groups).reset_index(drop=True),
+            base_meta,
+        )
+
+    cutoff = group_ts.max() - pd.Timedelta(days=float(lookback_days))
+    mask = group_ts >= cutoff
+    if int(mask.sum()) == 0 or int(pd.Series(groups).loc[mask].nunique()) < 2:
+        base_meta["enabled"] = False
+        base_meta["fallback"] = "insufficient_groups_after_window"
+        base_meta["rows_after"] = int(len(X))
+        base_meta["groups_after"] = int(pd.Series(groups).nunique())
+        return (
+            X.reset_index(drop=True),
+            y.reset_index(drop=True),
+            pd.Series(groups).reset_index(drop=True),
+            base_meta,
+        )
+
+    window_groups = pd.Series(groups).loc[mask].reset_index(drop=True)
+    base_meta["cutoff"] = cutoff.isoformat()
+    base_meta["rows_after"] = int(mask.sum())
+    base_meta["groups_after"] = int(window_groups.nunique())
+    return (
+        X.loc[mask].reset_index(drop=True),
+        y.loc[mask].reset_index(drop=True),
+        window_groups,
+        base_meta,
+    )
+
+
+def _build_recency_sample_weights(
+    groups: pd.Series,
+    *,
+    half_life_days: float,
+    max_weight: float,
+) -> pd.Series:
+    groups_s = pd.Series(groups).reset_index(drop=True)
+    if len(groups_s) == 0 or half_life_days <= 0:
+        return pd.Series(np.ones(len(groups_s), dtype=float), index=groups_s.index)
+
+    group_ts = _coerce_group_datetimes(groups_s)
+    if group_ts.isna().all():
+        return pd.Series(np.ones(len(groups_s), dtype=float), index=groups_s.index)
+
+    max_ts = group_ts.max()
+    age_days = (max_ts - group_ts).dt.total_seconds().fillna(0.0) / 86400.0
+    decay = np.power(0.5, age_days / max(float(half_life_days), 1.0 / 24.0))
+    weights = pd.Series(decay, index=groups_s.index, dtype=float)
+    lower = 1.0 / max(float(max_weight), 1.0)
+    weights = weights.clip(lower=lower, upper=max(float(max_weight), 1.0))
+    mean_weight = float(weights.mean()) or 1.0
+    return weights / mean_weight
 
 
 def _split_holdout_by_groups(
@@ -109,7 +205,10 @@ def _build_base_config() -> MLFactorConfig:
         include_time_features=_env_bool("V5_ML_INCLUDE_TIME_FEATURES", False),
         min_symbol_samples=int(os.getenv("V5_ML_MIN_SYMBOL_SAMPLES", "48")),
         min_symbol_target_std=float(os.getenv("V5_ML_MIN_SYMBOL_TARGET_STD", "1e-6")),
+        min_cross_sectional_group_size=int(os.getenv("V5_ML_MIN_GROUP_SIZE", "2")),
+        min_group_coverage_ratio=float(os.getenv("V5_ML_MIN_GROUP_COVERAGE_RATIO", "0.9")),
         prediction_horizon=int(os.getenv("V5_ML_PREDICTION_HORIZON", "6")),
+        train_lookback_days=int(os.getenv("V5_ML_ROLLING_WINDOW_DAYS", os.getenv("V5_ML_TRAIN_LOOKBACK_DAYS", "60"))),
     )
 
 
@@ -132,6 +231,7 @@ def _train_candidate_model(
     y_train: pd.Series,
     X_valid: pd.DataFrame,
     y_valid: pd.Series,
+    sample_weight: pd.Series | None = None,
     *,
     quiet: bool = False,
 ) -> MLFactorModel:
@@ -139,9 +239,9 @@ def _train_candidate_model(
     model.feature_names = list(X_train.columns)
     if quiet:
         with redirect_stdout(StringIO()):
-            model.train(X_train, y_train, X_valid, y_valid)
+            model.train(X_train, y_train, X_valid, y_valid, sample_weight=sample_weight)
     else:
-        model.train(X_train, y_train, X_valid, y_valid)
+        model.train(X_train, y_train, X_valid, y_valid, sample_weight=sample_weight)
     return model
 
 
@@ -151,6 +251,9 @@ def _candidate_cv_result(
     y: pd.Series,
     groups: pd.Series,
     cv: GroupedTimeSeriesSplit,
+    *,
+    recency_half_life_days: float,
+    recency_max_weight: float,
 ) -> dict:
     scores = []
     for train_idx, test_idx in cv.split(X, y, groups=groups):
@@ -158,9 +261,23 @@ def _candidate_cv_result(
         y_train = y.iloc[train_idx].reset_index(drop=True)
         X_test = X.iloc[test_idx].reset_index(drop=True)
         y_test = y.iloc[test_idx].reset_index(drop=True)
+        train_groups = groups.iloc[train_idx].reset_index(drop=True)
         test_groups = groups.iloc[test_idx].reset_index(drop=True)
+        sample_weight = _build_recency_sample_weights(
+            train_groups,
+            half_life_days=recency_half_life_days,
+            max_weight=recency_max_weight,
+        )
 
-        model = _train_candidate_model(cfg, X_train, y_train, X_test, y_test, quiet=True)
+        model = _train_candidate_model(
+            cfg,
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            sample_weight=sample_weight,
+            quiet=True,
+        )
         pred = model.predict_batch(X_test)
         scores.append(float(cross_sectional_ic(test_groups, y_test, pred)))
 
@@ -205,6 +322,9 @@ def main() -> int:
     df = pd.read_csv(CSV_PATH)
     cfg = _build_base_config()
     feature_selector = os.getenv("V5_ML_FEATURE_SELECTOR", "stable").strip().lower()
+    rolling_window_days = float(os.getenv("V5_ML_ROLLING_WINDOW_DAYS", str(cfg.train_lookback_days)))
+    recency_half_life_days = float(os.getenv("V5_ML_RECENCY_HALFLIFE_DAYS", "5"))
+    recency_max_weight = float(os.getenv("V5_ML_RECENCY_MAX_WEIGHT", "3.0"))
     base_model = MLFactorModel(cfg)
     X_base, y, prep_meta = base_model.build_training_frame(df, target_col="future_return_6h")
     X = optimize_features_for_training(X_base, y, selector=feature_selector, n_features=12)
@@ -213,6 +333,15 @@ def main() -> int:
         return 1
 
     groups = _build_group_series(prep_meta, len(X))
+    X, y, groups, window_meta = _apply_rolling_window(
+        X,
+        y,
+        groups,
+        lookback_days=rolling_window_days,
+    )
+    if X.empty or len(X) < min_samples:
+        print(f"training frame too small after rolling window: {len(X)}")
+        return 1
     unique_groups = pd.Index(groups.drop_duplicates().tolist())
     purge_gap = int(cfg.prediction_horizon)
     X_train, X_valid, y_train, y_valid, train_groups, valid_groups = _split_holdout_by_groups(
@@ -232,10 +361,30 @@ def main() -> int:
     for model_type in candidates:
         candidate_cfg = _config_for_candidate(model_type, cfg)
         try:
-            model = _train_candidate_model(candidate_cfg, X_train, y_train, X_valid, y_valid)
+            train_sample_weight = _build_recency_sample_weights(
+                train_groups,
+                half_life_days=recency_half_life_days,
+                max_weight=recency_max_weight,
+            )
+            model = _train_candidate_model(
+                candidate_cfg,
+                X_train,
+                y_train,
+                X_valid,
+                y_valid,
+                sample_weight=train_sample_weight,
+            )
             train_pred = model.predict_batch(X_train)
             valid_pred = model.predict_batch(X_valid)
-            cv_res = _candidate_cv_result(candidate_cfg, X, y, groups, cv)
+            cv_res = _candidate_cv_result(
+                candidate_cfg,
+                X,
+                y,
+                groups,
+                cv,
+                recency_half_life_days=recency_half_life_days,
+                recency_max_weight=recency_max_weight,
+            )
             candidate_results.append(
                 {
                     "model_type": model_type,
@@ -246,6 +395,8 @@ def main() -> int:
                     "cv_mean_ic": float(cv_res["mean_score"]),
                     "cv_std_ic": float(cv_res["std_score"]),
                     "cv_scores": [float(x) for x in cv_res["scores"]],
+                    "train_weight_mean": float(train_sample_weight.mean()),
+                    "train_weight_max": float(train_sample_weight.max()),
                 }
             )
             print(
@@ -313,6 +464,11 @@ def main() -> int:
             "valid_groups": int(valid_groups.nunique()),
             "purge_gap_groups": purge_gap,
         },
+        "rolling_window": window_meta,
+        "recency_weighting": {
+            "half_life_days": recency_half_life_days,
+            "max_weight": recency_max_weight,
+        },
         "candidate_models": [
             {
                 "model_type": item["model_type"],
@@ -322,6 +478,8 @@ def main() -> int:
                 "cv_std_ic": float(item.get("cv_std_ic", -1.0)),
                 "cv_scores": [float(x) for x in item.get("cv_scores", [])],
                 "ic_gap": float(item.get("train_ic", -1.0) - item.get("valid_ic", -1.0)),
+                "train_weight_mean": float(item.get("train_weight_mean", 0.0)),
+                "train_weight_max": float(item.get("train_weight_max", 0.0)),
                 **({"config": item["config"]} if "config" in item else {}),
                 **({"error": item["error"]} if "error" in item else {}),
             }
@@ -344,6 +502,9 @@ def main() -> int:
             "target_mode": cfg.target_mode,
             "include_time_features": cfg.include_time_features,
             "feature_selector": feature_selector,
+            "rolling_window_days": rolling_window_days,
+            "recency_half_life_days": recency_half_life_days,
+            "recency_max_weight": recency_max_weight,
         },
     }
     _append_history(history_entry)

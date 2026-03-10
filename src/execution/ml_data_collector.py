@@ -63,6 +63,8 @@ class FeatureRecord:
 
     # 标签（未来收益率）
     future_return_6h: Optional[float] = None
+    future_return_12h: Optional[float] = None
+    future_return_24h: Optional[float] = None
 
     def to_dict(self) -> dict:
         """To dict"""
@@ -141,6 +143,8 @@ class MLDataCollector:
                 price_position REAL,
                 regime TEXT,
                 future_return_6h REAL,
+                future_return_12h REAL,
+                future_return_24h REAL,
                 label_filled INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -156,6 +160,24 @@ class MLDataCollector:
 
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_label_filled ON feature_snapshots(label_filled)
+        ''')
+
+        existing_cols = {
+            str(row[1]) for row in cursor.execute("PRAGMA table_info(feature_snapshots)").fetchall()
+        }
+        if "future_return_12h" not in existing_cols:
+            cursor.execute("ALTER TABLE feature_snapshots ADD COLUMN future_return_12h REAL")
+        if "future_return_24h" not in existing_cols:
+            cursor.execute("ALTER TABLE feature_snapshots ADD COLUMN future_return_24h REAL")
+        cursor.execute('''
+            UPDATE feature_snapshots
+            SET label_filled = 0
+            WHERE label_filled = 1
+              AND (
+                    future_return_6h IS NULL
+                 OR future_return_12h IS NULL
+                 OR future_return_24h IS NULL
+              )
         ''')
 
         conn.commit()
@@ -201,6 +223,8 @@ class MLDataCollector:
                 symbol=symbol,
                 regime=regime,
                 future_return_6h=None,  # 稍后回填
+                future_return_12h=None,
+                future_return_24h=None,
                 **features
             )
 
@@ -247,15 +271,17 @@ class MLDataCollector:
                     timestamp, symbol, returns_1h, returns_6h, returns_24h,
                     momentum_5d, momentum_20d, volatility_6h, volatility_24h,
                     volatility_ratio, volume_ratio, obv, rsi, macd, macd_signal,
-                    bb_position, price_position, regime, future_return_6h, label_filled
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    bb_position, price_position, regime,
+                    future_return_6h, future_return_12h, future_return_24h, label_filled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ''', (
                 record.timestamp, record.symbol, record.returns_1h, record.returns_6h,
                 record.returns_24h, record.momentum_5d, record.momentum_20d,
                 record.volatility_6h, record.volatility_24h, record.volatility_ratio,
                 record.volume_ratio, record.obv, record.rsi, record.macd,
                 record.macd_signal, record.bb_position, record.price_position,
-                record.regime, record.future_return_6h
+                record.regime,
+                record.future_return_6h, record.future_return_12h, record.future_return_24h,
             ))
             conn.commit()
         except sqlite3.Error as e:
@@ -264,67 +290,115 @@ class MLDataCollector:
 
     def fill_labels(self, current_timestamp: int) -> int:
         """
-        回填6小时后的标签（未来收益率）
+        回填 6h / 12h / 24h 标签。
 
-        回填所有在current_timestamp之前6小时以上的未标记记录
+        仅当 24h 标签也准备好时才将记录标记为 fully labeled。
         """
         conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
-            # 找到所有6小时前以上且未回填标签的记录
-            six_hours_ago = current_timestamp - 6 * 3600 * 1000  # 6小时前的毫秒时间戳
+            six_hours_ago = current_timestamp - 6 * 3600 * 1000
 
             cursor.execute('''
-                SELECT id, timestamp, symbol FROM feature_snapshots
+                SELECT
+                    id, timestamp, symbol,
+                    future_return_6h, future_return_12h, future_return_24h
+                FROM feature_snapshots
                 WHERE label_filled = 0
                 AND timestamp <= ?
                 ORDER BY timestamp
-                LIMIT 1000  -- 每次最多处理1000条
+                LIMIT 1000
             ''', (six_hours_ago,))
 
             records_to_fill = cursor.fetchall()
 
-            # 批量更新优化
-            filled_updates = []
+            partial_updates = []
+            full_updates = []
             failed_updates = []
-            
-            for record_id, record_ts, symbol in records_to_fill:
-                try:
-                    # 计算未来6小时收益率
-                    future_return = self._calculate_future_return(symbol, record_ts, 6)
 
-                    if future_return is not None:
-                        filled_updates.append((future_return, record_id))
-                    else:
-                        # 如果无法计算收益，标记为-1表示失败
-                        failed_updates.append((record_id,))
+            for row in records_to_fill:
+                record_id = int(row["id"])
+                record_ts = int(row["timestamp"])
+                symbol = str(row["symbol"])
+                age_ms = max(0, int(current_timestamp) - record_ts)
+                available_horizons = [h for h in (6, 12, 24) if age_ms >= h * 3600 * 1000]
+                existing = {
+                    6: row["future_return_6h"],
+                    12: row["future_return_12h"],
+                    24: row["future_return_24h"],
+                }
+                values = dict(existing)
+                failed = False
+
+                try:
+                    for hours in available_horizons:
+                        if values.get(hours) is not None:
+                            continue
+                        future_return = self._calculate_future_return(symbol, record_ts, hours)
+                        if future_return is None:
+                            failed = True
+                            break
+                        values[hours] = float(future_return)
                 except Exception as e:
                     logger.error(f"[ML] Error processing record {record_id}: {e}")
-                    failed_updates.append((record_id,))
-            
-            # 批量执行更新
-            if filled_updates:
+                    failed = True
+
+                if failed:
+                    if 24 in available_horizons:
+                        failed_updates.append((record_id,))
+                    continue
+
+                payload = (
+                    values.get(6),
+                    values.get(12),
+                    values.get(24),
+                    record_id,
+                )
+                if values.get(6) is not None and values.get(12) is not None and values.get(24) is not None:
+                    full_updates.append(payload)
+                else:
+                    partial_updates.append(payload)
+
+            if partial_updates:
                 cursor.executemany('''
                     UPDATE feature_snapshots
-                    SET future_return_6h = ?, label_filled = 1
+                    SET
+                        future_return_6h = ?,
+                        future_return_12h = ?,
+                        future_return_24h = ?
                     WHERE id = ?
-                ''', filled_updates)
-            
+                ''', partial_updates)
+
+            if full_updates:
+                cursor.executemany('''
+                    UPDATE feature_snapshots
+                    SET
+                        future_return_6h = ?,
+                        future_return_12h = ?,
+                        future_return_24h = ?,
+                        label_filled = 1
+                    WHERE id = ?
+                ''', full_updates)
+
             if failed_updates:
                 cursor.executemany('''
                     UPDATE feature_snapshots
                     SET label_filled = -1
                     WHERE id = ?
                 ''', [(r[0],) for r in failed_updates])
-            
-            filled_count = len(filled_updates)
+
+            filled_count = len(full_updates)
+            partial_count = len(partial_updates)
             failed_count = len(failed_updates)
 
             conn.commit()
 
-            if filled_count > 0 or failed_count > 0:
-                logger.info(f"[ML] 回填完成: {filled_count}条成功, {failed_count}条失败")
+            if filled_count > 0 or partial_count > 0 or failed_count > 0:
+                logger.info(
+                    f"[ML] 回填完成: fully_labeled={filled_count}, "
+                    f"partial={partial_count}, failed={failed_count}"
+                )
 
             return filled_count
 
@@ -526,10 +600,14 @@ class MLDataCollector:
                     rsi, macd, macd_signal,
                     bb_position, price_position,
                     regime,
-                    future_return_6h
+                    future_return_6h,
+                    future_return_12h,
+                    future_return_24h
                 FROM feature_snapshots
                 WHERE label_filled = 1
                 AND future_return_6h IS NOT NULL
+                AND future_return_12h IS NOT NULL
+                AND future_return_24h IS NOT NULL
                 ORDER BY timestamp
             '''
 
@@ -548,8 +626,10 @@ class MLDataCollector:
             logger.info(f"  Total samples: {len(df)}")
             logger.info(f"  Symbols: {df['symbol'].nunique()}")
             logger.info(f"  Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
-            logger.info(f"  Avg future return: {df['future_return_6h'].mean():.4f}")
-            logger.info(f"  Return std: {df['future_return_6h'].std():.4f}")
+            logger.info(f"  Avg future return 6h: {df['future_return_6h'].mean():.4f}")
+            logger.info(f"  Avg future return 12h: {df['future_return_12h'].mean():.4f}")
+            logger.info(f"  Avg future return 24h: {df['future_return_24h'].mean():.4f}")
+            logger.info(f"  Return std 6h: {df['future_return_6h'].std():.4f}")
 
             return True
 
@@ -567,7 +647,14 @@ class MLDataCollector:
             total_records = cursor.fetchone()[0]
 
             # 已回填标签的记录数
-            cursor.execute('SELECT COUNT(*) FROM feature_snapshots WHERE label_filled = 1')
+            cursor.execute('''
+                SELECT COUNT(*)
+                FROM feature_snapshots
+                WHERE label_filled = 1
+                  AND future_return_6h IS NOT NULL
+                  AND future_return_12h IS NOT NULL
+                  AND future_return_24h IS NOT NULL
+            ''')
             labeled_records = cursor.fetchone()[0]
 
             # 币种数量

@@ -18,7 +18,13 @@ def test_v5_daily_ml_training_service_targets_prod_workspace():
     assert "Environment=V5_ML_CANDIDATES=ridge" in text
     assert "Environment=V5_ML_RIDGE_ALPHA=50" in text
     assert "Environment=V5_ML_MIN_SYMBOL_SAMPLES=48" in text
+    assert "Environment=V5_ML_MIN_GROUP_SIZE=2" in text
+    assert "Environment=V5_ML_MIN_GROUP_COVERAGE_RATIO=0.9" in text
     assert "Environment=V5_ML_FEATURE_SELECTOR=stable" in text
+    assert "Environment=V5_ML_ROLLING_WINDOW_DAYS=10" in text
+    assert "Environment=V5_ML_RECENCY_HALFLIFE_DAYS=5" in text
+    assert "Environment=V5_ML_RECENCY_MAX_WEIGHT=3.0" in text
+    assert "ExecStartPre=-/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/backfill_ml_multihorizon_labels.py'" in text
     assert "ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/daily_ml_training.py'" in text
 
 

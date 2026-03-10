@@ -10,6 +10,7 @@ This module keeps the public API stable while fixing a few structural issues:
 from __future__ import annotations
 
 import json
+import math
 import pickle
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
@@ -68,6 +69,8 @@ class MLFactorConfig:
     include_time_features: bool = True
     min_symbol_samples: int = 100
     min_symbol_target_std: float = 1e-6
+    min_cross_sectional_group_size: int = 2
+    min_group_coverage_ratio: float = 0.9
 
 
 class MLFactorModel:
@@ -173,23 +176,73 @@ class MLFactorModel:
             return pd.Series(np.zeros(len(s), dtype=float), index=s.index)
         return s.rank(pct=True) - 0.5
 
-    def _build_forward_edge_rank_target(
+    def _target_col_for_horizon(self, target_col: str, hours: int) -> str | None:
+        for suffix in ("6h", "12h", "24h"):
+            if target_col.endswith(suffix):
+                return f"{target_col[:-len(suffix)]}{hours}h"
+        return target_col if hours == 6 else None
+
+    def _available_target_horizons(
         self,
         work: pd.DataFrame,
         *,
         target_col: str,
-    ) -> pd.Series:
-        raw_rank = work.groupby("timestamp")[target_col].transform(self._rank_target_within_timestamp)
+    ) -> List[Tuple[int, str]]:
+        out: List[Tuple[int, str]] = []
+        for hours in (6, 12, 24):
+            col = self._target_col_for_horizon(target_col, hours)
+            if col and col in work.columns:
+                series = work[col]
+                if series.notna().any():
+                    out.append((hours, col))
+        return out
+
+    def _scaled_forward_volatility(self, work: pd.DataFrame, hours: int) -> pd.Series:
         if "volatility_24h" not in work.columns:
-            return raw_rank
+            return pd.Series(np.ones(len(work), dtype=float), index=work.index)
 
         vol = work["volatility_24h"].astype(float).abs().replace([np.inf, -np.inf], np.nan)
         finite_vol = vol[np.isfinite(vol)]
         floor = float(finite_vol.quantile(0.25)) if not finite_vol.empty else 1e-6
         floor = max(floor, 1e-6)
-        edge = work[target_col].astype(float) / vol.clip(lower=floor)
-        edge_rank = edge.groupby(work["timestamp"]).transform(self._rank_target_within_timestamp)
-        return 0.6 * raw_rank + 0.4 * edge_rank
+        horizon_scale = float(np.sqrt(max(float(hours), 1.0) / 24.0))
+        return vol.clip(lower=floor) * horizon_scale
+
+    def _build_forward_edge_rank_target(
+        self,
+        work: pd.DataFrame,
+        *,
+        target_col: str,
+    ) -> Tuple[pd.Series, List[str]]:
+        horizon_weights = {6: 0.5, 12: 0.3, 24: 0.2}
+        used_horizons = self._available_target_horizons(work, target_col=target_col)
+        if not used_horizons:
+            raise ValueError(f"missing target column: {target_col}")
+
+        components = []
+        weights = []
+        used_cols = []
+        for hours, col in used_horizons:
+            raw = work[col].astype(float)
+            raw_rank = raw.groupby(work["timestamp"]).transform(self._rank_target_within_timestamp)
+            vol = self._scaled_forward_volatility(work, hours)
+            edge = raw / vol
+            edge_rank = edge.groupby(work["timestamp"]).transform(self._rank_target_within_timestamp)
+            components.append(0.6 * raw_rank + 0.4 * edge_rank)
+            weights.append(float(horizon_weights.get(hours, 0.0)))
+            used_cols.append(col)
+
+        if len(components) == 1:
+            return components[0], used_cols
+
+        weights_s = pd.Series(weights, dtype=float)
+        weights_s = weights_s / weights_s.sum()
+        comp_df = pd.concat(components, axis=1)
+        comp_df.columns = used_cols
+        complete = comp_df.notna().all(axis=1)
+        score = pd.Series(np.nan, index=work.index, dtype=float)
+        score.loc[complete] = comp_df.loc[complete].mul(weights_s.to_numpy(), axis=1).sum(axis=1)
+        return score, used_cols
 
     def _build_training_frame(
         self,
@@ -236,16 +289,21 @@ class MLFactorModel:
             if "timestamp" not in work.columns:
                 raise ValueError("cross_sectional_demean requires timestamp")
             work[target_col] = work[target_col] - work.groupby("timestamp")[target_col].transform("mean")
+            meta["horizon_target_cols"] = [target_col]
         elif self.config.target_mode == "cross_sectional_rank":
             if "timestamp" not in work.columns:
                 raise ValueError("cross_sectional_rank requires timestamp")
             work[target_col] = work.groupby("timestamp")[target_col].transform(self._rank_target_within_timestamp)
+            meta["horizon_target_cols"] = [target_col]
         elif self.config.target_mode == "forward_edge_rank":
             if "timestamp" not in work.columns:
                 raise ValueError("forward_edge_rank requires timestamp")
-            work[target_col] = self._build_forward_edge_rank_target(work, target_col=target_col)
+            work[target_col], used_target_cols = self._build_forward_edge_rank_target(work, target_col=target_col)
+            meta["horizon_target_cols"] = used_target_cols
         elif self.config.target_mode != "raw":
             raise ValueError(f"unknown target_mode: {self.config.target_mode}")
+        else:
+            meta["horizon_target_cols"] = [target_col]
 
         preferred = [
             "returns_24h",
@@ -275,11 +333,42 @@ class MLFactorModel:
         valid = X.notna().all(axis=1) & work[target_col].notna()
         X = X.loc[valid].reset_index(drop=True)
         y = work.loc[valid, target_col].reset_index(drop=True)
+        timestamps = None
+        if "timestamp" in work.columns:
+            timestamps = work.loc[valid, "timestamp"].reset_index(drop=True)
+
+        if (
+            timestamps is not None
+            and self.config.target_mode != "raw"
+            and len(X) > 0
+        ):
+            group_sizes = timestamps.value_counts()
+            max_group_size = int(group_sizes.max()) if not group_sizes.empty else 0
+            required_group_size = max(
+                int(self.config.min_cross_sectional_group_size),
+                int(math.ceil(max_group_size * float(self.config.min_group_coverage_ratio))),
+            )
+            keep_groups = group_sizes[group_sizes >= required_group_size].index
+            keep_mask = timestamps.isin(keep_groups)
+            X = X.loc[keep_mask].reset_index(drop=True)
+            y = y.loc[keep_mask].reset_index(drop=True)
+            timestamps = timestamps.loc[keep_mask].reset_index(drop=True)
+            meta["group_filter"] = {
+                "enabled": True,
+                "max_group_size": max_group_size,
+                "required_group_size": required_group_size,
+                "groups_before": int(group_sizes.size),
+                "groups_after": int(pd.Series(timestamps).nunique()) if len(timestamps) else 0,
+            }
+        else:
+            meta["group_filter"] = {
+                "enabled": False,
+            }
 
         meta["feature_cols"] = feature_cols
         meta["rows_after_clean"] = int(len(X))
-        if "timestamp" in work.columns:
-            meta["timestamps"] = work.loc[valid, "timestamp"].reset_index(drop=True).tolist()
+        if timestamps is not None:
+            meta["timestamps"] = timestamps.tolist()
         return X, y, meta
 
     def build_training_frame(
@@ -296,6 +385,7 @@ class MLFactorModel:
         y_train=None,
         X_valid=None,
         y_valid=None,
+        sample_weight=None,
         market_data: Dict = None,
         force_retrain: bool = False,
     ):
@@ -308,7 +398,7 @@ class MLFactorModel:
                 f"Training with provided data: {len(X_train)} train, "
                 f"{len(X_valid) if X_valid is not None else 0} valid"
             )
-            self._train_with_data(X_train, y_train, X_valid, y_valid)
+            self._train_with_data(X_train, y_train, X_valid, y_valid, sample_weight=sample_weight)
             return
 
         if market_data is None:
@@ -328,9 +418,9 @@ class MLFactorModel:
 
         print(f"Training samples: {len(X_train)}, Validation samples: {len(X_valid)}")
         print(f"Features used: {meta.get('feature_cols')}")
-        self._train_with_data(X_train, y_train, X_valid, y_valid)
+        self._train_with_data(X_train, y_train, X_valid, y_valid, sample_weight=sample_weight)
 
-    def _train_with_data(self, X_train, y_train, X_valid, y_valid):
+    def _train_with_data(self, X_train, y_train, X_valid, y_valid, *, sample_weight=None):
         if X_valid is None or y_valid is None:
             raise ValueError("X_valid and y_valid are required")
 
@@ -347,7 +437,10 @@ class MLFactorModel:
             X_valid_scaled = self.scaler.transform(X_valid)
 
             self.model = Ridge(alpha=self.config.alpha)
-            self.model.fit(X_train_scaled, y_train)
+            fit_kwargs = {}
+            if sample_weight is not None:
+                fit_kwargs["sample_weight"] = np.asarray(sample_weight, dtype=float)
+            self.model.fit(X_train_scaled, y_train, **fit_kwargs)
 
             train_pred = self.model.predict(X_train_scaled)
             valid_pred = self.model.predict(X_valid_scaled)
@@ -376,7 +469,10 @@ class MLFactorModel:
                 min_samples_leaf=self.config.hgb_min_samples_leaf,
                 random_state=self.config.random_state,
             )
-            self.model.fit(X_train, y_train)
+            fit_kwargs = {}
+            if sample_weight is not None:
+                fit_kwargs["sample_weight"] = np.asarray(sample_weight, dtype=float)
+            self.model.fit(X_train, y_train, **fit_kwargs)
 
             train_pred = self.model.predict(X_train)
             valid_pred = self.model.predict(X_valid)
@@ -405,6 +501,7 @@ class MLFactorModel:
             self.model.fit(
                 X_train,
                 y_train,
+                sample_weight=np.asarray(sample_weight, dtype=float) if sample_weight is not None else None,
                 eval_set=[(X_valid, y_valid)],
                 callbacks=[
                     lgb.early_stopping(stopping_rounds=self.config.early_stopping_rounds),

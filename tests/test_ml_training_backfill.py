@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from scripts.backfill_ml_training_db import backfill_from_csv
 from src.execution.ml_data_collector import MLDataCollector
@@ -31,6 +32,8 @@ def _sample_frame() -> pd.DataFrame:
             "price_position": [0.5, 0.6, 0.7],
             "regime": ["Risk-Off", "Risk-Off", "Trending"],
             "future_return_6h": [0.01, -0.02, 0.03],
+            "future_return_12h": [0.02, -0.01, 0.04],
+            "future_return_24h": [0.03, 0.00, 0.05],
         }
     )
 
@@ -78,10 +81,63 @@ def test_backfill_from_csv_relabels_existing_pending_rows(tmp_path: Path) -> Non
     try:
         result = backfill_from_csv(conn, df)
         row = conn.execute(
-            "SELECT future_return_6h, label_filled FROM feature_snapshots WHERE timestamp = 1000 AND symbol = 'BTC/USDT'"
+            "SELECT future_return_6h, future_return_12h, future_return_24h, label_filled "
+            "FROM feature_snapshots WHERE timestamp = 1000 AND symbol = 'BTC/USDT'"
         ).fetchone()
     finally:
         conn.close()
 
     assert result["updated"] >= 1
-    assert row == (0.01, 1)
+    assert row == (0.01, 0.02, 0.03, 1)
+
+
+def test_fill_labels_waits_for_24h_before_marking_row_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "ml_training_data.db"
+    collector = MLDataCollector(db_path=str(db_path))
+    ts = 1_700_000_000_000
+    collector.collect_features(
+        timestamp=ts,
+        symbol="BTC/USDT",
+        market_data={
+            "close": [100.0 + i for i in range(30)],
+            "high": [101.0 + i for i in range(30)],
+            "low": [99.0 + i for i in range(30)],
+            "volume": [10.0 + i for i in range(30)],
+        },
+        regime="Risk-Off",
+    )
+
+    def fake_future_return(symbol: str, start_timestamp: int, hours: int) -> float:
+        assert symbol == "BTC/USDT"
+        assert start_timestamp == ts
+        return {6: 0.06, 12: 0.12, 24: 0.24}[hours]
+
+    monkeypatch.setattr(collector, "_calculate_future_return", fake_future_return)
+
+    assert collector.fill_labels(ts + 13 * 3600 * 1000) == 0
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT future_return_6h, future_return_12h, future_return_24h, label_filled "
+            "FROM feature_snapshots WHERE timestamp = ? AND symbol = 'BTC/USDT'",
+            (ts,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (0.06, 0.12, None, 0)
+
+    assert collector.fill_labels(ts + 25 * 3600 * 1000) == 1
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT future_return_6h, future_return_12h, future_return_24h, label_filled "
+            "FROM feature_snapshots WHERE timestamp = ? AND symbol = 'BTC/USDT'",
+            (ts,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (0.06, 0.12, 0.24, 1)
