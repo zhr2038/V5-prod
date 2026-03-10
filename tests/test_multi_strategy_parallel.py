@@ -8,7 +8,7 @@ from configs.schema import AlphaConfig, RiskConfig
 from src.alpha.alpha_engine import AlphaEngine
 from src.core.models import MarketSeries
 from src.portfolio.portfolio_engine import PortfolioEngine
-from src.strategy.multi_strategy_system import MultiStrategyAdapter, Signal, StrategyOrchestrator
+from src.strategy.multi_strategy_system import Alpha6FactorStrategy, MultiStrategyAdapter, Signal, StrategyOrchestrator
 
 
 def _series(symbol: str) -> MarketSeries:
@@ -122,6 +122,81 @@ def test_multi_strategy_single_signal_keeps_raw_signal_scale():
     scores = engine.compute_scores({"BTC/USDT": _series("BTC/USDT")})
 
     assert scores["BTC/USDT"] == pytest.approx(0.18)
+
+
+def test_alpha6_strategy_compresses_display_score_but_preserves_raw_strength(monkeypatch):
+    strategy = Alpha6FactorStrategy(
+        config={
+            "score_threshold": 0.05,
+            "score_transform": "tanh",
+            "score_transform_scale": 1.0,
+            "use_sentiment": False,
+            "alpha158_enabled": False,
+        }
+    )
+
+    def _fake_calc_factors(_df, symbol):
+        return {"synthetic_score": 4.0 if symbol == "FLOW/USDT" else -2.0}
+
+    monkeypatch.setattr(strategy, "_calculate_factors", _fake_calc_factors)
+    monkeypatch.setattr(strategy, "_zscore_factors", lambda factors: dict(factors))
+    monkeypatch.setattr(
+        strategy,
+        "_calculate_score",
+        lambda z_factors, _weights: float(z_factors["synthetic_score"]),
+    )
+
+    market_df = pd.DataFrame(
+        {
+            "symbol": ["FLOW/USDT"] * 60 + ["HYPE/USDT"] * 60,
+            "close": [1.0] * 120,
+            "high": [1.0] * 120,
+            "low": [1.0] * 120,
+            "volume": [1.0] * 120,
+        }
+    )
+
+    signals = strategy.generate_signals(market_df)
+    flow = next(s for s in signals if s.symbol == "FLOW/USDT")
+
+    assert 0.99 < flow.score < 1.0
+    assert flow.metadata["raw_score"] == pytest.approx(3.0)
+    assert flow.metadata["display_score"] == pytest.approx(flow.score)
+    assert flow.metadata["relative_score_raw"] == pytest.approx(3.0)
+
+
+def test_strategy_orchestrator_keeps_raw_score_metadata_for_same_side_fusion():
+    orchestrator = StrategyOrchestrator(total_capital=Decimal("100"))
+    now = datetime(2026, 3, 11)
+    signals = [
+        Signal(
+            symbol="FLOW/USDT",
+            side="buy",
+            score=0.999,
+            confidence=1.0,
+            strategy="Alpha6Factor",
+            timestamp=now,
+            metadata={"raw_score": 6.4456, "display_score": 0.999},
+        ),
+        Signal(
+            symbol="FLOW/USDT",
+            side="buy",
+            score=0.82,
+            confidence=0.92,
+            strategy="TrendFollowing",
+            timestamp=now,
+            metadata={"raw_score": 0.82, "display_score": 0.82},
+        ),
+    ]
+
+    fused = orchestrator._fuse_signals(signals)
+
+    assert len(fused) == 1
+    result = fused[0]
+    assert result.side == "buy"
+    assert 0.0 < result.score <= 1.0
+    assert result.metadata["raw_score"] == pytest.approx((6.4456 + 0.82) / 2.0)
+    assert result.metadata["display_score"] == pytest.approx(result.score)
 
 
 def test_strategy_orchestrator_downweights_conflicting_signals():

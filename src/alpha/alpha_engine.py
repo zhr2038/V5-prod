@@ -54,6 +54,7 @@ class AlphaSnapshot:
     raw_factors: Dict[str, Dict[str, float]]  # symbol -> factor -> value
     z_factors: Dict[str, Dict[str, float]]
     scores: Dict[str, float]
+    raw_scores: Dict[str, float] | None = None
 
 
 class AlphaEngine:
@@ -364,6 +365,8 @@ class AlphaEngine:
             'position_size_pct': 0.30,
             # 与组合层最低门槛联动，避免二次门槛叠加导致长期0买入
             'score_threshold': float(max(0.03, min(0.10, getattr(self.cfg, 'min_score_threshold', 0.05)))),
+            'score_transform': str(getattr(self.cfg, 'multi_strategy_score_transform', 'tanh') or 'tanh'),
+            'score_transform_scale': float(getattr(self.cfg, 'multi_strategy_score_transform_scale', 1.0) or 1.0),
             'alpha158_enabled': bool(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'enabled', False)),
             'alpha158_blend_weight': float(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'blend_weight', 0.35) or 0.35),
             'dynamic_ic_weighting': {
@@ -639,8 +642,17 @@ class AlphaEngine:
         return snap.scores
 
     def _compute_multi_strategy_scores(self, market_data: Dict[str, MarketSeries]) -> Dict[str, float]:
+        scores, _ = self._compute_multi_strategy_score_bundle(market_data)
+        return scores
+
+    def _compute_multi_strategy_score_bundle(
+        self, market_data: Dict[str, MarketSeries]
+    ) -> tuple[Dict[str, float], Dict[str, float]]:
         """
-        使用多策略系统计算评分
+        使用多策略系统计算评分。
+
+        Returns:
+            (display_scores, raw_scores)
         """
         import pandas as pd
         from datetime import datetime
@@ -675,13 +687,14 @@ class AlphaEngine:
         # 同一symbol可能出现多个信号（多策略/多阶段），使用加权平均而非简单覆盖
         from collections import defaultdict
         
-        symbol_signals = defaultdict(list)  # symbol -> [(score, weight, side), ...]
+        symbol_signals = defaultdict(list)  # symbol -> [{score, raw_score, weight, side}, ...]
         total_capital = max(float(self._resolve_total_capital_usdt() or 0.0), 1e-9)
 
         for target in targets:
             sym = target['symbol'].replace('-', '/')
 
             signal_score = float(target.get('signal_score', 0.0) or 0.0)
+            raw_signal_score = float(target.get('raw_signal_score', signal_score) or signal_score)
             confidence = max(0.0, float(target.get('confidence', 0.0) or 0.0))
 
             # 让“策略分配权重”真正进入打分链路
@@ -700,26 +713,33 @@ class AlphaEngine:
 
             # 买入信号为正分，卖出为负分
             score = abs(signal_score)
+            raw_score = abs(raw_signal_score)
             if target['side'] == 'sell':
                 score = -score
+                raw_score = -raw_score
 
             symbol_signals[sym].append({
                 'score': score,
+                'raw_score': raw_score,
                 'merge_weight': merge_weight,
                 'side': target['side']
             })
         
         # Merge multi-strategy signals while preserving buy-positive / sell-negative semantics.
         scores = {}
+        raw_scores = {}
         for sym, signals in symbol_signals.items():
             if len(signals) == 1:
                 scores[sym] = signals[0]['score']
+                raw_scores[sym] = signals[0]['raw_score']
             else:
                 total_weight = sum(s['merge_weight'] for s in signals)
                 weighted_score = sum(s['score'] * s['merge_weight'] for s in signals) / max(total_weight, 1e-9)
+                weighted_raw_score = sum(s['raw_score'] * s['merge_weight'] for s in signals) / max(total_weight, 1e-9)
                 scores[sym] = weighted_score
+                raw_scores[sym] = weighted_raw_score
         
-        return scores
+        return scores, raw_scores
 
     def compute_snapshot(self, market_data: Dict[str, MarketSeries], use_robust_zscore: bool = True) -> AlphaSnapshot:
         """计算完整的Alpha快照（包含原始因子、标准化因子和评分）
@@ -733,29 +753,49 @@ class AlphaEngine:
         """
         # 如果使用多策略，直接返回多策略结果
         if self.use_multi_strategy and self.multi_strategy_adapter:
-            scores = self._compute_multi_strategy_scores(market_data)
+            scores, raw_scores = self._compute_multi_strategy_score_bundle(market_data)
             ml_overlay_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
             ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
             if ml_overlay_scores and ml_weight > 0:
                 blended_scores: Dict[str, float] = {}
+                blended_raw_scores: Dict[str, float] = {}
                 for sym in sorted(set(scores.keys()) | set(ml_overlay_scores.keys())):
                     base_score = float(scores.get(sym, 0.0))
+                    base_raw_score = float(raw_scores.get(sym, base_score))
                     if sym in ml_overlay_scores:
                         blended_scores[sym] = float(
                             (1.0 - ml_weight) * base_score + ml_weight * float(ml_overlay_scores[sym])
                         )
+                        blended_raw_scores[sym] = float(
+                            (1.0 - ml_weight) * base_raw_score + ml_weight * float(ml_overlay_scores[sym])
+                        )
                     else:
                         blended_scores[sym] = base_score
+                        blended_raw_scores[sym] = base_raw_score
                 scores = blended_scores
+                raw_scores = blended_raw_scores
             if ml_runtime and ml_runtime.get("used_in_latest_snapshot"):
                 ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
                 self._write_ml_runtime_status(ml_runtime)
             symbols = sorted(set(scores.keys()) | set(ml_raw_preds.keys()))
             # 构建简化的AlphaSnapshot（多策略模式下部分字段为空）
             return AlphaSnapshot(
-                raw_factors={sym: {"ml_pred_raw": float(ml_raw_preds.get(sym, 0.0))} for sym in symbols},
-                z_factors={sym: {"ml_pred_zscore": float(ml_overlay_scores.get(sym, 0.0))} for sym in symbols},
-                scores=scores
+                raw_factors={
+                    sym: {
+                        "multi_strategy_raw_score": float(raw_scores.get(sym, scores.get(sym, 0.0))),
+                        "ml_pred_raw": float(ml_raw_preds.get(sym, 0.0)),
+                    }
+                    for sym in symbols
+                },
+                z_factors={
+                    sym: {
+                        "multi_strategy_score": float(scores.get(sym, 0.0)),
+                        "ml_pred_zscore": float(ml_overlay_scores.get(sym, 0.0)),
+                    }
+                    for sym in symbols
+                },
+                scores=scores,
+                raw_scores=raw_scores,
             )
 
         # 否则使用传统5因子 + Alpha158 overlay（可选）
@@ -910,4 +950,4 @@ class AlphaEngine:
             ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
             self._write_ml_runtime_status(ml_runtime)
 
-        return AlphaSnapshot(raw_factors=raw_factors, z_factors=z_factors, scores=scores)
+        return AlphaSnapshot(raw_factors=raw_factors, z_factors=z_factors, scores=scores, raw_scores=dict(scores))

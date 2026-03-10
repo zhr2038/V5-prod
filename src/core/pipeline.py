@@ -499,6 +499,7 @@ class V5Pipeline:
         # 2) Alpha计算后审计 (alpha已在前面计算)
         if audit:
             sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
+            raw_scores = dict(getattr(alpha, "raw_scores", {}) or {})
             
             # Add strategy signal audit if multi-strategy is used
             if hasattr(self.alpha_engine, 'use_multi_strategy') and self.alpha_engine.use_multi_strategy:
@@ -520,7 +521,16 @@ class V5Pipeline:
                 except Exception as e:
                     audit.add_note(f"Strategy signal audit error: {str(e)[:50]}")
             
-            audit.top_scores = [{"symbol": sym, "score": score} for sym, score in sorted_scores[:10]]
+            audit.top_scores = [
+                {
+                    "symbol": sym,
+                    "score": score,
+                    "display_score": score,
+                    "raw_score": float(raw_scores.get(sym, score)),
+                    "rank": idx + 1,
+                }
+                for idx, (sym, score) in enumerate(sorted_scores[:10])
+            ]
             audit.counts["scored"] = len(alpha.scores)
 
         # Compute *raw* equity (for reporting / performance).

@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -68,6 +70,9 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     assert "showSummary:true" in body
     assert "metrics.conversion_rate??metrics.last_conversion_rate??null" in body
     assert "account?.drawdown_pct??metrics.dd_pct??metrics.last_dd_pct??null" in body
+    assert "item.display_score ?? item.score ?? 0" in body
+    assert "item.raw_score ?? displayScore" in body
+    assert "原始 ${fmtNum(rawScore, 3)}" in body
     assert "浮盈亏 / 收益率" in body
     assert "fmtUsd(pnlValue)" in body
     assert "p.pnl??p.pnl_value||0" not in body
@@ -268,6 +273,63 @@ def test_dashboard_api_keeps_sub_one_percent_pnl_as_ratio(monkeypatch):
     assert payload["account"]["totalPnlPercent"] == 0.005
     assert payload["account"]["maxDrawdown"] == 0.0075
     assert payload["positions"][0]["pnlPercent"] == -0.0054
+
+
+def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    previous_run = runs_dir / "20260311_00"
+    current_run = runs_dir / "20260311_01"
+    previous_run.mkdir(parents=True, exist_ok=True)
+    current_run.mkdir(parents=True, exist_ok=True)
+
+    (previous_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "SIDEWAYS",
+                "top_scores": [
+                    {"symbol": "HYPE/USDT", "score": 0.91, "display_score": 0.91, "raw_score": 1.82, "rank": 1},
+                    {"symbol": "FLOW/USDT", "score": 0.88, "display_score": 0.88, "raw_score": 1.90, "rank": 2},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "SIDEWAYS",
+                "top_scores": [
+                    {"symbol": "FLOW/USDT", "score": 0.9987, "display_score": 0.9987, "raw_score": 3.7228, "rank": 1},
+                    {"symbol": "HYPE/USDT", "score": 0.9521, "display_score": 0.9521, "raw_score": 0.9521, "rank": 2},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(previous_run, (1, 1))
+    os.utime(current_run, (2, 2))
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["regime"] == "SIDEWAYS"
+    first = payload["scores"][0]
+    assert first["symbol"] == "FLOW/USDT"
+    assert first["rank"] == 1
+    assert first["previous_rank"] == 2
+    assert first["rank_change"] == 1
+    assert first["score"] == 0.9987
+    assert first["display_score"] == 0.9987
+    assert first["raw_score"] == 3.7228
+    assert first["raw_score_change"] == pytest.approx(1.8228)
 
 
 def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):

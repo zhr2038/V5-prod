@@ -434,11 +434,14 @@ function renderAlpha(alphaScores) {
     return;
   }
   setHtml("alpha-content", items.map((item) => {
-    const score = Number(item.score || 0);
-    const width = Math.max(8, Math.min(100, Math.abs(score) * 100));
+    const displayScore = Number(item.display_score ?? item.score ?? 0);
+    const rawScore = Number(item.raw_score ?? displayScore);
+    const rank = Number(item.rank || 0);
+    const width = Math.max(8, Math.min(100, Math.abs(displayScore) * 100));
     return `<div class="alpha">
-      <div class="row"><strong>${esc(item.symbol || "--")}</strong><span class="mono">${fmtNum(score, 3)}</span></div>
+      <div class="row"><strong>${esc(`${rank ? `#${rank} ` : ""}${item.symbol || "--"}`)}</strong><span class="mono">${fmtNum(displayScore, 3)}</span></div>
       <div class="bar"><span style="width:${width}%"></span></div>
+      <div class="subtle">原始 ${fmtNum(rawScore, 3)}</div>
     </div>`;
   }).join(""));
 }

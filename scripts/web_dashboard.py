@@ -1109,7 +1109,15 @@ def api_scores():
             items = []
             for item in decision.get('top_scores', [])[:20]:
                 try:
-                    items.append({'symbol': item.get('symbol', 'Unknown'), 'score': round(float(item.get('score', 0)), 4)})
+                    display_score = round(float(item.get('display_score', item.get('score', 0)) or 0), 4)
+                    raw_score = round(float(item.get('raw_score', display_score) or display_score), 4)
+                    items.append({
+                        'symbol': item.get('symbol', 'Unknown'),
+                        'score': display_score,
+                        'display_score': display_score,
+                        'raw_score': raw_score,
+                        'rank': int(item.get('rank', 0) or 0),
+                    })
                 except Exception:
                     continue
             regime = decision.get('regime', 'Unknown')
@@ -1126,16 +1134,21 @@ def api_scores():
 
         previous_ranking = {}
         for idx, s in enumerate(previous_scores):
-            previous_ranking[s['symbol']] = {'rank': idx + 1, 'score': s.get('score', 0)}
+            previous_ranking[s['symbol']] = {
+                'rank': int(s.get('rank', idx + 1) or (idx + 1)),
+                'score': s.get('score', 0),
+                'raw_score': s.get('raw_score', s.get('score', 0)),
+            }
 
         scores_with_trend = []
         for idx, s in enumerate(current_scores):
             symbol = s['symbol']
-            current_rank = idx + 1
+            current_rank = int(s.get('rank', idx + 1) or (idx + 1))
             prev_info = previous_ranking.get(symbol)
             if prev_info:
                 rank_change = prev_info['rank'] - current_rank
                 score_change = round(float(s['score']) - float(prev_info['score']), 4)
+                raw_score_change = round(float(s.get('raw_score', s['score'])) - float(prev_info.get('raw_score', prev_info['score'])), 4)
                 trend = 'up' if rank_change > 0 else 'down' if rank_change < 0 else 'stable'
                 scores_with_trend.append({
                     **s,
@@ -1143,6 +1156,7 @@ def api_scores():
                     'previous_rank': prev_info['rank'],
                     'rank_change': rank_change,
                     'score_change': score_change,
+                    'raw_score_change': raw_score_change,
                     'trend': trend,
                 })
             else:
@@ -1152,6 +1166,7 @@ def api_scores():
                     'previous_rank': None,
                     'rank_change': None,
                     'score_change': None,
+                    'raw_score_change': None,
                     'trend': 'new',
                 })
 

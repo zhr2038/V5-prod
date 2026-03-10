@@ -46,6 +46,8 @@ def test_live_prod_conflict_penalty_and_negative_expectancy_loads():
     assert cfg.alpha.multi_strategy_conflict_penalty_enabled is True
     assert cfg.alpha.multi_strategy_conflict_dominance_ratio == 1.35
     assert cfg.alpha.multi_strategy_conflict_penalty_strength == 0.65
+    assert cfg.alpha.multi_strategy_score_transform == "tanh"
+    assert cfg.alpha.multi_strategy_score_transform_scale == 1.0
     assert cfg.execution.negative_expectancy_score_penalty_enabled is True
     assert cfg.execution.negative_expectancy_score_penalty_floor_bps == 5.0
     assert cfg.execution.negative_expectancy_score_penalty_per_bps == 0.015

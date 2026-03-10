@@ -180,6 +180,24 @@ class AlphaConfig(BaseModel):
         le=1.0,
         description="Strength of the score/confidence attenuation applied to conflicted fused signals",
     )
+    multi_strategy_score_transform: str = Field(
+        default="tanh",
+        description="Compression mode for raw multi-strategy scores before they enter ranking/gating",
+    )
+    multi_strategy_score_transform_scale: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=10.0,
+        description="Scale used by the multi-strategy score compression function",
+    )
+
+    @field_validator("multi_strategy_score_transform")
+    @classmethod
+    def _validate_multi_strategy_score_transform(cls, v: str) -> str:
+        value = str(v or "tanh").strip().lower()
+        if value not in {"none", "clip", "tanh"}:
+            raise ValueError("multi_strategy_score_transform must be one of: none, clip, tanh")
+        return value
 
 
 class RegimeConfig(BaseModel):

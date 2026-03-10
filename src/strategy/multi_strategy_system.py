@@ -397,6 +397,17 @@ class Alpha6FactorStrategy(BaseStrategy):
         self.factor_weights = self.config['weights']
         self.sentiment_cache_dir = Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache'
 
+    def _compress_signal_score(self, raw_score: float) -> float:
+        """Compress raw cross-sectional strength into a stable display/routing scale."""
+        magnitude = max(0.0, abs(float(raw_score)))
+        mode = str(self.config.get('score_transform', 'tanh') or 'tanh').strip().lower()
+        scale = max(float(self.config.get('score_transform_scale', 1.0) or 1.0), 1e-6)
+        if mode == 'none':
+            return magnitude
+        if mode == 'clip':
+            return min(magnitude, 1.0)
+        return float(np.tanh(magnitude / scale))
+
     def set_factor_weights(self, weights: Dict[str, float]) -> None:
         merged = dict(self.config.get('weights') or {})
         merged.update({k: float(v) for k, v in (weights or {}).items()})
@@ -485,18 +496,20 @@ class Alpha6FactorStrategy(BaseStrategy):
         buy_count = 0
         for symbol, factors, z_factors, score in per_symbol:
             rel_score = score - cs_mean
-            if abs(rel_score) <= threshold:
+            display_score = self._compress_signal_score(rel_score)
+            raw_score = abs(float(rel_score))
+            if display_score <= threshold:
                 continue
 
             side = 'buy' if rel_score > 0 else 'sell'
             if side == 'buy':
                 buy_count += 1
-            confidence = min(abs(rel_score), 1.0)
+            confidence = min(raw_score, 1.0)
 
             signal = Signal(
                 symbol=symbol,
                 side=side,
-                score=abs(rel_score),
+                score=display_score,
                 confidence=confidence,
                 strategy=self.name,
                 timestamp=datetime.now(),
@@ -506,6 +519,11 @@ class Alpha6FactorStrategy(BaseStrategy):
                     'final_score': score,
                     'cross_section_mean': cs_mean,
                     'relative_score': rel_score,
+                    'relative_score_raw': rel_score,
+                    'raw_score': raw_score,
+                    'display_score': display_score,
+                    'score_transform': str(self.config.get('score_transform', 'tanh') or 'tanh'),
+                    'score_transform_scale': float(self.config.get('score_transform_scale', 1.0) or 1.0),
                 }
             )
             signals.append(signal)
@@ -515,12 +533,13 @@ class Alpha6FactorStrategy(BaseStrategy):
         if buy_count == 0 and per_symbol:
             top = max(per_symbol, key=lambda x: x[3] - cs_mean)
             rel_top = float(top[3] - cs_mean)
+            display_top = self._compress_signal_score(rel_top)
             if rel_top > -threshold:
                 signals.append(
                     Signal(
                         symbol=top[0],
                         side='buy',
-                        score=max(0.05, abs(rel_top)),
+                        score=max(0.05, display_top),
                         confidence=0.35,
                         strategy=self.name,
                         timestamp=datetime.now(),
@@ -529,6 +548,11 @@ class Alpha6FactorStrategy(BaseStrategy):
                             'final_score': float(top[3]),
                             'cross_section_mean': cs_mean,
                             'relative_score': rel_top,
+                            'relative_score_raw': rel_top,
+                            'raw_score': abs(rel_top),
+                            'display_score': max(0.05, display_top),
+                            'score_transform': str(self.config.get('score_transform', 'tanh') or 'tanh'),
+                            'score_transform_scale': float(self.config.get('score_transform_scale', 1.0) or 1.0),
                         }
                     )
                 )
@@ -754,6 +778,14 @@ class StrategyOrchestrator:
         self.run_id: str = ""
 
     @staticmethod
+    def _signal_raw_score(signal: Signal) -> float:
+        try:
+            meta = signal.metadata or {}
+            return float(meta.get("raw_score", signal.score))
+        except Exception:
+            return float(signal.score)
+
+    @staticmethod
     def _build_fused_signal(
         *,
         symbol: str,
@@ -762,20 +794,25 @@ class StrategyOrchestrator:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Signal:
         avg_score = float(np.mean([float(s.score) for s in signals])) if signals else 0.0
+        avg_raw_score = float(np.mean([StrategyOrchestrator._signal_raw_score(s) for s in signals])) if signals else 0.0
         avg_confidence = float(np.mean([float(s.confidence) for s in signals])) if signals else 0.0
+        display_score = max(0.0, min(avg_score, 1.0))
         fused_metadata = {
             "source_strategies": [s.strategy for s in signals],
             "original_scores": [float(s.score) for s in signals],
+            "original_raw_scores": [StrategyOrchestrator._signal_raw_score(s) for s in signals],
             "original_confidences": [float(s.confidence) for s in signals],
             "conflict_detected": False,
             "conflict_penalty_factor": 1.0,
+            "raw_score": max(0.0, avg_raw_score),
+            "display_score": display_score,
         }
         if metadata:
             fused_metadata.update(metadata)
         return Signal(
             symbol=symbol,
             side=side,
-            score=max(0.0, avg_score),
+            score=display_score,
             confidence=max(0.0, min(avg_confidence, 1.0)),
             strategy="FUSED",
             timestamp=datetime.now(),
@@ -838,6 +875,7 @@ class StrategyOrchestrator:
                     'symbol': s.symbol,
                     'side': s.side,
                     'score': float(s.score),
+                    'raw_score': StrategyOrchestrator._signal_raw_score(s),
                     'confidence': float(s.confidence),
                     'metadata': s.metadata
                 })
@@ -867,6 +905,7 @@ class StrategyOrchestrator:
                         'symbol': s.symbol,
                         'direction': s.side,
                         'score': float(s.score),
+                        'raw_score': StrategyOrchestrator._signal_raw_score(s),
                         'confidence': float(s.confidence),
                         'strategy': s.strategy,
                         'metadata': s.metadata,
@@ -994,6 +1033,7 @@ class StrategyOrchestrator:
                 )
                 fused.score = float(max(0.0, fused.score * penalty_factor))
                 fused.confidence = float(max(0.0, min(fused.confidence * penalty_factor, 1.0)))
+                fused.metadata["display_score"] = float(fused.score)
                 fused_signals.append(fused)
 
         return fused_signals
@@ -1155,6 +1195,7 @@ class MultiStrategyAdapter:
                     'side': signal.side,
                     'target_position_usdt': float(position_size),
                     'signal_score': float(signal.score),
+                    'raw_signal_score': float((signal.metadata or {}).get('raw_score', signal.score)),
                     'confidence': float(signal.confidence),
                     'source_strategy': signal.strategy,
                     'strategy_weight': float(strategy_weight),
