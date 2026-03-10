@@ -332,6 +332,41 @@ def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp
     assert first["raw_score_change"] == pytest.approx(1.8228)
 
 
+def test_api_scores_backfills_display_score_for_legacy_raw_values(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260311_01"
+    current_run.mkdir(parents=True, exist_ok=True)
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "SIDEWAYS",
+                "top_scores": [
+                    {"symbol": "FLOW/USDT", "score": 3.7228},
+                    {"symbol": "HYPE/USDT", "score": 0.9521},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(current_run, (2, 2))
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    first = payload["scores"][0]
+    assert first["symbol"] == "FLOW/USDT"
+    assert first["raw_score"] == 3.7228
+    assert 0.99 < first["display_score"] < 1.0
+    assert first["score"] == first["display_score"]
+
+
 def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

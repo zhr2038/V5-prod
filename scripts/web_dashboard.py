@@ -12,6 +12,7 @@ V5 Web Dashboard - 交易可视化界面
 
 import os
 import json
+import math
 import re
 import shutil
 import sqlite3
@@ -124,6 +125,35 @@ def _resolve_config_path() -> Path:
 
 
 CONFIG_PATH = _resolve_config_path()
+
+
+def _load_multi_strategy_score_transform() -> tuple[str, float]:
+    mode = "tanh"
+    scale = 1.0
+    try:
+        cfg = load_app_config(str(CONFIG_PATH), env_path=None)
+        alpha_cfg = getattr(cfg, "alpha", None)
+        if alpha_cfg is not None:
+            mode = str(getattr(alpha_cfg, "multi_strategy_score_transform", mode) or mode).strip().lower()
+            scale = float(getattr(alpha_cfg, "multi_strategy_score_transform_scale", scale) or scale)
+    except Exception:
+        pass
+    if mode not in {"none", "clip", "tanh"}:
+        mode = "tanh"
+    return mode, max(scale, 1e-6)
+
+
+def _legacy_display_score(score: float) -> float:
+    raw = float(score or 0.0)
+    if abs(raw) <= 1.0:
+        return raw
+    mode, scale = _load_multi_strategy_score_transform()
+    magnitude = abs(raw)
+    if mode == "none":
+        return raw
+    if mode == "clip":
+        return math.copysign(min(magnitude, 1.0), raw)
+    return math.copysign(math.tanh(magnitude / scale), raw)
 
 # 生产环境显示的 timer 列表
 TIMER_CANDIDATES = ['v5-prod.user.timer']
@@ -1109,8 +1139,11 @@ def api_scores():
             items = []
             for item in decision.get('top_scores', [])[:20]:
                 try:
-                    display_score = round(float(item.get('display_score', item.get('score', 0)) or 0), 4)
-                    raw_score = round(float(item.get('raw_score', display_score) or display_score), 4)
+                    raw_score = round(float(item.get('raw_score', item.get('score', 0)) or 0), 4)
+                    if item.get('display_score') is None:
+                        display_score = round(float(_legacy_display_score(raw_score)), 4)
+                    else:
+                        display_score = round(float(item.get('display_score', item.get('score', 0)) or 0), 4)
                     items.append({
                         'symbol': item.get('symbol', 'Unknown'),
                         'score': display_score,
