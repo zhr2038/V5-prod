@@ -48,7 +48,7 @@ body::before,body::after{
 }
 body::before{width:260px;height:260px;left:-48px;bottom:12vh;background:rgba(86,224,210,.14)}
 body::after{width:220px;height:220px;right:-36px;top:8vh;background:rgba(131,207,255,.14)}
-.shell{position:relative;z-index:1;max-width:1480px;margin:0 auto;padding:24px 24px 34px}
+.shell{position:relative;z-index:1;max-width:1560px;margin:0 auto;padding:24px 24px 34px}
 .hero,
 .panel,
 .metric,
@@ -190,6 +190,108 @@ body::after{width:220px;height:220px;right:-36px;top:8vh;background:rgba(131,207
   display:grid;
   grid-template-columns:minmax(0,1.22fr) minmax(0,.94fr);
   gap:18px;
+}
+.ml-band{
+  margin-bottom:18px;
+  padding:0;
+  overflow:hidden;
+}
+.ml-band-shell{
+  display:grid;
+  grid-template-columns:minmax(260px,.9fr) minmax(0,1.6fr);
+  gap:0;
+}
+.ml-band-main{
+  padding:20px 22px;
+  border-right:1px solid rgba(130,154,185,.12);
+  background:
+    radial-gradient(circle at 10% 20%,rgba(86,224,210,.12),transparent 28%),
+    linear-gradient(180deg,rgba(10,22,36,.96),rgba(7,16,27,.9));
+}
+.ml-band-title{
+  margin-top:10px;
+  font-size:1.32rem;
+  font-weight:700;
+  letter-spacing:-.03em;
+}
+.ml-band-status{
+  margin-top:10px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  font-size:1.02rem;
+  font-weight:700;
+}
+.ml-band-detail{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:.88rem;
+  line-height:1.72;
+}
+.ml-band-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:14px;
+}
+.ml-band-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+  padding:18px;
+  align-content:center;
+}
+.ml-stage{
+  min-height:128px;
+  border-radius:18px;
+  padding:16px;
+  background:rgba(4,11,19,.68);
+  border:1px solid rgba(130,154,185,.1);
+}
+.ml-stage-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+}
+.ml-stage-state{
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:rgba(130,154,185,.45);
+  box-shadow:0 0 0 8px rgba(130,154,185,.08);
+}
+.ml-stage.is-on .ml-stage-state{
+  background:var(--green);
+  box-shadow:0 0 0 8px rgba(85,223,134,.12);
+}
+.ml-stage.is-off .ml-stage-state{
+  background:rgba(130,154,185,.45);
+}
+.ml-stage-value{
+  margin-top:12px;
+  font-size:1.06rem;
+  font-weight:700;
+}
+.ml-stage-note{
+  margin-top:8px;
+  color:var(--muted);
+  font-size:.83rem;
+  line-height:1.62;
+}
+.ml-progress{
+  margin-top:14px;
+  height:8px;
+  border-radius:999px;
+  background:rgba(130,154,185,.12);
+  overflow:hidden;
+}
+.ml-progress>span{
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,rgba(86,224,210,.88),rgba(131,207,255,.92));
 }
 .column{display:grid;gap:18px}
 .panel{
@@ -460,14 +562,22 @@ tr:last-child td{border-bottom:none}
 @keyframes shimmer{
   100%{transform:translateX(100%)}
 }
+@media (max-width:1360px){
+  .metric-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .ml-band-shell{grid-template-columns:1fr}
+  .ml-band-main{border-right:none;border-bottom:1px solid rgba(130,154,185,.12)}
+}
 @media (max-width:1180px){
   .hero,
   .layout,
-  .metric-row,
   .vote-grid,
   .grid2{
     grid-template-columns:1fr;
   }
+  .ml-band-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:980px){
+  .metric-row{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:760px){
   .shell{padding:14px 14px 24px}
@@ -483,6 +593,10 @@ tr:last-child td{border-bottom:none}
   }
   .hero-strip::-webkit-scrollbar{display:none}
   .chip,.pill,.tiny,.alert{white-space:nowrap}
+  .metric-row,
+  .ml-band-grid{grid-template-columns:1fr}
+  .ml-band-main{padding:16px}
+  .ml-band-grid{padding:14px}
   table{min-width:500px}
   .footer{text-align:left}
 }
@@ -545,6 +659,27 @@ tr:last-child td{border-bottom:none}
       <div class="metric-kicker">刷新周期</div>
       <div class="metric-value mono">30s</div>
       <div class="subtle">后台自动轮询</div>
+    </div>
+  </section>
+
+  <section class="panel ml-band" id="ml-stage-band">
+    <div class="ml-band-shell">
+      <div class="ml-band-main">
+        <div class="kicker">ML 链路</div>
+        <div class="ml-band-title">采样到实盘</div>
+        <div class="ml-band-status"><span id="ml-stage-status">--</span></div>
+        <div class="ml-band-detail" id="ml-stage-detail">等待 ML 链路状态...</div>
+        <div class="ml-band-meta" id="ml-stage-meta">
+          <span class="tiny">采样 --</span>
+          <span class="tiny">训练 --</span>
+          <span class="tiny">门控 --</span>
+          <span class="tiny">实盘 --</span>
+        </div>
+        <div class="ml-progress"><span id="ml-stage-progress" style="width:0%"></span></div>
+      </div>
+      <div class="ml-band-grid" id="ml-stage-grid">
+        <div class="loading">加载中...</div>
+      </div>
     </div>
   </section>
 
