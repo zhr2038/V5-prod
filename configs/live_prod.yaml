@@ -164,9 +164,14 @@ execution:
   order_store_path: reports/orders.sqlite
   kill_switch_path: reports/kill_switch.json
   reconcile_status_path: reports/reconcile_status.json
+  reconcile_abs_usdt_tol: 1.0
   okx_exp_time_ms: 1500
   live_arm_env: V5_LIVE_ARM
   live_arm_value: "YES"
+  auto_clear_kill_switch_if_ok: true
+  preflight_bootstrap_patch_enabled: true
+  preflight_bootstrap_patch_max_total_usdt: 100.0
+  preflight_bootstrap_patch_min_interval_sec: 300
   
   split_orders: 3
   split_interval_sec: 3.0

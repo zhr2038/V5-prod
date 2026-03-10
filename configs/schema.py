@@ -220,6 +220,7 @@ class ExecutionConfig(BaseModel):
     reconcile_status_path: str = Field(default="reports/reconcile_status.json")
 
     # Reconcile behavior (G1)
+    reconcile_abs_usdt_tol: float = Field(default=50.0, ge=0, description="USDT drift tolerance used by live preflight reconcile.")
     reconcile_dust_usdt_ignore: float = Field(default=1.0, ge=0, description="Ignore base mismatches whose USDT value is below this (best-effort using mid).")
     reconcile_ccy_mode: str = Field(default="universe_only", description="universe_only|all")
 

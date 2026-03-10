@@ -5,9 +5,11 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/admin/clawd/v5-trading-bot
+WorkingDirectory=/home/admin/clawd/v5-prod
 Environment=PYTHONUNBUFFERED=1
 Environment=V5_CONFIG=configs/live_prod.yaml
 Environment=V5_DATA_PROVIDER=okx
 Environment=V5_LIVE_ARM=YES
-ExecStart=/usr/bin/flock -n /tmp/v5_live_prod_hourly.lock -c "/bin/bash -lc '/home/admin/clawd/v5-trading-bot/scripts/run_hourly_live_window.sh'"
+Environment=V5_WORKSPACE=/home/admin/clawd/v5-prod
+ExecStartPre=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && PYTHONPATH=. /home/admin/clawd/v5-prod/.venv/bin/python scripts/auto_sync_before_trade.py'
+ExecStart=/usr/bin/flock -n /tmp/v5_live_prod_hourly.lock -c "/bin/bash -lc '/home/admin/clawd/v5-prod/scripts/run_hourly_live_window.sh'"
