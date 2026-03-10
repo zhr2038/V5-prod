@@ -26,6 +26,7 @@ def test_v5_daily_ml_training_timer_points_to_service():
 def test_v5_model_promotion_gate_service_targets_prod_workspace():
     text = Path("deploy/systemd/v5-model-promotion-gate.service").read_text(encoding="utf-8")
     assert "WorkingDirectory=/home/admin/clawd/v5-prod" in text
+    assert "SuccessExitStatus=2" in text
     assert "Environment=PYTHONPATH=/home/admin/clawd/v5-prod" in text
     assert "ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/model_promotion_gate.py'" in text
 
