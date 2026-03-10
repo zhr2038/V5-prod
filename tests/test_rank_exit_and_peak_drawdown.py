@@ -195,3 +195,72 @@ def test_peak_drawdown_exit_generates_partial_sell_order(tmp_path):
     assert order.intent == "REBALANCE"
     assert order.notional_usdt == pytest.approx(109.0 * 0.33)
     assert order.meta["reason"].startswith("profit_partial_peak_drawdown_8pct")
+
+
+def test_rank_exit_audit_does_not_mislead_for_in_rank_position(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT", "XRP/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.rank_exit_strict_mode = True
+    cfg.execution.min_hold_minutes_before_rank_exit = 30
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"XRP/USDT": 0.25},
+        selected=["XRP/USDT"],
+        volatilities={},
+        notes="",
+    )
+
+    pipe.profit_taking.positions["XRP/USDT"] = PositionProfitState(
+        symbol="XRP/USDT",
+        entry_price=1.4,
+        entry_time=datetime.utcnow(),
+        highest_price=1.45,
+        profit_high=0.03,
+        current_stop=1.3,
+        rank_exit_streak=0,
+        last_rank=3,
+    )
+
+    market_data = {
+        "BTC/USDT": _series("BTC/USDT", 50000.0),
+        "XRP/USDT": _series("XRP/USDT", 1.41),
+    }
+    positions = [
+        Position(
+            symbol="XRP/USDT",
+            qty=10.0,
+            avg_px=1.40,
+            entry_ts="2026-03-10T10:00:00Z",
+            highest_px=1.45,
+            last_update_ts="2026-03-10T10:00:00Z",
+            last_mark_px=1.41,
+            unrealized_pnl_pct=0.007,
+        )
+    ]
+    alpha = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={
+            "BTC/USDT": 1.0,
+            "OKB/USDT": 0.95,
+            "XRP/USDT": 0.90,
+            "ETH/USDT": 0.80,
+        },
+    )
+    audit = DecisionAudit(run_id="rank-audit-in-rank")
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=positions,
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert out.orders == []
+    notes = [str(n) for n in audit.notes]
+    assert not any("Rank exit blocked by min-hold: XRP/USDT" in n for n in notes)
+    assert not any("Rank exit strict mode: XRP/USDT" in n for n in notes)

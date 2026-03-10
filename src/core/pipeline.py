@@ -687,6 +687,20 @@ class V5Pipeline:
                 if p.qty <= 0 or p.symbol in profit_symbols:
                     continue  # Skip if already handled by profit-taking or stop loss
 
+                current_rank = symbol_ranks.get(p.symbol, 999)
+                should_exit, reason = self.profit_taking.should_exit_by_rank(
+                    p.symbol,
+                    current_rank,
+                    max_rank=rank_exit_max_rank,
+                    confirm_rounds=rank_exit_confirm_rounds,
+                )
+                if not should_exit:
+                    if audit and str(reason).startswith("rank_exit_pending"):
+                        audit.add_note(
+                            f"Rank exit pending: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
+                        )
+                    continue
+
                 tw = float(target.get(p.symbol, 0.0) or 0.0)
                 if not rank_exit_strict_mode and tw > target_hold_eps:
                     if audit:
@@ -698,8 +712,6 @@ class V5Pipeline:
                     audit.add_note(
                         f"Rank exit strict mode: {p.symbol} ignoring target_w={tw:.4f} > eps={target_hold_eps:.4f}"
                     )
-
-                current_rank = symbol_ranks.get(p.symbol, 999)
 
                 # qlib hold-threshold migration: do not rank-exit too soon after entry.
                 min_hold_rank_exit = int(getattr(self.cfg.execution, 'min_hold_minutes_before_rank_exit', 0) or 0)
@@ -713,41 +725,29 @@ class V5Pipeline:
                             )
                         continue
 
-                should_exit, reason = self.profit_taking.should_exit_by_rank(
-                    p.symbol,
-                    current_rank,
-                    max_rank=rank_exit_max_rank,
-                    confirm_rounds=rank_exit_confirm_rounds,
-                )
-                if should_exit:
-                    s = market_data_1h.get(p.symbol)
-                    if s and s.close:
-                        current_price = float(s.close[-1])
-                        ranking_exit_orders.append(
-                            Order(
-                                symbol=p.symbol,
-                                side="sell",
-                                intent="CLOSE_LONG",
-                                notional_usdt=float(p.qty) * current_price,
-                                signal_price=current_price,
-                                meta={
-                                    "reason": f"rank_exit_{reason}",
-                                    "current_rank": current_rank,
-                                    "rank_source": rank_source,
-                                    "target_w": tw,
-                                    "confirm_rounds": rank_exit_confirm_rounds,
-                                    "max_rank": rank_exit_max_rank,
-                                },
-                            )
+                s = market_data_1h.get(p.symbol)
+                if s and s.close:
+                    current_price = float(s.close[-1])
+                    ranking_exit_orders.append(
+                        Order(
+                            symbol=p.symbol,
+                            side="sell",
+                            intent="CLOSE_LONG",
+                            notional_usdt=float(p.qty) * current_price,
+                            signal_price=current_price,
+                            meta={
+                                "reason": f"rank_exit_{reason}",
+                                "current_rank": current_rank,
+                                "rank_source": rank_source,
+                                "target_w": tw,
+                                "confirm_rounds": rank_exit_confirm_rounds,
+                                "max_rank": rank_exit_max_rank,
+                            },
                         )
-                        if audit:
-                            audit.add_note(
-                                f"Rank exit: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
-                            )
-                else:
-                    if audit and str(reason).startswith("rank_exit_pending"):
+                    )
+                    if audit:
                         audit.add_note(
-                            f"Rank exit pending: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
+                            f"Rank exit: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
                         )
         
         # 4. Policy-based exits (if not already handled)

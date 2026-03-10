@@ -213,7 +213,7 @@ execution:
     tier3_sell_pct: 1.0
 
   # qlib经验迁移：最短持仓门槛（先控超短抖动）
-  min_hold_minutes_before_rank_exit: 120
+  min_hold_minutes_before_rank_exit: 30
   min_hold_minutes_before_regime_exit: 45
 
   # qlib经验迁移：每轮最大换手（只作用于rebalance单，不拦截止损/强平）
