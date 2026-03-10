@@ -1,0 +1,25 @@
+{
+  "ymd_utc": "20260310",
+  "turnover_budget_per_day": 0.6,
+  "cost_budget_bps_per_day": 40.0,
+  "turnover_used": 0.0,
+  "cost_used_usdt": 0.0,
+  "avg_equity_est": 11.47770111068832,
+  "runs": {
+    "20260310_08": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    }
+  },
+  "fills_count_today": 0,
+  "median_notional_usdt_today": null,
+  "p25_notional_usdt_today": null,
+  "p75_notional_usdt_today": null,
+  "small_trade_ratio_today": null,
+  "small_trade_notional_cutoff": 9.0,
+  "cost_used_bps": 0.0,
+  "exceeded": false,
+  "reason": null
+}

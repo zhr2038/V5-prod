@@ -1,7 +1,19 @@
 {
-  "enabled": false,
-  "ts_ms": 1773046200000,
-  "trigger": "manual_reset",
-  "reason": "position_synced",
-  "note": "Manual reset after position sync - OKB/ETH/BNB quantities corrected"
+  "enabled": true,
+  "ts_ms": 1773111604728,
+  "trigger": "reconcile_hard_fail",
+  "reason": "usdt_mismatch",
+  "consecutive_hard": 36,
+  "consecutive_soft": 0,
+  "last_reconcile_ts_ms": 1773111604727,
+  "details": {
+    "max_abs_usdt_delta": 65.26258013438832,
+    "max_abs_base_delta": 0.674739996,
+    "reconcile_status_path": "reports/reconcile_status.json",
+    "okx_code": "0",
+    "okx_msg": "",
+    "http_status": 200,
+    "consecutive_stale": 0,
+    "stale_age_ms": 1
+  }
 }

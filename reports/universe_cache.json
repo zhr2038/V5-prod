@@ -1,5 +1,5 @@
 {
-  "ts": 1773090010.1425939,
+  "ts": 1773115209.019657,
   "ttl_sec": 3600,
   "config_signature": {
     "base_url": "https://www.okx.com",
@@ -26,20 +26,18 @@
   "symbols": [
     "BTC/USDT",
     "ETH/USDT",
-    "SOL/USDT",
     "CC/USDT",
-    "XRP/USDT",
+    "SOL/USDT",
     "HYPE/USDT",
-    "OKB/USDT",
+    "XRP/USDT",
     "SUI/USDT",
+    "OKB/USDT",
     "BNB/USDT",
     "ADA/USDT",
-    "LINK/USDT",
     "AVAX/USDT",
+    "LINK/USDT",
     "IP/USDT",
-    "LTC/USDT",
     "ROBO/USDT",
-    "UNI/USDT",
-    "PENGU/USDT"
+    "LTC/USDT"
   ]
 }

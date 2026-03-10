@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_ts_ms": 1773093608217,
-  "consecutive_hard": 0,
+  "updated_ts_ms": 1773115207878,
+  "consecutive_hard": 49,
   "consecutive_soft": 0,
   "consecutive_stale": 0,
   "last_stale_ts_ms": 0,
-  "last_reason": "ok",
-  "last_ok_ts_ms": 1773093608207,
-  "last_reconcile_ts_ms": 1773093608207,
-  "consecutive_ok": 1
+  "last_reason": "usdt_mismatch",
+  "last_ok_ts_ms": 1773101407849,
+  "last_reconcile_ts_ms": 1773115207878,
+  "consecutive_ok": 0
 }

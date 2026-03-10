@@ -1,5 +1,5 @@
 {
-  "ts": "2026-03-10T06:00:05.467238",
+  "ts": "2026-03-10T12:00:05.447570",
   "current_level": "DEFENSE",
   "config": {
     "name": "DEFENSE",
@@ -16,15 +16,15 @@
   },
   "metrics": {
     "dd_pct": 0.0,
-    "conversion_rate": 0.12121212121212122,
-    "dust_reject_rate": 0.6764705882352942,
+    "conversion_rate": 0.0,
+    "dust_reject_rate": 1.0344827586206897,
     "pnl_trend": "flat",
     "consecutive_losses": 0,
     "sample_size": 12,
-    "total_selected": 33,
-    "total_rebalance": 4
+    "total_selected": 29,
+    "total_rebalance": 0
   },
-  "reason": "噪声交易过高（拒单68%），降低频率",
+  "reason": "噪声交易过高（拒单103%），降低频率",
   "history": [
     {
       "ts": "2026-02-27T18:20:00",

@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-09T21:00:40Z",
+  "timestamp": "2026-03-10T00:00:43Z",
   "dry_run": false,
   "orders": [],
-  "notes": "regime=RegimeState.SIDEWAYS selected=['ETH/USDT', 'UNI/USDT', 'BTC/USDT'] orders=0"
+  "notes": "regime=RegimeState.TRENDING selected=['ETH/USDT', 'SOL/USDT'] orders=0"
 }

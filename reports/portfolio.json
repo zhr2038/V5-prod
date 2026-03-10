@@ -1,18 +1,17 @@
 {
   "target_weights": {
-    "ETH/USDT": 0.2288317686922796,
-    "UNI/USDT": 0.21238304511574344,
-    "BTC/USDT": 0.21424797861077308
+    "ETH/USDT": 0.35,
+    "SOL/USDT": 0.35,
+    "BNB/USDT": 0.15,
+    "HYPE/USDT": 0.15
   },
   "selected": [
     "ETH/USDT",
-    "UNI/USDT",
-    "BTC/USDT"
+    "SOL/USDT"
   ],
   "volatilities": {
-    "ETH/USDT": 0.007400017702953565,
-    "UNI/USDT": 0.008967479863238596,
-    "BTC/USDT": 0.005936347251126814
+    "ETH/USDT": 0.007424017228312608,
+    "SOL/USDT": 0.00818989520003386
   },
-  "notes": ""
+  "notes": "Reconciled after OKB sell - 2026-03-10"
 }

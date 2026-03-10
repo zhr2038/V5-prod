@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-10T06:00:02.999346",
+  "timestamp": "2026-03-10T12:00:02.360753",
   "base": {
     "enabled": true,
     "check_interval_minutes": 15,
@@ -21,8 +21,8 @@
       "breakout_threshold_pct": 0.3
     },
     "actions": 0,
-    "events_processed": 2,
-    "events_blocked": 1,
+    "events_processed": 0,
+    "events_blocked": 0,
     "should_trade": false,
     "fitness": 0.0
   },
@@ -35,8 +35,8 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 2,
-      "events_blocked": 1,
+      "events_processed": 0,
+      "events_blocked": 0,
       "should_trade": false,
       "fitness": 0.0
     },
@@ -48,8 +48,8 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 2,
-      "events_blocked": 1,
+      "events_processed": 0,
+      "events_blocked": 0,
       "should_trade": false,
       "fitness": 0.0
     },
@@ -61,8 +61,8 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 2,
-      "events_blocked": 1,
+      "events_processed": 0,
+      "events_blocked": 0,
       "should_trade": false,
       "fitness": 0.0
     },
@@ -74,8 +74,8 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 2,
-      "events_blocked": 1,
+      "events_processed": 0,
+      "events_blocked": 0,
       "should_trade": false,
       "fitness": 0.0
     },
@@ -87,8 +87,8 @@
         "breakout_threshold_pct": 0.3
       },
       "actions": 0,
-      "events_processed": 2,
-      "events_blocked": 1,
+      "events_processed": 0,
+      "events_blocked": 0,
       "should_trade": false,
       "fitness": 0.0
     }

@@ -108,6 +108,18 @@
       "cost_usdt": 0.0,
       "fills_count": 0,
       "notionals": []
+    },
+    "20260310_06": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
+    },
+    "20260310_07": {
+      "turnover": 0.0,
+      "cost_usdt": 0.0,
+      "fills_count": 0,
+      "notionals": []
     }
   },
   "fills_count_today": 7,

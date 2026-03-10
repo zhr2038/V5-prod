@@ -1,15 +1,15 @@
 {
   "selected": [
     "ETH/USDT",
-    "UNI/USDT",
-    "BTC/USDT",
+    "BNB/USDT",
+    "HYPE/USDT",
     "OKB/USDT"
   ],
   "hold_cycles": {
     "ETH/USDT": 1,
-    "UNI/USDT": 2,
-    "BTC/USDT": 1,
+    "BNB/USDT": 1,
+    "HYPE/USDT": 2,
     "OKB/USDT": 1
   },
-  "updated_ts": 1773090037
+  "updated_ts": 1773111630
 }

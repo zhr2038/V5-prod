@@ -1,5 +1,5 @@
 {
-  "last_global_trade_ms": 1773093603003,
+  "last_global_trade_ms": 1773101702479,
   "symbol_cooldowns": {
     "BTC/USDT": 1773072901010,
     "DOGE/USDT": 1772792102379,
@@ -17,14 +17,14 @@
     "AVAX/USDT": 1772719202770,
     "LTC/USDT": 1772783102171,
     "NEAR/USDT": 1772715602867,
-    "HYPE/USDT": 1773093603003,
+    "HYPE/USDT": 1773097203020,
     "APT/USDT": 1772620202341,
     "TRX/USDT": 1772973902575,
     "FIL/USDT": 1772806502702,
     "TON/USDT": 1772748003200,
     "ASTER/USDT": 1772728203638,
     "HUMA/USDT": 1772803802985,
-    "UNI/USDT": 1772794802381,
+    "UNI/USDT": 1773101702479,
     "PUMP/USDT": 1773033302747,
     "ROBO/USDT": 1773084603916
   },
@@ -116,17 +116,6 @@
       },
       "count": 1,
       "first_seen_ms": 1772795702452
-    },
-    "UNI/USDT": {
-      "signal": {
-        "symbol": "UNI/USDT",
-        "direction": "buy",
-        "score": 0.7639364706275916,
-        "rank": 0,
-        "timestamp_ms": 1772801102954
-      },
-      "count": 1,
-      "first_seen_ms": 1772801102962
     },
     "HUMA/USDT": {
       "signal": {
@@ -238,17 +227,6 @@
       "count": 1,
       "first_seen_ms": 1773069305160
     },
-    "OKB/USDT": {
-      "signal": {
-        "symbol": "OKB/USDT",
-        "direction": "buy",
-        "score": 1.430988829570987,
-        "rank": 1,
-        "timestamp_ms": 1773076503032
-      },
-      "count": 1,
-      "first_seen_ms": 1773076503035
-    },
     "BTC/USDT": {
       "signal": {
         "symbol": "BTC/USDT",
@@ -270,7 +248,18 @@
       },
       "count": 1,
       "first_seen_ms": 1773093603002
+    },
+    "ROBO/USDT": {
+      "signal": {
+        "symbol": "ROBO/USDT",
+        "direction": "sell",
+        "score": 0.19373831453152227,
+        "rank": 59,
+        "timestamp_ms": 1773112502353
+      },
+      "count": 1,
+      "first_seen_ms": 1773112502445
     }
   },
-  "saved_at_ms": 1773093603003
+  "saved_at_ms": 1773112502445
 }

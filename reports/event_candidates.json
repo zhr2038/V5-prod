@@ -1,97 +1,97 @@
 {
-  "timestamp": "2026-03-10T06:00:02.880217",
+  "timestamp": "2026-03-10T12:00:02.277451",
   "regime": "SIDEWAYS",
   "count": 10,
   "candidates": [
     {
-      "symbol": "IP/USDT",
-      "direction": "sell",
-      "score": 3.2485262900672764,
-      "rank": 99,
-      "price": 0.7892,
-      "trigger_up": 0.7915675999999999,
-      "trigger_down": 0.7868324
-    },
-    {
-      "symbol": "OKB/USDT",
+      "symbol": "SOL/USDT",
       "direction": "buy",
-      "score": 1.5236654254581115,
+      "score": 1.0,
       "rank": 1,
-      "price": 97.71,
-      "trigger_up": 98.00312999999998,
-      "trigger_down": 97.41686999999999
+      "price": 85.59,
+      "trigger_up": 85.84676999999999,
+      "trigger_down": 85.33323
     },
     {
       "symbol": "HYPE/USDT",
       "direction": "buy",
-      "score": 1.3245106047362292,
+      "score": 1.0,
       "rank": 1,
-      "price": 35.288,
-      "trigger_up": 35.39386399999999,
-      "trigger_down": 35.182136
-    },
-    {
-      "symbol": "CC/USDT",
-      "direction": "sell",
-      "score": 0.9386566754664751,
-      "rank": 96,
-      "price": 0.14527,
-      "trigger_up": 0.14570581,
-      "trigger_down": 0.14483419
-    },
-    {
-      "symbol": "UNI/USDT",
-      "direction": "buy",
-      "score": 0.8728338984282886,
-      "rank": 7,
-      "price": 3.912,
-      "trigger_up": 3.9237359999999994,
-      "trigger_down": 3.900264
-    },
-    {
-      "symbol": "XRP/USDT",
-      "direction": "sell",
-      "score": 0.8282206637831292,
-      "rank": 91,
-      "price": 1.3748,
-      "trigger_up": 1.3789243999999998,
-      "trigger_down": 1.3706756
-    },
-    {
-      "symbol": "LTC/USDT",
-      "direction": "buy",
-      "score": 0.6869362637175291,
-      "rank": 16,
-      "price": 54.15,
-      "trigger_up": 54.31244999999999,
-      "trigger_down": 53.98755
-    },
-    {
-      "symbol": "AVAX/USDT",
-      "direction": "buy",
-      "score": 0.6551411555329585,
-      "rank": 18,
-      "price": 9.356,
-      "trigger_up": 9.384068,
-      "trigger_down": 9.327932
+      "price": 34.762,
+      "trigger_up": 34.866285999999995,
+      "trigger_down": 34.657714
     },
     {
       "symbol": "BNB/USDT",
       "direction": "buy",
-      "score": 0.6542227408040855,
-      "rank": 18,
-      "price": 640.6,
-      "trigger_up": 642.5218,
-      "trigger_down": 638.6782000000001
+      "score": 1.0,
+      "rank": 1,
+      "price": 639.8,
+      "trigger_up": 641.7193999999998,
+      "trigger_down": 637.8806
+    },
+    {
+      "symbol": "BTC/USDT",
+      "direction": "buy",
+      "score": 0.9944298737206847,
+      "rank": 1,
+      "price": 69453.0,
+      "trigger_up": 69661.359,
+      "trigger_down": 69244.641
+    },
+    {
+      "symbol": "LINK/USDT",
+      "direction": "buy",
+      "score": 0.9371727093481682,
+      "rank": 4,
+      "price": 8.939,
+      "trigger_up": 8.965817,
+      "trigger_down": 8.912183
+    },
+    {
+      "symbol": "LTC/USDT",
+      "direction": "buy",
+      "score": 0.8255400538085452,
+      "rank": 9,
+      "price": 54.03,
+      "trigger_up": 54.19208999999999,
+      "trigger_down": 53.86791
+    },
+    {
+      "symbol": "XRP/USDT",
+      "direction": "buy",
+      "score": 0.7971640533161266,
+      "rank": 11,
+      "price": 1.3754,
+      "trigger_up": 1.3795261999999997,
+      "trigger_down": 1.3712738
+    },
+    {
+      "symbol": "IP/USDT",
+      "direction": "sell",
+      "score": 0.7509586298780727,
+      "rank": 87,
+      "price": 0.7915,
+      "trigger_up": 0.7938744999999999,
+      "trigger_down": 0.7891254999999999
+    },
+    {
+      "symbol": "OKB/USDT",
+      "direction": "sell",
+      "score": 0.7102305406446257,
+      "rank": 85,
+      "price": 98.25,
+      "trigger_up": 98.54475,
+      "trigger_down": 97.95525
     },
     {
       "symbol": "SUI/USDT",
       "direction": "buy",
-      "score": 0.6242608892709811,
-      "rank": 19,
-      "price": 0.9669,
-      "trigger_up": 0.9698006999999998,
-      "trigger_down": 0.9639993
+      "score": 0.5932676413567581,
+      "rank": 21,
+      "price": 0.9421,
+      "trigger_up": 0.9449263,
+      "trigger_down": 0.9392737000000001
     }
   ]
 }
