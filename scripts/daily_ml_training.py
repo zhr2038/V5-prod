@@ -105,9 +105,9 @@ def _candidate_models() -> list[str]:
 
 def _build_base_config() -> MLFactorConfig:
     return MLFactorConfig(
-        target_mode=os.getenv("V5_ML_TARGET_MODE", "cross_sectional_rank").strip().lower(),
+        target_mode=os.getenv("V5_ML_TARGET_MODE", "forward_edge_rank").strip().lower(),
         include_time_features=_env_bool("V5_ML_INCLUDE_TIME_FEATURES", False),
-        min_symbol_samples=int(os.getenv("V5_ML_MIN_SYMBOL_SAMPLES", "100")),
+        min_symbol_samples=int(os.getenv("V5_ML_MIN_SYMBOL_SAMPLES", "48")),
         min_symbol_target_std=float(os.getenv("V5_ML_MIN_SYMBOL_TARGET_STD", "1e-6")),
         prediction_horizon=int(os.getenv("V5_ML_PREDICTION_HORIZON", "6")),
     )
@@ -204,9 +204,10 @@ def main() -> int:
 
     df = pd.read_csv(CSV_PATH)
     cfg = _build_base_config()
+    feature_selector = os.getenv("V5_ML_FEATURE_SELECTOR", "stable").strip().lower()
     base_model = MLFactorModel(cfg)
     X_base, y, prep_meta = base_model.build_training_frame(df, target_col="future_return_6h")
-    X = optimize_features_for_training(X_base, y)
+    X = optimize_features_for_training(X_base, y, selector=feature_selector, n_features=12)
     if X.empty or len(X) < min_samples:
         print(f"training frame too small after cleaning: {len(X)}")
         return 1
@@ -342,6 +343,7 @@ def main() -> int:
             "candidates": candidates,
             "target_mode": cfg.target_mode,
             "include_time_features": cfg.include_time_features,
+            "feature_selector": feature_selector,
         },
     }
     _append_history(history_entry)

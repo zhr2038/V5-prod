@@ -64,7 +64,7 @@ class MLFactorConfig:
     early_stopping_rounds: int = 10
 
     # Better aligned with alpha ranking than raw absolute future return.
-    target_mode: str = "cross_sectional_rank"  # raw | cross_sectional_demean | cross_sectional_rank
+    target_mode: str = "cross_sectional_rank"  # raw | cross_sectional_demean | cross_sectional_rank | forward_edge_rank
     include_time_features: bool = True
     min_symbol_samples: int = 100
     min_symbol_target_std: float = 1e-6
@@ -173,6 +173,24 @@ class MLFactorModel:
             return pd.Series(np.zeros(len(s), dtype=float), index=s.index)
         return s.rank(pct=True) - 0.5
 
+    def _build_forward_edge_rank_target(
+        self,
+        work: pd.DataFrame,
+        *,
+        target_col: str,
+    ) -> pd.Series:
+        raw_rank = work.groupby("timestamp")[target_col].transform(self._rank_target_within_timestamp)
+        if "volatility_24h" not in work.columns:
+            return raw_rank
+
+        vol = work["volatility_24h"].astype(float).abs().replace([np.inf, -np.inf], np.nan)
+        finite_vol = vol[np.isfinite(vol)]
+        floor = float(finite_vol.quantile(0.25)) if not finite_vol.empty else 1e-6
+        floor = max(floor, 1e-6)
+        edge = work[target_col].astype(float) / vol.clip(lower=floor)
+        edge_rank = edge.groupby(work["timestamp"]).transform(self._rank_target_within_timestamp)
+        return 0.6 * raw_rank + 0.4 * edge_rank
+
     def _build_training_frame(
         self,
         df: pd.DataFrame,
@@ -222,6 +240,10 @@ class MLFactorModel:
             if "timestamp" not in work.columns:
                 raise ValueError("cross_sectional_rank requires timestamp")
             work[target_col] = work.groupby("timestamp")[target_col].transform(self._rank_target_within_timestamp)
+        elif self.config.target_mode == "forward_edge_rank":
+            if "timestamp" not in work.columns:
+                raise ValueError("forward_edge_rank requires timestamp")
+            work[target_col] = self._build_forward_edge_rank_target(work, target_col=target_col)
         elif self.config.target_mode != "raw":
             raise ValueError(f"unknown target_mode: {self.config.target_mode}")
 

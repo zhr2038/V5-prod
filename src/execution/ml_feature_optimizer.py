@@ -11,7 +11,14 @@ from typing import List
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_selection import mutual_info_regression
+
+try:
+    from sklearn.feature_selection import mutual_info_regression
+
+    SKLEARN_AVAILABLE = True
+except Exception:
+    mutual_info_regression = None
+    SKLEARN_AVAILABLE = False
 
 
 class FeatureEngineeringOptimizer:
@@ -28,6 +35,23 @@ class FeatureEngineeringOptimizer:
         "returns_6h",
         "volatility_6h",
     }
+
+    STABLE_FEATURE_ORDER = [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position",
+        "hour_of_day",
+        "day_of_week",
+    ]
 
     @staticmethod
     def remove_high_correlation_features(df: pd.DataFrame, threshold: float = 0.9) -> pd.DataFrame:
@@ -76,6 +100,8 @@ class FeatureEngineeringOptimizer:
         X = X.loc[:, X.nunique(dropna=True) > 1]
         if X.empty:
             return []
+        if not SKLEARN_AVAILABLE or mutual_info_regression is None:
+            return FeatureEngineeringOptimizer.select_stable_features(X, n_features=n_features)
 
         X_clean = X.fillna(X.median())
         y_clean = y.fillna(y.median())
@@ -85,8 +111,23 @@ class FeatureEngineeringOptimizer:
         )
         return importance_df.head(n_features)["feature"].tolist()
 
+    @staticmethod
+    def select_stable_features(X: pd.DataFrame, n_features: int = 12) -> List[str]:
+        preferred = [c for c in FeatureEngineeringOptimizer.STABLE_FEATURE_ORDER if c in X.columns]
+        extras = sorted(c for c in X.columns if c not in preferred)
+        ordered = preferred + extras
+        if n_features > 0:
+            return ordered[:n_features]
+        return ordered
 
-def optimize_features_for_training(df: pd.DataFrame, y: pd.Series | None = None) -> pd.DataFrame:
+
+def optimize_features_for_training(
+    df: pd.DataFrame,
+    y: pd.Series | None = None,
+    *,
+    selector: str = "stable",
+    n_features: int = 12,
+) -> pd.DataFrame:
     optimizer = FeatureEngineeringOptimizer()
     out = df.copy()
 
@@ -105,7 +146,11 @@ def optimize_features_for_training(df: pd.DataFrame, y: pd.Series | None = None)
     out = optimizer.remove_high_correlation_features(out, threshold=0.9)
 
     if y is not None and not out.empty:
-        selected = optimizer.select_features_by_importance(out, y, n_features=12)
+        selector_key = str(selector or "stable").strip().lower()
+        if selector_key == "mutual_info":
+            selected = optimizer.select_features_by_importance(out, y, n_features=n_features)
+        else:
+            selected = optimizer.select_stable_features(out, n_features=n_features)
         if selected:
             out = out[selected]
 

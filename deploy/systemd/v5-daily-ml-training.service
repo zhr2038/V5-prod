@@ -15,9 +15,11 @@ Environment=V5_ML_MIN_VALID_IC=0.00
 Environment=V5_ML_MAX_IC_GAP=0.25
 Environment=V5_ML_MIN_CV_MEAN_IC=0.01
 Environment=V5_ML_MAX_CV_STD=0.15
-Environment=V5_ML_TARGET_MODE=cross_sectional_rank
+Environment=V5_ML_TARGET_MODE=forward_edge_rank
 Environment=V5_ML_CANDIDATES=ridge
 Environment=V5_ML_RIDGE_ALPHA=50
+Environment=V5_ML_MIN_SYMBOL_SAMPLES=48
+Environment=V5_ML_FEATURE_SELECTOR=stable
 ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/daily_ml_training.py'
 
 [Install]
