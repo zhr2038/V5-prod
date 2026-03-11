@@ -314,6 +314,30 @@ def test_position_kline_api_returns_expected_shape(monkeypatch):
     assert payload["summary"]["change_pct"] == pytest.approx(0.03)
 
 
+def test_position_kline_api_normalizes_second_timestamps(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    series = module.MarketSeries(
+        symbol="BTC/USDT",
+        timeframe="1h",
+        ts=[1710201600, 1710205200],
+        open=[100.0, 101.0],
+        high=[102.0, 105.0],
+        low=[99.5, 100.5],
+        close=[101.0, 103.0],
+        volume=[10.0, 12.0],
+    )
+    monkeypatch.setattr(module, "_load_position_market_series", lambda symbol, timeframe, limit: (series, "cache"))
+
+    response = client.get("/api/position_kline?symbol=BTC&timeframe=1h")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["candles"][0]["ts"] == 1710201600000
+    assert payload["candles"][0]["time"] == "2024-03-12 00:00"
+
+
 def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

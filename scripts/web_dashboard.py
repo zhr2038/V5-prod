@@ -1540,9 +1540,12 @@ def api_position_kline():
             series.close,
             series.volume,
         ):
+            ts_value = int(ts_ms)
+            if abs(ts_value) < 10_000_000_000:
+                ts_value *= 1000
             candles.append({
-                'ts': int(ts_ms),
-                'time': datetime.utcfromtimestamp(int(ts_ms) / 1000.0).strftime('%Y-%m-%d %H:%M'),
+                'ts': ts_value,
+                'time': datetime.utcfromtimestamp(ts_value / 1000.0).strftime('%Y-%m-%d %H:%M'),
                 'open': round(float(open_px), 8),
                 'high': round(float(high_px), 8),
                 'low': round(float(low_px), 8),
