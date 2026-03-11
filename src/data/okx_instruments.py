@@ -44,15 +44,27 @@ class OKXSpotInstrumentsCache:
         self.ttl_sec = int(ttl_sec)
         self.timeout_sec = float(timeout_sec)
 
-    def _load_cache(self) -> Optional[Dict[str, Any]]:
+    def _read_cache(self) -> Optional[Dict[str, Any]]:
         try:
             if not self.cache_path.exists():
                 return None
             obj = json.loads(self.cache_path.read_text(encoding="utf-8"))
             if not isinstance(obj, dict):
                 return None
+            return obj
+        except Exception:
+            return None
+        return None
+
+    def _load_cache(self, *, allow_stale: bool = False) -> Optional[Dict[str, Any]]:
+        obj = self._read_cache()
+        if obj is None:
+            return None
+        if allow_stale:
+            return obj
+        try:
             ts = float(obj.get("ts") or 0.0)
-            if self.ttl_sec > 0 and (time.time() - ts) < float(self.ttl_sec):
+            if self.ttl_sec <= 0 or (time.time() - ts) < float(self.ttl_sec):
                 return obj
         except Exception:
             return None
@@ -81,8 +93,14 @@ class OKXSpotInstrumentsCache:
 
         obj = self._load_cache()
         if obj is None:
-            obj = self._fetch()
-            self._save_cache(obj)
+            stale_obj = self._load_cache(allow_stale=True)
+            try:
+                obj = self._fetch()
+                self._save_cache(obj)
+            except Exception:
+                if stale_obj is None:
+                    raise
+                obj = stale_obj
 
         rows = obj.get("data") or []
         if not isinstance(rows, list):
