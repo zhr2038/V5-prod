@@ -620,6 +620,7 @@ def run_walk_forward_task(
     )
     from src.data.mock_provider import MockProvider
     from src.data.okx_ccxt_provider import OKXCCXTProvider
+    from src.research.cache_loader import load_cached_market_data, summarize_market_data
 
     project_root = Path(project_root)
     task_meta = task_config.get("task") or {}
@@ -637,9 +638,23 @@ def run_walk_forward_task(
 
     cfg = load_config(str(app_cfg_path), env_path=env_path)
     cfg.execution.collect_ml_training_data = bool(walk_cfg.get("collect_ml_training_data", False))
-    provider = OKXCCXTProvider() if provider_name == "okx" else MockProvider(seed=int(walk_cfg.get("mock_seed", 7)))
+    provider = None
+    dataset_meta: dict[str, object]
+    if provider_name == "okx":
+        provider = OKXCCXTProvider()
+        market_data = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=ohlcv_limit)
+        dataset_meta = summarize_market_data(market_data, source="okx")
+    elif provider_name == "mock":
+        provider = MockProvider(seed=int(walk_cfg.get("mock_seed", 7)))
+        market_data = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=ohlcv_limit)
+        dataset_meta = summarize_market_data(market_data, source="mock")
+    elif provider_name == "cache":
+        cache_dir = _project_path(project_root, walk_cfg.get("cache_dir", "data/cache"), "data/cache")
+        market_data = load_cached_market_data(cache_dir, cfg.symbols, cfg.timeframe_main, limit=ohlcv_limit)
+        dataset_meta = summarize_market_data(market_data, source="cache", source_path=str(cache_dir))
+    else:
+        raise ValueError(f"unsupported walk-forward provider: {provider_name}")
 
-    market_data = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=ohlcv_limit)
     folds = run_walk_forward(
         market_data,
         folds=int(walk_cfg.get("folds", getattr(cfg.backtest, "walk_forward_folds", 4))),
@@ -656,12 +671,14 @@ def run_walk_forward_task(
             "min_fills_bucket": int(cfg.backtest.min_fills_bucket),
             "max_stats_age_days": int(cfg.backtest.max_stats_age_days),
             "cost_stats_dir": str(cfg.backtest.cost_stats_dir),
+            "provider": provider_name,
         },
     )
     output_report_path.parent.mkdir(parents=True, exist_ok=True)
     output_report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
     summary = build_portfolio_analysis_record(report)
+    run.write_json("dataset_meta.json", dataset_meta)
     run.write_json("metrics.json", summary)
     run.write_json("report.json", report)
     run.write_json("analysis/portfolio_analysis_record.json", summary)
