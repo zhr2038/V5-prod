@@ -3,8 +3,8 @@ Description=V5 Auto Risk Guard Evaluation
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/admin/clawd/v5-trading-bot
+WorkingDirectory=/home/admin/clawd/v5-prod
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/home/admin/clawd/v5-trading-bot
-Environment=PATH=/home/admin/clawd/v5-trading-bot/.venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/admin/clawd/v5-trading-bot/.venv/bin/python /home/admin/clawd/v5-trading-bot/scripts/auto_risk_eval.py
+Environment=PYTHONPATH=/home/admin/clawd/v5-prod
+Environment=PATH=/home/admin/clawd/v5-prod/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/admin/clawd/v5-prod/.venv/bin/python /home/admin/clawd/v5-prod/scripts/auto_risk_eval.py
