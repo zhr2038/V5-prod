@@ -1,232 +1,252 @@
-# v5-trading-bot
+# V5 Trading Bot
 
-V5 横截面趋势轮动系统（OKX 现货），**先 dry-run**。
+[English](./README.md)
 
-本仓库包含：
-- 信号流水线（Alpha → Regime → Portfolio → Risk → Orders）
-- 执行层：dry-run（模拟成交）/ live（OKX 私有接口：下单/查单/撤单）
-- SQLite 落盘：Positions/Account/Orders/Fills/Bills（幂等可追溯）
-- 回测 + walk-forward 框架
-- 成本校准与回灌（F2）
-- 日级预算监控 + 预算驱动的换手抑制（F3）
+V5 是当前用于生产运行的 OKX 现货交易仓库。它已经不只是研究代码集合，而是一套完整的生产工作区，包含实盘主循环、事件驱动检查、风控与对账、Flask Dashboard，以及 ML 训练与门控链路。
+
+## 项目概览
+
+当前仓库覆盖的能力包括：
+
+- `main.py` 驱动的小时级交易主循环
+- `event_driven_check.py` 驱动的事件补充检查
+- OKX 现货执行与显式实盘解锁
+- 开仓前安全检查：bills、ledger、reconcile、kill-switch
+- 监控与审计：健康检查、运行报告、Dashboard、run artifacts
+- ML 数据采集、训练、门控与可选实盘叠加
+
+当前生产运行目录：
+
+- `/home/admin/clawd/v5-prod`
+
+## 当前主入口
+
+核心入口：
+
+- `main.py`
+- `event_driven_check.py`
+- `scripts/web_dashboard.py`
+
+生产配置：
+
+- `configs/live_prod.yaml`
+
+关键文档：
+
+- [当前生产链路](./docs/CURRENT_PRODUCTION_FLOW.md)
+- [生产同步部署](./docs/PRODUCTION_ONLY_DEPLOYMENT.md)
+- [生产最小文件面](./docs/PRODUCTION_MINIMAL_FILES.md)
+
+## 系统怎么工作
+
+主链路大致是：
+
+1. 读取 `.env` 与 `configs/live_prod.yaml`
+2. 从 OKX 公共行情获取市场数据
+3. 计算 alpha、regime、组合与风控决策
+4. 执行 live preflight 安全检查
+5. 生成并执行订单
+6. 把订单、成交、持仓、汇总和审计信息写入 `reports/`
+
+当前 regime 不是单一规则，而是 ensemble：
+
+- HMM
+- funding sentiment
+- RSS sentiment
+
+当前监控面主要来自：
+
+- `/api/*` Dashboard 接口
+- `/health`、`/ready`、`/liveness`
+- `reports/runs/<run_id>/` 下的逐轮产物
+
+## Dashboard
+
+Dashboard 后端：
+
+- `scripts/web_dashboard.py`
+
+前端模板与静态资源：
+
+- `web/templates/`
+- `web/static/`
+
+当前 Dashboard 特性：
+
+- 单页运营总览
+- 集中展示市场状态、风险档位、持仓、成交、信号、健康、ML 阶段
+- 新增持仓聚焦区，支持按持仓币查看 K 线
+- 适配桌面与移动端
+
+常用入口：
+
+- `/`
+- `/monitor`
+- `/api/dashboard`
+- `/api/account`
+- `/api/positions`
+- `/api/market_state`
+- `/api/position_kline`
+- `/api/ml_training`
+
+本地启动：
+
+```bash
+python scripts/web_dashboard.py
+```
+
+默认地址：
+
+- `http://127.0.0.1:5000`
 
 ## 快速开始
 
+### 1. 创建虚拟环境
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+```
 
-# dry-run（默认使用 MockProvider）
-python3 main.py
+Windows PowerShell：
 
-# 运行测试
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### 2. 准备 `.env`
+
+至少需要：
+
+```env
+EXCHANGE_API_KEY=...
+EXCHANGE_API_SECRET=...
+EXCHANGE_PASSPHRASE=...
+```
+
+### 3. 本地运行
+
+本地默认运行：
+
+```bash
+python main.py
+```
+
+显式解锁实盘：
+
+```bash
+export V5_CONFIG=configs/live_prod.yaml
+export V5_DATA_PROVIDER=okx
+export V5_LIVE_ARM=YES
+python main.py
+```
+
+注意：
+
+- 实盘必须显式设置 `V5_LIVE_ARM=YES`
+- 生产数据源必须使用 `okx`
+- Dashboard 是运维/监控界面，不是交易前端
+
+## 测试
+
+运行主要测试：
+
+```bash
 pytest -q
 ```
 
-## 执行模式（dry-run / live）
-
-执行层通过 `cfg.execution.mode` 分流：
-- `dry_run`：使用 `ExecutionEngine`（默认，安全，不会触发实盘下单）
-- `live`：使用 `LiveExecutionEngine`（OKX 现货私有接口下单/查单/撤单）
-
-### Live 最后一道保险（ARM）
-即使配置写了 `mode: live`，也必须显式 arm 才会真的运行：
+只跑 Dashboard 相关回归：
 
 ```bash
-export V5_LIVE_ARM=YES
-python3 main.py
+pytest tests/test_web_dashboard.py
 ```
 
-如果未设置 ARM 环境变量，`main.py` 会直接拒绝启动 live（避免 timer/误配置触发实盘）。
+## 生产部署
 
-### Live Preflight（上线建议：常开）
-Live 每次执行前会先做一轮 **preflight catch-up**（不改变策略逻辑，只做运行自洽/可运维）：
+推荐模型：
 
-1) `bills_sync`：追平最近 7 天账单流水（事实源）
-2) `ledger_once`：用 bills 聚合推导 expected balance，并与 OKX balance 做闭环校验
-3) `reconcile_guard`：交易所余额/仓位 vs 本地 Store 对账 + kill-switch guard
-4) 输出明确结论：`ALLOW / SELL_ONLY / ABORT`
+- GitHub 是代码真源
+- `/home/admin/clawd/v5-prod` 是同步后的运行副本
+- `.env`、`.venv/`、`reports/`、`logs/`、服务端缓存属于服务器本地运行态
 
-> 目的：避免“timer 还没刷新状态文件”导致 live 用旧的 ok=true 误放行。
-
-#### 可选：Preflight Bootstrap Patch（受控状态对齐，不是财务真相）
-成交后，交易所余额会先变化，本地 `AccountStore/PositionStore` 可能在下一轮 preflight 前尚未反映，导致 `reconcile_guard` 短暂变红（`base_mismatch/usdt_mismatch`）。
-
-开启 `preflight_bootstrap_patch` 后：当 **ledger 已 ok** 且 reconcile 的失败原因属于 mismatch 时，preflight 会对本地做一次受控 patch，并再次 reconcile，做到“自动回绿”，减少人工 bootstrap。
-
-关键原则：
-- **账务真相以 `fills → bills → ledger` 为主**，bootstrap patch 仅用于状态对齐
-- patch **只覆盖**：`cash(USDT)` + `positions.qty`
-- patch **不覆盖**：`avg_px / pnl / strategy_state`
-- 带安全阈值与最小间隔，避免抖动/限频
-
-推荐上线默认值（仅 live 启用）：
-```yaml
-execution:
-  # preflight
-  preflight_enabled: true
-  preflight_max_pages: 5
-  max_status_age_sec: 180
-  preflight_fail_action: sell_only   # sell_only|abort
-
-  # controlled bootstrap patch (exchange -> local)
-  preflight_bootstrap_patch_enabled: true
-  preflight_bootstrap_patch_min_interval_sec: 300   # 5min, avoid thrash
-  preflight_bootstrap_patch_max_total_usdt: 50.0    # refuse patch if estimated drift > 50U
-```
-
-运维手工入口（查看 preflight 细节 JSON）：
-```bash
-python3 scripts/live_preflight_once.py --max-pages 5 --max-status-age-sec 180
-```
-
-### OKX 私有接口自检（balance）
-在写好 `.env`（api_key/api_secret/passphrase）后可运行：
+同步生产发布面：
 
 ```bash
-python3 scripts/okx_private_selfcheck.py
+python deploy/sync_prod_release.py \
+  --host <host> \
+  --user root \
+  --password '<password>' \
+  --remote-root /home/admin/clawd/v5-prod \
+  --service-user admin \
+  --enable-prod-timer \
+  --enable-event-driven-timer
 ```
 
-### Fill 同步与 slippage（G0.3）
-Live 模式下，执行引擎会在 `poll_open()` 里 best-effort 做 fills → orders 的状态推进，并把 fills 导出为 `trades.csv` / `cost_events`。
+当前生产同步会包含：
 
-slippage 计算：
-- 优先从 `reports/spread_snapshots/YYYYMMDD.jsonl` 找到该 symbol 在 fill 时间点之前最近一条 snapshot（mid/bid/ask）
-- 找不到 snapshot 时：
-  - `trades.csv` 的 `slippage_usdt` 写空值（表示 N/A）
-  - `cost_events` 的 mid/bid/ask/slippage 字段保持 null
+- `main.py`
+- `event_driven_check.py`
+- `configs/`
+- `deploy/`
+- `scripts/`
+- `src/`
+- `web/`
+- 当前生产文档
 
-你也可以手动同步 fills 到本地 SQLite：
+如需单独安装 user-level systemd：
 
-```bash
-python3 scripts/fill_sync.py --db reports/fills.sqlite
-```
-
-## Bills 同步（G0.4）
-
-Bills 是账本闭环的事实源（覆盖所有导致余额变化的事件，包含但不限于成交）。
-
-手动同步 bills：
-```bash
-python3 scripts/bills_sync.py --db reports/bills.sqlite
-```
-
-## 运维：reconcile timer（G1.1）
-
-仓库提供 systemd timer `v5-reconcile.timer`，用于定期刷新 `reports/reconcile_status.json`（默认每 5 分钟）。
-
-安装（system-wide，需要 sudo）：
-```bash
-bash deploy/install_systemd.sh
-```
-
-安装（user-level，不需要 sudo）：
 ```bash
 bash deploy/install_systemd.sh --user
 ```
 
-注意：如果使用 **user-level timer** 且希望“用户不登录也运行”，需要开启 lingering：
+如需用户退出后仍运行：
+
 ```bash
 sudo loginctl enable-linger admin
 ```
 
-巡检：
-```bash
-systemctl list-timers --all | grep v5-reconcile
-journalctl -u v5-reconcile.service -n 50 --no-pager
+## 目录说明
 
-# 文件侧闭环（确认是否持续刷新）
-ls -l --time-style=long-iso reports/reconcile_status.json
-cat reports/reconcile_status.json
-```
+主要目录：
 
-落盘文件：
-- fills：`reports/fills.sqlite`
-- orders：`reports/orders.sqlite`
-- bills：`reports/bills.sqlite`
+- `src/`: 交易核心、执行、风控、regime、因子、报告
+- `configs/`: 生产与辅助配置
+- `scripts/`: 运维脚本、Dashboard、报告、恢复工具
+- `web/`: Dashboard 模板与静态资源
+- `deploy/`: systemd unit 与生产同步工具
+- `reports/`: 运行输出、SQLite、run artifacts
+- `tests/`: 回归测试
 
-FillStore 去重规则：同一 `instId` 下同一 `tradeId` 只处理一次（主键 `(inst_id, trade_id)`）。
+仍存在但不是当前生产主路径的内容：
 
-### OKX expTime
-OKX 支持在交易接口请求头传 `expTime`（epoch 毫秒）。本项目配置项 `execution.okx_exp_time_ms` 若小于 1e12，会被当作“从现在起的 delta 毫秒”自动换算成 epoch 毫秒。
+- `study_notes/`
+- `v4_export/`
+- `scripts/archive/`
 
-### 使用 OKX 公共行情数据（可选）
+## 运维注意事项
 
-```bash
-export V5_DATA_PROVIDER=okx
-python3 main.py
-```
+- `reports/*` 属于运行态，不要提交到 GitHub
+- 不要把 `git pull` 当作生产目录的常规部署方式
+- 不要在生产副本里做破坏性 Git 操作
+- 如服务器上做了热修，下一次同步前要先回灌到仓库
 
-## 运行输出（reports/）
+常看的关键产物：
 
-执行 `python3 main.py` 后，会生成最新一轮输出以及按 run_id 分目录的产物。
+- `reports/runs/<run_id>/decision_audit.json`
+- `reports/runs/<run_id>/summary.json`
+- `reports/runs/<run_id>/trades.csv`
+- `reports/reconcile_status.json`
+- `reports/kill_switch.json`
+- `reports/ledger_status.json`
+- `reports/ml_runtime_status.json`
 
-### 顶层产物（概览）
-- `reports/alpha_snapshot.json`
-- `reports/regime.json`
-- `reports/portfolio.json`
-- `reports/execution_report.json`
-- `reports/slippage.sqlite`（dry-run 的占位记录）
+## 当前边界
 
-### 按次运行产物（建议重点看）
-- `reports/runs/<run_id>/decision_audit.json`：解释“为什么 0 单 / 为什么被拒绝”
-- `reports/runs/<run_id>/summary.json`：本次窗口指标汇总（并包含 budget 打标）
-- `reports/runs/<run_id>/trades.csv`：逐笔成交（live 时来自真实 fills；slippage 若无 snapshot 会写空值）
-- `reports/runs/<run_id>/equity.jsonl`：净值曲线点
-
-## F2：回测成本模型校准/回灌
-
-回测支持 **calibrated** 成本模型（来自日级统计）：
-- 统计文件：`reports/cost_stats/daily_cost_stats_YYYYMMDD.json`
-- 回退可追踪：每笔 fill 会记录 fallback level；回测结果会汇总 `fallback_level_counts`
-
-关键输出：
-- `reports/walk_forward.json`（schema_version=2）
-  - 顶层：`cost_assumption_meta`、`cost_assumption_aggregate.fallback_level_counts`
-  - 每个 fold：`cost_assumption` + `result.cost_assumption`
-
-运行 walk-forward：
-```bash
-python3 scripts/run_walk_forward.py
-# 输出：reports/walk_forward.json
-```
-
-## F3：日级预算监控 + 预算动作（控换手/控成本）
-
-V5 会维护 UTC 日切的预算状态，并把预算信息写回每次运行的报告：
-- 日级状态：`reports/budget_state/YYYYMMDD.json`
-- summary 打标：`reports/runs/<run_id>/summary.json` → `budget{...}`
-- audit 打标：`reports/runs/<run_id>/decision_audit.json` → `budget{...}` + `budget_action{...}`
-
-当 `budget.exceeded == true` 时（且 `cfg.budget.action_enabled == true`），会触发预算动作：
-- Stage-1（F3.1）：扩大 deadband（no-trade region），优先用“策略一致”的方式降低无效再平衡
-- Stage-2（F3.2）：当成交样本足够且小额噪声单占比高时，提高 `min_trade_notional`，过滤极小额噪声交易
-
-所有触发条件、有效阈值与抑制计数，都会写入 `decision_audit.json` 的 `budget_action` 字段，保证可追责。
-
-## v4 vs v5 对比（compare）
-
-小时级对比输出：`reports/compare/hourly/compare_YYYYMMDD_HH.md`。
-
-对比文档顶部会包含 **deadband + budget 控制状态**，确保打开 md 第一屏就能判断：
-- 今天是否超预算
-- 是否因预算扩大 deadband
-- 是否触发二段动作抬最小下单额
-
-手动运行 compare：
-```bash
-python3 scripts/compare_runs.py \
-  --v4_reports_dir /home/admin/clawd/v4-trading-bot/reports \
-  --v5_summary reports/runs/<run_id>/summary.json \
-  --out /tmp/compare.md
-```
-
-## 约束 / 备注
-
-- v5 phase-1：不做做空
-- 不加杠杆
-- 实盘（live）需要：
-  - `execution.mode: live`
-  - 环境变量 ARM：`V5_LIVE_ARM=YES`
-  - OKX API key 完整（key/secret/passphrase）
-- 对账门控（G1）尚在推进中：当前 live 侧会读取 `reports/kill_switch.json` / `reports/reconcile_status.json` 来决定是否进入 SELL_ONLY。
+- 仅 OKX 现货
+- 不使用杠杆
+- 不做空
+- ML 默认仍受门控保护，不是永久常开
+- 仓库里仍有历史研究内容，但本 README 只描述当前生产链路
