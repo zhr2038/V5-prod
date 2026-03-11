@@ -472,12 +472,12 @@ class ExecutionConfig(BaseModel):
         description="Minimum holding minutes before regime-exit is allowed (0=disable)",
     )
 
-    # Proactive churn cap: limit rebalance turnover per cycle (sum(abs(notional))/equity).
+    # Proactive churn cap: limit effective rebalance turnover per cycle.
     max_rebalance_turnover_per_cycle: Optional[float] = Field(
         default=None,
         ge=0,
         le=2.0,
-        description="Cap rebalance turnover ratio per cycle (e.g. 0.25 means <=25% equity notional)",
+        description="Cap effective rebalance turnover ratio per cycle (max(buy_notional, sell_notional)/equity)",
     )
 
     # Cost-aware entry gate (score proxy > estimated round-trip costs).

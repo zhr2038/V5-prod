@@ -6,7 +6,7 @@ from configs.schema import AppConfig
 from configs.schema import RegimeState
 from src.alpha.alpha_engine import AlphaSnapshot
 from src.core.clock import FixedClock
-from src.core.models import MarketSeries
+from src.core.models import MarketSeries, Order
 from src.core.pipeline import V5Pipeline
 from src.execution.position_store import Position
 from src.portfolio.portfolio_engine import PortfolioSnapshot
@@ -196,3 +196,80 @@ def test_pipeline_ml_collection_uses_stable_research_universe(tmp_path, monkeypa
         (1_704_114_000_000, "BTC/USDT"),
         (1_704_114_000_000, "ETH/USDT"),
     }
+
+
+def test_rebalance_turnover_cap_uses_side_turnover_budget():
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.max_rebalance_turnover_per_cycle = 0.30
+    pipe = V5Pipeline(cfg, clock=FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    orders = [
+        Order(
+            symbol="OLD/USDT",
+            side="sell",
+            intent="REBALANCE",
+            notional_usdt=20.0,
+            signal_price=1.0,
+            meta={"drift": -0.20},
+        ),
+        Order(
+            symbol="ADD/USDT",
+            side="buy",
+            intent="REBALANCE",
+            notional_usdt=15.0,
+            signal_price=1.0,
+            meta={"drift": 0.30},
+        ),
+        Order(
+            symbol="NEW/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=15.0,
+            signal_price=1.0,
+            meta={"drift": 0.35},
+        ),
+    ]
+
+    kept, dropped, stats = pipe._apply_rebalance_turnover_cap(orders, equity_raw=100.0)
+
+    assert not dropped
+    assert [order.symbol for order in kept] == ["OLD/USDT", "ADD/USDT", "NEW/USDT"]
+    assert stats["effective_turnover_notional"] == 30.0
+    assert stats["cap_notional"] == 30.0
+
+
+def test_rebalance_turnover_cap_prioritizes_existing_buys_before_new_opens():
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.max_rebalance_turnover_per_cycle = 0.20
+    pipe = V5Pipeline(cfg, clock=FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    orders = [
+        Order(
+            symbol="OPEN_BIG/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=20.0,
+            signal_price=1.0,
+            meta={"drift": 0.60},
+        ),
+        Order(
+            symbol="ADD_WINNER/USDT",
+            side="buy",
+            intent="REBALANCE",
+            notional_usdt=15.0,
+            signal_price=1.0,
+            meta={"drift": 0.30},
+        ),
+        Order(
+            symbol="OPEN_SMALL/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=5.0,
+            signal_price=1.0,
+            meta={"drift": 0.20},
+        ),
+    ]
+
+    kept, dropped, stats = pipe._apply_rebalance_turnover_cap(orders, equity_raw=100.0)
+
+    assert [order.symbol for order in kept] == ["ADD_WINNER/USDT", "OPEN_SMALL/USDT"]
+    assert [order.symbol for order in dropped] == ["OPEN_BIG/USDT"]
+    assert stats["kept_buy_notional"] == 20.0

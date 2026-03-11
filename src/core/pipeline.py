@@ -463,6 +463,85 @@ class V5Pipeline:
         alpha.scores = adjusted_scores
         return alpha
 
+    @staticmethod
+    def _rebalance_turnover_priority(order: Order) -> Tuple[int, float, float, str]:
+        drift = abs(float(((order.meta or {}).get("drift", 0.0) or 0.0)))
+        notional = abs(float(order.notional_usdt or 0.0))
+        side = str(order.side or "").lower()
+        intent = str(order.intent or "").upper()
+        open_rank = 1 if side == "buy" and intent == "OPEN_LONG" else 0
+        return (open_rank, -drift, notional, str(order.symbol))
+
+    def _cap_rebalance_side(
+        self,
+        orders: List[Order],
+        *,
+        cap_notional: float,
+    ) -> Tuple[List[Order], List[Order], float]:
+        if not orders:
+            return [], [], 0.0
+
+        ranked = sorted(orders, key=self._rebalance_turnover_priority)
+        kept_ranked: List[Order] = []
+        used = 0.0
+        for order in ranked:
+            notional = abs(float(order.notional_usdt or 0.0))
+            if (used + notional) <= cap_notional or not kept_ranked:
+                kept_ranked.append(order)
+                used += notional
+
+        keep_ids = {id(order) for order in kept_ranked}
+        kept = [order for order in orders if id(order) in keep_ids]
+        dropped = [order for order in orders if id(order) not in keep_ids]
+        return kept, dropped, float(used)
+
+    def _apply_rebalance_turnover_cap(
+        self,
+        rebalance_orders: List[Order],
+        *,
+        equity_raw: float,
+    ) -> Tuple[List[Order], List[Order], Dict[str, float]]:
+        max_rb_turnover = getattr(self.cfg.execution, "max_rebalance_turnover_per_cycle", None)
+        if (
+            max_rb_turnover is None
+            or float(max_rb_turnover) <= 0.0
+            or float(equity_raw) <= 0.0
+            or not rebalance_orders
+        ):
+            return rebalance_orders, [], {}
+
+        cap_notional = float(max_rb_turnover) * float(equity_raw)
+        buy_orders = [order for order in rebalance_orders if str(order.side or "").lower() == "buy"]
+        sell_orders = [order for order in rebalance_orders if str(order.side or "").lower() == "sell"]
+        total_buy = float(sum(abs(float(order.notional_usdt or 0.0)) for order in buy_orders))
+        total_sell = float(sum(abs(float(order.notional_usdt or 0.0)) for order in sell_orders))
+        effective_turnover = float(max(total_buy, total_sell))
+        stats = {
+            "cap_notional": float(cap_notional),
+            "total_buy_notional": float(total_buy),
+            "total_sell_notional": float(total_sell),
+            "effective_turnover_notional": float(effective_turnover),
+        }
+
+        if effective_turnover <= cap_notional:
+            return rebalance_orders, [], stats
+
+        kept_buys, dropped_buys, kept_buy = self._cap_rebalance_side(buy_orders, cap_notional=cap_notional)
+        kept_sells, dropped_sells, kept_sell = self._cap_rebalance_side(sell_orders, cap_notional=cap_notional)
+        keep_ids = {id(order) for order in (kept_buys + kept_sells)}
+        kept_orders = [order for order in rebalance_orders if id(order) in keep_ids]
+        dropped_orders = [order for order in rebalance_orders if id(order) not in keep_ids]
+        stats.update(
+            {
+                "kept_buy_notional": float(kept_buy),
+                "kept_sell_notional": float(kept_sell),
+                "dropped_count": float(len(dropped_orders)),
+                "dropped_buy_count": float(len(dropped_buys)),
+                "dropped_sell_count": float(len(dropped_sells)),
+            }
+        )
+        return kept_orders, dropped_orders, stats
+
     def run(
         self,
         market_data_1h: Dict[str, MarketSeries],
@@ -1675,50 +1754,38 @@ class V5Pipeline:
                 )
 
         # qlib migration: proactive per-cycle rebalance turnover cap.
-        max_rb_turnover = getattr(self.cfg.execution, 'max_rebalance_turnover_per_cycle', None)
-        if max_rb_turnover is not None and float(max_rb_turnover) > 0 and float(equity_raw) > 0 and rebalance_orders:
-            try:
-                cap_notional = float(max_rb_turnover) * float(equity_raw)
-                total_notional = float(sum(abs(float(o.notional_usdt or 0.0)) for o in rebalance_orders))
-                if total_notional > cap_notional:
-                    ranked = sorted(
-                        rebalance_orders,
-                        key=lambda x: abs(float(((x.meta or {}).get('drift', 0.0) or 0.0))),
-                        reverse=True,
+        try:
+            kept_rebalance_orders, dropped_rebalance_orders, turnover_cap_stats = self._apply_rebalance_turnover_cap(
+                rebalance_orders,
+                equity_raw=float(equity_raw),
+            )
+            if dropped_rebalance_orders:
+                rebalance_orders = kept_rebalance_orders
+                if audit:
+                    audit.reject("turnover_cap")
+                    audit.add_note(
+                        "Rebalance turnover capped: "
+                        f"buy=${float(turnover_cap_stats.get('total_buy_notional', 0.0)):.2f}, "
+                        f"sell=${float(turnover_cap_stats.get('total_sell_notional', 0.0)):.2f}, "
+                        f"effective=${float(turnover_cap_stats.get('effective_turnover_notional', 0.0)):.2f} "
+                        f"> cap=${float(turnover_cap_stats.get('cap_notional', 0.0)):.2f}, "
+                        f"kept={len(kept_rebalance_orders)}, dropped={len(dropped_rebalance_orders)}"
                     )
-                    kept = []
-                    used = 0.0
-                    dropped = []
-                    for o in ranked:
-                        n = abs(float(o.notional_usdt or 0.0))
-                        if (used + n) <= cap_notional or not kept:
-                            kept.append(o)
-                            used += n
-                        else:
-                            dropped.append(o)
-
-                    keep_ids = {id(x) for x in kept}
-                    rebalance_orders = [o for o in rebalance_orders if id(o) in keep_ids]
-
-                    if audit:
-                        audit.reject('turnover_cap')
-                        audit.add_note(
-                            f"Rebalance turnover capped: total=${total_notional:.2f} > cap=${cap_notional:.2f}, "
-                            f"kept={len(kept)}, dropped={len(dropped)}"
+                    for order in dropped_rebalance_orders[:12]:
+                        router_decisions.append(
+                            {
+                                "symbol": order.symbol,
+                                "action": "skip",
+                                "reason": "turnover_cap",
+                                "side": order.side,
+                                "intent": order.intent,
+                                "notional": float(order.notional_usdt or 0.0),
+                                "turnover_cap_notional": float(turnover_cap_stats.get("cap_notional", 0.0)),
+                            }
                         )
-                        for o in dropped[:12]:
-                            router_decisions.append(
-                                {
-                                    'symbol': o.symbol,
-                                    'action': 'skip',
-                                    'reason': 'turnover_cap',
-                                    'notional': float(o.notional_usdt or 0.0),
-                                    'turnover_cap_notional': float(cap_notional),
-                                }
-                            )
-            except Exception:
-                pass
-        
+        except Exception:
+            pass
+
         if audit:
             audit.router_decisions = router_decisions
             audit.counts["orders_rebalance"] = len(rebalance_orders)
