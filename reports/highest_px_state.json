@@ -1,23 +1,37 @@
 {
-  "BNB/USDT": {
-    "symbol": "BNB/USDT",
-    "highest_px": 638.6,
-    "entry_px": 623.5,
-    "updated_at": "2026-03-09T22:00:32.089259",
-    "source": "mark_to_market"
+  "ETH/USDT": {
+    "symbol": "ETH/USDT",
+    "highest_px": 100.0,
+    "entry_px": 100.0,
+    "updated_at": "2026-03-09T22:10:57.156074",
+    "source": "new_position"
   },
   "OKB/USDT": {
     "symbol": "OKB/USDT",
-    "highest_px": 97.63,
-    "entry_px": 95.98,
-    "updated_at": "2026-03-09T22:00:32.091093",
-    "source": "mark_to_market"
+    "highest_px": 97.4,
+    "entry_px": 97.4,
+    "updated_at": "2026-03-09T22:11:05.851413",
+    "source": "new_position"
   },
-  "HYPE/USDT": {
-    "symbol": "HYPE/USDT",
-    "highest_px": 32.896,
-    "entry_px": 31.837,
-    "updated_at": "2026-03-09T22:00:32.092645",
-    "source": "mark_to_market"
+  "AAA/USDT": {
+    "symbol": "AAA/USDT",
+    "highest_px": 100.0,
+    "entry_px": 100.0,
+    "updated_at": "2026-03-09T16:22:04.650158",
+    "source": "new_position"
+  },
+  "SUI/USDT": {
+    "symbol": "SUI/USDT",
+    "highest_px": 1.0,
+    "entry_px": 1.0,
+    "updated_at": "2026-03-10T22:49:56.913527",
+    "source": "new_position"
+  },
+  "NEW/USDT": {
+    "symbol": "NEW/USDT",
+    "highest_px": 5.0,
+    "entry_px": 5.0,
+    "updated_at": "2026-03-10T22:49:56.971528",
+    "source": "new_position"
   }
 }

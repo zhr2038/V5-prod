@@ -1,8 +1,9 @@
 {
-  "updated_ts_ms": 1773111630095,
+  "updated_ts_ms": 1773165772972,
   "lookback_hours": 24,
   "min_closed_cycles": 4,
   "expectancy_threshold_usdt": 0.0,
   "cooldown_hours": 24,
-  "symbols": {}
+  "symbols": {},
+  "stats": {}
 }

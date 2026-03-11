@@ -838,5 +838,2458 @@
       "target_mode": "raw",
       "include_time_features": false
     }
+  },
+  {
+    "timestamp": "2026-03-10T19:04:23.330197",
+    "samples": 2028,
+    "train_ic": 0.38636737810764044,
+    "valid_ic": -0.5024978535389498,
+    "cv_mean_ic": -0.05744136318138861,
+    "cv_std_ic": 0.20716863581055933,
+    "cv_scores": [
+      0.0,
+      0.03877279724074077,
+      -0.46155881774517,
+      0.007122325555479051,
+      0.12845687904200714
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "macd",
+      "rsi",
+      "obv",
+      "returns_24h",
+      "volatility_24h",
+      "momentum_5d",
+      "volume_ratio",
+      "volatility_ratio"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 364,
+      "train_groups": 285,
+      "valid_groups": 73,
+      "purge_gap_groups": 6
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.38636737810764044,
+        "valid_ic": -0.5024978535389498,
+        "cv_mean_ic": -0.05744136318138861,
+        "cv_std_ic": 0.20716863581055933,
+        "cv_scores": [
+          0.0,
+          0.03877279724074077,
+          -0.46155881774517,
+          0.007122325555479051,
+          0.12845687904200714
+        ],
+        "ic_gap": 0.8888652316465903,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "cross_sectional_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 100,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "cross_sectional_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2028
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_mean_ic<0.01",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "cross_sectional_rank",
+      "include_time_features": false
+    }
+  },
+  {
+    "timestamp": "2026-03-10T19:25:21.021823",
+    "samples": 2028,
+    "train_ic": 0.4323573147886853,
+    "valid_ic": -0.37209461106397496,
+    "cv_mean_ic": -0.017915545600699034,
+    "cv_std_ic": 0.20036771913004825,
+    "cv_scores": [
+      0.0,
+      0.07900501420458991,
+      -0.40874281792302514,
+      0.11033237760186201,
+      0.129827698113078
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 364,
+      "train_groups": 285,
+      "valid_groups": 73,
+      "purge_gap_groups": 6
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.4323573147886853,
+        "valid_ic": -0.37209461106397496,
+        "cv_mean_ic": -0.017915545600699034,
+        "cv_std_ic": 0.20036771913004825,
+        "cv_scores": [
+          0.0,
+          0.07900501420458991,
+          -0.40874281792302514,
+          0.11033237760186201,
+          0.129827698113078
+        ],
+        "ic_gap": 0.8044519258526602,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2028
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_mean_ic<0.01",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable"
+    }
+  },
+  {
+    "timestamp": "2026-03-10T19:25:45.002795",
+    "samples": 2028,
+    "train_ic": 0.4323573147886853,
+    "valid_ic": -0.37209461106397496,
+    "cv_mean_ic": -0.017915545600699034,
+    "cv_std_ic": 0.20036771913004825,
+    "cv_scores": [
+      0.0,
+      0.07900501420458991,
+      -0.40874281792302514,
+      0.11033237760186201,
+      0.129827698113078
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 364,
+      "train_groups": 285,
+      "valid_groups": 73,
+      "purge_gap_groups": 6
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.4323573147886853,
+        "valid_ic": -0.37209461106397496,
+        "cv_mean_ic": -0.017915545600699034,
+        "cv_std_ic": 0.20036771913004825,
+        "cv_scores": [
+          0.0,
+          0.07900501420458991,
+          -0.40874281792302514,
+          0.11033237760186201,
+          0.129827698113078
+        ],
+        "ic_gap": 0.8044519258526602,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 20,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2028
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_mean_ic<0.01",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable"
+    }
+  },
+  {
+    "timestamp": "2026-03-10T19:57:38.001751",
+    "samples": 2028,
+    "train_ic": 0.43380961667111156,
+    "valid_ic": -0.3748752738814543,
+    "cv_mean_ic": -0.015518400428836709,
+    "cv_std_ic": 0.20022100090323752,
+    "cv_scores": [
+      0.0,
+      0.08866033020522636,
+      -0.4059975366227636,
+      0.10955721579074394,
+      0.13018798848260976
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 364,
+      "train_groups": 285,
+      "valid_groups": 73,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 2028,
+      "groups_before": 364,
+      "cutoff": "2025-12-29T11:00:19.846000",
+      "rows_after": 2028,
+      "groups_after": 364
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.43380961667111156,
+        "valid_ic": -0.3748752738814543,
+        "cv_mean_ic": -0.015518400428836709,
+        "cv_std_ic": 0.20022100090323752,
+        "cv_scores": [
+          0.0,
+          0.08866033020522636,
+          -0.4059975366227636,
+          0.10955721579074394,
+          0.13018798848260976
+        ],
+        "ic_gap": 0.8086848905525659,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 1.0275837743867846,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2028
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_mean_ic<0.01",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T19:58:44.642063",
+    "samples": 2028,
+    "train_ic": 0.43380961667111156,
+    "valid_ic": -0.3748752738814543,
+    "cv_mean_ic": -0.015518400428836709,
+    "cv_std_ic": 0.20022100090323752,
+    "cv_scores": [
+      0.0,
+      0.08866033020522636,
+      -0.4059975366227636,
+      0.10955721579074394,
+      0.13018798848260976
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 364,
+      "train_groups": 285,
+      "valid_groups": 73,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 2028,
+      "groups_before": 364,
+      "cutoff": "2025-12-29T11:00:19.846000",
+      "rows_after": 2028,
+      "groups_after": 364
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.43380961667111156,
+        "valid_ic": -0.3748752738814543,
+        "cv_mean_ic": -0.015518400428836709,
+        "cv_std_ic": 0.20022100090323752,
+        "cv_scores": [
+          0.0,
+          0.08866033020522636,
+          -0.4059975366227636,
+          0.10955721579074394,
+          0.13018798848260976
+        ],
+        "ic_gap": 0.8086848905525659,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 1.0275837743867846,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2028
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_mean_ic<0.01",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:35:11.283348",
+    "samples": 2296,
+    "train_ic": 0.5346717751996536,
+    "valid_ic": 0.0,
+    "cv_mean_ic": 0.093496052508891,
+    "cv_std_ic": 0.19518920251483116,
+    "cv_scores": [
+      0.0,
+      0.0,
+      -0.13261034054143223,
+      0.43525220723029895,
+      0.16483839585558824
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd",
+      "bb_position"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 632,
+      "train_groups": 500,
+      "valid_groups": 126,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 2296,
+      "groups_before": 632,
+      "cutoff": "2026-01-08T08:22:05.113000",
+      "rows_after": 2296,
+      "groups_after": 632
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.5346717751996536,
+        "valid_ic": 0.0,
+        "cv_mean_ic": 0.093496052508891,
+        "cv_std_ic": 0.19518920251483116,
+        "cv_scores": [
+          0.0,
+          0.0,
+          -0.13261034054143223,
+          0.43525220723029895,
+          0.16483839585558824
+        ],
+        "ic_gap": 0.5346717751996536,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 2.6896693830878533,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2296
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "ic_gap>0.25",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:36:11.765569",
+    "samples": 2296,
+    "train_ic": 0.5346717751996536,
+    "valid_ic": 0.0,
+    "cv_mean_ic": 0.093496052508891,
+    "cv_std_ic": 0.19518920251483116,
+    "cv_scores": [
+      0.0,
+      0.0,
+      -0.13261034054143223,
+      0.43525220723029895,
+      0.16483839585558824
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd",
+      "bb_position"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 632,
+      "train_groups": 500,
+      "valid_groups": 126,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 2296,
+      "groups_before": 632,
+      "cutoff": "2026-01-08T08:22:05.113000",
+      "rows_after": 2296,
+      "groups_after": 632
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.5346717751996536,
+        "valid_ic": 0.0,
+        "cv_mean_ic": 0.093496052508891,
+        "cv_std_ic": 0.19518920251483116,
+        "cv_scores": [
+          0.0,
+          0.0,
+          -0.13261034054143223,
+          0.43525220723029895,
+          0.16483839585558824
+        ],
+        "ic_gap": 0.5346717751996536,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 2.6896693830878533,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2296
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "ic_gap>0.25",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:36:13.120625",
+    "samples": 2351,
+    "train_ic": 0.4797092691827542,
+    "valid_ic": 0.0,
+    "cv_mean_ic": 0.05526071594661626,
+    "cv_std_ic": 0.25264115009824795,
+    "cv_scores": [
+      0.0,
+      0.0,
+      -0.3345150418695964,
+      0.4394922697561867,
+      0.171326351846491
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd",
+      "bb_position"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 632,
+      "train_groups": 500,
+      "valid_groups": 126,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 2351,
+      "groups_before": 632,
+      "cutoff": "2026-01-08T08:22:05.113000",
+      "rows_after": 2351,
+      "groups_after": 632
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.4797092691827542,
+        "valid_ic": 0.0,
+        "cv_mean_ic": 0.05526071594661626,
+        "cv_std_ic": 0.25264115009824795,
+        "cv_scores": [
+          0.0,
+          0.0,
+          -0.3345150418695964,
+          0.4394922697561867,
+          0.171326351846491
+        ],
+        "ic_gap": 0.4797092691827542,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 2.696583275129753,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 12,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "LINK/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2351
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "ic_gap>0.25",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:36:14.483819",
+    "samples": 2351,
+    "train_ic": 0.4861636896673631,
+    "valid_ic": 0.0,
+    "cv_mean_ic": 0.05594703112775806,
+    "cv_std_ic": 0.25401497026257897,
+    "cv_scores": [
+      0.0,
+      0.0,
+      -0.33548259715928275,
+      0.4426521331204534,
+      0.17256561967761969
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd",
+      "bb_position"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 632,
+      "train_groups": 500,
+      "valid_groups": 126,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 2351,
+      "groups_before": 632,
+      "cutoff": "2026-01-08T08:22:05.113000",
+      "rows_after": 2351,
+      "groups_after": 632
+    },
+    "recency_weighting": {
+      "half_life_days": 3.0,
+      "max_weight": 2.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.4861636896673631,
+        "valid_ic": 0.0,
+        "cv_mean_ic": 0.05594703112775806,
+        "cv_std_ic": 0.25401497026257897,
+        "cv_scores": [
+          0.0,
+          0.0,
+          -0.33548259715928275,
+          0.4426521331204534,
+          0.17256561967761969
+        ],
+        "ic_gap": 0.4861636896673631,
+        "train_weight_mean": 0.9999999999999998,
+        "train_weight_max": 1.9037895099000313,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 12,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "LINK/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2351
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "ic_gap>0.25",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 3.0,
+      "recency_max_weight": 2.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:36:15.744086",
+    "samples": 271,
+    "train_ic": 0.0,
+    "valid_ic": 0.0,
+    "cv_mean_ic": 0.0,
+    "cv_std_ic": 0.0,
+    "cv_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd",
+      "bb_position"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 271,
+      "train_groups": 211,
+      "valid_groups": 54,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 10.0,
+      "rows_before": 2351,
+      "groups_before": 632,
+      "cutoff": "2026-02-27T08:22:05.113000",
+      "rows_after": 271,
+      "groups_after": 271
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.0,
+        "valid_ic": 0.0,
+        "cv_mean_ic": 0.0,
+        "cv_std_ic": 0.0,
+        "cv_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "ic_gap": 0.0,
+        "train_weight_mean": 1.0000000000000002,
+        "train_weight_max": 1.0517177184942685,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 10,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 12,
+          "min_symbol_target_std": 1e-06
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "LINK/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 2351
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "cv_mean_ic<0.01"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 10.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:40:19.493810",
+    "samples": 1992,
+    "train_ic": 0.6042763058815802,
+    "valid_ic": 0.3618304143783568,
+    "cv_mean_ic": 0.31463131405196004,
+    "cv_std_ic": 0.14494852148408116,
+    "cv_scores": [
+      0.26620040229772307,
+      0.5493616784261346,
+      0.16656771202980195,
+      0.4072108637699263,
+      0.1838159137362142
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 332,
+      "train_groups": 260,
+      "valid_groups": 66,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 1992,
+      "groups_before": 332,
+      "cutoff": "2025-12-28T02:00:14.494000",
+      "rows_after": 1992,
+      "groups_after": 332
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.6042763058815802,
+        "valid_ic": 0.3618304143783568,
+        "cv_mean_ic": 0.31463131405196004,
+        "cv_std_ic": 0.14494852148408116,
+        "cv_scores": [
+          0.26620040229772307,
+          0.5493616784261346,
+          0.16656771202980195,
+          0.4072108637699263,
+          0.1838159137362142
+        ],
+        "ic_gap": 0.24244589150322343,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 1.0251346348934949,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06,
+          "min_cross_sectional_group_size": 2,
+          "min_group_coverage_ratio": 0.9
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "group_filter": {
+        "enabled": true,
+        "max_group_size": 6,
+        "required_group_size": 6,
+        "groups_before": 632,
+        "groups_after": 332
+      },
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 1992
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": true,
+      "fail_reasons": []
+    },
+    "model_saved": true,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:43:52.520163",
+    "samples": 1992,
+    "train_ic": 0.607513949707839,
+    "valid_ic": 0.36078811668957034,
+    "cv_mean_ic": 0.3177065119346434,
+    "cv_std_ic": 0.13880425338779387,
+    "cv_scores": [
+      0.265694956817606,
+      0.5434496502305174,
+      0.188361175118953,
+      0.4072108637699263,
+      0.1838159137362142
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 332,
+      "train_groups": 260,
+      "valid_groups": 66,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 10.0,
+      "rows_before": 1992,
+      "groups_before": 332,
+      "cutoff": "2026-02-16T02:00:14.494000",
+      "rows_after": 1992,
+      "groups_after": 332
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.607513949707839,
+        "valid_ic": 0.36078811668957034,
+        "cv_mean_ic": 0.3177065119346434,
+        "cv_std_ic": 0.13880425338779387,
+        "cv_scores": [
+          0.265694956817606,
+          0.5434496502305174,
+          0.188361175118953,
+          0.4072108637699263,
+          0.1838159137362142
+        ],
+        "ic_gap": 0.24672583301826867,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 1.0251346348934949,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 10,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06,
+          "min_cross_sectional_group_size": 2,
+          "min_group_coverage_ratio": 0.9
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "group_filter": {
+        "enabled": true,
+        "max_group_size": 6,
+        "required_group_size": 6,
+        "groups_before": 556,
+        "groups_after": 332
+      },
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 1992
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": true,
+      "fail_reasons": []
+    },
+    "model_saved": true,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 10.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:43:52.618286",
+    "samples": 1992,
+    "train_ic": 0.6042763058815802,
+    "valid_ic": 0.3618304143783568,
+    "cv_mean_ic": 0.31463131405196004,
+    "cv_std_ic": 0.14494852148408116,
+    "cv_scores": [
+      0.26620040229772307,
+      0.5493616784261346,
+      0.16656771202980195,
+      0.4072108637699263,
+      0.1838159137362142
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "momentum_5d",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 332,
+      "train_groups": 260,
+      "valid_groups": 66,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 1992,
+      "groups_before": 332,
+      "cutoff": "2025-12-28T02:00:14.494000",
+      "rows_after": 1992,
+      "groups_after": 332
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.6042763058815802,
+        "valid_ic": 0.3618304143783568,
+        "cv_mean_ic": 0.31463131405196004,
+        "cv_std_ic": 0.14494852148408116,
+        "cv_scores": [
+          0.26620040229772307,
+          0.5493616784261346,
+          0.16656771202980195,
+          0.4072108637699263,
+          0.1838159137362142
+        ],
+        "ic_gap": 0.24244589150322343,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 1.0251346348934949,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06,
+          "min_cross_sectional_group_size": 2,
+          "min_group_coverage_ratio": 0.9
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "group_filter": {
+        "enabled": true,
+        "max_group_size": 6,
+        "required_group_size": 6,
+        "groups_before": 632,
+        "groups_after": 332
+      },
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 1992
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": true,
+      "fail_reasons": []
+    },
+    "model_saved": true,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T20:59:54.841766",
+    "samples": 312,
+    "train_ic": 0.35837509629670705,
+    "valid_ic": -0.36660833358257083,
+    "cv_mean_ic": -0.2502493175963166,
+    "cv_std_ic": 0.2771344067510963,
+    "cv_scores": [
+      -0.4783363037216521,
+      -0.6310207927918057,
+      0.15732711918802111,
+      -0.16737103233649855,
+      -0.13184557831964744
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 52,
+      "train_groups": 36,
+      "valid_groups": 10,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 312,
+      "groups_before": 52,
+      "cutoff": "2025-12-28T02:00:00",
+      "rows_after": 312,
+      "groups_after": 52
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.35837509629670705,
+        "valid_ic": -0.36660833358257083,
+        "cv_mean_ic": -0.2502493175963166,
+        "cv_std_ic": 0.2771344067510963,
+        "cv_scores": [
+          -0.4783363037216521,
+          -0.6310207927918057,
+          0.15732711918802111,
+          -0.16737103233649855,
+          -0.13184557831964744
+        ],
+        "ic_gap": 0.7249834298792779,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 1.1043802346565,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06,
+          "min_cross_sectional_group_size": 2,
+          "min_group_coverage_ratio": 0.9
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "timestamp_bucket": {
+        "enabled": true,
+        "rows_before": 2356,
+        "rows_after": 417,
+        "deduped_rows": 1939
+      },
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "group_filter": {
+        "enabled": true,
+        "max_group_size": 6,
+        "required_group_size": 6,
+        "groups_before": 97,
+        "groups_after": 52
+      },
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 312
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_mean_ic<0.01",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T21:00:19.253382",
+    "samples": 312,
+    "train_ic": 0.35837509629670705,
+    "valid_ic": -0.36660833358257083,
+    "cv_mean_ic": -0.2502493175963166,
+    "cv_std_ic": 0.2771344067510963,
+    "cv_scores": [
+      -0.4783363037216521,
+      -0.6310207927918057,
+      0.15732711918802111,
+      -0.16737103233649855,
+      -0.13184557831964744
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 52,
+      "train_groups": 36,
+      "valid_groups": 10,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 312,
+      "groups_before": 52,
+      "cutoff": "2025-12-28T02:00:00",
+      "rows_after": 312,
+      "groups_after": 52
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.35837509629670705,
+        "valid_ic": -0.36660833358257083,
+        "cv_mean_ic": -0.2502493175963166,
+        "cv_std_ic": 0.2771344067510963,
+        "cv_scores": [
+          -0.4783363037216521,
+          -0.6310207927918057,
+          0.15732711918802111,
+          -0.16737103233649855,
+          -0.13184557831964744
+        ],
+        "ic_gap": 0.7249834298792779,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 1.1043802346565,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06,
+          "min_cross_sectional_group_size": 2,
+          "min_group_coverage_ratio": 0.9
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "timestamp_bucket": {
+        "enabled": true,
+        "rows_before": 2356,
+        "rows_after": 417,
+        "deduped_rows": 1939
+      },
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "group_filter": {
+        "enabled": true,
+        "max_group_size": 6,
+        "required_group_size": 6,
+        "groups_before": 97,
+        "groups_after": 52
+      },
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 312
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_mean_ic<0.01",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
+  },
+  {
+    "timestamp": "2026-03-10T21:37:10.234472",
+    "samples": 312,
+    "train_ic": 0.35837509629670705,
+    "valid_ic": -0.36660833358257083,
+    "cv_mean_ic": -0.2502493175963166,
+    "cv_std_ic": 0.2771344067510963,
+    "cv_scores": [
+      -0.4783363037216521,
+      -0.6310207927918057,
+      0.15732711918802111,
+      -0.16737103233649855,
+      -0.13184557831964744
+    ],
+    "feature_mode": "optimized",
+    "selected_features": [
+      "returns_24h",
+      "volatility_24h",
+      "volatility_ratio",
+      "volume_ratio",
+      "obv",
+      "rsi",
+      "macd"
+    ],
+    "selector_reason": "optimize_features_for_training",
+    "grouped_holdout": {
+      "unique_groups": 52,
+      "train_groups": 36,
+      "valid_groups": 10,
+      "purge_gap_groups": 6
+    },
+    "rolling_window": {
+      "enabled": true,
+      "lookback_days": 60.0,
+      "rows_before": 312,
+      "groups_before": 52,
+      "cutoff": "2025-12-28T02:00:00",
+      "rows_after": 312,
+      "groups_after": 52
+    },
+    "cycle_alignment": {
+      "rows_before": 417,
+      "rows_after": 417,
+      "duplicates_removed": 0
+    },
+    "recency_weighting": {
+      "half_life_days": 5.0,
+      "max_weight": 3.0
+    },
+    "candidate_models": [
+      {
+        "model_type": "ridge",
+        "train_ic": 0.35837509629670705,
+        "valid_ic": -0.36660833358257083,
+        "cv_mean_ic": -0.2502493175963166,
+        "cv_std_ic": 0.2771344067510963,
+        "cv_scores": [
+          -0.4783363037216521,
+          -0.6310207927918057,
+          0.15732711918802111,
+          -0.16737103233649855,
+          -0.13184557831964744
+        ],
+        "ic_gap": 0.7249834298792779,
+        "train_weight_mean": 1.0,
+        "train_weight_max": 1.1043802346565,
+        "config": {
+          "model_type": "ridge",
+          "alpha": 50.0,
+          "n_estimators": 50,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "hgb_max_iter": 120,
+          "hgb_min_samples_leaf": 120,
+          "subsample": 0.6,
+          "colsample_bytree": 0.6,
+          "num_leaves": 7,
+          "min_data_in_leaf": 50,
+          "min_child_samples": 30,
+          "reg_alpha": 2.0,
+          "reg_lambda": 5.0,
+          "random_state": 42,
+          "train_lookback_days": 60,
+          "prediction_horizon": 6,
+          "min_train_samples": 200,
+          "early_stopping_rounds": 10,
+          "target_mode": "forward_edge_rank",
+          "include_time_features": false,
+          "min_symbol_samples": 48,
+          "min_symbol_target_std": 1e-06,
+          "min_cross_sectional_group_size": 2,
+          "min_group_coverage_ratio": 0.9
+        }
+      }
+    ],
+    "selected_model_type": "ridge",
+    "prep": {
+      "target_col": "future_return_6h",
+      "target_mode": "forward_edge_rank",
+      "kept_symbols": [
+        "BNB/USDT",
+        "BTC/USDT",
+        "DOGE/USDT",
+        "DOT/USDT",
+        "ETH/USDT",
+        "SOL/USDT"
+      ],
+      "dropped_symbols": [
+        "ADA/USDT",
+        "AVAX/USDT",
+        "LINK/USDT",
+        "XRP/USDT"
+      ],
+      "horizon_target_cols": [
+        "future_return_6h",
+        "future_return_12h",
+        "future_return_24h"
+      ],
+      "group_filter": {
+        "enabled": true,
+        "max_group_size": 6,
+        "required_group_size": 6,
+        "groups_before": 97,
+        "groups_after": 52
+      },
+      "feature_cols": [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position"
+      ],
+      "rows_after_clean": 312
+    },
+    "gate": {
+      "min_valid_ic": 0.0,
+      "max_ic_gap": 0.25,
+      "min_cv_mean_ic": 0.01,
+      "max_cv_std": 0.15,
+      "passed": false,
+      "fail_reasons": [
+        "valid_ic<0.00",
+        "ic_gap>0.25",
+        "cv_mean_ic<0.01",
+        "cv_std_ic>0.15"
+      ]
+    },
+    "model_saved": false,
+    "config": {
+      "model_type": "ridge",
+      "candidates": [
+        "ridge"
+      ],
+      "target_mode": "forward_edge_rank",
+      "include_time_features": false,
+      "feature_selector": "stable",
+      "rolling_window_days": 60.0,
+      "recency_half_life_days": 5.0,
+      "recency_max_weight": 3.0
+    }
   }
 ]
