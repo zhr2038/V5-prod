@@ -303,6 +303,28 @@ class ExecutionConfig(BaseModel):
         default=True,
         description="Allow pipeline cycles to persist ML feature snapshots and fill labels",
     )
+    ml_research_use_stable_universe: bool = Field(
+        default=False,
+        description="Collect ML snapshots from a stable research universe instead of only the live market_data keys",
+    )
+    ml_research_universe_path: Optional[str] = Field(
+        default=None,
+        description="Optional JSON file with {symbols:[...]} used as the stable ML research universe",
+    )
+    ml_research_symbols: List[str] = Field(
+        default_factory=list,
+        description="Optional explicit stable ML research symbols that override the universe file",
+    )
+    ml_research_include_config_symbols: bool = Field(
+        default=True,
+        description="Always include AppConfig.symbols in the ML research universe",
+    )
+    ml_research_lookback_bars: int = Field(
+        default=600,
+        ge=50,
+        le=5000,
+        description="OHLCV bars to load for ML snapshot feature calculation when backfilling from cache/provider",
+    )
 
     # Stores / safety files
     order_store_path: str = Field(default="reports/orders.sqlite")

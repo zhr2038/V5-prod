@@ -282,6 +282,104 @@ class V5Pipeline:
         hour_ms = 3600 * 1000
         return now_ms - (now_ms % hour_ms)
 
+    def _resolve_ml_research_universe_path(self) -> Optional[Path]:
+        raw_path = (
+            getattr(self.cfg.execution, "ml_research_universe_path", None)
+            or getattr(getattr(self.cfg, "universe", None), "cache_path", None)
+        )
+        if not raw_path:
+            return None
+        path = Path(str(raw_path))
+        if path.is_absolute():
+            return path
+        return (REPORTS_DIR.parent / path).resolve()
+
+    def _load_ml_research_symbols(self) -> list[str]:
+        symbols: list[str] = []
+
+        explicit = [
+            str(sym).strip()
+            for sym in (getattr(self.cfg.execution, "ml_research_symbols", []) or [])
+            if str(sym).strip()
+        ]
+        if explicit:
+            symbols.extend(explicit)
+        else:
+            universe_path = self._resolve_ml_research_universe_path()
+            if universe_path is not None and universe_path.exists():
+                try:
+                    payload = json.loads(universe_path.read_text(encoding="utf-8"))
+                    cached_symbols = payload.get("symbols", []) if isinstance(payload, dict) else []
+                    symbols.extend(str(sym).strip() for sym in cached_symbols if str(sym).strip())
+                except Exception:
+                    pass
+
+        if bool(getattr(self.cfg.execution, "ml_research_include_config_symbols", True)):
+            symbols.extend(str(sym).strip() for sym in (getattr(self.cfg, "symbols", []) or []) if str(sym).strip())
+
+        out: list[str] = []
+        seen: set[str] = set()
+        for raw in symbols:
+            sym = str(raw).strip()
+            if not sym:
+                continue
+            key = sym.upper()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(sym)
+        return out
+
+    @staticmethod
+    def _market_series_to_ml_payload(symbol: str, series: MarketSeries) -> Optional[Dict[str, Any]]:
+        close = list(getattr(series, "close", []) or [])
+        if len(close) < 2:
+            return None
+        return {
+            "symbol": str(symbol),
+            "ts": list(getattr(series, "ts", []) or []),
+            "open": list(getattr(series, "open", []) or close),
+            "high": list(getattr(series, "high", []) or close),
+            "low": list(getattr(series, "low", []) or close),
+            "close": close,
+            "volume": list(getattr(series, "volume", []) or [0.0] * len(close)),
+        }
+
+    def _resolve_ml_collection_payloads(
+        self,
+        market_data_1h: Dict[str, MarketSeries],
+        *,
+        snapshot_ts: int,
+    ) -> tuple[Dict[str, Dict[str, Any]], list[str]]:
+        use_stable_universe = bool(getattr(self.cfg.execution, "ml_research_use_stable_universe", False))
+        lookback_bars = int(getattr(self.cfg.execution, "ml_research_lookback_bars", 600) or 600)
+        target_symbols = (
+            self._load_ml_research_symbols()
+            if use_stable_universe
+            else sorted(str(sym) for sym in market_data_1h.keys())
+        )
+        if not target_symbols:
+            target_symbols = sorted(str(sym) for sym in market_data_1h.keys())
+
+        payloads: Dict[str, Dict[str, Any]] = {}
+        missing_symbols: list[str] = []
+        for sym in target_symbols:
+            payload = None
+            series = market_data_1h.get(sym)
+            if series is not None:
+                payload = self._market_series_to_ml_payload(sym, series)
+            if payload is None:
+                payload = self.data_collector.load_market_data_for_feature_snapshot(
+                    sym,
+                    end_timestamp=int(snapshot_ts),
+                    lookback_bars=lookback_bars,
+                )
+            if payload is None:
+                missing_symbols.append(sym)
+                continue
+            payloads[sym] = payload
+        return payloads, missing_symbols
+
     def _refresh_negative_expectancy_state(self, audit: Optional[DecisionAudit] = None) -> Dict[str, Any]:
         neg_feedback_enabled = any(
             [
@@ -1668,22 +1766,23 @@ class V5Pipeline:
             if bool(getattr(self.cfg.execution, "collect_ml_training_data", True)):
                 current_ts = int(self.clock.now().timestamp() * 1000)
                 snapshot_ts = self._resolve_ml_snapshot_timestamp_ms(audit=audit)
-                ml_symbols = sorted(str(sym) for sym in market_data_1h.keys())
-                for sym in ml_symbols:
-                    if sym in market_data_1h:
-                        px = float(prices.get(sym, 0))
-                        if px > 0:
-                            self.data_collector.collect_features(
-                                timestamp=snapshot_ts,
-                                symbol=sym,
-                                market_data={
-                                    'close': list(market_data_1h[sym].close) if hasattr(market_data_1h[sym], 'close') else [px],
-                                    'high': list(market_data_1h[sym].high) if hasattr(market_data_1h[sym], 'high') else [px],
-                                    'low': list(market_data_1h[sym].low) if hasattr(market_data_1h[sym], 'low') else [px],
-                                    'volume': list(market_data_1h[sym].volume) if hasattr(market_data_1h[sym], 'volume') else [0],
-                                },
-                                regime=str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
-                            )
+                ml_payloads, missing_symbols = self._resolve_ml_collection_payloads(
+                    market_data_1h,
+                    snapshot_ts=snapshot_ts,
+                )
+                for sym, payload in ml_payloads.items():
+                    close = list(payload.get("close", []) or [])
+                    px = float(close[-1]) if close else float(prices.get(sym, 0.0) or 0.0)
+                    if px <= 0:
+                        continue
+                    self.data_collector.collect_features(
+                        timestamp=snapshot_ts,
+                        symbol=sym,
+                        market_data=payload,
+                        regime=str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+                    )
+                if audit and missing_symbols:
+                    audit.add_note(f"ML data collection missing {len(missing_symbols)} stable-universe symbols")
             
             # 回填6小时前的标签
                 filled_count = self.data_collector.fill_labels(current_ts)
