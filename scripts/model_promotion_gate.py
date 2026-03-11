@@ -50,6 +50,24 @@ def _load_history():
         return []
 
 
+def _load_latest_training_entry() -> dict | None:
+    try:
+        from src.research.recorder import load_latest_task_record
+
+        record = load_latest_task_record("ml_training", "analysis/model_training_record.json")
+        if isinstance(record, dict):
+            legacy = record.get("legacy_history_entry")
+            if isinstance(legacy, dict):
+                return legacy
+
+        metrics = load_latest_task_record("ml_training", "metrics.json")
+        if isinstance(metrics, dict):
+            return metrics
+    except Exception:
+        return None
+    return None
+
+
 def _safe_float(v, default=-999.0):
     try:
         x = float(v)
@@ -84,6 +102,10 @@ def _comparable_history_runs(hist: list[dict], latest: dict) -> list[dict]:
 
 def main() -> int:
     hist = _load_history()
+    latest_run_entry = _load_latest_training_entry()
+    if latest_run_entry:
+        if not hist or str(hist[-1].get("run_id")) != str(latest_run_entry.get("run_id")):
+            hist = [*hist, latest_run_entry]
     if not hist:
         decision = {
             "ts": datetime.now().isoformat(),
@@ -101,11 +123,11 @@ def main() -> int:
     cv_std_ic = _safe_float(latest.get("cv_std_ic"))
     ic_gap = _safe_float(latest.get("train_ic")) - valid_ic
 
-    # configurable gates via env-like fallback constants
-    min_valid_ic = 0.00
-    min_cv_mean_ic = 0.01
-    max_cv_std = 0.15
-    max_ic_gap = 0.25
+    gate_cfg = latest.get("gate") or {}
+    min_valid_ic = _safe_float(gate_cfg.get("min_valid_ic"), default=0.00)
+    min_cv_mean_ic = _safe_float(gate_cfg.get("min_cv_mean_ic"), default=0.01)
+    max_cv_std = _safe_float(gate_cfg.get("max_cv_std"), default=0.15)
+    max_ic_gap = _safe_float(gate_cfg.get("max_ic_gap"), default=0.25)
 
     k = 5
     comparable_hist = _comparable_history_runs(hist, latest)

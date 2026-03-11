@@ -296,19 +296,19 @@ class MLDataCollector:
             return False
 
     def _calculate_features(self, data: Dict) -> Dict[str, float]:
-        """
-        计算特征
-        
-        使用 src/utils/features.py 中的公共函数避免代码重复
-        """
-        from src.utils.features import calculate_all_features
-        
-        close = pd.Series(data['close'])
-        volume = pd.Series(data.get('volume', [0] * len(close)))
-        high = pd.Series(data.get('high', close))
-        low = pd.Series(data.get('low', close))
-        
-        return calculate_all_features(close, volume, high, low)
+        """Compute the canonical snapshot feature set for training collection."""
+        from src.research.feature_registry import build_snapshot_feature_row
+
+        row = build_snapshot_feature_row(
+            symbol=str(data.get("symbol", "_tmp")),
+            close=list(data["close"]),
+            high=list(data.get("high", data["close"])),
+            low=list(data.get("low", data["close"])),
+            volume=list(data.get("volume", [0] * len(data["close"]))),
+            feature_groups=("classic",),
+            include_time_features=False,
+        )
+        return {key: float(value) for key, value in row.items() if key != "symbol"}
 
     def _save_record(self, record: FeatureRecord) -> None:
         """保存记录到数据库（使用连接池）"""

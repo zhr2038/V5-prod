@@ -1,0 +1,14 @@
+task:
+  name: walk_forward
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/walk_forward.json
+
+walk_forward:
+  config_path: configs/config.yaml
+  env_path: .env
+  provider: mock
+  mock_seed: 7
+  ohlcv_limit: 2880
+  folds: 4

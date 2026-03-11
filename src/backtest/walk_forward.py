@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, Any
 from collections import Counter
+import numpy as np
 
 from configs.schema import AppConfig
 from src.core.models import MarketSeries
@@ -94,3 +95,39 @@ def run_walk_forward(market_data: Dict[str, MarketSeries], folds: int = 4, cfg: 
         res = bt.run(sub)
         out.append(WalkForwardFold(train_range=tr, test_range=te, result=res))
     return out
+
+
+def build_portfolio_analysis_record(report: Dict[str, Any]) -> Dict[str, Any]:
+    folds = list(report.get("folds") or [])
+    sharpes = [float(((fold.get("result") or {}).get("sharpe") or 0.0)) for fold in folds]
+    cagrs = [float(((fold.get("result") or {}).get("cagr") or 0.0)) for fold in folds]
+    max_dds = [float(((fold.get("result") or {}).get("max_dd") or 0.0)) for fold in folds]
+    profit_factors = [float(((fold.get("result") or {}).get("profit_factor") or 0.0)) for fold in folds]
+    turnovers = [float(((fold.get("result") or {}).get("turnover") or 0.0)) for fold in folds]
+
+    def _summary(vals: List[float]) -> Dict[str, float]:
+        if not vals:
+            return {"count": 0, "mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
+        arr = np.asarray(vals, dtype=float)
+        return {
+            "count": int(len(arr)),
+            "mean": float(np.mean(arr)),
+            "std": float(np.std(arr)),
+            "min": float(np.min(arr)),
+            "max": float(np.max(arr)),
+        }
+
+    return {
+        "status": "completed",
+        "schema_version": int(report.get("schema_version") or 0),
+        "fold_count": int(len(folds)),
+        "metrics": {
+            "sharpe": _summary(sharpes),
+            "cagr": _summary(cagrs),
+            "max_dd": _summary(max_dds),
+            "profit_factor": _summary(profit_factors),
+            "turnover": _summary(turnovers),
+        },
+        "cost_assumption_meta": report.get("cost_assumption_meta") or {},
+        "cost_assumption_aggregate": report.get("cost_assumption_aggregate") or {},
+    }

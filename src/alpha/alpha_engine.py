@@ -16,7 +16,6 @@ from src.utils.math import safe_pct_change, zscore_cross_section
 from configs.schema import AlphaConfig
 from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
 from src.alpha.qlib_factors import compute_alpha158_style_factors
-from src.utils.features import calculate_all_features
 
 # 多策略集成
 try:
@@ -476,38 +475,15 @@ class AlphaEngine:
             pass
 
     def _build_ml_inference_frame(self, market_data: Dict[str, MarketSeries], feature_names: List[str]) -> pd.DataFrame:
-        rows: List[Dict[str, float]] = []
-        include_time = any(name in {"hour_of_day", "day_of_week"} for name in feature_names)
-        for sym, series in (market_data or {}).items():
-            close = pd.Series(list(getattr(series, "close", []) or []), dtype=float)
-            if len(close) < 2:
-                continue
-            volume = pd.Series(list(getattr(series, "volume", []) or [0.0] * len(close)), dtype=float)
-            high = pd.Series(list(getattr(series, "high", []) or list(close)), dtype=float)
-            low = pd.Series(list(getattr(series, "low", []) or list(close)), dtype=float)
-            features = calculate_all_features(close, volume, high, low)
-            row: Dict[str, float] = {"symbol": sym}
-            row.update({str(k): float(v) for k, v in features.items()})
-            if include_time:
-                ts_list = list(getattr(series, "ts", []) or [])
-                latest_ts = ts_list[-1] if ts_list else None
-                dt = pd.to_datetime(latest_ts, unit="ms", errors="coerce")
-                if pd.isna(dt):
-                    dt = datetime.now(timezone.utc)
-                row["hour_of_day"] = float(dt.hour)
-                row["day_of_week"] = float(dt.dayofweek)
-            rows.append(row)
+        from src.research.dataset_builder import DatasetBuildConfig, ResearchDatasetBuilder
 
-        if not rows:
-            return pd.DataFrame(columns=["symbol", *feature_names])
-
-        df = pd.DataFrame(rows)
-        for col in feature_names:
-            if col not in df.columns:
-                df[col] = 0.0
-        df = df[["symbol", *feature_names]].replace([np.inf, -np.inf], np.nan)
-        valid = df[feature_names].notna().all(axis=1)
-        return df.loc[valid].reset_index(drop=True)
+        builder = ResearchDatasetBuilder(
+            DatasetBuildConfig(
+                feature_groups=tuple(getattr(getattr(self._ml_model, "config", None), "feature_groups", ("classic",)) or ("classic",)),
+                include_time_features=bool(getattr(getattr(self._ml_model, "config", None), "include_time_features", False)),
+            )
+        )
+        return builder.build_inference_frame(market_data, feature_names=feature_names)
 
     def _compute_ml_overlay_scores(self, market_data: Dict[str, MarketSeries]) -> tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
         ml_cfg = getattr(self.cfg, "ml_factor", None)

@@ -8,7 +8,16 @@ from typing import Generator
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import BaseCrossValidator
+
+try:
+    from sklearn.model_selection import BaseCrossValidator
+except Exception:
+    class BaseCrossValidator:
+        def split(self, X, y=None, groups=None):
+            raise NotImplementedError
+
+        def get_n_splits(self, X=None, y=None, groups=None):
+            raise NotImplementedError
 
 
 class TimeSeriesSplit(BaseCrossValidator):
