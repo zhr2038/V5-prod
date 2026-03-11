@@ -45,6 +45,7 @@ Synced code surface:
 - `deploy/`
 - `scripts/`
 - `src/`
+- `web/`
 - current production runbooks in `docs/`
 
 ## Standard deploy flow

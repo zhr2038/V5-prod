@@ -17,6 +17,7 @@ PRODUCTION_SYNC_ITEMS = (
     "deploy",
     "scripts",
     "src",
+    "web",
     "docs/CURRENT_PRODUCTION_FLOW.md",
     "docs/PRODUCTION_MINIMAL_FILES.md",
     "docs/PRODUCTION_ONLY_DEPLOYMENT.md",
