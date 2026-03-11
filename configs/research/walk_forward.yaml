@@ -10,5 +10,6 @@ walk_forward:
   env_path: .env
   provider: mock
   mock_seed: 7
+  collect_ml_training_data: false
   ohlcv_limit: 2880
   folds: 4

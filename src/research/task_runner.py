@@ -636,6 +636,7 @@ def run_walk_forward_task(
     output_report_path = _project_path(project_root, paths_cfg.get("output_report_path", "reports/walk_forward.json"), "reports/walk_forward.json")
 
     cfg = load_config(str(app_cfg_path), env_path=env_path)
+    cfg.execution.collect_ml_training_data = bool(walk_cfg.get("collect_ml_training_data", False))
     provider = OKXCCXTProvider() if provider_name == "okx" else MockProvider(seed=int(walk_cfg.get("mock_seed", 7)))
 
     market_data = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=ohlcv_limit)
@@ -643,6 +644,7 @@ def run_walk_forward_task(
         market_data,
         folds=int(walk_cfg.get("folds", getattr(cfg.backtest, "walk_forward_folds", 4))),
         cfg=cfg,
+        data_provider=provider,
     )
     report = build_walk_forward_report(
         folds,

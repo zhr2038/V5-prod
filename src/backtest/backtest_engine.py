@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from collections import Counter
 
 import numpy as np
 
 from src.core.models import MarketSeries
+
+
+class _BacktestClock:
+    def __init__(self, timestamp_ms: int | None = None):
+        self._now = datetime.now(timezone.utc)
+        if timestamp_ms is not None:
+            self.set_timestamp_ms(timestamp_ms)
+
+    def set_timestamp_ms(self, timestamp_ms: int) -> None:
+        self._now = datetime.fromtimestamp(int(timestamp_ms) / 1000.0, tz=timezone.utc)
+
+    def now(self) -> datetime:
+        return self._now
 
 
 @dataclass
@@ -52,7 +66,7 @@ class BacktestEngine:
         ca["fallback_level_counts"] = dict(self._fallback_counts)
         return ca
 
-    def run(self, market_data: Dict[str, MarketSeries], pipeline=None) -> BacktestResult:
+    def run(self, market_data: Dict[str, MarketSeries], pipeline=None, *, cfg=None, data_provider=None) -> BacktestResult:
         """Run"""
         syms = list(market_data.keys())
         if not syms:
@@ -63,7 +77,13 @@ class BacktestEngine:
         from configs.schema import AppConfig
 
         if pipeline is None:
-            pipeline = V5Pipeline(AppConfig(symbols=syms))
+            cfg_provided = cfg is not None
+            cfg = cfg or AppConfig(symbols=syms)
+            if not cfg_provided:
+                cfg.execution.collect_ml_training_data = False
+            init_ts = int(market_data[syms[0]].ts[0]) if getattr(market_data[syms[0]], "ts", None) else None
+            clock = _BacktestClock(init_ts)
+            pipeline = V5Pipeline(cfg, clock=clock, data_provider=data_provider)
 
         # align by min length
         n = min(len(market_data[s].close) for s in syms)
@@ -88,6 +108,13 @@ class BacktestEngine:
                                         low=market_data[s].low[: i + 1],
                                         close=market_data[s].close[: i + 1],
                                         volume=market_data[s].volume[: i + 1]) for s in syms}
+
+            try:
+                clock = getattr(pipeline, "clock", None)
+                if clock is not None and hasattr(clock, "set_timestamp_ms"):
+                    clock.set_timestamp_ms(int(md_slice[syms[0]].ts[-1]))
+            except Exception:
+                pass
 
             # Backtest semantics: pass *cash* into pipeline; pipeline computes equity = cash + positions MTM.
             out = pipeline.run(md_slice, positions=list(positions.values()), cash_usdt=float(cash), equity_peak_usdt=float(peak))

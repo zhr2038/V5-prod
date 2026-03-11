@@ -1665,29 +1665,30 @@ class V5Pipeline:
         # Phase 3: ML数据收集
         # 收集特征快照用于训练ML模型
         try:
-            current_ts = int(self.clock.now().timestamp() * 1000)
-            snapshot_ts = self._resolve_ml_snapshot_timestamp_ms(audit=audit)
-            ml_symbols = sorted(str(sym) for sym in market_data_1h.keys())
-            for sym in ml_symbols:
-                if sym in market_data_1h:
-                    px = float(prices.get(sym, 0))
-                    if px > 0:
-                        self.data_collector.collect_features(
-                            timestamp=snapshot_ts,
-                            symbol=sym,
-                            market_data={
-                                'close': list(market_data_1h[sym].close) if hasattr(market_data_1h[sym], 'close') else [px],
-                                'high': list(market_data_1h[sym].high) if hasattr(market_data_1h[sym], 'high') else [px],
-                                'low': list(market_data_1h[sym].low) if hasattr(market_data_1h[sym], 'low') else [px],
-                                'volume': list(market_data_1h[sym].volume) if hasattr(market_data_1h[sym], 'volume') else [0],
-                            },
-                            regime=str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
-                        )
+            if bool(getattr(self.cfg.execution, "collect_ml_training_data", True)):
+                current_ts = int(self.clock.now().timestamp() * 1000)
+                snapshot_ts = self._resolve_ml_snapshot_timestamp_ms(audit=audit)
+                ml_symbols = sorted(str(sym) for sym in market_data_1h.keys())
+                for sym in ml_symbols:
+                    if sym in market_data_1h:
+                        px = float(prices.get(sym, 0))
+                        if px > 0:
+                            self.data_collector.collect_features(
+                                timestamp=snapshot_ts,
+                                symbol=sym,
+                                market_data={
+                                    'close': list(market_data_1h[sym].close) if hasattr(market_data_1h[sym], 'close') else [px],
+                                    'high': list(market_data_1h[sym].high) if hasattr(market_data_1h[sym], 'high') else [px],
+                                    'low': list(market_data_1h[sym].low) if hasattr(market_data_1h[sym], 'low') else [px],
+                                    'volume': list(market_data_1h[sym].volume) if hasattr(market_data_1h[sym], 'volume') else [0],
+                                },
+                                regime=str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+                            )
             
             # 回填6小时前的标签
-            filled_count = self.data_collector.fill_labels(current_ts)
-            if audit and filled_count > 0:
-                audit.add_note(f"ML data: filled {filled_count} labels")
+                filled_count = self.data_collector.fill_labels(current_ts)
+                if audit and filled_count > 0:
+                    audit.add_note(f"ML data: filled {filled_count} labels")
         except Exception as e:
             # 数据收集失败不应影响交易
             if audit:

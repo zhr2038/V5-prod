@@ -24,6 +24,7 @@ def test_walk_forward_report_contains_cost_assumption():
 
     cfg = AppConfig(symbols=["BTC/USDT"])
     cfg.backtest.cost_model = "default"
+    cfg.execution.collect_ml_training_data = False
 
     folds = run_walk_forward(md, folds=2, cfg=cfg)
     report = build_walk_forward_report(folds, cost_meta={"mode": "default"})

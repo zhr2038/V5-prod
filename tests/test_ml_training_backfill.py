@@ -277,3 +277,38 @@ def test_fill_labels_waits_for_24h_before_marking_row_ready(tmp_path: Path, monk
         conn.close()
 
     assert row == (0.06, 0.12, 0.24, 1)
+
+
+def test_fetch_future_return_from_cache_merges_overlapping_cache_files(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    db_path = reports_dir / "ml_training_data.db"
+    collector = MLDataCollector(db_path=str(db_path))
+
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True)
+    ts = 1_700_000_000_000
+
+    pd.DataFrame(
+        {
+            "timestamp": [
+                pd.to_datetime(ts, unit="ms").strftime("%Y-%m-%d %H:%M:%S"),
+                pd.to_datetime(ts + 6 * 3600 * 1000, unit="ms").strftime("%Y-%m-%d %H:%M:%S"),
+                pd.to_datetime(ts + 12 * 3600 * 1000, unit="ms").strftime("%Y-%m-%d %H:%M:%S"),
+            ],
+            "close": [100.0, 106.0, 112.0],
+        }
+    ).to_csv(cache_dir / "BTC_USDT_1H_2026-02-01_2026-02-01.csv", index=False)
+    pd.DataFrame(
+        {
+            "timestamp": [
+                pd.to_datetime(ts + 12 * 3600 * 1000, unit="ms").strftime("%Y-%m-%d %H:%M:%S"),
+                pd.to_datetime(ts + 24 * 3600 * 1000, unit="ms").strftime("%Y-%m-%d %H:%M:%S"),
+            ],
+            "close": [112.0, 124.0],
+        }
+    ).to_csv(cache_dir / "BTC_USDT_1H_2026-02-01_2026-02-02.csv", index=False)
+
+    out = collector._fetch_future_return_from_cache("BTC/USDT", ts, 24)
+
+    assert out == pytest.approx(0.24)

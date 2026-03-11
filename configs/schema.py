@@ -299,6 +299,10 @@ class ExecutionConfig(BaseModel):
     # Mode selector (preferred). Keep dry_run for backward compatibility.
     mode: str = Field(default="dry_run", description="dry_run|live")
     dry_run: bool = True
+    collect_ml_training_data: bool = Field(
+        default=True,
+        description="Allow pipeline cycles to persist ML feature snapshots and fill labels",
+    )
 
     # Stores / safety files
     order_store_path: str = Field(default="reports/orders.sqlite")

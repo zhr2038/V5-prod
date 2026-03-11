@@ -66,7 +66,13 @@ def build_folds(n: int, folds: int = 4) -> List[Tuple[Tuple[int, int], Tuple[int
     return out
 
 
-def run_walk_forward(market_data: Dict[str, MarketSeries], folds: int = 4, cfg: Optional[AppConfig] = None) -> List[WalkForwardFold]:
+def run_walk_forward(
+    market_data: Dict[str, MarketSeries],
+    folds: int = 4,
+    cfg: Optional[AppConfig] = None,
+    *,
+    data_provider=None,
+) -> List[WalkForwardFold]:
     """Run walk forward"""
     syms = list(market_data.keys())
     if not syms:
@@ -92,7 +98,7 @@ def run_walk_forward(market_data: Dict[str, MarketSeries], folds: int = 4, cfg: 
                                ts=market_data[s].ts[s0:s1], open=market_data[s].open[s0:s1],
                                high=market_data[s].high[s0:s1], low=market_data[s].low[s0:s1],
                                close=market_data[s].close[s0:s1], volume=market_data[s].volume[s0:s1]) for s in syms}
-        res = bt.run(sub)
+        res = bt.run(sub, cfg=cfg, data_provider=data_provider)
         out.append(WalkForwardFold(train_range=tr, test_range=te, result=res))
     return out
 
