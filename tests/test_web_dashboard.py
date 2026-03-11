@@ -64,6 +64,7 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     assert "renderHmmProbRows" in body
     assert "renderDerivedVoteRows" in body
     assert "renderVoteHistory" in body
+    assert "renderMlSignalCard" in body
     assert "showHistoryTooltip" in body
     assert "showHmmProbs:true" in body
     assert "showStateBars:true" in body
@@ -367,6 +368,183 @@ def test_api_scores_backfills_display_score_for_legacy_raw_values(monkeypatch, t
     assert first["score"] == first["display_score"]
 
 
+def test_api_scores_skips_latest_failed_run(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    valid_run = runs_dir / "20260311_00"
+    failed_run = runs_dir / "20260311_01"
+    valid_run.mkdir(parents=True, exist_ok=True)
+    failed_run.mkdir(parents=True, exist_ok=True)
+
+    (valid_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "SIDEWAYS",
+                "top_scores": [
+                    {"symbol": "FLOW/USDT", "score": 0.88, "display_score": 0.88, "raw_score": 1.90, "rank": 1},
+                    {"symbol": "HYPE/USDT", "score": 0.86, "display_score": 0.86, "raw_score": 1.70, "rank": 2},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (failed_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "Unknown",
+                "top_scores": [],
+                "counts": {"universe": 0, "scored": 0},
+                "notes": ["No market data returned from provider"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(valid_run, (1, 1))
+    os.utime(failed_run, (2, 2))
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_run"] == "20260311_00"
+    assert payload["regime"] == "SIDEWAYS"
+    assert payload["scores"][0]["symbol"] == "FLOW/USDT"
+
+
+def test_api_scores_falls_back_to_alpha_snapshot_when_runs_empty(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    failed_run = runs_dir / "20260311_01"
+    failed_run.mkdir(parents=True, exist_ok=True)
+    (failed_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "Unknown",
+                "top_scores": [],
+                "counts": {"universe": 0, "scored": 0},
+                "notes": ["No market data returned from provider"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "alpha_snapshot.json").write_text(
+        json.dumps(
+            {
+                "scores": {
+                    "SOL/USDT": 0.95,
+                    "BTC/USDT": 0.75,
+                    "ETH/USDT": -0.10,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "regime.json").write_text(
+        json.dumps({"state": "Trending", "multiplier": 1.2, "votes": {}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    os.utime(failed_run, (2, 2))
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_run"] == "alpha_snapshot"
+    assert payload["regime"] == "Trending"
+    assert [item["symbol"] for item in payload["scores"][:2]] == ["SOL/USDT", "BTC/USDT"]
+
+
+def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260312_01"
+    current_run.mkdir(parents=True, exist_ok=True)
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260312_01",
+                "regime": "TRENDING",
+                "counts": {"selected": 2, "orders_rebalance": 1, "orders_exit": 0},
+                "top_scores": [
+                    {"symbol": "BTC/USDT", "score": 0.93, "display_score": 0.93, "raw_score": 1.44, "rank": 1},
+                    {"symbol": "ETH/USDT", "score": 0.84, "display_score": 0.84, "raw_score": 0.88, "rank": 2},
+                ],
+                "targets_pre_risk": {"BTC/USDT": 0.35, "ETH/USDT": 0.25},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_runtime_status.json").write_text(
+        json.dumps(
+            {
+                "configured_enabled": True,
+                "promotion_passed": True,
+                "used_in_latest_snapshot": True,
+                "prediction_count": 3,
+                "ml_weight": 0.2,
+                "reason": "ok",
+                "ts": "2026-03-12T02:01:08Z",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "alpha_snapshot.json").write_text(
+        json.dumps(
+            {
+                "raw_factors": {
+                    "BTC/USDT": {"ml_pred_raw": 0.061},
+                    "ETH/USDT": {"ml_pred_raw": -0.018},
+                    "SOL/USDT": {"ml_pred_raw": 0.074},
+                },
+                "z_factors": {
+                    "BTC/USDT": {"ml_pred_zscore": 0.82},
+                    "ETH/USDT": {"ml_pred_zscore": -0.31},
+                    "SOL/USDT": {"ml_pred_zscore": 1.12},
+                },
+                "scores": {
+                    "BTC/USDT": 0.93,
+                    "ETH/USDT": 0.84,
+                    "SOL/USDT": 0.65,
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(current_run, (2, 2))
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    ml = payload["ml_signal_overview"]
+    assert ml["configured_enabled"] is True
+    assert ml["promoted"] is True
+    assert ml["live_active"] is True
+    assert ml["prediction_count"] == 3
+    assert ml["ml_weight"] == 0.2
+    assert [item["symbol"] for item in ml["top_contributors"]] == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+    assert ml["top_contributors"][0]["ml_zscore"] == 0.82
+
+
 def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -653,3 +831,46 @@ def test_market_state_prefers_live_funding_vote_over_snapshot(monkeypatch):
     assert funding["confidence"] == 0.18
     assert funding["sentiment"] == 0.09
     assert funding["composite"] is True
+
+
+def test_market_state_snapshot_falls_back_to_regime_json_after_failed_run(tmp_path):
+    module = load_web_dashboard_module()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    failed_run = runs_dir / "20260312_00"
+    failed_run.mkdir(parents=True, exist_ok=True)
+    (failed_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "Unknown",
+                "top_scores": [],
+                "counts": {"universe": 0, "scored": 0},
+                "notes": ["No market data returned from provider"],
+                "regime_details": {},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "regime.json").write_text(
+        json.dumps(
+            {
+                "state": "Trending",
+                "multiplier": 1.2,
+                "final_score": 0.42,
+                "votes": {"hmm": {"state": "TRENDING", "confidence": 0.81}},
+                "alerts": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(failed_run, (2, 2))
+
+    snapshot = module._load_market_state_snapshot(reports_dir)
+
+    assert snapshot["state"] == "Trending"
+    assert snapshot["method"] == "regime_json"
+    assert snapshot["final_score"] == 0.42
+    assert snapshot["votes"]["hmm"]["state"] == "TRENDING"

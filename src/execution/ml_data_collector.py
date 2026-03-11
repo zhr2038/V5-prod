@@ -440,6 +440,17 @@ class MLDataCollector:
             conn.rollback()
             raise MLDataCollectorError(f"database error filling labels: {exc}") from exc
 
+    def fill_all_labels(self, current_timestamp: int, *, max_batches: int = 100) -> dict[str, int]:
+        total_filled = 0
+        batches_run = 0
+        for _ in range(max(int(max_batches), 1)):
+            filled = int(self.fill_labels(current_timestamp))
+            if filled <= 0:
+                break
+            batches_run += 1
+            total_filled += filled
+        return {"filled": total_filled, "batches": batches_run}
+
     def _calculate_future_return(self, symbol: str, start_timestamp: int, hours: int) -> Optional[float]:
         try:
             if self._data_provider is not None:
@@ -474,8 +485,15 @@ class MLDataCollector:
     def _empty_candle_frame() -> pd.DataFrame:
         return pd.DataFrame(columns=["timestamp_ms", "close"])
 
+    @staticmethod
+    def _empty_ohlcv_frame() -> pd.DataFrame:
+        return pd.DataFrame(columns=["timestamp_ms", "open", "high", "low", "close", "volume"])
+
+    def _default_cache_dir(self) -> Path:
+        return Path(self.db_path).resolve().parent.parent / "data" / "cache"
+
     @classmethod
-    def _load_cache_candles(
+    def _load_cache_ohlcv(
         cls,
         cache_dir: Path,
         symbol: str,
@@ -486,30 +504,44 @@ class MLDataCollector:
         prefix = str(symbol or "").replace("/", "_").replace("-", "_").strip()
         files = sorted(cache_dir.glob(f"{prefix}_1H_*.csv"))
         if not files:
-            return cls._empty_candle_frame()
+            return cls._empty_ohlcv_frame()
 
         frames: list[pd.DataFrame] = []
         for path in files:
             try:
-                df = pd.read_csv(path, usecols=lambda c: str(c).strip().lower() in {"timestamp", "close"})
+                df = pd.read_csv(
+                    path,
+                    usecols=lambda c: str(c).strip().lower() in {"timestamp", "open", "high", "low", "close", "volume"},
+                )
             except Exception:
                 continue
             if df.empty or "timestamp" not in df.columns or "close" not in df.columns:
                 continue
+            close_s = pd.to_numeric(df["close"], errors="coerce")
             frame = pd.DataFrame(
                 {
                     "timestamp_ms": cls._parse_cache_timestamp_ms(df["timestamp"]),
-                    "close": pd.to_numeric(df["close"], errors="coerce"),
+                    "open": pd.to_numeric(df["open"], errors="coerce") if "open" in df.columns else close_s,
+                    "high": pd.to_numeric(df["high"], errors="coerce") if "high" in df.columns else close_s,
+                    "low": pd.to_numeric(df["low"], errors="coerce") if "low" in df.columns else close_s,
+                    "close": close_s,
+                    "volume": pd.to_numeric(df["volume"], errors="coerce") if "volume" in df.columns else 0.0,
                 }
             ).dropna(subset=["timestamp_ms", "close"])
             if frame.empty:
                 continue
             frame["timestamp_ms"] = frame["timestamp_ms"].astype("int64")
+            for col in ("open", "high", "low", "close", "volume"):
+                frame[col] = pd.to_numeric(frame[col], errors="coerce")
+            frame["open"] = frame["open"].fillna(frame["close"]).astype("float64")
+            frame["high"] = frame["high"].fillna(frame["close"]).astype("float64")
+            frame["low"] = frame["low"].fillna(frame["close"]).astype("float64")
             frame["close"] = frame["close"].astype("float64")
+            frame["volume"] = frame["volume"].fillna(0.0).astype("float64")
             frames.append(frame)
 
         if not frames:
-            return cls._empty_candle_frame()
+            return cls._empty_ohlcv_frame()
 
         merged = pd.concat(frames, ignore_index=True)
         merged = merged.drop_duplicates(subset=["timestamp_ms"], keep="last").sort_values("timestamp_ms").reset_index(drop=True)
@@ -518,6 +550,166 @@ class MLDataCollector:
         if end_ms is not None:
             merged = merged[merged["timestamp_ms"] <= int(end_ms) + cls.ONE_HOUR_MS]
         return merged.reset_index(drop=True)
+
+    @classmethod
+    def _load_cache_candles(
+        cls,
+        cache_dir: Path,
+        symbol: str,
+        *,
+        start_ms: Optional[int] = None,
+        end_ms: Optional[int] = None,
+    ) -> pd.DataFrame:
+        ohlcv = cls._load_cache_ohlcv(cache_dir, symbol, start_ms=start_ms, end_ms=end_ms)
+        if ohlcv.empty:
+            return cls._empty_candle_frame()
+        return ohlcv[["timestamp_ms", "close"]].copy()
+
+    def load_market_data_for_feature_snapshot(
+        self,
+        symbol: str,
+        *,
+        end_timestamp: int,
+        lookback_bars: int = 600,
+    ) -> Optional[Dict[str, Any]]:
+        end_ms = int(end_timestamp)
+        lookback = max(int(lookback_bars), 2)
+        cache_dir = self._default_cache_dir()
+        ohlcv = self._load_cache_ohlcv(cache_dir, symbol, end_ms=end_ms)
+        if not ohlcv.empty:
+            ohlcv = ohlcv[ohlcv["timestamp_ms"] <= end_ms].tail(lookback).reset_index(drop=True)
+            if len(ohlcv) >= 2:
+                return {
+                    "symbol": str(symbol),
+                    "ts": ohlcv["timestamp_ms"].astype("int64").tolist(),
+                    "open": ohlcv["open"].astype(float).tolist(),
+                    "high": ohlcv["high"].astype(float).tolist(),
+                    "low": ohlcv["low"].astype(float).tolist(),
+                    "close": ohlcv["close"].astype(float).tolist(),
+                    "volume": ohlcv["volume"].astype(float).tolist(),
+                }
+
+        if self._data_provider is None:
+            return None
+
+        try:
+            series_dict = self._data_provider.fetch_ohlcv(
+                symbols=[str(symbol)],
+                timeframe="1h",
+                limit=lookback,
+                end_ts_ms=end_ms + self.ONE_HOUR_MS,
+            )
+        except Exception as exc:
+            logger.warning("[ML] failed loading snapshot OHLCV for %s from provider: %s", symbol, exc)
+            return None
+
+        series = series_dict.get(str(symbol))
+        if series is None or not getattr(series, "close", None):
+            return None
+
+        ts = list(getattr(series, "ts", []) or [])
+        close = list(getattr(series, "close", []) or [])
+        if len(close) < 2:
+            return None
+        return {
+            "symbol": str(symbol),
+            "ts": ts,
+            "open": list(getattr(series, "open", []) or close),
+            "high": list(getattr(series, "high", []) or close),
+            "low": list(getattr(series, "low", []) or close),
+            "close": close,
+            "volume": list(getattr(series, "volume", []) or [0.0] * len(close)),
+        }
+
+    def backfill_feature_snapshots_from_cache(
+        self,
+        *,
+        symbols: list[str],
+        start_timestamp: int,
+        end_timestamp: int,
+        lookback_bars: int = 600,
+        overwrite_existing: bool = False,
+        regime: str = "UNKNOWN",
+    ) -> dict[str, Any]:
+        start_ms = int(start_timestamp)
+        end_ms = int(end_timestamp)
+        lookback = max(int(lookback_bars), 2)
+        cache_dir = self._default_cache_dir()
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT timestamp, symbol
+            FROM feature_snapshots
+            WHERE timestamp BETWEEN ? AND ?
+            """,
+            (start_ms, end_ms),
+        ).fetchall()
+        existing_keys: set[tuple[int, str]] = {(int(ts), str(symbol)) for ts, symbol in rows}
+
+        stats = {
+            "symbols_requested": len(symbols or []),
+            "symbols_loaded": 0,
+            "inserted": 0,
+            "updated": 0,
+            "skipped_existing": 0,
+            "failed": 0,
+            "missing_cache_symbols": [],
+        }
+
+        for raw_symbol in symbols or []:
+            symbol = str(raw_symbol).strip()
+            if not symbol:
+                continue
+            ohlcv = self._load_cache_ohlcv(
+                cache_dir,
+                symbol,
+                start_ms=start_ms - (lookback * self.ONE_HOUR_MS),
+                end_ms=end_ms,
+            )
+            if ohlcv.empty:
+                stats["missing_cache_symbols"].append(symbol)
+                continue
+
+            stats["symbols_loaded"] += 1
+            target_rows = ohlcv[(ohlcv["timestamp_ms"] >= start_ms) & (ohlcv["timestamp_ms"] <= end_ms)].reset_index(drop=True)
+            if target_rows.empty:
+                continue
+
+            for _, row in target_rows.iterrows():
+                ts = int(row["timestamp_ms"])
+                key = (ts, symbol)
+                if key in existing_keys and not overwrite_existing:
+                    stats["skipped_existing"] += 1
+                    continue
+
+                upto = ohlcv[ohlcv["timestamp_ms"] <= ts].tail(lookback).reset_index(drop=True)
+                ok = self.collect_features(
+                    timestamp=ts,
+                    symbol=symbol,
+                    market_data={
+                        "symbol": symbol,
+                        "ts": upto["timestamp_ms"].astype("int64").tolist(),
+                        "open": upto["open"].astype(float).tolist(),
+                        "high": upto["high"].astype(float).tolist(),
+                        "low": upto["low"].astype(float).tolist(),
+                        "close": upto["close"].astype(float).tolist(),
+                        "volume": upto["volume"].astype(float).tolist(),
+                    },
+                    regime=regime,
+                )
+                if not ok:
+                    stats["failed"] += 1
+                    continue
+
+                if key in existing_keys:
+                    stats["updated"] += 1
+                else:
+                    stats["inserted"] += 1
+                    existing_keys.add(key)
+
+        return stats
 
     @staticmethod
     def _compute_future_return_from_candles(
@@ -581,7 +773,7 @@ class MLDataCollector:
         return future_return
 
     def _fetch_future_return_from_cache(self, symbol: str, start_timestamp: int, hours: int) -> Optional[float]:
-        cache_dir = Path(self.db_path).resolve().parent.parent / "data" / "cache"
+        cache_dir = self._default_cache_dir()
         end_timestamp = int(start_timestamp) + int(hours) * self.ONE_HOUR_MS
         candles = self._load_cache_candles(
             cache_dir,

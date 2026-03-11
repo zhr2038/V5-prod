@@ -312,3 +312,117 @@ def test_fetch_future_return_from_cache_merges_overlapping_cache_files(tmp_path:
     out = collector._fetch_future_return_from_cache("BTC/USDT", ts, 24)
 
     assert out == pytest.approx(0.24)
+
+
+def test_backfill_feature_snapshots_from_cache_exports_labeled_rows(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    db_path = reports_dir / "ml_training_data.db"
+    csv_path = reports_dir / "ml_training_data.csv"
+    collector = MLDataCollector(db_path=str(db_path))
+
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True)
+    base_ts = 1_740_614_400_000
+    bars = 40
+    frame = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.to_datetime(base_ts + idx * 3600 * 1000, unit="ms").strftime("%Y-%m-%d %H:%M:%S")
+                for idx in range(bars)
+            ],
+            "open": [100.0 + idx for idx in range(bars)],
+            "high": [101.0 + idx for idx in range(bars)],
+            "low": [99.0 + idx for idx in range(bars)],
+            "close": [100.5 + idx for idx in range(bars)],
+            "volume": [10.0 + idx for idx in range(bars)],
+        }
+    )
+    frame.to_csv(cache_dir / "BTC_USDT_1H_2026-02-27_2026-02-28.csv", index=False)
+
+    start_ts = base_ts + 10 * 3600 * 1000
+    end_ts = base_ts + 11 * 3600 * 1000
+
+    stats = collector.backfill_feature_snapshots_from_cache(
+        symbols=["BTC/USDT"],
+        start_timestamp=start_ts,
+        end_timestamp=end_ts,
+        lookback_bars=24,
+        overwrite_existing=False,
+        regime="SIDEWAYS",
+    )
+    filled = collector.fill_labels(base_ts + 39 * 3600 * 1000)
+    exported = collector.export_training_data(str(csv_path), min_samples=1)
+
+    assert stats["symbols_loaded"] == 1
+    assert stats["inserted"] == 2
+    assert stats["updated"] == 0
+    assert stats["failed"] == 0
+    assert stats["missing_cache_symbols"] == []
+    assert filled == 2
+    assert exported is True
+
+    df = pd.read_csv(csv_path)
+    assert len(df) == 2
+    assert df["symbol"].tolist() == ["BTC/USDT", "BTC/USDT"]
+    assert df["timestamp"].tolist() == [start_ts, end_ts]
+    assert df["future_return_24h"].notna().all()
+
+
+def test_fill_all_labels_runs_multiple_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "ml_training_data.db"
+    collector = MLDataCollector(db_path=str(db_path))
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = []
+        for idx in range(1005):
+            ts = 1_700_000_000_000 + idx * 3600 * 1000
+            rows.append(
+                (
+                    ts,
+                    "BTC/USDT",
+                    0.1,
+                    0.2,
+                    0.3,
+                    1.0,
+                    2.0,
+                    0.01,
+                    0.02,
+                    0.5,
+                    1.5,
+                    10.0,
+                    50.0,
+                    0.1,
+                    0.05,
+                    0.2,
+                    0.6,
+                    "SIDEWAYS",
+                )
+            )
+        conn.executemany(
+            """
+            INSERT INTO feature_snapshots (
+                timestamp, symbol, returns_1h, returns_6h, returns_24h,
+                momentum_5d, momentum_20d, volatility_6h, volatility_24h,
+                volatility_ratio, volume_ratio, obv, rsi, macd, macd_signal,
+                bb_position, price_position, regime
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(collector, "_calculate_future_return", lambda symbol, start_timestamp, hours: {6: 0.06, 12: 0.12, 24: 0.24}[hours])
+
+    result = collector.fill_all_labels(1_700_000_000_000 + 2000 * 3600 * 1000, max_batches=5)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        labeled = int(conn.execute("SELECT COUNT(*) FROM feature_snapshots WHERE label_filled = 1").fetchone()[0])
+    finally:
+        conn.close()
+
+    assert result == {"filled": 1005, "batches": 2}
+    assert labeled == 1005

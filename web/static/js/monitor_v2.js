@@ -307,6 +307,61 @@ function renderVoteHistory(history) {
     </div>`;
 }
 
+function shortSymbol(symbol) {
+  return String(symbol || "--").replace("/USDT", "").replace("-USDT", "");
+}
+
+function renderMlSignalCard(ml) {
+  if (!ml) return "";
+
+  const enabled = Boolean(ml.configured_enabled);
+  const promoted = Boolean(ml.promoted);
+  const liveActive = Boolean(ml.live_active);
+  const predictionCount = Number(ml.prediction_count || 0);
+  const coverageCount = Number(ml.coverage_count || 0);
+  const activeCount = Number(ml.active_symbols || predictionCount || coverageCount || 0);
+  const weightPct = Number(ml.ml_weight || 0) * 100;
+  const hasContributors = Array.isArray(ml.top_contributors) && ml.top_contributors.length > 0;
+
+  if (!enabled && !promoted && !liveActive && !coverageCount && !hasContributors) {
+    return "";
+  }
+
+  let value = "Disabled";
+  if (liveActive) {
+    value = `Active on ${activeCount || 0} syms`;
+  } else if (promoted) {
+    value = "Promoted, waiting";
+  } else if (enabled) {
+    value = "Idle this cycle";
+  }
+
+  const details = [];
+  if (weightPct > 0) details.push(`wt ${weightPct.toFixed(0)}%`);
+  if (predictionCount > 0) details.push(`pred ${predictionCount}`);
+  else if (coverageCount > 0) details.push(`cover ${coverageCount}`);
+  if (promoted) details.push("gate ok");
+  else if (enabled) details.push("gate blocked");
+
+  let subtle = details.join(" / ");
+  if (hasContributors) {
+    const topEffects = ml.top_contributors.slice(0, 3).map((item) => {
+      const zscore = Number(item.ml_zscore || 0);
+      const sign = zscore > 0 ? "+" : "";
+      return `${shortSymbol(item.symbol)} ${sign}${fmtNum(zscore, 2)}z`;
+    }).join(" / ");
+    subtle = `${subtle}${subtle ? " / " : ""}impact ${topEffects}`;
+  } else if (ml.reason) {
+    subtle = `${subtle}${subtle ? " / " : ""}${messageZh(ml.reason)}`;
+  }
+
+  return `<div class="signal">
+    <div class="label">ML Overlay</div>
+    <div class="value">${esc(value)}</div>
+    <div class="subtle">${esc(subtle || "waiting for ML snapshot...")}</div>
+  </div>`;
+}
+
 function voteCard(label, vote, cache, opts = {}) {
   const conf = Number(vote?.confidence || 0);
   const state = vote?.state || "--";
@@ -545,9 +600,10 @@ function renderMarket(payload) {
 function renderSignals(data) {
   const strategies = Array.isArray(data.strategy_signals) ? data.strategy_signals : [];
   const counts = data.counts || {};
+  const mlCard = renderMlSignalCard(data.ml_signal_overview || null);
   setText("signals-time", data.run_id ? `运行 ${data.run_id}` : "等待策略信号...");
 
-  if (!strategies.length) {
+  if (!strategies.length && !mlCard) {
     setHtml("signals-content", '<div class="empty">当前没有策略信号。</div>');
     return;
   }
@@ -556,11 +612,12 @@ function renderSignals(data) {
     <div class="info"><div class="label">入池</div><div class="value">${counts.selected || 0}</div><div class="subtle">进入候选池</div></div>
     <div class="info"><div class="label">订单</div><div class="value">${(counts.orders_rebalance || 0) + (counts.orders_exit || 0)}</div><div class="subtle">本轮尝试</div></div>
   </div>`;
-  const cards = strategies.map((item) => `<div class="signal">
+  const strategyCards = strategies.map((item) => `<div class="signal">
     <div class="label">${esc(item.strategy || "策略")}</div>
     <div class="value">${item.total_signals || 0} 个信号</div>
     <div class="subtle">买 ${item.buy_signals || 0} / 卖 ${item.sell_signals || 0} / 配置 ${(Number(item.allocation || 0) * 100).toFixed(0)}%</div>
-  </div>`).join("");
+  </div>`);
+  const cards = [mlCard, ...strategyCards].filter(Boolean).join("");
 
   setHtml("signals-content", `${summary}<div class="signal-grid">${cards}</div>`);
 }

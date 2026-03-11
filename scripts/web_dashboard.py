@@ -155,7 +155,263 @@ def _legacy_display_score(score: float) -> float:
         return math.copysign(min(magnitude, 1.0), raw)
     return math.copysign(math.tanh(magnitude / scale), raw)
 
+
+def _iter_decision_audits(reports_dir: Path) -> List[Dict[str, Any]]:
+    runs_dir = reports_dir / 'runs'
+    if not runs_dir.exists():
+        return []
+
+    run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+    run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
+    audits: List[Dict[str, Any]] = []
+    for run_dir in run_dirs:
+        audit = _load_json_payload(run_dir / 'decision_audit.json')
+        if not audit:
+            continue
+        audits.append({'run_dir': run_dir, 'audit': audit})
+    return audits
+
+
+def _normalize_top_scores(raw_scores: Any, limit: int = 20) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    if not isinstance(raw_scores, list):
+        return items
+
+    for idx, item in enumerate(raw_scores[:limit]):
+        if not isinstance(item, dict):
+            continue
+        try:
+            raw_score = round(float(item.get('raw_score', item.get('score', 0)) or 0), 4)
+            if item.get('display_score') is None:
+                display_score = round(float(_legacy_display_score(raw_score)), 4)
+            else:
+                display_score = round(float(item.get('display_score', item.get('score', 0)) or 0), 4)
+            items.append({
+                'symbol': item.get('symbol', 'Unknown'),
+                'score': display_score,
+                'display_score': display_score,
+                'raw_score': raw_score,
+                'rank': int(item.get('rank', idx + 1) or (idx + 1)),
+            })
+        except Exception:
+            continue
+    return items
+
+
+def _decision_note_text(audit: Dict[str, Any]) -> str:
+    notes = audit.get('notes', [])
+    if isinstance(notes, list):
+        return ' '.join(str(item) for item in notes if item)
+    return str(notes or '')
+
+
+def _decision_counts(audit: Dict[str, Any]) -> Dict[str, int]:
+    counts = audit.get('counts', {})
+    if not isinstance(counts, dict):
+        return {}
+    normalized: Dict[str, int] = {}
+    for key in ('universe', 'scored', 'selected', 'executed'):
+        try:
+            normalized[key] = int(counts.get(key, 0) or 0)
+        except Exception:
+            normalized[key] = 0
+    return normalized
+
+
+def _is_failed_decision_audit(audit: Dict[str, Any]) -> bool:
+    details = audit.get('regime_details', {})
+    regime = str(audit.get('regime') or '').strip().upper()
+    note_text = _decision_note_text(audit).lower()
+    counts = _decision_counts(audit)
+    has_top_scores = bool(_normalize_top_scores(audit.get('top_scores', [])))
+    has_details = isinstance(details, dict) and bool(details)
+    return (
+        'no market data returned from provider' in note_text
+        and not has_top_scores
+        and not has_details
+        and counts.get('universe', 0) <= 0
+        and counts.get('scored', 0) <= 0
+        and regime in {'', 'UNKNOWN'}
+    )
+
+
+def _has_usable_market_state(audit: Dict[str, Any]) -> bool:
+    if _is_failed_decision_audit(audit):
+        return False
+    details = audit.get('regime_details', {})
+    if isinstance(details, dict) and details:
+        return True
+    regime = str(audit.get('regime') or '').strip()
+    return bool(regime and regime.upper() != 'UNKNOWN')
+
+
+def _load_regime_json_snapshot(reports_dir: Path) -> Dict[str, Any]:
+    payload = _load_json_payload(reports_dir / 'regime.json')
+    if not payload:
+        return {}
+
+    regime = str(payload.get('state') or payload.get('regime') or '').strip()
+    if not regime:
+        return {}
+
+    votes = payload.get('votes', {})
+    alerts = payload.get('alerts', [])
+    monitor = payload.get('monitor', {})
+    return {
+        'state': regime,
+        'position_multiplier': float(payload.get('position_multiplier', payload.get('multiplier', 0.0)) or 0.0),
+        'final_score': float(payload.get('final_score', 0.0) or 0.0),
+        'method': 'regime_json',
+        'votes': votes if isinstance(votes, dict) else {},
+        'alerts': alerts if isinstance(alerts, list) else [],
+        'monitor': monitor if isinstance(monitor, dict) else {},
+    }
+
+
+def _load_alpha_snapshot_scores(reports_dir: Path, limit: int = 20) -> Dict[str, Any]:
+    payload = _load_json_payload(reports_dir / 'alpha_snapshot.json')
+    raw_scores = payload.get('scores', {})
+    if not isinstance(raw_scores, dict) or not raw_scores:
+        return {}
+
+    items: List[Dict[str, Any]] = []
+    ranked = sorted(raw_scores.items(), key=lambda kv: float(kv[1] or 0.0), reverse=True)
+    for rank, (symbol, raw_value) in enumerate(ranked[:limit], start=1):
+        try:
+            raw_score = round(float(raw_value or 0.0), 4)
+            display_score = round(float(_legacy_display_score(raw_score)), 4)
+        except Exception:
+            continue
+        items.append({
+            'symbol': str(symbol or 'Unknown'),
+            'score': display_score,
+            'display_score': display_score,
+            'raw_score': raw_score,
+            'rank': rank,
+        })
+
+    if not items:
+        return {}
+
+    regime_snapshot = _load_regime_json_snapshot(reports_dir)
+    return {
+        'regime': str(regime_snapshot.get('state') or 'Unknown'),
+        'current_run': 'alpha_snapshot',
+        'scores': items,
+    }
+
 # 生产环境显示的 timer 列表
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value or 0.0)
+    except Exception:
+        return float(default)
+
+
+def _normalize_symbol_key(symbol: Any) -> str:
+    return str(symbol or '').strip().upper().replace('-', '/')
+
+
+def _build_ml_signal_overview(
+    reports_dir: Path,
+    preferred_symbols: Optional[List[str]] = None,
+    limit: int = 3,
+) -> Dict[str, Any]:
+    runtime = _load_json_payload(reports_dir / 'ml_runtime_status.json')
+    promotion = _load_json_payload(reports_dir / 'model_promotion_decision.json')
+    snapshot = _load_json_payload(reports_dir / 'alpha_snapshot.json')
+
+    raw_factors = snapshot.get('raw_factors', {})
+    z_factors = snapshot.get('z_factors', {})
+    score_map = snapshot.get('scores', {})
+
+    factor_rows: List[Dict[str, Any]] = []
+    if isinstance(z_factors, dict):
+        for symbol, z_bucket in z_factors.items():
+            if not isinstance(z_bucket, dict):
+                continue
+            raw_bucket = raw_factors.get(symbol, {}) if isinstance(raw_factors, dict) else {}
+            if raw_bucket and not isinstance(raw_bucket, dict):
+                raw_bucket = {}
+            ml_zscore = _coerce_float(z_bucket.get('ml_pred_zscore', 0.0))
+            ml_raw = _coerce_float(raw_bucket.get('ml_pred_raw', 0.0))
+            final_score = _coerce_float(score_map.get(symbol, 0.0)) if isinstance(score_map, dict) else 0.0
+            factor_rows.append({
+                'symbol': str(symbol or 'Unknown'),
+                'symbol_key': _normalize_symbol_key(symbol),
+                'ml_zscore': round(ml_zscore, 4),
+                'ml_raw': round(ml_raw, 6),
+                'final_score': round(final_score, 4),
+            })
+
+    nonzero_rows = [
+        row for row in factor_rows
+        if abs(float(row.get('ml_zscore', 0.0) or 0.0)) > 1e-9 or abs(float(row.get('ml_raw', 0.0) or 0.0)) > 1e-12
+    ]
+    nonzero_rows.sort(
+        key=lambda item: (
+            abs(float(item.get('ml_zscore', 0.0) or 0.0)),
+            abs(float(item.get('ml_raw', 0.0) or 0.0)),
+            str(item.get('symbol') or ''),
+        ),
+        reverse=True,
+    )
+
+    factor_by_symbol = {str(row['symbol_key']): row for row in nonzero_rows}
+    contributors: List[Dict[str, Any]] = []
+    seen_symbols = set()
+
+    for symbol in preferred_symbols or []:
+        row = factor_by_symbol.get(_normalize_symbol_key(symbol))
+        if row is None:
+            continue
+        symbol_key = str(row['symbol_key'])
+        if symbol_key in seen_symbols:
+            continue
+        contributors.append({k: v for k, v in row.items() if k != 'symbol_key'})
+        seen_symbols.add(symbol_key)
+        if len(contributors) >= limit:
+            break
+
+    if len(contributors) < limit:
+        for row in nonzero_rows:
+            symbol_key = str(row['symbol_key'])
+            if symbol_key in seen_symbols:
+                continue
+            contributors.append({k: v for k, v in row.items() if k != 'symbol_key'})
+            seen_symbols.add(symbol_key)
+            if len(contributors) >= limit:
+                break
+
+    try:
+        prediction_count = int(runtime.get('prediction_count', 0) or 0)
+    except Exception:
+        prediction_count = 0
+
+    configured_enabled = bool(runtime.get('configured_enabled', False))
+    promoted = bool(runtime.get('promotion_passed', promotion.get('passed', False)))
+    live_active = bool(runtime.get('used_in_latest_snapshot', False))
+    coverage_count = prediction_count if prediction_count > 0 else len(nonzero_rows)
+    reason = str(runtime.get('reason') or runtime.get('error') or '')
+
+    if not configured_enabled and (promoted or live_active or coverage_count > 0):
+        configured_enabled = True
+
+    return {
+        'configured_enabled': configured_enabled,
+        'promoted': promoted,
+        'live_active': live_active,
+        'prediction_count': prediction_count,
+        'active_symbols': coverage_count,
+        'coverage_count': coverage_count,
+        'ml_weight': _coerce_float(runtime.get('ml_weight', 0.0)),
+        'reason': reason,
+        'last_update': runtime.get('ts'),
+        'top_contributors': contributors,
+    }
+
+
 TIMER_CANDIDATES = ['v5-prod.user.timer']
 PRODUCTION_TIMER_CONFIGS = [
     {'name': 'v5-prod.user.timer', 'desc': '实盘主循环', 'icon': 'LIVE'},
@@ -1124,46 +1380,38 @@ def api_positions():
 def api_scores():
     """币种评分API（当前run vs 上一个run 的排名变化）"""
     try:
-        runs_dir = REPORTS_DIR / 'runs'
-        if not runs_dir.exists():
-            return jsonify({'regime': 'Unknown', 'scores': []})
+        current_run_id: Optional[str] = None
+        previous_run_id: Optional[str] = None
+        current_regime = 'Unknown'
+        current_scores: List[Dict[str, Any]] = []
+        previous_scores: List[Dict[str, Any]] = []
 
-        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-        if not run_dirs:
-            return jsonify({'regime': 'Unknown', 'scores': []})
+        usable_runs: List[Dict[str, Any]] = []
+        for entry in _iter_decision_audits(REPORTS_DIR):
+            items = _normalize_top_scores(entry['audit'].get('top_scores', []))
+            if not items:
+                continue
+            usable_runs.append({
+                'run_id': entry['run_dir'].name,
+                'regime': str(entry['audit'].get('regime') or 'Unknown'),
+                'scores': items,
+            })
 
-        def load_scores(run_dir: Path):
-            with open(run_dir / 'decision_audit.json', 'r', encoding='utf-8') as f:
-                decision = json.load(f)
-            items = []
-            for item in decision.get('top_scores', [])[:20]:
-                try:
-                    raw_score = round(float(item.get('raw_score', item.get('score', 0)) or 0), 4)
-                    if item.get('display_score') is None:
-                        display_score = round(float(_legacy_display_score(raw_score)), 4)
-                    else:
-                        display_score = round(float(item.get('display_score', item.get('score', 0)) or 0), 4)
-                    items.append({
-                        'symbol': item.get('symbol', 'Unknown'),
-                        'score': display_score,
-                        'display_score': display_score,
-                        'raw_score': raw_score,
-                        'rank': int(item.get('rank', 0) or 0),
-                    })
-                except Exception:
-                    continue
-            regime = decision.get('regime', 'Unknown')
-            return regime, items
-
-        current_run = run_dirs[0]
-        current_regime, current_scores = load_scores(current_run)
-
-        previous_scores = []
-        previous_run_id = None
-        if len(run_dirs) > 1:
-            previous_run_id = run_dirs[1].name
-            _, previous_scores = load_scores(run_dirs[1])
+        if usable_runs:
+            current_run_id = usable_runs[0]['run_id']
+            current_regime = usable_runs[0]['regime']
+            current_scores = usable_runs[0]['scores']
+            if len(usable_runs) > 1:
+                previous_run_id = usable_runs[1]['run_id']
+                previous_scores = usable_runs[1]['scores']
+        else:
+            alpha_snapshot = _load_alpha_snapshot_scores(REPORTS_DIR)
+            if alpha_snapshot:
+                current_run_id = str(alpha_snapshot.get('current_run') or 'alpha_snapshot')
+                current_regime = str(alpha_snapshot.get('regime') or 'Unknown')
+                current_scores = alpha_snapshot.get('scores', [])
+            else:
+                return jsonify({'regime': 'Unknown', 'scores': []})
 
         previous_ranking = {}
         for idx, s in enumerate(previous_scores):
@@ -1205,7 +1453,7 @@ def api_scores():
 
         return jsonify({
             'regime': current_regime,
-            'current_run': current_run.name,
+            'current_run': current_run_id,
             'previous_run': previous_run_id,
             'scores': scores_with_trend,
             'last_update': datetime.now().isoformat()
@@ -1673,12 +1921,17 @@ def _load_latest_regime_history_snapshot(reports_dir: Path) -> Dict[str, Any]:
 
 def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
     try:
-        runs_dir = reports_dir / 'runs'
-        if runs_dir.exists():
-            run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-            run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-            if run_dirs:
-                audit = json.loads((run_dirs[0] / 'decision_audit.json').read_text(encoding='utf-8'))
+        audit_entries = _iter_decision_audits(reports_dir)
+        regime_json_snapshot = _load_regime_json_snapshot(reports_dir)
+        if audit_entries:
+            if _is_failed_decision_audit(audit_entries[0]['audit']) and regime_json_snapshot:
+                return regime_json_snapshot
+
+            for entry in audit_entries:
+                audit = entry['audit']
+                if not _has_usable_market_state(audit):
+                    continue
+
                 regime = str(audit.get('regime') or 'SIDEWAYS')
                 details = audit.get('regime_details', {})
                 if isinstance(details, dict) and details:
@@ -1698,12 +1951,15 @@ def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
                 return {
                     'state': regime,
                     'position_multiplier': float(audit.get('regime_multiplier', details.get('multiplier', 0.0)) or 0.0),
-                    'final_score': float(details.get('final_score', 0.0) or 0.0),
+                    'final_score': float(details.get('final_score', audit.get('final_score', 0.0)) or 0.0),
                     'method': str(details.get('method', 'decision_audit')),
                     'votes': votes,
                     'alerts': alerts,
                     'monitor': details.get('monitor', {}) if isinstance(details.get('monitor', {}), dict) else {},
                 }
+
+        if regime_json_snapshot:
+            return regime_json_snapshot
     except Exception:
         pass
 
@@ -3533,6 +3789,14 @@ def api_decision_audit():
             target_rank = []
 
         fused_source_is_fallback = bool(strategy_source_run) and str(strategy_source_run) != str(run_id)
+        preferred_ml_symbols: List[str] = []
+        for item in audit_data.get('top_scores', []) or []:
+            if isinstance(item, dict) and item.get('symbol'):
+                preferred_ml_symbols.append(str(item.get('symbol')))
+        for item in target_rank[:10]:
+            if isinstance(item, dict) and item.get('symbol'):
+                preferred_ml_symbols.append(str(item.get('symbol')))
+        ml_signal_overview = _build_ml_signal_overview(REPORTS_DIR, preferred_symbols=preferred_ml_symbols)
 
         return jsonify({
             'run_id': run_id,
@@ -3565,6 +3829,7 @@ def api_decision_audit():
                 'run_id': run_id,
                 'note': 'execution_summary/run_orders 仅统计本次run；recent_fill_summary统计跨run最近成交。',
             },
+            'ml_signal_overview': ml_signal_overview,
             'recent_fill_summary': recent_fill_summary,
             'latest_ordered_run_summary': latest_ordered_run_summary,
             'run_orders': run_orders[:30],

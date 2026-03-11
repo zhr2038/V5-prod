@@ -185,6 +185,11 @@ rebalance:
 execution:
   mode: live
   dry_run: false
+  collect_ml_training_data: true
+  ml_research_use_stable_universe: true
+  ml_research_universe_path: reports/universe_cache.json
+  ml_research_include_config_symbols: true
+  ml_research_lookback_bars: 600
   order_store_path: reports/orders.sqlite
   kill_switch_path: reports/kill_switch.json
   reconcile_status_path: reports/reconcile_status.json
