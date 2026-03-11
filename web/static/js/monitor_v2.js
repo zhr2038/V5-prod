@@ -1,5 +1,7 @@
 const REFRESH_MS = 30000;
 const MOBILE_QUERY = "(max-width: 760px)";
+const POSITION_KLINE_LIMITS = { "1h": 96, "4h": 120, "1d": 90 };
+const POSITION_KLINE_LABELS = { "1h": "1H", "4h": "4H", "1d": "1D" };
 
 const stateLabels = { TRENDING: "趋势", SIDEWAYS: "震荡", RISK_OFF: "避险" };
 const stateClasses = { TRENDING: "state-trending", SIDEWAYS: "state-sideways", RISK_OFF: "state-riskoff" };
@@ -145,6 +147,14 @@ let marketCache = null;
 let decisionCache = null;
 let healthCache = null;
 let lastMobileState = isMobileViewport();
+let latestPositions = [];
+let latestAccount = {};
+let positionSpotlightState = {
+  symbol: "",
+  timeframe: "1h",
+  requestId: 0,
+  cache: new Map(),
+};
 
 async function fetchJson(url, signal) {
   try {
@@ -310,6 +320,322 @@ function renderVoteHistory(history) {
 function shortSymbol(symbol) {
   return String(symbol || "--").replace("/USDT", "").replace("-USDT", "");
 }
+
+function normalizeInstrumentSymbol(symbol) {
+  const raw = String(symbol || "").trim().toUpperCase().replace(/_/g, "/").replace(/-/g, "/");
+  if (!raw) return "";
+  if (raw.endsWith("/USDT")) return raw;
+  if (raw.endsWith("USDT") && !raw.includes("/")) return `${raw.slice(0, -4)}/USDT`;
+  if (raw.includes("/")) return `${raw.split("/")[0]}/USDT`;
+  return `${raw}/USDT`;
+}
+
+function baseSymbol(symbol) {
+  return normalizeInstrumentSymbol(symbol).split("/")[0] || shortSymbol(symbol);
+}
+
+function fmtCompactUsd(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "--";
+  if (Math.abs(num) >= 1000000) return `$${(num / 1000000).toFixed(2)}M`;
+  if (Math.abs(num) >= 1000) return `$${(num / 1000).toFixed(1)}K`;
+  return fmtUsd(num);
+}
+
+function getActivePosition(positions) {
+  const items = Array.isArray(positions) ? positions : [];
+  if (!items.length) return null;
+  if (!positionSpotlightState.symbol) {
+    positionSpotlightState.symbol = baseSymbol(items[0].symbol);
+    return items[0];
+  }
+  return items.find((item) => baseSymbol(item.symbol) === positionSpotlightState.symbol) || items[0];
+}
+
+function updatePositionTimeframeButtons() {
+  const root = document.getElementById("position-kline-timeframes");
+  if (!root) return;
+  root.querySelectorAll("[data-timeframe]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.timeframe === positionSpotlightState.timeframe);
+  });
+}
+
+function renderPositionKlineSymbolButtons(positions) {
+  const root = document.getElementById("position-kline-symbols");
+  if (!root) return;
+  const items = Array.isArray(positions) ? positions : [];
+  if (!items.length) {
+    root.innerHTML = "";
+    return;
+  }
+
+  root.innerHTML = items.slice(0, 10).map((position) => {
+    const symbolKey = baseSymbol(position.symbol);
+    const activeClass = symbolKey === positionSpotlightState.symbol ? " is-active" : "";
+    const pnlValue = Number(position.pnl ?? position.pnl_value ?? 0);
+    const pnlClass = pnlValue >= 0 ? "text-green" : "text-red";
+    return `<button type="button" class="symbol-chip${activeClass}" data-position-symbol="${esc(symbolKey)}">
+      <strong>${esc(symbolKey)}</strong>
+      <span>${fmtCompactUsd(position.value)}</span>
+      <span class="${pnlClass}">${fmtPct(position.pnlPercent ?? position.pnl_pct ?? 0, 1)}</span>
+    </button>`;
+  }).join("");
+}
+
+function renderPositionSpotlightSummary(position, account, payload) {
+  const weight = Number(account?.totalEquity) > 0 ? Number(position.value || 0) / Number(account.totalEquity) : null;
+  const lastClose = Number(payload?.summary?.close ?? position.currentPrice ?? position.price);
+  const avgPrice = Number(position.avgPrice ?? position.avg_px);
+  const pnlValue = Number(position.pnl ?? position.pnl_value ?? 0);
+  const pnlPct = Number(position.pnlPercent ?? position.pnl_pct ?? 0);
+  const rangePct = payload?.summary?.high > 0
+    ? (Number(payload.summary.high) - Number(payload.summary.low || 0)) / Number(payload.summary.low || payload.summary.high)
+    : null;
+  const cards = [
+    ["持仓市值", fmtUsd(position.value)],
+    ["仓位占比", weight == null ? "--" : `${fmtNum(weight * 100, 1)}%`],
+    ["成本价", avgPrice > 0 ? fmtUsd(avgPrice) : "--"],
+    ["最新价", Number.isFinite(lastClose) ? fmtUsd(lastClose) : "--"],
+    ["未实现盈亏", `${fmtUsd(pnlValue)} / ${fmtPct(pnlPct, 2)}`],
+    ["区间振幅", rangePct == null ? "--" : `${fmtNum(rangePct * 100, 2)}%`],
+  ];
+  setHtml("position-kline-summary", cards.map(([label, value]) => `<div class="stat-card">
+    <div class="mini-label">${esc(label)}</div>
+    <div class="stat-card-value">${value}</div>
+  </div>`).join(""));
+}
+
+function renderPositionSpotlightHeader(position, account, payload) {
+  if (!position) {
+    setText("position-spotlight-symbol", "暂无持仓");
+    setText("position-spotlight-copy", "默认展示当前仓位中市值最高的币种，并支持切换时间周期。");
+    setText("position-kline-source", "数据源 --");
+    setHtml("position-kline-summary", `<div class="stat-card"><div class="mini-label">持仓市值</div><div class="stat-card-value">--</div></div>`);
+    return;
+  }
+
+  const symbolText = normalizeInstrumentSymbol(position.symbol) || `${baseSymbol(position.symbol)}/USDT`;
+  const weight = Number(account?.totalEquity) > 0 ? Number(position.value || 0) / Number(account.totalEquity) : null;
+  const lastTime = payload?.summary?.last_time ? ` · 截止 ${payload.summary.last_time}` : "";
+  const sourceText = payload?.source ? ` · ${String(payload.source).toUpperCase()}` : "";
+  setText("position-spotlight-symbol", symbolText);
+  setText(
+    "position-spotlight-copy",
+    `数量 ${fmtNum(position.qty ?? position.quantity, 4)} · 占权益 ${weight == null ? "--" : `${fmtNum(weight * 100, 1)}%`} · ${POSITION_KLINE_LABELS[positionSpotlightState.timeframe]} K 线${sourceText}${lastTime}`,
+  );
+  setText(
+    "position-kline-source",
+    payload?.summary?.bars
+      ? `数据 ${String(payload.source || "--").toUpperCase()} · ${POSITION_KLINE_LABELS[payload.timeframe] || payload.timeframe} · ${payload.summary.bars} 根`
+      : "数据源 --",
+  );
+}
+
+function formatChartAxisPrice(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "--";
+  if (Math.abs(num) >= 1000) return num.toFixed(0);
+  if (Math.abs(num) >= 100) return num.toFixed(2);
+  if (Math.abs(num) >= 1) return num.toFixed(3);
+  return num.toFixed(5);
+}
+
+function formatChartTimeLabel(value) {
+  const raw = String(value || "");
+  if (!raw) return "--";
+  const [datePart, timePart = ""] = raw.split(" ");
+  if (positionSpotlightState.timeframe === "1d") return datePart.slice(5);
+  return timePart.slice(0, 5) || datePart.slice(5);
+}
+
+function buildCandlestickSvg(candles, avgPrice) {
+  const width = 920;
+  const height = 360;
+  const margin = { top: 18, right: 64, bottom: 34, left: 16 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const highs = candles.map((item) => Number(item.high)).filter(Number.isFinite);
+  const lows = candles.map((item) => Number(item.low)).filter(Number.isFinite);
+  if (!highs.length || !lows.length) return "";
+
+  let minPrice = Math.min(...lows);
+  let maxPrice = Math.max(...highs);
+  if (Number.isFinite(avgPrice) && avgPrice > 0) {
+    minPrice = Math.min(minPrice, avgPrice);
+    maxPrice = Math.max(maxPrice, avgPrice);
+  }
+  const padding = Math.max((maxPrice - minPrice) * 0.12, maxPrice * 0.01, 0.0001);
+  minPrice -= padding;
+  maxPrice += padding;
+
+  const yFor = (price) => {
+    const pct = (Number(price) - minPrice) / Math.max(maxPrice - minPrice, 1e-9);
+    return margin.top + plotHeight - (pct * plotHeight);
+  };
+
+  const step = plotWidth / Math.max(candles.length, 1);
+  const bodyWidth = Math.max(3, Math.min(step * 0.62, 10));
+  const gridValues = Array.from({ length: 5 }, (_, index) => maxPrice - ((maxPrice - minPrice) / 4) * index);
+  const grid = gridValues.map((value) => {
+    const y = yFor(value);
+    return `<g>
+      <line x1="${margin.left}" y1="${y.toFixed(2)}" x2="${width - margin.right + 8}" y2="${y.toFixed(2)}" stroke="rgba(147,175,198,.12)" stroke-dasharray="4 6"></line>
+      <text x="${width - margin.right + 12}" y="${(y + 4).toFixed(2)}" fill="#8ea1b8" font-size="11" font-family="JetBrains Mono,monospace">${esc(formatChartAxisPrice(value))}</text>
+    </g>`;
+  }).join("");
+
+  const candlesSvg = candles.map((item, index) => {
+    const x = margin.left + (step * index) + step / 2;
+    const open = Number(item.open);
+    const close = Number(item.close);
+    const high = Number(item.high);
+    const low = Number(item.low);
+    const rising = close >= open;
+    const bodyTop = Math.min(yFor(open), yFor(close));
+    const bodyBottom = Math.max(yFor(open), yFor(close));
+    const bodyHeight = Math.max(bodyBottom - bodyTop, 1.6);
+    const color = rising ? "#5edac7" : "#ff879d";
+    const fill = rising ? "rgba(94,218,199,.28)" : "rgba(255,135,157,.24)";
+    return `<g>
+      <line x1="${x.toFixed(2)}" y1="${yFor(high).toFixed(2)}" x2="${x.toFixed(2)}" y2="${yFor(low).toFixed(2)}" stroke="${color}" stroke-width="1.4" stroke-linecap="round"></line>
+      <rect x="${(x - bodyWidth / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${bodyWidth.toFixed(2)}" height="${bodyHeight.toFixed(2)}" rx="1.8" fill="${fill}" stroke="${color}" stroke-width="1.1"></rect>
+    </g>`;
+  }).join("");
+
+  const avgLine = Number.isFinite(avgPrice) && avgPrice > 0
+    ? `<g>
+      <line x1="${margin.left}" y1="${yFor(avgPrice).toFixed(2)}" x2="${width - margin.right}" y2="${yFor(avgPrice).toFixed(2)}" stroke="rgba(241,197,108,.92)" stroke-width="1.4" stroke-dasharray="8 6"></line>
+      <text x="${margin.left + 6}" y="${(yFor(avgPrice) - 8).toFixed(2)}" fill="#f1c56c" font-size="11" font-family="JetBrains Mono,monospace">AVG ${esc(formatChartAxisPrice(avgPrice))}</text>
+    </g>`
+    : "";
+
+  const lastClose = Number(candles[candles.length - 1]?.close);
+  const lastLine = Number.isFinite(lastClose)
+    ? `<g>
+      <line x1="${margin.left}" y1="${yFor(lastClose).toFixed(2)}" x2="${width - margin.right}" y2="${yFor(lastClose).toFixed(2)}" stroke="rgba(131,208,255,.88)" stroke-width="1.1" stroke-dasharray="4 8"></line>
+      <text x="${width - margin.right - 4}" y="${(yFor(lastClose) - 8).toFixed(2)}" text-anchor="end" fill="#83d0ff" font-size="11" font-family="JetBrains Mono,monospace">LAST ${esc(formatChartAxisPrice(lastClose))}</text>
+    </g>`
+    : "";
+
+  const labelIndexes = Array.from(new Set([
+    0,
+    Math.floor((candles.length - 1) * 0.33),
+    Math.floor((candles.length - 1) * 0.66),
+    candles.length - 1,
+  ])).filter((index) => index >= 0 && index < candles.length);
+  const labels = labelIndexes.map((index) => {
+    const x = margin.left + (step * index) + step / 2;
+    return `<text x="${x.toFixed(2)}" y="${height - 10}" text-anchor="middle" fill="#8ea1b8" font-size="11" font-family="JetBrains Mono,monospace">${esc(formatChartTimeLabel(candles[index].time))}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="持仓 K 线图">
+    <defs>
+      <linearGradient id="candle-bg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="rgba(131,208,255,.08)"></stop>
+        <stop offset="100%" stop-color="rgba(6,12,21,0)"></stop>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="${width}" height="${height}" fill="url(#candle-bg)"></rect>
+    ${grid}
+    ${avgLine}
+    ${lastLine}
+    ${candlesSvg}
+    ${labels}
+  </svg>`;
+}
+
+function renderPositionKlineState(message, tone = "empty") {
+  const klass = tone === "error" ? "chart-stage-empty error" : "chart-stage-empty";
+  setHtml("position-kline-chart", `<div class="${klass}">${esc(message)}</div>`);
+}
+
+function renderPositionKline(payload, position, account) {
+  const candles = Array.isArray(payload?.candles) ? payload.candles : [];
+  renderPositionSpotlightHeader(position, account, payload);
+  renderPositionSpotlightSummary(position, account, payload);
+  if (!candles.length) {
+    renderPositionKlineState("当前没有可展示的 K 线数据。");
+    return;
+  }
+  const avgPrice = Number(position.avgPrice ?? position.avg_px);
+  const svg = buildCandlestickSvg(candles, avgPrice);
+  if (!svg) {
+    renderPositionKlineState("K 线数据不完整，暂时无法渲染图表。", "error");
+    return;
+  }
+  setHtml("position-kline-chart", svg);
+}
+
+async function fetchPositionKlinePayload(symbol, timeframe) {
+  const limit = POSITION_KLINE_LIMITS[timeframe] || POSITION_KLINE_LIMITS["1h"];
+  return fetchJson(`/api/position_kline?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`);
+}
+
+async function loadPositionSpotlight(position, account, { force = false } = {}) {
+  if (!position) {
+    renderPositionSpotlightHeader(null, null, null);
+    renderPositionKlineState("暂无持仓，K 线图将在有仓位后显示。");
+    return;
+  }
+
+  const symbolKey = baseSymbol(position.symbol);
+  const cacheKey = `${symbolKey}|${positionSpotlightState.timeframe}`;
+  const cached = positionSpotlightState.cache.get(cacheKey);
+  renderPositionSpotlightHeader(position, account, cached?.payload || null);
+  renderPositionSpotlightSummary(position, account, cached?.payload || null);
+
+  if (!force && cached && (Date.now() - cached.fetchedAt) < REFRESH_MS) {
+    renderPositionKline(cached.payload, position, account);
+    return;
+  }
+
+  renderPositionKlineState("K 线加载中...");
+  const requestId = ++positionSpotlightState.requestId;
+  const payload = await fetchPositionKlinePayload(symbolKey, positionSpotlightState.timeframe);
+  if (requestId !== positionSpotlightState.requestId) return;
+
+  if (!payload || payload.error || !Array.isArray(payload.candles) || !payload.candles.length) {
+    renderPositionKlineState(payload?.error || "K 线数据获取失败。", "error");
+    return;
+  }
+
+  positionSpotlightState.cache.set(cacheKey, { payload, fetchedAt: Date.now() });
+  renderPositionKline(payload, position, account);
+}
+
+function syncPositionSpotlight(positions, account, { force = false } = {}) {
+  const items = Array.isArray(positions) ? positions.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0)) : [];
+  const active = getActivePosition(items);
+  if (active) {
+    positionSpotlightState.symbol = baseSymbol(active.symbol);
+  }
+  updatePositionTimeframeButtons();
+  renderPositionKlineSymbolButtons(items);
+  void loadPositionSpotlight(active, account, { force });
+}
+
+document.addEventListener("click", (evt) => {
+  const timeframeButton = evt.target.closest("#position-kline-timeframes [data-timeframe]");
+  if (timeframeButton) {
+    const timeframe = timeframeButton.dataset.timeframe;
+    if (timeframe && timeframe !== positionSpotlightState.timeframe) {
+      positionSpotlightState.timeframe = timeframe;
+      updatePositionTimeframeButtons();
+      syncPositionSpotlight(latestPositions, latestAccount, { force: false });
+    }
+    return;
+  }
+
+  const symbolButton = evt.target.closest("[data-position-symbol]");
+  if (symbolButton) {
+    const symbol = symbolButton.dataset.positionSymbol;
+    if (symbol && symbol !== positionSpotlightState.symbol) {
+      positionSpotlightState.symbol = symbol;
+      renderPositionKlineSymbolButtons(latestPositions);
+      syncPositionSpotlight(latestPositions, latestAccount, { force: false });
+    }
+  }
+});
 
 function renderMlSignalCard(ml) {
   if (!ml) return "";
@@ -545,6 +871,8 @@ function renderDashboard(payload) {
   const ic = payload.icDiagnostics || {};
   const ml = payload.mlTraining || {};
   const reflection = payload.reflectionReports || {};
+  latestAccount = account;
+  latestPositions = positions.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
 
   setText("update-time", `最近刷新 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`);
   document.getElementById("update-time")?.setAttribute("data-legacy-refresh-label", "鏈€杩戝埛鏂?");
@@ -555,6 +883,7 @@ function renderDashboard(payload) {
   setText("positions-value", fmtUsd(account.positionsValue));
 
   renderPositions(positions);
+  syncPositionSpotlight(latestPositions, latestAccount, { force: false });
   renderTrades(trades);
   renderAlpha(alpha);
   renderSystem(status, timers, cost, ic, ml, reflection);

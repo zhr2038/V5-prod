@@ -23,14 +23,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, render_template, jsonify, send_from_directory
+from flask import Flask, render_template, jsonify, request, send_from_directory
 import pandas as pd
 import yaml
 import requests
 from configs.loader import load_config as load_app_config
 
+from src.core.models import MarketSeries
+from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
 from src.regime.rss_vote_utils import build_rss_vote
+from src.research.cache_loader import load_cached_market_data
 
 
 def _detect_workspace() -> Path:
@@ -125,6 +128,137 @@ def _resolve_config_path() -> Path:
 
 
 CONFIG_PATH = _resolve_config_path()
+POSITION_KLINE_TIMEFRAMES: Dict[str, Dict[str, Any]] = {
+    '1h': {'source_timeframe': '1h', 'resample_rule': None, 'source_limit_multiplier': 1},
+    '4h': {'source_timeframe': '1h', 'resample_rule': '4H', 'source_limit_multiplier': 4},
+    '1d': {'source_timeframe': '1h', 'resample_rule': '1D', 'source_limit_multiplier': 24},
+}
+POSITION_KLINE_DEFAULT_LIMIT = 96
+_OKX_PUBLIC_PROVIDER: Optional[OKXCCXTProvider] = None
+
+
+def _normalize_dashboard_symbol(symbol: str) -> str:
+    raw = str(symbol or '').strip().upper()
+    if not raw:
+        raise ValueError('symbol is required')
+
+    cleaned = raw.replace('_', '/').replace('-', '/')
+    cleaned = re.sub(r'/+', '/', cleaned)
+    if cleaned.endswith('/USDT'):
+        return cleaned
+    if cleaned.endswith('USDT') and '/' not in cleaned:
+        return f"{cleaned[:-4]}/USDT"
+    if '/' in cleaned:
+        base = cleaned.split('/', 1)[0]
+    else:
+        base = cleaned
+    if not base:
+        raise ValueError(f'invalid symbol: {symbol}')
+    return f"{base}/USDT"
+
+
+def _trim_market_series(series: MarketSeries, limit: int) -> MarketSeries:
+    target = max(int(limit or 0), 0)
+    if target <= 0 or len(series.ts) <= target:
+        return series
+    return MarketSeries(
+        symbol=series.symbol,
+        timeframe=series.timeframe,
+        ts=series.ts[-target:],
+        open=series.open[-target:],
+        high=series.high[-target:],
+        low=series.low[-target:],
+        close=series.close[-target:],
+        volume=series.volume[-target:],
+    )
+
+
+def _market_series_to_frame(series: MarketSeries) -> pd.DataFrame:
+    frame = pd.DataFrame({
+        'timestamp_ms': list(series.ts or []),
+        'open': list(series.open or []),
+        'high': list(series.high or []),
+        'low': list(series.low or []),
+        'close': list(series.close or []),
+        'volume': list(series.volume or []),
+    })
+    if frame.empty:
+        return frame
+    frame['timestamp'] = pd.to_datetime(frame['timestamp_ms'], unit='ms', utc=True)
+    frame = frame.drop_duplicates(subset=['timestamp'], keep='last').sort_values('timestamp')
+    return frame.set_index('timestamp')[['open', 'high', 'low', 'close', 'volume']]
+
+
+def _frame_to_market_series(frame: pd.DataFrame, *, symbol: str, timeframe: str) -> MarketSeries:
+    cleaned = frame.dropna(subset=['open', 'high', 'low', 'close']).sort_index()
+    if cleaned.empty:
+        return MarketSeries(symbol=symbol, timeframe=timeframe, ts=[], open=[], high=[], low=[], close=[], volume=[])
+    timestamp_ms = (cleaned.index.astype('int64') // 1_000_000).astype(int).tolist()
+    return MarketSeries(
+        symbol=symbol,
+        timeframe=timeframe,
+        ts=timestamp_ms,
+        open=cleaned['open'].astype(float).tolist(),
+        high=cleaned['high'].astype(float).tolist(),
+        low=cleaned['low'].astype(float).tolist(),
+        close=cleaned['close'].astype(float).tolist(),
+        volume=cleaned['volume'].fillna(0).astype(float).tolist(),
+    )
+
+
+def _load_cached_position_market_series(symbol: str, timeframe: str, limit: int) -> Optional[MarketSeries]:
+    tf_config = POSITION_KLINE_TIMEFRAMES[timeframe]
+    source_timeframe = str(tf_config['source_timeframe'])
+    source_limit = max(int(limit or 0) * int(tf_config['source_limit_multiplier']), int(limit or 0))
+    source_limit = max(source_limit, int(limit or 0))
+    market_data = load_cached_market_data(CACHE_DIR, [symbol], source_timeframe, limit=source_limit)
+    series = market_data.get(symbol)
+    if series is None or not series.ts:
+        return None
+
+    resample_rule = tf_config.get('resample_rule')
+    if not resample_rule:
+        return _trim_market_series(series, limit)
+
+    frame = _market_series_to_frame(series)
+    if frame.empty:
+        return None
+
+    resampled = frame.resample(str(resample_rule)).agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum',
+    })
+    resampled = resampled.dropna(subset=['open', 'high', 'low', 'close'])
+    if resampled.empty:
+        return None
+    return _frame_to_market_series(resampled.tail(int(limit or 0)), symbol=symbol, timeframe=timeframe)
+
+
+def _get_okx_public_provider() -> OKXCCXTProvider:
+    global _OKX_PUBLIC_PROVIDER
+    if _OKX_PUBLIC_PROVIDER is None:
+        _OKX_PUBLIC_PROVIDER = OKXCCXTProvider(rate_limit=True)
+    return _OKX_PUBLIC_PROVIDER
+
+
+def _load_position_market_series(symbol: str, timeframe: str, limit: int) -> tuple[MarketSeries, str]:
+    normalized_symbol = _normalize_dashboard_symbol(symbol)
+
+    try:
+        cached_series = _load_cached_position_market_series(normalized_symbol, timeframe, limit)
+        if cached_series is not None and cached_series.ts:
+            return cached_series, 'cache'
+    except Exception:
+        pass
+
+    provider = _get_okx_public_provider()
+    series = provider.fetch_ohlcv([normalized_symbol], timeframe=timeframe, limit=int(limit or 0)).get(normalized_symbol)
+    if series is None or not series.ts:
+        raise FileNotFoundError(f'no OHLCV data for {normalized_symbol}')
+    return _trim_market_series(series, limit), 'okx'
 
 
 def _load_multi_strategy_score_transform() -> tuple[str, float]:
@@ -1374,6 +1508,73 @@ def api_positions():
         return jsonify({'positions': positions})
     except Exception as e:
         return jsonify({'error': str(e), 'positions': []}), 500
+
+
+@app.route('/api/position_kline')
+def api_position_kline():
+    """持仓币 K 线数据。"""
+    try:
+        symbol = str(request.args.get('symbol', '') or '').strip()
+        if not symbol:
+            return jsonify({'error': 'symbol is required', 'candles': []}), 400
+
+        timeframe = str(request.args.get('timeframe', '1h') or '1h').strip().lower()
+        if timeframe not in POSITION_KLINE_TIMEFRAMES:
+            timeframe = '1h'
+
+        try:
+            limit = int(request.args.get('limit', POSITION_KLINE_DEFAULT_LIMIT))
+        except (TypeError, ValueError):
+            limit = POSITION_KLINE_DEFAULT_LIMIT
+        limit = max(24, min(limit, 240))
+
+        normalized_symbol = _normalize_dashboard_symbol(symbol)
+        series, source = _load_position_market_series(normalized_symbol, timeframe, limit)
+        series = _trim_market_series(series, limit)
+        candles = []
+        for ts_ms, open_px, high_px, low_px, close_px, volume in zip(
+            series.ts,
+            series.open,
+            series.high,
+            series.low,
+            series.close,
+            series.volume,
+        ):
+            candles.append({
+                'ts': int(ts_ms),
+                'time': datetime.utcfromtimestamp(int(ts_ms) / 1000.0).strftime('%Y-%m-%d %H:%M'),
+                'open': round(float(open_px), 8),
+                'high': round(float(high_px), 8),
+                'low': round(float(low_px), 8),
+                'close': round(float(close_px), 8),
+                'volume': round(float(volume), 8),
+            })
+
+        if not candles:
+            return jsonify({'error': f'no candles for {normalized_symbol}', 'candles': []}), 404
+
+        first_open = float(candles[0]['open'] or 0)
+        last_close = float(candles[-1]['close'] or 0)
+        period_change_pct = ((last_close - first_open) / first_open) if first_open > 0 else 0.0
+
+        return jsonify({
+            'symbol': normalized_symbol,
+            'timeframe': timeframe,
+            'source': source,
+            'candles': candles,
+            'summary': {
+                'bars': len(candles),
+                'open': round(first_open, 8),
+                'close': round(last_close, 8),
+                'high': round(max(float(item['high']) for item in candles), 8),
+                'low': round(min(float(item['low']) for item in candles), 8),
+                'volume': round(sum(float(item['volume']) for item in candles), 8),
+                'change_pct': round(period_change_pct, 6),
+                'last_time': candles[-1]['time'],
+            },
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'candles': []}), 500
 
 
 @app.route('/api/scores')

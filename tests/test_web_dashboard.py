@@ -53,7 +53,9 @@ def test_index_renders_monitor_template():
     assert 'id="health-content"' in body
     assert 'id="vote-history"' in body
     assert 'id="history-tooltip"' in body
-    assert "风险档位（持仓上限）" in body
+    assert 'id="position-kline-chart"' in body
+    assert 'id="position-kline-symbols"' in body
+    assert 'id="position-kline-timeframes"' in body
     assert 'src="/static/js/monitor_v2.js?v=' in body
     assert 'src="/static/js/ml_status_panel.js?v=' in body
 
@@ -69,6 +71,10 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     assert "showHmmProbs:true" in body
     assert "showStateBars:true" in body
     assert "showSummary:true" in body
+    assert "buildCandlestickSvg" in body
+    assert "syncPositionSpotlight" in body
+    assert "/api/position_kline" in body
+    assert "position-kline-timeframes" in body
     assert "metrics.conversion_rate??metrics.last_conversion_rate??null" in body
     assert "account?.drawdown_pct??metrics.dd_pct??metrics.last_dd_pct??null" in body
     assert "item.display_score ?? item.score ?? 0" in body
@@ -274,6 +280,38 @@ def test_dashboard_api_keeps_sub_one_percent_pnl_as_ratio(monkeypatch):
     assert payload["account"]["totalPnlPercent"] == 0.005
     assert payload["account"]["maxDrawdown"] == 0.0075
     assert payload["positions"][0]["pnlPercent"] == -0.0054
+
+
+def test_position_kline_api_returns_expected_shape(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    series = module.MarketSeries(
+        symbol="BTC/USDT",
+        timeframe="1h",
+        ts=[1710201600000, 1710205200000],
+        open=[100.0, 101.0],
+        high=[102.0, 105.0],
+        low=[99.5, 100.5],
+        close=[101.0, 103.0],
+        volume=[10.0, 12.0],
+    )
+    monkeypatch.setattr(module, "_load_position_market_series", lambda symbol, timeframe, limit: (series, "cache"))
+
+    response = client.get("/api/position_kline?symbol=BTC&timeframe=1h&limit=2")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["symbol"] == "BTC/USDT"
+    assert payload["timeframe"] == "1h"
+    assert payload["source"] == "cache"
+    assert len(payload["candles"]) == 2
+    assert payload["candles"][0]["open"] == 100.0
+    assert payload["summary"]["bars"] == 2
+    assert payload["summary"]["high"] == 105.0
+    assert payload["summary"]["low"] == 99.5
+    assert payload["summary"]["volume"] == 22.0
+    assert payload["summary"]["change_pct"] == pytest.approx(0.03)
 
 
 def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp_path):
