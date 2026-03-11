@@ -327,38 +327,38 @@ function renderMlSignalCard(ml) {
     return "";
   }
 
-  let value = "Disabled";
+  let value = "未启用";
   if (liveActive) {
-    value = `Active on ${activeCount || 0} syms`;
+    value = `本轮参与 ${activeCount || 0} 个币种`;
   } else if (promoted) {
-    value = "Promoted, waiting";
+    value = "已晋升，等待加载";
   } else if (enabled) {
-    value = "Idle this cycle";
+    value = "本轮未参与";
   }
 
   const details = [];
-  if (weightPct > 0) details.push(`wt ${weightPct.toFixed(0)}%`);
-  if (predictionCount > 0) details.push(`pred ${predictionCount}`);
-  else if (coverageCount > 0) details.push(`cover ${coverageCount}`);
-  if (promoted) details.push("gate ok");
-  else if (enabled) details.push("gate blocked");
+  if (weightPct > 0) details.push(`权重 ${weightPct.toFixed(0)}%`);
+  if (predictionCount > 0) details.push(`预测 ${predictionCount} 个`);
+  else if (coverageCount > 0) details.push(`覆盖 ${coverageCount} 个`);
+  if (promoted) details.push("门控通过");
+  else if (enabled) details.push("门控拦截");
 
-  let subtle = details.join(" / ");
+  let subtle = details.join(" · ");
   if (hasContributors) {
     const topEffects = ml.top_contributors.slice(0, 3).map((item) => {
       const zscore = Number(item.ml_zscore || 0);
       const sign = zscore > 0 ? "+" : "";
-      return `${shortSymbol(item.symbol)} ${sign}${fmtNum(zscore, 2)}z`;
-    }).join(" / ");
-    subtle = `${subtle}${subtle ? " / " : ""}impact ${topEffects}`;
+      return `${shortSymbol(item.symbol)} ${sign}${fmtNum(zscore, 2)}`;
+    }).join("、");
+    subtle = `${subtle}${subtle ? "；" : ""}当前影响：${topEffects}`;
   } else if (ml.reason) {
-    subtle = `${subtle}${subtle ? " / " : ""}${messageZh(ml.reason)}`;
+    subtle = `${subtle}${subtle ? "；" : ""}${messageZh(ml.reason)}`;
   }
 
   return `<div class="signal">
-    <div class="label">ML Overlay</div>
+    <div class="label">机器学习叠加</div>
     <div class="value">${esc(value)}</div>
-    <div class="subtle">${esc(subtle || "waiting for ML snapshot...")}</div>
+    <div class="subtle">${esc(subtle || "等待机器学习决策快照...")}</div>
   </div>`;
 }
 
