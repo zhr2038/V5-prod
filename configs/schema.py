@@ -573,6 +573,7 @@ class BacktestConfig(BaseModel):
     slippage_bps: float = Field(default=5.0, ge=0)
     one_bar_delay: bool = True
     walk_forward_folds: int = Field(default=4, ge=1)
+    initial_equity_usdt: float = Field(default=20.0, gt=0)
 
     # cost calibration (F2)
     cost_model: str = Field(default="default", description="default|calibrated")

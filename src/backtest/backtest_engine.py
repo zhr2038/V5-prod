@@ -66,6 +66,16 @@ class BacktestEngine:
         ca["fallback_level_counts"] = dict(self._fallback_counts)
         return ca
 
+    @staticmethod
+    def _initial_equity_usdt(cfg) -> float:
+        try:
+            value = float(getattr(getattr(cfg, "backtest", None), "initial_equity_usdt", 20.0) or 20.0)
+            if value > 0:
+                return value
+        except Exception:
+            pass
+        return 20.0
+
     def run(self, market_data: Dict[str, MarketSeries], pipeline=None, *, cfg=None, data_provider=None) -> BacktestResult:
         """Run"""
         syms = list(market_data.keys())
@@ -76,9 +86,10 @@ class BacktestEngine:
         from src.core.pipeline import V5Pipeline
         from configs.schema import AppConfig
 
+        cfg_provided = cfg is not None
+        cfg = cfg or AppConfig(symbols=syms)
+
         if pipeline is None:
-            cfg_provided = cfg is not None
-            cfg = cfg or AppConfig(symbols=syms)
             if not cfg_provided:
                 cfg.execution.collect_ml_training_data = False
             init_ts = int(market_data[syms[0]].ts[0]) if getattr(market_data[syms[0]], "ts", None) else None
@@ -90,9 +101,10 @@ class BacktestEngine:
         if n < 80:
             return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self._cost_assumption())
 
-        cash = 1.0
+        initial_equity = self._initial_equity_usdt(cfg)
+        cash = float(initial_equity)
         equity_curve = []
-        peak = 1.0
+        peak = float(initial_equity)
         turnovers = []
         gains = 0.0
         losses = 0.0
@@ -204,7 +216,7 @@ class BacktestEngine:
                     cash += notional * (1.0 - cost)
                     positions.pop(o.symbol, None)
 
-            turnovers.append(traded_notional)
+            turnovers.append(float(traded_notional) / max(float(initial_equity), 1e-12))
 
             # Mark-to-market equity after execution at bar i+1 close
             eq_now = float(cash)
@@ -227,7 +239,8 @@ class BacktestEngine:
 
         ann = np.sqrt(24 * 365)
         sharpe = float(np.mean(rets) / (np.std(rets) + 1e-12) * ann)
-        cagr = float(eq[-1] ** (365 * 24 / max(1, len(rets))) - 1.0)
+        total_return = float(eq[-1]) / max(float(initial_equity), 1e-12)
+        cagr = float(max(total_return, 1e-12) ** (365 * 24 / max(1, len(rets))) - 1.0)
         pf = float(gains / (losses + 1e-12))
         turnover = float(np.mean(np.array(turnovers, dtype=float)))
 
