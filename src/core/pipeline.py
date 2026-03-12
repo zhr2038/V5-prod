@@ -469,7 +469,8 @@ class V5Pipeline:
         notional = abs(float(order.notional_usdt or 0.0))
         side = str(order.side or "").lower()
         intent = str(order.intent or "").upper()
-        open_rank = 1 if side == "buy" and intent == "OPEN_LONG" else 0
+        # Preserve top-ranked fresh entries before routine add-ons when buy turnover is capped.
+        open_rank = 0 if side == "buy" and intent == "OPEN_LONG" else 1
         return (open_rank, -drift, notional, str(order.symbol))
 
     def _cap_rebalance_side(

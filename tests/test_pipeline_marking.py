@@ -237,9 +237,9 @@ def test_rebalance_turnover_cap_uses_side_turnover_budget():
     assert stats["cap_notional"] == 30.0
 
 
-def test_rebalance_turnover_cap_prioritizes_existing_buys_before_new_opens():
+def test_rebalance_turnover_cap_prioritizes_new_opens_before_existing_buys():
     cfg = AppConfig(symbols=["BTC/USDT"])
-    cfg.execution.max_rebalance_turnover_per_cycle = 0.20
+    cfg.execution.max_rebalance_turnover_per_cycle = 0.25
     pipe = V5Pipeline(cfg, clock=FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
     orders = [
         Order(
@@ -270,6 +270,6 @@ def test_rebalance_turnover_cap_prioritizes_existing_buys_before_new_opens():
 
     kept, dropped, stats = pipe._apply_rebalance_turnover_cap(orders, equity_raw=100.0)
 
-    assert [order.symbol for order in kept] == ["ADD_WINNER/USDT", "OPEN_SMALL/USDT"]
-    assert [order.symbol for order in dropped] == ["OPEN_BIG/USDT"]
-    assert stats["kept_buy_notional"] == 20.0
+    assert [order.symbol for order in kept] == ["OPEN_BIG/USDT", "OPEN_SMALL/USDT"]
+    assert [order.symbol for order in dropped] == ["ADD_WINNER/USDT"]
+    assert stats["kept_buy_notional"] == 25.0
