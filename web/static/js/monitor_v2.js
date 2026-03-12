@@ -776,6 +776,74 @@ function renderMlImpactCard(ml) {
   </div>`;
 }
 
+function renderMlImpactCardClean(ml) {
+  if (!ml) return "";
+
+  const enabled = Boolean(ml.configured_enabled);
+  const promoted = Boolean(ml.promoted);
+  const liveActive = Boolean(ml.live_active);
+  const predictionCount = Number(ml.prediction_count || 0);
+  const coverageCount = Number(ml.coverage_count || 0);
+  const activeCount = Number(ml.active_symbols || predictionCount || coverageCount || 0);
+  const weightPct = Number(ml.ml_weight || 0) * 100;
+  const promotedRows = Array.isArray(ml.top_promoted) ? ml.top_promoted : [];
+  const suppressedRows = Array.isArray(ml.top_suppressed) ? ml.top_suppressed : [];
+  const contributors = Array.isArray(ml.top_contributors) ? ml.top_contributors : [];
+  const lastStep = ml.last_step || {};
+  const rolling = ml.rolling_24h || {};
+  const impactStatus = String(ml.impact_status || "");
+
+  if (!enabled && !promoted && !liveActive && !coverageCount && !contributors.length) {
+    return "";
+  }
+
+  let title = "ML 叠加";
+  if (impactStatus === "positive") title = "ML 叠加 / 正面";
+  else if (impactStatus === "negative") title = "ML 叠加 / 负面";
+  else if (impactStatus === "mixed") title = "ML 叠加 / 中性";
+
+  let value = "未启用";
+  if (liveActive) value = `本轮参与 ${activeCount || 0} 个币`;
+  else if (promoted) value = "已过门控";
+  else if (enabled) value = "本轮未参与";
+
+  const meta = [];
+  if (weightPct > 0) meta.push(`权重 ${weightPct.toFixed(0)}%`);
+  if (predictionCount > 0) meta.push(`预测 ${predictionCount}`);
+  else if (coverageCount > 0) meta.push(`覆盖 ${coverageCount}`);
+  if (lastStep?.delta_bps != null) {
+    meta.push(`上轮 Top${lastStep.top_n || 3} ${Number(lastStep.delta_bps) >= 0 ? "+" : ""}${fmtNum(lastStep.delta_bps, 1)}bps`);
+  }
+  if (rolling?.topn_delta_mean_bps != null) {
+    meta.push(`24h ${Number(rolling.topn_delta_mean_bps) >= 0 ? "+" : ""}${fmtNum(rolling.topn_delta_mean_bps, 1)}bps`);
+  }
+
+  const moveParts = [];
+  if (promotedRows.length) {
+    moveParts.push(`抬升 ${promotedRows.slice(0, 2).map((item) => `${shortSymbol(item.symbol)} ${item.base_rank}->${item.final_rank}`).join(" / ")}`);
+  }
+  if (suppressedRows.length) {
+    moveParts.push(`压低 ${suppressedRows.slice(0, 2).map((item) => `${shortSymbol(item.symbol)} ${item.base_rank}->${item.final_rank}`).join(" / ")}`);
+  }
+  if (!moveParts.length && contributors.length) {
+    moveParts.push(`当前 ${contributors.slice(0, 3).map((item) => {
+      const delta = Number(item.score_delta || 0);
+      const sign = delta > 0 ? "+" : "";
+      return `${shortSymbol(item.symbol)} ${sign}${fmtNum(delta, 2)}`;
+    }).join(" / ")}`);
+  }
+  if (!moveParts.length && ml.reason) {
+    moveParts.push(messageZh(ml.reason));
+  }
+
+  return `<div class="signal">
+    <div class="label">${esc(title)}</div>
+    <div class="value">${esc(value)}</div>
+    <div class="subtle">${esc(meta.join(" / ") || "等待 ML 影响数据...")}</div>
+    ${moveParts.length ? `<div class="subtle" style="margin-top:6px">${esc(moveParts.join(" / "))}</div>` : ""}
+  </div>`;
+}
+
 function voteCard(label, vote, cache, opts = {}) {
   const conf = Number(vote?.confidence || 0);
   const state = vote?.state || "--";
@@ -1017,7 +1085,7 @@ function renderMarket(payload) {
 function renderSignals(data) {
   const strategies = Array.isArray(data.strategy_signals) ? data.strategy_signals : [];
   const counts = data.counts || {};
-  const mlCard = renderMlImpactCard(data.ml_signal_overview || null);
+  const mlCard = renderMlImpactCardClean(data.ml_signal_overview || null);
   setText("signals-time", data.run_id ? `运行 ${data.run_id}` : "等待策略信号...");
 
   if (!strategies.length && !mlCard) {
