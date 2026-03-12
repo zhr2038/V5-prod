@@ -487,7 +487,7 @@ class V5Pipeline:
         used = 0.0
         for order in ranked:
             notional = abs(float(order.notional_usdt or 0.0))
-            if (used + notional) <= cap_notional or not kept_ranked:
+            if (used + notional) <= cap_notional:
                 kept_ranked.append(order)
                 used += notional
 

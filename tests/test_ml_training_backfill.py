@@ -426,3 +426,80 @@ def test_fill_all_labels_runs_multiple_batches(tmp_path: Path, monkeypatch: pyte
 
     assert result == {"filled": 1005, "batches": 2}
     assert labeled == 1005
+
+
+def test_fill_all_labels_continues_after_partial_only_batch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "ml_training_data.db"
+    collector = MLDataCollector(db_path=str(db_path))
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = []
+        ts = 1_700_000_000_000
+        for idx in range(1005):
+            rows.append(
+                (
+                    ts,
+                    f"S{idx}/USDT",
+                    0.1,
+                    0.2,
+                    0.3,
+                    1.0,
+                    2.0,
+                    0.01,
+                    0.02,
+                    0.5,
+                    1.5,
+                    10.0,
+                    50.0,
+                    0.1,
+                    0.05,
+                    0.2,
+                    0.6,
+                    "SIDEWAYS",
+                )
+            )
+        conn.executemany(
+            """
+            INSERT INTO feature_snapshots (
+                timestamp, symbol, returns_1h, returns_6h, returns_24h,
+                momentum_5d, momentum_20d, volatility_6h, volatility_24h,
+                volatility_ratio, volume_ratio, obv, rsi, macd, macd_signal,
+                bb_position, price_position, regime
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        collector,
+        "_calculate_future_return",
+        lambda symbol, start_timestamp, hours: {6: 0.06, 12: 0.12, 24: None}[hours],
+    )
+
+    result = collector.fill_all_labels(ts + 13 * 3600 * 1000, max_batches=5)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        partial = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM feature_snapshots "
+                "WHERE future_return_6h IS NOT NULL AND future_return_12h IS NOT NULL "
+                "AND future_return_24h IS NULL AND label_filled = 0"
+            ).fetchone()[0]
+        )
+        untouched = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM feature_snapshots "
+                "WHERE future_return_6h IS NULL AND future_return_12h IS NULL "
+                "AND future_return_24h IS NULL AND label_filled = 0"
+            ).fetchone()[0]
+        )
+    finally:
+        conn.close()
+
+    assert result == {"filled": 0, "batches": 2}
+    assert partial == 1005
+    assert untouched == 0

@@ -3308,8 +3308,8 @@ def api_decision_chain():
                     # UTC数据的特征：run_id小时 = 本地小时 - 8 (或 +16)
                     hour_diff = (run_hour - local_hour) % 24
                     if hour_diff >= 16:  # 相差16小时以上，说明是UTC命名的旧数据
-                        # 旧数据：时间戳是UTC，需要+8转为CST
-                        run_time = datetime.fromtimestamp(ts + 8*3600).strftime('%Y-%m-%d %H:%M:%S')
+                        # 旧数据：时间戳是UTC，显式转为CST，避免在UTC+8主机上重复偏移。
+                        run_time = (datetime.utcfromtimestamp(ts) + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
                     else:
                         # 新数据：时间戳已经是CST
                         run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')

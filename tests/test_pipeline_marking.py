@@ -273,3 +273,42 @@ def test_rebalance_turnover_cap_prioritizes_new_opens_before_existing_buys():
     assert [order.symbol for order in kept] == ["OPEN_BIG/USDT", "OPEN_SMALL/USDT"]
     assert [order.symbol for order in dropped] == ["ADD_WINNER/USDT"]
     assert stats["kept_buy_notional"] == 25.0
+
+
+def test_rebalance_turnover_cap_drops_oversized_open_and_keeps_fitting_orders():
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.max_rebalance_turnover_per_cycle = 0.25
+    pipe = V5Pipeline(cfg, clock=FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    orders = [
+        Order(
+            symbol="OPEN_OVERSIZED/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=30.0,
+            signal_price=1.0,
+            meta={"drift": 0.80},
+        ),
+        Order(
+            symbol="OPEN_FIT/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=20.0,
+            signal_price=1.0,
+            meta={"drift": 0.50},
+        ),
+        Order(
+            symbol="ADD_SMALL/USDT",
+            side="buy",
+            intent="REBALANCE",
+            notional_usdt=5.0,
+            signal_price=1.0,
+            meta={"drift": 0.20},
+        ),
+    ]
+
+    kept, dropped, stats = pipe._apply_rebalance_turnover_cap(orders, equity_raw=100.0)
+
+    assert [order.symbol for order in kept] == ["OPEN_FIT/USDT", "ADD_SMALL/USDT"]
+    assert [order.symbol for order in dropped] == ["OPEN_OVERSIZED/USDT"]
+    assert stats["cap_notional"] == 25.0
+    assert stats["kept_buy_notional"] == 25.0

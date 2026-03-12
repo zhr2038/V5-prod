@@ -326,11 +326,13 @@ class MLDataCollector:
             "duplicates_removed": rows_before - rows_after,
         }
 
-    def fill_labels(self, current_timestamp: int) -> int:
+    def _fill_labels_batch(self, current_timestamp: int) -> Dict[str, int]:
         conn = self._get_connection()
         cursor = conn.cursor()
         try:
             six_hours_ago = int(current_timestamp) - 6 * self.ONE_HOUR_MS
+            twelve_hours_ago = int(current_timestamp) - 12 * self.ONE_HOUR_MS
+            twenty_four_hours_ago = int(current_timestamp) - 24 * self.ONE_HOUR_MS
             cursor.execute(
                 """
                 SELECT
@@ -338,11 +340,15 @@ class MLDataCollector:
                     future_return_6h, future_return_12h, future_return_24h
                 FROM feature_snapshots
                 WHERE label_filled = 0
-                  AND timestamp <= ?
-                ORDER BY timestamp
+                  AND (
+                    (timestamp <= ? AND future_return_6h IS NULL)
+                    OR (timestamp <= ? AND future_return_12h IS NULL)
+                    OR (timestamp <= ? AND future_return_24h IS NULL)
+                  )
+                ORDER BY timestamp, id
                 LIMIT 1000
                 """,
-                (six_hours_ago,),
+                (six_hours_ago, twelve_hours_ago, twenty_four_hours_ago),
             )
             records_to_fill = cursor.fetchall()
 
@@ -435,18 +441,28 @@ class MLDataCollector:
                     len(partial_updates),
                     len(failed_updates),
                 )
-            return len(full_updates)
+            return {
+                "filled": int(len(full_updates)),
+                "partial": int(len(partial_updates)),
+                "failed": int(len(failed_updates)),
+                "processed": int(len(full_updates) + len(partial_updates) + len(failed_updates)),
+            }
         except sqlite3.Error as exc:
             conn.rollback()
             raise MLDataCollectorError(f"database error filling labels: {exc}") from exc
+
+    def fill_labels(self, current_timestamp: int) -> int:
+        return int(self._fill_labels_batch(current_timestamp)["filled"])
 
     def fill_all_labels(self, current_timestamp: int, *, max_batches: int = 100) -> dict[str, int]:
         total_filled = 0
         batches_run = 0
         for _ in range(max(int(max_batches), 1)):
-            filled = int(self.fill_labels(current_timestamp))
-            if filled <= 0:
+            batch_stats = self._fill_labels_batch(current_timestamp)
+            processed = int(batch_stats.get("processed", 0))
+            if processed <= 0:
                 break
+            filled = int(batch_stats.get("filled", 0))
             batches_run += 1
             total_filled += filled
         return {"filled": total_filled, "batches": batches_run}

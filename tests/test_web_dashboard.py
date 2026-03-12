@@ -936,3 +936,36 @@ def test_market_state_snapshot_falls_back_to_regime_json_after_failed_run(tmp_pa
     assert snapshot["method"] == "regime_json"
     assert snapshot["final_score"] == 0.42
     assert snapshot["votes"]["hmm"]["state"] == "TRENDING"
+
+
+def test_decision_chain_legacy_utc_run_time_is_not_double_shifted(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    legacy_run = runs_dir / "20260311_00"
+    legacy_run.mkdir(parents=True, exist_ok=True)
+    (legacy_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260311_00",
+                "now_ts": 3600,
+                "regime": "SIDEWAYS",
+                "top_scores": [{"symbol": "BTC/USDT", "score": 0.5, "rank": 1}],
+                "counts": {"selected": 1, "targets_pre_risk": 1, "orders_rebalance": 0, "orders_exit": 0},
+                "router_decisions": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(legacy_run, (0, 0))
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/decision_chain")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rounds"][0]["run_id"] == "20260311_00"
+    assert payload["rounds"][0]["time"] == "1970-01-01 09:00:00"
