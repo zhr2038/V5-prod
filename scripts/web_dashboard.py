@@ -447,6 +447,20 @@ def _normalize_symbol_key(symbol: Any) -> str:
     return str(symbol or '').strip().upper().replace('-', '/')
 
 
+def _score_rank_map(scores: Any) -> Dict[str, int]:
+    if not isinstance(scores, dict):
+        return {}
+    ranked = sorted(
+        (
+            (str(sym), _coerce_float(score))
+            for sym, score in scores.items()
+        ),
+        key=lambda item: (item[1], item[0]),
+        reverse=True,
+    )
+    return {sym: idx + 1 for idx, (sym, _) in enumerate(ranked)}
+
+
 def _build_ml_signal_overview(
     reports_dir: Path,
     preferred_symbols: Optional[List[str]] = None,
@@ -455,10 +469,15 @@ def _build_ml_signal_overview(
     runtime = _load_json_payload(reports_dir / 'ml_runtime_status.json')
     promotion = _load_json_payload(reports_dir / 'model_promotion_decision.json')
     snapshot = _load_json_payload(reports_dir / 'alpha_snapshot.json')
+    impact_summary = _load_json_payload(reports_dir / 'ml_overlay_impact.json')
 
     raw_factors = snapshot.get('raw_factors', {})
     z_factors = snapshot.get('z_factors', {})
     score_map = snapshot.get('scores', {})
+    base_score_map = snapshot.get('base_scores', {})
+    overlay_score_map = snapshot.get('ml_overlay_scores', {})
+    base_rank_map = _score_rank_map(base_score_map)
+    final_rank_map = _score_rank_map(score_map)
 
     factor_rows: List[Dict[str, Any]] = []
     if isinstance(z_factors, dict):
@@ -470,13 +489,25 @@ def _build_ml_signal_overview(
                 raw_bucket = {}
             ml_zscore = _coerce_float(z_bucket.get('ml_pred_zscore', 0.0))
             ml_raw = _coerce_float(raw_bucket.get('ml_pred_raw', 0.0))
+            overlay_score = _coerce_float(
+                raw_bucket.get('ml_overlay_score', overlay_score_map.get(symbol, z_bucket.get('ml_overlay_score', 0.0)))
+            )
+            base_score = _coerce_float(raw_bucket.get('ml_base_score', base_score_map.get(symbol, 0.0)))
             final_score = _coerce_float(score_map.get(symbol, 0.0)) if isinstance(score_map, dict) else 0.0
+            base_rank = int(base_rank_map.get(str(symbol), 0) or 0)
+            final_rank = int(final_rank_map.get(str(symbol), 0) or 0)
             factor_rows.append({
                 'symbol': str(symbol or 'Unknown'),
                 'symbol_key': _normalize_symbol_key(symbol),
                 'ml_zscore': round(ml_zscore, 4),
                 'ml_raw': round(ml_raw, 6),
+                'ml_overlay_score': round(overlay_score, 4),
+                'base_score': round(base_score, 4),
                 'final_score': round(final_score, 4),
+                'score_delta': round(final_score - base_score, 4),
+                'base_rank': base_rank,
+                'final_rank': final_rank,
+                'rank_delta': int(base_rank - final_rank) if base_rank and final_rank else 0,
             })
 
     nonzero_rows = [
@@ -518,6 +549,33 @@ def _build_ml_signal_overview(
             if len(contributors) >= limit:
                 break
 
+    promoted_rows = [
+        {k: v for k, v in row.items() if k != 'symbol_key'}
+        for row in factor_rows
+        if int(row.get('rank_delta', 0) or 0) > 0
+    ]
+    promoted_rows.sort(
+        key=lambda item: (
+            int(item.get('rank_delta', 0) or 0),
+            abs(float(item.get('score_delta', 0.0) or 0.0)),
+            str(item.get('symbol') or ''),
+        ),
+        reverse=True,
+    )
+    suppressed_rows = [
+        {k: v for k, v in row.items() if k != 'symbol_key'}
+        for row in factor_rows
+        if int(row.get('rank_delta', 0) or 0) < 0
+    ]
+    suppressed_rows.sort(
+        key=lambda item: (
+            abs(int(item.get('rank_delta', 0) or 0)),
+            abs(float(item.get('score_delta', 0.0) or 0.0)),
+            str(item.get('symbol') or ''),
+        ),
+        reverse=True,
+    )
+
     try:
         prediction_count = int(runtime.get('prediction_count', 0) or 0)
     except Exception:
@@ -528,6 +586,9 @@ def _build_ml_signal_overview(
     live_active = bool(runtime.get('used_in_latest_snapshot', False))
     coverage_count = prediction_count if prediction_count > 0 else len(nonzero_rows)
     reason = str(runtime.get('reason') or runtime.get('error') or '')
+    last_step = impact_summary.get('last_step', {}) if isinstance(impact_summary, dict) else {}
+    rolling_24h = impact_summary.get('rolling_24h', {}) if isinstance(impact_summary, dict) else {}
+    impact_status = str((rolling_24h.get('status') or last_step.get('status') or 'insufficient'))
 
     if not configured_enabled and (promoted or live_active or coverage_count > 0):
         configured_enabled = True
@@ -542,7 +603,16 @@ def _build_ml_signal_overview(
         'ml_weight': _coerce_float(runtime.get('ml_weight', 0.0)),
         'reason': reason,
         'last_update': runtime.get('ts'),
+        'overlay_transform': runtime.get('overlay_transform'),
+        'overlay_transform_scale': _coerce_float(runtime.get('overlay_transform_scale', 0.0)),
+        'overlay_transform_max_abs': _coerce_float(runtime.get('overlay_transform_max_abs', 0.0)),
+        'overlay_score_max_abs': _coerce_float(runtime.get('overlay_score_max_abs', 0.0)),
+        'impact_status': impact_status,
+        'last_step': last_step,
+        'rolling_24h': rolling_24h,
         'top_contributors': contributors,
+        'top_promoted': promoted_rows[:limit],
+        'top_suppressed': suppressed_rows[:limit],
     }
 
 
@@ -4000,7 +4070,12 @@ def api_decision_audit():
         for item in target_rank[:10]:
             if isinstance(item, dict) and item.get('symbol'):
                 preferred_ml_symbols.append(str(item.get('symbol')))
+        stored_ml_overview = audit_data.get('ml_signal_overview', {}) if isinstance(audit_data, dict) else {}
         ml_signal_overview = _build_ml_signal_overview(REPORTS_DIR, preferred_symbols=preferred_ml_symbols)
+        if isinstance(stored_ml_overview, dict) and stored_ml_overview:
+            merged_ml_overview = dict(stored_ml_overview)
+            merged_ml_overview.update({k: v for k, v in ml_signal_overview.items() if v not in (None, {}, [], "")})
+            ml_signal_overview = merged_ml_overview
 
         return jsonify({
             'run_id': run_id,

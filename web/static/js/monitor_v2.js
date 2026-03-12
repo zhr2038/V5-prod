@@ -638,6 +638,9 @@ document.addEventListener("click", (evt) => {
 });
 
 function renderMlSignalCard(ml) {
+  return renderMlImpactCard(ml);
+}
+/*
   if (!ml) return "";
 
   const enabled = Boolean(ml.configured_enabled);
@@ -648,6 +651,11 @@ function renderMlSignalCard(ml) {
   const activeCount = Number(ml.active_symbols || predictionCount || coverageCount || 0);
   const weightPct = Number(ml.ml_weight || 0) * 100;
   const hasContributors = Array.isArray(ml.top_contributors) && ml.top_contributors.length > 0;
+  const promotedRows = Array.isArray(ml.top_promoted) ? ml.top_promoted : [];
+  const suppressedRows = Array.isArray(ml.top_suppressed) ? ml.top_suppressed : [];
+  const lastStep = ml.last_step || {};
+  const rolling = ml.rolling_24h || {};
+  const impactStatus = String(ml.impact_status || "");
 
   if (!enabled && !promoted && !liveActive && !coverageCount && !hasContributors) {
     return "";
@@ -663,6 +671,10 @@ function renderMlSignalCard(ml) {
   }
 
   const details = [];
+  if (impactStatus && impactStatus !== "insufficient") {
+    const tone = impactStatus === "positive" ? "姝ｉ潰" : (impactStatus === "negative" ? "璐熼潰" : "涓€?");
+    value = `${value} 路 ${tone}`;
+  }
   if (weightPct > 0) details.push(`权重 ${weightPct.toFixed(0)}%`);
   if (predictionCount > 0) details.push(`预测 ${predictionCount} 个`);
   else if (coverageCount > 0) details.push(`覆盖 ${coverageCount} 个`);
@@ -670,6 +682,13 @@ function renderMlSignalCard(ml) {
   else if (enabled) details.push("门控拦截");
 
   let subtle = details.join(" · ");
+  if (lastStep?.delta_bps != null) {
+    details.push(`涓婅疆 Top${lastStep.top_n || 3} ${Number(lastStep.delta_bps) >= 0 ? "+" : ""}${fmtNum(lastStep.delta_bps, 1)}bps`);
+  }
+  if (rolling?.topn_delta_mean_bps != null) {
+    details.push(`24h ${Number(rolling.topn_delta_mean_bps) >= 0 ? "+" : ""}${fmtNum(rolling.topn_delta_mean_bps, 1)}bps`);
+  }
+  let subtle = details.join(" 路 ");
   if (hasContributors) {
     const topEffects = ml.top_contributors.slice(0, 3).map((item) => {
       const zscore = Number(item.ml_zscore || 0);
@@ -685,6 +704,75 @@ function renderMlSignalCard(ml) {
     <div class="label">机器学习叠加</div>
     <div class="value">${esc(value)}</div>
     <div class="subtle">${esc(subtle || "等待机器学习决策快照...")}</div>
+  </div>`;
+}
+
+*/
+function renderMlImpactCard(ml) {
+  if (!ml) return "";
+
+  const enabled = Boolean(ml.configured_enabled);
+  const promoted = Boolean(ml.promoted);
+  const liveActive = Boolean(ml.live_active);
+  const predictionCount = Number(ml.prediction_count || 0);
+  const coverageCount = Number(ml.coverage_count || 0);
+  const activeCount = Number(ml.active_symbols || predictionCount || coverageCount || 0);
+  const weightPct = Number(ml.ml_weight || 0) * 100;
+  const promotedRows = Array.isArray(ml.top_promoted) ? ml.top_promoted : [];
+  const suppressedRows = Array.isArray(ml.top_suppressed) ? ml.top_suppressed : [];
+  const contributors = Array.isArray(ml.top_contributors) ? ml.top_contributors : [];
+  const lastStep = ml.last_step || {};
+  const rolling = ml.rolling_24h || {};
+  const impactStatus = String(ml.impact_status || "");
+
+  if (!enabled && !promoted && !liveActive && !coverageCount && !contributors.length) {
+    return "";
+  }
+
+  let title = "ML 鍙犲姞";
+  if (impactStatus === "positive") title = "ML 鍙犲姞 路 姝ｉ潰";
+  else if (impactStatus === "negative") title = "ML 鍙犲姞 路 璐熼潰";
+  else if (impactStatus === "mixed") title = "ML 鍙犲姞 路 涓€?";
+
+  let value = "鏈惎鐢?";
+  if (liveActive) value = `鏈疆 ${activeCount || 0} 涓竵`;
+  else if (promoted) value = "宸查€氳繃闂ㄦ帶";
+  else if (enabled) value = "鏈疆鏈弬涓?";
+
+  const meta = [];
+  if (weightPct > 0) meta.push(`鏉冮噸 ${weightPct.toFixed(0)}%`);
+  if (predictionCount > 0) meta.push(`棰勬祴 ${predictionCount}`);
+  else if (coverageCount > 0) meta.push(`瑕嗙洊 ${coverageCount}`);
+  if (lastStep?.delta_bps != null) {
+    meta.push(`涓婅疆 Top${lastStep.top_n || 3} ${Number(lastStep.delta_bps) >= 0 ? "+" : ""}${fmtNum(lastStep.delta_bps, 1)}bps`);
+  }
+  if (rolling?.topn_delta_mean_bps != null) {
+    meta.push(`24h ${Number(rolling.topn_delta_mean_bps) >= 0 ? "+" : ""}${fmtNum(rolling.topn_delta_mean_bps, 1)}bps`);
+  }
+
+  const moveParts = [];
+  if (promotedRows.length) {
+    moveParts.push(`鎶崌 ${promotedRows.slice(0, 2).map((item) => `${shortSymbol(item.symbol)} ${item.base_rank}->${item.final_rank}`).join(" / ")}`);
+  }
+  if (suppressedRows.length) {
+    moveParts.push(`鍘嬩綆 ${suppressedRows.slice(0, 2).map((item) => `${shortSymbol(item.symbol)} ${item.base_rank}->${item.final_rank}`).join(" / ")}`);
+  }
+  if (!moveParts.length && contributors.length) {
+    moveParts.push(`褰撳墠 ${contributors.slice(0, 3).map((item) => {
+      const delta = Number(item.score_delta || 0);
+      const sign = delta > 0 ? "+" : "";
+      return `${shortSymbol(item.symbol)} ${sign}${fmtNum(delta, 2)}`;
+    }).join(" / ")}`);
+  }
+  if (!moveParts.length && ml.reason) {
+    moveParts.push(messageZh(ml.reason));
+  }
+
+  return `<div class="signal">
+    <div class="label">${esc(title)}</div>
+    <div class="value">${esc(value)}</div>
+    <div class="subtle">${esc(meta.join(" 路 ") || "绛夊緟 ML 褰卞搷鏁版嵁...")}</div>
+    ${moveParts.length ? `<div class="subtle" style="margin-top:6px">${esc(moveParts.join(" 锛?"))}</div>` : ""}
   </div>`;
 }
 
@@ -929,7 +1017,7 @@ function renderMarket(payload) {
 function renderSignals(data) {
   const strategies = Array.isArray(data.strategy_signals) ? data.strategy_signals : [];
   const counts = data.counts || {};
-  const mlCard = renderMlSignalCard(data.ml_signal_overview || null);
+  const mlCard = renderMlImpactCard(data.ml_signal_overview || null);
   setText("signals-time", data.run_id ? `运行 ${data.run_id}` : "等待策略信号...");
 
   if (!strategies.length && !mlCard) {

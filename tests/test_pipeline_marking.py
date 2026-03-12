@@ -312,3 +312,101 @@ def test_rebalance_turnover_cap_drops_oversized_open_and_keeps_fitting_orders():
     assert [order.symbol for order in dropped] == ["OPEN_OVERSIZED/USDT"]
     assert stats["cap_notional"] == 25.0
     assert stats["kept_buy_notional"] == 25.0
+
+
+def test_pipeline_records_ml_rank_delta_and_impact_summary(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(pipeline_module, "REPORTS_DIR", reports_dir)
+
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    pipe = V5Pipeline(AppConfig(symbols=["AAA/USDT", "BBB/USDT", "CCC/USDT"]), clock=FixedClock(t0))
+    pipe.portfolio_engine.allocate = lambda **kwargs: PortfolioSnapshot(
+        target_weights={"AAA/USDT": 0.5, "BBB/USDT": 0.5},
+        selected=["AAA/USDT", "BBB/USDT"],
+        volatilities={},
+        entry_candidates=["AAA/USDT", "BBB/USDT"],
+    )
+    pipe.data_collector.collect_features = lambda **kwargs: True
+    pipe.data_collector.fill_labels = lambda current_timestamp: 0
+
+    md1 = {
+        "AAA/USDT": MarketSeries(symbol="AAA/USDT", timeframe="1h", ts=[0], open=[10.0], high=[10.0], low=[10.0], close=[10.0], volume=[1.0]),
+        "BBB/USDT": MarketSeries(symbol="BBB/USDT", timeframe="1h", ts=[0], open=[20.0], high=[20.0], low=[20.0], close=[20.0], volume=[1.0]),
+        "CCC/USDT": MarketSeries(symbol="CCC/USDT", timeframe="1h", ts=[0], open=[30.0], high=[30.0], low=[30.0], close=[30.0], volume=[1.0]),
+    }
+    alpha1 = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"BBB/USDT": 0.9, "AAA/USDT": 0.7, "CCC/USDT": 0.1},
+        raw_scores={"BBB/USDT": 0.9, "AAA/USDT": 0.7, "CCC/USDT": 0.1},
+        telemetry_scores={"AAA/USDT": 0.6, "BBB/USDT": 0.4, "CCC/USDT": 0.2},
+        base_scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        base_raw_scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        ml_overlay_scores={"AAA/USDT": 0.3, "BBB/USDT": 1.8},
+        ml_overlay_raw_scores={"AAA/USDT": 0.5, "BBB/USDT": 2.7},
+        ml_runtime={
+            "configured_enabled": True,
+            "promotion_passed": True,
+            "used_in_latest_snapshot": True,
+            "prediction_count": 2,
+            "ml_weight": 0.2,
+            "reason": "ok",
+            "ts": "2026-01-01T12:00:00Z",
+            "overlay_transform": "tanh",
+            "overlay_transform_scale": 1.6,
+            "overlay_transform_max_abs": 1.6,
+            "overlay_score_max_abs": 1.6,
+        },
+    )
+    audit1 = DecisionAudit(run_id="20260101_12", window_start_ts=1_704_110_400, window_end_ts=1_704_114_000)
+
+    pipe.run(
+        md1,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit1,
+        precomputed_alpha=alpha1,
+        precomputed_regime=RegimeResult(state=RegimeState.SIDEWAYS, atr_pct=0.0, ma20=0.0, ma60=0.0, multiplier=1.0),
+    )
+
+    assert audit1.top_scores[0]["symbol"] == "BBB/USDT"
+    assert audit1.top_scores[0]["base_rank"] == 2
+    assert audit1.top_scores[0]["rank_delta"] == 1
+    assert audit1.ml_signal_overview["top_promoted"][0]["symbol"] == "BBB/USDT"
+
+    pipe.clock = FixedClock(datetime(2026, 1, 1, 13, 0, tzinfo=timezone.utc))
+    md2 = {
+        "AAA/USDT": MarketSeries(symbol="AAA/USDT", timeframe="1h", ts=[0], open=[10.2], high=[10.2], low=[10.2], close=[10.2], volume=[1.0]),
+        "BBB/USDT": MarketSeries(symbol="BBB/USDT", timeframe="1h", ts=[0], open=[21.0], high=[21.0], low=[21.0], close=[21.0], volume=[1.0]),
+        "CCC/USDT": MarketSeries(symbol="CCC/USDT", timeframe="1h", ts=[0], open=[29.7], high=[29.7], low=[29.7], close=[29.7], volume=[1.0]),
+    }
+    alpha2 = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"BBB/USDT": 0.8, "AAA/USDT": 0.6, "CCC/USDT": 0.2},
+        raw_scores={"BBB/USDT": 0.8, "AAA/USDT": 0.6, "CCC/USDT": 0.2},
+        telemetry_scores={"AAA/USDT": 0.5, "BBB/USDT": 0.3, "CCC/USDT": 0.1},
+        base_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.55, "CCC/USDT": 0.2},
+        base_raw_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.55, "CCC/USDT": 0.2},
+        ml_overlay_scores={"AAA/USDT": 0.25, "BBB/USDT": 1.4},
+        ml_overlay_raw_scores={"AAA/USDT": 0.4, "BBB/USDT": 2.1},
+        ml_runtime=alpha1.ml_runtime,
+    )
+    audit2 = DecisionAudit(run_id="20260101_13", window_start_ts=1_704_114_000, window_end_ts=1_704_117_600)
+
+    pipe.run(
+        md2,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit2,
+        precomputed_alpha=alpha2,
+        precomputed_regime=RegimeResult(state=RegimeState.SIDEWAYS, atr_pct=0.0, ma20=0.0, ma60=0.0, multiplier=1.0),
+    )
+
+    impact_summary = json.loads((reports_dir / "ml_overlay_impact.json").read_text(encoding="utf-8"))
+    assert impact_summary["last_step"]["delta_bps"] is not None
+    assert impact_summary["rolling_24h"]["points"] >= 1
+    assert audit2.ml_signal_overview["last_step"]["delta_bps"] == impact_summary["last_step"]["delta_bps"]

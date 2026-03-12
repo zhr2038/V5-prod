@@ -38,7 +38,13 @@ def dump_run_artifacts(
         "raw_factors": alpha.raw_factors,
         "z_factors": alpha.z_factors,
         "scores": alpha.scores,
+        "raw_scores": alpha.raw_scores,
         "telemetry_scores": alpha.telemetry_scores,
+        "base_scores": alpha.base_scores,
+        "base_raw_scores": alpha.base_raw_scores,
+        "ml_overlay_scores": alpha.ml_overlay_scores,
+        "ml_overlay_raw_scores": alpha.ml_overlay_raw_scores,
+        "ml_runtime": alpha.ml_runtime,
     })
     write_json(f"{reports_dir}/regime.json", asdict(regime))
     write_json(f"{reports_dir}/portfolio.json", asdict(portfolio))

@@ -571,19 +571,42 @@ def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
         json.dumps(
             {
                 "raw_factors": {
-                    "BTC/USDT": {"ml_pred_raw": 0.061},
-                    "ETH/USDT": {"ml_pred_raw": -0.018},
-                    "SOL/USDT": {"ml_pred_raw": 0.074},
+                    "BTC/USDT": {"ml_pred_raw": 0.061, "ml_overlay_score": 0.52, "ml_base_score": 0.78},
+                    "ETH/USDT": {"ml_pred_raw": -0.018, "ml_overlay_score": -0.24, "ml_base_score": 0.91},
+                    "SOL/USDT": {"ml_pred_raw": 0.074, "ml_overlay_score": 0.68, "ml_base_score": 0.55},
                 },
                 "z_factors": {
-                    "BTC/USDT": {"ml_pred_zscore": 0.82},
-                    "ETH/USDT": {"ml_pred_zscore": -0.31},
-                    "SOL/USDT": {"ml_pred_zscore": 1.12},
+                    "BTC/USDT": {"ml_pred_zscore": 0.82, "ml_overlay_score": 0.52},
+                    "ETH/USDT": {"ml_pred_zscore": -0.31, "ml_overlay_score": -0.24},
+                    "SOL/USDT": {"ml_pred_zscore": 1.12, "ml_overlay_score": 0.68},
+                },
+                "base_scores": {
+                    "BTC/USDT": 0.78,
+                    "ETH/USDT": 0.91,
+                    "SOL/USDT": 0.55,
                 },
                 "scores": {
                     "BTC/USDT": 0.93,
                     "ETH/USDT": 0.84,
                     "SOL/USDT": 0.65,
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_overlay_impact.json").write_text(
+        json.dumps(
+            {
+                "last_step": {
+                    "top_n": 3,
+                    "delta_bps": 14.2,
+                    "status": "positive",
+                },
+                "rolling_24h": {
+                    "points": 6,
+                    "topn_delta_mean_bps": 8.4,
+                    "status": "positive",
                 },
             },
             ensure_ascii=False,
@@ -603,8 +626,13 @@ def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
     assert ml["live_active"] is True
     assert ml["prediction_count"] == 3
     assert ml["ml_weight"] == 0.2
+    assert ml["impact_status"] == "positive"
+    assert ml["last_step"]["delta_bps"] == 14.2
+    assert ml["rolling_24h"]["topn_delta_mean_bps"] == 8.4
     assert [item["symbol"] for item in ml["top_contributors"]] == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
     assert ml["top_contributors"][0]["ml_zscore"] == 0.82
+    assert ml["top_promoted"][0]["symbol"] == "BTC/USDT"
+    assert ml["top_suppressed"][0]["symbol"] == "ETH/USDT"
 
 
 def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):

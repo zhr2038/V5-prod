@@ -37,6 +37,9 @@ def test_live_prod_ml_factor_loads():
     cfg = load_config("configs/live_prod.yaml", env_path=None)
     assert cfg.alpha.ml_factor.enabled is True
     assert cfg.alpha.ml_factor.ml_weight == 0.20
+    assert cfg.alpha.ml_factor.overlay_transform == "tanh"
+    assert cfg.alpha.ml_factor.overlay_transform_scale == 1.6
+    assert cfg.alpha.ml_factor.overlay_transform_max_abs == 1.6
     assert cfg.alpha.ml_factor.require_promotion_passed is True
     assert cfg.alpha.ml_factor.model_path == "models/ml_factor_model"
 

@@ -55,6 +55,11 @@ class AlphaSnapshot:
     scores: Dict[str, float]
     raw_scores: Dict[str, float] | None = None
     telemetry_scores: Dict[str, float] | None = None
+    base_scores: Dict[str, float] | None = None
+    base_raw_scores: Dict[str, float] | None = None
+    ml_overlay_scores: Dict[str, float] | None = None
+    ml_overlay_raw_scores: Dict[str, float] | None = None
+    ml_runtime: Dict[str, Any] | None = None
 
 
 class AlphaEngine:
@@ -485,6 +490,34 @@ class AlphaEngine:
         )
         return builder.build_inference_frame(market_data, feature_names=feature_names)
 
+    def _transform_ml_overlay_scores(self, overlay_scores: Dict[str, float]) -> Dict[str, float]:
+        ml_cfg = getattr(self.cfg, "ml_factor", None)
+        if not overlay_scores or ml_cfg is None:
+            return {}
+
+        transform = str(getattr(ml_cfg, "overlay_transform", "tanh") or "tanh").strip().lower()
+        scale = max(float(getattr(ml_cfg, "overlay_transform_scale", 1.6) or 1.6), 1e-6)
+        max_abs = max(float(getattr(ml_cfg, "overlay_transform_max_abs", 1.6) or 1.6), 1e-6)
+
+        transformed: Dict[str, float] = {}
+        for sym, raw_value in (overlay_scores or {}).items():
+            try:
+                value = float(raw_value)
+            except Exception:
+                continue
+            if not np.isfinite(value):
+                continue
+
+            if transform == "none":
+                adjusted = value
+            elif transform == "clip":
+                adjusted = max(-max_abs, min(max_abs, value))
+            else:
+                adjusted = max_abs * float(np.tanh(value / scale))
+
+            transformed[str(sym)] = float(adjusted)
+        return transformed
+
     def _compute_ml_overlay_scores(self, market_data: Dict[str, MarketSeries]) -> tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
         ml_cfg = getattr(self.cfg, "ml_factor", None)
         status: Dict[str, Any] = {
@@ -797,14 +830,20 @@ class AlphaEngine:
                 raw_scores = dict(scores)
             factor_snapshot = self._get_alpha6_factor_snapshot()
             telemetry_scores = self._build_multi_strategy_telemetry_scores(factor_snapshot)
-            ml_overlay_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
+            ml_overlay_raw_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
+            ml_overlay_scores = self._transform_ml_overlay_scores(ml_overlay_raw_scores)
             ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
+            base_scores = dict(scores)
+            base_raw_scores = dict(raw_scores)
+            for sym in sorted(set(base_scores.keys()) | set(ml_overlay_scores.keys())):
+                base_scores.setdefault(sym, 0.0)
+                base_raw_scores.setdefault(sym, float(base_scores.get(sym, 0.0)))
             if ml_overlay_scores and ml_weight > 0:
                 blended_scores: Dict[str, float] = {}
                 blended_raw_scores: Dict[str, float] = {}
-                for sym in sorted(set(scores.keys()) | set(ml_overlay_scores.keys())):
-                    base_score = float(scores.get(sym, 0.0))
-                    base_raw_score = float(raw_scores.get(sym, base_score))
+                for sym in sorted(set(base_scores.keys()) | set(ml_overlay_scores.keys())):
+                    base_score = float(base_scores.get(sym, 0.0))
+                    base_raw_score = float(base_raw_scores.get(sym, base_score))
                     if sym in ml_overlay_scores:
                         blended_scores[sym] = float(
                             (1.0 - ml_weight) * base_score + ml_weight * float(ml_overlay_scores[sym])
@@ -819,6 +858,18 @@ class AlphaEngine:
                 raw_scores = blended_raw_scores
             if ml_runtime and ml_runtime.get("used_in_latest_snapshot"):
                 ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
+                ml_runtime["overlay_transform"] = str(
+                    getattr(getattr(self.cfg, "ml_factor", None), "overlay_transform", "tanh") or "tanh"
+                )
+                ml_runtime["overlay_transform_scale"] = float(
+                    getattr(getattr(self.cfg, "ml_factor", None), "overlay_transform_scale", 1.6) or 1.6
+                )
+                ml_runtime["overlay_transform_max_abs"] = float(
+                    getattr(getattr(self.cfg, "ml_factor", None), "overlay_transform_max_abs", 1.6) or 1.6
+                )
+                ml_runtime["overlay_score_max_abs"] = float(
+                    max((abs(float(v)) for v in ml_overlay_scores.values()), default=0.0)
+                )
                 self._write_ml_runtime_status(ml_runtime)
             symbols = sorted(set(scores.keys()) | set(ml_raw_preds.keys()) | set(factor_snapshot.keys()))
             raw_factors: Dict[str, Dict[str, float]] = {}
@@ -833,6 +884,9 @@ class AlphaEngine:
                 raw_bucket["alpha6_relative_score"] = float(factor_entry.get("relative_score", 0.0))
                 raw_bucket["alpha6_final_score"] = float(factor_entry.get("final_score", 0.0))
                 raw_bucket["ml_pred_raw"] = float(ml_raw_preds.get(sym, 0.0))
+                raw_bucket["ml_overlay_score"] = float(ml_overlay_scores.get(sym, 0.0))
+                raw_bucket["ml_base_score"] = float(base_scores.get(sym, 0.0))
+                raw_bucket["ml_score_delta"] = float(scores.get(sym, 0.0) - base_scores.get(sym, 0.0))
                 raw_factors[sym] = raw_bucket
 
                 z_bucket = {
@@ -841,7 +895,8 @@ class AlphaEngine:
                 }
                 z_bucket["multi_strategy_score"] = float(scores.get(sym, 0.0))
                 z_bucket["alpha6_display_score"] = float(factor_entry.get("display_score", 0.0))
-                z_bucket["ml_pred_zscore"] = float(ml_overlay_scores.get(sym, 0.0))
+                z_bucket["ml_pred_zscore"] = float(ml_overlay_raw_scores.get(sym, 0.0))
+                z_bucket["ml_overlay_score"] = float(ml_overlay_scores.get(sym, 0.0))
                 z_factors[sym] = z_bucket
 
             return AlphaSnapshot(
@@ -850,6 +905,11 @@ class AlphaEngine:
                 scores=scores,
                 raw_scores=raw_scores,
                 telemetry_scores=telemetry_scores or dict(scores),
+                base_scores=base_scores,
+                base_raw_scores=base_raw_scores,
+                ml_overlay_scores=ml_overlay_scores,
+                ml_overlay_raw_scores=ml_overlay_raw_scores,
+                ml_runtime=ml_runtime,
             )
 
         # 否则使用传统5因子 + Alpha158 overlay（可选）
@@ -962,12 +1022,14 @@ class AlphaEngine:
                 "f12_imxd_14": float(getattr(ow, "f12_imxd_14", 0.35)),
             }
         ov_w = self._load_dynamic_ic_weights(static_ov_w) if static_ov_w else {}
-        ml_overlay_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
+        ml_overlay_raw_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
+        ml_overlay_scores = self._transform_ml_overlay_scores(ml_overlay_raw_scores)
         ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
 
         raw_factors: Dict[str, Dict[str, float]] = {}
         z_factors: Dict[str, Dict[str, float]] = {}
         scores: Dict[str, float] = {}
+        base_scores: Dict[str, float] = {}
 
         symbols = sorted(set(f1.keys()))
         for sym in symbols:
@@ -995,13 +1057,31 @@ class AlphaEngine:
                 raw_score = base_score
 
             classic_score = float(-raw_score)
+            base_scores[sym] = classic_score
             if sym in ml_overlay_scores and ml_weight > 0:
                 scores[sym] = float((1.0 - ml_weight) * classic_score + ml_weight * float(ml_overlay_scores[sym]))
             else:
                 scores[sym] = classic_score
 
+            raw_factors[sym]["ml_overlay_score"] = float(ml_overlay_scores.get(sym, 0.0))
+            raw_factors[sym]["ml_base_score"] = float(classic_score)
+            raw_factors[sym]["ml_score_delta"] = float(scores[sym] - classic_score)
+            z_factors[sym]["ml_overlay_score"] = float(ml_overlay_scores.get(sym, 0.0))
+
         if ml_runtime and ml_runtime.get("used_in_latest_snapshot"):
             ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
+            ml_runtime["overlay_transform"] = str(
+                getattr(getattr(self.cfg, "ml_factor", None), "overlay_transform", "tanh") or "tanh"
+            )
+            ml_runtime["overlay_transform_scale"] = float(
+                getattr(getattr(self.cfg, "ml_factor", None), "overlay_transform_scale", 1.6) or 1.6
+            )
+            ml_runtime["overlay_transform_max_abs"] = float(
+                getattr(getattr(self.cfg, "ml_factor", None), "overlay_transform_max_abs", 1.6) or 1.6
+            )
+            ml_runtime["overlay_score_max_abs"] = float(
+                max((abs(float(v)) for v in ml_overlay_scores.values()), default=0.0)
+            )
             self._write_ml_runtime_status(ml_runtime)
 
         return AlphaSnapshot(
@@ -1010,4 +1090,9 @@ class AlphaEngine:
             scores=scores,
             raw_scores=dict(scores),
             telemetry_scores=dict(scores),
+            base_scores=base_scores,
+            base_raw_scores=dict(base_scores),
+            ml_overlay_scores=ml_overlay_scores,
+            ml_overlay_raw_scores=ml_overlay_raw_scores,
+            ml_runtime=ml_runtime,
         )

@@ -83,6 +83,7 @@ class DecisionAudit:
     
     # 多策略信号详情
     strategy_signals: List[Dict[str, Any]] = field(default_factory=list)
+    ml_signal_overview: Dict[str, Any] = field(default_factory=dict)
     
     def reject(self, reason: str) -> None:
         """记录拒绝原因"""
@@ -144,5 +145,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.exit_signals = data.get("exit_signals", [])
     audit.notes = data.get("notes", [])
     audit.regime_details = data.get("regime_details", {})
+    audit.strategy_signals = data.get("strategy_signals", [])
+    audit.ml_signal_overview = data.get("ml_signal_overview", {})
     
     return audit

@@ -114,10 +114,30 @@ class MLFactorLiveConfig(BaseModel):
     enabled: bool = Field(default=False, description="Blend promoted ML factor predictions into alpha scores")
     ml_weight: float = Field(default=0.20, ge=0.0, le=1.0, description="ML overlay blend weight")
     traditional_weight: float = Field(default=0.80, ge=0.0, le=1.0, description="Legacy display field for config readability")
+    overlay_transform: str = Field(
+        default="tanh",
+        description="Transform applied to ML overlay score before blending: tanh, clip, none",
+    )
+    overlay_transform_scale: float = Field(
+        default=1.6,
+        gt=0.0,
+        le=10.0,
+        description="Scale parameter for tanh overlay transform",
+    )
+    overlay_transform_max_abs: float = Field(
+        default=1.6,
+        gt=0.0,
+        le=10.0,
+        description="Maximum absolute ML overlay contribution before blend",
+    )
     model_path: str = Field(default="models/ml_factor_model")
     active_model_pointer_path: str = Field(default="models/ml_factor_model_active.txt")
     promotion_decision_path: str = Field(default="reports/model_promotion_decision.json")
     runtime_status_path: str = Field(default="reports/ml_runtime_status.json")
+    impact_summary_path: str = Field(default="reports/ml_overlay_impact.json")
+    impact_history_path: str = Field(default="reports/ml_overlay_impact_history.jsonl")
+    impact_state_path: str = Field(default="reports/ml_overlay_impact_state.json")
+    impact_eval_top_n: int = Field(default=3, ge=1, le=20)
     require_promotion_passed: bool = Field(default=True, description="Only use models that passed promotion gate")
     max_model_age_hours: int = Field(default=72, ge=1, le=24 * 30)
     min_symbols: int = Field(default=3, ge=1, le=500)

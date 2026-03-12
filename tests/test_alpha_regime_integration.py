@@ -149,6 +149,9 @@ def test_alpha_engine_ml_overlay_runs_in_live_multi_strategy_path(tmp_path, monk
             ml_factor=MLFactorLiveConfig(
                 enabled=True,
                 ml_weight=0.20,
+                overlay_transform="tanh",
+                overlay_transform_scale=1.6,
+                overlay_transform_max_abs=1.1,
                 model_path=str(model_base),
                 active_model_pointer_path=str(pointer_path),
                 promotion_decision_path=str(decision_path),
@@ -174,7 +177,13 @@ def test_alpha_engine_ml_overlay_runs_in_live_multi_strategy_path(tmp_path, monk
     assert runtime["used_in_latest_snapshot"] is True
     assert runtime["prediction_count"] == 3
     assert runtime["reason"] == "ok"
+    assert runtime["overlay_transform"] == "tanh"
+    assert runtime["overlay_transform_max_abs"] == 1.1
     assert set(runtime["symbols_used"]) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
     assert set(snapshot.scores) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
+    assert set(snapshot.base_scores) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
+    assert set(snapshot.ml_overlay_scores) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
+    assert max(abs(v) for v in snapshot.ml_overlay_scores.values()) <= 1.1 + 1e-9
     assert any(snapshot.raw_factors[sym]["ml_pred_raw"] != 0.0 for sym in snapshot.raw_factors)
     assert any(snapshot.z_factors[sym]["ml_pred_zscore"] != 0.0 for sym in snapshot.z_factors)
+    assert any("ml_overlay_score" in snapshot.raw_factors[sym] for sym in snapshot.raw_factors)

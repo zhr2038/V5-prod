@@ -464,6 +464,388 @@ class V5Pipeline:
         return alpha
 
     @staticmethod
+    def _score_rank_map(scores: Dict[str, float]) -> Dict[str, int]:
+        ranked = sorted(
+            ((str(sym), float(score or 0.0)) for sym, score in (scores or {}).items()),
+            key=lambda item: (item[1], item[0]),
+            reverse=True,
+        )
+        return {sym: idx + 1 for idx, (sym, _) in enumerate(ranked)}
+
+    @staticmethod
+    def _top_score_rows(scores: Dict[str, float], rank_map: Dict[str, int], limit: int) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for sym, _ in sorted(
+            ((str(sym), float(score or 0.0)) for sym, score in (scores or {}).items()),
+            key=lambda item: (item[1], item[0]),
+            reverse=True,
+        )[: max(int(limit or 0), 0)]:
+            rows.append(
+                {
+                    "symbol": sym,
+                    "score": float(scores.get(sym, 0.0) or 0.0),
+                    "rank": int(rank_map.get(sym, 0) or 0),
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _mean_return_bps(symbols: List[str], returns_by_symbol: Dict[str, float]) -> Optional[float]:
+        vals = [float(returns_by_symbol[sym]) for sym in symbols if sym in returns_by_symbol]
+        if not vals:
+            return None
+        return float(sum(vals) / len(vals) * 10000.0)
+
+    @staticmethod
+    def _impact_tone(value_bps: Optional[float], *, positive_th: float = 5.0, negative_th: float = -5.0) -> str:
+        if value_bps is None:
+            return "insufficient"
+        if value_bps >= positive_th:
+            return "positive"
+        if value_bps <= negative_th:
+            return "negative"
+        return "mixed"
+
+    def _resolve_ml_impact_path(self, attr_name: str, default_name: str) -> Path:
+        ml_cfg = getattr(self.cfg.alpha, "ml_factor", None)
+        raw_path = getattr(ml_cfg, attr_name, default_name) if ml_cfg is not None else default_name
+        path = Path(str(raw_path or default_name))
+        if not path.is_absolute():
+            path = (REPORTS_DIR.parent / path).resolve()
+        return path
+
+    def _build_ml_audit_overview(
+        self,
+        alpha: AlphaSnapshot,
+        *,
+        impact_summary: Optional[Dict[str, Any]] = None,
+        limit: int = 3,
+    ) -> Dict[str, Any]:
+        ml_runtime = dict(getattr(alpha, "ml_runtime", {}) or {})
+        base_scores = dict(getattr(alpha, "base_scores", {}) or {})
+        final_scores = dict(getattr(alpha, "scores", {}) or {})
+        overlay_scores = dict(getattr(alpha, "ml_overlay_scores", {}) or {})
+        overlay_raw_scores = dict(getattr(alpha, "ml_overlay_raw_scores", {}) or {})
+
+        configured_enabled = bool(ml_runtime.get("configured_enabled", False))
+        promoted = bool(ml_runtime.get("promotion_passed", False))
+        live_active = bool(ml_runtime.get("used_in_latest_snapshot", False))
+        prediction_count = int(ml_runtime.get("prediction_count", 0) or 0)
+        if not configured_enabled and not promoted and not live_active and not overlay_scores and not overlay_raw_scores:
+            return {}
+
+        base_rank = self._score_rank_map(base_scores)
+        final_rank = self._score_rank_map(final_scores)
+        symbols = sorted(set(final_scores.keys()) | set(base_scores.keys()) | set(overlay_scores.keys()) | set(overlay_raw_scores.keys()))
+
+        top_contributors: List[Dict[str, Any]] = []
+        top_promoted: List[Dict[str, Any]] = []
+        top_suppressed: List[Dict[str, Any]] = []
+        for sym in symbols:
+            base_score = float(base_scores.get(sym, 0.0) or 0.0)
+            final_score = float(final_scores.get(sym, 0.0) or 0.0)
+            delta = float(final_score - base_score)
+            raw_z = float(overlay_raw_scores.get(sym, 0.0) or 0.0)
+            overlay_score = float(overlay_scores.get(sym, 0.0) or 0.0)
+            base_pos = int(base_rank.get(sym, len(base_rank) + 1 if base_rank else 0) or 0)
+            final_pos = int(final_rank.get(sym, len(final_rank) + 1 if final_rank else 0) or 0)
+            rank_delta = int(base_pos - final_pos) if base_pos and final_pos else 0
+
+            if abs(raw_z) > 1e-9 or abs(overlay_score) > 1e-9 or abs(delta) > 1e-9:
+                top_contributors.append(
+                    {
+                        "symbol": sym,
+                        "ml_zscore": round(raw_z, 4),
+                        "ml_overlay_score": round(overlay_score, 4),
+                        "base_score": round(base_score, 4),
+                        "final_score": round(final_score, 4),
+                        "score_delta": round(delta, 4),
+                        "base_rank": base_pos,
+                        "final_rank": final_pos,
+                        "rank_delta": rank_delta,
+                    }
+                )
+            if rank_delta > 0:
+                top_promoted.append(
+                    {
+                        "symbol": sym,
+                        "base_rank": base_pos,
+                        "final_rank": final_pos,
+                        "rank_delta": rank_delta,
+                        "score_delta": round(delta, 4),
+                        "ml_overlay_score": round(overlay_score, 4),
+                    }
+                )
+            elif rank_delta < 0:
+                top_suppressed.append(
+                    {
+                        "symbol": sym,
+                        "base_rank": base_pos,
+                        "final_rank": final_pos,
+                        "rank_delta": rank_delta,
+                        "score_delta": round(delta, 4),
+                        "ml_overlay_score": round(overlay_score, 4),
+                    }
+                )
+
+        top_contributors.sort(
+            key=lambda item: (
+                abs(float(item.get("score_delta", 0.0) or 0.0)),
+                abs(float(item.get("ml_zscore", 0.0) or 0.0)),
+                str(item.get("symbol") or ""),
+            ),
+            reverse=True,
+        )
+        top_promoted.sort(
+            key=lambda item: (
+                int(item.get("rank_delta", 0) or 0),
+                abs(float(item.get("score_delta", 0.0) or 0.0)),
+                str(item.get("symbol") or ""),
+            ),
+            reverse=True,
+        )
+        top_suppressed.sort(
+            key=lambda item: (
+                abs(int(item.get("rank_delta", 0) or 0)),
+                abs(float(item.get("score_delta", 0.0) or 0.0)),
+                str(item.get("symbol") or ""),
+            ),
+            reverse=True,
+        )
+
+        last_step = (impact_summary or {}).get("last_step") or {}
+        rolling = (impact_summary or {}).get("rolling_24h") or {}
+        return {
+            "configured_enabled": configured_enabled,
+            "promoted": promoted,
+            "live_active": live_active,
+            "prediction_count": prediction_count,
+            "active_symbols": int(len(overlay_scores) or prediction_count or 0),
+            "coverage_count": int(len(overlay_scores) or prediction_count or 0),
+            "ml_weight": float(ml_runtime.get("ml_weight", 0.0) or 0.0),
+            "reason": str(ml_runtime.get("reason") or ""),
+            "last_update": ml_runtime.get("ts"),
+            "overlay_transform": ml_runtime.get("overlay_transform"),
+            "overlay_transform_scale": ml_runtime.get("overlay_transform_scale"),
+            "overlay_transform_max_abs": ml_runtime.get("overlay_transform_max_abs"),
+            "overlay_score_max_abs": ml_runtime.get("overlay_score_max_abs"),
+            "lifted_into_top3": int(sum(1 for item in top_promoted if int(item.get("final_rank", 99) or 99) <= 3)),
+            "pushed_out_of_top3": int(sum(1 for item in top_suppressed if int(item.get("base_rank", 99) or 99) <= 3)),
+            "top_contributors": top_contributors[:limit],
+            "top_promoted": top_promoted[:limit],
+            "top_suppressed": top_suppressed[:limit],
+            "impact_status": str((rolling.get("status") or last_step.get("status") or "insufficient")),
+            "last_step": last_step,
+            "rolling_24h": rolling,
+        }
+
+    def _update_ml_impact_monitor(
+        self,
+        alpha: AlphaSnapshot,
+        market_data_1h: Dict[str, MarketSeries],
+        *,
+        snapshot_ts_ms: int,
+    ) -> Dict[str, Any]:
+        ml_cfg = getattr(self.cfg.alpha, "ml_factor", None)
+        final_scores = dict(getattr(alpha, "scores", {}) or {})
+        base_scores = dict(getattr(alpha, "base_scores", {}) or {})
+        overlay_scores = dict(getattr(alpha, "ml_overlay_scores", {}) or {})
+        overlay_raw_scores = dict(getattr(alpha, "ml_overlay_raw_scores", {}) or {})
+        if ml_cfg is None or not final_scores or not base_scores or not (overlay_scores or overlay_raw_scores):
+            return {}
+
+        state_path = self._resolve_ml_impact_path("impact_state_path", "reports/ml_overlay_impact_state.json")
+        history_path = self._resolve_ml_impact_path("impact_history_path", "reports/ml_overlay_impact_history.jsonl")
+        summary_path = self._resolve_ml_impact_path("impact_summary_path", "reports/ml_overlay_impact.json")
+        top_n = int(getattr(ml_cfg, "impact_eval_top_n", 3) or 3)
+
+        closes = {
+            str(sym): float(series.close[-1])
+            for sym, series in (market_data_1h or {}).items()
+            if getattr(series, "close", None)
+        }
+        base_rank = self._score_rank_map(base_scores)
+        final_rank = self._score_rank_map(final_scores)
+
+        current_state = {
+            "ts_ms": int(snapshot_ts_ms),
+            "base_scores": {str(sym): float(val) for sym, val in base_scores.items()},
+            "final_scores": {str(sym): float(val) for sym, val in final_scores.items()},
+            "base_rank": {str(sym): int(rank) for sym, rank in base_rank.items()},
+            "final_rank": {str(sym): int(rank) for sym, rank in final_rank.items()},
+            "overlay_scores": {str(sym): float(val) for sym, val in overlay_scores.items()},
+            "overlay_raw_scores": {str(sym): float(val) for sym, val in overlay_raw_scores.items()},
+            "closes": {str(sym): float(px) for sym, px in closes.items()},
+        }
+
+        previous_state: Dict[str, Any] = {}
+        if state_path.exists():
+            try:
+                previous_state = json.loads(state_path.read_text(encoding="utf-8"))
+            except Exception:
+                previous_state = {}
+
+        step_summary: Dict[str, Any] = {}
+        try:
+            prev_ts = int(previous_state.get("ts_ms") or 0)
+            if prev_ts > 0 and prev_ts < int(snapshot_ts_ms):
+                prev_closes = {
+                    str(sym): float(px)
+                    for sym, px in ((previous_state.get("closes") or {}).items())
+                    if float(px or 0.0) > 0.0
+                }
+                returns_by_symbol = {
+                    sym: float(closes[sym]) / float(prev_px) - 1.0
+                    for sym, prev_px in prev_closes.items()
+                    if sym in closes and float(prev_px) > 0.0 and float(closes[sym]) > 0.0
+                }
+                prev_base_scores = {
+                    str(sym): float(score)
+                    for sym, score in ((previous_state.get("base_scores") or {}).items())
+                }
+                prev_final_scores = {
+                    str(sym): float(score)
+                    for sym, score in ((previous_state.get("final_scores") or {}).items())
+                }
+                prev_base_rank = {
+                    str(sym): int(rank)
+                    for sym, rank in ((previous_state.get("base_rank") or {}).items())
+                } or self._score_rank_map(prev_base_scores)
+                prev_final_rank = {
+                    str(sym): int(rank)
+                    for sym, rank in ((previous_state.get("final_rank") or {}).items())
+                } or self._score_rank_map(prev_final_scores)
+
+                base_top = [
+                    row["symbol"]
+                    for row in self._top_score_rows(prev_base_scores, prev_base_rank, top_n)
+                    if row["symbol"] in returns_by_symbol
+                ]
+                final_top = [
+                    row["symbol"]
+                    for row in self._top_score_rows(prev_final_scores, prev_final_rank, top_n)
+                    if row["symbol"] in returns_by_symbol
+                ]
+
+                promoted = []
+                suppressed = []
+                for sym in sorted(set(prev_base_scores.keys()) | set(prev_final_scores.keys())):
+                    if sym not in returns_by_symbol:
+                        continue
+                    base_pos = int(prev_base_rank.get(sym, 0) or 0)
+                    final_pos = int(prev_final_rank.get(sym, 0) or 0)
+                    if base_pos <= 0 or final_pos <= 0:
+                        continue
+                    rank_delta = int(base_pos - final_pos)
+                    row = {
+                        "symbol": sym,
+                        "base_rank": base_pos,
+                        "final_rank": final_pos,
+                        "rank_delta": rank_delta,
+                        "return_bps": round(float(returns_by_symbol[sym]) * 10000.0, 2),
+                    }
+                    if rank_delta > 0:
+                        promoted.append(row)
+                    elif rank_delta < 0:
+                        suppressed.append(row)
+
+                promoted.sort(key=lambda item: (int(item["rank_delta"]), float(item["return_bps"])), reverse=True)
+                suppressed.sort(key=lambda item: (abs(int(item["rank_delta"])), abs(float(item["return_bps"]))), reverse=True)
+
+                base_top_return_bps = self._mean_return_bps(base_top, returns_by_symbol)
+                final_top_return_bps = self._mean_return_bps(final_top, returns_by_symbol)
+                promoted_return_bps = self._mean_return_bps([row["symbol"] for row in promoted[:top_n]], returns_by_symbol)
+                suppressed_return_bps = self._mean_return_bps([row["symbol"] for row in suppressed[:top_n]], returns_by_symbol)
+                delta_bps = (
+                    float(final_top_return_bps - base_top_return_bps)
+                    if final_top_return_bps is not None and base_top_return_bps is not None
+                    else None
+                )
+                promoted_minus_suppressed_bps = (
+                    float(promoted_return_bps - suppressed_return_bps)
+                    if promoted_return_bps is not None and suppressed_return_bps is not None
+                    else None
+                )
+
+                step_summary = {
+                    "from_ts_ms": prev_ts,
+                    "to_ts_ms": int(snapshot_ts_ms),
+                    "top_n": top_n,
+                    "base_top_symbols": base_top,
+                    "final_top_symbols": final_top,
+                    "base_top_return_bps": round(float(base_top_return_bps), 2) if base_top_return_bps is not None else None,
+                    "final_top_return_bps": round(float(final_top_return_bps), 2) if final_top_return_bps is not None else None,
+                    "delta_bps": round(float(delta_bps), 2) if delta_bps is not None else None,
+                    "promoted_symbols": promoted[:top_n],
+                    "suppressed_symbols": suppressed[:top_n],
+                    "promoted_return_bps": round(float(promoted_return_bps), 2) if promoted_return_bps is not None else None,
+                    "suppressed_return_bps": round(float(suppressed_return_bps), 2) if suppressed_return_bps is not None else None,
+                    "promoted_minus_suppressed_bps": round(float(promoted_minus_suppressed_bps), 2)
+                    if promoted_minus_suppressed_bps is not None
+                    else None,
+                }
+                step_summary["status"] = self._impact_tone(
+                    step_summary.get("delta_bps"),
+                )
+
+                history_path.parent.mkdir(parents=True, exist_ok=True)
+                with history_path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(step_summary, ensure_ascii=False) + "\n")
+        except Exception:
+            step_summary = {}
+
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(current_state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        history_rows: List[Dict[str, Any]] = []
+        if history_path.exists():
+            try:
+                for line in history_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    row = json.loads(line)
+                    if int(row.get("to_ts_ms") or 0) >= int(snapshot_ts_ms) - 24 * 3600 * 1000:
+                        history_rows.append(row)
+            except Exception:
+                history_rows = []
+
+        delta_vals = [
+            float(row.get("delta_bps"))
+            for row in history_rows
+            if row.get("delta_bps") is not None
+        ]
+        promoted_vals = [
+            float(row.get("promoted_minus_suppressed_bps"))
+            for row in history_rows
+            if row.get("promoted_minus_suppressed_bps") is not None
+        ]
+        rolling_delta = float(sum(delta_vals) / len(delta_vals)) if delta_vals else None
+        rolling_promoted = float(sum(promoted_vals) / len(promoted_vals)) if promoted_vals else None
+        positive_ratio = (
+            float(sum(1 for row in history_rows if float(row.get("delta_bps") or 0.0) > 0.0) / len(history_rows))
+            if history_rows
+            else None
+        )
+        rolling = {
+            "points": len(history_rows),
+            "topn_delta_mean_bps": round(float(rolling_delta), 2) if rolling_delta is not None else None,
+            "promoted_minus_suppressed_mean_bps": round(float(rolling_promoted), 2)
+            if rolling_promoted is not None
+            else None,
+            "positive_ratio": round(float(positive_ratio), 4) if positive_ratio is not None else None,
+            "status": self._impact_tone(rolling_delta),
+        }
+        summary = {
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "last_step": step_summary,
+            "rolling_24h": rolling,
+        }
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        return summary
+
+    @staticmethod
     def _rebalance_turnover_priority(order: Order) -> Tuple[int, float, float, str]:
         drift = abs(float(((order.meta or {}).get("drift", 0.0) or 0.0)))
         notional = abs(float(order.notional_usdt or 0.0))
@@ -674,10 +1056,26 @@ class V5Pipeline:
                     'rss_weight': getattr(self.cfg.regime, 'rss_weight', 0),
                 }
 
+        ml_snapshot_ts = self._resolve_ml_snapshot_timestamp_ms(audit=audit)
+        ml_impact_summary = self._update_ml_impact_monitor(
+            alpha,
+            market_data_1h,
+            snapshot_ts_ms=ml_snapshot_ts,
+        )
+
         # 2) Alpha计算后审计 (alpha已在前面计算)
         if audit:
             sorted_scores = sorted(alpha.scores.items(), key=lambda x: x[1], reverse=True)
             raw_scores = dict(getattr(alpha, "raw_scores", {}) or {})
+            base_scores = dict(getattr(alpha, "base_scores", {}) or {})
+            ml_overlay_scores = dict(getattr(alpha, "ml_overlay_scores", {}) or {})
+            ml_overlay_raw_scores = dict(getattr(alpha, "ml_overlay_raw_scores", {}) or {})
+            base_rank_map = self._score_rank_map(base_scores)
+            final_rank_map = self._score_rank_map(alpha.scores)
+            audit.ml_signal_overview = self._build_ml_audit_overview(
+                alpha,
+                impact_summary=ml_impact_summary,
+            )
             
             # Add strategy signal audit if multi-strategy is used
             if hasattr(self.alpha_engine, 'use_multi_strategy') and self.alpha_engine.use_multi_strategy:
@@ -705,7 +1103,13 @@ class V5Pipeline:
                     "score": score,
                     "display_score": score,
                     "raw_score": float(raw_scores.get(sym, score)),
+                    "base_score": float(base_scores.get(sym, 0.0)),
+                    "ml_overlay_score": float(ml_overlay_scores.get(sym, 0.0)),
+                    "ml_pred_zscore": float(ml_overlay_raw_scores.get(sym, 0.0)),
+                    "score_delta": float(score - base_scores.get(sym, 0.0)),
+                    "base_rank": int(base_rank_map.get(sym, idx + 1)),
                     "rank": idx + 1,
+                    "rank_delta": int(base_rank_map.get(sym, idx + 1)) - int(final_rank_map.get(sym, idx + 1)),
                 }
                 for idx, (sym, score) in enumerate(sorted_scores[:10])
             ]

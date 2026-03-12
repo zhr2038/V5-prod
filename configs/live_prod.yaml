@@ -81,6 +81,9 @@ alpha:
     enabled: true
     ml_weight: 0.20
     traditional_weight: 0.80
+    overlay_transform: tanh
+    overlay_transform_scale: 1.6
+    overlay_transform_max_abs: 1.6
     model_path: models/ml_factor_model
     active_model_pointer_path: models/ml_factor_model_active.txt
     promotion_decision_path: reports/model_promotion_decision.json
