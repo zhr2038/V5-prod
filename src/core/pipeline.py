@@ -1576,6 +1576,21 @@ class V5Pipeline:
                         rt_cost_bps = float(rt_cost_bps_cfg) if rt_cost_bps_cfg is not None else 2.0 * (fee_bps + slippage_bps)
                         score_per_bps = float(getattr(self.cfg.execution, "cost_aware_score_per_bps", 0.0025) or 0.0025)
                         score_floor = float(getattr(self.cfg.execution, "cost_aware_min_score_floor", 0.08) or 0.08)
+                        low_price_guard_enabled = bool(
+                            getattr(self.cfg.execution, "low_price_entry_guard_enabled", False)
+                        )
+                        low_price_threshold = float(
+                            getattr(self.cfg.execution, "low_price_entry_threshold_usdt", 0.05) or 0.05
+                        )
+                        low_price_extra_floor = float(
+                            getattr(self.cfg.execution, "low_price_entry_extra_score_floor", 0.0) or 0.0
+                        )
+                        low_price_extra_cost_bps = float(
+                            getattr(self.cfg.execution, "low_price_entry_extra_cost_bps", 0.0) or 0.0
+                        )
+                        if low_price_guard_enabled and float(px) > 0 and float(px) <= low_price_threshold:
+                            rt_cost_bps += low_price_extra_cost_bps
+                            score_floor += low_price_extra_floor
                         alpha_floor = float(getattr(self.cfg.alpha, "min_score_threshold", 0.0) or 0.0)
                         required_score = max(alpha_floor, score_floor + rt_cost_bps * score_per_bps)
 
@@ -1590,6 +1605,10 @@ class V5Pipeline:
                                         "score": float(score_sym),
                                         "required_score": float(required_score),
                                         "rt_cost_bps": float(rt_cost_bps),
+                                        "low_price_guard_applied": bool(
+                                            low_price_guard_enabled and float(px) > 0 and float(px) <= low_price_threshold
+                                        ),
+                                        "px": float(px),
                                     }
                                 )
                             continue

@@ -52,7 +52,20 @@ def test_live_prod_conflict_penalty_and_negative_expectancy_loads():
     assert cfg.execution.negative_expectancy_score_penalty_floor_bps == 5.0
     assert cfg.execution.negative_expectancy_score_penalty_per_bps == 0.015
     assert cfg.execution.negative_expectancy_open_block_enabled is True
-    assert cfg.execution.negative_expectancy_open_block_floor_bps == 5.0
+    assert cfg.execution.negative_expectancy_open_block_floor_bps == 15.0
+
+
+def test_live_prod_sideways_churn_controls_load():
+    cfg = load_config("configs/live_prod.yaml", env_path=None)
+    assert cfg.regime.pos_mult_sideways == 0.6
+    assert cfg.rebalance.deadband_sideways == 0.07
+    assert cfg.execution.open_long_cooldown_minutes == 120
+    assert cfg.execution.cost_aware_score_per_bps == 0.0030
+    assert cfg.execution.cost_aware_min_score_floor == 0.14
+    assert cfg.execution.low_price_entry_guard_enabled is True
+    assert cfg.execution.low_price_entry_threshold_usdt == 0.05
+    assert cfg.execution.low_price_entry_extra_score_floor == 0.08
+    assert cfg.execution.low_price_entry_extra_cost_bps == 12.0
 
 
 def test_live_prod_funding_thresholds_load():

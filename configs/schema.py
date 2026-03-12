@@ -500,6 +500,25 @@ class ExecutionConfig(BaseModel):
         le=10000,
         description="Override round-trip cost bps for cost-aware gate; default=2*(fee_bps+slippage_bps)",
     )
+    low_price_entry_guard_enabled: bool = Field(default=False)
+    low_price_entry_threshold_usdt: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1000.0,
+        description="Treat symbols below this spot price as low-price/high-friction entries",
+    )
+    low_price_entry_extra_score_floor: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10.0,
+        description="Extra required score added for low-price OPEN_LONG entries",
+    )
+    low_price_entry_extra_cost_bps: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10000.0,
+        description="Additional round-trip cost bps charged in cost-aware gate for low-price OPEN_LONG entries",
+    )
 
     # Negative-expectancy symbol cooldown (root-cause churn suppressor)
     negative_expectancy_cooldown_enabled: bool = Field(default=True)

@@ -136,7 +136,7 @@ regime:
   atr_very_low: 0.008
   
   pos_mult_trending: 1.2
-  pos_mult_sideways: 0.7
+  pos_mult_sideways: 0.6
   pos_mult_risk_off: 0.0
   
   sentiment_regime_override_enabled: true
@@ -174,7 +174,7 @@ risk:
       dd_15_plus: {max_positions: 1, position_size_pct: 0.15}
 
 rebalance:
-  deadband_sideways: 0.05
+  deadband_sideways: 0.07
   deadband_trending: 0.04
   deadband_riskoff: 0.07
   new_position_deadband_multiplier: 1.0
@@ -209,7 +209,7 @@ execution:
   fee_bps: 6
   slippage_bps: 5
   
-  open_long_cooldown_minutes: 15
+  open_long_cooldown_minutes: 120
   # 排名退出防抖：需连续2轮跌出前3才触发rank_exit；且退出后1小时内禁止回补
   rank_exit_max_rank: 3
   rank_exit_confirm_rounds: 2
@@ -237,9 +237,13 @@ execution:
 
   # qlib经验迁移：成本感知开仓（score代理edge）
   cost_aware_entry_enabled: true
-  cost_aware_score_per_bps: 0.0020
-  cost_aware_min_score_floor: 0.10
+  cost_aware_score_per_bps: 0.0030
+  cost_aware_min_score_floor: 0.14
   cost_aware_roundtrip_cost_bps: null
+  low_price_entry_guard_enabled: true
+  low_price_entry_threshold_usdt: 0.05
+  low_price_entry_extra_score_floor: 0.08
+  low_price_entry_extra_cost_bps: 12.0
 
   # 负期望标的自动冷却（24h窗口）
   negative_expectancy_cooldown_enabled: true
@@ -255,7 +259,7 @@ execution:
   negative_expectancy_score_penalty_max: 0.60
   negative_expectancy_open_block_enabled: true
   negative_expectancy_open_block_min_closed_cycles: 2
-  negative_expectancy_open_block_floor_bps: 5.0
+  negative_expectancy_open_block_floor_bps: 15.0
 
   order_state_machine_path: reports/order_state_machine.json
 

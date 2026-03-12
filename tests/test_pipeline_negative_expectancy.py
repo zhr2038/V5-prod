@@ -166,3 +166,92 @@ def test_pipeline_blocks_open_long_on_negative_expectancy():
         d.get("symbol") == "OKB/USDT" and d.get("reason") == "negative_expectancy_open_block"
         for d in audit.router_decisions
     )
+
+
+def test_pipeline_low_price_entry_guard_raises_cost_floor():
+    cfg = AppConfig(symbols=["PUMP/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.cost_aware_entry_enabled = True
+    cfg.execution.cost_aware_score_per_bps = 0.003
+    cfg.execution.cost_aware_min_score_floor = 0.14
+    cfg.execution.cost_aware_roundtrip_cost_bps = 22.0
+    cfg.execution.low_price_entry_guard_enabled = True
+    cfg.execution.low_price_entry_threshold_usdt = 0.05
+    cfg.execution.low_price_entry_extra_score_floor = 0.08
+    cfg.execution.low_price_entry_extra_cost_bps = 12.0
+    cfg.execution.negative_expectancy_score_penalty_enabled = False
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_cooldown_enabled = False
+
+    pipe = _build_pipe(cfg)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"PUMP/USDT": 0.25},
+        selected=["PUMP/USDT"],
+        entry_candidates=["PUMP/USDT"],
+        volatilities={},
+        notes="",
+    )
+
+    market_data = {"PUMP/USDT": _series("PUMP/USDT", 0.0021)}
+    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"PUMP/USDT": 0.26})
+    audit = DecisionAudit(run_id="low-price-guard")
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert out.orders == []
+    assert any(
+        d.get("symbol") == "PUMP/USDT"
+        and d.get("reason") == "cost_aware_edge"
+        and d.get("low_price_guard_applied") is True
+        for d in audit.router_decisions
+    )
+
+
+def test_pipeline_normal_price_entry_not_hit_by_low_price_guard():
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.cost_aware_entry_enabled = True
+    cfg.execution.cost_aware_score_per_bps = 0.003
+    cfg.execution.cost_aware_min_score_floor = 0.14
+    cfg.execution.cost_aware_roundtrip_cost_bps = 22.0
+    cfg.execution.low_price_entry_guard_enabled = True
+    cfg.execution.low_price_entry_threshold_usdt = 0.05
+    cfg.execution.low_price_entry_extra_score_floor = 0.08
+    cfg.execution.low_price_entry_extra_cost_bps = 12.0
+    cfg.execution.negative_expectancy_score_penalty_enabled = False
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_cooldown_enabled = False
+
+    pipe = _build_pipe(cfg)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 0.25},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+
+    market_data = {"BTC/USDT": _series("BTC/USDT", 70000.0)}
+    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 0.26})
+    audit = DecisionAudit(run_id="normal-price-guard")
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "BTC/USDT"
