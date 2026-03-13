@@ -35,7 +35,7 @@ function buildMlDetail(data) {
     parts.push(`样本 ${Number(data.labeled_samples || 0)} / ${Number(data.total_samples || 0)}`);
   }
   if (data.last_ic != null) {
-    parts.push(`IC ${Number(data.last_ic).toFixed(3)}`);
+    parts.push(`信息系数 ${Number(data.last_ic).toFixed(3)}`);
   }
   if (data.runtime_prediction_count != null && Number(data.runtime_prediction_count) > 0) {
     parts.push(`推理 ${Number(data.runtime_prediction_count)} 次`);
@@ -111,9 +111,9 @@ async function loadMlStagePanel() {
   } catch (err) {
     console.error("failed to load ml stage status", err);
     mlText("ml-stage-status", "--");
-    mlText("ml-stage-detail", "ML 链路状态获取失败");
+    mlText("ml-stage-detail", "机器学习链路状态获取失败");
     mlHtml("ml-stage-meta", '<span class="tiny tone-negative">状态异常</span>');
-    mlHtml("ml-stage-grid", '<div class="error">ML 链路状态获取失败</div>');
+    mlHtml("ml-stage-grid", '<div class="error">机器学习链路状态获取失败</div>');
     const progressEl = document.getElementById("ml-stage-progress");
     if (progressEl) progressEl.style.width = "0%";
   }

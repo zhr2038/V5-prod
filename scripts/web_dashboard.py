@@ -4240,12 +4240,12 @@ def api_shadow_ml_overlay():
         if shadow_workspace is None:
             return jsonify({
                 'available': False,
-                'error': 'shadow tuned xgboost workspace not found',
+                'error': '未找到旁路调优版 XGBoost 工作区',
             })
 
         payload = _load_shadow_ml_overlay_summary(shadow_workspace)
         if not payload.get('available'):
-            payload['error'] = 'shadow ml overlay data not ready'
+            payload['error'] = '旁路调优版 XGBoost 归因数据未就绪'
         return jsonify(payload)
     except Exception as e:
         return jsonify({

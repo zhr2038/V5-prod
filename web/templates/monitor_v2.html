@@ -736,7 +736,7 @@ tr:last-child td{border-bottom:none}
   <section class="hero">
     <div class="hero-main">
       <div class="hero-top">
-        <div class="eyebrow">V5 Production Dashboard</div>
+          <div class="eyebrow">V5 生产看板</div>
         <div class="chip"><span class="dot"></span><span id="update-time">加载中...</span></div>
       </div>
       <h1 class="hero-title">交易指挥台</h1>
@@ -753,8 +753,8 @@ tr:last-child td{border-bottom:none}
           <div class="hero-stat-copy">跟随市场/风险引擎动态调整</div>
         </div>
         <div class="hero-stat">
-          <div class="kicker">组合节奏</div>
-          <div class="hero-stat-value">30s</div>
+              <div class="kicker">组合节奏</div>
+              <div class="hero-stat-value">30秒</div>
           <div class="hero-stat-copy">页面自动刷新，保持与后台轮询同步</div>
         </div>
       </div>
@@ -809,10 +809,10 @@ tr:last-child td{border-bottom:none}
   <section class="panel ml-band" id="ml-stage-band">
     <div class="ml-band-shell">
       <div class="ml-band-main">
-        <div class="kicker">ML 链路</div>
+              <div class="kicker">机器学习链路</div>
         <div class="ml-band-title">采样到实盘</div>
         <div class="ml-band-status"><span id="ml-stage-status">--</span></div>
-        <div class="ml-band-detail" id="ml-stage-detail">等待 ML 链路状态...</div>
+              <div class="ml-band-detail" id="ml-stage-detail">等待机器学习链路状态...</div>
         <div class="ml-band-meta" id="ml-stage-meta">
           <span class="tiny">采样 --</span>
           <span class="tiny">训练 --</span>
@@ -836,9 +836,9 @@ tr:last-child td{border-bottom:none}
           <div class="chart-copy" id="position-spotlight-copy">默认展示当前仓位中市值最高的币种，并支持切换时间周期。</div>
         </div>
         <div class="segmented" id="position-kline-timeframes">
-          <button type="button" class="segment is-active" data-timeframe="1h">1H</button>
-          <button type="button" class="segment" data-timeframe="4h">4H</button>
-          <button type="button" class="segment" data-timeframe="1d">1D</button>
+                <button type="button" class="segment is-active" data-timeframe="1h">1小时</button>
+                <button type="button" class="segment" data-timeframe="4h">4小时</button>
+                <button type="button" class="segment" data-timeframe="1d">1日</button>
         </div>
       </div>
       <div id="position-kline-symbols" class="meta-row"></div>
@@ -954,6 +954,18 @@ tr:last-child td{border-bottom:none}
         <div id="health-content" class="health-list"><div class="loading">加载中...</div></div>
       </div>
     </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="kicker">旁路模型叠加</div>
+        <div class="title" id="ml-impact-headline">调优版 XGBoost 归因</div>
+        <div class="note" id="ml-impact-subtitle">查看模型抬升了谁、压低了谁，以及最近 24 小时叠加效果。</div>
+      </div>
+      <div class="panel-tag">旁路 / 纸面</div>
+    </div>
+    <div id="ml-impact-content"><div class="loading">加载中...</div></div>
   </section>
 
   <div id="history-tooltip" class="hover-tip" hidden></div>
