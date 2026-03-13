@@ -114,6 +114,36 @@ class MLFactorLiveConfig(BaseModel):
     enabled: bool = Field(default=False, description="Blend promoted ML factor predictions into alpha scores")
     ml_weight: float = Field(default=0.20, ge=0.0, le=1.0, description="ML overlay blend weight")
     traditional_weight: float = Field(default=0.80, ge=0.0, le=1.0, description="Legacy display field for config readability")
+    online_control_enabled: bool = Field(
+        default=True,
+        description="Automatically downweight or shadow ML overlay based on recent online attribution",
+    )
+    online_control_24h_min_points: int = Field(
+        default=6,
+        ge=1,
+        le=200,
+        description="Minimum attribution points required before 24h online control can downweight ML",
+    )
+    online_control_48h_min_points: int = Field(
+        default=12,
+        ge=1,
+        le=400,
+        description="Minimum attribution points required before 48h online control can switch ML to shadow mode",
+    )
+    online_control_negative_24h_bps: float = Field(
+        default=0.0,
+        description="Downweight ML when rolling 24h top-N delta is below this threshold in bps",
+    )
+    online_control_negative_48h_bps: float = Field(
+        default=0.0,
+        description="Shadow ML when rolling 48h top-N delta is below this threshold in bps",
+    )
+    online_control_downweight_ml_weight: float = Field(
+        default=0.08,
+        ge=0.0,
+        le=1.0,
+        description="Effective ML weight when 24h online attribution is negative",
+    )
     overlay_transform: str = Field(
         default="tanh",
         description="Transform applied to ML overlay score before blending: tanh, clip, none",

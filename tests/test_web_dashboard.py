@@ -56,6 +56,9 @@ def test_index_renders_monitor_template():
     assert 'id="position-kline-chart"' in body
     assert 'id="position-kline-symbols"' in body
     assert 'id="position-kline-timeframes"' in body
+    assert 'id="ml-impact-headline"' in body
+    assert 'id="ml-impact-subtitle"' in body
+    assert 'id="ml-impact-content"' in body
     assert 'src="/static/js/monitor_v2.js?v=' in body
     assert 'src="/static/js/ml_status_panel.js?v=' in body
 
@@ -71,6 +74,8 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     assert "showHmmProbs:true" in body
     assert "showStateBars:true" in body
     assert "showSummary:true" in body
+    assert "renderShadowMlPanel" in body
+    assert "/api/shadow_ml_overlay" in body
     assert "buildCandlestickSvg" in body
     assert "syncPositionSpotlight" in body
     assert "/api/position_kline" in body
@@ -560,6 +565,10 @@ def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
                 "used_in_latest_snapshot": True,
                 "prediction_count": 3,
                 "ml_weight": 0.2,
+                "configured_ml_weight": 0.2,
+                "effective_ml_weight": 0.08,
+                "overlay_mode": "downweighted",
+                "online_control_reason": "rolling_24h_negative",
                 "reason": "ok",
                 "ts": "2026-03-12T02:01:08Z",
             },
@@ -608,6 +617,13 @@ def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
                     "topn_delta_mean_bps": 8.4,
                     "status": "positive",
                 },
+                "rolling_48h": {
+                    "points": 12,
+                    "topn_delta_mean_bps": -3.1,
+                    "status": "mixed",
+                },
+                "overlay_mode": "downweighted",
+                "online_control_reason": "rolling_24h_negative",
             },
             ensure_ascii=False,
         ),
@@ -626,13 +642,113 @@ def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
     assert ml["live_active"] is True
     assert ml["prediction_count"] == 3
     assert ml["ml_weight"] == 0.2
+    assert ml["configured_ml_weight"] == 0.2
+    assert ml["effective_ml_weight"] == 0.08
+    assert ml["overlay_mode"] == "downweighted"
+    assert ml["online_control_reason"] == "rolling_24h_negative"
     assert ml["impact_status"] == "positive"
     assert ml["last_step"]["delta_bps"] == 14.2
     assert ml["rolling_24h"]["topn_delta_mean_bps"] == 8.4
+    assert ml["rolling_48h"]["topn_delta_mean_bps"] == -3.1
     assert [item["symbol"] for item in ml["top_contributors"]] == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
     assert ml["top_contributors"][0]["ml_zscore"] == 0.82
     assert ml["top_promoted"][0]["symbol"] == "BTC/USDT"
     assert ml["top_suppressed"][0]["symbol"] == "ETH/USDT"
+
+
+def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    shadow_workspace = tmp_path / "v5-shadow-tuned-xgboost"
+    reports_dir = shadow_workspace / "reports"
+    run_dir = reports_dir / "runs" / "shadow_tuned_xgboost_20260313_05"
+    runtime_dir = reports_dir / "shadow_tuned_xgboost"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    (run_dir / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "shadow_tuned_xgboost_20260313_05",
+                "ml_signal_overview": {
+                    "configured_enabled": True,
+                    "live_active": True,
+                    "prediction_count": 22,
+                    "impact_status": "positive",
+                    "top_contributors": [
+                        {
+                            "symbol": "OKB/USDT",
+                            "ml_zscore": 2.61,
+                            "ml_overlay_score": 1.48,
+                            "score_delta": 0.29,
+                            "base_rank": 16,
+                            "final_rank": 10,
+                            "rank_delta": 6,
+                        }
+                    ],
+                    "top_promoted": [
+                        {
+                            "symbol": "HYPE/USDT",
+                            "score_delta": 0.20,
+                            "base_rank": 9,
+                            "final_rank": 2,
+                            "rank_delta": 7,
+                        }
+                    ],
+                    "top_suppressed": [
+                        {
+                            "symbol": "PIXEL/USDT",
+                            "score_delta": -0.25,
+                            "base_rank": 3,
+                            "final_rank": 4,
+                            "rank_delta": -1,
+                        }
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_dir / "ml_runtime_status.json").write_text(
+        json.dumps(
+            {
+                "configured_enabled": True,
+                "used_in_latest_snapshot": True,
+                "prediction_count": 22,
+                "ml_weight": 0.2,
+                "overlay_score_max_abs": 1.4836,
+                "ts": "2026-03-13T05:15:18Z",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_dir / "ml_overlay_impact.json").write_text(
+        json.dumps(
+            {
+                "last_step": {"top_n": 3, "delta_bps": 12.4, "status": "positive"},
+                "rolling_24h": {"points": 8, "topn_delta_mean_bps": 9.7, "status": "positive"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "_resolve_shadow_workspace", lambda: shadow_workspace)
+
+    response = client.get("/api/shadow_ml_overlay")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["available"] is True
+    assert payload["workspace"] == str(shadow_workspace)
+    assert payload["run_id"] == "shadow_tuned_xgboost_20260313_05"
+    assert payload["ml_signal_overview"]["live_active"] is True
+    assert payload["ml_signal_overview"]["overlay_score_max_abs"] == 1.4836
+    assert payload["ml_signal_overview"]["rolling_24h"]["topn_delta_mean_bps"] == 9.7
+    assert payload["ml_signal_overview"]["top_contributors"][0]["symbol"] == "OKB/USDT"
 
 
 def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):

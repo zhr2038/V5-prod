@@ -343,6 +343,7 @@ def test_pipeline_records_ml_rank_delta_and_impact_summary(tmp_path, monkeypatch
         telemetry_scores={"AAA/USDT": 0.6, "BBB/USDT": 0.4, "CCC/USDT": 0.2},
         base_scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
         base_raw_scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        ml_attribution_scores={"BBB/USDT": 0.9, "AAA/USDT": 0.7, "CCC/USDT": 0.1},
         ml_overlay_scores={"AAA/USDT": 0.3, "BBB/USDT": 1.8},
         ml_overlay_raw_scores={"AAA/USDT": 0.5, "BBB/USDT": 2.7},
         ml_runtime={
@@ -351,6 +352,9 @@ def test_pipeline_records_ml_rank_delta_and_impact_summary(tmp_path, monkeypatch
             "used_in_latest_snapshot": True,
             "prediction_count": 2,
             "ml_weight": 0.2,
+            "configured_ml_weight": 0.2,
+            "effective_ml_weight": 0.2,
+            "overlay_mode": "live",
             "reason": "ok",
             "ts": "2026-01-01T12:00:00Z",
             "overlay_transform": "tanh",
@@ -390,6 +394,7 @@ def test_pipeline_records_ml_rank_delta_and_impact_summary(tmp_path, monkeypatch
         telemetry_scores={"AAA/USDT": 0.5, "BBB/USDT": 0.3, "CCC/USDT": 0.1},
         base_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.55, "CCC/USDT": 0.2},
         base_raw_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.55, "CCC/USDT": 0.2},
+        ml_attribution_scores={"BBB/USDT": 0.8, "AAA/USDT": 0.6, "CCC/USDT": 0.2},
         ml_overlay_scores={"AAA/USDT": 0.25, "BBB/USDT": 1.4},
         ml_overlay_raw_scores={"AAA/USDT": 0.4, "BBB/USDT": 2.1},
         ml_runtime=alpha1.ml_runtime,
@@ -409,4 +414,68 @@ def test_pipeline_records_ml_rank_delta_and_impact_summary(tmp_path, monkeypatch
     impact_summary = json.loads((reports_dir / "ml_overlay_impact.json").read_text(encoding="utf-8"))
     assert impact_summary["last_step"]["delta_bps"] is not None
     assert impact_summary["rolling_24h"]["points"] >= 1
+    assert impact_summary["rolling_48h"]["points"] >= 1
     assert audit2.ml_signal_overview["last_step"]["delta_bps"] == impact_summary["last_step"]["delta_bps"]
+    assert audit2.ml_signal_overview["overlay_mode"] == "live"
+
+
+def test_pipeline_ml_impact_uses_attribution_scores_in_shadow_mode(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(pipeline_module, "REPORTS_DIR", reports_dir)
+
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    pipe = V5Pipeline(AppConfig(symbols=["AAA/USDT", "BBB/USDT", "CCC/USDT"]), clock=FixedClock(t0))
+    pipe.portfolio_engine.allocate = lambda **kwargs: PortfolioSnapshot(
+        target_weights={"AAA/USDT": 0.5, "BBB/USDT": 0.5},
+        selected=["AAA/USDT", "BBB/USDT"],
+        volatilities={},
+        entry_candidates=["AAA/USDT", "BBB/USDT"],
+    )
+    pipe.data_collector.collect_features = lambda **kwargs: True
+    pipe.data_collector.fill_labels = lambda current_timestamp: 0
+
+    md = {
+        "AAA/USDT": MarketSeries(symbol="AAA/USDT", timeframe="1h", ts=[0], open=[10.0], high=[10.0], low=[10.0], close=[10.0], volume=[1.0]),
+        "BBB/USDT": MarketSeries(symbol="BBB/USDT", timeframe="1h", ts=[0], open=[20.0], high=[20.0], low=[20.0], close=[20.0], volume=[1.0]),
+        "CCC/USDT": MarketSeries(symbol="CCC/USDT", timeframe="1h", ts=[0], open=[30.0], high=[30.0], low=[30.0], close=[30.0], volume=[1.0]),
+    }
+    alpha = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        raw_scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        telemetry_scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        base_scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        base_raw_scores={"AAA/USDT": 0.8, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        ml_attribution_scores={"BBB/USDT": 0.95, "AAA/USDT": 0.7, "CCC/USDT": 0.1},
+        ml_overlay_scores={"AAA/USDT": 0.1, "BBB/USDT": 1.2},
+        ml_overlay_raw_scores={"AAA/USDT": 0.2, "BBB/USDT": 2.0},
+        ml_runtime={
+            "configured_enabled": True,
+            "promotion_passed": True,
+            "used_in_latest_snapshot": False,
+            "prediction_count": 2,
+            "ml_weight": 0.2,
+            "configured_ml_weight": 0.2,
+            "effective_ml_weight": 0.0,
+            "overlay_mode": "shadow",
+            "reason": "ok",
+            "ts": "2026-01-01T12:00:00Z",
+        },
+    )
+    audit = DecisionAudit(run_id="20260101_12", window_start_ts=1_704_110_400, window_end_ts=1_704_114_000)
+
+    pipe.run(
+        md,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=RegimeResult(state=RegimeState.SIDEWAYS, atr_pct=0.0, ma20=0.0, ma60=0.0, multiplier=1.0),
+    )
+
+    assert audit.top_scores[0]["symbol"] == "AAA/USDT"
+    assert audit.ml_signal_overview["overlay_mode"] == "shadow"
+    assert audit.ml_signal_overview["top_promoted"][0]["symbol"] == "BBB/USDT"

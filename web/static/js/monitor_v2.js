@@ -146,6 +146,7 @@ let riskCache = { risk: null, account: null };
 let marketCache = null;
 let decisionCache = null;
 let healthCache = null;
+let shadowMlCache = null;
 let lastMobileState = isMobileViewport();
 let latestPositions = [];
 let latestAccount = {};
@@ -785,30 +786,57 @@ function renderMlImpactCardClean(ml) {
   const predictionCount = Number(ml.prediction_count || 0);
   const coverageCount = Number(ml.coverage_count || 0);
   const activeCount = Number(ml.active_symbols || predictionCount || coverageCount || 0);
-  const weightPct = Number(ml.ml_weight || 0) * 100;
+  const configuredWeightPct = Number(ml.configured_ml_weight ?? ml.ml_weight ?? 0) * 100;
+  const effectiveWeightPct = Number(ml.effective_ml_weight ?? ml.ml_weight ?? 0) * 100;
+  const overlayMode = String(ml.overlay_mode || "");
+  const controlReason = String(ml.online_control_reason || "");
   const promotedRows = Array.isArray(ml.top_promoted) ? ml.top_promoted : [];
   const suppressedRows = Array.isArray(ml.top_suppressed) ? ml.top_suppressed : [];
   const contributors = Array.isArray(ml.top_contributors) ? ml.top_contributors : [];
   const lastStep = ml.last_step || {};
   const rolling = ml.rolling_24h || {};
+  const rolling48 = ml.rolling_48h || {};
   const impactStatus = String(ml.impact_status || "");
 
   if (!enabled && !promoted && !liveActive && !coverageCount && !contributors.length) {
     return "";
   }
 
+  const modeLabelMap = {
+    live: "实盘",
+    downweighted: "降权",
+    observe: "观察",
+    shadow: "Shadow",
+  };
+  const reasonLabelMap = {
+    healthy_online_attribution: "24h稳定",
+    insufficient_24h_history: "样本不足",
+    rolling_24h_negative: "24h负贡献",
+    rolling_48h_negative: "48h负贡献",
+    online_control_disabled: "控制关闭",
+  };
+
   let title = "ML 叠加";
-  if (impactStatus === "positive") title = "ML 叠加 / 正面";
+  const modeLabel = modeLabelMap[overlayMode] || "";
+  if (modeLabel) title = `ML 叠加 / ${modeLabel}`;
+  else if (impactStatus === "positive") title = "ML 叠加 / 正面";
   else if (impactStatus === "negative") title = "ML 叠加 / 负面";
   else if (impactStatus === "mixed") title = "ML 叠加 / 中性";
 
   let value = "未启用";
-  if (liveActive) value = `本轮参与 ${activeCount || 0} 个币`;
+  if (overlayMode === "shadow") value = `Shadow ${activeCount || 0} 个币`;
+  else if (overlayMode === "downweighted") value = `降权参与 ${activeCount || 0} 个币`;
+  else if (overlayMode === "observe") value = `观察中 ${activeCount || 0} 个币`;
+  else if (liveActive) value = `实盘参与 ${activeCount || 0} 个币`;
   else if (promoted) value = "已过门控";
   else if (enabled) value = "本轮未参与";
 
   const meta = [];
-  if (weightPct > 0) meta.push(`权重 ${weightPct.toFixed(0)}%`);
+  if (configuredWeightPct > 0 && Math.abs(configuredWeightPct - effectiveWeightPct) > 0.01) {
+    meta.push(`权重 ${configuredWeightPct.toFixed(0)}%→${effectiveWeightPct.toFixed(0)}%`);
+  } else if (effectiveWeightPct > 0) {
+    meta.push(`权重 ${effectiveWeightPct.toFixed(0)}%`);
+  }
   if (predictionCount > 0) meta.push(`预测 ${predictionCount}`);
   else if (coverageCount > 0) meta.push(`覆盖 ${coverageCount}`);
   if (lastStep?.delta_bps != null) {
@@ -816,6 +844,9 @@ function renderMlImpactCardClean(ml) {
   }
   if (rolling?.topn_delta_mean_bps != null) {
     meta.push(`24h ${Number(rolling.topn_delta_mean_bps) >= 0 ? "+" : ""}${fmtNum(rolling.topn_delta_mean_bps, 1)}bps`);
+  }
+  if (rolling48?.topn_delta_mean_bps != null) {
+    meta.push(`48h ${Number(rolling48.topn_delta_mean_bps) >= 0 ? "+" : ""}${fmtNum(rolling48.topn_delta_mean_bps, 1)}bps`);
   }
 
   const moveParts = [];
@@ -832,6 +863,9 @@ function renderMlImpactCardClean(ml) {
       return `${shortSymbol(item.symbol)} ${sign}${fmtNum(delta, 2)}`;
     }).join(" / ")}`);
   }
+  if (!moveParts.length && controlReason && reasonLabelMap[controlReason]) {
+    moveParts.push(`状态 ${reasonLabelMap[controlReason]}`);
+  }
   if (!moveParts.length && ml.reason) {
     moveParts.push(messageZh(ml.reason));
   }
@@ -842,6 +876,157 @@ function renderMlImpactCardClean(ml) {
     <div class="subtle">${esc(meta.join(" / ") || "等待 ML 影响数据...")}</div>
     ${moveParts.length ? `<div class="subtle" style="margin-top:6px">${esc(moveParts.join(" / "))}</div>` : ""}
   </div>`;
+}
+
+function fmtSigned(value, digits = 1, suffix = "") {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "--";
+  const sign = num > 0 ? "+" : "";
+  return `${sign}${num.toFixed(digits)}${suffix}`;
+}
+
+function shadowMlPhaseText(ml) {
+  if (ml?.live_active) return "shadow 已参与本轮排序";
+  if (ml?.promoted) return "shadow 已过门控";
+  if (ml?.configured_enabled) return "shadow 已接通，等待更多样本";
+  return "shadow 未接通";
+}
+
+function renderShadowMlHeadline(payload) {
+  if (!payload || !payload.available) {
+    setText("ml-impact-headline", "Shadow ML 未就绪");
+    setText("ml-impact-subtitle", messageZh(payload?.error || "shadow tuned xgboost workspace not found"));
+    return;
+  }
+
+  const ml = payload.ml_signal_overview || {};
+  const rolling = ml.rolling_24h || {};
+  const lastStep = ml.last_step || {};
+  let headline = shadowMlPhaseText(ml);
+
+  if (rolling?.topn_delta_mean_bps != null) {
+    headline = `${fmtSigned(rolling.topn_delta_mean_bps, 1, "bps")} / 24h`;
+  } else if (lastStep?.delta_bps != null) {
+    headline = `${fmtSigned(lastStep.delta_bps, 1, "bps")} / 本轮`;
+  } else if (Number(ml.overlay_score_max_abs || 0) > 0) {
+    headline = `max |overlay| ${fmtNum(ml.overlay_score_max_abs, 2)}`;
+  }
+
+  const meta = [];
+  if (payload.run_id) meta.push(`run ${payload.run_id}`);
+  if (ml.prediction_count != null) meta.push(`预测 ${Number(ml.prediction_count || 0)}`);
+  if (ml.ml_weight != null) meta.push(`权重 ${fmtNum(Number(ml.ml_weight || 0) * 100, 0)}%`);
+  if (ml.last_update) meta.push(`更新 ${ml.last_update}`);
+  setText("ml-impact-headline", headline);
+  setText("ml-impact-subtitle", meta.join(" / ") || "等待 shadow tuned xgboost 贡献数据...");
+}
+
+function renderShadowMlMoverList(title, items, emptyText) {
+  const rows = Array.isArray(items) ? items.slice(0, 3) : [];
+  if (!rows.length) {
+    return `<div class="info">
+      <div class="label">${esc(title)}</div>
+      <div class="subtle" style="margin-top:10px">${esc(emptyText)}</div>
+    </div>`;
+  }
+  return `<div class="info">
+    <div class="label">${esc(title)}</div>
+    <div style="display:grid;gap:10px;margin-top:10px">
+      ${rows.map((item) => {
+        const rankDelta = Number(item.rank_delta || 0);
+        const scoreDelta = Number(item.score_delta || 0);
+        const scoreClass = scoreDelta >= 0 ? "text-green" : "text-red";
+        return `<div class="row">
+          <div>
+            <div><strong>${esc(shortSymbol(item.symbol))}</strong></div>
+            <div class="subtle">排名 ${esc(`${item.base_rank || "--"} -> ${item.final_rank || "--"}`)}</div>
+          </div>
+          <div class="text-right">
+            <div class="${scoreClass}">${fmtSigned(scoreDelta, 3)}</div>
+            <div class="subtle">${rankDelta >= 0 ? "+" : ""}${rankDelta}</div>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+  </div>`;
+}
+
+function renderShadowMlPanel(payload) {
+  shadowMlCache = payload;
+  renderShadowMlHeadline(payload);
+
+  if (!payload || !payload.available) {
+    setHtml("ml-impact-content", `<div class="empty">${esc(messageZh(payload?.error || "shadow tuned xgboost workspace not found"))}</div>`);
+    return;
+  }
+
+  const ml = payload.ml_signal_overview || {};
+  const contributors = Array.isArray(ml.top_contributors) ? ml.top_contributors : [];
+  const promotedRows = Array.isArray(ml.top_promoted) ? ml.top_promoted : [];
+  const suppressedRows = Array.isArray(ml.top_suppressed) ? ml.top_suppressed : [];
+  const rolling = ml.rolling_24h || {};
+  const lastStep = ml.last_step || {};
+  const lifted = Number(ml.lifted_into_top3 || 0);
+  const pushed = Number(ml.pushed_out_of_top3 || 0);
+  const overlayMaxAbs = Number(ml.overlay_score_max_abs || 0);
+  const coverageCount = Number(ml.coverage_count || ml.active_symbols || ml.prediction_count || 0);
+
+  const summaryCards = `<div class="signal-grid" style="margin-bottom:12px">
+    <div class="info">
+      <div class="label">状态</div>
+      <div class="value">${esc(shadowMlPhaseText(ml))}</div>
+      <div class="subtle">${esc(String(ml.impact_status || "insufficient"))}</div>
+    </div>
+    <div class="info">
+      <div class="label">24h TopN</div>
+      <div class="value">${rolling?.topn_delta_mean_bps != null ? fmtSigned(rolling.topn_delta_mean_bps, 1, "bps") : "--"}</div>
+      <div class="subtle">${rolling?.points != null ? `${rolling.points} 个观测点` : "等待累计样本"}</div>
+    </div>
+    <div class="info">
+      <div class="label">本轮扰动</div>
+      <div class="value">${lastStep?.delta_bps != null ? fmtSigned(lastStep.delta_bps, 1, "bps") : "--"}</div>
+      <div class="subtle">覆盖 ${coverageCount} 币 / max |overlay| ${fmtNum(overlayMaxAbs, 2)}</div>
+    </div>
+    <div class="info">
+      <div class="label">Top3 影响</div>
+      <div class="value">${lifted || pushed ? `+${lifted} / -${pushed}` : `${promotedRows.length} / ${suppressedRows.length}`}</div>
+      <div class="subtle">抬入 / 挤出</div>
+    </div>
+  </div>`;
+
+  const contributorRows = contributors.map((item) => {
+    const scoreDelta = Number(item.score_delta || 0);
+    const scoreClass = scoreDelta >= 0 ? "text-green" : "text-red";
+    const rankDelta = Number(item.rank_delta || 0);
+    const rankText = item.base_rank && item.final_rank ? `${item.base_rank} -> ${item.final_rank}` : "--";
+    return `<tr>
+      <td><strong>${esc(shortSymbol(item.symbol))}</strong></td>
+      <td class="text-right mono">${fmtNum(item.ml_zscore, 3)}</td>
+      <td class="text-right mono">${fmtNum(item.ml_overlay_score, 3)}</td>
+      <td class="text-right ${scoreClass}">${fmtSigned(scoreDelta, 3)}</td>
+      <td class="text-right mono">${esc(rankText)}${rankDelta ? ` (${rankDelta > 0 ? "+" : ""}${rankDelta})` : ""}</td>
+    </tr>`;
+  }).join("");
+
+  const contributorTable = contributors.length ? `<div class="table-shell" style="margin-bottom:12px">
+    <table>
+      <thead>
+        <tr><th>币种</th><th class="text-right">z</th><th class="text-right">overlay</th><th class="text-right">Δscore</th><th class="text-right">排名</th></tr>
+      </thead>
+      <tbody>${contributorRows}</tbody>
+    </table>
+  </div>` : '<div class="empty" style="margin-bottom:12px">当前还没有可展示的 shadow ML 贡献明细。</div>';
+
+  const movers = `<div class="grid2">
+    ${renderShadowMlMoverList("重点抬升", promotedRows, "这轮没有明显抬升的币。")}
+    ${renderShadowMlMoverList("重点压低", suppressedRows, "这轮没有明显压低的币。")}
+  </div>`;
+
+  const footer = `<div class="subtle" style="margin-top:12px">
+    ${esc(`workspace ${payload.workspace || "--"} / run ${payload.run_id || "--"} / ${ml.reason ? `reason ${messageZh(ml.reason)}` : "shadow tuned xgboost"}`)}
+  </div>`;
+
+  setHtml("ml-impact-content", `${summaryCards}${contributorTable}${movers}${footer}`);
 }
 
 function voteCard(label, vote, cache, opts = {}) {
@@ -1200,6 +1385,11 @@ async function loadDecision(signal) {
   }
 }
 
+async function loadShadowMl(signal) {
+  const data = await fetchJson("/api/shadow_ml_overlay", signal);
+  renderShadowMlPanel(data || { available: false, error: "shadow ml overlay data unavailable" });
+}
+
 async function loadHealth(signal) {
   const data = await fetchJson("/api/health", signal);
   if (data) renderHealth(data);
@@ -1221,7 +1411,7 @@ function scheduleSecondaryLoad(signal) {
   const run = () => {
     secondaryTimer = null;
     secondaryIdleHandle = null;
-    Promise.allSettled([loadDecision(signal), loadHealth(signal)]);
+    Promise.allSettled([loadDecision(signal), loadShadowMl(signal), loadHealth(signal)]);
   };
   if ("requestIdleCallback" in window) {
     secondaryIdleHandle = requestIdleCallback(run, { timeout: 1200 });
@@ -1250,6 +1440,7 @@ function rerenderForViewport() {
     renderSignals(decisionCache);
     renderDecision(decisionCache);
   }
+  if (shadowMlCache) renderShadowMlPanel(shadowMlCache);
   if (healthCache) renderHealth(healthCache);
 }
 

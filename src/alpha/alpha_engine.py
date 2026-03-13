@@ -57,6 +57,7 @@ class AlphaSnapshot:
     telemetry_scores: Dict[str, float] | None = None
     base_scores: Dict[str, float] | None = None
     base_raw_scores: Dict[str, float] | None = None
+    ml_attribution_scores: Dict[str, float] | None = None
     ml_overlay_scores: Dict[str, float] | None = None
     ml_overlay_raw_scores: Dict[str, float] | None = None
     ml_runtime: Dict[str, Any] | None = None
@@ -445,6 +446,7 @@ class AlphaEngine:
     @staticmethod
     def _ml_artifact_candidates(base_path: Path) -> List[Path]:
         return [
+            Path(f"{base_path}.json"),
             Path(f"{base_path}.txt"),
             Path(f"{base_path}.pkl"),
             Path(f"{base_path}_config.json"),
@@ -517,6 +519,176 @@ class AlphaEngine:
 
             transformed[str(sym)] = float(adjusted)
         return transformed
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value or 0.0)
+        except Exception:
+            return float(default)
+
+    @staticmethod
+    def _impact_tone(value_bps: Optional[float]) -> str:
+        if value_bps is None:
+            return "insufficient"
+        if value_bps >= 5.0:
+            return "positive"
+        if value_bps <= -5.0:
+            return "negative"
+        return "mixed"
+
+    def _resolve_ml_impact_path(self, attr_name: str, default_name: str) -> Path:
+        ml_cfg = getattr(self.cfg, "ml_factor", None)
+        raw_path = getattr(ml_cfg, attr_name, default_name) if ml_cfg is not None else default_name
+        return self._resolve_repo_path(raw_path, default_name)
+
+    def _summarize_ml_impact_rows(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        delta_vals = [
+            float(row.get("delta_bps"))
+            for row in rows
+            if row.get("delta_bps") is not None
+        ]
+        promoted_vals = [
+            float(row.get("promoted_minus_suppressed_bps"))
+            for row in rows
+            if row.get("promoted_minus_suppressed_bps") is not None
+        ]
+        rolling_delta = float(sum(delta_vals) / len(delta_vals)) if delta_vals else None
+        rolling_promoted = float(sum(promoted_vals) / len(promoted_vals)) if promoted_vals else None
+        positive_ratio = (
+            float(sum(1 for row in rows if float(row.get("delta_bps") or 0.0) > 0.0) / len(rows))
+            if rows
+            else None
+        )
+        return {
+            "points": len(rows),
+            "topn_delta_mean_bps": round(float(rolling_delta), 2) if rolling_delta is not None else None,
+            "promoted_minus_suppressed_mean_bps": round(float(rolling_promoted), 2)
+            if rolling_promoted is not None
+            else None,
+            "positive_ratio": round(float(positive_ratio), 4) if positive_ratio is not None else None,
+            "status": self._impact_tone(rolling_delta),
+        }
+
+    def _load_ml_impact_summary(self) -> Dict[str, Any]:
+        summary_path = self._resolve_ml_impact_path("impact_summary_path", "reports/ml_overlay_impact.json")
+        history_path = self._resolve_ml_impact_path("impact_history_path", "reports/ml_overlay_impact_history.jsonl")
+
+        summary: Dict[str, Any] = {}
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:
+                summary = {}
+
+        if isinstance(summary.get("rolling_48h"), dict):
+            return summary
+
+        rows: List[Dict[str, Any]] = []
+        if history_path.exists():
+            try:
+                for line in history_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    rows.append(json.loads(line))
+            except Exception:
+                rows = []
+
+        if not rows:
+            return summary
+
+        latest_to_ts = max(int(row.get("to_ts_ms") or 0) for row in rows)
+        if latest_to_ts <= 0:
+            return summary
+
+        def _window(hours: int) -> List[Dict[str, Any]]:
+            cutoff = latest_to_ts - hours * 3600 * 1000
+            return [row for row in rows if int(row.get("to_ts_ms") or 0) >= cutoff]
+
+        summary = dict(summary)
+        summary.setdefault("rolling_24h", self._summarize_ml_impact_rows(_window(24)))
+        summary["rolling_48h"] = self._summarize_ml_impact_rows(_window(48))
+        return summary
+
+    def _resolve_ml_online_control(self) -> Dict[str, Any]:
+        ml_cfg = getattr(self.cfg, "ml_factor", None)
+        configured_weight = float(getattr(ml_cfg, "ml_weight", 0.0) or 0.0) if ml_cfg is not None else 0.0
+        control = {
+            "mode": "disabled",
+            "configured_ml_weight": configured_weight,
+            "effective_ml_weight": configured_weight,
+            "reason": "disabled",
+            "rolling_24h": {},
+            "rolling_48h": {},
+        }
+        if ml_cfg is None or configured_weight <= 0.0:
+            return control
+
+        summary = self._load_ml_impact_summary()
+        rolling_24h = summary.get("rolling_24h", {}) if isinstance(summary, dict) else {}
+        rolling_48h = summary.get("rolling_48h", {}) if isinstance(summary, dict) else {}
+        control["rolling_24h"] = rolling_24h if isinstance(rolling_24h, dict) else {}
+        control["rolling_48h"] = rolling_48h if isinstance(rolling_48h, dict) else {}
+
+        if not bool(getattr(ml_cfg, "online_control_enabled", True)):
+            control["mode"] = "live"
+            control["reason"] = "online_control_disabled"
+            return control
+
+        points_24h = int(self._safe_float(control["rolling_24h"].get("points"), 0))
+        points_48h = int(self._safe_float(control["rolling_48h"].get("points"), 0))
+        min_points_24h = int(getattr(ml_cfg, "online_control_24h_min_points", 6) or 6)
+        min_points_48h = int(getattr(ml_cfg, "online_control_48h_min_points", 12) or 12)
+        neg_24h_bps = float(getattr(ml_cfg, "online_control_negative_24h_bps", 0.0) or 0.0)
+        neg_48h_bps = float(getattr(ml_cfg, "online_control_negative_48h_bps", 0.0) or 0.0)
+        rolling_24h_bps = control["rolling_24h"].get("topn_delta_mean_bps")
+        rolling_48h_bps = control["rolling_48h"].get("topn_delta_mean_bps")
+
+        if points_48h >= min_points_48h and rolling_48h_bps is not None and float(rolling_48h_bps) < neg_48h_bps:
+            control["mode"] = "shadow"
+            control["effective_ml_weight"] = 0.0
+            control["reason"] = "rolling_48h_negative"
+            return control
+
+        if points_24h < min_points_24h:
+            control["mode"] = "observe"
+            control["reason"] = "insufficient_24h_history"
+            return control
+
+        if rolling_24h_bps is not None and float(rolling_24h_bps) < neg_24h_bps:
+            control["mode"] = "downweighted"
+            control["effective_ml_weight"] = min(
+                configured_weight,
+                float(getattr(ml_cfg, "online_control_downweight_ml_weight", 0.08) or 0.08),
+            )
+            control["reason"] = "rolling_24h_negative"
+            return control
+
+        control["mode"] = "live"
+        control["reason"] = "healthy_online_attribution"
+        return control
+
+    @staticmethod
+    def _blend_score_map(
+        base_scores: Dict[str, float],
+        overlay_scores: Dict[str, float],
+        weight: float,
+    ) -> Dict[str, float]:
+        if not base_scores and not overlay_scores:
+            return {}
+        w = max(0.0, float(weight or 0.0))
+        if w <= 0.0:
+            return {str(sym): float(score) for sym, score in base_scores.items()}
+
+        blended: Dict[str, float] = {}
+        for sym in sorted(set(base_scores.keys()) | set(overlay_scores.keys())):
+            base_score = float(base_scores.get(sym, 0.0))
+            if sym in overlay_scores:
+                blended[str(sym)] = float((1.0 - w) * base_score + w * float(overlay_scores[sym]))
+            else:
+                blended[str(sym)] = base_score
+        return blended
 
     def _compute_ml_overlay_scores(self, market_data: Dict[str, MarketSeries]) -> tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
         ml_cfg = getattr(self.cfg, "ml_factor", None)
@@ -833,30 +1005,36 @@ class AlphaEngine:
             ml_overlay_raw_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
             ml_overlay_scores = self._transform_ml_overlay_scores(ml_overlay_raw_scores)
             ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
+            ml_control = self._resolve_ml_online_control() if ml_overlay_scores and ml_weight > 0 else {
+                "mode": "disabled",
+                "configured_ml_weight": ml_weight,
+                "effective_ml_weight": ml_weight,
+                "reason": "disabled",
+                "rolling_24h": {},
+                "rolling_48h": {},
+            }
+            effective_ml_weight = float(ml_control.get("effective_ml_weight", ml_weight) or 0.0)
             base_scores = dict(scores)
             base_raw_scores = dict(raw_scores)
             for sym in sorted(set(base_scores.keys()) | set(ml_overlay_scores.keys())):
                 base_scores.setdefault(sym, 0.0)
                 base_raw_scores.setdefault(sym, float(base_scores.get(sym, 0.0)))
-            if ml_overlay_scores and ml_weight > 0:
-                blended_scores: Dict[str, float] = {}
-                blended_raw_scores: Dict[str, float] = {}
-                for sym in sorted(set(base_scores.keys()) | set(ml_overlay_scores.keys())):
-                    base_score = float(base_scores.get(sym, 0.0))
-                    base_raw_score = float(base_raw_scores.get(sym, base_score))
-                    if sym in ml_overlay_scores:
-                        blended_scores[sym] = float(
-                            (1.0 - ml_weight) * base_score + ml_weight * float(ml_overlay_scores[sym])
-                        )
-                        blended_raw_scores[sym] = float(
-                            (1.0 - ml_weight) * base_raw_score + ml_weight * float(ml_overlay_scores[sym])
-                        )
-                    else:
-                        blended_scores[sym] = base_score
-                        blended_raw_scores[sym] = base_raw_score
-                scores = blended_scores
-                raw_scores = blended_raw_scores
+            attribution_scores = self._blend_score_map(base_scores, ml_overlay_scores, ml_weight)
+            scores = self._blend_score_map(base_scores, ml_overlay_scores, effective_ml_weight)
+            raw_scores = self._blend_score_map(base_raw_scores, ml_overlay_scores, effective_ml_weight)
             if ml_runtime and ml_runtime.get("used_in_latest_snapshot"):
+                overlay_mode = str(ml_control.get("mode") or "live")
+                applied_live = effective_ml_weight > 0 and overlay_mode != "shadow"
+                ml_runtime["configured_ml_weight"] = float(ml_weight)
+                ml_runtime["effective_ml_weight"] = float(effective_ml_weight)
+                ml_runtime["overlay_mode"] = overlay_mode
+                ml_runtime["online_control_enabled"] = bool(
+                    getattr(getattr(self.cfg, "ml_factor", None), "online_control_enabled", True)
+                )
+                ml_runtime["online_control_reason"] = str(ml_control.get("reason") or "")
+                ml_runtime["rolling_24h"] = ml_control.get("rolling_24h") or {}
+                ml_runtime["rolling_48h"] = ml_control.get("rolling_48h") or {}
+                ml_runtime["used_in_latest_snapshot"] = bool(applied_live and ml_overlay_scores)
                 ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
                 ml_runtime["overlay_transform"] = str(
                     getattr(getattr(self.cfg, "ml_factor", None), "overlay_transform", "tanh") or "tanh"
@@ -907,6 +1085,7 @@ class AlphaEngine:
                 telemetry_scores=telemetry_scores or dict(scores),
                 base_scores=base_scores,
                 base_raw_scores=base_raw_scores,
+                ml_attribution_scores=attribution_scores,
                 ml_overlay_scores=ml_overlay_scores,
                 ml_overlay_raw_scores=ml_overlay_raw_scores,
                 ml_runtime=ml_runtime,
@@ -1025,6 +1204,15 @@ class AlphaEngine:
         ml_overlay_raw_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
         ml_overlay_scores = self._transform_ml_overlay_scores(ml_overlay_raw_scores)
         ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
+        ml_control = self._resolve_ml_online_control() if ml_overlay_scores and ml_weight > 0 else {
+            "mode": "disabled",
+            "configured_ml_weight": ml_weight,
+            "effective_ml_weight": ml_weight,
+            "reason": "disabled",
+            "rolling_24h": {},
+            "rolling_48h": {},
+        }
+        effective_ml_weight = float(ml_control.get("effective_ml_weight", ml_weight) or 0.0)
 
         raw_factors: Dict[str, Dict[str, float]] = {}
         z_factors: Dict[str, Dict[str, float]] = {}
@@ -1058,17 +1246,29 @@ class AlphaEngine:
 
             classic_score = float(-raw_score)
             base_scores[sym] = classic_score
-            if sym in ml_overlay_scores and ml_weight > 0:
-                scores[sym] = float((1.0 - ml_weight) * classic_score + ml_weight * float(ml_overlay_scores[sym]))
-            else:
-                scores[sym] = classic_score
 
             raw_factors[sym]["ml_overlay_score"] = float(ml_overlay_scores.get(sym, 0.0))
             raw_factors[sym]["ml_base_score"] = float(classic_score)
-            raw_factors[sym]["ml_score_delta"] = float(scores[sym] - classic_score)
             z_factors[sym]["ml_overlay_score"] = float(ml_overlay_scores.get(sym, 0.0))
 
+        attribution_scores = self._blend_score_map(base_scores, ml_overlay_scores, ml_weight)
+        scores = self._blend_score_map(base_scores, ml_overlay_scores, effective_ml_weight)
+        for sym in sorted(base_scores.keys()):
+            raw_factors[sym]["ml_score_delta"] = float(scores.get(sym, base_scores[sym]) - base_scores[sym])
+
         if ml_runtime and ml_runtime.get("used_in_latest_snapshot"):
+            overlay_mode = str(ml_control.get("mode") or "live")
+            applied_live = effective_ml_weight > 0 and overlay_mode != "shadow"
+            ml_runtime["configured_ml_weight"] = float(ml_weight)
+            ml_runtime["effective_ml_weight"] = float(effective_ml_weight)
+            ml_runtime["overlay_mode"] = overlay_mode
+            ml_runtime["online_control_enabled"] = bool(
+                getattr(getattr(self.cfg, "ml_factor", None), "online_control_enabled", True)
+            )
+            ml_runtime["online_control_reason"] = str(ml_control.get("reason") or "")
+            ml_runtime["rolling_24h"] = ml_control.get("rolling_24h") or {}
+            ml_runtime["rolling_48h"] = ml_control.get("rolling_48h") or {}
+            ml_runtime["used_in_latest_snapshot"] = bool(applied_live and ml_overlay_scores)
             ml_runtime["symbols_used"] = sorted(ml_overlay_scores.keys())
             ml_runtime["overlay_transform"] = str(
                 getattr(getattr(self.cfg, "ml_factor", None), "overlay_transform", "tanh") or "tanh"
@@ -1092,6 +1292,7 @@ class AlphaEngine:
             telemetry_scores=dict(scores),
             base_scores=base_scores,
             base_raw_scores=dict(base_scores),
+            ml_attribution_scores=attribution_scores,
             ml_overlay_scores=ml_overlay_scores,
             ml_overlay_raw_scores=ml_overlay_raw_scores,
             ml_runtime=ml_runtime,

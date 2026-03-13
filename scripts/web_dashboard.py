@@ -584,23 +584,34 @@ def _build_ml_signal_overview(
     configured_enabled = bool(runtime.get('configured_enabled', False))
     promoted = bool(runtime.get('promotion_passed', promotion.get('passed', False)))
     live_active = bool(runtime.get('used_in_latest_snapshot', False))
+    overlay_mode = str(runtime.get('overlay_mode') or impact_summary.get('overlay_mode') or 'disabled')
     coverage_count = prediction_count if prediction_count > 0 else len(nonzero_rows)
     reason = str(runtime.get('reason') or runtime.get('error') or '')
     last_step = impact_summary.get('last_step', {}) if isinstance(impact_summary, dict) else {}
     rolling_24h = impact_summary.get('rolling_24h', {}) if isinstance(impact_summary, dict) else {}
+    rolling_48h = impact_summary.get('rolling_48h', {}) if isinstance(impact_summary, dict) else {}
     impact_status = str((rolling_24h.get('status') or last_step.get('status') or 'insufficient'))
 
     if not configured_enabled and (promoted or live_active or coverage_count > 0):
         configured_enabled = True
+    if overlay_mode in {'', 'disabled'} and configured_enabled:
+        if live_active:
+            overlay_mode = 'live'
+        elif coverage_count > 0:
+            overlay_mode = 'observe'
 
     return {
         'configured_enabled': configured_enabled,
         'promoted': promoted,
         'live_active': live_active,
+        'overlay_mode': overlay_mode,
         'prediction_count': prediction_count,
         'active_symbols': coverage_count,
         'coverage_count': coverage_count,
         'ml_weight': _coerce_float(runtime.get('ml_weight', 0.0)),
+        'configured_ml_weight': _coerce_float(runtime.get('configured_ml_weight', runtime.get('ml_weight', 0.0))),
+        'effective_ml_weight': _coerce_float(runtime.get('effective_ml_weight', runtime.get('ml_weight', 0.0))),
+        'online_control_reason': str(runtime.get('online_control_reason') or impact_summary.get('online_control_reason') or ''),
         'reason': reason,
         'last_update': runtime.get('ts'),
         'overlay_transform': runtime.get('overlay_transform'),
@@ -610,9 +621,113 @@ def _build_ml_signal_overview(
         'impact_status': impact_status,
         'last_step': last_step,
         'rolling_24h': rolling_24h,
+        'rolling_48h': rolling_48h,
         'top_contributors': contributors,
         'top_promoted': promoted_rows[:limit],
         'top_suppressed': suppressed_rows[:limit],
+    }
+
+
+def _resolve_shadow_workspace() -> Optional[Path]:
+    candidates: List[Path] = []
+
+    env_shadow = os.getenv('V5_SHADOW_WORKSPACE')
+    if env_shadow:
+        candidates.append(Path(env_shadow).expanduser())
+
+    candidates.append(WORKSPACE)
+    candidates.append(WORKSPACE.parent / 'v5-shadow-tuned-xgboost')
+    candidates.append(WORKSPACE.parent / 'v5-shadow-xgboost')
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved = str(candidate.resolve())
+        except Exception:
+            resolved = str(candidate)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        reports_dir = candidate / 'reports'
+        runtime_dir = reports_dir / 'shadow_tuned_xgboost'
+        runs_dir = reports_dir / 'runs'
+        if runtime_dir.exists() and runs_dir.exists():
+            return candidate
+    return None
+
+
+def _pick_latest_shadow_audit(reports_dir: Path) -> tuple[Optional[Path], Dict[str, Any]]:
+    entries = _iter_decision_audits(reports_dir)
+    if not entries:
+        return None, {}
+
+    for entry in entries:
+        audit = entry.get('audit', {})
+        overview = audit.get('ml_signal_overview', {}) if isinstance(audit, dict) else {}
+        if isinstance(overview, dict) and overview:
+            return entry.get('run_dir'), audit
+
+    latest = entries[0]
+    return latest.get('run_dir'), latest.get('audit', {})
+
+
+def _load_shadow_ml_overlay_summary(shadow_workspace: Path) -> Dict[str, Any]:
+    reports_dir = shadow_workspace / 'reports'
+    runtime_dir = reports_dir / 'shadow_tuned_xgboost'
+    run_dir, audit = _pick_latest_shadow_audit(reports_dir)
+    runtime = _load_json_payload(runtime_dir / 'ml_runtime_status.json')
+    impact_summary = _load_json_payload(runtime_dir / 'ml_overlay_impact.json')
+
+    overview = {}
+    if isinstance(audit, dict):
+        stored = audit.get('ml_signal_overview', {})
+        if isinstance(stored, dict):
+            overview.update(stored)
+
+    if isinstance(runtime, dict) and runtime:
+        overview.setdefault('configured_enabled', bool(runtime.get('configured_enabled', False)))
+        overview.setdefault('promoted', bool(runtime.get('promotion_passed', False)))
+        overview.setdefault('live_active', bool(runtime.get('used_in_latest_snapshot', False)))
+        overview.setdefault('prediction_count', int(runtime.get('prediction_count', 0) or 0))
+        active_symbols = int(runtime.get('prediction_count', 0) or 0)
+        overview.setdefault('active_symbols', active_symbols)
+        overview.setdefault('coverage_count', active_symbols)
+        overview.setdefault('ml_weight', _coerce_float(runtime.get('ml_weight', 0.0)))
+        overview.setdefault('reason', str(runtime.get('reason') or runtime.get('error') or ''))
+        overview.setdefault('last_update', runtime.get('ts'))
+        overview.setdefault('overlay_transform', runtime.get('overlay_transform'))
+        overview.setdefault('overlay_transform_scale', _coerce_float(runtime.get('overlay_transform_scale', 0.0)))
+        overview.setdefault('overlay_transform_max_abs', _coerce_float(runtime.get('overlay_transform_max_abs', 0.0)))
+        overview.setdefault('overlay_score_max_abs', _coerce_float(runtime.get('overlay_score_max_abs', 0.0)))
+
+    if isinstance(impact_summary, dict) and impact_summary:
+        last_step = impact_summary.get('last_step', {}) if isinstance(impact_summary.get('last_step', {}), dict) else {}
+        rolling_24h = impact_summary.get('rolling_24h', {}) if isinstance(impact_summary.get('rolling_24h', {}), dict) else {}
+        overview.setdefault('last_step', last_step)
+        overview.setdefault('rolling_24h', rolling_24h)
+        overview.setdefault('impact_status', str(rolling_24h.get('status') or last_step.get('status') or 'insufficient'))
+
+    overview.setdefault('top_contributors', [])
+    overview.setdefault('top_promoted', [])
+    overview.setdefault('top_suppressed', [])
+    overview.setdefault('impact_status', 'insufficient')
+
+    ts = None
+    if isinstance(audit, dict):
+        ts = audit.get('timestamp') or audit.get('now_ts')
+    if ts is None and run_dir is not None:
+        ts = run_dir.stat().st_mtime
+
+    return {
+        'available': bool(overview),
+        'workspace': str(shadow_workspace),
+        'reports_dir': str(reports_dir),
+        'run_id': str(audit.get('run_id') or (run_dir.name if run_dir is not None else '')),
+        'timestamp': ts,
+        'ml_signal_overview': overview,
+        'top_scores': audit.get('top_scores', []) if isinstance(audit, dict) else [],
+        'notes': audit.get('notes', [])[:8] if isinstance(audit, dict) and isinstance(audit.get('notes', []), list) else [],
     }
 
 
@@ -4116,6 +4231,27 @@ def api_decision_audit():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/shadow_ml_overlay')
+def api_shadow_ml_overlay():
+    try:
+        shadow_workspace = _resolve_shadow_workspace()
+        if shadow_workspace is None:
+            return jsonify({
+                'available': False,
+                'error': 'shadow tuned xgboost workspace not found',
+            })
+
+        payload = _load_shadow_ml_overlay_summary(shadow_workspace)
+        if not payload.get('available'):
+            payload['error'] = 'shadow ml overlay data not ready'
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({
+            'available': False,
+            'error': str(e),
+        })
 
 
 @app.route('/api/health')

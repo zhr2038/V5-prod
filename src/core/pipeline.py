@@ -523,13 +523,14 @@ class V5Pipeline:
     ) -> Dict[str, Any]:
         ml_runtime = dict(getattr(alpha, "ml_runtime", {}) or {})
         base_scores = dict(getattr(alpha, "base_scores", {}) or {})
-        final_scores = dict(getattr(alpha, "scores", {}) or {})
+        final_scores = dict(getattr(alpha, "ml_attribution_scores", {}) or getattr(alpha, "scores", {}) or {})
         overlay_scores = dict(getattr(alpha, "ml_overlay_scores", {}) or {})
         overlay_raw_scores = dict(getattr(alpha, "ml_overlay_raw_scores", {}) or {})
 
         configured_enabled = bool(ml_runtime.get("configured_enabled", False))
         promoted = bool(ml_runtime.get("promotion_passed", False))
         live_active = bool(ml_runtime.get("used_in_latest_snapshot", False))
+        overlay_mode = str(ml_runtime.get("overlay_mode") or "disabled")
         prediction_count = int(ml_runtime.get("prediction_count", 0) or 0)
         if not configured_enabled and not promoted and not live_active and not overlay_scores and not overlay_raw_scores:
             return {}
@@ -623,6 +624,10 @@ class V5Pipeline:
             "active_symbols": int(len(overlay_scores) or prediction_count or 0),
             "coverage_count": int(len(overlay_scores) or prediction_count or 0),
             "ml_weight": float(ml_runtime.get("ml_weight", 0.0) or 0.0),
+            "configured_ml_weight": float(ml_runtime.get("configured_ml_weight", ml_runtime.get("ml_weight", 0.0)) or 0.0),
+            "effective_ml_weight": float(ml_runtime.get("effective_ml_weight", ml_runtime.get("ml_weight", 0.0)) or 0.0),
+            "overlay_mode": overlay_mode,
+            "online_control_reason": str(ml_runtime.get("online_control_reason") or ""),
             "reason": str(ml_runtime.get("reason") or ""),
             "last_update": ml_runtime.get("ts"),
             "overlay_transform": ml_runtime.get("overlay_transform"),
@@ -637,6 +642,7 @@ class V5Pipeline:
             "impact_status": str((rolling.get("status") or last_step.get("status") or "insufficient")),
             "last_step": last_step,
             "rolling_24h": rolling,
+            "rolling_48h": impact_summary.get("rolling_48h", {}) if isinstance(impact_summary, dict) else {},
         }
 
     def _update_ml_impact_monitor(
@@ -647,7 +653,7 @@ class V5Pipeline:
         snapshot_ts_ms: int,
     ) -> Dict[str, Any]:
         ml_cfg = getattr(self.cfg.alpha, "ml_factor", None)
-        final_scores = dict(getattr(alpha, "scores", {}) or {})
+        final_scores = dict(getattr(alpha, "ml_attribution_scores", {}) or getattr(alpha, "scores", {}) or {})
         base_scores = dict(getattr(alpha, "base_scores", {}) or {})
         overlay_scores = dict(getattr(alpha, "ml_overlay_scores", {}) or {})
         overlay_raw_scores = dict(getattr(alpha, "ml_overlay_raw_scores", {}) or {})
@@ -805,41 +811,55 @@ class V5Pipeline:
                     if not line:
                         continue
                     row = json.loads(line)
-                    if int(row.get("to_ts_ms") or 0) >= int(snapshot_ts_ms) - 24 * 3600 * 1000:
+                    if int(row.get("to_ts_ms") or 0) >= int(snapshot_ts_ms) - 48 * 3600 * 1000:
                         history_rows.append(row)
             except Exception:
                 history_rows = []
 
-        delta_vals = [
-            float(row.get("delta_bps"))
-            for row in history_rows
-            if row.get("delta_bps") is not None
+        def _rolling_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+            delta_vals = [
+                float(row.get("delta_bps"))
+                for row in rows
+                if row.get("delta_bps") is not None
+            ]
+            promoted_vals = [
+                float(row.get("promoted_minus_suppressed_bps"))
+                for row in rows
+                if row.get("promoted_minus_suppressed_bps") is not None
+            ]
+            rolling_delta = float(sum(delta_vals) / len(delta_vals)) if delta_vals else None
+            rolling_promoted = float(sum(promoted_vals) / len(promoted_vals)) if promoted_vals else None
+            positive_ratio = (
+                float(sum(1 for row in rows if float(row.get("delta_bps") or 0.0) > 0.0) / len(rows))
+                if rows
+                else None
+            )
+            return {
+                "points": len(rows),
+                "topn_delta_mean_bps": round(float(rolling_delta), 2) if rolling_delta is not None else None,
+                "promoted_minus_suppressed_mean_bps": round(float(rolling_promoted), 2)
+                if rolling_promoted is not None
+                else None,
+                "positive_ratio": round(float(positive_ratio), 4) if positive_ratio is not None else None,
+                "status": self._impact_tone(rolling_delta),
+            }
+
+        rolling_24h_rows = [
+            row for row in history_rows
+            if int(row.get("to_ts_ms") or 0) >= int(snapshot_ts_ms) - 24 * 3600 * 1000
         ]
-        promoted_vals = [
-            float(row.get("promoted_minus_suppressed_bps"))
-            for row in history_rows
-            if row.get("promoted_minus_suppressed_bps") is not None
-        ]
-        rolling_delta = float(sum(delta_vals) / len(delta_vals)) if delta_vals else None
-        rolling_promoted = float(sum(promoted_vals) / len(promoted_vals)) if promoted_vals else None
-        positive_ratio = (
-            float(sum(1 for row in history_rows if float(row.get("delta_bps") or 0.0) > 0.0) / len(history_rows))
-            if history_rows
-            else None
-        )
-        rolling = {
-            "points": len(history_rows),
-            "topn_delta_mean_bps": round(float(rolling_delta), 2) if rolling_delta is not None else None,
-            "promoted_minus_suppressed_mean_bps": round(float(rolling_promoted), 2)
-            if rolling_promoted is not None
-            else None,
-            "positive_ratio": round(float(positive_ratio), 4) if positive_ratio is not None else None,
-            "status": self._impact_tone(rolling_delta),
-        }
+        rolling_24h = _rolling_stats(rolling_24h_rows)
+        rolling_48h = _rolling_stats(history_rows)
+        ml_runtime = dict(getattr(alpha, "ml_runtime", {}) or {})
         summary = {
             "updated_at": datetime.utcnow().isoformat() + "Z",
             "last_step": step_summary,
-            "rolling_24h": rolling,
+            "rolling_24h": rolling_24h,
+            "rolling_48h": rolling_48h,
+            "overlay_mode": str(ml_runtime.get("overlay_mode") or ""),
+            "configured_ml_weight": float(ml_runtime.get("configured_ml_weight", ml_runtime.get("ml_weight", 0.0)) or 0.0),
+            "effective_ml_weight": float(ml_runtime.get("effective_ml_weight", ml_runtime.get("ml_weight", 0.0)) or 0.0),
+            "online_control_reason": str(ml_runtime.get("online_control_reason") or ""),
         }
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

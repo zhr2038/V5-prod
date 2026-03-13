@@ -117,6 +117,8 @@ def test_alpha_engine_ml_overlay_runs_in_live_multi_strategy_path(tmp_path, monk
     )
 
     runtime_path = tmp_path / "ml_runtime_status.json"
+    impact_summary_path = tmp_path / "ml_overlay_impact.json"
+    impact_history_path = tmp_path / "ml_overlay_impact_history.jsonl"
 
     feature_cols = [
         "returns_24h",
@@ -152,15 +154,17 @@ def test_alpha_engine_ml_overlay_runs_in_live_multi_strategy_path(tmp_path, monk
                 overlay_transform="tanh",
                 overlay_transform_scale=1.6,
                 overlay_transform_max_abs=1.1,
-                model_path=str(model_base),
-                active_model_pointer_path=str(pointer_path),
-                promotion_decision_path=str(decision_path),
-                runtime_status_path=str(runtime_path),
-                require_promotion_passed=True,
-                min_symbols=3,
+                    model_path=str(model_base),
+                    active_model_pointer_path=str(pointer_path),
+                    promotion_decision_path=str(decision_path),
+                    runtime_status_path=str(runtime_path),
+                    impact_summary_path=str(impact_summary_path),
+                    impact_history_path=str(impact_history_path),
+                    require_promotion_passed=True,
+                    min_symbols=3,
+                )
             )
         )
-    )
     engine.use_multi_strategy = True
     engine.multi_strategy_adapter = object()
     engine._compute_multi_strategy_scores = lambda _: {"AAA/USDT": 0.40}
@@ -177,13 +181,109 @@ def test_alpha_engine_ml_overlay_runs_in_live_multi_strategy_path(tmp_path, monk
     assert runtime["used_in_latest_snapshot"] is True
     assert runtime["prediction_count"] == 3
     assert runtime["reason"] == "ok"
+    assert runtime["overlay_mode"] == "observe"
+    assert runtime["effective_ml_weight"] == 0.2
     assert runtime["overlay_transform"] == "tanh"
     assert runtime["overlay_transform_max_abs"] == 1.1
     assert set(runtime["symbols_used"]) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
     assert set(snapshot.scores) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
     assert set(snapshot.base_scores) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
+    assert set(snapshot.ml_attribution_scores) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
     assert set(snapshot.ml_overlay_scores) == {"AAA/USDT", "BBB/USDT", "CCC/USDT"}
     assert max(abs(v) for v in snapshot.ml_overlay_scores.values()) <= 1.1 + 1e-9
     assert any(snapshot.raw_factors[sym]["ml_pred_raw"] != 0.0 for sym in snapshot.raw_factors)
     assert any(snapshot.z_factors[sym]["ml_pred_zscore"] != 0.0 for sym in snapshot.z_factors)
     assert any("ml_overlay_score" in snapshot.raw_factors[sym] for sym in snapshot.raw_factors)
+
+
+def test_alpha_engine_ml_overlay_enters_shadow_but_keeps_attribution_scores(tmp_path, monkeypatch):
+    model_base = tmp_path / "ml_factor_model"
+    (tmp_path / "ml_factor_model.pkl").write_bytes(b"test")
+    (tmp_path / "ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+
+    pointer_path = tmp_path / "ml_factor_model_active.txt"
+    pointer_path.write_text(str(model_base), encoding="utf-8")
+
+    decision_path = tmp_path / "model_promotion_decision.json"
+    decision_path.write_text(
+        json.dumps({"passed": True, "ts": "2026-03-10T00:40:00Z"}),
+        encoding="utf-8",
+    )
+
+    runtime_path = tmp_path / "ml_runtime_status.json"
+    impact_summary_path = tmp_path / "ml_overlay_impact.json"
+    impact_history_path = tmp_path / "ml_overlay_impact_history.jsonl"
+    impact_summary_path.write_text(
+        json.dumps(
+            {
+                "rolling_24h": {"points": 8, "topn_delta_mean_bps": -12.5, "status": "negative"},
+                "rolling_48h": {"points": 16, "topn_delta_mean_bps": -6.8, "status": "negative"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    feature_cols = [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position",
+    ]
+
+    def _fake_load_model(self, path: str) -> None:
+        self.feature_names = list(feature_cols)
+        self.is_trained = True
+
+    def _fake_predict_batch(self, features_df: pd.DataFrame) -> pd.Series:
+        return pd.Series([2.0, 1.0, -1.0], index=features_df.index, dtype=float)
+
+    monkeypatch.setattr("src.execution.ml_factor_model.MLFactorModel.load_model", _fake_load_model)
+    monkeypatch.setattr("src.execution.ml_factor_model.MLFactorModel.predict_batch", _fake_predict_batch)
+
+    engine = AlphaEngine(
+        AlphaConfig(
+            ml_factor=MLFactorLiveConfig(
+                enabled=True,
+                ml_weight=0.20,
+                online_control_enabled=True,
+                online_control_24h_min_points=6,
+                online_control_48h_min_points=12,
+                online_control_downweight_ml_weight=0.08,
+                model_path=str(model_base),
+                active_model_pointer_path=str(pointer_path),
+                promotion_decision_path=str(decision_path),
+                runtime_status_path=str(runtime_path),
+                impact_summary_path=str(impact_summary_path),
+                impact_history_path=str(impact_history_path),
+                require_promotion_passed=True,
+                min_symbols=3,
+            )
+        )
+    )
+    engine.use_multi_strategy = True
+    engine.multi_strategy_adapter = object()
+    engine._compute_multi_strategy_scores = lambda _: {"AAA/USDT": 0.40}
+
+    market_data = {
+        "AAA/USDT": _build_market_series("AAA/USDT", 10.0, 0.05),
+        "BBB/USDT": _build_market_series("BBB/USDT", 20.0, 0.03),
+        "CCC/USDT": _build_market_series("CCC/USDT", 30.0, 0.01),
+    }
+
+    snapshot = engine.compute_snapshot(market_data)
+    runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+
+    assert runtime["overlay_mode"] == "shadow"
+    assert runtime["effective_ml_weight"] == 0.0
+    assert runtime["used_in_latest_snapshot"] is False
+    assert runtime["online_control_reason"] == "rolling_48h_negative"
+    assert snapshot.scores == snapshot.base_scores
+    assert snapshot.ml_attribution_scores != snapshot.base_scores

@@ -42,6 +42,7 @@ def dump_run_artifacts(
         "telemetry_scores": alpha.telemetry_scores,
         "base_scores": alpha.base_scores,
         "base_raw_scores": alpha.base_raw_scores,
+        "ml_attribution_scores": alpha.ml_attribution_scores,
         "ml_overlay_scores": alpha.ml_overlay_scores,
         "ml_overlay_raw_scores": alpha.ml_overlay_raw_scores,
         "ml_runtime": alpha.ml_runtime,
