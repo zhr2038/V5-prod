@@ -1,0 +1,23 @@
+task:
+  name: trend_quality_experiment
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/trend_quality_experiment/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  ohlcv_limit: 720
+  folds: 4
+  workers: auto
+  research_symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+    - XRP/USDT
+    - ADA/USDT
+    - LINK/USDT
+    - AVAX/USDT

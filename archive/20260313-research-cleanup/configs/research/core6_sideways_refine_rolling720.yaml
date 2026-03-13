@@ -1,0 +1,130 @@
+task:
+  name: core6_sideways_refine_rolling720
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/core6_sideways_refine_rolling720/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: auto
+  evaluations:
+    - name: recent_720
+      ohlcv_limit: 720
+      window_shift_bars: 0
+    - name: shift_360
+      ohlcv_limit: 720
+      window_shift_bars: 360
+    - name: shift_720
+      ohlcv_limit: 720
+      window_shift_bars: 720
+    - name: shift_1080
+      ohlcv_limit: 720
+      window_shift_bars: 1080
+    - name: shift_1440
+      ohlcv_limit: 720
+      window_shift_bars: 1440
+    - name: shift_1800
+      ohlcv_limit: 720
+      window_shift_bars: 1800
+  variants:
+    - name: core6_base
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+    - name: side_0p5
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.5
+        rebalance.deadband_sideways: 0.08
+    - name: side_0p45
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.45
+        rebalance.deadband_sideways: 0.085
+    - name: side_0p5_cost_mild
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.5
+        rebalance.deadband_sideways: 0.08
+        execution.cost_aware_min_score_floor: 0.18
+        execution.cost_aware_score_per_bps: 0.0035
+    - name: side_0p45_cost_mild
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.45
+        rebalance.deadband_sideways: 0.085
+        execution.cost_aware_min_score_floor: 0.18
+        execution.cost_aware_score_per_bps: 0.0035
+    - name: side_0p5_exitfast
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.5
+        rebalance.deadband_sideways: 0.08
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: side_0p45_exitfast
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.45
+        rebalance.deadband_sideways: 0.085
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: side_0p4_exitfast
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.4
+        rebalance.deadband_sideways: 0.09
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60

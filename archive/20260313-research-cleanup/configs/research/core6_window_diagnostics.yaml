@@ -1,0 +1,29 @@
+task:
+  name: core6_window_diagnostics
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/core6_window_diagnostics/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: auto
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+    - XRP/USDT
+    - ADA/USDT
+  evaluations:
+    - name: early_720
+      ohlcv_limit: 720
+      window_shift_bars: 1440
+    - name: mid_720
+      ohlcv_limit: 720
+      window_shift_bars: 720
+    - name: recent_720
+      ohlcv_limit: 720
+      window_shift_bars: 0

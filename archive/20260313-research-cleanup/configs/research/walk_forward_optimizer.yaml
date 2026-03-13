@@ -1,0 +1,35 @@
+task:
+  name: walk_forward_optimizer
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/walk_forward_optimizer.json
+
+walk_forward:
+  config_path: configs/live_prod.yaml
+  env_path: .env
+  provider: cache
+  cache_dir: data/cache
+  collect_ml_training_data: false
+  ohlcv_limit: 2400
+  folds: 4
+
+optimizer:
+  executor: process
+  max_workers: 0
+  min_fold_count: 2
+  objective_weights:
+    metrics.sharpe.mean: 1.0
+    metrics.cagr.mean: 0.30
+    metrics.max_dd.mean: -1.20
+    metrics.turnover.mean: -0.10
+    metrics.sharpe.std: -0.20
+  parameter_grid:
+    alpha.long_top_pct:
+      values: [0.20, 0.25, 0.30]
+    alpha.min_score_threshold:
+      values: [0.00, 0.03, 0.05]
+    rebalance.deadband_trending:
+      values: [0.03, 0.05]
+    execution.rank_exit_max_rank:
+      values: [3, 4]

@@ -1,0 +1,167 @@
+task:
+  name: core6_execution_tuning_rolling720
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/core6_execution_tuning_rolling720/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: auto
+  evaluations:
+    - name: recent_720
+      ohlcv_limit: 720
+      window_shift_bars: 0
+    - name: shift_360
+      ohlcv_limit: 720
+      window_shift_bars: 360
+    - name: shift_720
+      ohlcv_limit: 720
+      window_shift_bars: 720
+    - name: shift_1080
+      ohlcv_limit: 720
+      window_shift_bars: 1080
+    - name: shift_1440
+      ohlcv_limit: 720
+      window_shift_bars: 1440
+    - name: shift_1800
+      ohlcv_limit: 720
+      window_shift_bars: 1800
+  variants:
+    - name: core6_base
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+    - name: core6_exitfast
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: core6_strict_exit
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.rank_exit_max_rank: 2
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: core6_strong_cost
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.cost_aware_min_score_floor: 0.20
+        execution.cost_aware_score_per_bps: 0.004
+    - name: core6_sideways_0p4
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.4
+        rebalance.deadband_sideways: 0.09
+    - name: core6_sideways_0p25
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.25
+        rebalance.deadband_sideways: 0.10
+    - name: core6_negexp_strong
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.negative_expectancy_score_penalty_floor_bps: 15.0
+        execution.negative_expectancy_score_penalty_per_bps: 0.03
+        execution.negative_expectancy_score_penalty_max: 1.0
+        execution.negative_expectancy_open_block_floor_bps: 30.0
+    - name: core6_cost_negexp
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.cost_aware_min_score_floor: 0.20
+        execution.cost_aware_score_per_bps: 0.004
+        execution.negative_expectancy_score_penalty_floor_bps: 15.0
+        execution.negative_expectancy_score_penalty_per_bps: 0.03
+        execution.negative_expectancy_score_penalty_max: 1.0
+        execution.negative_expectancy_open_block_floor_bps: 30.0
+    - name: core6_sideways_cost
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.4
+        rebalance.deadband_sideways: 0.09
+        execution.cost_aware_min_score_floor: 0.20
+        execution.cost_aware_score_per_bps: 0.004
+    - name: core6_sideways_cost_negexp
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.4
+        rebalance.deadband_sideways: 0.09
+        execution.cost_aware_min_score_floor: 0.20
+        execution.cost_aware_score_per_bps: 0.004
+        execution.negative_expectancy_score_penalty_floor_bps: 15.0
+        execution.negative_expectancy_score_penalty_per_bps: 0.03
+        execution.negative_expectancy_score_penalty_max: 1.0
+        execution.negative_expectancy_open_block_floor_bps: 30.0
+    - name: core6_long_cooldown
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.open_long_cooldown_minutes: 360
+        execution.rank_exit_reentry_cooldown_minutes: 180

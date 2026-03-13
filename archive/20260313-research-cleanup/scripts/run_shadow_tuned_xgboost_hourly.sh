@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+WIN_ID="shadow_tuned_xgboost_$(date +%Y%m%d_%H)"
+NOW_EPOCH="$(date +%s)"
+END_EPOCH=$(( NOW_EPOCH - (NOW_EPOCH % 3600) ))
+START_EPOCH=$(( END_EPOCH - 3600 ))
+
+echo "[V5-SHADOW-XGB] WIN_ID=${WIN_ID} window=[${START_EPOCH}, ${END_EPOCH})"
+
+LOCK="/tmp/v5_shadow_tuned_xgboost.lock"
+exec 9>"$LOCK"
+flock -n 9 || exit 0
+
+PYTHON_BIN="${V5_PYTHON_BIN:-$ROOT/.venv/bin/python}"
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  PYTHON_BIN="${V5_PYTHON_BIN:-python3}"
+fi
+
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export V5_DATA_PROVIDER="${V5_DATA_PROVIDER:-okx}"
+export V5_DISABLE_TOPLEVEL_ARTIFACTS="${V5_DISABLE_TOPLEVEL_ARTIFACTS:-1}"
+export V5_RUN_ID="${V5_RUN_ID:-$WIN_ID}"
+export V5_WINDOW_START_TS="${V5_WINDOW_START_TS:-$START_EPOCH}"
+export V5_WINDOW_END_TS="${V5_WINDOW_END_TS:-$END_EPOCH}"
+
+"$PYTHON_BIN" "$ROOT/scripts/run_shadow_tuned_xgboost.py" --provider "$V5_DATA_PROVIDER"

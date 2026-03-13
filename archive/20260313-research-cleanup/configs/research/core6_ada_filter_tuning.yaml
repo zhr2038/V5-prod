@@ -1,0 +1,94 @@
+task:
+  name: core6_ada_filter_tuning
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/core6_ada_filter_tuning/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: auto
+  evaluations:
+    - name: mid_720
+      ohlcv_limit: 720
+      window_shift_bars: 720
+      folds: 4
+    - name: recent_720
+      ohlcv_limit: 720
+      window_shift_bars: 0
+      folds: 4
+    - name: early_720
+      ohlcv_limit: 720
+      window_shift_bars: 1440
+      folds: 4
+    - name: validation_full
+      ohlcv_limit: 2759
+      window_shift_bars: 0
+      folds: 4
+  variants:
+    - name: core6_ada
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+    - name: core6_ada_minscore_0p08
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        alpha.min_score_threshold: 0.08
+    - name: core6_ada_minscore_0p10
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        alpha.min_score_threshold: 0.10
+    - name: core6_ada_top2
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        alpha.topk_dropout.topk_override: 2
+        alpha.topk_dropout.n_drop_per_cycle: 1
+    - name: core6_ada_minscore_0p08_top2
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        alpha.min_score_threshold: 0.08
+        alpha.topk_dropout.topk_override: 2
+        alpha.topk_dropout.n_drop_per_cycle: 1
+    - name: core6_ada_exitfast_minscore_0p08
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        alpha.min_score_threshold: 0.08
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60

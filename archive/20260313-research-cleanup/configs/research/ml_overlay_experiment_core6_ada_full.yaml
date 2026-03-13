@@ -1,0 +1,22 @@
+task:
+  name: ml_overlay_experiment_core6_ada_full
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/ml_overlay_experiment_core6_ada_full/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  ohlcv_limit: 2759
+  folds: 4
+  parallel_workers: 3
+  fold_parallel_workers: 2
+  research_symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+    - XRP/USDT
+    - ADA/USDT

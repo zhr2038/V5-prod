@@ -1,0 +1,129 @@
+task:
+  name: liquid_universe_sweep_round3
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/liquid_universe_sweep_round3/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: auto
+  evaluations:
+    - name: screening_720
+      ohlcv_limit: 720
+      folds: 4
+    - name: screening_1200
+      ohlcv_limit: 1200
+      folds: 4
+    - name: validation_full
+      ohlcv_limit: 2759
+      folds: 4
+  variants:
+    - name: core6_ada
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+    - name: core6_ada_side0p55
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.55
+    - name: core6_ada_side0p5
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.5
+    - name: core6_ada_exitfast
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: core6_ada_strict_exit
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.rank_exit_max_rank: 2
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: core6_link
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - LINK/USDT
+    - name: core6_link_side0p55
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - LINK/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.55
+    - name: core6_link_side0p5
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - LINK/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.5
+    - name: core6_link_exitfast
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - LINK/USDT
+      overrides:
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: core6_link_strict_exit
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - LINK/USDT
+      overrides:
+        execution.rank_exit_max_rank: 2
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60

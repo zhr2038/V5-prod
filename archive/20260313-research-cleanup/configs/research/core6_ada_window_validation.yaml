@@ -1,0 +1,81 @@
+task:
+  name: core6_ada_window_validation
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/core6_ada_window_validation/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: auto
+  evaluations:
+    - name: mid_720
+      ohlcv_limit: 720
+      window_shift_bars: 720
+      folds: 4
+    - name: recent_720
+      ohlcv_limit: 720
+      window_shift_bars: 0
+      folds: 4
+    - name: early_720
+      ohlcv_limit: 720
+      window_shift_bars: 1440
+      folds: 4
+    - name: validation_full
+      ohlcv_limit: 2759
+      window_shift_bars: 0
+      folds: 4
+  variants:
+    - name: baseline8
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+        - LINK/USDT
+        - AVAX/USDT
+    - name: core6_ada
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+    - name: core6_ada_exitfast
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: core6_ada_strict_exit
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.rank_exit_max_rank: 2
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: core6_link
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - LINK/USDT

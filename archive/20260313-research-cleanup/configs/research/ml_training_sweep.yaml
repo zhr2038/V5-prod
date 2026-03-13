@@ -1,0 +1,55 @@
+task:
+  name: ml_training_sweep
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/ml_training_sweep.json
+  batch_root: reports/sweeps/ml_training/latest
+
+sweep:
+  base_task_config: configs/research/ml_training_gpu.yaml
+  max_candidates: 16
+  sample_strategy: random
+  random_seed: 42
+  objective_weights:
+    valid_ic: 3.0
+    cv_mean_ic: 2.0
+    cv_std: -1.5
+    ic_gap: -1.0
+  concurrency:
+    gpu_workers: 1
+    cpu_workers: 1
+    gpu_model_n_jobs: 8
+    cpu_model_n_jobs: 6
+    gpu_candidate_workers: 1
+    cpu_candidate_workers: 2
+    gpu_cv_workers: 2
+    cpu_cv_workers: 4
+  parameter_grid:
+    model.candidates:
+      values:
+        - [xgboost]
+    model.xgboost_compute_device:
+      values: [auto]
+    model.xgboost_n_estimators:
+      values: [96, 160, 256]
+    model.xgboost_max_depth:
+      values: [2, 3]
+    model.xgboost_learning_rate:
+      values: [0.03, 0.05]
+    model.xgboost_subsample:
+      values: [0.60, 0.80]
+    model.xgboost_colsample_bytree:
+      values: [0.50, 0.75]
+    model.xgboost_reg_alpha:
+      values: [2.0, 6.0]
+    model.xgboost_reg_lambda:
+      values: [8.0, 16.0]
+    model.xgboost_max_bin:
+      values: [256]
+    dataset.selected_feature_count:
+      values: [5, 7, 9]
+    recency_weighting.half_life_days:
+      values: [3, 5]
+    dataset.rolling_window_days:
+      values: [30, 45, 60]

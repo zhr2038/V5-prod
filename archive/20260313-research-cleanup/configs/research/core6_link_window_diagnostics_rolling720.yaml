@@ -1,0 +1,38 @@
+task:
+  name: core6_link_window_diagnostics_rolling720
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/core6_link_window_diagnostics_rolling720/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: auto
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+    - XRP/USDT
+    - LINK/USDT
+  evaluations:
+    - name: recent_720
+      ohlcv_limit: 720
+      window_shift_bars: 0
+    - name: shift_360
+      ohlcv_limit: 720
+      window_shift_bars: 360
+    - name: shift_720
+      ohlcv_limit: 720
+      window_shift_bars: 720
+    - name: shift_1080
+      ohlcv_limit: 720
+      window_shift_bars: 1080
+    - name: shift_1440
+      ohlcv_limit: 720
+      window_shift_bars: 1440
+    - name: shift_1800
+      ohlcv_limit: 720
+      window_shift_bars: 1800

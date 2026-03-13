@@ -1,0 +1,114 @@
+task:
+  name: liquid_universe_sweep
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/liquid_universe_sweep/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: auto
+  evaluations:
+    - name: screening_1200
+      ohlcv_limit: 1200
+      folds: 4
+    - name: validation_full
+      ohlcv_limit: 2759
+      folds: 4
+  variants:
+    - name: baseline8
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+        - LINK/USDT
+        - AVAX/USDT
+    - name: core5
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+    - name: core5_side0p4
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.4
+    - name: core5_side0p3
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.3
+    - name: core5_exitfast
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+      overrides:
+        execution.rank_exit_confirm_rounds: 1
+        execution.min_hold_minutes_before_rank_exit: 0
+        execution.open_long_cooldown_minutes: 60
+    - name: defensive5
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - DOGE/USDT
+    - name: defensive5_side0p4
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - DOGE/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.4
+    - name: large4
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+    - name: large4_side0p4
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.4
+    - name: btc_eth_bnb
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - BNB/USDT
+    - name: btc_eth_bnb_side0p4
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - BNB/USDT
+      overrides:
+        regime.pos_mult_sideways: 0.4
+    - name: strength4
+      symbols:
+        - BTC/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - DOGE/USDT
