@@ -892,23 +892,49 @@ class V5Pipeline:
         orders: List[Order],
         *,
         cap_notional: float,
-    ) -> Tuple[List[Order], List[Order], float]:
+    ) -> Tuple[List[Order], List[Order], float, List[Order]]:
         if not orders:
-            return [], [], 0.0
+            return [], [], 0.0, []
 
         ranked = sorted(orders, key=self._rebalance_turnover_priority)
         kept_ranked: List[Order] = []
+        clipped_ranked: List[Order] = []
         used = 0.0
         for order in ranked:
             notional = abs(float(order.notional_usdt or 0.0))
+            remaining = float(cap_notional) - float(used)
+            if remaining <= 0.0:
+                continue
             if (used + notional) <= cap_notional:
                 kept_ranked.append(order)
                 used += notional
+                continue
+
+            side = str(order.side or "").lower()
+            intent = str(order.intent or "").upper()
+            clip_floor = float(
+                ((order.meta or {}).get("clip_min_notional", getattr(self.cfg.budget, "min_trade_notional_base", 0.0)) or 0.0)
+            )
+            if (
+                side == "buy"
+                and intent == "OPEN_LONG"
+                and remaining >= clip_floor
+                and remaining < notional
+            ):
+                meta = dict(order.meta or {})
+                meta["turnover_cap_clipped"] = True
+                meta["turnover_cap_original_notional"] = float(order.notional_usdt or 0.0)
+                meta["turnover_cap_clipped_notional"] = float(remaining)
+                order.meta = meta
+                order.notional_usdt = float(remaining)
+                kept_ranked.append(order)
+                clipped_ranked.append(order)
+                used += float(remaining)
 
         keep_ids = {id(order) for order in kept_ranked}
         kept = [order for order in orders if id(order) in keep_ids]
         dropped = [order for order in orders if id(order) not in keep_ids]
-        return kept, dropped, float(used)
+        return kept, dropped, float(used), clipped_ranked
 
     def _apply_rebalance_turnover_cap(
         self,
@@ -941,11 +967,18 @@ class V5Pipeline:
         if effective_turnover <= cap_notional:
             return rebalance_orders, [], stats
 
-        kept_buys, dropped_buys, kept_buy = self._cap_rebalance_side(buy_orders, cap_notional=cap_notional)
-        kept_sells, dropped_sells, kept_sell = self._cap_rebalance_side(sell_orders, cap_notional=cap_notional)
+        kept_buys, dropped_buys, kept_buy, clipped_buys = self._cap_rebalance_side(
+            buy_orders,
+            cap_notional=cap_notional,
+        )
+        kept_sells, dropped_sells, kept_sell, clipped_sells = self._cap_rebalance_side(
+            sell_orders,
+            cap_notional=cap_notional,
+        )
         keep_ids = {id(order) for order in (kept_buys + kept_sells)}
         kept_orders = [order for order in rebalance_orders if id(order) in keep_ids]
         dropped_orders = [order for order in rebalance_orders if id(order) not in keep_ids]
+        clipped_orders = list(clipped_buys) + list(clipped_sells)
         stats.update(
             {
                 "kept_buy_notional": float(kept_buy),
@@ -953,6 +986,9 @@ class V5Pipeline:
                 "dropped_count": float(len(dropped_orders)),
                 "dropped_buy_count": float(len(dropped_buys)),
                 "dropped_sell_count": float(len(dropped_sells)),
+                "clipped_count": float(len(clipped_orders)),
+                "clipped_buy_count": float(len(clipped_buys)),
+                "clipped_sell_count": float(len(clipped_sells)),
             }
         )
         return kept_orders, dropped_orders, stats
@@ -2071,12 +2107,14 @@ class V5Pipeline:
 
             # Router check: min_notional (base + F3.2 stage-2)
             min_notional = float(self.cfg.budget.min_trade_notional_base)
+            clip_min_notional = float(min_notional)
             if audit and (audit.budget or {}).get("exceeded") and self.cfg.budget.action_enabled:
                 try:
                     from src.core.budget_action import effective_min_trade_notional
 
                     eff, patch = effective_min_trade_notional(self.cfg, audit)
                     min_notional = float(eff)
+                    clip_min_notional = float(min_notional)
                     # merge patch into budget_action
                     ba = audit.budget_action or {}
                     ba.update(patch)
@@ -2112,6 +2150,8 @@ class V5Pipeline:
                         # Estimate min notional requirement from base minSz.
                         min_notional_ex = float(min_sz) * float(px)
                         slack = float(getattr(self.cfg.budget, "exchange_min_notional_slack_multiplier", 1.05) or 1.05)
+                        if min_notional_ex > 0:
+                            clip_min_notional = max(float(clip_min_notional), float(min_notional_ex) * float(slack))
                         if min_notional_ex > 0 and float(notional) < float(min_notional_ex) * slack:
                             if audit:
                                 audit.reject("exchange_min_notional")
@@ -2182,6 +2222,8 @@ class V5Pipeline:
                 "dd_mult": dd_mult,
                 "score_rank": int(symbol_ranks.get(sym, 1_000_000)),
             }
+            if side == "buy":
+                meta["clip_min_notional"] = float(clip_min_notional)
             if audit:
                 meta.update(
                     {
@@ -2236,18 +2278,41 @@ class V5Pipeline:
                 rebalance_orders,
                 equity_raw=float(equity_raw),
             )
-            if dropped_rebalance_orders:
+            clipped_rebalance_orders = [
+                order
+                for order in kept_rebalance_orders
+                if bool(((order.meta or {}).get("turnover_cap_clipped", False)))
+            ]
+            if dropped_rebalance_orders or clipped_rebalance_orders:
                 rebalance_orders = kept_rebalance_orders
                 if audit:
-                    audit.reject("turnover_cap")
+                    if dropped_rebalance_orders:
+                        audit.reject("turnover_cap")
+                    for _ in clipped_rebalance_orders:
+                        audit.reject("cap_clipped")
                     audit.add_note(
                         "Rebalance turnover capped: "
                         f"buy=${float(turnover_cap_stats.get('total_buy_notional', 0.0)):.2f}, "
                         f"sell=${float(turnover_cap_stats.get('total_sell_notional', 0.0)):.2f}, "
                         f"effective=${float(turnover_cap_stats.get('effective_turnover_notional', 0.0)):.2f} "
                         f"> cap=${float(turnover_cap_stats.get('cap_notional', 0.0)):.2f}, "
-                        f"kept={len(kept_rebalance_orders)}, dropped={len(dropped_rebalance_orders)}"
+                        f"kept={len(kept_rebalance_orders)}, dropped={len(dropped_rebalance_orders)}, "
+                        f"clipped={len(clipped_rebalance_orders)}"
                     )
+                    for order in clipped_rebalance_orders[:12]:
+                        meta = order.meta or {}
+                        router_decisions.append(
+                            {
+                                "symbol": order.symbol,
+                                "action": "clip",
+                                "reason": "turnover_cap",
+                                "side": order.side,
+                                "intent": order.intent,
+                                "notional": float(meta.get("turnover_cap_clipped_notional", order.notional_usdt or 0.0)),
+                                "original_notional": float(meta.get("turnover_cap_original_notional", order.notional_usdt or 0.0)),
+                                "turnover_cap_notional": float(turnover_cap_stats.get("cap_notional", 0.0)),
+                            }
+                        )
                     for order in dropped_rebalance_orders[:12]:
                         router_decisions.append(
                             {
