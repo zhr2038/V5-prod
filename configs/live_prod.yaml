@@ -83,7 +83,9 @@ alpha:
     traditional_weight: 0.80
     online_control_enabled: true
     online_control_24h_min_points: 6
+    online_control_24h_min_coverage_hours: 18
     online_control_48h_min_points: 12
+    online_control_48h_min_coverage_hours: 36
     online_control_negative_24h_bps: 0.0
     online_control_negative_48h_bps: 0.0
     online_control_downweight_ml_weight: 0.08

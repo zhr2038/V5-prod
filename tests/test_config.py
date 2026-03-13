@@ -39,7 +39,9 @@ def test_live_prod_ml_factor_loads():
     assert cfg.alpha.ml_factor.ml_weight == 0.20
     assert cfg.alpha.ml_factor.online_control_enabled is True
     assert cfg.alpha.ml_factor.online_control_24h_min_points == 6
+    assert cfg.alpha.ml_factor.online_control_24h_min_coverage_hours == 18
     assert cfg.alpha.ml_factor.online_control_48h_min_points == 12
+    assert cfg.alpha.ml_factor.online_control_48h_min_coverage_hours == 36
     assert cfg.alpha.ml_factor.online_control_downweight_ml_weight == 0.08
     assert cfg.alpha.ml_factor.overlay_transform == "tanh"
     assert cfg.alpha.ml_factor.overlay_transform_scale == 1.6

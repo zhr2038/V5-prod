@@ -834,6 +834,13 @@ class V5Pipeline:
                 if rows
                 else None
             )
+            from_candidates = [int(row.get("from_ts_ms") or 0) for row in rows if int(row.get("from_ts_ms") or 0) > 0]
+            to_candidates = [int(row.get("to_ts_ms") or 0) for row in rows if int(row.get("to_ts_ms") or 0) > 0]
+            coverage_hours = (
+                max(0.0, (max(to_candidates) - min(from_candidates)) / 3_600_000.0)
+                if from_candidates and to_candidates and max(to_candidates) >= min(from_candidates)
+                else 0.0
+            )
             return {
                 "points": len(rows),
                 "topn_delta_mean_bps": round(float(rolling_delta), 2) if rolling_delta is not None else None,
@@ -841,6 +848,7 @@ class V5Pipeline:
                 if rolling_promoted is not None
                 else None,
                 "positive_ratio": round(float(positive_ratio), 4) if positive_ratio is not None else None,
+                "coverage_hours": round(float(coverage_hours), 2),
                 "status": self._impact_tone(rolling_delta),
             }
 

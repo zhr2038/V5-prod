@@ -124,11 +124,23 @@ class MLFactorLiveConfig(BaseModel):
         le=200,
         description="Minimum attribution points required before 24h online control can downweight ML",
     )
+    online_control_24h_min_coverage_hours: float = Field(
+        default=18.0,
+        ge=1.0,
+        le=24.0,
+        description="Minimum lookback coverage required before 24h online control can downweight ML",
+    )
     online_control_48h_min_points: int = Field(
         default=12,
         ge=1,
         le=400,
         description="Minimum attribution points required before 48h online control can switch ML to shadow mode",
+    )
+    online_control_48h_min_coverage_hours: float = Field(
+        default=36.0,
+        ge=1.0,
+        le=48.0,
+        description="Minimum lookback coverage required before 48h online control can switch ML to shadow mode",
     )
     online_control_negative_24h_bps: float = Field(
         default=0.0,

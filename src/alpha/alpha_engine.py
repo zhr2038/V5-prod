@@ -560,6 +560,13 @@ class AlphaEngine:
             if rows
             else None
         )
+        from_candidates = [int(row.get("from_ts_ms") or 0) for row in rows if int(row.get("from_ts_ms") or 0) > 0]
+        to_candidates = [int(row.get("to_ts_ms") or 0) for row in rows if int(row.get("to_ts_ms") or 0) > 0]
+        coverage_hours = (
+            max(0.0, (max(to_candidates) - min(from_candidates)) / 3_600_000.0)
+            if from_candidates and to_candidates and max(to_candidates) >= min(from_candidates)
+            else 0.0
+        )
         return {
             "points": len(rows),
             "topn_delta_mean_bps": round(float(rolling_delta), 2) if rolling_delta is not None else None,
@@ -567,6 +574,7 @@ class AlphaEngine:
             if rolling_promoted is not None
             else None,
             "positive_ratio": round(float(positive_ratio), 4) if positive_ratio is not None else None,
+            "coverage_hours": round(float(coverage_hours), 2),
             "status": self._impact_tone(rolling_delta),
         }
 
@@ -638,20 +646,29 @@ class AlphaEngine:
 
         points_24h = int(self._safe_float(control["rolling_24h"].get("points"), 0))
         points_48h = int(self._safe_float(control["rolling_48h"].get("points"), 0))
+        coverage_24h = float(self._safe_float(control["rolling_24h"].get("coverage_hours"), 0.0))
+        coverage_48h = float(self._safe_float(control["rolling_48h"].get("coverage_hours"), 0.0))
         min_points_24h = int(getattr(ml_cfg, "online_control_24h_min_points", 6) or 6)
         min_points_48h = int(getattr(ml_cfg, "online_control_48h_min_points", 12) or 12)
+        min_coverage_24h = float(getattr(ml_cfg, "online_control_24h_min_coverage_hours", 18.0) or 18.0)
+        min_coverage_48h = float(getattr(ml_cfg, "online_control_48h_min_coverage_hours", 36.0) or 36.0)
         neg_24h_bps = float(getattr(ml_cfg, "online_control_negative_24h_bps", 0.0) or 0.0)
         neg_48h_bps = float(getattr(ml_cfg, "online_control_negative_48h_bps", 0.0) or 0.0)
         rolling_24h_bps = control["rolling_24h"].get("topn_delta_mean_bps")
         rolling_48h_bps = control["rolling_48h"].get("topn_delta_mean_bps")
 
-        if points_48h >= min_points_48h and rolling_48h_bps is not None and float(rolling_48h_bps) < neg_48h_bps:
+        if (
+            points_48h >= min_points_48h
+            and coverage_48h >= min_coverage_48h
+            and rolling_48h_bps is not None
+            and float(rolling_48h_bps) < neg_48h_bps
+        ):
             control["mode"] = "shadow"
             control["effective_ml_weight"] = 0.0
             control["reason"] = "rolling_48h_negative"
             return control
 
-        if points_24h < min_points_24h:
+        if points_24h < min_points_24h or coverage_24h < min_coverage_24h:
             control["mode"] = "observe"
             control["reason"] = "insufficient_24h_history"
             return control

@@ -216,8 +216,8 @@ def test_alpha_engine_ml_overlay_enters_shadow_but_keeps_attribution_scores(tmp_
     impact_summary_path.write_text(
         json.dumps(
             {
-                "rolling_24h": {"points": 8, "topn_delta_mean_bps": -12.5, "status": "negative"},
-                "rolling_48h": {"points": 16, "topn_delta_mean_bps": -6.8, "status": "negative"},
+                "rolling_24h": {"points": 8, "coverage_hours": 24.0, "topn_delta_mean_bps": -12.5, "status": "negative"},
+                "rolling_48h": {"points": 16, "coverage_hours": 48.0, "topn_delta_mean_bps": -6.8, "status": "negative"},
             }
         ),
         encoding="utf-8",
