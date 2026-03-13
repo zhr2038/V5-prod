@@ -880,8 +880,11 @@ class V5Pipeline:
         notional = abs(float(order.notional_usdt or 0.0))
         side = str(order.side or "").lower()
         intent = str(order.intent or "").upper()
-        # Preserve top-ranked fresh entries before routine add-ons when buy turnover is capped.
+        # For buys, preserve top-ranked symbols first, then prefer fresh opens over add-ons.
+        score_rank = int(((order.meta or {}).get("score_rank", 1_000_000) or 1_000_000))
         open_rank = 0 if side == "buy" and intent == "OPEN_LONG" else 1
+        if side == "buy":
+            return (score_rank, open_rank, -drift, notional, str(order.symbol))
         return (open_rank, -drift, notional, str(order.symbol))
 
     def _cap_rebalance_side(
@@ -1413,6 +1416,7 @@ class V5Pipeline:
         ranking_exit_orders = []
         rank_scores = dict(getattr(alpha, 'scores', {}) or {})
         rank_source = 'alpha'
+        symbol_ranks: Dict[str, int] = {}
 
         try:
             use_fused_for_weighting = bool(getattr(self.cfg.alpha, 'use_fused_score_for_weighting', True))
@@ -2173,7 +2177,11 @@ class V5Pipeline:
                 continue
             
             # 如果通过所有检查，生成订单
-            meta = {"target_w": tw, "dd_mult": dd_mult}
+            meta = {
+                "target_w": tw,
+                "dd_mult": dd_mult,
+                "score_rank": int(symbol_ranks.get(sym, 1_000_000)),
+            }
             if audit:
                 meta.update(
                     {

@@ -314,6 +314,44 @@ def test_rebalance_turnover_cap_drops_oversized_open_and_keeps_fitting_orders():
     assert stats["kept_buy_notional"] == 25.0
 
 
+def test_rebalance_turnover_cap_keeps_higher_ranked_buy_before_lower_ranked_buy():
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.max_rebalance_turnover_per_cycle = 0.25
+    pipe = V5Pipeline(cfg, clock=FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    orders = [
+        Order(
+            symbol="TOP1/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=20.0,
+            signal_price=1.0,
+            meta={"drift": 0.20, "score_rank": 1},
+        ),
+        Order(
+            symbol="TOP4/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=20.0,
+            signal_price=1.0,
+            meta={"drift": 0.60, "score_rank": 4},
+        ),
+        Order(
+            symbol="TOP6/USDT",
+            side="buy",
+            intent="REBALANCE",
+            notional_usdt=5.0,
+            signal_price=1.0,
+            meta={"drift": 0.80, "score_rank": 6},
+        ),
+    ]
+
+    kept, dropped, stats = pipe._apply_rebalance_turnover_cap(orders, equity_raw=100.0)
+
+    assert [order.symbol for order in kept] == ["TOP1/USDT", "TOP6/USDT"]
+    assert [order.symbol for order in dropped] == ["TOP4/USDT"]
+    assert stats["kept_buy_notional"] == 25.0
+
+
 def test_pipeline_prefers_in_memory_strategy_signal_payload():
     t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
     cfg = AppConfig(symbols=["BTC/USDT"])
