@@ -102,6 +102,23 @@ alpha:
     use_robust_zscore: true
 
   # Qlib Alpha158 因子 overlay（增强量价/趋势质量）
+  mean_reversion:
+    enabled: true
+    allocation: 0.25
+    allocation_multiplier_trending: 0.70
+    allocation_multiplier_sideways: 1.20
+    allocation_multiplier_risk_off: 0.90
+    rsi_period: 14
+    rsi_oversold: 28
+    rsi_overbought: 72
+    bb_period: 20
+    bb_std: 2
+    position_size_pct: 0.25
+    mean_rev_threshold: 0.025
+    volume_dry_ratio: 0.80
+    buy_score_multiplier: 0.75
+    sell_score_multiplier: 1.00
+
   alpha158_overlay:
     enabled: true
     blend_weight: 0.35

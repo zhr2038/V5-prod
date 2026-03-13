@@ -312,6 +312,41 @@ def test_multi_strategy_adapter_normalizes_total_target_notional():
     assert all(t["target_position_usdt"] == pytest.approx(100.0 / 3.0, rel=1e-6) for t in targets)
 
 
+def test_strategy_orchestrator_keeps_current_run_signal_payload(tmp_path):
+    orchestrator = StrategyOrchestrator(total_capital=Decimal("100"), audit_root=tmp_path / "reports")
+    orchestrator.set_run_id("20260313_15")
+    now = datetime(2026, 3, 13, 15, 0, 0)
+
+    class _SingleSignalStrategy:
+        name = "MeanReversion"
+        strategy_type = type("StrategyTypeLike", (), {"value": "mean_reversion"})()
+
+        def generate_signals(self, _market_data):
+            return [
+                Signal(
+                    symbol="SUI/USDT",
+                    side="sell",
+                    score=0.61,
+                    confidence=0.74,
+                    strategy="MeanReversion",
+                    timestamp=now,
+                    metadata={"rsi": 74.5},
+                )
+            ]
+
+        def calculate_position_size(self, signal, available_capital):
+            return available_capital
+
+    orchestrator.register_strategy(_SingleSignalStrategy(), allocation=Decimal("0.25"))
+    orchestrator.generate_combined_signals(pd.DataFrame({"symbol": ["SUI/USDT"], "close": [1.0], "high": [1.0], "low": [1.0], "volume": [1.0]}))
+
+    payload = orchestrator.latest_strategy_signal_payload()
+    assert payload["run_id"] == "20260313_15"
+    assert payload["strategies"][0]["strategy"] == "MeanReversion"
+    assert orchestrator.strategy_signals_path() == tmp_path / "reports" / "runs" / "20260313_15" / "strategy_signals.json"
+    assert orchestrator.strategy_signals_path().exists()
+
+
 def test_alpha6_strategy_keeps_factor_snapshot_for_non_signal_symbols(monkeypatch):
     strategy = Alpha6FactorStrategy(
         config={

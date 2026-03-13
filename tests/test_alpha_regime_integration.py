@@ -1,6 +1,7 @@
 import json
 
 import pandas as pd
+import pytest
 
 from configs.schema import AlphaConfig, MLFactorLiveConfig
 from src.alpha.alpha_engine import AlphaEngine
@@ -80,6 +81,38 @@ def test_alpha_engine_maps_regime_weights_into_multi_strategy_alpha6(tmp_path):
 
     assert engine.alpha6_strategy.factor_weights["f1_mom_5d"] == 0.05
     assert engine.alpha6_strategy.factor_weights["f3_vol_adj_ret"] == 0.6
+
+
+def test_alpha_engine_reweights_mean_reversion_allocation_by_regime():
+    engine = AlphaEngine(
+        AlphaConfig(
+            use_multi_strategy=True,
+            mean_reversion={
+                "allocation": 0.25,
+                "allocation_multiplier_trending": 0.7,
+                "allocation_multiplier_sideways": 1.2,
+                "allocation_multiplier_risk_off": 0.9,
+            },
+        )
+    )
+
+    engine.set_regime_context("TRENDING")
+    engine._apply_multi_strategy_regime_weights()
+    trend_alloc = {
+        name: float(value)
+        for name, value in engine.multi_strategy_adapter.orchestrator.strategy_allocations.items()
+    }
+
+    engine.set_regime_context("SIDEWAYS")
+    engine._apply_multi_strategy_regime_weights()
+    sideways_alloc = {
+        name: float(value)
+        for name, value in engine.multi_strategy_adapter.orchestrator.strategy_allocations.items()
+    }
+
+    assert sum(trend_alloc.values()) == pytest.approx(1.0)
+    assert sum(sideways_alloc.values()) == pytest.approx(1.0)
+    assert sideways_alloc["MeanReversion"] > trend_alloc["MeanReversion"]
 
 
 def _build_market_series(symbol: str, base_price: float, slope: float) -> MarketSeries:

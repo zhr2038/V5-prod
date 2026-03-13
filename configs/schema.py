@@ -186,6 +186,30 @@ class MLFactorLiveConfig(BaseModel):
     use_robust_zscore: bool = Field(default=True)
 
 
+class MeanReversionConfig(BaseModel):
+    enabled: bool = Field(default=True, description="Enable mean-reversion strategy inside multi-strategy mode")
+    allocation: float = Field(default=0.25, ge=0.0, le=1.0, description="Base capital allocation before regime adjustment")
+    allocation_multiplier_trending: float = Field(default=0.70, ge=0.0, le=3.0)
+    allocation_multiplier_sideways: float = Field(default=1.20, ge=0.0, le=3.0)
+    allocation_multiplier_risk_off: float = Field(default=0.90, ge=0.0, le=3.0)
+    rsi_period: int = Field(default=14, ge=2, le=100)
+    rsi_oversold: float = Field(default=28.0, ge=1.0, le=50.0)
+    rsi_overbought: float = Field(default=72.0, ge=50.0, le=99.0)
+    bb_period: int = Field(default=20, ge=5, le=200)
+    bb_std: float = Field(default=2.0, gt=0.0, le=10.0)
+    position_size_pct: float = Field(default=0.25, ge=0.0, le=1.0)
+    mean_rev_threshold: float = Field(default=0.025, ge=0.0, le=1.0)
+    volume_dry_ratio: float = Field(default=0.80, ge=0.1, le=2.0)
+    buy_score_multiplier: float = Field(default=0.75, ge=0.0, le=2.0)
+    sell_score_multiplier: float = Field(default=1.00, ge=0.0, le=2.0)
+
+    @model_validator(mode="after")
+    def _check_rsi_bounds(self):
+        if self.rsi_oversold >= self.rsi_overbought:
+            raise ValueError("rsi_oversold must be < rsi_overbought")
+        return self
+
+
 class AlphaConfig(BaseModel):
     weights: AlphaWeights = Field(default_factory=AlphaWeights)
     long_top_pct: float = Field(default=0.20, gt=0, le=1)
@@ -206,6 +230,7 @@ class AlphaConfig(BaseModel):
     # 动态IC权重（基于 reports/alpha_ic_monitor.json）
     dynamic_ic_weighting: DynamicICWeightingConfig = Field(default_factory=DynamicICWeightingConfig)
     ml_factor: MLFactorLiveConfig = Field(default_factory=MLFactorLiveConfig)
+    mean_reversion: MeanReversionConfig = Field(default_factory=MeanReversionConfig)
 
     # 最低分阈值：避免买入负分币种
     min_score_threshold: float = Field(default=0.0, description="Minimum alpha score required to enter a position (0=disabled)")

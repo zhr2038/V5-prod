@@ -1108,20 +1108,26 @@ class V5Pipeline:
             # Add strategy signal audit if multi-strategy is used
             if hasattr(self.alpha_engine, 'use_multi_strategy') and self.alpha_engine.use_multi_strategy:
                 try:
-                    import json as _json
-                    from datetime import datetime
-                    from pathlib import Path
-                    # Load strategy signals from current run audit file
-                    strategy_audit_file = self.alpha_engine.strategy_signals_path()
-                    if strategy_audit_file is not None and strategy_audit_file.exists():
-                        with open(strategy_audit_file, 'r', encoding='utf-8') as f:
-                            strategy_data = _json.load(f)
-                        audit.strategy_signals = strategy_data.get('strategies', [])
-                        # Add note about multi-strategy
-                        total_signals = sum(s.get('total_signals', 0) for s in audit.strategy_signals)
-                        audit.add_note(f"Multi-strategy: {len(audit.strategy_signals)} strategies, {total_signals} total signals")
-                        for s in audit.strategy_signals:
-                            audit.add_note(f"  {s['strategy']}: {s['total_signals']} signals ({s['buy_signals']} buy, {s['sell_signals']} sell)")
+                    strategy_payload = self.alpha_engine.get_latest_strategy_signal_payload()
+                    strategy_source = "memory"
+                    if not strategy_payload:
+                        strategy_audit_file = self.alpha_engine.strategy_signals_path()
+                        if strategy_audit_file is not None and strategy_audit_file.exists():
+                            strategy_payload = json.loads(strategy_audit_file.read_text(encoding='utf-8'))
+                            strategy_source = "file"
+                    audit.strategy_signals = (
+                        strategy_payload.get('strategies', [])
+                        if isinstance(strategy_payload, dict)
+                        else []
+                    )
+                    total_signals = sum(int(s.get('total_signals', 0) or 0) for s in audit.strategy_signals)
+                    audit.add_note(
+                        f"Multi-strategy audit: source={strategy_source}, strategies={len(audit.strategy_signals)}, total_signals={total_signals}"
+                    )
+                    for s in audit.strategy_signals:
+                        audit.add_note(
+                            f"  {s['strategy']}: {s['total_signals']} signals ({s['buy_signals']} buy, {s['sell_signals']} sell)"
+                        )
                 except Exception as e:
                     audit.add_note(f"Strategy signal audit error: {str(e)[:50]}")
             

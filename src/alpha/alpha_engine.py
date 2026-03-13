@@ -6,6 +6,7 @@ from pathlib import Path
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from io import StringIO
+from decimal import Decimal
 import os
 import json
 import numpy as np
@@ -85,7 +86,9 @@ class AlphaEngine:
         self.run_id = ""
         self.current_regime_key: Optional[str] = None
         self.alpha6_strategy = None
+        self.mean_reversion_strategy = None
         self._alpha6_static_weights: Dict[str, float] = {}
+        self._multi_strategy_base_allocations: Dict[str, Decimal] = {}
         self.repo_root = Path(__file__).resolve().parents[2]
         self._ml_model = None
         self._ml_model_base_path: Optional[Path] = None
@@ -162,6 +165,36 @@ class AlphaEngine:
         if self.alpha6_strategy is None:
             return
         self.alpha6_strategy.set_factor_weights(self._resolve_multi_strategy_alpha6_weights())
+        if not self.multi_strategy_adapter or not self._multi_strategy_base_allocations:
+            return
+
+        mean_cfg = getattr(self.cfg, "mean_reversion", None)
+        if self.mean_reversion_strategy is None or mean_cfg is None:
+            return
+
+        regime_key = self._normalize_regime_key(self.current_regime_key) or "Sideways"
+        multiplier_map = {
+            "Trending": float(getattr(mean_cfg, "allocation_multiplier_trending", 0.70) or 0.70),
+            "Sideways": float(getattr(mean_cfg, "allocation_multiplier_sideways", 1.20) or 1.20),
+            "Risk-Off": float(getattr(mean_cfg, "allocation_multiplier_risk_off", 0.90) or 0.90),
+        }
+        mean_multiplier = multiplier_map.get(regime_key, 1.0)
+
+        adjusted_allocations: Dict[str, Decimal] = {}
+        for strategy_name, base_alloc in self._multi_strategy_base_allocations.items():
+            alloc = Decimal(str(float(base_alloc)))
+            if strategy_name == self.mean_reversion_strategy.name:
+                alloc *= Decimal(str(mean_multiplier))
+            adjusted_allocations[strategy_name] = alloc
+
+        total_alloc = sum(adjusted_allocations.values(), Decimal("0"))
+        if total_alloc <= Decimal("0"):
+            adjusted_allocations = dict(self._multi_strategy_base_allocations)
+            total_alloc = sum(adjusted_allocations.values(), Decimal("0"))
+
+        for strategy_name, alloc in adjusted_allocations.items():
+            normalized = alloc / total_alloc if total_alloc > 0 else alloc
+            self.multi_strategy_adapter.orchestrator.set_strategy_allocation(strategy_name, normalized)
 
     def _load_dynamic_ic_weights(self, default_weights: Dict[str, float]) -> Dict[str, float]:
         """Load dynamic factor weights from IC monitor summary.
@@ -315,7 +348,6 @@ class AlphaEngine:
 
     def _init_multi_strategy(self):
         """初始化多策略系统 (趋势跟踪 + 均值回归 + 6因子Alpha)"""
-        from decimal import Decimal
         from src.strategy.multi_strategy_system import Alpha6FactorStrategy
 
         # 动态资金基数：优先实时权益，不再固定20U
@@ -325,6 +357,7 @@ class AlphaEngine:
         # 创建策略编排器
         orchestrator = StrategyOrchestrator(
             total_capital=total_capital,
+            audit_root=self.repo_root / "reports",
             conflict_penalty_enabled=bool(
                 getattr(self.cfg, "multi_strategy_conflict_penalty_enabled", True)
             ),
@@ -350,17 +383,24 @@ class AlphaEngine:
         })
         orchestrator.register_strategy(trend_strategy, allocation=Decimal('0.20'))
 
-        # 注册均值回归策略 (25%资金)
+        mean_cfg = getattr(self.cfg, "mean_reversion", None)
+        mean_base_allocation = float(getattr(mean_cfg, "allocation", 0.25) or 0.25) if mean_cfg is not None else 0.25
+
+        # 注册均值回归策略
         mean_revert_strategy = MeanReversionStrategy(config={
-            'rsi_period': 14,
-            'rsi_oversold': 28,
-            'rsi_overbought': 72,
-            'bb_period': 20,
-            'bb_std': 2,
-            'position_size_pct': 0.25,
-            'mean_rev_threshold': 0.025
+            'rsi_period': int(getattr(mean_cfg, 'rsi_period', 14) or 14),
+            'rsi_oversold': float(getattr(mean_cfg, 'rsi_oversold', 28) or 28),
+            'rsi_overbought': float(getattr(mean_cfg, 'rsi_overbought', 72) or 72),
+            'bb_period': int(getattr(mean_cfg, 'bb_period', 20) or 20),
+            'bb_std': float(getattr(mean_cfg, 'bb_std', 2.0) or 2.0),
+            'position_size_pct': float(getattr(mean_cfg, 'position_size_pct', mean_base_allocation) or mean_base_allocation),
+            'mean_rev_threshold': float(getattr(mean_cfg, 'mean_rev_threshold', 0.025) or 0.025),
+            'volume_dry_ratio': float(getattr(mean_cfg, 'volume_dry_ratio', 0.8) or 0.8),
+            'buy_score_multiplier': float(getattr(mean_cfg, 'buy_score_multiplier', 0.75) or 0.75),
+            'sell_score_multiplier': float(getattr(mean_cfg, 'sell_score_multiplier', 1.0) or 1.0),
         })
-        orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal('0.25'))
+        self.mean_reversion_strategy = mean_revert_strategy
+        orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal(str(mean_base_allocation)))
 
         # 注册6因子Alpha策略 (55%资金，主策略)
         # 根治：不再硬编码权重，统一读取 live 配置，避免“改了配置但策略不生效”
@@ -410,12 +450,18 @@ class AlphaEngine:
         self.alpha6_strategy = alpha6_strategy
         self._alpha6_static_weights = dict(alpha_weights)
         orchestrator.register_strategy(alpha6_strategy, allocation=Decimal('0.55'))
+        self._multi_strategy_base_allocations = {
+            trend_strategy.name: Decimal('0.20'),
+            mean_revert_strategy.name: Decimal(str(mean_base_allocation)),
+            alpha6_strategy.name: Decimal('0.55'),
+        }
 
         # 创建适配器
         self.multi_strategy_adapter = MultiStrategyAdapter(orchestrator)
+        self._apply_multi_strategy_regime_weights()
         print(f"[AlphaEngine] 多策略融合已启用:")
         print(f"              - 趋势跟踪: 20%")
-        print(f"              - 均值回归: 25%")
+        print(f"              - 均值回归: {mean_base_allocation * 100:.0f}%")
         print(f"              - 6因子Alpha: 55%")
 
     def set_run_id(self, run_id: Optional[str]) -> None:
@@ -427,6 +473,18 @@ class AlphaEngine:
         if self.multi_strategy_adapter:
             return self.multi_strategy_adapter.strategy_signals_path()
         return None
+
+    def get_latest_strategy_signal_payload(self) -> Dict[str, Any]:
+        if not self.multi_strategy_adapter:
+            return {}
+        getter = getattr(self.multi_strategy_adapter, "latest_strategy_signal_payload", None)
+        if callable(getter):
+            try:
+                payload = getter()
+                return payload if isinstance(payload, dict) else {}
+            except Exception:
+                return {}
+        return {}
 
     def _resolve_repo_path(self, raw_path: Optional[str], default: str) -> Path:
         path = Path(str(raw_path or default))

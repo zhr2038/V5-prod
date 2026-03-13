@@ -240,6 +240,9 @@ class MeanReversionStrategy(BaseStrategy):
             'bb_period': 20,
             'bb_std': 2,
             'position_size_pct': 0.2,
+            'volume_dry_ratio': 0.8,
+            'buy_score_multiplier': 1.0,
+            'sell_score_multiplier': 1.0,
             'mean_rev_threshold': 0.02  # 偏离均值2%以上才考虑
         }
         if config:
@@ -275,21 +278,26 @@ class MeanReversionStrategy(BaseStrategy):
             overbought = latest['rsi'] > self.config['rsi_overbought'] and deviation > self.config['mean_rev_threshold']
             
             # 成交量萎缩
-            volume_dry_up = latest['volume'] < latest['volume_ma'] * 0.8
+            volume_dry_ratio = float(self.config.get('volume_dry_ratio', 0.8) or 0.8)
+            volume_dry_up = latest['volume'] < latest['volume_ma'] * volume_dry_ratio
             
             if oversold and volume_dry_up:
                 score = (self.config['rsi_oversold'] - latest['rsi']) / self.config['rsi_oversold']
+                score *= float(self.config.get('buy_score_multiplier', 1.0) or 1.0)
+                score = min(max(score, 0.0), 1.0)
                 signal = Signal(
                     symbol=symbol,
                     side='buy',
-                    score=min(score, 1.0),
+                    score=score,
                     confidence=min(score * 0.9 + 0.1, 1.0),
                     strategy=self.name,
                     timestamp=datetime.now(),
                     metadata={
                         'rsi': latest['rsi'],
                         'deviation': deviation,
-                        'bb_lower': latest['bb_lower']
+                        'bb_lower': latest['bb_lower'],
+                        'volume_dry_ratio': volume_dry_ratio,
+                        'side_weight_multiplier': float(self.config.get('buy_score_multiplier', 1.0) or 1.0),
                     }
                 )
                 signals.append(signal)
@@ -297,17 +305,21 @@ class MeanReversionStrategy(BaseStrategy):
             
             elif overbought and volume_dry_up:
                 score = (latest['rsi'] - self.config['rsi_overbought']) / (100 - self.config['rsi_overbought'])
+                score *= float(self.config.get('sell_score_multiplier', 1.0) or 1.0)
+                score = min(max(score, 0.0), 1.0)
                 signal = Signal(
                     symbol=symbol,
                     side='sell',
-                    score=min(score, 1.0),
+                    score=score,
                     confidence=min(score * 0.9 + 0.1, 1.0),
                     strategy=self.name,
                     timestamp=datetime.now(),
                     metadata={
                         'rsi': latest['rsi'],
                         'deviation': deviation,
-                        'bb_upper': latest['bb_upper']
+                        'bb_upper': latest['bb_upper'],
+                        'volume_dry_ratio': volume_dry_ratio,
+                        'side_weight_multiplier': float(self.config.get('sell_score_multiplier', 1.0) or 1.0),
                     }
                 )
                 signals.append(signal)
@@ -806,6 +818,7 @@ class StrategyOrchestrator:
         self,
         total_capital: Decimal = Decimal('100'),
         *,
+        audit_root: Optional[Path] = None,
         conflict_penalty_enabled: bool = True,
         conflict_dominance_ratio: float = 1.35,
         conflict_min_confidence: float = 0.60,
@@ -818,6 +831,8 @@ class StrategyOrchestrator:
         self.conflict_dominance_ratio = max(1.0, float(conflict_dominance_ratio))
         self.conflict_min_confidence = float(max(0.0, min(conflict_min_confidence, 1.0)))
         self.conflict_penalty_strength = float(max(0.0, min(conflict_penalty_strength, 1.0)))
+        self.audit_root = Path(audit_root) if audit_root is not None else None
+        self._latest_strategy_signal_payload: Dict[str, Any] = {}
         
         # 默认资金分配
         self.default_allocations = {
@@ -887,7 +902,17 @@ class StrategyOrchestrator:
     def strategy_signals_path(self) -> Optional[Path]:
         if not self.run_id:
             return None
+        if self.audit_root is not None:
+            return self.audit_root / "runs" / self.run_id / "strategy_signals.json"
         return Path("reports") / "runs" / self.run_id / "strategy_signals.json"
+
+    def set_strategy_allocation(self, strategy_name: str, allocation: Decimal) -> None:
+        if strategy_name not in self.strategies:
+            return
+        self.strategy_allocations[strategy_name] = allocation
+
+    def latest_strategy_signal_payload(self) -> Dict[str, Any]:
+        return deepcopy(self._latest_strategy_signal_payload)
 
     def generate_combined_signals(self, market_data: pd.DataFrame) -> List[Signal]:
         """生成融合后的交易信号"""
@@ -970,6 +995,7 @@ class StrategyOrchestrator:
                     'strategies': strategy_signal_audit,
                     'fused': {s['symbol']: s for s in fused_audit}  # Add fused signals
                 }
+                self._latest_strategy_signal_payload = deepcopy(payload)
                 tmp_file = audit_file.with_suffix('.tmp')
                 tmp_file.write_text(
                     json.dumps(payload, indent=2, ensure_ascii=False, default=str),
@@ -979,6 +1005,8 @@ class StrategyOrchestrator:
         except Exception as e:
             print(f"[Orchestrator] 审计记录失败: {e}")
         
+        if not self._latest_strategy_signal_payload and 'payload' in locals():
+            self._latest_strategy_signal_payload = deepcopy(payload)
         return combined
     
     def _fuse_signals(self, signals: List[Signal]) -> List[Signal]:
@@ -1163,6 +1191,9 @@ class MultiStrategyAdapter:
 
     def strategy_signals_path(self) -> Optional[Path]:
         return self.orchestrator.strategy_signals_path()
+
+    def latest_strategy_signal_payload(self) -> Dict[str, Any]:
+        return self.orchestrator.latest_strategy_signal_payload()
 
     def _normalize_targets_to_total_capital(self, targets: List[Dict]) -> List[Dict]:
         positive_targets = [

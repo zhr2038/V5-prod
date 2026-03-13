@@ -656,6 +656,126 @@ def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
     assert ml["top_suppressed"][0]["symbol"] == "ETH/USDT"
 
 
+def test_api_decision_audit_prefers_current_run_embedded_strategy_signals(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260313_14"
+    stale_run = runs_dir / "20260313_13"
+    current_run.mkdir(parents=True, exist_ok=True)
+    stale_run.mkdir(parents=True, exist_ok=True)
+
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260313_14",
+                "regime": "SIDEWAYS",
+                "counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 0},
+                "strategy_signals": [
+                    {
+                        "strategy": "MeanReversion",
+                        "allocation": 0.25,
+                        "total_signals": 1,
+                        "buy_signals": 0,
+                        "sell_signals": 1,
+                        "signals": [{"symbol": "SUI/USDT", "side": "sell", "score": 0.61}],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (stale_run / "decision_audit.json").write_text(
+        json.dumps({"run_id": "20260313_13", "regime": "SIDEWAYS"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (stale_run / "strategy_signals.json").write_text(
+        json.dumps(
+            {
+                "strategies": [
+                    {
+                        "strategy": "TrendFollowing",
+                        "allocation": 0.2,
+                        "total_signals": 2,
+                        "buy_signals": 2,
+                        "sell_signals": 0,
+                        "signals": [{"symbol": "BTC/USDT", "side": "buy", "score": 0.9}],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(stale_run, (1, 1))
+    os.utime(current_run, (2, 2))
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["strategy_signal_source"] == "decision_audit"
+    assert payload["strategy_run_id"] == "20260313_14"
+    assert payload["strategy_signals"][0]["strategy"] == "MeanReversion"
+
+
+def test_api_decision_audit_does_not_fallback_to_previous_run_strategy_signals(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260313_15"
+    stale_run = runs_dir / "20260313_14"
+    current_run.mkdir(parents=True, exist_ok=True)
+    stale_run.mkdir(parents=True, exist_ok=True)
+
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {"run_id": "20260313_15", "regime": "TRENDING", "counts": {"selected": 0, "orders_rebalance": 0, "orders_exit": 0}},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (stale_run / "decision_audit.json").write_text(
+        json.dumps({"run_id": "20260313_14", "regime": "SIDEWAYS"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (stale_run / "strategy_signals.json").write_text(
+        json.dumps(
+            {
+                "strategies": [
+                    {
+                        "strategy": "TrendFollowing",
+                        "allocation": 0.2,
+                        "total_signals": 1,
+                        "buy_signals": 1,
+                        "sell_signals": 0,
+                        "signals": [{"symbol": "BTC/USDT", "side": "buy", "score": 0.9}],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(stale_run, (1, 1))
+    os.utime(current_run, (2, 2))
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["strategy_signal_source"] == "missing"
+    assert payload["strategy_run_id"] is None
+    assert payload["strategy_signals"] == []
+
+
 def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

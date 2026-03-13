@@ -3889,33 +3889,25 @@ def api_decision_audit():
 
         strategy_signals = []
         strategy_source_run = None
+        strategy_signal_source = 'missing'
+        embedded_strategy_signals = audit_data.get('strategy_signals')
+        if isinstance(embedded_strategy_signals, list) and embedded_strategy_signals:
+            strategy_signals = embedded_strategy_signals
+            strategy_source_run = latest_run_dir.name
+            strategy_signal_source = 'decision_audit'
 
         # 优先：同一run目录
         strategy_file = latest_run_dir / 'strategy_signals.json'
-        if strategy_file.exists():
+        if not strategy_signals and strategy_file.exists():
             try:
                 strategy_signals = _load_strategy_signals(strategy_file)
                 strategy_source_run = latest_run_dir.name
+                strategy_signal_source = 'strategy_file'
                 ts = strategy_file.stat().st_mtime
             except Exception:
                 strategy_signals = []
 
         # 回退：按时间倒序遍历，找到第一个可成功解析的 strategy_signals.json
-        if not strategy_signals:
-            strategy_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'strategy_signals.json').exists()]
-            strategy_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-            for fallback_dir in strategy_dirs:
-                fallback_file = fallback_dir / 'strategy_signals.json'
-                try:
-                    parsed = _load_strategy_signals(fallback_file)
-                    if parsed:
-                        strategy_signals = parsed
-                        strategy_source_run = fallback_dir.name
-                        ts = fallback_file.stat().st_mtime
-                        break
-                except Exception:
-                    continue
-
         # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.
         held_symbols = set()
         try:
@@ -4177,7 +4169,7 @@ def api_decision_audit():
         except Exception:
             target_rank = []
 
-        fused_source_is_fallback = bool(strategy_source_run) and str(strategy_source_run) != str(run_id)
+        fused_source_is_fallback = False
         preferred_ml_symbols: List[str] = []
         for item in audit_data.get('top_scores', []) or []:
             if isinstance(item, dict) and item.get('symbol'):
@@ -4195,6 +4187,7 @@ def api_decision_audit():
         return jsonify({
             'run_id': run_id,
             'strategy_run_id': strategy_source_run,
+            'strategy_signal_source': strategy_signal_source,
             'strategy_signals_count': len(strategy_signals or []),
             'timestamp': ts,
             'regime': audit_data.get('regime'),

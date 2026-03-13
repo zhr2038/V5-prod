@@ -1271,6 +1271,12 @@ function renderSignals(data) {
   const strategies = Array.isArray(data.strategy_signals) ? data.strategy_signals : [];
   const counts = data.counts || {};
   const mlCard = renderMlImpactCardClean(data.ml_signal_overview || null);
+  const sourceMap = {
+    decision_audit: "当前轮审计",
+    strategy_file: "当前轮信号文件",
+    missing: "当前轮缺失",
+  };
+  const sourceText = sourceMap[String(data.strategy_signal_source || "missing")] || "当前轮缺失";
   setText("signals-time", data.run_id ? `运行 ${data.run_id}` : "等待策略信号...");
 
   if (!strategies.length && !mlCard) {
@@ -1287,6 +1293,50 @@ function renderSignals(data) {
     <div class="value">${item.total_signals || 0} 个信号</div>
     <div class="subtle">买 ${item.buy_signals || 0} / 卖 ${item.sell_signals || 0} / 配置 ${(Number(item.allocation || 0) * 100).toFixed(0)}%</div>
   </div>`);
+  const cards = [mlCard, ...strategyCards].filter(Boolean).join("");
+
+  setHtml("signals-content", `${summary}<div class="signal-grid">${cards}</div>`);
+}
+
+function renderSignalsV2(data) {
+  const strategies = Array.isArray(data.strategy_signals) ? data.strategy_signals : [];
+  const counts = data.counts || {};
+  const mlCard = renderMlImpactCardClean(data.ml_signal_overview || null);
+  const sourceMap = {
+    decision_audit: "当前轮审计",
+    strategy_file: "当前轮信号文件",
+    missing: "当前轮缺失",
+  };
+  const sourceText = sourceMap[String(data.strategy_signal_source || "missing")] || "当前轮缺失";
+  setText("signals-time", data.run_id ? `运行 ${data.run_id}` : "等待策略信号...");
+
+  if (!strategies.length && !mlCard) {
+    setHtml("signals-content", '<div class="empty">当前轮没有策略信号。</div>');
+    return;
+  }
+
+  const summary = `<div class="grid2" style="margin-bottom:12px">
+    <div class="info"><div class="label">入池</div><div class="value">${counts.selected || 0}</div><div class="subtle">进入候选池</div></div>
+    <div class="info"><div class="label">订单</div><div class="value">${(counts.orders_rebalance || 0) + (counts.orders_exit || 0)}</div><div class="subtle">本轮尝试</div></div>
+    <div class="info"><div class="label">信号源</div><div class="value">${esc(sourceText)}</div><div class="subtle">${esc(data.strategy_run_id || data.run_id || "--")}</div></div>
+  </div>`;
+  const strategyCards = strategies.map((item) => {
+    const preview = Array.isArray(item.signals) ? item.signals.slice(0, 3) : [];
+    const previewHtml = preview.length
+      ? `<div class="subtle" style="margin-top:10px">${preview.map((signal) => {
+          const symbol = shortSymbol(signal.symbol || "--");
+          const side = sideZh(signal.side || signal.direction || "--");
+          const score = fmtNum(signal.score, 2);
+          return `${esc(symbol)} ${esc(side)} ${esc(score)}`;
+        }).join(" / ")}</div>`
+      : '<div class="subtle" style="margin-top:10px">本轮无样例信号</div>';
+    return `<div class="signal">
+      <div class="label">${esc(item.strategy || "策略")}</div>
+      <div class="value">${item.total_signals || 0} 个信号</div>
+      <div class="subtle">买 ${item.buy_signals || 0} / 卖 ${item.sell_signals || 0} / 配置 ${(Number(item.allocation || 0) * 100).toFixed(0)}%</div>
+      ${previewHtml}
+    </div>`;
+  });
   const cards = [mlCard, ...strategyCards].filter(Boolean).join("");
 
   setHtml("signals-content", `${summary}<div class="signal-grid">${cards}</div>`);
@@ -1380,7 +1430,7 @@ async function loadMarket(signal) {
 async function loadDecision(signal) {
   const data = await fetchJson("/api/decision_audit", signal);
   if (data) {
-    renderSignals(data);
+    renderSignalsV2(data);
     renderDecision(data);
   }
 }
@@ -1437,7 +1487,7 @@ function rerenderForViewport() {
   if (riskCache.risk) renderRiskPanels(riskCache.risk, riskCache.account);
   if (marketCache) renderMarket(marketCache);
   if (decisionCache) {
-    renderSignals(decisionCache);
+    renderSignalsV2(decisionCache);
     renderDecision(decisionCache);
   }
   if (shadowMlCache) renderShadowMlPanel(shadowMlCache);
