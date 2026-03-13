@@ -970,32 +970,32 @@ class StrategyOrchestrator:
             sys.stdout.flush()
         
         # 保存策略信号审计到文件（包括融合结果）
+        fused_audit = []
+        for s in combined:
+            fused_audit.append({
+                'symbol': s.symbol,
+                'direction': s.side,
+                'score': float(s.score),
+                'raw_score': StrategyOrchestrator._signal_raw_score(s),
+                'confidence': float(s.confidence),
+                'strategy': s.strategy,
+                'metadata': s.metadata,
+                'rank': 0,  # Will be calculated later
+            })
+
+        payload = {
+            'timestamp': datetime.now().isoformat(),
+            'run_id': self.run_id,
+            'strategies': strategy_signal_audit,
+            'fused': {s['symbol']: s for s in fused_audit},  # Add fused signals
+        }
+        self._latest_strategy_signal_payload = deepcopy(payload)
+
         try:
             audit_file = self.strategy_signals_path()
             if audit_file is not None:
                 audit_file.parent.mkdir(parents=True, exist_ok=True)
 
-                # Build fused signal audit for the current run.
-                fused_audit = []
-                for s in combined:
-                    fused_audit.append({
-                        'symbol': s.symbol,
-                        'direction': s.side,
-                        'score': float(s.score),
-                        'raw_score': StrategyOrchestrator._signal_raw_score(s),
-                        'confidence': float(s.confidence),
-                        'strategy': s.strategy,
-                        'metadata': s.metadata,
-                        'rank': 0  # Will be calculated later
-                    })
-
-                payload = {
-                    'timestamp': datetime.now().isoformat(),
-                    'run_id': self.run_id,
-                    'strategies': strategy_signal_audit,
-                    'fused': {s['symbol']: s for s in fused_audit}  # Add fused signals
-                }
-                self._latest_strategy_signal_payload = deepcopy(payload)
                 tmp_file = audit_file.with_suffix('.tmp')
                 tmp_file.write_text(
                     json.dumps(payload, indent=2, ensure_ascii=False, default=str),
@@ -1004,9 +1004,6 @@ class StrategyOrchestrator:
                 tmp_file.replace(audit_file)
         except Exception as e:
             print(f"[Orchestrator] 审计记录失败: {e}")
-        
-        if not self._latest_strategy_signal_payload and 'payload' in locals():
-            self._latest_strategy_signal_payload = deepcopy(payload)
         return combined
     
     def _fuse_signals(self, signals: List[Signal]) -> List[Signal]:

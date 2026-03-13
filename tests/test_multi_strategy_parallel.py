@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -239,6 +240,44 @@ def test_strategy_orchestrator_downweights_conflicting_signals():
     assert result.metadata["conflict_detected"] is True
     assert result.metadata["conflict_penalty_factor"] < 1.0
     assert result.metadata["opposing_strategies"] == ["MeanReversion"]
+
+
+def test_strategy_orchestrator_keeps_latest_payload_without_run_id():
+    orchestrator = StrategyOrchestrator(total_capital=Decimal("100"))
+
+    class _StubStrategy:
+        name = "MeanReversion"
+        strategy_type = SimpleNamespace(value="mean_reversion")
+
+        def generate_signals(self, _market_data):
+            return [
+                Signal(
+                    symbol="BTC/USDT",
+                    side="sell",
+                    score=0.42,
+                    confidence=0.9,
+                    strategy="MeanReversion",
+                    timestamp=datetime(2026, 3, 13),
+                )
+            ]
+
+    orchestrator.register_strategy(_StubStrategy(), Decimal("0.25"))
+    market_df = pd.DataFrame(
+        {
+            "symbol": ["BTC/USDT"] * 30,
+            "close": [100.0] * 30,
+            "high": [101.0] * 30,
+            "low": [99.0] * 30,
+            "volume": [1.0] * 30,
+        }
+    )
+
+    orchestrator.generate_combined_signals(market_df)
+
+    payload = orchestrator.latest_strategy_signal_payload()
+    assert payload["run_id"] == ""
+    assert payload["strategies"][0]["strategy"] == "MeanReversion"
+    assert payload["strategies"][0]["total_signals"] == 1
 
 
 def test_portfolio_engine_loads_only_current_run_fused_signals(tmp_path, monkeypatch):

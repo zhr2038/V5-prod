@@ -723,7 +723,7 @@ def test_api_decision_audit_prefers_current_run_embedded_strategy_signals(monkey
     assert payload["strategy_signals"][0]["strategy"] == "MeanReversion"
 
 
-def test_api_decision_audit_does_not_fallback_to_previous_run_strategy_signals(monkeypatch, tmp_path):
+def test_api_decision_audit_falls_back_to_previous_run_strategy_signals(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
 
@@ -771,9 +771,10 @@ def test_api_decision_audit_does_not_fallback_to_previous_run_strategy_signals(m
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["strategy_signal_source"] == "missing"
-    assert payload["strategy_run_id"] is None
-    assert payload["strategy_signals"] == []
+    assert payload["strategy_signal_source"] == "previous_run_strategy_file"
+    assert payload["strategy_run_id"] == "20260313_14"
+    assert payload["strategy_signals"][0]["strategy"] == "TrendFollowing"
+    assert payload["fused_source_is_fallback"] is True
 
 
 def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):

@@ -376,6 +376,57 @@ def test_pipeline_prefers_in_memory_strategy_signal_payload():
     assert "source=memory" in " ".join(audit.notes)
 
 
+def test_pipeline_uses_audit_run_id_when_run_logger_missing():
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    pipe = V5Pipeline(cfg, clock=FixedClock(t0))
+    captured = {}
+
+    pipe.alpha_engine.set_run_id = lambda run_id: captured.__setitem__("alpha", run_id)
+    pipe.portfolio_engine.set_run_id = lambda run_id: captured.__setitem__("portfolio", run_id)
+    pipe.portfolio_engine.allocate = lambda **kwargs: PortfolioSnapshot(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        volatilities={},
+        entry_candidates=["BTC/USDT"],
+    )
+    pipe.data_collector.collect_features = lambda **kwargs: True
+    pipe.data_collector.fill_labels = lambda current_timestamp: 0
+
+    md = {
+        "BTC/USDT": MarketSeries(
+            symbol="BTC/USDT",
+            timeframe="1h",
+            ts=[0, 1],
+            open=[100.0, 101.0],
+            high=[101.0, 102.0],
+            low=[99.0, 100.0],
+            close=[100.5, 101.5],
+            volume=[1.0, 1.0],
+        )
+    }
+    audit = DecisionAudit(run_id="20260101_00")
+
+    pipe.run(
+        md,
+        positions=[],
+        cash_usdt=1000.0,
+        equity_peak_usdt=1000.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=RegimeResult(
+            state=RegimeState.SIDEWAYS,
+            atr_pct=0.0,
+            ma20=0.0,
+            ma60=0.0,
+            multiplier=1.0,
+        ),
+    )
+
+    assert captured["alpha"] == "20260101_00"
+    assert captured["portfolio"] == "20260101_00"
+
+
 def test_pipeline_records_ml_rank_delta_and_impact_summary(tmp_path, monkeypatch):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)

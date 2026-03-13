@@ -3890,6 +3890,21 @@ def api_decision_audit():
         strategy_signals = []
         strategy_source_run = None
         strategy_signal_source = 'missing'
+        def _load_run_strategy_payload(run_dir: Path, audit_obj: Dict[str, Any]) -> tuple[List[Dict[str, Any]], Optional[str], Optional[float]]:
+            embedded = audit_obj.get('strategy_signals')
+            if isinstance(embedded, list) and embedded:
+                return embedded, 'decision_audit', None
+
+            run_strategy_file = run_dir / 'strategy_signals.json'
+            if run_strategy_file.exists():
+                try:
+                    loaded = _load_strategy_signals(run_strategy_file)
+                    if loaded:
+                        return loaded, 'strategy_file', run_strategy_file.stat().st_mtime
+                except Exception:
+                    return [], None, None
+            return [], None, None
+
         embedded_strategy_signals = audit_data.get('strategy_signals')
         if isinstance(embedded_strategy_signals, list) and embedded_strategy_signals:
             strategy_signals = embedded_strategy_signals
@@ -3901,13 +3916,32 @@ def api_decision_audit():
         if not strategy_signals and strategy_file.exists():
             try:
                 strategy_signals = _load_strategy_signals(strategy_file)
-                strategy_source_run = latest_run_dir.name
-                strategy_signal_source = 'strategy_file'
-                ts = strategy_file.stat().st_mtime
+                if strategy_signals:
+                    strategy_source_run = latest_run_dir.name
+                    strategy_signal_source = 'strategy_file'
+                    ts = strategy_file.stat().st_mtime
             except Exception:
                 strategy_signals = []
 
         # 回退：按时间倒序遍历，找到第一个可成功解析的 strategy_signals.json
+        if not strategy_signals:
+            for stale_run_dir in run_dirs[1:]:
+                try:
+                    with open(stale_run_dir / 'decision_audit.json', 'r') as f:
+                        stale_audit = json.load(f)
+                except Exception:
+                    continue
+
+                fallback_signals, fallback_source, fallback_ts = _load_run_strategy_payload(stale_run_dir, stale_audit)
+                if not fallback_signals:
+                    continue
+
+                strategy_signals = fallback_signals
+                strategy_source_run = stale_run_dir.name
+                strategy_signal_source = f'previous_run_{fallback_source}'
+                ts = fallback_ts if fallback_ts is not None else stale_run_dir.stat().st_mtime
+                break
+
         # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.
         held_symbols = set()
         try:
@@ -4169,7 +4203,7 @@ def api_decision_audit():
         except Exception:
             target_rank = []
 
-        fused_source_is_fallback = False
+        fused_source_is_fallback = bool(strategy_source_run and strategy_source_run != latest_run_dir.name)
         preferred_ml_symbols: List[str] = []
         for item in audit_data.get('top_scores', []) or []:
             if isinstance(item, dict) and item.get('symbol'):

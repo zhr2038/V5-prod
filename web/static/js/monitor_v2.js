@@ -1274,6 +1274,8 @@ function renderSignals(data) {
   const sourceMap = {
     decision_audit: "当前轮审计",
     strategy_file: "当前轮信号文件",
+    previous_run_decision_audit: "上一轮审计回退",
+    previous_run_strategy_file: "上一轮信号文件回退",
     missing: "当前轮缺失",
   };
   const sourceText = sourceMap[String(data.strategy_signal_source || "missing")] || "当前轮缺失";
@@ -1305,6 +1307,8 @@ function renderSignalsV2(data) {
   const sourceMap = {
     decision_audit: "当前轮审计",
     strategy_file: "当前轮信号文件",
+    previous_run_decision_audit: "上一轮审计回退",
+    previous_run_strategy_file: "上一轮信号文件回退",
     missing: "当前轮缺失",
   };
   const sourceText = sourceMap[String(data.strategy_signal_source || "missing")] || "当前轮缺失";

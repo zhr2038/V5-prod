@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1006,6 +1007,13 @@ class V5Pipeline:
                 run_id = Path(getattr(run_logger, 'run_dir', '')).name
             except Exception:
                 run_id = ""
+        if not run_id and audit is not None:
+            try:
+                run_id = str(getattr(audit, 'run_id', '') or '').strip()
+            except Exception:
+                run_id = ""
+        if not run_id:
+            run_id = str(os.getenv("V5_RUN_ID", "") or "").strip()
         self.alpha_engine.set_run_id(run_id)
         self.portfolio_engine.set_run_id(run_id)
 
@@ -1109,12 +1117,15 @@ class V5Pipeline:
             if hasattr(self.alpha_engine, 'use_multi_strategy') and self.alpha_engine.use_multi_strategy:
                 try:
                     strategy_payload = self.alpha_engine.get_latest_strategy_signal_payload()
-                    strategy_source = "memory"
-                    if not strategy_payload:
+                    strategy_source = "missing"
+                    if isinstance(strategy_payload, dict) and strategy_payload.get('strategies'):
+                        strategy_source = "memory"
+                    else:
                         strategy_audit_file = self.alpha_engine.strategy_signals_path()
                         if strategy_audit_file is not None and strategy_audit_file.exists():
                             strategy_payload = json.loads(strategy_audit_file.read_text(encoding='utf-8'))
-                            strategy_source = "file"
+                            if isinstance(strategy_payload, dict) and strategy_payload.get('strategies'):
+                                strategy_source = "file"
                     audit.strategy_signals = (
                         strategy_payload.get('strategies', [])
                         if isinstance(strategy_payload, dict)
