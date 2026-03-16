@@ -1156,11 +1156,23 @@ class V5Pipeline:
             if hasattr(self.alpha_engine, 'use_multi_strategy') and self.alpha_engine.use_multi_strategy:
                 try:
                     strategy_payload = self.alpha_engine.get_latest_strategy_signal_payload()
+                    strategy_audit_file = self.alpha_engine.strategy_signals_path()
                     strategy_source = "missing"
                     if isinstance(strategy_payload, dict) and strategy_payload.get('strategies'):
                         strategy_source = "memory"
+                        if strategy_audit_file is not None and not strategy_audit_file.exists():
+                            try:
+                                strategy_audit_file.parent.mkdir(parents=True, exist_ok=True)
+                                tmp_file = strategy_audit_file.with_suffix('.tmp')
+                                tmp_file.write_text(
+                                    json.dumps(strategy_payload, indent=2, ensure_ascii=False, default=str),
+                                    encoding='utf-8',
+                                )
+                                tmp_file.replace(strategy_audit_file)
+                                strategy_source = "memory_backfill"
+                            except Exception as e:
+                                audit.add_note(f"Strategy signal file backfill failed: {str(e)[:80]}")
                     else:
-                        strategy_audit_file = self.alpha_engine.strategy_signals_path()
                         if strategy_audit_file is not None and strategy_audit_file.exists():
                             strategy_payload = json.loads(strategy_audit_file.read_text(encoding='utf-8'))
                             if isinstance(strategy_payload, dict) and strategy_payload.get('strategies'):

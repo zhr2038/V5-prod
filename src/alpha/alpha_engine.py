@@ -144,6 +144,8 @@ class AlphaEngine:
         for key in static_base_w.keys():
             if key in regime_override:
                 weights[key] = float(regime_override[key])
+        if regime_override:
+            return weights
         return self._load_dynamic_ic_weights(weights)
 
     def _resolve_multi_strategy_alpha6_weights(self) -> Dict[str, float]:
@@ -487,7 +489,8 @@ class AlphaEngine:
         return {}
 
     def _resolve_repo_path(self, raw_path: Optional[str], default: str) -> Path:
-        path = Path(str(raw_path or default))
+        raw = str(raw_path or default).strip().replace("\\", "/")
+        path = Path(raw)
         if not path.is_absolute():
             path = self.repo_root / path
         return path
@@ -771,6 +774,9 @@ class AlphaEngine:
             "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "configured_enabled": bool(getattr(ml_cfg, "enabled", False)) if ml_cfg is not None else False,
             "promotion_passed": False,
+            "latest_decision_passed": False,
+            "promotion_fallback_active": False,
+            "promotion_source": "none",
             "trained": False,
             "used_in_latest_snapshot": False,
             "reason": "disabled",
@@ -797,11 +803,13 @@ class AlphaEngine:
         model_base_path = self._normalize_ml_base_path(
             self._resolve_repo_path(getattr(ml_cfg, "model_path", "models/ml_factor_model"), "models/ml_factor_model")
         )
+        pointer_model_ready = False
 
         if decision_path.exists():
             try:
                 decision = json.loads(decision_path.read_text(encoding="utf-8"))
-                status["promotion_passed"] = bool(decision.get("passed"))
+                status["latest_decision_passed"] = bool(decision.get("passed"))
+                status["promotion_passed"] = bool(status["latest_decision_passed"])
                 if decision.get("fail_reasons"):
                     status["promotion_fail_reasons"] = [str(x) for x in decision.get("fail_reasons") or []]
             except Exception:
@@ -813,6 +821,7 @@ class AlphaEngine:
                 if pointer_value:
                     pointer_base = self._normalize_ml_base_path(self._resolve_repo_path(pointer_value, pointer_value))
                     if self._ml_artifact_exists(pointer_base):
+                        pointer_model_ready = True
                         model_base_path = pointer_base
             except Exception:
                 status["reason"] = "active_pointer_unreadable"
@@ -825,7 +834,7 @@ class AlphaEngine:
             return {}, {}, status
 
         if bool(getattr(ml_cfg, "require_promotion_passed", True)):
-            if not status["promotion_passed"]:
+            if not status["latest_decision_passed"]:
                 status["reason"] = "promotion_not_passed"
                 self._write_ml_runtime_status(status)
                 return {}, {}, status
@@ -833,6 +842,12 @@ class AlphaEngine:
                 status["reason"] = "active_pointer_missing"
                 self._write_ml_runtime_status(status)
                 return {}, {}, status
+            if not pointer_model_ready:
+                status["reason"] = "active_pointer_model_missing"
+                self._write_ml_runtime_status(status)
+                return {}, {}, status
+            status["promotion_passed"] = True
+            status["promotion_source"] = "latest_decision"
 
         latest_mtime_ns = max(
             p.stat().st_mtime_ns for p in self._ml_artifact_candidates(model_base_path) if p.exists()

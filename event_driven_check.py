@@ -187,19 +187,9 @@ def load_current_state(cfg=None, config_path: Path = None):
                 try:
                     with open(signals_path) as f:
                         sig_data = json.load(f)
-                        fused_signals = sig_data.get("fused", {})
-                        logger.info(f"Found {len(fused_signals)} fused signals in file")
-                        if fused_signals:
-                            for sym, data in fused_signals.items():
-                                if sym not in tradeable_symbols:
-                                    continue
-                                signals[sym] = SignalState(
-                                    symbol=sym,
-                                    direction=data.get('direction', 'hold'),
-                                    score=data.get('score', 0),
-                                    rank=data.get('rank', 99),
-                                    timestamp_ms=int(datetime.now().timestamp() * 1000)
-                                )
+                        signals = _load_fused_signal_states(sig_data, tradeable_symbols)
+                        logger.info(f"Found {len(sig_data.get('fused', {}))} fused signals in file")
+                        if signals:
                             logger.info(f"Loaded {len(signals)} FUSED signals (tradeable filtered)")
                         else:
                             logger.warning("fused_signals is empty")
@@ -214,6 +204,21 @@ def load_current_state(cfg=None, config_path: Path = None):
                     )
                 else:
                     logger.warning("No strategy_signals.json found under runs/")
+
+            if not signals:
+                audit_path, audit_meta = find_latest_decision_audit_file(runs_dir, max_age_minutes=int(max_age or 90))
+                if audit_path is not None:
+                    try:
+                        with open(audit_path) as f:
+                            audit_data = json.load(f)
+                        signals = _load_decision_audit_signal_states(audit_data, tradeable_symbols)
+                        if signals:
+                            logger.info(
+                                f"Loaded {len(signals)} signals from decision audit top_scores: "
+                                f"{audit_path} (age={audit_meta.get('age_min', 0):.1f}m)"
+                            )
+                    except Exception as e:
+                        logger.error(f"Could not load decision audit signals: {e}")
         else:
             logger.warning(f"Runs directory not found: {runs_dir}")
         
@@ -316,6 +321,69 @@ def get_last_live_run_age_sec():
         return age, latest.name
     except Exception:
         return None, None
+
+
+def find_latest_decision_audit_file(runs_dir: Path, max_age_minutes: int = 90):
+    """Find newest decision_audit.json under runs/ within freshness window."""
+    try:
+        files = sorted(
+            [p for p in runs_dir.glob('*/decision_audit.json') if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not files:
+            return None, None
+
+        newest = files[0]
+        age_sec = max(0.0, time.time() - newest.stat().st_mtime)
+        age_min = age_sec / 60.0
+        if age_min > float(max_age_minutes):
+            return None, {'path': str(newest), 'age_min': age_min, 'fresh': False, 'count': len(files)}
+
+        return newest, {'path': str(newest), 'age_min': age_min, 'fresh': True, 'count': len(files)}
+    except Exception:
+        return None, None
+
+
+def _load_fused_signal_states(sig_data: dict, tradeable_symbols: set[str]):
+    signals = {}
+    fused_signals = sig_data.get("fused", {})
+    for sym, data in (fused_signals or {}).items():
+        if sym not in tradeable_symbols:
+            continue
+        signals[sym] = SignalState(
+            symbol=sym,
+            direction=data.get('direction', 'hold'),
+            score=data.get('score', 0),
+            rank=data.get('rank', 99),
+            timestamp_ms=int(datetime.now().timestamp() * 1000)
+        )
+    return signals
+
+
+def _load_decision_audit_signal_states(audit_data: dict, tradeable_symbols: set[str]):
+    signals = {}
+    for row in (audit_data.get('top_scores') or []):
+        sym = str(row.get('symbol') or '')
+        if not sym or sym not in tradeable_symbols:
+            continue
+        try:
+            score = float(row.get('score', row.get('display_score', 0)) or 0)
+        except Exception:
+            score = 0.0
+        try:
+            rank = int(row.get('rank', 99) or 99)
+        except Exception:
+            rank = 99
+        direction = 'buy' if score > 0 else 'sell' if score < 0 else 'hold'
+        signals[sym] = SignalState(
+            symbol=sym,
+            direction=direction,
+            score=abs(score),
+            rank=rank,
+            timestamp_ms=int(datetime.now().timestamp() * 1000)
+        )
+    return signals
 
 
 def get_current_live_window_run_id(now: datetime = None) -> str:
