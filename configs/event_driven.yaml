@@ -1,0 +1,41 @@
+# Event-Driven Trading Configuration
+# Copy to configs/live_20u_real.yaml to enable
+
+event_driven:
+  enabled: true
+  active_mode: true
+  force_full_run: false
+  force_full_min_interval_minutes: 12
+  live_service_unit: v5-prod.user.service
+
+  # Check frequency (should match timer interval)
+  check_interval_minutes: 15
+  
+  # Cooldown settings
+  global_cooldown_p2_minutes: 30      # P2 events: min 30 min between trades
+  symbol_cooldown_minutes: 60         # Per-symbol: 60 min cooldown
+  signal_confirmation_periods: 2      # Confirm signal for 2 periods before trading
+
+  # Signal change thresholds
+  score_change_threshold: 0.35        # 35% change triggers event
+  rank_jump_threshold: 4              # 4 position jump triggers event
+
+  # Breakout detection
+  breakout_enabled: true
+  breakout_lookback_hours: 24         # 24h high/low
+  breakout_threshold_pct: 0.3         # 0.3% breakout threshold
+  
+  # Heartbeat (fallback)
+  heartbeat_interval_hours: 4         # Trade at least every 4 hours
+  fused_signal_max_age_minutes: 90    # 超过该时效则不用融合信号
+  adaptive_cooldown:
+    enabled: true
+    lookback_runs: 12
+    high_block_ratio: 0.75
+    min_events_for_action: 8
+    p2_min_minutes: 8
+    p2_max_minutes: 60
+    symbol_min_minutes: 15
+    symbol_max_minutes: 120
+    confirm_min: 1
+    confirm_max: 4

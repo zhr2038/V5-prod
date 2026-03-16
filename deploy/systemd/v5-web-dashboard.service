@@ -1,0 +1,17 @@
+[Unit]
+Description=V5 Web Dashboard
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/clawd/v5-prod
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/clawd/v5-prod
+Environment=V5_WORKSPACE=/home/admin/clawd/v5-prod
+ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/web_dashboard.py'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

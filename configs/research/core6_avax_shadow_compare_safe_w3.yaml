@@ -1,0 +1,49 @@
+task:
+  name: core6_avax_shadow_compare_safe_w3
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/core6_avax_shadow_compare_safe_w3/latest.json
+
+experiment:
+  base_config_path: configs/live_prod.yaml
+  env_path: .env
+  cache_dir: data/cache
+  workers: 3
+  parallel_granularity: job
+  evaluations:
+    - name: full_cached_latest
+      ohlcv_limit: full
+      window_shift_bars: 0
+    - name: recent_1440
+      ohlcv_limit: 1440
+      window_shift_bars: 0
+    - name: recent_720
+      ohlcv_limit: 720
+      window_shift_bars: 0
+    - name: recent_480
+      ohlcv_limit: 480
+      window_shift_bars: 0
+  variants:
+    - name: core6_cost018
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - ADA/USDT
+      overrides:
+        execution.cost_aware_min_score_floor: 0.18
+        execution.cost_aware_score_per_bps: 0.00325
+    - name: avax_015
+      symbols:
+        - BTC/USDT
+        - ETH/USDT
+        - SOL/USDT
+        - BNB/USDT
+        - XRP/USDT
+        - AVAX/USDT
+      overrides:
+        execution.cost_aware_min_score_floor: 0.15
+        execution.cost_aware_score_per_bps: 0.00325

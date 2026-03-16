@@ -1,0 +1,15 @@
+task:
+  name: walk_forward_prod_cache
+
+paths:
+  runs_dir: reports/runs
+  output_report_path: reports/research/walk_forward/prod_cache_live_prod.json
+
+walk_forward:
+  config_path: configs/live_prod.yaml
+  env_path: .env
+  provider: cache
+  cache_dir: data/cache
+  collect_ml_training_data: false
+  ohlcv_limit: 720
+  folds: 4

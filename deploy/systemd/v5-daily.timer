@@ -1,0 +1,10 @@
+[Unit]
+Description=Run daily last24h rollup compare
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=v5-daily.service
+
+[Install]
+WantedBy=timers.target

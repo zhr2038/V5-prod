@@ -1,0 +1,9 @@
+[Unit]
+Description=V5 trading bot hourly dry-run + compare
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-trading-bot
+ExecStart=/bin/bash /home/admin/clawd/v5-trading-bot/scripts/run_hourly_window.sh

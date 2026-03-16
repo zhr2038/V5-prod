@@ -1,0 +1,105 @@
+# 20 USDT 实盘开仓测试配置
+# 强制开仓，测试真实交易功能
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  api_key: ${EXCHANGE_API_KEY}
+  api_secret: ${EXCHANGE_API_SECRET}
+  passphrase: ${EXCHANGE_PASSPHRASE}
+  testnet: false
+
+universe:
+  enabled: false  # 禁用 universe，使用固定币种
+
+alpha:
+  long_top_pct: 0.50  # 提高选择比例
+  weights:
+    # 简单权重，确保有信号
+    f1_mom_5d: 0.5
+    f2_mom_20d: 0.5
+    f3_vol_adj_ret_20d: 0.0
+    f4_volume_expansion: 0.0
+    f5_rsi_trend_confirm: 0.0
+
+regime:
+  atr_threshold: 0.10  # 提高阈值，确保不是 Risk-Off
+  atr_very_low: 0.05
+  pos_mult_trending: 1.0
+  pos_mult_sideways: 1.0  # 强制开仓
+  pos_mult_risk_off: 1.0  # 即使 Risk-Off 也开仓
+
+risk:
+  max_single_weight: 0.50  # 提高单币种限制
+  max_gross_exposure: 1.0
+  drawdown_trigger: 0.20  # 提高回撤触发
+  drawdown_delever: 0.80  # 减少 delever
+
+rebalance:
+  deadband_sideways: 0.20  # 提高 deadband
+  deadband_trending: 0.10
+  deadband_riskoff: 0.20
+
+execution:
+  mode: live
+  dry_run: false  # 真实交易
+  order_store_path: reports/orders.sqlite
+  kill_switch_path: reports/kill_switch.json
+  reconcile_status_path: reports/reconcile_status.json
+  okx_exp_time_ms: 1500
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+
+  # live preflight
+  preflight_enabled: false  # 禁用 preflight 检查
+  preflight_max_pages: 5
+  max_status_age_sec: 180
+  preflight_fail_action: sell_only
+
+  # state-alignment patch when reconcile shows base/usdt mismatch
+  preflight_bootstrap_patch_enabled: false
+
+  split_orders: 1
+  split_interval_sec: 1
+  max_hourly_volume_pct: 0.20  # 提高限制
+  slippage_db_path: reports/slippage.sqlite
+  fee_bps: 6
+  slippage_bps: 5
+
+budget:
+  # 完全禁用 budget 限制
+  live_equity_cap_usdt: 20.0
+  min_trade_notional_base: 0.1  # 极低的最小交易金额
+  min_trade_notional_multiplier_exceeded: 1.0
+  min_trade_notional_cap_abs: 100.0
+  min_trade_notional_cap_equity_ratio: 0.10
+  small_trade_median_threshold_abs: 1.0
+  small_trade_median_threshold_equity_ratio: 0.01
+  small_trade_ratio_threshold: 1.0  # 允许100%小交易
+  min_fills_for_second_stage: 0
+  deadband_multiplier_exceeded: 1.0
+  deadband_cap: 0.50
+  action_enabled: false  # ⚠️ 关键：禁用 budget 限制！
+  turnover_budget_per_day: null
+  cost_budget_bps_per_day: null
+
+backtest:
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  cost_model: default  # 使用默认成本
+  cost_stats_dir: reports/cost_stats
+  fee_quantile: p50
+  slippage_quantile: p50
+  min_fills_global: 0
+  min_fills_bucket: 0
+  max_stats_age_days: 7

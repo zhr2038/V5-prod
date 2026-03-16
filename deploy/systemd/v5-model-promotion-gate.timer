@@ -1,0 +1,12 @@
+[Unit]
+Description=Run V5 ML Promotion Gate at 00:40
+
+[Timer]
+OnCalendar=*-*-* 00:40:00
+Persistent=true
+AccuracySec=60s
+RandomizedDelaySec=120s
+Unit=v5-model-promotion-gate.service
+
+[Install]
+WantedBy=timers.target

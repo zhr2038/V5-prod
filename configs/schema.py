@@ -1,0 +1,778 @@
+from __future__ import annotations
+
+from enum import Enum
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class RegimeState(str, Enum):
+    TRENDING = "Trending"
+    SIDEWAYS = "Sideways"
+    RISK_OFF = "Risk-Off"
+
+
+class ExchangeConfig(BaseModel):
+    name: str = Field(default="okx", description="Exchange name")
+    api_key: Optional[str] = Field(default=None)
+    api_secret: Optional[str] = Field(default=None)
+    passphrase: Optional[str] = Field(default=None)
+    testnet: bool = False
+
+
+class UniverseConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Enable dynamic universe selection")
+    use_universe_symbols: bool = Field(default=False, description="Use universe output as trading symbols")
+    include_symbols: List[str] = Field(default_factory=list, description="Always include these symbols when use_universe_symbols=true (e.g. BTC/USDT).")
+    exclude_symbols: List[str] = Field(default_factory=list, description="Always exclude these symbols from universe output.")
+    cache_path: str = Field(default="reports/universe_cache.json")
+    cache_ttl_sec: int = Field(default=3600, ge=0)
+
+    top_n_market_cap: int = Field(default=30, ge=1)
+    min_24h_quote_volume_usdt: float = Field(default=5_000_000.0, ge=0)
+    # Optional tradability filter: drop instruments whose quoted spread is too wide.
+    max_spread_bps: Optional[float] = Field(default=None, ge=0)
+
+    blacklist_path: str = Field(default="configs/blacklist.json")
+    exclude_stablecoins: bool = True
+
+    # Step-2: refine liquidity ranking using per-instrument ticker (more reliable than batch tickers on some mirrors).
+    refine_with_single_ticker: bool = Field(default=False)
+    refine_single_ticker_max_candidates: int = Field(default=200, ge=1)
+    refine_single_ticker_sleep_sec: float = Field(default=0.02, ge=0)
+    min_data_coverage_ratio: float = Field(default=0.80, ge=0.0, le=1.0)
+    require_btc_benchmark: bool = Field(default=True)
+
+
+class AlphaWeights(BaseModel):
+    f1_mom_5d: float = 0.25
+    f2_mom_20d: float = 0.25
+    f3_vol_adj_ret_20d: float = 0.20
+    f4_volume_expansion: float = 0.15
+    f5_rsi_trend_confirm: float = 0.15
+
+    @field_validator("f1_mom_5d", "f2_mom_20d", "f3_vol_adj_ret_20d", "f4_volume_expansion", "f5_rsi_trend_confirm")
+    @classmethod
+    def _finite(cls, v: float) -> float:
+        v = float(v)
+        if v != v or v in (float("inf"), float("-inf")):
+            raise ValueError("weight must be finite")
+        return v
+
+    @model_validator(mode='after')
+    def _check_sum(self):
+        """验证权重总和接近1.0（允许0.3的误差，仅警告）"""
+        total = (
+            self.f1_mom_5d + 
+            self.f2_mom_20d + 
+            self.f3_vol_adj_ret_20d + 
+            self.f4_volume_expansion + 
+            self.f5_rsi_trend_confirm
+        )
+        if abs(total - 1.0) > 0.3:  # 放宽到30%误差
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Alpha weights sum to {total:.2f} (expected ~1.0). "
+                f"This may be intentional for multi-strategy mode."
+            )
+        return self
+
+
+class Alpha158OverlayWeights(BaseModel):
+    # Qlib Alpha158 风格补充因子权重（用于 overlay score）
+    f6_corr_pv_10: float = 0.15
+    f7_cord_10: float = 0.15
+    f8_rsqr_10: float = 0.20
+    f9_rank_20: float = 0.15
+    f10_imax_14: float = -0.05
+    f11_imin_14: float = 0.05
+    f12_imxd_14: float = 0.35
+
+
+class Alpha158OverlayConfig(BaseModel):
+    enabled: bool = Field(default=True, description="Enable Alpha158-style factor overlay")
+    blend_weight: float = Field(default=0.35, ge=0, le=1, description="Blend ratio of overlay score into final score")
+    weights: Alpha158OverlayWeights = Field(default_factory=Alpha158OverlayWeights)
+
+
+class TopkDropoutConfig(BaseModel):
+    enabled: bool = Field(default=True, description="Enable TopkDropout-style limited replacement")
+    topk_override: Optional[int] = Field(default=None, ge=1, le=200)
+    n_drop_per_cycle: int = Field(default=2, ge=1, le=50)
+    hold_cycles: int = Field(default=2, ge=1, le=200)
+    state_path: str = Field(default="reports/topk_dropout_state.json")
+
+
+class DynamicICWeightingConfig(BaseModel):
+    enabled: bool = Field(default=True)
+    ic_monitor_path: str = Field(default="reports/alpha_ic_monitor.json")
+    min_abs_ic: float = Field(default=0.003, ge=0, le=1)
+    fallback_to_static: bool = Field(default=True)
+
+
+class MLFactorLiveConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Blend promoted ML factor predictions into alpha scores")
+    ml_weight: float = Field(default=0.20, ge=0.0, le=1.0, description="ML overlay blend weight")
+    traditional_weight: float = Field(default=0.80, ge=0.0, le=1.0, description="Legacy display field for config readability")
+    online_control_enabled: bool = Field(
+        default=True,
+        description="Automatically downweight or shadow ML overlay based on recent online attribution",
+    )
+    online_control_24h_min_points: int = Field(
+        default=6,
+        ge=1,
+        le=200,
+        description="Minimum attribution points required before 24h online control can downweight ML",
+    )
+    online_control_24h_min_coverage_hours: float = Field(
+        default=18.0,
+        ge=1.0,
+        le=24.0,
+        description="Minimum lookback coverage required before 24h online control can downweight ML",
+    )
+    online_control_48h_min_points: int = Field(
+        default=12,
+        ge=1,
+        le=400,
+        description="Minimum attribution points required before 48h online control can switch ML to shadow mode",
+    )
+    online_control_48h_min_coverage_hours: float = Field(
+        default=36.0,
+        ge=1.0,
+        le=48.0,
+        description="Minimum lookback coverage required before 48h online control can switch ML to shadow mode",
+    )
+    online_control_negative_24h_bps: float = Field(
+        default=0.0,
+        description="Downweight ML when rolling 24h top-N delta is below this threshold in bps",
+    )
+    online_control_negative_48h_bps: float = Field(
+        default=0.0,
+        description="Shadow ML when rolling 48h top-N delta is below this threshold in bps",
+    )
+    online_control_downweight_ml_weight: float = Field(
+        default=0.08,
+        ge=0.0,
+        le=1.0,
+        description="Effective ML weight when 24h online attribution is negative",
+    )
+    overlay_transform: str = Field(
+        default="tanh",
+        description="Transform applied to ML overlay score before blending: tanh, clip, none",
+    )
+    overlay_transform_scale: float = Field(
+        default=1.6,
+        gt=0.0,
+        le=10.0,
+        description="Scale parameter for tanh overlay transform",
+    )
+    overlay_transform_max_abs: float = Field(
+        default=1.6,
+        gt=0.0,
+        le=10.0,
+        description="Maximum absolute ML overlay contribution before blend",
+    )
+    model_path: str = Field(default="models/ml_factor_model")
+    active_model_pointer_path: str = Field(default="models/ml_factor_model_active.txt")
+    promotion_decision_path: str = Field(default="reports/model_promotion_decision.json")
+    runtime_status_path: str = Field(default="reports/ml_runtime_status.json")
+    impact_summary_path: str = Field(default="reports/ml_overlay_impact.json")
+    impact_history_path: str = Field(default="reports/ml_overlay_impact_history.jsonl")
+    impact_state_path: str = Field(default="reports/ml_overlay_impact_state.json")
+    impact_eval_top_n: int = Field(default=3, ge=1, le=20)
+    require_promotion_passed: bool = Field(default=True, description="Only use models that passed promotion gate")
+    max_model_age_hours: int = Field(default=72, ge=1, le=24 * 30)
+    min_symbols: int = Field(default=3, ge=1, le=500)
+    use_robust_zscore: bool = Field(default=True)
+
+
+class MeanReversionConfig(BaseModel):
+    enabled: bool = Field(default=True, description="Enable mean-reversion strategy inside multi-strategy mode")
+    allocation: float = Field(default=0.25, ge=0.0, le=1.0, description="Base capital allocation before regime adjustment")
+    allocation_multiplier_trending: float = Field(default=0.70, ge=0.0, le=3.0)
+    allocation_multiplier_sideways: float = Field(default=1.20, ge=0.0, le=3.0)
+    allocation_multiplier_risk_off: float = Field(default=0.90, ge=0.0, le=3.0)
+    rsi_period: int = Field(default=14, ge=2, le=100)
+    rsi_oversold: float = Field(default=28.0, ge=1.0, le=50.0)
+    rsi_overbought: float = Field(default=72.0, ge=50.0, le=99.0)
+    bb_period: int = Field(default=20, ge=5, le=200)
+    bb_std: float = Field(default=2.0, gt=0.0, le=10.0)
+    position_size_pct: float = Field(default=0.25, ge=0.0, le=1.0)
+    mean_rev_threshold: float = Field(default=0.025, ge=0.0, le=1.0)
+    volume_dry_ratio: float = Field(default=0.80, ge=0.1, le=2.0)
+    buy_score_multiplier: float = Field(default=0.75, ge=0.0, le=2.0)
+    sell_score_multiplier: float = Field(default=1.00, ge=0.0, le=2.0)
+
+    @model_validator(mode="after")
+    def _check_rsi_bounds(self):
+        if self.rsi_oversold >= self.rsi_overbought:
+            raise ValueError("rsi_oversold must be < rsi_overbought")
+        return self
+
+
+class AlphaConfig(BaseModel):
+    weights: AlphaWeights = Field(default_factory=AlphaWeights)
+    long_top_pct: float = Field(default=0.20, gt=0, le=1)
+
+    # Lightweight portfolio optimizer (Qlib-inspired):
+    # blend confidence weights with previous weights to reduce churn.
+    optimizer_enabled: bool = Field(default=False)
+    optimizer_prev_weight_penalty: float = Field(default=0.35, ge=0, le=1)
+    optimizer_min_weight_floor: float = Field(default=0.0, ge=0, le=0.2)
+    optimizer_state_path: str = Field(default="reports/portfolio_optimizer_state.json")
+
+    # Qlib Alpha158 风格补充层
+    alpha158_overlay: Alpha158OverlayConfig = Field(default_factory=Alpha158OverlayConfig)
+
+    # TopkDropout-style 控换手
+    topk_dropout: TopkDropoutConfig = Field(default_factory=TopkDropoutConfig)
+
+    # 动态IC权重（基于 reports/alpha_ic_monitor.json）
+    dynamic_ic_weighting: DynamicICWeightingConfig = Field(default_factory=DynamicICWeightingConfig)
+    ml_factor: MLFactorLiveConfig = Field(default_factory=MLFactorLiveConfig)
+    mean_reversion: MeanReversionConfig = Field(default_factory=MeanReversionConfig)
+
+    # 最低分阈值：避免买入负分币种
+    min_score_threshold: float = Field(default=0.0, description="Minimum alpha score required to enter a position (0=disabled)")
+
+    # When fused signals are available, use fused scores for weight sizing too
+    # (not only for symbol selection). This avoids selection/weighting mismatch.
+    use_fused_score_for_weighting: bool = Field(default=True)
+
+    # Research/ops: optionally override weights by regime from a JSON file.
+    dynamic_weights_by_regime_path: Optional[str] = Field(default=None, description="Path to reports/alpha_dynamic_weights_by_regime.json")
+    dynamic_weights_by_regime_enabled: bool = Field(default=False)
+
+    # 多策略模式
+    use_multi_strategy: bool = Field(default=False, description="Enable multi-strategy mode (trend + mean reversion)")
+    multi_strategy_conflict_penalty_enabled: bool = Field(
+        default=True,
+        description="Downweight fused signals when buy/sell strategies disagree on the same symbol",
+    )
+    multi_strategy_conflict_dominance_ratio: float = Field(
+        default=1.35,
+        ge=1.0,
+        le=5.0,
+        description="Required confidence dominance ratio to keep the winning side when strategies conflict",
+    )
+    multi_strategy_conflict_min_confidence: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description="Minimum dominant confidence required to keep a conflicted fused signal",
+    )
+    multi_strategy_conflict_penalty_strength: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        description="Strength of the score/confidence attenuation applied to conflicted fused signals",
+    )
+    multi_strategy_score_transform: str = Field(
+        default="tanh",
+        description="Compression mode for raw multi-strategy scores before they enter ranking/gating",
+    )
+    multi_strategy_score_transform_scale: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=10.0,
+        description="Scale used by the multi-strategy score compression function",
+    )
+
+    @field_validator("multi_strategy_score_transform")
+    @classmethod
+    def _validate_multi_strategy_score_transform(cls, v: str) -> str:
+        value = str(v or "tanh").strip().lower()
+        if value not in {"none", "clip", "tanh"}:
+            raise ValueError("multi_strategy_score_transform must be one of: none, clip, tanh")
+        return value
+
+
+class RegimeConfig(BaseModel):
+    atr_threshold: float = Field(default=0.02, gt=0, description="ATR% threshold above which trend regime allowed")
+    atr_very_low: float = Field(default=0.008, gt=0, description="ATR% below which sideways")
+    pos_mult_trending: float = 1.2
+    pos_mult_sideways: float = 0.6
+    pos_mult_risk_off: float = 0.3
+
+    # Ensemble方法配置
+    use_ensemble: bool = Field(default=False, description="使用Ensemble方法（HMM+情绪）替代传统MA")
+    use_hmm: bool = Field(default=False, description="启用HMM模型")
+    hmm_weight: float = Field(default=0.40, ge=0, le=1, description="HMM权重")
+    funding_weight: float = Field(default=0.35, ge=0, le=1, description="资金费率情绪权重")
+    rss_weight: float = Field(default=0.25, ge=0, le=1, description="RSS新闻情绪权重")
+    funding_signal_max_age_minutes: int = Field(default=180, ge=1, le=1440)
+    rss_signal_max_age_minutes: int = Field(default=180, ge=1, le=1440)
+    funding_trending_threshold: float = Field(default=0.10, ge=0.0, le=1.0)
+    funding_risk_off_threshold: float = Field(default=-0.10, ge=-1.0, le=0.0)
+    funding_breadth_threshold: float = Field(default=0.68, ge=0.5, le=1.0)
+    funding_extreme_sentiment_threshold: float = Field(default=0.12, ge=0.0, le=1.0)
+    funding_extreme_breadth_threshold: float = Field(default=0.55, ge=0.5, le=1.0)
+
+    # 情绪驱动的风险状态修正（避免在强反弹初期被长期锁死）
+    sentiment_regime_override_enabled: bool = Field(default=True)
+    sentiment_riskoff_relax_threshold: float = Field(default=0.65, ge=-1.0, le=1.0)
+    sentiment_riskoff_harden_threshold: float = Field(default=-0.65, ge=-1.0, le=1.0)
+    ma_gap_relax_threshold: float = Field(default=0.03, ge=0.0, le=0.2, description="(ma60-ma20)/ma60 小于该值时允许情绪放松Risk-Off")
+
+    # Regime monitor: persist votes and detect silent failures/stuck states.
+    regime_monitor_enabled: bool = Field(default=True)
+    regime_history_db_path: str = Field(default="reports/regime_history.db")
+    regime_sideways_prob_warn_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    regime_sideways_consecutive_warn: int = Field(default=10, ge=2, le=200)
+    regime_monitor_keep_rows: int = Field(default=5000, ge=100, le=500000)
+
+    @model_validator(mode='after')
+    def _validate_funding_thresholds(self):
+        if self.funding_risk_off_threshold >= 0:
+            raise ValueError("funding_risk_off_threshold must be < 0")
+        if self.funding_trending_threshold <= 0:
+            raise ValueError("funding_trending_threshold must be > 0")
+        if self.funding_extreme_breadth_threshold > self.funding_breadth_threshold:
+            raise ValueError("funding_extreme_breadth_threshold must be <= funding_breadth_threshold")
+        return self
+
+
+class RiskConfig(BaseModel):
+    max_single_weight: float = Field(default=0.25, gt=0, le=1)
+    max_gross_exposure: float = Field(default=1.0, gt=0, le=1.0)
+    drawdown_trigger: float = Field(default=0.08, gt=0, le=1)
+    drawdown_delever: float = Field(default=0.50, gt=0, le=1)
+    # Hard cap for number of selected symbols. When set, overrides auto-risk level cap.
+    max_positions_override: Optional[int] = Field(default=None, ge=1, le=20)
+
+    @model_validator(mode='after')
+    def _check_drawdown_logic(self):
+        """验证回撤参数的逻辑合理性"""
+        if self.drawdown_delever >= 1.0:
+            raise ValueError("drawdown_delever must be < 1.0 (it's a reduction ratio, not leverage)")
+        if self.drawdown_trigger >= self.max_gross_exposure:
+            raise ValueError("drawdown_trigger should be less than max_gross_exposure")
+        return self
+
+
+class RebalanceConfig(BaseModel):
+    # no-trade region (deadband) by regime
+    deadband_sideways: float = Field(default=0.05, ge=0, le=1)
+    deadband_trending: float = Field(default=0.03, ge=0, le=1)
+    deadband_riskoff: float = Field(default=0.05, ge=0, le=1)
+
+    # New position banding: effective_deadband = deadband * multiplier when current weight is ~0
+    new_position_deadband_multiplier: float = Field(default=2.0, ge=1.0, le=5.0)
+    new_position_weight_eps: float = Field(default=0.001, ge=0.0, le=0.05, description="Treat current weight < eps as new position")
+
+    # Close-only (tw==0) tuning: allow faster cleanup of stale holdings without increasing overall churn.
+    # effective_deadband_close = deadband * multiplier
+    close_only_deadband_multiplier: float = Field(default=0.5, ge=0.0, le=1.0)
+    close_only_weight_eps: float = Field(default=0.001, ge=0.0, le=0.05, description="Treat target weight < eps as close-only")
+
+
+class PeakDrawdownExitConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Enable profit-taking exits based on retrace from peak profit")
+
+    tier1_profit_pct: float = Field(default=0.08, ge=0.0, le=5.0)
+    tier1_retrace_pct: float = Field(default=0.025, ge=0.0, le=1.0)
+    tier1_sell_pct: float = Field(default=0.33, ge=0.0, le=1.0)
+
+    tier2_profit_pct: float = Field(default=0.15, ge=0.0, le=5.0)
+    tier2_retrace_pct: float = Field(default=0.04, ge=0.0, le=1.0)
+    tier2_sell_pct: float = Field(default=0.50, ge=0.0, le=1.0)
+
+    tier3_profit_pct: float = Field(default=0.25, ge=0.0, le=5.0)
+    tier3_retrace_pct: float = Field(default=0.06, ge=0.0, le=1.0)
+    tier3_sell_pct: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class ExecutionConfig(BaseModel):
+    # Mode selector (preferred). Keep dry_run for backward compatibility.
+    mode: str = Field(default="dry_run", description="dry_run|live")
+    dry_run: bool = True
+    collect_ml_training_data: bool = Field(
+        default=True,
+        description="Allow pipeline cycles to persist ML feature snapshots and fill labels",
+    )
+    ml_research_use_stable_universe: bool = Field(
+        default=False,
+        description="Collect ML snapshots from a stable research universe instead of only the live market_data keys",
+    )
+    ml_research_universe_path: Optional[str] = Field(
+        default=None,
+        description="Optional JSON file with {symbols:[...]} used as the stable ML research universe",
+    )
+    ml_research_symbols: List[str] = Field(
+        default_factory=list,
+        description="Optional explicit stable ML research symbols that override the universe file",
+    )
+    ml_research_include_config_symbols: bool = Field(
+        default=True,
+        description="Always include AppConfig.symbols in the ML research universe",
+    )
+    ml_research_lookback_bars: int = Field(
+        default=600,
+        ge=50,
+        le=5000,
+        description="OHLCV bars to load for ML snapshot feature calculation when backfilling from cache/provider",
+    )
+
+    # Stores / safety files
+    order_store_path: str = Field(default="reports/orders.sqlite")
+    kill_switch_path: str = Field(default="reports/kill_switch.json")
+    reconcile_status_path: str = Field(default="reports/reconcile_status.json")
+
+    # Reconcile behavior (G1)
+    reconcile_abs_usdt_tol: float = Field(default=50.0, ge=0, description="USDT drift tolerance used by live preflight reconcile.")
+    reconcile_dust_usdt_ignore: float = Field(default=1.0, ge=0, description="Ignore base mismatches whose USDT value is below this (best-effort using mid).")
+    reconcile_ccy_mode: str = Field(default="universe_only", description="universe_only|all")
+
+    # Live preflight catch-up (A)
+    preflight_enabled: bool = Field(default=True)
+    preflight_max_pages: int = Field(default=5, ge=1)
+    max_status_age_sec: int = Field(default=180, ge=1)
+    preflight_fail_action: str = Field(default="sell_only", description="sell_only|abort")
+    
+    # Allow trading on small reconcile drift (useful for initialization)
+    allow_trade_on_small_reconcile_drift: bool = Field(default=False, description="Allow trading when reconcile has small drift (not hard failures)")
+
+    # Optional: controlled exchange->local bootstrap patch (live-only)
+    preflight_bootstrap_patch_enabled: bool = Field(default=False, description="When reconcile fails (base/usdt mismatch), patch local cash/qty from exchange as a state-alignment step.")
+    preflight_bootstrap_patch_max_total_usdt: float = Field(default=50.0, ge=0, description="Safety cap: if estimated total drift exceeds this, do not patch.")
+    preflight_bootstrap_patch_min_interval_sec: int = Field(default=300, ge=0, description="Min seconds between patches to avoid thrash.")
+
+    # OKX request expiration (ms) for trading endpoints (optional).
+    # Note: OKX expects expTime as an epoch-millisecond timestamp.
+    # We treat values < 1e12 as a delta-ms from now for convenience.
+    okx_exp_time_ms: Optional[int] = Field(default=1500, ge=1)
+
+    # Borrow safety (live only)
+    abort_on_borrow: bool = Field(default=True, description="If OKX balance shows any liabilities/negative eq, abort preflight")
+    borrow_liab_eps: float = Field(default=1e-6, ge=0)
+    borrow_neg_eq_eps: float = Field(default=1e-6, ge=0)
+    borrow_block_mode: str = Field(default="global_abort", description="global_abort|symbol_only")
+
+    # Account config safety (OKX API): enforce account mode/settings before allowing buys.
+    enforce_account_config_check: bool = Field(default=True)
+    required_acct_lv: str = Field(default="1", description="Expected account mode. '1'=Spot mode")
+    required_pos_mode: str = Field(default="net_mode", description="Expected posMode from /account/config")
+    require_auto_loan_false: bool = Field(default=True, description="Reject buys if account config shows autoLoan=true")
+    auto_fix_auto_loan: bool = Field(default=False, description="Try set-auto-loan=false before rejecting (acctLv 3/4 only)")
+    require_spot_borrow_disabled: bool = Field(default=False, description="Reject buys if enableSpotBorrow=true")
+    ensure_spot_auto_repay_true: bool = Field(default=True, description="When spot borrow is enabled, ensure auto repay=true")
+    require_fee_type_zero: bool = Field(default=False, description="Reject buys if feeType!=0 (buy fee in quote can overrun quote balance)")
+    auto_fix_fee_type_zero: bool = Field(default=False, description="Try set feeType=0 before rejecting buys")
+
+    # Per-order quote balance guard: never submit buy larger than available quote balance.
+    buy_quote_balance_safety_check: bool = Field(default=True)
+    buy_quote_reserve_usdt: float = Field(default=0.5, ge=0)
+    buy_quote_slack_ratio: float = Field(default=0.001, ge=0, le=0.1)
+
+    # Dust thresholds used by pipeline current-position recognition.
+    # For small accounts, keep qty threshold tiny and rely on value threshold.
+    dust_qty_threshold: float = Field(default=1e-6, ge=0)
+    dust_value_threshold: float = Field(default=0.5, ge=0)
+
+    # If partial REBALANCE sell falls below exchange minSz, optionally auto-upgrade
+    # to full close (when full position itself is tradable) to avoid repeated DUST rejects.
+    auto_upgrade_dust_sell_to_close: bool = Field(default=True)
+
+    # Hard rule (optional): if a held symbol is absent from current scored list, force CLOSE_LONG.
+    force_close_unscored_positions: bool = Field(default=False)
+
+    # Anti-chase controls for existing positions (avoid buying far above own average entry).
+    anti_chase_enabled: bool = Field(default=False)
+    anti_chase_max_entry_premium_pct: float = Field(default=0.015, ge=0, le=1)
+    anti_chase_max_add_notional_ratio: float = Field(default=0.25, ge=0, le=10)
+
+    # Entry guard for NEW OPEN_LONG orders.
+    # Uses real-time top-of-book (ask/bid) vs signal_price to avoid chasing delayed signals.
+    open_long_entry_guard_enabled: bool = Field(default=False)
+    open_long_max_signal_premium_pct: float = Field(default=0.006, ge=0, le=1)
+    open_long_max_spread_bps: float = Field(default=35.0, ge=0, le=10000)
+    open_long_entry_guard_fail_open: bool = Field(
+        default=True,
+        description="If top-of-book is unavailable, skip guard (true) or reject OPEN_LONG (false)",
+    )
+
+    # Require fused strategy signal file for buy decisions. If missing, block buy orders.
+    require_fused_signals_for_buy: bool = Field(default=False)
+
+    # Ops convenience: allow controlled auto-clear of kill-switch when reconcile/ledger are OK.
+    # Default False for safety.
+    auto_clear_kill_switch_if_ok: bool = Field(default=False)
+
+    # (Optional / future) borrow prevention knobs (kept for config compatibility)
+    borrow_prevention: bool = Field(default=False)
+    check_fee_currency_balance: bool = Field(default=False)
+    high_risk_blacklist_path: str = Field(default="configs/borrow_prevention_rules.json")
+
+    # Last-arm safety env var (required for live)
+    live_arm_env: str = Field(default="V5_LIVE_ARM")
+    live_arm_value: str = Field(default="YES")
+
+    split_orders: int = Field(default=3, ge=1, le=10)
+    split_interval_sec: float = Field(default=3.0, ge=0)
+    max_hourly_volume_pct: float = Field(default=0.05, gt=0, le=1)
+    slippage_db_path: str = Field(default="reports/slippage.sqlite")
+
+    # Safety: prevent duplicate entries on the same symbol within cooldown window.
+    open_long_cooldown_minutes: int = Field(
+        default=10,
+        ge=0,
+        description="Block new OPEN_LONG buy if same symbol had FILLED OPEN_LONG within this many minutes (0=disable)",
+    )
+
+    # Rank-exit anti-churn controls.
+    rank_exit_max_rank: int = Field(
+        default=3,
+        ge=1,
+        le=50,
+        description="Trigger rank-exit when rank exceeds this threshold",
+    )
+    rank_exit_confirm_rounds: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description="Require N consecutive rounds beyond rank_exit_max_rank before exiting",
+    )
+    rank_exit_strict_mode: bool = Field(
+        default=False,
+        description="Ignore positive target weight and profit-based max-rank relaxation when rank-exit confirms",
+    )
+    rank_exit_reentry_cooldown_minutes: int = Field(
+        default=60,
+        ge=0,
+        le=24 * 60,
+        description="After a FILLED rank-exit sell, block OPEN_LONG re-entry for this many minutes",
+    )
+    peak_drawdown_exit: PeakDrawdownExitConfig = Field(default_factory=PeakDrawdownExitConfig)
+
+    # qlib-style hold threshold: avoid ultra-short churn exits.
+    # Applied in pipeline to rank_exit / regime_exit only (stop-loss exits are not delayed).
+    min_hold_minutes_before_rank_exit: int = Field(
+        default=90,
+        ge=0,
+        le=7 * 24 * 60,
+        description="Minimum holding minutes before rank-exit is allowed (0=disable)",
+    )
+    min_hold_minutes_before_regime_exit: int = Field(
+        default=60,
+        ge=0,
+        le=7 * 24 * 60,
+        description="Minimum holding minutes before regime-exit is allowed (0=disable)",
+    )
+
+    # Proactive churn cap: limit effective rebalance turnover per cycle.
+    max_rebalance_turnover_per_cycle: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=2.0,
+        description="Cap effective rebalance turnover ratio per cycle (max(buy_notional, sell_notional)/equity)",
+    )
+
+    # Cost-aware entry gate (score proxy > estimated round-trip costs).
+    cost_aware_entry_enabled: bool = Field(default=False)
+    cost_aware_score_per_bps: float = Field(
+        default=0.0025,
+        ge=0,
+        le=0.1,
+        description="Convert cost bps into required additional score",
+    )
+    cost_aware_min_score_floor: float = Field(
+        default=0.08,
+        ge=-5,
+        le=10,
+        description="Base score floor for cost-aware entry gate",
+    )
+    cost_aware_roundtrip_cost_bps: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=10000,
+        description="Override round-trip cost bps for cost-aware gate; default=2*(fee_bps+slippage_bps)",
+    )
+    low_price_entry_guard_enabled: bool = Field(default=False)
+    low_price_entry_threshold_usdt: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1000.0,
+        description="Treat symbols below this spot price as low-price/high-friction entries",
+    )
+    low_price_entry_extra_score_floor: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10.0,
+        description="Extra required score added for low-price OPEN_LONG entries",
+    )
+    low_price_entry_extra_cost_bps: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=10000.0,
+        description="Additional round-trip cost bps charged in cost-aware gate for low-price OPEN_LONG entries",
+    )
+
+    # Negative-expectancy symbol cooldown (root-cause churn suppressor)
+    negative_expectancy_cooldown_enabled: bool = Field(default=True)
+    negative_expectancy_lookback_hours: int = Field(default=24, ge=1, le=24 * 30)
+    negative_expectancy_min_closed_cycles: int = Field(default=4, ge=1, le=200)
+    negative_expectancy_threshold_usdt: float = Field(default=0.0, ge=-1000, le=1000)
+    negative_expectancy_cooldown_hours: int = Field(default=24, ge=1, le=24 * 30)
+    negative_expectancy_state_path: str = Field(default="reports/negative_expectancy_cooldown.json")
+    negative_expectancy_score_penalty_enabled: bool = Field(default=True)
+    negative_expectancy_score_penalty_min_closed_cycles: int = Field(default=2, ge=1, le=200)
+    negative_expectancy_score_penalty_floor_bps: float = Field(
+        default=5.0,
+        ge=-10000,
+        le=10000,
+        description="Apply score penalty when recent realized expectancy is below this threshold in bps",
+    )
+    negative_expectancy_score_penalty_per_bps: float = Field(
+        default=0.015,
+        ge=0.0,
+        le=10.0,
+        description="Score penalty added per 1 bps of recent expectancy shortfall",
+    )
+    negative_expectancy_score_penalty_max: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=10.0,
+        description="Cap for recent negative expectancy score penalty",
+    )
+    negative_expectancy_open_block_enabled: bool = Field(default=True)
+    negative_expectancy_open_block_min_closed_cycles: int = Field(default=2, ge=1, le=200)
+    negative_expectancy_open_block_floor_bps: float = Field(
+        default=5.0,
+        ge=-10000,
+        le=10000,
+        description="Block new OPEN_LONG orders when recent realized expectancy stays below this threshold in bps",
+    )
+
+    order_state_machine_path: str = Field(
+        default="reports/order_state_machine.json",
+        description="Path for execution arbitration state machine persistence",
+    )
+
+    # dry-run cost model (bps)
+    fee_bps: float = Field(default=6.0, ge=0)
+    slippage_bps: float = Field(default=5.0, ge=0)
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_norm(cls, v: str) -> str:
+        vv = str(v or "dry_run").strip().lower()
+        if vv not in {"dry_run", "live"}:
+            raise ValueError("execution.mode must be 'dry_run' or 'live'")
+        return vv
+
+    @field_validator("reconcile_ccy_mode")
+    @classmethod
+    def _reconcile_ccy_mode(cls, v: str) -> str:
+        vv = str(v or "universe_only").strip().lower()
+        if vv not in {"universe_only", "all"}:
+            raise ValueError("execution.reconcile_ccy_mode must be 'universe_only' or 'all'")
+        return vv
+
+    @field_validator("preflight_fail_action")
+    @classmethod
+    def _preflight_fail_action(cls, v: str) -> str:
+        vv = str(v or "sell_only").strip().lower()
+        if vv not in {"sell_only", "abort", "allow"}:
+            raise ValueError("execution.preflight_fail_action must be 'sell_only', 'abort', or 'allow'")
+        return vv
+
+    @field_validator("borrow_block_mode")
+    @classmethod
+    def _borrow_block_mode(cls, v: str) -> str:
+        vv = str(v or "global_abort").strip().lower()
+        if vv not in {"global_abort", "symbol_only"}:
+            raise ValueError("execution.borrow_block_mode must be 'global_abort' or 'symbol_only'")
+        return vv
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_pre(cls, data: object) -> object:
+        # Backward-compat: if mode not present, derive from dry_run.
+        if isinstance(data, dict) and "mode" not in data and "dry_run" in data:
+            d = dict(data)
+            d["mode"] = "dry_run" if bool(d.get("dry_run", True)) else "live"
+            return d
+        return data
+
+
+class BacktestConfig(BaseModel):
+    fee_bps: float = Field(default=6.0, ge=0)
+    slippage_bps: float = Field(default=5.0, ge=0)
+    one_bar_delay: bool = True
+    walk_forward_folds: int = Field(default=4, ge=1)
+    initial_equity_usdt: float = Field(default=20.0, gt=0)
+
+    # cost calibration (F2)
+    cost_model: str = Field(default="default", description="default|calibrated")
+    cost_stats_dir: str = Field(default="reports/cost_stats")
+    fee_quantile: str = Field(default="p75")
+    slippage_quantile: str = Field(default="p90")
+    min_fills_global: int = Field(default=30, ge=0)
+    min_fills_bucket: int = Field(default=10, ge=0)
+    max_stats_age_days: int = Field(default=7, ge=0)
+
+
+class BudgetConfig(BaseModel):
+    # Exchange min-order protection (works even when budget is not exceeded)
+    exchange_min_notional_enabled: bool = Field(default=True)
+    exchange_min_notional_slack_multiplier: float = Field(default=1.05, ge=1.0)
+
+    # F3.0: monitoring
+    turnover_budget_per_day: Optional[float] = Field(default=None, ge=0)
+    cost_budget_bps_per_day: Optional[float] = Field(default=None, ge=0)
+
+    # F3.1/F3.2: action (only takes effect when budget exceeded)
+    action_enabled: bool = Field(default=True)
+
+    # Stage-1: widen deadband
+    deadband_multiplier_exceeded: float = Field(default=1.5, ge=1.0)
+    deadband_cap: float = Field(default=0.15, ge=0, le=1)
+
+    # Stage-2: raise min_trade_notional to suppress small noisy rebalances
+    min_fills_for_second_stage: int = Field(default=5, ge=0)
+    min_trade_notional_base: float = Field(default=25.0, ge=0)
+    min_trade_notional_multiplier_exceeded: float = Field(default=2.0, ge=1.0)
+    min_trade_notional_cap_abs: float = Field(default=200.0, ge=0)
+    min_trade_notional_cap_equity_ratio: float = Field(default=0.01, ge=0, le=1)
+
+    # Optional: for live small-budget sampling, cap the equity used by sizing logic.
+    # This does NOT change reconcile/accounting; it only caps order sizing.
+    live_equity_cap_usdt: Optional[float] = Field(default=None, ge=0)
+
+    # Hard buy block (optional): when raw equity >= cap*ratio, block all buy orders (sell-only).
+    hard_buy_block_on_cap: bool = Field(default=False)
+    hard_buy_block_cap_ratio: float = Field(default=1.0, ge=0.5, le=2.0)
+
+    # Trigger metrics (computed from daily trades)
+    small_trade_ratio_threshold: float = Field(default=0.6, ge=0, le=1)
+    small_trade_median_threshold_abs: float = Field(default=10.0, ge=0)
+    small_trade_median_threshold_equity_ratio: float = Field(default=0.0025, ge=0, le=1)
+
+
+class AppConfig(BaseModel):
+    symbols: List[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
+    timeframe_main: str = "1h"
+    timeframe_aux: str = "4h"
+    exchange: ExchangeConfig = Field(default_factory=ExchangeConfig)
+    universe: UniverseConfig = Field(default_factory=UniverseConfig)
+    alpha: AlphaConfig = Field(default_factory=AlphaConfig)
+    regime: RegimeConfig = Field(default_factory=RegimeConfig)
+    risk: RiskConfig = Field(default_factory=RiskConfig)
+    rebalance: RebalanceConfig = Field(default_factory=RebalanceConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    backtest: BacktestConfig = Field(default_factory=BacktestConfig)
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
+
+    @field_validator("symbols")
+    @classmethod
+    def _symbols_format(cls, v: List[str]) -> List[str]:
+        out = []
+        for s in v or []:
+            s = str(s)
+            if "/" not in s:
+                raise ValueError(f"invalid symbol format: {s}")
+            out.append(s)
+        if not out:
+            raise ValueError("symbols cannot be empty")
+        return out

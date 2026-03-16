@@ -1,0 +1,12 @@
+[Unit]
+Description=Run V5 20U small-budget LIVE hourly (closed window)
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=30s
+RandomizedDelaySec=20s
+Unit=v5-live-20u.user.service
+
+[Install]
+WantedBy=timers.target

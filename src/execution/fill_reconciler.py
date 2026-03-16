@@ -1,0 +1,242 @@
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.execution.fill_store import FillStore
+from src.execution.okx_private_client import OKXPrivateClient
+from src.execution.order_store import OrderStore
+
+
+log = logging.getLogger(__name__)
+
+
+def _dec(x: Optional[str]) -> Decimal:
+    if x is None or x == "":
+        return Decimal("0")
+    return Decimal(str(x))
+
+
+@dataclass
+class FillAgg:
+    """FillAgg类"""
+    inst_id: str
+    cl_ord_id: Optional[str]
+    ord_id: Optional[str]
+
+    acc_fill_sz: Decimal
+    vwap_px: Optional[Decimal]
+    fees_by_ccy: Dict[str, Decimal]
+
+
+class FillReconciler:
+    """Reconcile OKX fills into OrderStore.
+
+    Rules:
+    - Association priority: clOrdId -> ordId -> ignore (keep only in FillStore)
+    - State semantics:
+      - If any fill exists => at least PARTIAL
+      - Terminal state is authoritative from get_order.state (filled/canceled/mmp_canceled)
+    - Fees are aggregated per feeCcy.
+
+    Incremental processing:
+    - Uses FillStore.fill_processed (S1) to ensure each (inst_id, trade_id) is processed once.
+    """
+
+    def __init__(self, *, fill_store: FillStore, order_store: OrderStore, okx: Optional[OKXPrivateClient] = None):
+        self.fill_store = fill_store
+        self.order_store = order_store
+        self.okx = okx
+
+    def _load_unprocessed_fills(self, limit: int = 2000) -> List[Dict[str, Any]]:
+        return self.fill_store.list_unprocessed(limit=limit)
+
+    def _aggregate(self, fills: List[Dict[str, Any]]) -> List[FillAgg]:
+        # group key: (inst_id, cl_ord_id or '', ord_id or '') but we keep both
+        groups: Dict[Tuple[str, Optional[str], Optional[str]], List[Dict[str, Any]]] = {}
+        for f in fills:
+            k = (str(f.get("inst_id")), f.get("cl_ord_id"), f.get("ord_id"))
+            groups.setdefault(k, []).append(f)
+
+        aggs: List[FillAgg] = []
+        for (inst_id, clid, oid), xs in groups.items():
+            sum_sz = Decimal("0")
+            sum_px_sz = Decimal("0")
+            fees: Dict[str, Decimal] = {}
+
+            for it in xs:
+                sz = _dec(it.get("fill_sz"))
+                px = _dec(it.get("fill_px"))
+                if sz > 0 and px > 0:
+                    sum_sz += sz
+                    sum_px_sz += px * sz
+
+                ccy = it.get("fee_ccy")
+                fee = it.get("fee")
+                if ccy is not None and fee is not None and str(ccy) != "":
+                    fees[str(ccy)] = fees.get(str(ccy), Decimal("0")) + _dec(str(fee))
+
+            vwap = (sum_px_sz / sum_sz) if sum_sz > 0 else None
+            aggs.append(
+                FillAgg(
+                    inst_id=inst_id,
+                    cl_ord_id=str(clid) if clid else None,
+                    ord_id=str(oid) if oid else None,
+                    acc_fill_sz=sum_sz,
+                    vwap_px=vwap,
+                    fees_by_ccy=fees,
+                )
+            )
+
+        return aggs
+
+    def reconcile(self, *, limit: int = 2000, max_get_order_per_run: int = 20) -> Dict[str, Any]:
+        """Reconcile"""
+        fills = self._load_unprocessed_fills(limit=limit)
+        if not fills:
+            return {"new_fills": 0, "updated_orders": 0, "get_order_calls": 0, "fills_exported": 0, "export_errors": 0}
+
+        aggs = self._aggregate(fills)
+        updated = 0
+        get_calls = 0
+
+        # NOTE: processed marker is written *only after* successful export (trades/cost_events).
+        # This prevents data loss if exporter fails mid-run.
+
+        for a in aggs:
+            # Associate
+            row = None
+            if a.cl_ord_id:
+                row = self.order_store.get(a.cl_ord_id)
+            if row is None and a.ord_id:
+                row = self.order_store.get_by_ord_id(a.ord_id)
+
+            if row is None:
+                continue
+
+            clid = str(row.cl_ord_id)
+
+            # Always at least PARTIAL if fill exists
+            fee_json = json.dumps({k: str(v) for k, v in a.fees_by_ccy.items()}, ensure_ascii=False, separators=(",", ":"))
+            self.order_store.update_state(
+                clid,
+                new_state="PARTIAL" if a.acc_fill_sz > 0 else str(row.state),
+                acc_fill_sz=str(a.acc_fill_sz),
+                avg_px=(str(a.vwap_px) if a.vwap_px is not None else None),
+                fee=fee_json if a.fees_by_ccy else None,
+                event_type="FILL_AGG",
+            )
+            updated += 1
+
+            # Confirm terminal state via get_order when possible
+            if self.okx is not None and get_calls < int(max_get_order_per_run):
+                try:
+                    r = self.okx.get_order(inst_id=str(row.inst_id), ord_id=row.ord_id, cl_ord_id=row.cl_ord_id)
+                    get_calls += 1
+                    d = (r.data or {}).get("data") or []
+                    if isinstance(d, list) and d:
+                        st = str((d[0] or {}).get("state") or "")
+                        st_l = st.lower()
+                        if st_l in {"filled", "canceled", "cancelled", "mmp_canceled"}:
+                            mapped = "FILLED" if st_l == "filled" else "CANCELED"
+                            self.order_store.update_state(clid, new_state=mapped, last_query=r.data, event_type="ORDER_STATE")
+                except Exception as e:
+                    log.debug(f"get_order confirm failed for {clid}: {e}")
+
+        # Export per-fill trades/cost events and mark processed only after export.
+        exported = 0
+        export_errors = 0
+        try:
+            from src.reporting.fill_trade_exporter import export_fill
+        except Exception:
+            export_fill = None
+
+        # Cache per-run context for richer cost_events bucketing (regime/deadband/drift)
+        run_ctx_cache: Dict[str, Dict[str, Any]] = {}
+
+        def _load_run_ctx(run_id: str) -> Dict[str, Any]:
+            if run_id in run_ctx_cache:
+                return run_ctx_cache[run_id]
+            ctx: Dict[str, Any] = {"regime": None, "by_symbol": {}}
+            try:
+                import os
+                from pathlib import Path
+
+                p = Path(os.path.join("reports", "runs", str(run_id), "decision_audit.json"))
+                if p.exists():
+                    obj = json.loads(p.read_text(encoding="utf-8"))
+                    ctx["regime"] = obj.get("regime")
+                    # router_decisions entries often include: symbol, drift, deadband
+                    by_sym: Dict[str, Dict[str, Any]] = {}
+                    for it in (obj.get("router_decisions") or []):
+                        if not isinstance(it, dict):
+                            continue
+                        sym = it.get("symbol")
+                        if not sym:
+                            continue
+                        by_sym[str(sym)] = it
+                    ctx["by_symbol"] = by_sym
+            except Exception:
+                pass
+            run_ctx_cache[run_id] = ctx
+            return ctx
+
+        for f in fills:
+            inst_id = str(f.get("inst_id") or "")
+            trade_id = str(f.get("trade_id") or "")
+            if not inst_id or not trade_id:
+                continue
+
+            # associate for run_id/intent/window
+            row = None
+            clid_f = f.get("cl_ord_id")
+            oid_f = f.get("ord_id")
+            if clid_f:
+                row = self.order_store.get(str(clid_f))
+            if row is None and oid_f:
+                row = self.order_store.get_by_ord_id(str(oid_f))
+
+            if row is None or export_fill is None:
+                continue
+
+            try:
+                # enrich export with per-run regime and per-symbol deadband/drift when available
+                run_id = str(row.run_id)
+                symbol = str(inst_id).replace("-", "/")
+                ctx = _load_run_ctx(run_id)
+                sym_ctx = (ctx.get("by_symbol") or {}).get(symbol) if isinstance(ctx, dict) else None
+                export_fill(
+                    fill_ts_ms=int(f.get("ts_ms") or 0),
+                    inst_id=inst_id,
+                    side=str(f.get("side") or row.side or ""),
+                    fill_px=str(f.get("fill_px") or "0"),
+                    fill_sz=str(f.get("fill_sz") or "0"),
+                    fee=f.get("fee"),
+                    fee_ccy=f.get("fee_ccy"),
+                    run_id=run_id,
+                    intent=str(row.intent),
+                    window_start_ts=row.window_start_ts,
+                    window_end_ts=row.window_end_ts,
+                    run_dir=f"reports/runs/{row.run_id}",
+                    regime=(ctx.get("regime") if isinstance(ctx, dict) else None),
+                    deadband_pct=((sym_ctx or {}).get("deadband") if isinstance(sym_ctx, dict) else None),
+                    drift=((sym_ctx or {}).get("drift") if isinstance(sym_ctx, dict) else None),
+                    cl_ord_id=str(row.cl_ord_id),
+                    order_store_path=str(getattr(self.order_store, 'path', 'reports/orders.sqlite')),
+                )
+                self.fill_store.mark_processed(inst_id, trade_id)
+                exported += 1
+            except Exception:
+                export_errors += 1
+
+        return {
+            "new_fills": len(fills),
+            "updated_orders": updated,
+            "get_order_calls": int(get_calls),
+            "fills_exported": int(exported),
+            "export_errors": int(export_errors),
+        }

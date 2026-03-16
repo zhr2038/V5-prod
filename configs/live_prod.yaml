@@ -1,0 +1,380 @@
+# V5 正式上线配置
+# 从20U小资金测试切换到正常规模交易
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  api_key: ${EXCHANGE_API_KEY}
+  api_secret: ${EXCHANGE_API_SECRET}
+  passphrase: ${EXCHANGE_PASSPHRASE}
+  testnet: false
+
+universe:
+  enabled: true
+  use_universe_symbols: true
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 3600
+
+  # 币池门槛 - 更宽松的优质币池
+  top_n_market_cap: 50
+  min_24h_quote_volume_usdt: 5000000
+  max_spread_bps: 30
+  
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+  
+  refine_with_single_ticker: false
+  refine_single_ticker_max_candidates: 100
+  refine_single_ticker_sleep_sec: 0.02
+  
+  exclude_symbols:
+    - PAXG/USDT
+    - XAUT/USDT
+    - USDT/USDT
+    - USDC/USDT
+    - TUSD/USDT
+    - DAI/USDT
+    - PEPE/USDT
+    - SHIB/USDT
+    - FLOKI/USDT
+    - BONK/USDT
+    - DOGE/USDT
+    - TRX/USDT
+
+alpha:
+  long_top_pct: 0.25  # 选前25%
+  min_score_threshold: 0.05
+  use_fused_score_for_weighting: true  # 融合分不仅选币，也用于定仓，避免选币/仓位错配
+
+  # Qlib-inspired 轻量组合优化（降低仓位抖动）
+  optimizer_enabled: true
+  optimizer_prev_weight_penalty: 0.35
+  optimizer_min_weight_floor: 0.01
+  optimizer_state_path: reports/portfolio_optimizer_state.json
+  
+  weights:
+    f1_mom_5d: 0.10
+    f2_mom_20d: 0.30
+    f3_vol_adj_ret_20d: 0.35
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.10
+  
+  dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
+  dynamic_weights_by_regime_enabled: true
+  use_multi_strategy: true
+  multi_strategy_conflict_penalty_enabled: true
+  multi_strategy_conflict_dominance_ratio: 1.35
+  multi_strategy_conflict_min_confidence: 0.60
+  multi_strategy_conflict_penalty_strength: 0.65
+  multi_strategy_score_transform: tanh
+  multi_strategy_score_transform_scale: 1.0
+
+  ml_factor:
+    enabled: true
+    ml_weight: 0.20
+    traditional_weight: 0.80
+    online_control_enabled: true
+    online_control_24h_min_points: 6
+    online_control_24h_min_coverage_hours: 18
+    online_control_48h_min_points: 12
+    online_control_48h_min_coverage_hours: 36
+    online_control_negative_24h_bps: 0.0
+    online_control_negative_48h_bps: 0.0
+    online_control_downweight_ml_weight: 0.08
+    overlay_transform: tanh
+    overlay_transform_scale: 1.6
+    overlay_transform_max_abs: 1.6
+    model_path: models/ml_factor_model
+    active_model_pointer_path: models/ml_factor_model_active.txt
+    promotion_decision_path: reports/model_promotion_decision.json
+    runtime_status_path: reports/ml_runtime_status.json
+    require_promotion_passed: true
+    max_model_age_hours: 72
+    min_symbols: 3
+    use_robust_zscore: true
+
+  # Qlib Alpha158 因子 overlay（增强量价/趋势质量）
+  mean_reversion:
+    enabled: true
+    allocation: 0.25
+    allocation_multiplier_trending: 0.70
+    allocation_multiplier_sideways: 1.20
+    allocation_multiplier_risk_off: 0.90
+    rsi_period: 14
+    rsi_oversold: 28
+    rsi_overbought: 72
+    bb_period: 20
+    bb_std: 2
+    position_size_pct: 0.25
+    mean_rev_threshold: 0.025
+    volume_dry_ratio: 0.80
+    buy_score_multiplier: 0.75
+    sell_score_multiplier: 1.00
+
+  alpha158_overlay:
+    enabled: true
+    blend_weight: 0.35
+    weights:
+      f6_corr_pv_10: 0.15
+      f7_cord_10: 0.15
+      f8_rsqr_10: 0.20
+      f9_rank_20: 0.15
+      f10_imax_14: -0.05
+      f11_imin_14: 0.05
+      f12_imxd_14: 0.35
+
+  # TopkDropout：每轮限量换仓 + 最短持有周期（按轮次）
+  topk_dropout:
+    enabled: true
+    topk_override: null
+    n_drop_per_cycle: 2
+    hold_cycles: 2
+    state_path: reports/topk_dropout_state.json
+
+  # 动态IC权重：用 rolling IC 做因子权重再分配
+  dynamic_ic_weighting:
+    enabled: true
+    ic_monitor_path: reports/alpha_ic_monitor.json
+    min_abs_ic: 0.003
+    fallback_to_static: true
+
+regime:
+  use_ensemble: true
+  use_hmm: true
+  hmm_weight: 0.35
+  funding_weight: 0.40
+  rss_weight: 0.25
+  funding_signal_max_age_minutes: 180
+  rss_signal_max_age_minutes: 180
+  funding_trending_threshold: 0.10
+  funding_risk_off_threshold: -0.10
+  funding_breadth_threshold: 0.68
+  funding_extreme_sentiment_threshold: 0.12
+  funding_extreme_breadth_threshold: 0.55
+  
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  
+  pos_mult_trending: 1.2
+  pos_mult_sideways: 0.6
+  pos_mult_risk_off: 0.0
+  
+  sentiment_regime_override_enabled: true
+  sentiment_riskoff_relax_threshold: 0.55
+  sentiment_riskoff_harden_threshold: -0.65
+  ma_gap_relax_threshold: 0.03
+
+  # Regime monitor（学习记录补齐）：持久化状态+检测卡住/沉默故障
+  regime_monitor_enabled: true
+  regime_history_db_path: reports/regime_history.db
+  regime_sideways_prob_warn_threshold: 0.80
+  regime_sideways_consecutive_warn: 10
+  regime_monitor_keep_rows: 5000
+
+risk:
+  # 正式上线：放宽单币限制，允许多币分散
+  max_single_weight: 0.25  # 单币最多25%
+  max_gross_exposure: 1.0
+  # 取消单币硬限制，改由AutoRisk动态控制
+  max_positions_override: null
+  drawdown_trigger: 0.15  # 15%回撤触发保护
+  drawdown_delever: 0.60
+  
+  auto_risk_guard:
+    enabled: true
+    max_positions_by_regime:
+      trending: 8    # 趋势行情：最多8个币
+      sideways: 5    # 震荡行情：最多5个币
+      risk_off: 0    # RiskOff：空仓
+    drawdown_adjustment:
+      enabled: true
+      dd_0_5:    {max_positions: 8, position_size_pct: 1.0}
+      dd_5_10:   {max_positions: 5, position_size_pct: 0.7}
+      dd_10_15:  {max_positions: 3, position_size_pct: 0.5}
+      dd_15_plus: {max_positions: 1, position_size_pct: 0.15}
+
+rebalance:
+  deadband_sideways: 0.07
+  deadband_trending: 0.04
+  deadband_riskoff: 0.07
+  new_position_deadband_multiplier: 1.0
+  new_position_weight_eps: 0.001
+  close_only_deadband_multiplier: 0.25
+  close_only_weight_eps: 0.001
+
+execution:
+  mode: live
+  dry_run: false
+  collect_ml_training_data: true
+  ml_research_use_stable_universe: true
+  ml_research_universe_path: reports/universe_cache.json
+  ml_research_include_config_symbols: true
+  ml_research_lookback_bars: 600
+  order_store_path: reports/orders.sqlite
+  kill_switch_path: reports/kill_switch.json
+  reconcile_status_path: reports/reconcile_status.json
+  reconcile_abs_usdt_tol: 1.0
+  okx_exp_time_ms: 1500
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+  auto_clear_kill_switch_if_ok: true
+  preflight_bootstrap_patch_enabled: true
+  preflight_bootstrap_patch_max_total_usdt: 100.0
+  preflight_bootstrap_patch_min_interval_sec: 300
+  
+  split_orders: 3
+  split_interval_sec: 3.0
+  max_hourly_volume_pct: 0.05
+  slippage_db_path: reports/slippage.sqlite
+  fee_bps: 6
+  slippage_bps: 5
+  
+  open_long_cooldown_minutes: 120
+  # 排名退出防抖：需连续2轮跌出前3才触发rank_exit；且退出后1小时内禁止回补
+  rank_exit_max_rank: 3
+  rank_exit_confirm_rounds: 2
+  rank_exit_strict_mode: true
+  rank_exit_reentry_cooldown_minutes: 60
+
+  peak_drawdown_exit:
+    enabled: true
+    tier1_profit_pct: 0.08
+    tier1_retrace_pct: 0.025
+    tier1_sell_pct: 0.33
+    tier2_profit_pct: 0.15
+    tier2_retrace_pct: 0.04
+    tier2_sell_pct: 0.50
+    tier3_profit_pct: 0.25
+    tier3_retrace_pct: 0.06
+    tier3_sell_pct: 1.0
+
+  # qlib经验迁移：最短持仓门槛（先控超短抖动）
+  min_hold_minutes_before_rank_exit: 30
+  min_hold_minutes_before_regime_exit: 45
+
+  # qlib经验迁移：每轮最大换手（只作用于rebalance单，不拦截止损/强平）
+  max_rebalance_turnover_per_cycle: 0.30
+
+  # qlib经验迁移：成本感知开仓（score代理edge）
+  cost_aware_entry_enabled: true
+  cost_aware_score_per_bps: 0.0030
+  cost_aware_min_score_floor: 0.14
+  cost_aware_roundtrip_cost_bps: null
+  low_price_entry_guard_enabled: true
+  low_price_entry_threshold_usdt: 0.05
+  low_price_entry_extra_score_floor: 0.08
+  low_price_entry_extra_cost_bps: 12.0
+
+  # 负期望标的自动冷却（24h窗口）
+  negative_expectancy_cooldown_enabled: true
+  negative_expectancy_lookback_hours: 24
+  negative_expectancy_min_closed_cycles: 4
+  negative_expectancy_threshold_usdt: 0.0
+  negative_expectancy_cooldown_hours: 24
+  negative_expectancy_state_path: reports/negative_expectancy_cooldown.json
+  negative_expectancy_score_penalty_enabled: true
+  negative_expectancy_score_penalty_min_closed_cycles: 2
+  negative_expectancy_score_penalty_floor_bps: 5.0
+  negative_expectancy_score_penalty_per_bps: 0.015
+  negative_expectancy_score_penalty_max: 0.60
+  negative_expectancy_open_block_enabled: true
+  negative_expectancy_open_block_min_closed_cycles: 2
+  negative_expectancy_open_block_floor_bps: 15.0
+
+  order_state_machine_path: reports/order_state_machine.json
+
+  # 当部分减仓触发 minSz dust 时，自动升级为整仓卖出（若整仓可交易）
+  auto_upgrade_dust_sell_to_close: true
+
+  # 追高/入场质量防护
+  anti_chase_enabled: true
+  anti_chase_max_entry_premium_pct: 0.012
+  anti_chase_max_add_notional_ratio: 1.00
+  open_long_entry_guard_enabled: true
+  open_long_max_signal_premium_pct: 0.006   # 新开仓时，实时ask相对信号价最大溢价0.6%
+  open_long_max_spread_bps: 35               # 点差过大不追单
+  open_long_entry_guard_fail_open: true      # 盘口数据偶发不可用时不中断主流程
+  
+  # 允许小额对账差异时继续交易
+  allow_trade_on_small_reconcile_drift: true
+  preflight_fail_action: allow  # 或 sell_only, 但配合 allow_trade_on_small_reconcile_drift 使用
+  
+  # 借币预防
+  borrow_prevention: true
+  borrow_block_mode: symbol_only
+  min_trade_value_usdt: 10.0
+  max_fee_ratio: 0.05
+  check_fee_currency_balance: true
+  require_fee_type_zero: true
+  auto_fix_fee_type_zero: true
+  high_risk_blacklist_path: configs/borrow_prevention_rules.json
+
+budget:
+  # 正式策略：不设资金硬上限，但启用日内换手/成本预算约束
+  live_equity_cap_usdt: null  # 无上限
+  action_enabled: true  # 启用预算动作（主要用于换手/成本预算）
+  
+  exchange_min_notional_enabled: true
+  exchange_min_notional_slack_multiplier: 1.05
+  
+  min_trade_notional_base: 9.0
+  min_trade_notional_multiplier_exceeded: 1.5
+  min_trade_notional_cap_abs: 100.0
+  min_trade_notional_cap_equity_ratio: 0.03
+  
+  hard_buy_block_on_cap: false  # cap=null 时不启用资金上限硬拦截
+  hard_buy_block_cap_ratio: 1.0
+  turnover_budget_per_day: 0.60
+  cost_budget_bps_per_day: 40
+
+backtest:
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  cost_model: calibrated
+  cost_stats_dir: reports/cost_stats
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 30
+  min_fills_bucket: 10
+  max_stats_age_days: 7
+
+# Event-driven trigger (production)
+event_driven:
+  enabled: true
+  active_mode: true
+  active_min_interval_minutes: 60
+  force_full_run: false
+  force_full_min_interval_minutes: 12
+  check_interval_minutes: 15
+  global_cooldown_p2_minutes: 30
+  symbol_cooldown_minutes: 60
+  signal_confirmation_periods: 2
+  score_change_threshold: 0.35
+  rank_jump_threshold: 4
+  breakout_enabled: true
+  breakout_lookback_hours: 24
+  breakout_threshold_pct: 0.3
+  heartbeat_interval_hours: 4
+  fused_signal_max_age_minutes: 90
+  live_service_unit: v5-prod.user.service
+  adaptive_cooldown:
+    enabled: true
+    lookback_runs: 12
+    high_block_ratio: 0.75
+    min_events_for_action: 8
+    p2_min_minutes: 8
+    p2_max_minutes: 60
+    symbol_min_minutes: 15
+    symbol_max_minutes: 120
+    confirm_min: 1
+    confirm_max: 4

@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>V5 交易总览</title>
+<style>
+:root{
+  --bg:#071019;
+  --bg-soft:#0d1825;
+  --panel:rgba(9,18,29,.82);
+  --panel-strong:rgba(10,20,32,.94);
+  --panel-alt:rgba(15,28,43,.88);
+  --border:rgba(147,175,198,.14);
+  --border-strong:rgba(147,175,198,.24);
+  --ink:#edf5ff;
+  --muted:#8ea1b8;
+  --muted-strong:#b8c6d8;
+  --teal:#5edac7;
+  --cyan:#83d0ff;
+  --sand:#f1c56c;
+  --rose:#ff879d;
+  --green:#7bf1a7;
+  --shadow:0 26px 80px rgba(0,0,0,.34);
+  --glow:0 0 0 1px rgba(131,208,255,.06),0 24px 64px rgba(4,10,18,.4);
+  --radius-xl:32px;
+  --radius-lg:24px;
+  --radius-md:18px;
+  --radius-sm:14px;
+  --body:"MiSans","Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"JetBrains Mono","IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  background:
+    radial-gradient(circle at 12% 0%,rgba(94,218,199,.18),transparent 24%),
+    radial-gradient(circle at 100% 12%,rgba(241,197,108,.14),transparent 20%),
+    radial-gradient(circle at 82% 82%,rgba(131,208,255,.16),transparent 22%),
+    linear-gradient(160deg,#040a11 0%,#09121d 38%,#0f1e2e 100%);
+  color:var(--ink);
+  font-family:var(--body);
+}
+body::before,
+body::after{
+  content:"";
+  position:fixed;
+  inset:auto;
+  z-index:0;
+  pointer-events:none;
+  filter:blur(48px);
+  opacity:.55;
+}
+body::before{left:-80px;bottom:10vh;width:260px;height:260px;background:rgba(94,218,199,.14)}
+body::after{right:-60px;top:12vh;width:240px;height:240px;background:rgba(131,208,255,.14)}
+.shell{
+  position:relative;
+  z-index:1;
+  max-width:1600px;
+  margin:0 auto;
+  padding:24px 24px 36px;
+  display:grid;
+  gap:18px;
+}
+.hero,
+.panel,
+.metric,
+.status-card,
+.spotlight-card,
+.chip,
+.pill,
+.tiny,
+.symbol-chip{
+  -webkit-backdrop-filter:blur(16px);
+  backdrop-filter:blur(16px);
+}
+.hero{
+  display:grid;
+  grid-template-columns:minmax(0,1.28fr) minmax(320px,.82fr);
+  gap:18px;
+}
+.hero-main,
+.status-card,
+.panel,
+.metric{
+  background:linear-gradient(180deg,rgba(9,19,31,.96),rgba(7,15,25,.82));
+  border:1px solid var(--border);
+  box-shadow:var(--shadow);
+}
+.hero-main{
+  position:relative;
+  overflow:hidden;
+  padding:26px;
+  border-radius:var(--radius-xl);
+}
+.hero-main::after{
+  content:"";
+  position:absolute;
+  right:-120px;
+  bottom:-120px;
+  width:280px;
+  height:280px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(131,208,255,.18),transparent 72%);
+}
+.hero-top{
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  align-items:flex-start;
+}
+.eyebrow{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px;
+  border-radius:999px;
+  background:rgba(94,218,199,.12);
+  color:var(--teal);
+  font:700 11px/1 var(--mono);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.hero-title{
+  margin:18px 0 10px;
+  font-size:clamp(2.4rem,4vw,4.2rem);
+  line-height:.92;
+  letter-spacing:-.05em;
+}
+.hero-copy{
+  margin:0;
+  max-width:760px;
+  color:var(--muted);
+  font-size:1rem;
+  line-height:1.78;
+}
+.hero-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+  margin-top:20px;
+}
+.hero-stat{
+  padding:16px;
+  border-radius:20px;
+  border:1px solid rgba(147,175,198,.1);
+  background:linear-gradient(180deg,rgba(8,16,27,.72),rgba(6,12,21,.48));
+}
+.kicker,
+.metric-kicker,
+.label,
+.mini-label,
+.stack-label,
+.vote-title,
+.chart-caption{
+  color:var(--muted);
+  font:700 11px/1.2 var(--mono);
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.hero-stat-value,
+.stack-value,
+.metric-value{
+  margin-top:10px;
+  font-weight:700;
+  letter-spacing:-.04em;
+}
+.hero-stat-value{
+  font-size:1.12rem;
+}
+.hero-stat-copy,
+.note,
+.subtle{
+  color:var(--muted);
+  font-size:.88rem;
+  line-height:1.68;
+}
+.hero-side{
+  display:grid;
+  gap:14px;
+}
+.status-card{
+  padding:18px;
+  border-radius:var(--radius-lg);
+}
+.stack-value{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:10px;
+  font-size:1.08rem;
+}
+.hero-strip,
+.meta-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-top:16px;
+}
+.chip,
+.pill,
+.tiny,
+.alert,
+.symbol-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  border-radius:999px;
+  font-size:.8rem;
+  font-weight:700;
+  white-space:nowrap;
+}
+.chip,
+.symbol-chip{
+  padding:9px 12px;
+  border:1px solid rgba(131,208,255,.12);
+  background:rgba(9,17,28,.72);
+  color:var(--ink);
+}
+.pill{
+  padding:8px 12px;
+  border:1px solid rgba(147,175,198,.12);
+  background:rgba(9,17,28,.72);
+}
+.dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--teal);
+  box-shadow:0 0 0 6px rgba(94,218,199,.12);
+}
+.metric-grid{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:14px;
+}
+.metric{
+  padding:18px;
+  border-radius:var(--radius-lg);
+  min-height:124px;
+}
+.metric-value{
+  font-size:clamp(1.54rem,2vw,2.28rem);
+}
+.panel{
+  border-radius:var(--radius-xl);
+  padding:18px;
+  overflow:hidden;
+}
+.panel-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:14px;
+  margin-bottom:16px;
+}
+.title{
+  font-size:1.18rem;
+  font-weight:700;
+  line-height:1.32;
+  letter-spacing:-.03em;
+}
+.panel-tag{
+  padding:8px 12px;
+  border-radius:999px;
+  border:1px solid rgba(147,175,198,.12);
+  background:rgba(7,14,24,.72);
+  color:var(--muted-strong);
+  font:700 11px/1 var(--mono);
+}
+.ml-band{
+  padding:0;
+}
+.ml-band-shell{
+  display:grid;
+  grid-template-columns:minmax(280px,.9fr) minmax(0,1.55fr);
+}
+.ml-band-main{
+  padding:20px 22px;
+  border-right:1px solid rgba(147,175,198,.1);
+  background:
+    radial-gradient(circle at 10% 20%,rgba(94,218,199,.12),transparent 28%),
+    linear-gradient(180deg,rgba(10,22,36,.96),rgba(7,16,27,.9));
+}
+.ml-band-title{
+  margin-top:10px;
+  font-size:1.32rem;
+  font-weight:700;
+  letter-spacing:-.03em;
+}
+.ml-band-status{
+  margin-top:10px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  font-size:1.02rem;
+  font-weight:700;
+}
+.ml-band-detail{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:.88rem;
+  line-height:1.72;
+}
+.ml-band-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:14px;
+}
+.ml-progress{
+  margin-top:14px;
+  height:8px;
+  border-radius:999px;
+  background:rgba(147,175,198,.12);
+  overflow:hidden;
+}
+.ml-progress>span{
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,rgba(94,218,199,.9),rgba(131,208,255,.92));
+}
+.ml-band-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+  padding:18px;
+  align-content:center;
+}
+.ml-stage{
+  min-height:128px;
+  border-radius:18px;
+  padding:16px;
+  background:rgba(4,11,19,.68);
+  border:1px solid rgba(147,175,198,.1);
+}
+.ml-stage-top,
+.row,
+.vote-head,
+.position-card-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.ml-stage-state{
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:rgba(147,175,198,.42);
+  box-shadow:0 0 0 8px rgba(147,175,198,.08);
+}
+.ml-stage.is-on .ml-stage-state{
+  background:var(--green);
+  box-shadow:0 0 0 8px rgba(123,241,167,.12);
+}
+.ml-stage-value{
+  margin-top:12px;
+  font-size:1.04rem;
+  font-weight:700;
+}
+.ml-stage-note{
+  margin-top:8px;
+  color:var(--muted);
+  font-size:.83rem;
+  line-height:1.62;
+}
+.portfolio-stage{
+  display:grid;
+  grid-template-columns:minmax(0,1.24fr) minmax(340px,.9fr);
+  gap:18px;
+}
+.spotlight-card{
+  display:grid;
+  gap:16px;
+}
+.chart-toolbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:14px;
+  flex-wrap:wrap;
+}
+.chart-copy{
+  color:var(--muted);
+  font-size:.92rem;
+  line-height:1.7;
+}
+.segmented{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.segment{
+  appearance:none;
+  border:none;
+  padding:10px 14px;
+  border-radius:999px;
+  background:rgba(8,16,26,.84);
+  border:1px solid rgba(147,175,198,.12);
+  color:var(--muted-strong);
+  font:700 12px/1 var(--mono);
+  cursor:pointer;
+  transition:all .2s ease;
+}
+.segment:hover{border-color:rgba(131,208,255,.28);color:var(--ink)}
+.segment.is-active{
+  background:linear-gradient(135deg,rgba(94,218,199,.2),rgba(131,208,255,.18));
+  border-color:rgba(94,218,199,.28);
+  color:var(--ink);
+}
+.symbol-chip{
+  appearance:none;
+  cursor:pointer;
+  transition:all .2s ease;
+}
+.symbol-chip:hover{
+  transform:translateY(-1px);
+  border-color:rgba(131,208,255,.28);
+}
+.symbol-chip.is-active{
+  background:linear-gradient(135deg,rgba(94,218,199,.18),rgba(131,208,255,.12));
+  border-color:rgba(94,218,199,.28);
+  box-shadow:var(--glow);
+}
+.symbol-chip strong{font-size:.86rem}
+.chart-frame{
+  min-height:360px;
+  border-radius:26px;
+  border:1px solid rgba(147,175,198,.12);
+  background:
+    linear-gradient(180deg,rgba(7,15,25,.92),rgba(9,18,30,.86)),
+    radial-gradient(circle at top,rgba(131,208,255,.08),transparent 55%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.02);
+  overflow:hidden;
+}
+.chart-frame svg{
+  display:block;
+  width:100%;
+  height:100%;
+  min-height:360px;
+}
+.chart-stage-empty{
+  min-height:360px;
+  display:grid;
+  place-items:center;
+  color:var(--muted);
+  padding:24px;
+  text-align:center;
+}
+.chart-stats{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:10px;
+}
+.stat-card,
+.vote,
+.trade,
+.signal,
+.decision,
+.ops,
+.health,
+.alpha,
+.info,
+.mobile-item{
+  background:rgba(5,11,20,.66);
+  border:1px solid rgba(147,175,198,.1);
+  border-radius:18px;
+  padding:15px;
+}
+.stat-card-value,
+.value{
+  margin-top:8px;
+  font-size:1rem;
+  font-weight:700;
+  line-height:1.34;
+}
+.position-grid,
+.signal-grid,
+.ops-grid,
+.health-list,
+.alpha-list,
+.trade-list,
+.decision-grid{
+  display:grid;
+  gap:12px;
+}
+.position-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.signal-grid,
+.ops-grid{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.main-grid{
+  display:grid;
+  grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);
+  gap:18px;
+}
+.column{
+  display:grid;
+  gap:18px;
+}
+.grid2{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.table-shell{
+  overflow:auto;
+  border-radius:18px;
+  border:1px solid rgba(147,175,198,.1);
+  background:rgba(5,11,20,.66);
+}
+table{width:100%;border-collapse:collapse;min-width:560px}
+th,td{
+  padding:12px 14px;
+  border-bottom:1px solid rgba(147,175,198,.08);
+  text-align:left;
+  font-size:.9rem;
+}
+th{
+  color:var(--muted);
+  font:700 11px/1.2 var(--mono);
+  background:rgba(8,16,28,.95);
+  position:sticky;
+  top:0;
+}
+tr:last-child td{border-bottom:none}
+.text-right{text-align:right}
+.text-green{color:#8bf2ad}
+.text-red{color:#ff9dae}
+.mono{font-family:var(--mono)}
+.position-card-kpi{
+  margin-top:12px;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.mini-value{
+  display:block;
+  margin-top:6px;
+  font-size:.92rem;
+  font-weight:700;
+}
+.bar,
+.prob-track{
+  height:8px;
+  border-radius:999px;
+  background:rgba(147,175,198,.12);
+  overflow:hidden;
+}
+.bar{margin-top:10px}
+.bar>span,
+.prob-track>span{
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,rgba(94,218,199,.86),rgba(131,208,255,.92));
+}
+.prob-list{display:grid;gap:8px;margin-top:12px}
+.prob-row{
+  display:grid;
+  grid-template-columns:56px 1fr auto;
+  gap:10px;
+  align-items:center;
+}
+.prob-label{font-size:.8rem;color:var(--muted)}
+.prob-value{font:700 11px/1 var(--mono)}
+.vote-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.vote-value{margin-top:8px;font-size:1rem;font-weight:700}
+.vote-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.vote-summary{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:.84rem;
+  line-height:1.66;
+}
+.tiny{
+  padding:6px 10px;
+  background:rgba(13,25,40,.88);
+  border:1px solid rgba(147,175,198,.12);
+  color:var(--muted);
+  font-weight:600;
+}
+.history-wrap{
+  margin-top:14px;
+  padding-top:14px;
+  border-top:1px solid rgba(147,175,198,.12);
+}
+.history-title{
+  margin-bottom:10px;
+  color:var(--muted);
+  font:700 11px/1.2 var(--mono);
+  letter-spacing:.08em;
+}
+.history-grid{display:grid;gap:10px}
+.history-row{
+  display:grid;
+  grid-template-columns:60px 1fr;
+  gap:10px;
+  align-items:center;
+}
+.history-label{font-size:.8rem;color:var(--muted)}
+.history-track{
+  display:grid;
+  grid-auto-flow:column;
+  grid-auto-columns:minmax(0,1fr);
+  gap:4px;
+}
+.history-cell{
+  height:12px;
+  border-radius:999px;
+  background:rgba(147,175,198,.16);
+  cursor:pointer;
+}
+.history-cell.state-trending{background:rgba(123,241,167,.88)}
+.history-cell.state-sideways{background:rgba(241,197,108,.84)}
+.history-cell.state-riskoff{background:rgba(255,135,157,.84)}
+.hover-tip{
+  position:fixed;
+  z-index:60;
+  pointer-events:none;
+  min-width:176px;
+  max-width:236px;
+  padding:12px 14px;
+  border-radius:14px;
+  background:rgba(3,10,20,.96);
+  border:1px solid rgba(131,208,255,.18);
+  box-shadow:0 20px 48px rgba(2,6,23,.48);
+}
+.hover-tip[hidden]{display:none}
+.hover-tip-title{
+  margin-bottom:8px;
+  color:var(--muted);
+  font:700 12px/1.2 var(--mono);
+  letter-spacing:.08em;
+}
+.hover-tip-grid{display:grid;gap:6px}
+.hover-tip-row{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  font-size:.82rem;
+  line-height:1.4;
+}
+.hover-tip-row span{color:var(--muted)}
+.hover-tip-row strong{text-align:right}
+.loading,
+.empty,
+.error{
+  padding:16px;
+  border-radius:16px;
+  text-align:center;
+  background:rgba(5,11,20,.66);
+  border:1px dashed rgba(147,175,198,.18);
+}
+.loading{
+  color:var(--muted);
+  position:relative;
+  overflow:hidden;
+}
+.loading::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);
+  transform:translateX(-100%);
+  animation:shimmer 1.25s infinite;
+}
+.error{color:var(--rose)}
+.state-trending,.risk-attack,.tone-positive{background:rgba(123,241,167,.14);color:#9cf2b9}
+.state-sideways,.risk-neutral,.tone-warn{background:rgba(241,197,108,.14);color:#f4d385}
+.state-riskoff,.risk-defense,.risk-protect,.tone-negative{background:rgba(255,135,157,.14);color:#ffacc0}
+.alert{
+  padding:8px 12px;
+  background:rgba(131,208,255,.14);
+  color:#d8efff;
+  border:1px solid rgba(131,208,255,.12);
+  margin:0 8px 8px 0;
+}
+.footer{
+  color:var(--muted);
+  font-size:.82rem;
+  text-align:right;
+}
+@keyframes shimmer{100%{transform:translateX(100%)}}
+@media (max-width:1380px){
+  .metric-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .chart-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .ml-band-shell{grid-template-columns:1fr}
+  .ml-band-main{border-right:none;border-bottom:1px solid rgba(147,175,198,.12)}
+}
+@media (max-width:1180px){
+  .hero,
+  .portfolio-stage,
+  .main-grid,
+  .vote-grid,
+  .grid2,
+  .hero-grid{
+    grid-template-columns:1fr;
+  }
+  .ml-band-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:860px){
+  .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .chart-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:760px){
+  .shell{padding:14px 14px 26px}
+  .hero-main,.panel,.metric,.status-card{padding:16px}
+  .hero-main,.panel{border-radius:24px}
+  .hero-title{font-size:2.3rem}
+  .ml-band-grid,
+  .metric-grid,
+  .chart-stats{grid-template-columns:1fr}
+  .ml-band-main{padding:16px}
+  .ml-band-grid{padding:14px}
+  .chart-frame,
+  .chart-frame svg,
+  .chart-stage-empty{min-height:300px}
+  table{min-width:500px}
+  .footer{text-align:left}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <section class="hero">
+    <div class="hero-main">
+      <div class="hero-top">
+          <div class="eyebrow">V5 生产看板</div>
+        <div class="chip"><span class="dot"></span><span id="update-time">加载中...</span></div>
+      </div>
+      <h1 class="hero-title">交易指挥台</h1>
+      <p class="hero-copy">把市场状态、风控阈值、持仓结构和执行链路收进同一页。先看会影响仓位的核心信号，再看订单、健康和训练链路，减少在多个模块之间来回切换。</p>
+      <div class="hero-grid">
+        <div class="hero-stat">
+          <div class="kicker">市场体感</div>
+          <div class="hero-stat-value" id="market-state-detail">--</div>
+          <div class="hero-stat-copy" id="market-detail">等待市场状态...</div>
+        </div>
+        <div class="hero-stat">
+          <div class="kicker">持仓倍率</div>
+          <div class="hero-stat-value" id="position-multiplier">--</div>
+          <div class="hero-stat-copy">跟随市场/风险引擎动态调整</div>
+        </div>
+        <div class="hero-stat">
+              <div class="kicker">组合节奏</div>
+              <div class="hero-stat-value">30秒</div>
+          <div class="hero-stat-copy">页面自动刷新，保持与后台轮询同步</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-side">
+      <div class="status-card">
+        <div class="stack-label">市场状态</div>
+        <div class="stack-value" id="market-state-val">--</div>
+        <div class="note">三路投票与信号健康直接影响整体仓位配置。</div>
+      </div>
+      <div class="status-card">
+        <div class="stack-label">风险档位</div>
+        <div class="stack-value" id="risk-level">--</div>
+        <div class="note" id="risk-detail">等待风险数据...</div>
+        <div class="hero-strip">
+          <div class="chip"><span>当前回撤</span><strong id="current-drawdown">--</strong></div>
+          <div class="chip"><span>转化率</span><strong id="conversion-rate">--</strong></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="metric-grid">
+    <div class="metric">
+      <div class="metric-kicker">总权益</div>
+      <div class="metric-value" id="total-equity">--</div>
+      <div class="subtle" id="total-pnl">--</div>
+    </div>
+    <div class="metric">
+      <div class="metric-kicker">现金</div>
+      <div class="metric-value" id="cash-usdt">--</div>
+      <div class="subtle" id="cash-ratio">--</div>
+    </div>
+    <div class="metric">
+      <div class="metric-kicker">在仓市值</div>
+      <div class="metric-value" id="positions-value">--</div>
+      <div class="subtle" id="positions-count-top">--</div>
+    </div>
+    <div class="metric">
+      <div class="metric-kicker">系统健康</div>
+      <div class="metric-value" id="health-update-time">--</div>
+      <div class="subtle" id="health-summary">等待健康检查...</div>
+    </div>
+    <div class="metric">
+      <div class="metric-kicker">观察重点</div>
+      <div class="metric-value">仓位 + 执行</div>
+      <div class="subtle">持仓 K 线和订单路径联动查看</div>
+    </div>
+  </section>
+
+  <section class="panel ml-band" id="ml-stage-band">
+    <div class="ml-band-shell">
+      <div class="ml-band-main">
+              <div class="kicker">机器学习链路</div>
+        <div class="ml-band-title">采样到实盘</div>
+        <div class="ml-band-status"><span id="ml-stage-status">--</span></div>
+              <div class="ml-band-detail" id="ml-stage-detail">等待机器学习链路状态...</div>
+        <div class="ml-band-meta" id="ml-stage-meta">
+          <span class="tiny">采样 --</span>
+          <span class="tiny">训练 --</span>
+          <span class="tiny">门控 --</span>
+          <span class="tiny">实盘 --</span>
+        </div>
+        <div class="ml-progress"><span id="ml-stage-progress" style="width:0%"></span></div>
+      </div>
+      <div class="ml-band-grid" id="ml-stage-grid">
+        <div class="loading">加载中...</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="portfolio-stage">
+    <div class="panel spotlight-card">
+      <div class="chart-toolbar">
+        <div>
+          <div class="kicker">持仓聚焦</div>
+          <div class="title" id="position-spotlight-symbol">等待持仓...</div>
+          <div class="chart-copy" id="position-spotlight-copy">默认展示当前仓位中市值最高的币种，并支持切换时间周期。</div>
+        </div>
+        <div class="segmented" id="position-kline-timeframes">
+                <button type="button" class="segment is-active" data-timeframe="1h">1小时</button>
+                <button type="button" class="segment" data-timeframe="4h">4小时</button>
+                <button type="button" class="segment" data-timeframe="1d">1日</button>
+        </div>
+      </div>
+      <div id="position-kline-symbols" class="meta-row"></div>
+      <div id="position-kline-chart" class="chart-frame">
+        <div class="chart-stage-empty">暂无持仓，K 线图将在有仓位后显示。</div>
+      </div>
+      <div class="row">
+        <div class="chart-caption" id="position-kline-source">数据源 --</div>
+      </div>
+      <div id="position-kline-summary" class="chart-stats">
+        <div class="stat-card">
+          <div class="mini-label">持仓市值</div>
+          <div class="stat-card-value">--</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="kicker">持仓清单</div>
+          <div class="title">当前仓位</div>
+          <div class="note" id="positions-subtitle">等待持仓数据...</div>
+        </div>
+        <div class="panel-tag">按市值排序</div>
+      </div>
+      <div id="positions-content"><div class="loading">加载中...</div></div>
+    </div>
+  </section>
+
+  <section class="main-grid">
+    <div class="column">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">市场雷达</div>
+            <div class="title">三路投票</div>
+            <div class="note">HMM、资金费率和 RSS 的合成判断</div>
+          </div>
+          <div class="panel-tag">核心信号</div>
+        </div>
+        <div id="ensemble-votes" class="vote-grid"><div class="loading">加载中...</div></div>
+        <div id="vote-history" class="history-wrap"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">策略信号</div>
+            <div class="title">信号总览</div>
+            <div class="note" id="signals-time">等待策略信号...</div>
+          </div>
+          <div class="panel-tag">选币到订单</div>
+        </div>
+        <div id="signals-content"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">成交</div>
+            <div class="title">最近流水</div>
+            <div class="note">优先展示最近几笔可读成交</div>
+          </div>
+        </div>
+        <div id="trades-content" class="trade-list"><div class="loading">加载中...</div></div>
+      </div>
+    </div>
+
+    <div class="column">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">运行矩阵</div>
+            <div class="title">服务与定时器</div>
+            <div class="note">主循环、事件驱动、训练、对账统一查看</div>
+          </div>
+        </div>
+        <div id="system-content" class="ops-grid"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">执行路径</div>
+            <div class="title">信号到订单</div>
+            <div class="note" id="decision-flow-time">等待执行路径...</div>
+          </div>
+          <div class="panel-tag">路由结果</div>
+        </div>
+        <div id="decision-flow-content"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">高分标的</div>
+            <div class="title">因子排序</div>
+            <div class="note">只保留最靠前的一组目标币</div>
+          </div>
+        </div>
+        <div id="alpha-content" class="alpha-list"><div class="loading">加载中...</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">健康检查</div>
+            <div class="title">依赖状态</div>
+            <div class="note">数据库、OKX、磁盘与定时任务</div>
+          </div>
+        </div>
+        <div id="health-content" class="health-list"><div class="loading">加载中...</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="kicker">旁路模型叠加</div>
+        <div class="title" id="ml-impact-headline">调优版 XGBoost 归因</div>
+        <div class="note" id="ml-impact-subtitle">查看模型抬升了谁、压低了谁，以及最近 24 小时叠加效果。</div>
+      </div>
+      <div class="panel-tag">旁路 / 纸面</div>
+    </div>
+    <div id="ml-impact-content"><div class="loading">加载中...</div></div>
+  </section>
+
+  <div id="history-tooltip" class="hover-tip" hidden></div>
+  <div class="footer">移动端会自动切换为单列布局，仍保留持仓 K 线与关键指标。</div>
+</div>
+<script src="{{ url_for('static', filename='js/monitor_v2.js') }}?v={{ monitor_v2_js_version }}"></script>
+<script src="{{ url_for('static', filename='js/ml_status_panel.js') }}?v={{ ml_status_panel_js_version }}"></script>
+</body>
+</html>

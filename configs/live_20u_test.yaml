@@ -1,0 +1,98 @@
+# 高频数据积累配置 - 快速积累30+ fills
+# 基于live_20u_test.yaml修改，优化交易频率
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+  - ADA/USDT
+  - DOGE/USDT
+  - XRP/USDT
+  - DOT/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  api_key: ${EXCHANGE_API_KEY}
+  api_secret: ${EXCHANGE_API_SECRET}
+  passphrase: ${EXCHANGE_PASSPHRASE}
+  testnet: false
+
+universe:
+  enabled: true
+  use_universe_symbols: false
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 1800  # 30分钟缓存，更频繁更新
+  top_n_market_cap: 30
+  min_24h_quote_volume_usdt: 5000000
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+
+alpha:
+  long_top_pct: 0.25  # 选择前25%币种，增加交易机会
+  weights:
+    f1_mom_5d: 0.30      # 增加短期动量权重
+    f2_mom_20d: 0.15      # 降低F2权重，减少无效交易
+    f3_vol_adj_ret_20d: 0.25  # 增加波动调整收益权重
+    f4_volume_expansion: 0.15  # 保持
+    f5_rsi_trend_confirm: 0.15  # 保持
+
+regime:
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  pos_mult_trending: 1.0    # 降低趋势状态仓位，减少风险
+  pos_mult_sideways: 0.8    # 增加横盘状态仓位
+  pos_mult_risk_off: 0.4    # 增加风险规避状态仓位
+
+risk:
+  max_single_weight: 0.20   # 降低单币种最大权重，分散交易
+  max_gross_exposure: 1.0
+  drawdown_trigger: 0.08
+  drawdown_delever: 0.50
+
+rebalance:
+  interval_minutes: 30      # 30分钟调仓，更频繁交易
+  deadband_sideways: 0.03   # 降低deadband，更敏感触发
+  deadband_trending: 0.02   # 趋势状态更敏感
+  deadband_riskoff: 0.04    # 风险规避状态稍宽松
+
+execution:
+  mode: dry_run            # 保持dry-run安全
+  dry_run: true
+  order_store_path: reports/orders.sqlite
+  kill_switch_path: reports/kill_switch.json
+  reconcile_status_path: reports/reconcile_status.json
+  okx_exp_time_ms: 1500
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+
+  split_orders: 2          # 减少分单，加快执行
+  split_interval_sec: 2    # 缩短分单间隔
+  max_hourly_volume_pct: 0.03  # 降低单小时交易量限制
+  slippage_db_path: reports/slippage.sqlite
+  fee_bps: 6
+  slippage_bps: 5
+
+backtest:
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  cost_model: default
+  cost_stats_dir: reports/cost_stats
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 20     # 降低全局最小fills要求
+  min_fills_bucket: 8      # 降低bucket最小fills要求
+  max_stats_age_days: 7
+
+# 高频交易特定配置
+fast_data_collection:
+  enabled: true
+  max_daily_trades: 20     # 每日最大交易次数限制
+  min_trade_interval_minutes: 15  # 最小交易间隔
+  target_fills: 30         # 目标fills数量
+  stop_when_target_reached: true  # 达到目标后停止

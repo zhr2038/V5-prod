@@ -1,0 +1,63 @@
+# 最简单测试配置
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  testnet: false
+
+alpha:
+  long_top_pct: 0.50
+  weights:
+    f1_mom_5d: 0.5
+    f2_mom_20d: 0.5
+    f3_vol_adj_ret_20d: 0.0
+    f4_volume_expansion: 0.0
+    f5_rsi_trend_confirm: 0.0
+
+regime:
+  atr_threshold: 0.01
+  atr_very_low: 0.004
+  pos_mult_trending: 1.0
+  pos_mult_sideways: 1.0
+  pos_mult_risk_off: 1.0
+
+risk:
+  max_single_weight: 0.5
+  max_gross_exposure: 1.0
+  drawdown_trigger: 0.50
+  drawdown_delever: 0.50
+
+rebalance:
+  interval_minutes: 60
+  deadband_sideways: 0.0001  # 极低deadband
+  deadband_trending: 0.0001
+  deadband_riskoff: 0.0001
+
+execution:
+  mode: dry_run
+  dry_run: true
+  fee_bps: 0
+  slippage_bps: 0
+
+backtest:
+  start_date: "2026-01-19"
+  end_date: "2026-01-22"  # 很短的时间
+  fee_bps: 0
+  slippage_bps: 0
+  one_bar_delay: true
+  walk_forward_folds: 1
+  cost_model: fixed
+  cost_stats_dir: ""
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 1
+  min_fills_bucket: 1
+  max_stats_age_days: 365
+
+# 关键：设置min_trade_notional_base
+min_trade_notional_base: 0.0001

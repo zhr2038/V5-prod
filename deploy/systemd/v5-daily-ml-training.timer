@@ -1,0 +1,12 @@
+[Unit]
+Description=Run V5 Daily ML Training at 00:30
+
+[Timer]
+OnCalendar=*-*-* 00:30:00
+Persistent=true
+AccuracySec=60s
+RandomizedDelaySec=300s
+Unit=v5-daily-ml-training.service
+
+[Install]
+WantedBy=timers.target

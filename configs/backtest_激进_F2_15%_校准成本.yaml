@@ -1,0 +1,72 @@
+
+# 回测配置: 激进_F2_15%_校准成本
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+  - ADA/USDT
+  - DOGE/USDT
+  - XRP/USDT
+  - DOT/USDT
+  - LINK/USDT
+  - AVAX/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  testnet: false
+
+universe:
+  enabled: false  # 回测时禁用动态universe
+
+alpha:
+  long_top_pct: 0.20
+  weights:
+    f1_mom_5d: 0.28
+    f2_mom_20d: 0.15
+    f3_vol_adj_ret_20d: 0.24
+    f4_volume_expansion: 0.14
+    f5_rsi_trend_confirm: 0.14
+
+regime:
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  pos_mult_trending: 1.0
+  pos_mult_sideways: 0.7
+  pos_mult_risk_off: 0.4
+
+risk:
+  max_single_weight: 0.20
+  max_gross_exposure: 0.8
+  drawdown_trigger: 0.06
+  drawdown_delever: 0.50
+
+rebalance:
+  interval_minutes: 60
+  deadband_sideways: 0.05
+  deadband_trending: 0.03
+  deadband_riskoff: 0.05
+
+execution:
+  mode: backtest
+  dry_run: false
+  fee_bps: 6
+  slippage_bps: 5
+
+backtest:
+  start_date: "2026-01-18"  # 30天前
+  end_date: "2026-02-17"    # 昨天
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  cost_model: calibrated
+  cost_stats_dir: reports/cost_stats_clean
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 10
+  min_fills_bucket: 5
+  max_stats_age_days: 30

@@ -1,0 +1,13 @@
+[Unit]
+Description=V5 tuned XGBoost shadow hourly evaluation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-shadow-tuned-xgboost
+Environment=PYTHONUNBUFFERED=1
+Environment=V5_DATA_PROVIDER=okx
+Environment=V5_LIVE_ARM=NO
+Environment=V5_WORKSPACE=/home/admin/clawd/v5-shadow-tuned-xgboost
+ExecStart=/usr/bin/flock -n /tmp/v5_shadow_tuned_xgboost_hourly.lock -c "/bin/bash -lc '/home/admin/clawd/v5-shadow-tuned-xgboost/scripts/run_shadow_tuned_xgboost_hourly.sh'"

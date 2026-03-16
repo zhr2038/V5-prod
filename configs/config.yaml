@@ -1,0 +1,83 @@
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  api_key: ${EXCHANGE_API_KEY}
+  api_secret: ${EXCHANGE_API_SECRET}
+  passphrase: ${EXCHANGE_PASSPHRASE}
+  testnet: false
+
+universe:
+  enabled: true
+  use_universe_symbols: false
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 3600
+  top_n_market_cap: 30
+  min_24h_quote_volume_usdt: 5000000
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+
+alpha:
+  long_top_pct: 0.20
+  weights:
+    f1_mom_5d: 0.25
+    f2_mom_20d: 0.25
+    f3_vol_adj_ret_20d: 0.20
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.15
+
+regime:
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  pos_mult_trending: 1.2
+  pos_mult_sideways: 0.6
+  pos_mult_risk_off: 0.3
+
+risk:
+  max_single_weight: 0.25
+  max_gross_exposure: 1.0
+  drawdown_trigger: 0.08
+  drawdown_delever: 0.50
+
+rebalance:
+  deadband_sideways: 0.05
+  deadband_trending: 0.03
+  deadband_riskoff: 0.05
+
+execution:
+  mode: dry_run
+  dry_run: true
+  order_store_path: reports/orders.sqlite
+  kill_switch_path: reports/kill_switch.json
+  reconcile_status_path: reports/reconcile_status.json
+  okx_exp_time_ms: 1500
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+
+  split_orders: 3
+  split_interval_sec: 3
+  max_hourly_volume_pct: 0.05
+  slippage_db_path: reports/slippage.sqlite
+  fee_bps: 6
+  slippage_bps: 5
+
+backtest:
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  # 成本校准（F2）
+  cost_model: default  # default|calibrated
+  cost_stats_dir: reports/cost_stats
+  fee_quantile: p75
+  slippage_quantile: p90
+  min_fills_global: 30
+  min_fills_bucket: 10
+  max_stats_age_days: 7

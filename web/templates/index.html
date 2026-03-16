@@ -1,0 +1,1750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V5 Trading Bot - 综合监控面板</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0e1a;
+            color: #e0e6ed;
+            min-height: 100vh;
+        }
+        
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        
+        header {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #1e2530;
+            margin-bottom: 20px;
+        }
+        
+        header h1 {
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, #00d4ff, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .nav-tab {
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid #2a3142;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            color: #94a3b8;
+        }
+        
+        .nav-tab:hover { background: rgba(255,255,255,0.1); }
+        .nav-tab.active { 
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            color: white;
+            border-color: transparent;
+        }
+        
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 15px;
+        }
+        
+        .card {
+            background: linear-gradient(135deg, #1a1f2e 0%, #151921 100%);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #2a3142;
+        }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .card-icon {
+            width: 40px; height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-right: 12px;
+        }
+        
+        .card-title { font-size: 1rem; font-weight: 600; }
+        .card-subtitle { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+        
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        
+        .stat-item {
+            background: rgba(255,255,255,0.03);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
+        .stat-label { font-size: 0.75rem; color: #64748b; margin-top: 5px; }
+        
+        /* Progress */
+        .progress-container { margin: 10px 0; }
+        .progress-header { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 6px; }
+        .progress-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+        .progress-green { background: linear-gradient(90deg, #22c55e, #4ade80); }
+        .progress-blue { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+        .progress-purple { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+        
+        /* Timers */
+        .timer-item {
+            display: flex; align-items: center;
+            padding: 10px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .timer-icon { font-size: 18px; margin-right: 10px; }
+        .timer-name { font-weight: 500; font-size: 0.9rem; }
+        .timer-desc { font-size: 0.75rem; color: #64748b; }
+        .timer-status { margin-left: auto; text-align: right; }
+        .status-badge {
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+        .status-active { background: rgba(34,197,94,0.2); color: #22c55e; }
+        .status-inactive { background: rgba(239,68,68,0.2); color: #ef4444; }
+        
+        /* Chart Container */
+        .chart-container {
+            position: relative;
+            height: 520px;
+            margin: 20px 0;
+            width: 100%;
+        }
+
+        /* 权益页图表再放大一档 */
+        #tab-equity .card {
+            padding: 24px;
+        }
+        
+        /* Positions & Trades */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .data-table th, .data-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .data-table th { color: #64748b; font-weight: 500; }
+        .data-table tr:hover { background: rgba(255,255,255,0.02); }
+        .positive { color: #22c55e; }
+        .negative { color: #ef4444; }
+        
+        /* Update Time */
+        .update-time {
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            color: #64748b;
+            font-size: 0.8rem;
+        }
+        
+        .loading {
+            display: flex; align-items: center; justify-content: center;
+            padding: 40px; color: #64748b;
+        }
+        .spinner {
+            width: 24px; height: 24px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 V5 Trading Bot 综合监控面板</h1>
+        </header>
+        
+        <div class="nav-tabs">
+            <div class="nav-tab active" onclick="switchTab('overview')">📊 总览</div>
+            <div class="nav-tab" onclick="switchTab('decision')">🧠 决策归因</div>
+            <div class="nav-tab" onclick="switchTab('shadow')">🧪 参数A/B测试</div>
+            <div class="nav-tab" onclick="switchTab('equity')">📈 权益曲线</div>
+            <div class="nav-tab" onclick="switchTab('positions')">💼 持仓&交易</div>
+            <div class="nav-tab" onclick="switchTab('system')">⚙️ 系统状态</div>
+        </div>
+        
+        <!-- 总览 Tab -->
+        <div id="tab-overview" class="tab-content active">
+            <!-- 智能告警横幅 -->
+            <div id="smart-alerts-banner" style="display: none; margin-bottom: 15px;">
+                <!-- 动态插入告警卡片 -->
+            </div>
+            
+            <div class="grid">
+                <!-- 账户概览 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(59,130,246,0.2);">💰</div>
+                        <div>
+                            <div class="card-title">账户概览</div>
+                            <div class="card-subtitle">Account Overview</div>
+                        </div>
+                    </div>
+                    <div class="stats-grid" id="account-stats">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <!-- 市场状态 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(245,158,11,0.2);">📉</div>
+                        <div>
+                            <div class="card-title">市场状态</div>
+                            <div class="card-subtitle">Market State</div>
+                        </div>
+                    </div>
+                    <div id="market-state">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <!-- 风险档位 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(239,68,68,0.2);">🛡️</div>
+                        <div>
+                            <div class="card-title">风险档位</div>
+                            <div class="card-subtitle">Risk Guard</div>
+                        </div>
+                    </div>
+                    <div id="risk-guard-state">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <!-- 定时任务 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(34,197,94,0.2);">⏰</div>
+                        <div>
+                            <div class="card-title">定时任务</div>
+                            <div class="card-subtitle">System Timers</div>
+                        </div>
+                    </div>
+                    <div id="timers-list">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <!-- ML训练 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(139,92,246,0.2);">🧠</div>
+                        <div>
+                            <div class="card-title">ML训练进度</div>
+                            <div class="card-subtitle">Machine Learning</div>
+                        </div>
+                    </div>
+                    <div id="ml-progress">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <!-- 币种评分 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(6,182,212,0.2);">⭐</div>
+                        <div>
+                            <div class="card-title">币种评分 Top10</div>
+                            <div class="card-subtitle">Alpha Scores</div>
+                        </div>
+                    </div>
+                    <div id="alpha-scores">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <!-- 情绪分析 -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(139,92,246,0.2);">😊</div>
+                        <div>
+                            <div class="card-title">市场情绪</div>
+                            <div class="card-subtitle">Fear & Greed</div>
+                        </div>
+                    </div>
+                    <div id="sentiment-display">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 决策归因 Tab -->
+        <div id="tab-decision" class="tab-content">
+            <div class="grid">
+                <!-- 策略信号分析 -->
+                <div class="card" style="grid-column: 1 / -1;">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(245,158,11,0.2);">📊</div>
+                        <div>
+                            <div class="card-title">三策略信号分析</div>
+                            <div class="card-subtitle">TrendFollowing + MeanReversion + Alpha6Factor</div>
+                        </div>
+                    </div>
+                    <div id="strategy-signals-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(139,92,246,0.2);">🧠</div>
+                        <div>
+                            <div class="card-title">决策归因分析</div>
+                            <div class="card-subtitle">Strategy → Risk → Execution</div>
+                        </div>
+                    </div>
+                    <div id="decision-chain-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 参数A/B测试 Tab -->
+        <div id="tab-shadow" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(16,185,129,0.2);">🧪</div>
+                    <div>
+                        <div class="card-title">参数A/B影子测试</div>
+                        <div class="card-subtitle">改参数前先验证历史效果</div>
+                    </div>
+                </div>
+                <div id="shadow-test-container">
+                    <div class="loading"><div class="spinner"></div></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 权益曲线 Tab -->
+        <div id="tab-equity" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: rgba(59,130,246,0.2);">📈</div>
+                    <div>
+                        <div class="card-title">权益曲线</div>
+                        <div class="card-subtitle">Equity Curve</div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="equityChart"></canvas>
+                </div>
+                
+                <div class="stats-grid" style="margin-top: 20px;" id="equity-stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="equity-initial">--</div>
+                        <div class="stat-label">初始权益</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="equity-current">--</div>
+                        <div class="stat-label">当前权益</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="equity-return">--</div>
+                        <div class="stat-label">总收益率</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="equity-days">--</div>
+                        <div class="stat-label">交易天数</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 持仓 Tab -->
+        <div id="tab-positions" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(34,197,94,0.2);">💼</div>
+                        <div>
+                            <div class="card-title">当前持仓</div>
+                            <div class="card-subtitle">Positions</div>
+                        </div>
+                    </div>
+                    <div id="positions-table-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(6,182,212,0.2);">🔄</div>
+                        <div>
+                            <div class="card-title">最近交易</div>
+                            <div class="card-subtitle">Recent Trades</div>
+                        </div>
+                    </div>
+                    <div id="trades-table-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        
+        <!-- 系统状态 Tab -->
+        <div id="tab-system" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(34,197,94,0.2);">💰</div>
+                        <div>
+                            <div class="card-title">F2成本校准</div>
+                            <div class="card-subtitle">Cost Calibration</div>
+                        </div>
+                    </div>
+                    <div id="cost-calibration">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(245,158,11,0.2);">📊</div>
+                        <div>
+                            <div class="card-title">IC因子诊断</div>
+                            <div class="card-subtitle">IC Diagnostics</div>
+                        </div>
+                    </div>
+                    <div id="ic-diagnostics">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(236,72,153,0.2);">📝</div>
+                        <div>
+                            <div class="card-title">反思报告</div>
+                            <div class="card-subtitle">Reflection Reports</div>
+                        </div>
+                    </div>
+                    <div id="reflection-reports">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+                
+                <!-- 自动风险档位守卫 -->
+                <div class="card" style="grid-column: 1 / -1;">
+                    <div class="card-header">
+                        <div class="card-icon" style="background: rgba(239,68,68,0.2);">🛡️</div>
+                        <div>
+                            <div class="card-title">自动风险档位守卫</div>
+                            <div class="card-subtitle">Auto Risk Guard</div>
+                        </div>
+                    </div>
+                    <div id="auto-risk-guard-container">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="update-time" id="update-time">
+            最后更新: --
+        </div>
+    </div>
+    
+    <script>
+        // Tab切换
+        function switchTab(tabName) {
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            
+            if (tabName === 'equity') loadEquityChart();
+        }
+        
+        // 加载账户数据
+        async function loadAccount() {
+            try {
+                const res = await fetch('/api/account');
+                const data = await res.json();
+                
+                const html = `
+                    <div class="stat-item">
+                        <div class="stat-value">$${data.cash_usdt?.toFixed(2) || '--'}</div>
+                        <div class="stat-label">可用资金</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value ${data.realized_pnl >= 0 ? 'positive' : 'negative'}">
+                            ${data.realized_pnl >= 0 ? '+' : ''}${data.realized_pnl?.toFixed(2) || '--'}
+                        </div>
+                        <div class="stat-label">已实现盈亏</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.total_trades || 0}</div>
+                        <div class="stat-label">总交易数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.total_fees?.toFixed(4) || '--'}</div>
+                        <div class="stat-label">手续费</div>
+                    </div>
+                `;
+                document.getElementById('account-stats').innerHTML = html;
+            } catch (e) {
+                console.error('加载账户失败:', e);
+            }
+        }
+        
+        // 加载市场状态
+        async function loadMarketState() {
+            try {
+                const res = await fetch('/api/market_state');
+                const data = await res.json();
+                
+                const stateColors = {
+                    'RISK_OFF': '#ef4444',
+                    'TRENDING': '#22c55e',
+                    'SIDEWAYS': '#f59e0b'
+                };
+                
+                // 三种判断标准的状态颜色
+                const voteColors = {
+                    'TRENDING': '#22c55e',
+                    'TRENDINGUP': '#22c55e',
+                    'SIDEWAYS': '#f59e0b',
+                    'RISK_OFF': '#ef4444',
+                    'TRENDINGDOWN': '#ef4444',
+                    'N/A': '#64748b',
+                    'DISABLED': '#64748b'
+                };
+                
+                const votes = data.votes || {};
+                const hmmVote = votes.hmm || {};
+                const fundingVote = votes.funding || {};
+                const rssVote = votes.rss || {};
+                
+                const html = `
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" style="color: ${stateColors[data.state] || '#fff'}">
+                                ${data.state || '--'}
+                            </div>
+                            <div class="stat-label">市场状态</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.position_multiplier}x</div>
+                            <div class="stat-label">仓位乘数</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 三种判断标准 -->
+                    <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+                        <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px;">三种方法判断</div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                            <!-- HMM -->
+                            <div style="text-align: center; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                <div style="font-size: 0.75rem; color: #64748b;">HMM模型</div>
+                                <div style="font-weight: 600; color: ${voteColors[hmmVote.state] || '#fff'}; font-size: 0.9rem;">
+                                    ${hmmVote.state === 'DISABLED' ? '禁用' : (hmmVote.state || '--')}
+                                </div>
+                                <div style="font-size: 0.75rem; color: #00d4ff;">${hmmVote.sentiment !== undefined ? hmmVote.sentiment.toFixed(3) : 'N/A'}</div>
+                                <div style="font-size: 0.7rem; color: #64748b;">${(hmmVote.weight || 0) * 100}%</div>
+                            </div>
+                            
+                            <!-- 资金费率 -->
+                            <div style="text-align: center; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                <div style="font-size: 0.75rem; color: #64748b;">资金费率</div>
+                                <div style="font-weight: 600; color: ${voteColors[fundingVote.state] || '#fff'}; font-size: 0.9rem;">
+                                    ${fundingVote.state || '--'}
+                                </div>
+                                <div style="font-size: 0.75rem; color: #00d4ff;">${fundingVote.sentiment !== undefined ? fundingVote.sentiment.toFixed(3) : 'N/A'}</div>
+                                <div style="font-size: 0.7rem; color: #64748b;">${(fundingVote.weight || 0) * 100}%</div>
+                            </div>
+                            
+                            <!-- RSS新闻 -->
+                            <div style="text-align: center; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                <div style="font-size: 0.75rem; color: #64748b;">RSS新闻</div>
+                                <div style="font-weight: 600; color: ${voteColors[rssVote.state] || '#fff'}; font-size: 0.9rem;">
+                                    ${rssVote.state || '--'}
+                                </div>
+                                <div style="font-size: 0.75rem; color: #00d4ff;">${rssVote.sentiment !== undefined ? rssVote.sentiment.toFixed(3) : 'N/A'}</div>
+                                <div style="font-size: 0.7rem; color: #64748b;">${(rssVote.weight || 0) * 100}%</div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); font-size: 0.8rem; color: #64748b; text-align: center;">
+                            方法: ${data.method || '传统MA'} | 综合得分: ${(data.final_score || 0).toFixed(3)}
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 0.9rem;">
+                        ${data.description || '市场状态监控中'}
+                    </div>
+                `;
+                document.getElementById('market-state').innerHTML = html;
+            } catch (e) {
+                console.error('加载市场状态失败:', e);
+            }
+        }
+        
+        // 加载定时任务
+        async function loadTimers() {
+            try {
+                const res = await fetch('/api/timers');
+                const data = await res.json();
+                
+                let html = '';
+                data.timers?.forEach(timer => {
+                    const statusClass = timer.active ? 'status-active' : 'status-inactive';
+                    const statusText = timer.active ? '运行中' : '已停止';
+                    
+                    // 格式化下次运行时间
+                    let nextRunText = '未启用';
+                    if (timer.next_run && timer.next_run !== 'n/a') {
+                        try {
+                            // 解析 "Tue 2026-02-24 22:00:00" 格式
+                            const dateMatch = timer.next_run.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d+)/);
+                            if (dateMatch) {
+                                const [_, year, month, day, hour, minute] = dateMatch;
+                                const date = new Date(year, month - 1, day, hour, minute);
+                                const now = new Date();
+                                const diffMs = date - now;
+                                
+                                if (diffMs > 0) {
+                                    const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+                                    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                                    
+                                    if (diffHrs > 0) {
+                                        nextRunText = `${diffHrs}小时${diffMins}分钟后`;
+                                    } else if (diffMins > 0) {
+                                        nextRunText = `${diffMins}分钟后`;
+                                    } else {
+                                        nextRunText = '即将运行';
+                                    }
+                                    
+                                    // 添加具体时间
+                                    nextRunText += ` (${hour}:${minute})`;
+                                } else {
+                                    nextRunText = '正在运行或已过期';
+                                }
+                            }
+                        } catch (e) {
+                            nextRunText = timer.next_run;
+                        }
+                    }
+                    
+                    html += `
+                        <div class="timer-item">
+                            <div class="timer-icon">${timer.icon}</div>
+                            <div style="flex: 1;">
+                                <div class="timer-name">${timer.desc}</div>
+                                <div class="timer-desc" style="color: #00d4ff; font-size: 0.8rem;">${nextRunText}</div>
+                            </div>
+                            <div class="timer-status">
+                                <span class="status-badge ${statusClass}">${statusText}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                document.getElementById('timers-list').innerHTML = html || '<div style="color: #64748b; text-align: center;">暂无定时任务</div>';
+            } catch (e) {
+                console.error('加载定时任务失败:', e);
+            }
+        }
+        
+        // 加载ML训练进度
+        async function loadMLProgress() {
+            try {
+                const res = await fetch('/api/ml_training');
+                const data = await res.json();
+                
+                const statusMap = {
+                    'trained_today': { color: '#22c55e', text: '今日已训练' },
+                    'ready_to_train': { color: '#3b82f6', text: '等待训练' },
+                    'collecting_data': { color: '#f59e0b', text: '数据收集中' },
+                    'no_data': { color: '#64748b', text: '暂无数据' }
+                };
+                const status = statusMap[data.status] || { color: '#64748b', text: '未知' };
+                
+                const html = `
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>数据收集: ${data.total_samples || 0}/${data.samples_needed || 100}</span>
+                            <span style="color: ${status.color}">${status.text}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-purple" style="width: ${data.progress_percent || 0}%"></div>
+                        </div>
+                    </div>
+                    ${data.last_ic ? `
+                        <div style="margin-top: 10px; text-align: center;">
+                            <span style="color: #64748b;">最新IC: </span>
+                            <span style="color: ${data.last_ic > 0.02 ? '#22c55e' : '#f59e0b'}; font-weight: 600;">${data.last_ic.toFixed(4)}</span>
+                        </div>
+                    ` : ''}
+                `;
+                document.getElementById('ml-progress').innerHTML = html;
+            } catch (e) {
+                console.error('加载ML进度失败:', e);
+            }
+        }
+        
+        // 加载权益曲线图表
+        let equityChart = null;
+        async function loadEquityChart() {
+            try {
+                const res = await fetch('/api/equity_curve');
+                const data = await res.json();
+                
+                // 更新统计数据
+                document.getElementById('equity-initial').textContent = `$${data.initial || 100}`;
+                document.getElementById('equity-current').textContent = `$${data.current || 100}`;
+                const returnEl = document.getElementById('equity-return');
+                returnEl.textContent = `${data.total_return >= 0 ? '+' : ''}${data.total_return?.toFixed(2) || 0}%`;
+                returnEl.className = 'stat-value ' + (data.total_return >= 0 ? 'positive' : 'negative');
+                document.getElementById('equity-days').textContent = data.days || 0;
+                
+                // 绘制图表
+                const ctx = document.getElementById('equityChart').getContext('2d');
+                
+                if (equityChart) {
+                    equityChart.destroy();
+                }
+                
+                if (!data.dates || data.dates.length === 0) {
+                    document.getElementById('equityChart').parentElement.innerHTML = 
+                        '<div style="text-align: center; padding: 100px 20px; color: #64748b;">暂无权益数据</div>';
+                    return;
+                }
+                
+                // 可读性优化：下采样 + 时间格式化 + 动态Y轴
+                const maxPoints = 90;
+                const n = data.dates.length;
+                const step = Math.max(1, Math.floor(n / maxPoints));
+                const sampledDates = [];
+                const sampledValues = [];
+                for (let i = 0; i < n; i += step) {
+                    sampledDates.push(data.dates[i]);
+                    sampledValues.push(data.values[i]);
+                }
+                if (sampledDates[sampledDates.length - 1] !== data.dates[n - 1]) {
+                    sampledDates.push(data.dates[n - 1]);
+                    sampledValues.push(data.values[n - 1]);
+                }
+
+                const base = sampledValues[0] || 1;
+                const pctValues = sampledValues.map(v => ((v - base) / base) * 100); // 相对首点收益率
+                const pMin = Math.min(...pctValues);
+                const pMax = Math.max(...pctValues);
+                const pPad = Math.max((pMax - pMin) * 0.2, 0.05);
+                const trendUp = pctValues[pctValues.length - 1] >= pctValues[0];
+
+                const dynamicXTicks = Math.max(4, Math.min(10, Math.floor((window.innerWidth || 390) / 70)));
+
+                equityChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: sampledDates,
+                        datasets: [{
+                            label: '相对收益(%)',
+                            data: pctValues,
+                            borderColor: trendUp ? '#22c55e' : '#ef4444',
+                            backgroundColor: trendUp ? 'rgba(34,197,94,0.14)' : 'rgba(239,68,68,0.14)',
+                            borderWidth: 2.2,
+                            fill: true,
+                            tension: 0.25,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            yAxisID: 'y'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(10, 14, 26, 0.95)',
+                                borderColor: '#2a3142',
+                                borderWidth: 1,
+                                callbacks: {
+                                    title: (items) => {
+                                        const raw = items?.[0]?.label || '';
+                                        return raw.replace('T', ' ').replace('Z', '').slice(0, 16);
+                                    },
+                                    label: (context) => {
+                                        const i = context.dataIndex;
+                                        const pct = Number(context.raw).toFixed(3);
+                                        const eq = Number(sampledValues[i]).toFixed(4);
+                                        return `变化: ${pct}% ｜ 权益: $${eq}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(255,255,255,0.04)' },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    autoSkip: true,
+                                    maxTicksLimit: dynamicXTicks,
+                                    callback: function(val) {
+                                        const raw = this.getLabelForValue(val) || '';
+                                        return raw.includes('T') ? raw.split('T')[1].slice(0,5) : raw.slice(11,16);
+                                    }
+                                }
+                            },
+                            y: {
+                                min: pMin - pPad,
+                                max: pMax + pPad,
+                                beginAtZero: false,
+                                grid: { color: 'rgba(255,255,255,0.04)' },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    callback: (val) => Number(val).toFixed(2) + '%'
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('加载权益曲线失败:', e);
+            }
+        }
+        
+        // 加载持仓
+        async function loadPositions() {
+            try {
+                const res = await fetch('/api/positions');
+                const data = await res.json();
+                
+                if (!data || data.length === 0) {
+                    document.getElementById('positions-table-container').innerHTML = 
+                        '<div style="text-align: center; padding: 40px; color: #64748b;">当前无持仓</div>';
+                    return;
+                }
+                
+                let html = `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>币种</th>
+                                <th>数量</th>
+                                <th>价值(USDT)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                data.forEach(pos => {
+                    html += `
+                        <tr>
+                            <td>${pos.symbol}</td>
+                            <td>${pos.qty?.toFixed(6) || '--'}</td>
+                            <td>${pos.value_usdt?.toFixed(2) || '--'}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</tbody></table>';
+                document.getElementById('positions-table-container').innerHTML = html;
+            } catch (e) {
+                console.error('加载持仓失败:', e);
+            }
+        }
+        
+        // 加载交易记录
+        async function loadTrades() {
+            try {
+                const res = await fetch('/api/trades');
+                const data = await res.json();
+                
+                if (!data || data.length === 0) {
+                    document.getElementById('trades-table-container').innerHTML = 
+                        '<div style="text-align: center; padding: 40px; color: #64748b;">暂无交易记录</div>';
+                    return;
+                }
+                
+                let html = `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>币种</th>
+                                <th>方向</th>
+                                <th>金额</th>
+                                <th>手续费</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                data.slice(0, 10).forEach(trade => {
+                    const sideClass = trade.side === 'buy' ? 'negative' : 'positive';
+                    const sideText = trade.side === 'buy' ? '买入' : '卖出';
+                    
+                    html += `
+                        <tr>
+                            <td>${trade.time?.slice(0, 16).replace('T', ' ') || '--'}</td>
+                            <td>${trade.symbol}</td>
+                            <td class="${sideClass}">${sideText}</td>
+                            <td>$${trade.amount?.toFixed(2) || '--'}</td>
+                            <td>${trade.fee?.toFixed(6) || '--'}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</tbody></table>';
+                document.getElementById('trades-table-container').innerHTML = html;
+            } catch (e) {
+                console.error('加载交易失败:', e);
+            }
+        }
+        
+        // 加载成本校准
+        async function loadCostCalibration() {
+            try {
+                const res = await fetch('/api/cost_calibration');
+                const data = await res.json();
+                
+                const statusText = data.status === 'calibrated' ? '已校准' : '校准中';
+                const statusColor = data.status === 'calibrated' ? '#22c55e' : '#f59e0b';
+                
+                const html = `
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>校准进度</span>
+                            <span style="color: ${statusColor}">${statusText}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-green" style="width: ${data.progress_percent || 0}%"></div>
+                        </div>
+                    </div>
+                    <div class="stats-grid" style="margin-top: 15px;">
+                        <div class="stat-item">
+                            <div class="stat-value">${data.total_days || 0}</div>
+                            <div class="stat-label">校准天数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.avg_slippage_bps?.toFixed(2) || '--'}</div>
+                            <div class="stat-label">滑点(bps)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.avg_fee_bps?.toFixed(2) || '--'}</div>
+                            <div class="stat-label">费率(bps)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.event_files || 0}</div>
+                            <div class="stat-label">事件文件</div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('cost-calibration').innerHTML = html;
+            } catch (e) {
+                console.error('加载成本校准失败:', e);
+            }
+        }
+        
+        // 加载IC诊断
+        async function loadICDiagnostics() {
+            try {
+                const res = await fetch('/api/ic_diagnostics');
+                const data = await res.json();
+                
+                if (data.status === 'no_data' || data.error) {
+                    document.getElementById('ic-diagnostics').innerHTML = 
+                        '<div style="text-align: center; padding: 40px; color: #64748b;">暂无IC诊断数据<br/><span style="font-size: 0.85rem;">需要至少30天交易数据</span></div>';
+                    return;
+                }
+                
+                const icColor = data.overall_ic > 0.02 ? '#22c55e' : data.overall_ic > 0 ? '#f59e0b' : '#ef4444';
+                
+                let html = `
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" style="color: ${icColor}">${data.overall_ic?.toFixed(4) || '--'}</div>
+                            <div class="stat-label">整体IC</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.overall_ir?.toFixed(4) || '--'}</div>
+                            <div class="stat-label">IR比率</div>
+                        </div>
+                    </div>
+                `;
+                
+                if (data.factors && data.factors.length > 0) {
+                    html += '<div style="margin-top: 15px; font-size: 0.85rem; color: #64748b;">因子IC:</div>';
+                    data.factors.slice(0, 5).forEach(f => {
+                        const color = f.ic > 0.02 ? '#22c55e' : f.ic > 0 ? '#94a3b8' : '#ef4444';
+                        html += `
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                <span style="color: #94a3b8;">${f.name}</span>
+                                <span style="color: ${color}; font-weight: 500;">${f.ic?.toFixed(4) || '--'}</span>
+                            </div>
+                        `;
+                    });
+                }
+                
+                document.getElementById('ic-diagnostics').innerHTML = html;
+            } catch (e) {
+                console.error('加载IC诊断失败:', e);
+            }
+        }
+        
+        // 加载反思报告
+        async function loadReflectionReports() {
+            try {
+                const res = await fetch('/api/reflection_reports');
+                const data = await res.json();
+                
+                if (!data.reports || data.reports.length === 0) {
+                    document.getElementById('reflection-reports').innerHTML = 
+                        '<div style="text-align: center; padding: 40px; color: #64748b;">暂无反思报告<br/><span style="font-size: 0.85rem;">每天21:00自动生成</span></div>';
+                    return;
+                }
+                
+                const r = data.reports[0];
+                const pnlColor = r.total_pnl >= 0 ? '#22c55e' : '#ef4444';
+                
+                const html = `
+                    <div style="background: rgba(236,72,153,0.1); border-radius: 10px; padding: 15px; margin-bottom: 15px;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <div>
+                                <div style="font-weight: 600;">最新报告: ${r.date}</div>
+                                <div style="font-size: 0.8rem; color: #64748b;">${r.trade_count}笔 · ${r.symbols}币种</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 1.3rem; font-weight: 700; color: ${pnlColor};">
+                                    ${r.total_pnl >= 0 ? '+' : ''}${r.total_pnl?.toFixed(2)}
+                                </div>
+                                <div style="font-size: 0.75rem; color: #64748b;">总盈亏</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px; text-align: center;">
+                        <div style="flex: 1; padding: 10px; background: rgba(239,68,68,0.1); border-radius: 8px;">
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #ef4444;">${r.high_priority}</div>
+                            <div style="font-size: 0.7rem; color: #64748b;">高优先级</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: rgba(245,158,11,0.1); border-radius: 8px;">
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #f59e0b;">${r.medium_priority}</div>
+                            <div style="font-size: 0.7rem; color: #64748b;">中优先级</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: rgba(34,197,94,0.1); border-radius: 8px;">
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #22c55e;">${r.insights_count}</div>
+                            <div style="font-size: 0.7rem; color: #64748b;">总洞察</div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('reflection-reports').innerHTML = html;
+            } catch (e) {
+                console.error('加载反思报告失败:', e);
+            }
+        }
+        
+        // 加载币种评分
+        async function loadAlphaScores() {
+            try {
+                const res = await fetch('/api/scores');
+                const data = await res.json();
+                
+                const container = document.getElementById('alpha-scores');
+                
+                if (!data.scores || data.scores.length === 0) {
+                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: #64748b;">暂无评分数据</div>';
+                    return;
+                }
+                
+                // 显示市场状态
+                let html = `
+                    <div style="margin-bottom: 12px; padding: 8px 12px; background: rgba(255,255,255,0.05); border-radius: 8px; font-size: 0.85rem;">
+                        <span style="color: #64748b;">市场状态:</span>
+                        <span style="color: #00d4ff; font-weight: 500;">${data.regime || 'Unknown'}</span>
+                    </div>
+                `;
+                
+                // 显示Top10评分
+                html += '<div style="max-height: 280px; overflow-y: auto;">';
+                data.scores.slice(0, 10).forEach((item, index) => {
+                    const score = item.score || 0;
+                    const scoreColor = score > 0.5 ? '#22c55e' : score > 0 ? '#f59e0b' : '#ef4444';
+                    const width = Math.abs(score) * 100;
+                    
+                    // 排名变化指示器
+                    let trendHtml = '';
+                    if (item.trend === 'up') {
+                        trendHtml = `<span style="color: #22c55e; font-size: 0.75rem; margin-left: 6px;">↑${item.rank_change}</span>`;
+                    } else if (item.trend === 'down') {
+                        trendHtml = `<span style="color: #ef4444; font-size: 0.75rem; margin-left: 6px;">↓${Math.abs(item.rank_change)}</span>`;
+                    } else if (item.trend === 'stable') {
+                        trendHtml = `<span style="color: #64748b; font-size: 0.75rem; margin-left: 6px;">→</span>`;
+                    } else if (item.trend === 'new') {
+                        trendHtml = `<span style="color: #f59e0b; font-size: 0.75rem; margin-left: 6px;">NEW</span>`;
+                    }
+                    
+                    // 上一排名提示
+                    let prevRankHtml = '';
+                    if (item.previous_rank) {
+                        prevRankHtml = `<span style="color: #64748b; font-size: 0.7rem;">(${item.previous_rank}→)</span>`;
+                    }
+                    
+                    html += `
+                        <div style="margin-bottom: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <span style="font-size: 0.9rem;">
+                                    <span style="color: #64748b; margin-right: 8px;">${index + 1}</span>
+                                    ${item.symbol}
+                                    ${prevRankHtml}
+                                    ${trendHtml}
+                                </span>
+                                <span style="font-size: 0.85rem; font-weight: 500; color: ${scoreColor};">
+                                    ${score.toFixed(4)}
+                                </span>
+                            </div>
+                            <div style="height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+                                <div style="height: 100%; width: ${width}%; background: ${scoreColor}; border-radius: 2px; transition: width 0.3s;"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                
+                // 添加图例
+                html += `
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.05); font-size: 0.75rem; color: #64748b; display: flex; gap: 12px;">
+                        <span><span style="color: #22c55e;">↑</span> 排名上升</span>
+                        <span><span style="color: #ef4444;">↓</span> 排名下降</span>
+                        <span><span style="color: #64748b;">→</span> 排名不变</span>
+                        <span><span style="color: #f59e0b;">NEW</span> 新上榜</span>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('加载币种评分失败:', e);
+                document.getElementById('alpha-scores').innerHTML = 
+                    '<div style="color: #ef4444; text-align: center;">加载失败</div>';
+            }
+        }
+        
+        // 加载情绪分析
+        async function loadSentiment() {
+            try {
+                const res = await fetch('/api/sentiment');
+                const data = await res.json();
+                
+                const container = document.getElementById('sentiment-display');
+                
+                if (data.error) {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">情绪分析暂未启用</div>';
+                    return;
+                }
+                
+                const overall = data.overall || {};
+                const mood = overall.mood || '中性';
+                const moodColor = overall.mood_color || '#64748b';
+                const fearGreed = overall.fear_greed || 50;
+                
+                let html = `
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <div style="font-size: 2.5rem; font-weight: 700; color: ${moodColor}; margin-bottom: 5px;">
+                            ${fearGreed}
+                        </div>
+                        <div style="font-size: 1rem; color: ${moodColor}; font-weight: 500;">
+                            ${mood}
+                        </div>
+                        <div style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">
+                            恐惧贪婪指数 (0-100)
+                        </div>
+                    </div>
+                    
+                    <div style="height: 8px; background: linear-gradient(90deg, #ef4444 0%, #f59e0b 25%, #64748b 50%, #3b82f6 75%, #22c55e 100%); border-radius: 4px; position: relative; margin: 15px 0;">
+                        <div style="position: absolute; top: -5px; left: ${fearGreed}%; width: 4px; height: 18px; background: white; border-radius: 2px; transform: translateX(-50%); box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+                
+            } catch (e) {
+                console.error('加载情绪分析失败:', e);
+                document.getElementById('sentiment-display').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
+        // 加载决策归因面板
+        async function loadDecisionChain() {
+            try {
+                const res = await fetch('/api/decision_chain');
+                const data = await res.json();
+                
+                const container = document.getElementById('decision-chain-container');
+                if (!data.rounds || data.rounds.length === 0) {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">暂无决策记录</div>';
+                    return;
+                }
+                
+                let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
+                
+                for (const round of data.rounds) {
+                    const risk = round.risk_state || {};
+                    const exec = round.execution_result || {};
+                    const blocks = round.block_reasons || {};
+                    
+                    // 判断本轮状态颜色
+                    let statusColor = '#22c55e';  // 绿色-正常成交
+                    let statusText = '正常';
+                    if (exec.orders_rebalance === 0 && exec.selected > 0) {
+                        statusColor = '#f59e0b';  // 黄色-有信号但被拦截
+                        statusText = '被拦截';
+                    }
+                    
+                    // 格式化时间显示：提取 HH:MM 并计算相对时间
+                    let timeDisplay = round.time;
+                    let relativeTime = '';
+                    if (round.time && round.time.includes(' ')) {
+                        const timePart = round.time.split(' ')[1].slice(0, 5); // HH:MM
+                        const datePart = round.time.split(' ')[0].slice(5); // MM-DD
+                        timeDisplay = `${datePart} ${timePart}`;
+                        
+                        // 计算相对时间
+                        const roundDate = new Date(round.time);
+                        const now = new Date();
+                        const diffMinutes = Math.floor((now - roundDate) / 60000);
+                        if (diffMinutes < 60) {
+                            relativeTime = `${diffMinutes}分钟前`;
+                        } else if (diffMinutes < 1440) {
+                            relativeTime = `${Math.floor(diffMinutes / 60)}小时前`;
+                        } else {
+                            relativeTime = `${Math.floor(diffMinutes / 1440)}天前`;
+                        }
+                    }
+                    
+                    html += `
+                        <div style="background: rgba(255,255,255,0.03); border-radius: 12px; padding: 15px; border-left: 4px solid ${statusColor};">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <div>
+                                    <div style="font-weight: 600; font-size: 1rem;">${timeDisplay}</div>
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 2px;">${relativeTime}</div>
+                                </div>
+                                <span style="background: ${statusColor}; color: white; padding: 3px 10px; border-radius: 10px; font-size: 0.75rem;">${statusText}</span>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; font-size: 0.85rem;">
+                                <div style="text-align: center;">
+                                    <div style="color: #64748b;">选中币种</div>
+                                    <div style="font-weight: 600;">${exec.selected || 0}</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="color: #64748b;">实际成交</div>
+                                    <div style="font-weight: 600; color: ${exec.orders_rebalance > 0 ? '#22c55e' : '#ef4444'};">${exec.orders_rebalance || 0}</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="color: #64748b;">风控状态</div>
+                                    <div style="font-weight: 600;">${risk.regime || 'Unknown'}</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="color: #64748b;">回撤降杠杆</div>
+                                    <div style="font-weight: 600; color: ${(risk.dd_multiplier || 1) < 1 ? '#f59e0b' : '#22c55e'};">${risk.dd_multiplier || 1}x</div>
+                                </div>
+                            </div>
+                            
+                            ${blocks.deadband > 0 ? `
+                                <div style="background: rgba(245,158,11,0.1); border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                                    <div style="color: #f59e0b; font-size: 0.8rem; margin-bottom: 5px;">⚠️ Deadband 拦截: ${blocks.deadband} 个币种</div>
+                                    ${round.blocked_top && round.blocked_top.length > 0 ? `
+                                        <div style="font-size: 0.75rem; color: #94a3b8;">
+                                            被拦Top3: ${round.blocked_top.map(b => `${b.symbol}(漂移${b.drift.toFixed(3)})`).join(', ')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            ` : ''}
+                            
+                            <div style="font-size: 0.75rem; color: #64748b;">
+                                策略信号: ${(round.strategy_signals || []).slice(0,3).map(s => `${s.symbol}(${s.score.toFixed(2)})`).join(', ')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+                container.innerHTML = html;
+                
+            } catch (e) {
+                console.error('加载决策归因失败:', e);
+                document.getElementById('decision-chain-container').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
+        // 加载策略信号分析
+        async function loadStrategySignals() {
+            try {
+                const res = await fetch('/api/decision_chain');
+                const data = await res.json();
+                
+                const container = document.getElementById('strategy-signals-container');
+                
+                if (!data.rounds || data.rounds.length === 0) {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">暂无策略信号数据</div>';
+                    return;
+                }
+                
+                const latest = data.rounds[0];
+                const strategies = latest.strategy_signals || [];
+                
+                if (strategies.length === 0) {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">本轮未记录策略信号</div>';
+                    return;
+                }
+                
+                // Strategy colors
+                const strategyColors = {
+                    'TrendFollowing': { bg: 'rgba(239,68,68,0.15)', border: '#ef4444', text: '#fca5a5' },
+                    'MeanReversion': { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6', text: '#93c5fd' },
+                    'Alpha6Factor': { bg: 'rgba(16,185,129,0.15)', border: '#10b981', text: '#86efac' }
+                };
+                
+                let html = `
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px;">
+                `;
+                
+                for (const st of strategies) {
+                    const colors = strategyColors[st.strategy] || { bg: 'rgba(100,100,100,0.1)', border: '#666', text: '#999' };
+                    const signals = st.signals || [];
+                    
+                    html += `
+                        <div style="background: ${colors.bg}; border: 1px solid ${colors.border}; border-radius: 12px; padding: 15px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <div style="font-weight: 600; color: ${colors.text}; font-size: 1.1rem;">
+                                    ${st.strategy}
+                                </div>
+                                <span style="font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; background: ${colors.border}; color: white;">
+                                    ${st.allocation * 100}%
+                                </span>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
+                                <div style="text-align: center;">
+                                    <div style="font-size: 1.2rem; font-weight: 600; color: ${colors.text};">${st.total_signals}</div>
+                                    <div style="font-size: 0.7rem; color: #64748b;">总信号</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 1.2rem; font-weight: 600; color: #22c55e;">${st.buy_signals}</div>
+                                    <div style="font-size: 0.7rem; color: #64748b;">买入</div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 1.2rem; font-weight: 600; color: #ef4444;">${st.sell_signals}</div>
+                                    <div style="font-size: 0.7rem; color: #64748b;">卖出</div>
+                                </div>
+                            </div>
+                            
+                            ${signals.length > 0 ? `
+                                <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+                                    <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 8px;">信号详情</div>
+                                    ${signals.map(s => `
+                                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 5px; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                            <span style="color: ${colors.text};">${s.symbol}</span>
+                                            <span style="color: ${s.side === 'buy' ? '#22c55e' : '#ef4444'};">${s.side === 'buy' ? '买入' : '卖出'} ${s.score.toFixed(3)}</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+                
+                // Add fusion summary
+                if (strategies.length > 1) {
+                    const totalInput = strategies.reduce((sum, s) => sum + s.total_signals, 0);
+                    html += `
+                        <div style="margin-top: 15px; background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3); border-radius: 12px; padding: 15px;">
+                            <div style="font-weight: 600; color: #c4b5fd; margin-bottom: 8px;">🔄 信号融合</div>
+                            <div style="font-size: 0.85rem; color: #94a3b8;">
+                                输入: ${totalInput} 个信号 → 输出: ${latest.execution_result?.orders_rebalance || 0} 个交易单
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+                
+            } catch (e) {
+                console.error('加载策略信号失败:', e);
+                document.getElementById('strategy-signals-container').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
+        // 加载参数A/B影子测试
+        async function loadShadowTest() {
+            try {
+                const res = await fetch('/api/shadow_test');
+                const data = await res.json();
+                
+                const container = document.getElementById('shadow-test-container');
+                if (data.status === 'no_data') {
+                    container.innerHTML = '<div style="color: #64748b; text-align: center;">暂无数据</div>';
+                    return;
+                }
+                
+                const current = data.comparison?.current || {};
+                const estimated = data.comparison?.estimated_with_proposed || {};
+                const rec = data.recommendation || {};
+                const matrix = data.matrix || [];
+                const gate = data.ab_gate || null;
+                
+                // 建议颜色
+                let recColor = '#64748b';
+                let recBg = 'rgba(100,116,139,0.1)';
+                if (rec.action === 'cautious_try') {
+                    recColor = '#f59e0b';
+                    recBg = 'rgba(245,158,11,0.1)';
+                } else if (rec.action === 'keep_current') {
+                    recColor = '#22c55e';
+                    recBg = 'rgba(34,197,94,0.1)';
+                }
+                
+                const matrixHtml = matrix.length ? `
+                    <div style="background: rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); border-radius:12px; padding:12px; margin-bottom:12px;">
+                        <div style="font-weight:600; margin-bottom:8px; color:#c7d2fe;">🧭 当前A/B测试矩阵</div>
+                        <div style="font-size:0.85rem; color:#94a3b8; line-height:1.7;">
+                            ${matrix.map(m => `<div><b>${m.name}</b>: ${Object.entries(m.params||{}).map(([k,v]) => `${k}=${v}`).join(', ')}</div>`).join('')}
+                        </div>
+                    </div>
+                ` : '';
+
+                const gateHtml = gate ? `
+                    <div style="background: rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:12px; padding:12px; margin-bottom:12px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-weight:600; color:#a7f3d0;">🚦切参守门结论</div>
+                            <span style="font-size:0.8rem; padding:2px 8px; border-radius:10px; background:${gate?.decision?.switch_recommended ? '#10b981' : '#64748b'}; color:white;">
+                                ${gate?.decision?.switch_recommended ? '建议切换' : '继续观察'}
+                            </span>
+                        </div>
+                        <div style="font-size:0.85rem; color:#94a3b8; margin-top:6px;">
+                            样本 ${gate.window_runs || 0} 轮；当前转化 ${((gate.current||{}).conversion||0)*100 ? (((gate.current||{}).conversion||0)*100).toFixed(1) : '--'}%；
+                            候选转化 ${((gate.candidate||{}).conversion||0)*100 ? (((gate.candidate||{}).conversion||0)*100).toFixed(1) : '--'}%。
+                        </div>
+                    </div>
+                ` : '';
+
+                let html = `
+                    ${matrixHtml}
+                    ${gateHtml}
+                    <div style="margin-bottom: 20px;">
+                        <div style="color: #64748b; font-size: 0.85rem; margin-bottom: 10px;">
+                            基于过去 ${data.window_rounds} 轮（约${data.window_days}天）的数据分析
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                        <div style="background: rgba(59,130,246,0.1); border-radius: 12px; padding: 15px; border: 1px solid rgba(59,130,246,0.3);">
+                            <div style="color: #3b82f6; font-weight: 600; margin-bottom: 10px;">📊 当前参数</div>
+                            <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">deadband_sideways = 0.04</div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                                <div>
+                                    <div style="font-size: 0.75rem; color: #64748b;">平均选中</div>
+                                    <div style="font-weight: 600;">${current.avg_selected_per_round}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.75rem; color: #64748b;">平均成交</div>
+                                    <div style="font-weight: 600;">${current.avg_rebalance_per_round}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.75rem; color: #64748b;">成交率</div>
+                                    <div style="font-weight: 600;">${current.conversion_rate}%</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.75rem; color: #64748b;">被拦次数</div>
+                                    <div style="font-weight: 600;">${current.total_deadband_blocks}</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="background: rgba(16,185,129,0.1); border-radius: 12px; padding: 15px; border: 1px solid rgba(16,185,129,0.3);">
+                            <div style="color: #10b981; font-weight: 600; margin-bottom: 10px;">🧪 建议参数</div>
+                            <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">deadband_sideways = 0.03</div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                                <div>
+                                    <div style="font-size: 0.75rem; color: #64748b;">预估成交</div>
+                                    <div style="font-weight: 600; color: #10b981;">${estimated.avg_rebalance_per_round}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.75rem; color: #64748b;">预估成交率</div>
+                                    <div style="font-weight: 600; color: #10b981;">${estimated.estimated_conversion_rate}%</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.75rem; color: #64748b;">额外成交</div>
+                                    <div style="font-weight: 600; color: #10b981;">+${estimated.additional_trades}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.75rem; color: #64748b;">风险提示</div>
+                                    <div style="font-size: 0.7rem; color: #f59e0b;">可能含弱信号</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="background: ${recBg}; border-radius: 12px; padding: 15px; border-left: 4px solid ${recColor};">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div style="font-weight: 600; color: ${recColor};">💡 系统建议</div>
+                            <span style="background: ${recColor}; color: white; padding: 3px 10px; border-radius: 10px; font-size: 0.75rem;">
+                                ${rec.action === 'cautious_try' ? '谨慎尝试' : rec.action === 'keep_current' ? '保持现状' : '观察'}
+                            </span>
+                        </div>
+                        <div style="font-size: 0.9rem; margin-bottom: 8px;">${rec.reason}</div>
+                        <div style="font-size: 0.85rem; color: #64748b;">
+                            下一步: ${rec.suggested_next_step}
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+                
+            } catch (e) {
+                console.error('加载A/B测试失败:', e);
+                document.getElementById('shadow-test-container').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
+        // 加载智能告警
+        async function loadSmartAlerts() {
+            try {
+                const res = await fetch('/api/smart_alerts');
+                const data = await res.json();
+                
+                const banner = document.getElementById('smart-alerts-banner');
+                
+                if (data.status === 'alert' && data.alerts && data.alerts.length > 0) {
+                    let html = '';
+                    for (const alert of data.alerts) {
+                        const levelColors = {
+                            'critical': { bg: 'rgba(239,68,68,0.15)', border: '#ef4444', icon: '🚨' },
+                            'high': { bg: 'rgba(245,158,11,0.15)', border: '#f59e0b', icon: '⚠️' },
+                            'medium': { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6', icon: '📊' }
+                        };
+                        const colors = levelColors[alert.level] || levelColors['medium'];
+                        
+                        html += `
+                            <div style="background: ${colors.bg}; border-left: 4px solid ${colors.border}; border-radius: 8px; padding: 12px 15px; margin-bottom: 10px;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-size: 1.2rem;">${colors.icon}</span>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; color: #e2e8f0;">${alert.title}</div>
+                                        <div style="font-size: 0.85rem; color: #94a3b8; margin-top: 3px;">${alert.message}</div>
+                                        <div style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">💡 ${alert.suggestion}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    banner.innerHTML = html;
+                    banner.style.display = 'block';
+                } else {
+                    banner.style.display = 'none';
+                }
+            } catch (e) {
+                console.error('加载智能告警失败:', e);
+            }
+        }
+        
+        // 加载自动风险档位守卫
+        async function loadAutoRiskGuard() {
+            try {
+                const res = await fetch('/api/auto_risk_guard');
+                const data = await res.json();
+                
+                const container = document.getElementById('auto-risk-guard-container');
+                if (data.error) {
+                    container.innerHTML = `<div style="color: #64748b; text-align: center;">加载失败: ${data.error}</div>`;
+                    return;
+                }
+                
+                const level = data.current_level || 'NEUTRAL';
+                const config = data.config || {};
+                const history = data.history || [];
+                
+                // 档位颜色
+                const levelColors = {
+                    'ATTACK': { bg: 'rgba(239,68,68,0.15)', border: '#ef4444', text: '#fca5a5', desc: '进攻档 - 积极交易' },
+                    'NEUTRAL': { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6', text: '#93c5fd', desc: '中性档 - 标准操作' },
+                    'DEFENSE': { bg: 'rgba(245,158,11,0.15)', border: '#f59e0b', text: '#fcd34d', desc: '防守档 - 降低风险' },
+                    'PROTECT': { bg: 'rgba(34,197,94,0.15)', border: '#22c55e', text: '#86efac', desc: '保护档 - 优先保本' }
+                };
+                const colors = levelColors[level] || levelColors['NEUTRAL'];
+                
+                // 历史记录
+                let historyHtml = '';
+                if (history.length > 0) {
+                    historyHtml = `
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 8px;">📜 最近切换记录</div>
+                            ${history.slice(-3).map(h => `
+                                <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">
+                                    <span style="color: ${colors.text}">${h.from} → ${h.to}</span>
+                                    <span style="margin-left: 10px; color: #64748b;">${h.reason || '自动切换'}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+                
+                const html = `
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: start;">
+                        <!-- 左侧档位显示 -->
+                        <div style="background: ${colors.bg}; border: 2px solid ${colors.border}; border-radius: 12px; padding: 20px; text-align: center; min-width: 140px;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: ${colors.text}; margin-bottom: 5px;">${level}</div>
+                            <div style="font-size: 0.75rem; color: ${colors.text}; opacity: 0.8;">${colors.desc}</div>
+                            <div style="font-size: 0.7rem; color: #64748b; margin-top: 10px;">更新: ${data.last_update?.split(' ')[1] || '--'}</div>
+                        </div>
+                        
+                        <!-- 右侧配置参数 -->
+                        <div>
+                            <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 10px;">⚙️ 当前配置参数</div>
+                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">震荡仓位</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${(config.pos_mult_sideways * 100)?.toFixed(0) || '--'}%</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">回撤触发</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${(config.drawdown_trigger * 100)?.toFixed(0) || '--'}%</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">最小下单</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">$${config.min_trade_notional_base || '--'}</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">死区阈值</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${(config.deadband_sideways * 100)?.toFixed(1) || '--'}%</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">最大持仓</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${config.max_positions || '--'}个</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px;">
+                                    <div style="font-size: 0.7rem; color: #64748b;">冷却时间</div>
+                                    <div style="font-size: 0.9rem; color: #e2e8f0; font-weight: 600;">${config.cooldown_hours || '--'}小时</div>
+                                </div>
+                            </div>
+                            ${historyHtml}
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+                
+                // 同时更新首页的风险档位显示（简洁版）
+                const miniHtml = `
+                    <div style="text-align: center; padding: 10px;">
+                        <div style="font-size: 1.3rem; font-weight: 700; color: ${colors.text}; margin-bottom: 5px;">
+                            ${level}
+                        </div>
+                        <div style="font-size: 0.8rem; color: ${colors.text}; margin-bottom: 8px;">
+                            ${colors.desc}
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.75rem; color: #64748b;">
+                            <div>仓位: ${(config.pos_mult_sideways * 100)?.toFixed(0) || '--'}%</div>
+                            <div>回撤: ${((data.metrics?.last_dd_pct || 0) * 100).toFixed(1)}%</div>
+                        </div>
+                        ${level === 'PROTECT' ? `
+                            <div style="margin-top: 8px; padding: 6px; background: rgba(239,68,68,0.2); border-radius: 6px; font-size: 0.75rem; color: #fca5a5;">
+                                ⚠️ 保护模式：只减仓，不开新仓
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+                const miniContainer = document.getElementById('risk-guard-state');
+                if (miniContainer) {
+                    miniContainer.innerHTML = miniHtml;
+                }
+                
+            } catch (e) {
+                console.error('加载自动风险档位失败:', e);
+                document.getElementById('auto-risk-guard-container').innerHTML = 
+                    '<div style="color: #64748b; text-align: center;">加载失败</div>';
+            }
+        }
+        
+        // 加载所有数据
+        async function loadAll() {
+            await Promise.all([
+                loadAccount(),
+                loadMarketState(),
+                loadTimers(),
+                loadMLProgress(),
+                loadAlphaScores(),
+                loadSentiment(),
+                loadPositions(),
+                loadTrades(),
+                loadCostCalibration(),
+                loadICDiagnostics(),
+                loadReflectionReports(),
+                loadDecisionChain(),
+                loadStrategySignals(),
+                loadShadowTest(),
+                loadSmartAlerts(),
+                loadAutoRiskGuard()
+            ]);
+            
+            document.getElementById('update-time').textContent = 
+                '最后更新: ' + new Date().toLocaleString('zh-CN');
+        }
+        
+        // 初始加载
+        loadAll();
+        setInterval(loadAll, 30000);
+    </script>
+</body>
+</html>

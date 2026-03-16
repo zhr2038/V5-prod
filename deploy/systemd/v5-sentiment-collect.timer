@@ -1,0 +1,11 @@
+[Unit]
+Description=V5 Sentiment Collection Timer
+
+[Timer]
+OnCalendar=*:30:00
+Persistent=true
+AccuracySec=1min
+Unit=v5-sentiment-collect.service
+
+[Install]
+WantedBy=timers.target

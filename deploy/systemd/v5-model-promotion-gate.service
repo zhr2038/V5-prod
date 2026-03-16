@@ -1,0 +1,17 @@
+[Unit]
+Description=V5 ML Model Promotion Gate
+Wants=network-online.target
+After=network-online.target v5-daily-ml-training.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-prod
+SuccessExitStatus=2
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/clawd/v5-prod
+Environment=V5_WORKSPACE=/home/admin/clawd/v5-prod
+Environment=V5_CONFIG=configs/live_prod.yaml
+ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/model_promotion_gate.py'
+
+[Install]
+WantedBy=default.target

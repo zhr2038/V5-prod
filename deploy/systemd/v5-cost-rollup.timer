@@ -1,0 +1,12 @@
+[Unit]
+Description=Run V5 cost rollup daily at 00:15 UTC
+
+[Timer]
+OnCalendar=*-*-* 00:15:00 UTC
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=2min
+Unit=v5-cost-rollup.service
+
+[Install]
+WantedBy=timers.target

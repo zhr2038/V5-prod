@@ -1,0 +1,56 @@
+task:
+  name: ml_training_gpu
+
+paths:
+  runs_dir: reports/runs
+  db_path: reports/ml_training_data.db
+  csv_path: reports/ml_training_data.csv
+  history_path: reports/ml_training_history.json
+  model_path: models/ml_factor_model
+
+dataset:
+  min_samples: 200
+  target_col: future_return_6h
+  target_mode: forward_edge_rank
+  feature_groups:
+    - classic
+  include_time_features: false
+  feature_selector: stable
+  selected_feature_count: 12
+  rolling_window_days: 60
+  prediction_horizon: 6
+  min_symbol_samples: 48
+  min_symbol_target_std: 1.0e-6
+  min_group_size: 2
+  min_group_coverage_ratio: 0.9
+  align_cycles: true
+
+model:
+  candidates:
+    - xgboost
+    - ridge
+  n_jobs: -1
+  xgboost_n_estimators: 300
+  xgboost_max_depth: 4
+  xgboost_learning_rate: 0.05
+  xgboost_subsample: 0.8
+  xgboost_colsample_bytree: 0.8
+  xgboost_reg_alpha: 1.0
+  xgboost_reg_lambda: 4.0
+  xgboost_max_bin: 256
+  xgboost_compute_device: auto
+  ridge_alpha: 50.0
+
+gate:
+  min_valid_ic: 0.0
+  max_ic_gap: 0.25
+  min_cv_mean_ic: 0.01
+  max_cv_std: 0.15
+
+recency_weighting:
+  half_life_days: 5
+  max_weight: 3.0
+
+parallel:
+  candidate_workers: 2
+  cv_workers: 4

@@ -1,0 +1,441 @@
+# 20 USDT 实盘小资金测试配置
+# 优化版：启用 universe 动态选股 + auto_blacklist + 动态权重
+
+# symbols 作为保底，universe 会在此基础上扩展
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  api_key: ${EXCHANGE_API_KEY}
+  api_secret: ${EXCHANGE_API_SECRET}
+  passphrase: ${EXCHANGE_PASSPHRASE}
+  testnet: false
+
+universe:
+  enabled: true
+  use_universe_symbols: true
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 3600
+
+  # 币池门槛 - 只过滤劣币，不限制好币
+  # 策略将在这个币池内自由竞争选股
+  top_n_market_cap: 50              # 选市值前50（更大的池子）
+  min_24h_quote_volume_usdt: 5000000    # 24h成交额 > 500万 USDT（避免币池过窄）
+  max_spread_bps: 30                 # 点差 < 30bps（放宽，先保证可选标的数量）
+  
+  # 点差过大的币自动拉黑7天
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+  
+  # 单币 ticker 精筛（更可靠的成交量数据）
+  refine_with_single_ticker: false   # 关闭单币逐个精筛，避免把币池压缩到仅4个
+  refine_single_ticker_max_candidates: 100
+  refine_single_ticker_sleep_sec: 0.02
+  
+  # ❌ 移除白名单限制 - 策略自由竞争
+  # 只保留黑名单过滤劣币
+  
+  # 明确排除非加密货币和低质量币
+  exclude_symbols:
+    # 贵金属（非加密货币）
+    - PAXG/USDT
+    - XAUT/USDT
+    # 稳定币
+    - USDT/USDT
+    - USDC/USDT
+    - TUSD/USDT
+    - DAI/USDT
+    # 已知的垃圾币/低质量币
+    - PEPE/USDT
+    - SHIB/USDT
+    - FLOKI/USDT
+    - BONK/USDT
+    - DOGE/USDT    # meme币，波动太大
+    - TRX/USDT     # 争议项目
+
+# alpha block moved below (single source of truth)
+
+regime:
+  # Ensemble 方法配置（不用传统MA，用HMM+情绪加权投票）
+  use_ensemble: true           # 启用Ensemble方法（HMM+资金费率+RSS）
+  use_hmm: true               # 启用HMM（训练好之前权重为0）
+  
+  # 三种方法的权重（加起来=1.0）
+  # HMM已用1年OKX数据训练完成，启用
+  hmm_weight: 0.35           # HMM: 35%（数据驱动）
+  funding_weight: 0.40       # 资金费率: 40%（实时）
+  rss_weight: 0.25           # RSS新闻: 25%（深度）
+  
+  # HMM训练好后的目标权重：
+  # hmm_weight: 0.40          # HMM: 40%
+  # funding_weight: 0.35      # 资金费率: 35%
+  # rss_weight: 0.25          # RSS: 25%
+  
+  # 传统方法配置（use_ensemble=false时使用）
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  
+  pos_mult_trending: 1.2
+  pos_mult_sideways: 0.7  # 震荡行情仓位乘数0.7x（保守，优先控回撤）
+  pos_mult_risk_off: 0.0  # Risk-Off严格空仓
+  
+  # 情绪覆盖（用于调整最终multiplier）
+  sentiment_regime_override_enabled: true
+  sentiment_riskoff_relax_threshold: 0.55
+  sentiment_riskoff_harden_threshold: -0.65
+  ma_gap_relax_threshold: 0.03
+
+risk:
+  max_single_weight: 0.30  # 提高单币种限制，避免资金不足
+  max_gross_exposure: 1.0
+  # 硬限制：始终只允许1个持仓标的
+  max_positions_override: 1
+  drawdown_trigger: 0.12  # 12%回撤触发保护（恢复真实风控）
+  drawdown_delever: 0.60  # 触发后降至60%风险敞口
+
+  # AutoRiskGuard - 自动档位控制持仓数量
+  auto_risk_guard:
+    enabled: true
+    # 根据市场状态动态调整持仓数量
+    max_positions_by_regime:
+      trending: 5    # 趋势行情：最多5个币
+      sideways: 3    # 震荡行情：最多3个币
+      risk_off: 0    # RiskOff：空仓
+    # 根据回撤调整
+    drawdown_adjustment:
+      enabled: true
+      dd_0_5:    {max_positions: 5, position_size_pct: 1.0}   # 回撤<5%：正常
+      dd_5_10:   {max_positions: 3, position_size_pct: 0.7}   # 回撤5-10%：减仓
+      dd_10_15:  {max_positions: 2, position_size_pct: 0.5}   # 回撤10-15%：大减仓
+      dd_15_plus: {max_positions: 1, position_size_pct: 0.15}  # 回撤>15%：保护态探针仓（防长期锁死）
+
+rebalance:
+  deadband_sideways: 0.06   # 提高死区，降低震荡反复换仓
+  deadband_trending: 0.05
+  deadband_riskoff: 0.07
+
+  # Small-budget tuning: do NOT double deadband for new positions; otherwise signals rarely cross.
+  new_position_deadband_multiplier: 1.0
+  new_position_weight_eps: 0.001
+
+  # If a coin drops out of selected (tw=0), allow faster cleanup than normal rebalance.
+  close_only_deadband_multiplier: 0.25
+  close_only_weight_eps: 0.001
+
+execution:
+  mode: live
+  dry_run: false  # ⚠️ 关键：启用真实交易！
+  order_store_path: reports/orders.sqlite
+  kill_switch_path: reports/kill_switch.json
+  reconcile_status_path: reports/reconcile_status.json
+  okx_exp_time_ms: 1500
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+  
+  # # 借币预防机制（基于 PEPE 问题经验）
+  borrow_prevention: true
+  min_trade_value_usdt: 5.0  # 最小交易金额
+  max_fee_ratio: 0.05  # 最大手续费比例
+  check_fee_currency_balance: true  # 检查手续费币种余额
+  high_risk_blacklist_path: configs/borrow_prevention_rules.json
+
+  # live preflight
+  preflight_enabled: true
+  preflight_max_pages: 5
+  max_status_age_sec: 180
+  preflight_fail_action: sell_only
+
+  # 账户配置检查保留开启；
+  # 但由于部分账户/App 无法直接关闭 spotBorrow 开关，不再依赖该开关做全局禁买。
+  enforce_account_config_check: true
+  require_spot_borrow_disabled: false
+
+  # 真实无借币约束（执行层）：买单不得超过可用USDT预算
+  buy_quote_balance_safety_check: true
+  buy_quote_reserve_usdt: 2.0
+  buy_quote_slack_ratio: 0.001
+  
+  # 优化: 小额差异时仍允许交易（避免灰尘持仓阻止交易）
+  allow_trade_on_small_reconcile_drift: true  # 允许小额差异时交易
+  
+  # Reconcile 容差设置（小资金账户放宽）
+  reconcile_dust_usdt_ignore: 5.0  # 忽略 <5 USDT 的灰尘差异
+  reconcile_abs_usdt_tol: 100.0    # USDT 差异容差 100 USDT（宽松）
+  reconcile_abs_base_tol: 1.0      # 币种数量容差放宽
+  
+  # Borrow detection thresholds (strict)
+  borrow_liab_eps: 0.01
+  borrow_neg_eq_eps: 0.01
+  # Borrow block scope: global_abort = 任意负债直接阻断交易
+  borrow_block_mode: global_abort
+
+  # Dust thresholds (small-account safe): do not wipe valid ~9U positions as dust.
+  dust_qty_threshold: 0.000001
+  dust_value_threshold: 0.5
+  # 当部分减仓因 minSz 触发 dust 时，自动升级为整仓卖出（若整仓可交易）
+  auto_upgrade_dust_sell_to_close: true
+  # 强规则：持仓若不在本轮评分清单中，强制清仓
+  force_close_unscored_positions: true
+
+  # 防追高：已有仓位时，若价格相对持仓均价溢价过高则禁止继续加仓
+  anti_chase_enabled: true
+  anti_chase_max_entry_premium_pct: 0.012
+  anti_chase_max_add_notional_ratio: 0.20
+
+  # 严格要求使用融合信号：拿不到 fused 信号时禁止买入（不使用 alpha fallback 开仓）
+  require_fused_signals_for_buy: true
+
+  # Ops: allow kill-switch to auto-clear when reconcile+ledger OK (prevents stuck automation)
+  auto_clear_kill_switch_if_ok: true
+
+  # state-alignment patch when reconcile shows base/usdt mismatch
+  preflight_bootstrap_patch_enabled: true
+  preflight_bootstrap_patch_min_interval_sec: 300
+  preflight_bootstrap_patch_max_total_usdt: 50.0
+
+  # Kill switch auto-clear configuration
+  kill_switch:
+    auto_clear_enabled: true              # Auto-clear kill switch after OK reconciles
+    auto_clear_after_ok_count: 1          # Clear after 1 consecutive OK reconcile
+    hard_fail_threshold: 5                # Trigger after 5 hard failures
+    stale_soft_threshold: 3               # Trigger after 3 stale statuses
+
+  split_orders: 3
+  split_interval_sec: 3
+  max_hourly_volume_pct: 0.05
+  open_long_cooldown_minutes: 30  # 同币种30分钟内已OPEN_LONG成交则禁止再次OPEN_LONG
+  # 排名退出防抖：需连续2轮跌出前3才触发rank_exit；且退出后1小时内禁止回补
+  rank_exit_max_rank: 3
+  rank_exit_confirm_rounds: 2
+  rank_exit_reentry_cooldown_minutes: 60
+
+  # qlib经验迁移：最短持仓门槛（防15~30分钟反复进出）
+  min_hold_minutes_before_rank_exit: 120
+  min_hold_minutes_before_regime_exit: 60
+
+  # qlib经验迁移：每轮rebalance换手上限（小资金更严格）
+  max_rebalance_turnover_per_cycle: 0.20
+
+  # qlib经验迁移：成本感知开仓（score代理edge）
+  cost_aware_entry_enabled: true
+  cost_aware_score_per_bps: 0.0025
+  cost_aware_min_score_floor: 0.12
+  cost_aware_roundtrip_cost_bps: null
+
+  # 负期望标的自动冷却（小资金更快止损）
+  negative_expectancy_cooldown_enabled: true
+  negative_expectancy_lookback_hours: 24
+  negative_expectancy_min_closed_cycles: 3
+  negative_expectancy_threshold_usdt: 0.0
+  negative_expectancy_cooldown_hours: 24
+  negative_expectancy_state_path: reports/negative_expectancy_cooldown.json
+
+  order_state_machine_path: reports/order_state_machine.json  # 执行仲裁状态机持久化
+  slippage_db_path: reports/slippage.sqlite
+  fee_bps: 6
+  slippage_bps: 5
+
+budget:
+  # 实盘测试 - 设置明确的资金限制
+  # 当前阶段：140U 上限
+  live_equity_cap_usdt: 140.0
+
+  # Exchange min-order protection (avoid 51020/minSz failures on small budget)
+  exchange_min_notional_enabled: true
+  exchange_min_notional_slack_multiplier: 1.05
+
+  # Let exchange minSz-based filter be the primary guard; avoid blocking valid small-budget opens.
+  min_trade_notional_base: 2.5  # 提高最小下单额，减少小额拒单与磨损
+  min_trade_notional_multiplier_exceeded: 1.5  # 启用超支惩罚
+  min_trade_notional_cap_abs: 100.0
+  min_trade_notional_cap_equity_ratio: 0.03  # 合理上限
+  small_trade_median_threshold_abs: 10.0  # 合理阈值
+  small_trade_median_threshold_equity_ratio: 0.002  # 合理比例
+  small_trade_ratio_threshold: 0.5  # 合理小交易比例阈值
+  min_fills_for_second_stage: 3  # 合理要求
+  deadband_multiplier_exceeded: 1.5  # 启用超支惩罚
+  deadband_cap: 0.15  # 合理上限
+  action_enabled: true  # 启用预算动作
+  # 超过预算上限后：硬性禁止买单（只允许卖出）
+  hard_buy_block_on_cap: true
+  hard_buy_block_cap_ratio: 1.0
+  turnover_budget_per_day: 0.50
+  cost_budget_bps_per_day: 35
+
+backtest:
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  # 成本校准（F2）
+  cost_model: calibrated  # default|calibrated
+  cost_stats_dir: reports/cost_stats
+  fee_quantile: p75
+  slippage_quantile: p90
+  # 小样本阶段先把门槛降下来，尽快让 calibrated 成本模型生效
+
+# 交易执行配置
+trading:
+  position_mode: symbol_only  # 单币种模式，避免跨币种借币
+  prevent_borrow: true        # 禁止借币，确保不超仓
+  min_fills_global: 2
+  min_fills_bucket: 1
+  max_stats_age_days: 7
+
+# ============================================================
+# Alpha 引擎配置
+# ============================================================
+alpha:
+  # 启用多策略模式
+  use_multi_strategy: true
+
+  # 与主配置保持一致：避免“同文件两个alpha段互相覆盖”导致策略参数漂移
+  weights:
+    f1_mom_5d: 0.20
+    f2_mom_20d: 0.30
+    f3_vol_adj_ret_20d: 0.25
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.10
+  long_top_pct: 0.30
+  min_score_threshold: 0.08
+  dynamic_weights_by_regime_enabled: true
+  dynamic_weights_by_regime_path: reports/alpha_dynamic_weights_by_regime.json
+
+  # Qlib Alpha158 因子 overlay
+  alpha158_overlay:
+    enabled: true
+    blend_weight: 0.40
+    weights:
+      f6_corr_pv_10: 0.15
+      f7_cord_10: 0.15
+      f8_rsqr_10: 0.20
+      f9_rank_20: 0.15
+      f10_imax_14: -0.05
+      f11_imin_14: 0.05
+      f12_imxd_14: 0.35
+
+  # TopkDropout：小资金更严格
+  topk_dropout:
+    enabled: true
+    topk_override: null
+    n_drop_per_cycle: 1
+    hold_cycles: 2
+    state_path: reports/topk_dropout_state.json
+
+  dynamic_ic_weighting:
+    enabled: true
+    ic_monitor_path: reports/alpha_ic_monitor.json
+    min_abs_ic: 0.004
+    fallback_to_static: true
+
+# ============================================================
+# 因子权重配置 (IC-based动态权重)
+# ============================================================
+factor_weights:
+  scheme: hierarchical  # conservative | dynamic | hierarchical
+  
+  # 基础技术因子 (70%)
+  base:
+    f1_mom_5d: 0.12           # 短期动量 12%
+    f2_mom_20d: 0.20          # 中期动量 20% (核心)
+    f3_vol_adj_ret_20d: 0.12  # 波动率调整 12%
+    f4_volume_expansion: 0.13 # 成交量 13%
+    f5_rsi_trend_confirm: 0.13# RSI趋势 13%
+  
+  # 情绪因子 (15%基础 + 动态调整)
+  sentiment:
+    f6_sentiment: 0.15
+    enabled: true
+    max_weight: 0.30
+    min_weight: 0.05
+  
+  # 情绪反向操作策略
+  sentiment_contrarian:
+    enabled: true
+    greedy_threshold: 0.70      # 极度贪婪阈值
+    fearful_threshold: -0.70    # 极度恐惧阈值
+    position_adjustment: 0.30   # 仓位调整幅度
+    
+    # 具体操作
+    actions:
+      extreme_greed:
+        factor_boost: -0.10     # 降低情绪权重
+        position_scale: 0.70    # 减仓30%
+        reason: "FOMO预警:市场过热"
+      extreme_fear:
+        factor_boost: +0.05     # 保守提高情绪权重
+        position_scale: 1.00    # 不额外加仓，避免逆势放大风险
+        reason: "恐慌期谨慎观察，不主动放大仓位"
+
+# 数据源配置 (情绪分析)
+sentiment:
+  enabled: true
+  provider: deepseek          # deepseek | openai | textblob
+  update_interval: 3600       # 每小时更新 (秒)
+  cache_dir: data/sentiment_cache
+  symbols:
+    - BTC-USDT
+    - ETH-USDT
+    - SOL-USDT
+    - BNB-USDT
+    - ADA-USDT
+    - DOT-USDT
+    - AVAX-USDT
+    - POL/USDT
+
+# ============================================================
+# ML因子模型配置 (LightGBM) - 增加正则化防止过拟合
+# ============================================================
+ml_factor:
+  enabled: true               # 启用ML因子模型
+  model_type: lightgbm        # lightgbm | xgboost | sklearn
+  # 减少模型复杂度防止过拟合
+  n_estimators: 50            # 树的数量减半（原100）
+  max_depth: 4                # 最大深度降低（原5）
+  learning_rate: 0.05         # 学习率
+  # 增加正则化参数
+  subsample: 0.6              # 行采样率（新增）
+  colsample_bytree: 0.6       # 列采样率（新增）
+  reg_alpha: 2.0              # L1正则化（新增，原默认0）
+  reg_lambda: 5.0             # L2正则化（新增，原默认0）
+  min_child_samples: 30       # 叶子最小样本数（新增）
+  
+  min_train_samples: 200      # 最小训练样本数
+  prediction_horizon: 6       # 预测未来6小时收益
+  
+  # 与传统因子的融合权重
+  blend_with_traditional: true
+  ml_weight: 0.20             # ML模型权重降低（原0.30，现0.20）
+  traditional_weight: 0.80    # 传统因子权重提高（原0.70，现0.80）
+  
+  # 自动重训练
+  auto_retrain: true
+  retrain_interval_hours: 24  # 每天自动重训练
+  
+  # 模型路径
+  model_path: models/ml_factor_model.txt
+  training_data_db: reports/ml_training_data.db
+# Event-Driven Trading Configuration
+event_driven:
+  enabled: true  # 启用事件驱动交易
+  active_mode: true  # true=有动作时触发v5-live执行（事件触发模式）
+  force_full_run: false  # 关闭强制全量，避免无事件时也高频触发
+  force_full_min_interval_minutes: 12  # 防止与整点任务叠加导致重复下单
+  check_interval_minutes: 30
+  global_cooldown_p2_minutes: 30
+  symbol_cooldown_minutes: 60
+  signal_confirmation_periods: 3
+  # 提高阈值降低噪声（原0.45->0.60，原5->7）
+  score_change_threshold: 0.60
+  rank_jump_threshold: 7
+  breakout_enabled: true
+  breakout_lookback_hours: 24
+  breakout_threshold_pct: 0.8  # 提高突破阈值（原0.5->0.8）
+  heartbeat_interval_hours: 4

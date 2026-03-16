@@ -1,0 +1,116 @@
+# 20 USDT 小规模测试配置
+# 基于 live_small.yaml，但强制限制 equity 为 20 USDT
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+
+timeframe_main: 1h
+timeframe_aux: 4h
+
+exchange:
+  name: okx
+  api_key: ${EXCHANGE_API_KEY}
+  api_secret: ${EXCHANGE_API_SECRET}
+  passphrase: ${EXCHANGE_PASSPHRASE}
+  testnet: false
+
+universe:
+  enabled: true
+  use_universe_symbols: true
+  cache_path: reports/universe_cache.json
+  cache_ttl_sec: 3600
+  top_n_market_cap: 30
+  min_24h_quote_volume_usdt: 5000000
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+
+alpha:
+  long_top_pct: 0.20
+  weights:
+    # 保守起步权重（基于IC衰减分析）
+    f1_mom_5d: 0.25
+    f2_mom_20d: 0.10
+    f3_vol_adj_ret_20d: 0.35
+    f4_volume_expansion: 0.10
+    f5_rsi_trend_confirm: 0.20
+
+regime:
+  atr_threshold: 0.02
+  atr_very_low: 0.008
+  pos_mult_trending: 1.2
+  pos_mult_sideways: 0.6
+  pos_mult_risk_off: 0.3
+
+risk:
+  max_single_weight: 0.25
+  max_gross_exposure: 1.0
+  drawdown_trigger: 0.08
+  drawdown_delever: 0.50
+
+rebalance:
+  deadband_sideways: 0.07
+  deadband_trending: 0.03
+  deadband_riskoff: 0.07
+
+execution:
+  mode: dry_run
+  dry_run: true
+  order_store_path: reports/orders.sqlite
+  kill_switch_path: reports/kill_switch.json
+  reconcile_status_path: reports/reconcile_status.json
+  okx_exp_time_ms: 1500
+  live_arm_env: V5_LIVE_ARM
+  live_arm_value: "YES"
+
+  # live preflight
+  preflight_enabled: true
+  preflight_max_pages: 5
+  max_status_age_sec: 180
+  preflight_fail_action: sell_only
+
+  # state-alignment patch when reconcile shows base/usdt mismatch
+  preflight_bootstrap_patch_enabled: true
+  preflight_bootstrap_patch_min_interval_sec: 300
+  preflight_bootstrap_patch_max_total_usdt: 50.0
+
+  split_orders: 3
+  split_interval_sec: 3
+  max_hourly_volume_pct: 0.05
+  slippage_db_path: reports/slippage.sqlite
+  fee_bps: 6
+  slippage_bps: 5
+
+budget:
+  # 20 USDT 小规模测试
+  live_equity_cap_usdt: 20.0
+  min_trade_notional_base: 1.0
+  min_trade_notional_multiplier_exceeded: 2.0
+  min_trade_notional_cap_abs: 200.0
+  min_trade_notional_cap_equity_ratio: 0.01
+  small_trade_median_threshold_abs: 10.0
+  small_trade_median_threshold_equity_ratio: 0.0025
+  small_trade_ratio_threshold: 0.6
+  min_fills_for_second_stage: 5
+  deadband_multiplier_exceeded: 1.5
+  deadband_cap: 0.15
+  action_enabled: true
+  turnover_budget_per_day: null
+  cost_budget_bps_per_day: null
+
+backtest:
+  fee_bps: 6
+  slippage_bps: 5
+  one_bar_delay: true
+  walk_forward_folds: 4
+  # 成本校准（F2）
+  cost_model: calibrated  # default|calibrated
+  cost_stats_dir: reports/cost_stats
+  fee_quantile: p75
+  slippage_quantile: p90
+  # 小样本阶段先把门槛降下来，尽快让 calibrated 成本模型生效
+  min_fills_global: 2
+  min_fills_bucket: 1
+  max_stats_age_days: 7

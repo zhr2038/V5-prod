@@ -1,0 +1,8 @@
+[Unit]
+Description=V5 Sentiment Data Collection
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-prod
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && .venv/bin/python scripts/collect_funding_sentiment.py && .venv/bin/python scripts/collect_rss_sentiment.py'

@@ -1,0 +1,10 @@
+[Unit]
+Description=V5 event-driven trading check
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-prod
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/flock -n /tmp/v5_event_driven.lock -c "/bin/bash -lc 'PYTHONPATH=. /home/admin/clawd/v5-prod/.venv/bin/python /home/admin/clawd/v5-prod/event_driven_check.py'"

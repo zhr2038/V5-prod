@@ -1,0 +1,53 @@
+# IC research config (does NOT affect live trading)
+# Goal: expand sample for IC training/analysis:
+# - lookback: 30 days
+# - universe size: ~100 symbols (subject to liquidity/spread filters)
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+
+universe:
+  enabled: true
+  use_universe_symbols: true
+  cache_path: reports/universe_cache_ic_research.json
+  cache_ttl_sec: 0
+  top_n_market_cap: 100
+  # For research, we allow a wider universe to reach ~100 symbols.
+  # Live configs remain stricter.
+  min_24h_quote_volume_usdt: 200000
+  max_spread_bps: 50
+  refine_with_single_ticker: false
+  refine_single_ticker_max_candidates: 0
+  refine_single_ticker_sleep_sec: 0.0
+  blacklist_path: configs/blacklist.json
+  exclude_stablecoins: true
+  include_symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+    - BNB/USDT
+
+alpha:
+  long_top_pct: 0.25
+
+# Risk/rebalance values here are placeholders; research run shouldn't place live orders.
+execution:
+  mode: dry_run
+  dry_run: true
+
+budget:
+  # Keep exchange min-order guard on for realism (but this is research, so doesn't place orders anyway)
+  exchange_min_notional_enabled: true
+  exchange_min_notional_slack_multiplier: 1.05
+
+backtest:
+  # used by some scripts as defaults
+  cost_model: calibrated
+  cost_stats_dir: reports/cost_stats
+
+ic_research:
+  lookback_days: 30
+  horizon: 1h
