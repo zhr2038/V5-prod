@@ -58,6 +58,12 @@ def test_negative_expectancy_refresh_persists_stats_and_bps(tmp_path: Path):
     assert stats["closed_notional_usdt"] == 100.0
     assert stats["expectancy_usdt"] == -1.0
     assert stats["expectancy_bps"] == -100.0
+    assert stats["fast_fail_closed_cycles"] == 1
+    assert stats["fast_fail_pnl_sum_usdt"] == -1.0
+    assert stats["fast_fail_closed_notional_usdt"] == 100.0
+    assert stats["fast_fail_expectancy_usdt"] == -1.0
+    assert stats["fast_fail_expectancy_bps"] == -100.0
+    assert 0.0 <= stats["fast_fail_avg_hold_minutes"] <= 1.0
 
     blocked = cooldown.is_blocked("BTC/USDT")
     assert blocked is not None
@@ -67,3 +73,4 @@ def test_negative_expectancy_refresh_persists_stats_and_bps(tmp_path: Path):
     assert symbol_stats is not None
     assert symbol_stats["cooldown_active"] is True
     assert symbol_stats["expectancy_bps"] == -100.0
+    assert symbol_stats["fast_fail_expectancy_bps"] == -100.0

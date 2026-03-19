@@ -16,6 +16,7 @@ class NegativeExpectancyConfig:
     cooldown_hours: int = 24
     state_path: str = "reports/negative_expectancy_cooldown.json"
     orders_db_path: str = "reports/orders.sqlite"
+    fast_fail_max_hold_minutes: int = 120
 
 
 class NegativeExpectancyCooldown:
@@ -82,9 +83,10 @@ class NegativeExpectancyCooldown:
             except Exception:
                 pass
 
-        # FIFO inventory per symbol
-        inv_qty: Dict[str, float] = {}
-        inv_cost: Dict[str, float] = {}
+        # FIFO inventory per symbol, preserving entry timestamps so we can detect
+        # "fast-fail" round-trips that reverse within a short holding window.
+        inv_lots: Dict[str, list[Dict[str, float]]] = {}
+        fast_fail_hold_ms = max(0, int(self.cfg.fast_fail_max_hold_minutes)) * 60 * 1000
 
         for r in rows:
             inst_id = str(r["inst_id"])
@@ -93,38 +95,62 @@ class NegativeExpectancyCooldown:
             try:
                 qty = float(r["acc_fill_sz"] or 0.0)
                 px = float(r["avg_px"] or 0.0)
+                updated_ts = int(r["updated_ts"] or 0)
             except Exception:
                 continue
             if qty <= 0 or px <= 0:
                 continue
 
-            inv_qty.setdefault(sym, 0.0)
-            inv_cost.setdefault(sym, 0.0)
+            inv_lots.setdefault(sym, [])
             by_symbol.setdefault(
                 sym,
                 {
                     "closed_cycles": 0.0,
                     "pnl_sum_usdt": 0.0,
                     "closed_notional_usdt": 0.0,
+                    "fast_fail_closed_cycles": 0.0,
+                    "fast_fail_pnl_sum_usdt": 0.0,
+                    "fast_fail_closed_notional_usdt": 0.0,
+                    "fast_fail_hold_minutes_sum": 0.0,
                 },
             )
 
             if side == "buy":
-                inv_cost[sym] += qty * px
-                inv_qty[sym] += qty
+                inv_lots[sym].append(
+                    {
+                        "qty": qty,
+                        "px": px,
+                        "ts": float(updated_ts),
+                    }
+                )
             elif side == "sell":
-                if inv_qty[sym] <= 1e-12:
-                    continue
-                close_qty = min(inv_qty[sym], qty)
-                avg_cost = inv_cost[sym] / inv_qty[sym] if inv_qty[sym] > 1e-12 else px
-                pnl = (px - avg_cost) * close_qty
-                by_symbol[sym]["closed_cycles"] += 1.0
-                by_symbol[sym]["pnl_sum_usdt"] += float(pnl)
-                by_symbol[sym]["closed_notional_usdt"] += float(avg_cost * close_qty)
+                remaining = qty
+                while remaining > 1e-12 and inv_lots[sym]:
+                    lot = inv_lots[sym][0]
+                    lot_qty = float(lot.get("qty") or 0.0)
+                    if lot_qty <= 1e-12:
+                        inv_lots[sym].pop(0)
+                        continue
+                    close_qty = min(lot_qty, remaining)
+                    avg_cost = float(lot.get("px") or px)
+                    pnl = (px - avg_cost) * close_qty
+                    by_symbol[sym]["closed_cycles"] += 1.0
+                    by_symbol[sym]["pnl_sum_usdt"] += float(pnl)
+                    by_symbol[sym]["closed_notional_usdt"] += float(avg_cost * close_qty)
 
-                # reduce inventory
-                inv_cost[sym] = max(0.0, inv_cost[sym] - avg_cost * close_qty)
-                inv_qty[sym] = max(0.0, inv_qty[sym] - close_qty)
+                    hold_ms = max(0.0, float(updated_ts) - float(lot.get("ts") or updated_ts))
+                    if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
+                        by_symbol[sym]["fast_fail_closed_cycles"] += 1.0
+                        by_symbol[sym]["fast_fail_pnl_sum_usdt"] += float(pnl)
+                        by_symbol[sym]["fast_fail_closed_notional_usdt"] += float(avg_cost * close_qty)
+                        by_symbol[sym]["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+
+                    remaining = max(0.0, remaining - close_qty)
+                    left_qty = max(0.0, lot_qty - close_qty)
+                    if left_qty <= 1e-12:
+                        inv_lots[sym].pop(0)
+                    else:
+                        lot["qty"] = left_qty
 
         # expectancy
         out = {}
@@ -134,12 +160,26 @@ class NegativeExpectancyCooldown:
             closed_notional = float(st.get("closed_notional_usdt") or 0.0)
             exp = pnl_sum / n if n > 0 else 0.0
             exp_bps = (pnl_sum / closed_notional * 10000.0) if closed_notional > 1e-12 else 0.0
+            ff_n = int(st.get("fast_fail_closed_cycles") or 0)
+            ff_pnl_sum = float(st.get("fast_fail_pnl_sum_usdt") or 0.0)
+            ff_closed_notional = float(st.get("fast_fail_closed_notional_usdt") or 0.0)
+            ff_exp = ff_pnl_sum / ff_n if ff_n > 0 else 0.0
+            ff_exp_bps = (ff_pnl_sum / ff_closed_notional * 10000.0) if ff_closed_notional > 1e-12 else 0.0
+            ff_hold_minutes_avg = (
+                float(st.get("fast_fail_hold_minutes_sum") or 0.0) / ff_n if ff_n > 0 else 0.0
+            )
             out[sym] = {
                 "closed_cycles": n,
                 "pnl_sum_usdt": pnl_sum,
                 "closed_notional_usdt": closed_notional,
                 "expectancy_usdt": exp,
                 "expectancy_bps": exp_bps,
+                "fast_fail_closed_cycles": ff_n,
+                "fast_fail_pnl_sum_usdt": ff_pnl_sum,
+                "fast_fail_closed_notional_usdt": ff_closed_notional,
+                "fast_fail_expectancy_usdt": ff_exp,
+                "fast_fail_expectancy_bps": ff_exp_bps,
+                "fast_fail_avg_hold_minutes": ff_hold_minutes_avg,
             }
         return out
 
@@ -175,6 +215,12 @@ class NegativeExpectancyCooldown:
                 "closed_notional_usdt": float(st.get("closed_notional_usdt") or 0.0),
                 "expectancy_usdt": exp,
                 "expectancy_bps": float(st.get("expectancy_bps") or 0.0),
+                "fast_fail_closed_cycles": int(st.get("fast_fail_closed_cycles") or 0),
+                "fast_fail_pnl_sum_usdt": float(st.get("fast_fail_pnl_sum_usdt") or 0.0),
+                "fast_fail_closed_notional_usdt": float(st.get("fast_fail_closed_notional_usdt") or 0.0),
+                "fast_fail_expectancy_usdt": float(st.get("fast_fail_expectancy_usdt") or 0.0),
+                "fast_fail_expectancy_bps": float(st.get("fast_fail_expectancy_bps") or 0.0),
+                "fast_fail_avg_hold_minutes": float(st.get("fast_fail_avg_hold_minutes") or 0.0),
                 "updated_ts_ms": now_ms,
             }
             if n >= min_cycles and exp < exp_th:

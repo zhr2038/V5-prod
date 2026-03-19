@@ -213,6 +213,7 @@ class V5Pipeline:
                 bool(getattr(cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
                 bool(getattr(cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
                 bool(getattr(cfg.execution, 'negative_expectancy_open_block_enabled', False)),
+                bool(getattr(cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
             ]
         )
         self.negative_expectancy_cooldown = NegativeExpectancyCooldown(
@@ -224,6 +225,9 @@ class V5Pipeline:
                 cooldown_hours=int(getattr(cfg.execution, 'negative_expectancy_cooldown_hours', 24) or 24),
                 state_path=str(getattr(cfg.execution, 'negative_expectancy_state_path', 'reports/negative_expectancy_cooldown.json')),
                 orders_db_path=str(getattr(cfg.execution, 'order_store_path', 'reports/orders.sqlite')),
+                fast_fail_max_hold_minutes=int(
+                    getattr(cfg.execution, 'negative_expectancy_fast_fail_max_hold_minutes', 120) or 120
+                ),
             )
         )
         
@@ -387,6 +391,7 @@ class V5Pipeline:
                 bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_open_block_enabled', False)),
+                bool(getattr(self.cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
             ]
         )
         if not neg_feedback_enabled:
@@ -1081,6 +1086,7 @@ class V5Pipeline:
                 bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_open_block_enabled', False)),
+                bool(getattr(self.cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
             ]
         )
         neg_cd_enabled = bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False))
@@ -1951,6 +1957,56 @@ class V5Pipeline:
                                 "expectancy_bps": expectancy_bps,
                                 "closed_cycles": closed_cycles,
                                 "required_expectancy_bps": floor_bps,
+                            }
+                        )
+                    continue
+
+            if (
+                side == "buy"
+                and intent == "OPEN_LONG"
+                and neg_feedback_enabled
+                and bool(getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_enabled", False))
+            ):
+                ff_min_cycles = int(
+                    getattr(
+                        self.cfg.execution,
+                        "negative_expectancy_fast_fail_open_block_min_closed_cycles",
+                        2,
+                    )
+                    or 2
+                )
+                ff_floor_bps = float(
+                    getattr(
+                        self.cfg.execution,
+                        "negative_expectancy_fast_fail_open_block_floor_bps",
+                        0.0,
+                    )
+                    or 0.0
+                )
+                ff_hold_minutes = int(
+                    getattr(
+                        self.cfg.execution,
+                        "negative_expectancy_fast_fail_max_hold_minutes",
+                        120,
+                    )
+                    or 120
+                )
+                ff_closed_cycles = int((neg_stats or {}).get("fast_fail_closed_cycles") or 0)
+                ff_expectancy_bps = float((neg_stats or {}).get("fast_fail_expectancy_bps") or 0.0)
+                ff_avg_hold_minutes = float((neg_stats or {}).get("fast_fail_avg_hold_minutes") or 0.0)
+                if ff_closed_cycles >= ff_min_cycles and ff_expectancy_bps < ff_floor_bps:
+                    if audit:
+                        audit.reject("negative_expectancy_fast_fail_open_block")
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": "negative_expectancy_fast_fail_open_block",
+                                "fast_fail_expectancy_bps": ff_expectancy_bps,
+                                "fast_fail_closed_cycles": ff_closed_cycles,
+                                "fast_fail_avg_hold_minutes": ff_avg_hold_minutes,
+                                "fast_fail_max_hold_minutes": ff_hold_minutes,
+                                "required_expectancy_bps": ff_floor_bps,
                             }
                         )
                     continue
