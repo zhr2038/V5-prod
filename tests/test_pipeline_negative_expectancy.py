@@ -168,6 +168,67 @@ def test_pipeline_blocks_open_long_on_negative_expectancy():
     )
 
 
+def test_pipeline_blocks_open_long_on_negative_expectancy_fast_fail():
+    cfg = AppConfig(symbols=["ROBO/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.negative_expectancy_score_penalty_enabled = False
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = True
+    cfg.execution.negative_expectancy_fast_fail_open_block_min_closed_cycles = 2
+    cfg.execution.negative_expectancy_fast_fail_open_block_floor_bps = 0.0
+    cfg.execution.negative_expectancy_fast_fail_max_hold_minutes = 120
+    cfg.execution.negative_expectancy_cooldown_enabled = False
+
+    pipe = _build_pipe(cfg)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"ROBO/USDT": 0.25},
+        selected=["ROBO/USDT"],
+        entry_candidates=["ROBO/USDT"],
+        volatilities={},
+        notes="",
+    )
+    pipe.negative_expectancy_cooldown.refresh = lambda force=False: {
+        "stats": {
+            "ROBO/USDT": {
+                "closed_cycles": 3,
+                "expectancy_bps": 20.0,
+                "fast_fail_closed_cycles": 2,
+                "fast_fail_expectancy_bps": -120.0,
+                "fast_fail_avg_hold_minutes": 64.0,
+            }
+        },
+        "symbols": {},
+    }
+    pipe.negative_expectancy_cooldown.get_symbol_stats = lambda symbol: {
+        "closed_cycles": 3,
+        "expectancy_bps": 20.0,
+        "fast_fail_closed_cycles": 2,
+        "fast_fail_expectancy_bps": -120.0,
+        "fast_fail_avg_hold_minutes": 64.0,
+        "cooldown_active": False,
+    }
+
+    market_data = {"ROBO/USDT": _series("ROBO/USDT", 0.08)}
+    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"ROBO/USDT": 0.60})
+    audit = DecisionAudit(run_id="neg-fast-fail-block")
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert out.orders == []
+    assert any(
+        d.get("symbol") == "ROBO/USDT" and d.get("reason") == "negative_expectancy_fast_fail_open_block"
+        for d in audit.router_decisions
+    )
+
+
 def test_pipeline_low_price_entry_guard_raises_cost_floor():
     cfg = AppConfig(symbols=["PUMP/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False

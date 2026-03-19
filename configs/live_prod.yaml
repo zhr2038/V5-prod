@@ -24,8 +24,8 @@ universe:
   cache_ttl_sec: 3600
 
   # 币池门槛 - 更宽松的优质币池
-  top_n_market_cap: 50
-  min_24h_quote_volume_usdt: 5000000
+  top_n_market_cap: 35
+  min_24h_quote_volume_usdt: 10000000
   max_spread_bps: 30
   
   blacklist_path: configs/blacklist.json
@@ -266,12 +266,12 @@ execution:
   # qlib经验迁移：成本感知开仓（score代理edge）
   cost_aware_entry_enabled: true
   cost_aware_score_per_bps: 0.0030
-  cost_aware_min_score_floor: 0.14
+  cost_aware_min_score_floor: 0.18
   cost_aware_roundtrip_cost_bps: null
   low_price_entry_guard_enabled: true
-  low_price_entry_threshold_usdt: 0.05
-  low_price_entry_extra_score_floor: 0.08
-  low_price_entry_extra_cost_bps: 12.0
+  low_price_entry_threshold_usdt: 0.20
+  low_price_entry_extra_score_floor: 0.12
+  low_price_entry_extra_cost_bps: 20.0
 
   # 负期望标的自动冷却（24h窗口）
   negative_expectancy_cooldown_enabled: true
@@ -282,12 +282,16 @@ execution:
   negative_expectancy_state_path: reports/negative_expectancy_cooldown.json
   negative_expectancy_score_penalty_enabled: true
   negative_expectancy_score_penalty_min_closed_cycles: 2
-  negative_expectancy_score_penalty_floor_bps: 5.0
-  negative_expectancy_score_penalty_per_bps: 0.015
+  negative_expectancy_score_penalty_floor_bps: 10.0
+  negative_expectancy_score_penalty_per_bps: 0.02
   negative_expectancy_score_penalty_max: 0.60
   negative_expectancy_open_block_enabled: true
   negative_expectancy_open_block_min_closed_cycles: 2
-  negative_expectancy_open_block_floor_bps: 15.0
+  negative_expectancy_open_block_floor_bps: 25.0
+  negative_expectancy_fast_fail_max_hold_minutes: 120
+  negative_expectancy_fast_fail_open_block_enabled: true
+  negative_expectancy_fast_fail_open_block_min_closed_cycles: 2
+  negative_expectancy_fast_fail_open_block_floor_bps: 0.0
 
   order_state_machine_path: reports/order_state_machine.json
 

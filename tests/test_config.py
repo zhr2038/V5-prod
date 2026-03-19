@@ -63,23 +63,29 @@ def test_live_prod_conflict_penalty_and_negative_expectancy_loads():
     assert cfg.alpha.mean_reversion.buy_score_multiplier == 0.75
     assert cfg.alpha.mean_reversion.sell_score_multiplier == 1.0
     assert cfg.execution.negative_expectancy_score_penalty_enabled is True
-    assert cfg.execution.negative_expectancy_score_penalty_floor_bps == 5.0
-    assert cfg.execution.negative_expectancy_score_penalty_per_bps == 0.015
+    assert cfg.execution.negative_expectancy_score_penalty_floor_bps == 10.0
+    assert cfg.execution.negative_expectancy_score_penalty_per_bps == 0.02
     assert cfg.execution.negative_expectancy_open_block_enabled is True
-    assert cfg.execution.negative_expectancy_open_block_floor_bps == 15.0
+    assert cfg.execution.negative_expectancy_open_block_floor_bps == 25.0
+    assert cfg.execution.negative_expectancy_fast_fail_max_hold_minutes == 120
+    assert cfg.execution.negative_expectancy_fast_fail_open_block_enabled is True
+    assert cfg.execution.negative_expectancy_fast_fail_open_block_min_closed_cycles == 2
+    assert cfg.execution.negative_expectancy_fast_fail_open_block_floor_bps == 0.0
 
 
 def test_live_prod_sideways_churn_controls_load():
     cfg = load_config("configs/live_prod.yaml", env_path=None)
+    assert cfg.universe.top_n_market_cap == 35
+    assert cfg.universe.min_24h_quote_volume_usdt == 10000000
     assert cfg.regime.pos_mult_sideways == 0.6
     assert cfg.rebalance.deadband_sideways == 0.07
     assert cfg.execution.open_long_cooldown_minutes == 120
     assert cfg.execution.cost_aware_score_per_bps == 0.0030
-    assert cfg.execution.cost_aware_min_score_floor == 0.14
+    assert cfg.execution.cost_aware_min_score_floor == 0.18
     assert cfg.execution.low_price_entry_guard_enabled is True
-    assert cfg.execution.low_price_entry_threshold_usdt == 0.05
-    assert cfg.execution.low_price_entry_extra_score_floor == 0.08
-    assert cfg.execution.low_price_entry_extra_cost_bps == 12.0
+    assert cfg.execution.low_price_entry_threshold_usdt == 0.20
+    assert cfg.execution.low_price_entry_extra_score_floor == 0.12
+    assert cfg.execution.low_price_entry_extra_cost_bps == 20.0
 
 
 def test_live_prod_funding_thresholds_load():

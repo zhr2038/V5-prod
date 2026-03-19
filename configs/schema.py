@@ -642,6 +642,20 @@ class ExecutionConfig(BaseModel):
         le=10000,
         description="Block new OPEN_LONG orders when recent realized expectancy stays below this threshold in bps",
     )
+    negative_expectancy_fast_fail_max_hold_minutes: int = Field(
+        default=120,
+        ge=1,
+        le=24 * 60,
+        description="Holding window treated as a fast-fail round-trip when computing recent churn stats",
+    )
+    negative_expectancy_fast_fail_open_block_enabled: bool = Field(default=True)
+    negative_expectancy_fast_fail_open_block_min_closed_cycles: int = Field(default=2, ge=1, le=200)
+    negative_expectancy_fast_fail_open_block_floor_bps: float = Field(
+        default=0.0,
+        ge=-10000,
+        le=10000,
+        description="Block new OPEN_LONG orders when recent fast-fail round-trips stay below this threshold in bps",
+    )
 
     order_state_machine_path: str = Field(
         default="reports/order_state_machine.json",
