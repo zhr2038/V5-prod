@@ -229,6 +229,66 @@ def test_pipeline_blocks_open_long_on_negative_expectancy_fast_fail():
     )
 
 
+def test_pipeline_demotes_negative_expectancy_blocked_symbol_before_ranking():
+    cfg = AppConfig(symbols=["ROBO/USDT", "WLD/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.negative_expectancy_score_penalty_enabled = False
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = True
+    cfg.execution.negative_expectancy_fast_fail_open_block_min_closed_cycles = 2
+    cfg.execution.negative_expectancy_fast_fail_open_block_floor_bps = 0.0
+    cfg.execution.negative_expectancy_fast_fail_max_hold_minutes = 120
+    cfg.execution.negative_expectancy_cooldown_enabled = False
+
+    pipe = _build_pipe(cfg)
+    captured = {}
+
+    def _allocate(scores, market_data, regime_mult, audit=None):
+        captured.update(scores)
+        return SimpleNamespace(
+            target_weights={},
+            selected=[],
+            entry_candidates=[],
+            volatilities={},
+            notes="",
+        )
+
+    pipe.portfolio_engine.allocate = _allocate
+    pipe.negative_expectancy_cooldown.refresh = lambda force=False: {
+        "stats": {
+            "ROBO/USDT": {
+                "closed_cycles": 3,
+                "expectancy_bps": 20.0,
+                "fast_fail_closed_cycles": 2,
+                "fast_fail_expectancy_bps": -120.0,
+                "fast_fail_avg_hold_minutes": 64.0,
+            }
+        },
+        "symbols": {},
+    }
+
+    market_data = {
+        "ROBO/USDT": _series("ROBO/USDT", 0.08),
+        "WLD/USDT": _series("WLD/USDT", 1.8),
+    }
+    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"ROBO/USDT": 0.90, "WLD/USDT": 0.50})
+    audit = DecisionAudit(run_id="neg-rank-guard")
+
+    pipe.run(
+        market_data_1h=market_data,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert captured["ROBO/USDT"] < captured["WLD/USDT"]
+    assert audit.top_scores[0]["symbol"] == "WLD/USDT"
+    assert any("NegativeExpectancy rank-guard: ROBO/USDT" in note for note in audit.notes)
+
+
 def test_pipeline_low_price_entry_guard_raises_cost_floor():
     cfg = AppConfig(symbols=["PUMP/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False
