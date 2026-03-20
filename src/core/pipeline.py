@@ -469,6 +469,96 @@ class V5Pipeline:
         alpha.scores = adjusted_scores
         return alpha
 
+    def _apply_negative_expectancy_rank_guard(
+        self,
+        alpha: AlphaSnapshot,
+        neg_cd_state: Dict[str, Any],
+        *,
+        positions: List[Position],
+        audit: Optional[DecisionAudit] = None,
+    ) -> AlphaSnapshot:
+        if not getattr(alpha, 'scores', None):
+            return alpha
+
+        stats_map = (neg_cd_state.get('stats') or {}) if isinstance(neg_cd_state, dict) else {}
+        cooldown_map = (neg_cd_state.get('symbols') or {}) if isinstance(neg_cd_state, dict) else {}
+        if not stats_map and not cooldown_map:
+            return alpha
+
+        held_symbols = {
+            str(getattr(p, 'symbol', '') or '')
+            for p in (positions or [])
+            if float(getattr(p, 'qty', 0.0) or 0.0) > 0.0
+        }
+        adjusted_scores = dict(alpha.scores or {})
+        if not adjusted_scores:
+            return alpha
+
+        cooldown_enabled = bool(getattr(self.cfg.execution, "negative_expectancy_cooldown_enabled", False))
+        open_block_enabled = bool(getattr(self.cfg.execution, "negative_expectancy_open_block_enabled", False))
+        ff_block_enabled = bool(getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_enabled", False))
+        if not any([cooldown_enabled, open_block_enabled, ff_block_enabled]):
+            return alpha
+
+        base_min_score = min(float(v) for v in adjusted_scores.values())
+        demoted = []
+        demote_index = 0
+        for sym, raw_score in list(adjusted_scores.items()):
+            if sym in held_symbols:
+                continue
+
+            reason = None
+            stat = stats_map.get(sym) if isinstance(stats_map.get(sym), dict) else {}
+            cooldown_active = cooldown_enabled and isinstance(cooldown_map.get(sym), dict)
+            if cooldown_active:
+                reason = "negative_expectancy_cooldown"
+            else:
+                if open_block_enabled:
+                    min_cycles = int(
+                        getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2
+                    )
+                    floor_bps = float(
+                        getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0) or 5.0
+                    )
+                    closed_cycles = int((stat or {}).get("closed_cycles") or 0)
+                    expectancy_bps = float((stat or {}).get("expectancy_bps") or 0.0)
+                    if closed_cycles >= min_cycles and expectancy_bps < floor_bps:
+                        reason = "negative_expectancy_open_block"
+                if reason is None and ff_block_enabled:
+                    ff_min_cycles = int(
+                        getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_min_closed_cycles", 2) or 2
+                    )
+                    ff_floor_bps = float(
+                        getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0) or 0.0
+                    )
+                    ff_closed_cycles = int((stat or {}).get("fast_fail_closed_cycles") or 0)
+                    ff_expectancy_bps = float((stat or {}).get("fast_fail_expectancy_bps") or 0.0)
+                    if ff_closed_cycles >= ff_min_cycles and ff_expectancy_bps < ff_floor_bps:
+                        reason = "negative_expectancy_fast_fail_open_block"
+
+            if reason is None:
+                continue
+
+            demoted_score = min(float(raw_score) - 1.0, base_min_score - 0.05 - demote_index * 0.001)
+            adjusted_scores[sym] = demoted_score
+            demote_index += 1
+            demoted.append((sym, float(raw_score), float(demoted_score), reason))
+
+            raw_bucket = alpha.raw_factors.setdefault(sym, {})
+            raw_bucket["negative_expectancy_rank_guard_reason"] = reason
+            z_bucket = alpha.z_factors.setdefault(sym, {})
+            z_bucket["negative_expectancy_rank_guard"] = -1.0
+
+        if demoted and audit:
+            for sym, before, after, reason in demoted:
+                audit.add_note(
+                    "NegativeExpectancy rank-guard: "
+                    f"{sym} reason={reason} score={before:.4f}->{after:.4f}"
+                )
+
+        alpha.scores = adjusted_scores
+        return alpha
+
     @staticmethod
     def _score_rank_map(scores: Dict[str, float]) -> Dict[str, int]:
         ranked = sorted(
@@ -1092,6 +1182,7 @@ class V5Pipeline:
         neg_cd_enabled = bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False))
         neg_cd_state = self._refresh_negative_expectancy_state(audit=audit) if neg_feedback_enabled else {}
         alpha = self._apply_negative_expectancy_score_penalty(alpha, neg_cd_state, audit=audit)
+        alpha = self._apply_negative_expectancy_rank_guard(alpha, neg_cd_state, positions=positions, audit=audit)
         
         # 3) 短线交易增强：Risk-Off 机会覆盖 (已禁用 - HMM标签已修复)
         # 当Alpha评分很高时，覆盖Risk-Off状态，允许短线交易
