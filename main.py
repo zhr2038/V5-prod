@@ -12,6 +12,7 @@ from configs.loader import load_config
 from configs.schema import AppConfig
 from src.data.mock_provider import MockProvider
 from src.data.okx_ccxt_provider import OKXCCXTProvider
+from src.execution.account_store import AccountStore
 from src.execution.execution_engine import ExecutionEngine
 from src.execution.position_store import PositionStore
 from src.reporting.reporting import dump_run_artifacts
@@ -262,6 +263,12 @@ def compute_orders(current_weights: Dict[str, float], target_weights: Dict[str, 
     return orders
 
 
+def _merge_managed_symbols(base_symbols: list[str], held_symbols: list[str]) -> list[str]:
+    base = [str(s) for s in (base_symbols or []) if str(s).strip()]
+    held = [str(s) for s in (held_symbols or []) if str(s).strip()]
+    return list(dict.fromkeys(base + held))
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent
     cfg_path = os.getenv("V5_CONFIG")
@@ -313,6 +320,16 @@ def main() -> None:
 
     provider = build_provider(cfg)
 
+    # load persisted positions/account early so current holdings always stay in managed market-data scope
+    store = PositionStore(path="reports/positions.sqlite")
+    acc_store = AccountStore(path="reports/positions.sqlite")
+    held = store.list()
+    held_symbols = [
+        str(getattr(p, "symbol", "") or "")
+        for p in held
+        if float(getattr(p, "qty", 0.0) or 0.0) > 0.0
+    ]
+
     symbols = list(cfg.symbols)
     # Optional: dynamic universe
     if cfg.universe.enabled:
@@ -340,14 +357,33 @@ def main() -> None:
                 log.info(f"Universe enabled: using {len(symbols)} symbols (include={len(inc)})")
         except Exception as e:
             log.warning(f"Universe fetch failed, fallback to config symbols: {e}")
+
+    scored_symbols = [str(s) for s in (symbols or []) if str(s).strip()]
+    managed_symbols = _merge_managed_symbols(scored_symbols, held_symbols)
+    if len(managed_symbols) > len(scored_symbols):
+        added = [sym for sym in managed_symbols if sym not in set(scored_symbols)]
+        log.info(
+            "Managed universe expanded with held positions: scored=%d managed=%d added=%s",
+            len(scored_symbols),
+            len(managed_symbols),
+            added,
+        )
+        audit.add_note(
+            f"managed universe expanded with held positions: scored={len(scored_symbols)} "
+            f"managed={len(managed_symbols)} added={added}"
+        )
     
     # 璁板綍universe閰嶇疆鍒癮udit
     audit.universe_config = {
         "enabled": cfg.universe.enabled,
         "use_universe_symbols": cfg.universe.use_universe_symbols,
         "config_symbols_count": len(cfg.symbols),
-        "actual_symbols_count": len(symbols),
-        "actual_symbols_sample": symbols[:10] if symbols else [],
+        "actual_symbols_count": len(scored_symbols),
+        "actual_symbols_sample": scored_symbols[:10] if scored_symbols else [],
+        "managed_symbols_count": len(managed_symbols),
+        "managed_symbols_sample": managed_symbols[:10] if managed_symbols else [],
+        "held_symbols_count": len(held_symbols),
+        "held_symbols_sample": held_symbols[:10] if held_symbols else [],
     }
 
     # fetch 1h bars for alpha/regime and 4h for auxiliary (placeholder)
@@ -360,14 +396,14 @@ def main() -> None:
         end_ts_ms = window_end_ts * 1000  # 杞崲涓烘绉?
     
     md_1h = provider.fetch_ohlcv(
-        symbols,
+        managed_symbols,
         timeframe=cfg.timeframe_main,
         limit=24 * 60,
         end_ts_ms=end_ts_ms,
     )
 
     ok_md, md_reason, md_1h = _validate_market_data_snapshot(
-        symbols=symbols,
+        symbols=scored_symbols,
         market_data=md_1h,
         require_symbol="BTC/USDT" if bool(getattr(cfg.universe, "require_btc_benchmark", True)) else None,
         min_coverage_ratio=float(getattr(cfg.universe, "min_data_coverage_ratio", 0.80) or 0.80),
@@ -378,33 +414,44 @@ def main() -> None:
         audit.add_note(md_reason)
         audit.save(f"reports/runs/{run_id}")
         return
-    if len(md_1h) < len(symbols):
-        log.warning("Market data partial coverage: %d/%d symbols available", len(md_1h), len(symbols))
-        audit.add_note(f"market data partial coverage: {len(md_1h)}/{len(symbols)}")
+    scored_available = len([sym for sym in scored_symbols if sym in md_1h])
+    if scored_available < len(scored_symbols):
+        log.warning(
+            "Market data partial coverage: %d/%d scored symbols available",
+            scored_available,
+            len(scored_symbols),
+        )
+        audit.add_note(f"market data partial coverage: {scored_available}/{len(scored_symbols)}")
+    missing_held_symbols = [sym for sym in held_symbols if sym not in md_1h]
+    if missing_held_symbols:
+        log.warning("Held symbols missing managed market data: %s", missing_held_symbols)
+        audit.add_note(f"held symbols missing managed market data: {missing_held_symbols}")
 
     from src.core.pipeline import V5Pipeline
 
     pipe = V5Pipeline(cfg, data_provider=provider)
 
+    alpha_market_data = {sym: md_1h[sym] for sym in scored_symbols if sym in md_1h}
+
     # regime from BTC (market data validated above)
-    btc = md_1h.get("BTC/USDT")
+    btc = alpha_market_data.get("BTC/USDT")
     if btc is None:
         if bool(getattr(cfg.universe, "require_btc_benchmark", True)):
             raise RuntimeError("BTC/USDT missing after market-data validation")
-        btc = next(iter(md_1h.values()))
+        btc = next(iter(alpha_market_data.values()))
 
     regime = pipe.regime_engine.detect(btc)
     pipe.alpha_engine.set_regime_context(
         regime.state.value if hasattr(regime.state, "value") else regime.state
     )
-    alpha_snap = pipe.alpha_engine.compute_snapshot(md_1h)
+    alpha_snap = pipe.alpha_engine.compute_snapshot(alpha_market_data)
 
     # ========== 瓒嬪娍缂撳瓨锛氫繚瀛樻垨璇诲彇 ==========
     is_trend_update_only = str(os.getenv("V5_TREND_UPDATE_ONLY") or "").upper() == "1"
     use_cached_trend = str(os.getenv("V5_USE_CACHED_TREND") or "").upper() == "1"
 
     if is_trend_update_only:
-        save_trend_cache(alpha_snap, regime, symbols)
+        save_trend_cache(alpha_snap, regime, scored_symbols)
         log.info("[TrendUpdate] Trend cache saved, exiting (V5_TREND_UPDATE_ONLY=1)")
         return
 
@@ -418,10 +465,6 @@ def main() -> None:
             log.warning("[TrendCache] No valid cache found, using freshly computed trend")
     # ========== 瓒嬪娍缂撳瓨缁撴潫 ==========
 
-    # load persisted positions/account
-    store = PositionStore(path="reports/positions.sqlite")
-    from src.execution.account_store import AccountStore
-    acc_store = AccountStore(path="reports/positions.sqlite")
     acc = acc_store.get()
     held = store.list()
     # Mark-to-market at cycle start
@@ -468,7 +511,7 @@ def main() -> None:
         pass
     
     # 璁板綍universe鏁伴噺
-    audit.counts["universe"] = len(symbols)
+    audit.counts["universe"] = len(scored_symbols)
 
     # Sanity-check equity peak: if an old corrupted peak is orders-of-magnitude above current equity,
     # it will permanently trigger drawdown throttle (DD multiplier). Clamp it.
@@ -606,11 +649,11 @@ def main() -> None:
 
         tob = {}
         if hasattr(provider, "fetch_top_of_book"):
-            tob = provider.fetch_top_of_book(symbols)
+            tob = provider.fetch_top_of_book(scored_symbols)
 
         selected = set(getattr(out.portfolio, "selected", []) or [])
         rows = []
-        for sym in symbols:
+        for sym in scored_symbols:
             ba = tob.get(sym) or {}
             bid = ba.get("bid")
             ask = ba.get("ask")

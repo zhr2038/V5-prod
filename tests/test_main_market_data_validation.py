@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from main import _validate_market_data_snapshot
+from main import _merge_managed_symbols, _validate_market_data_snapshot
 from src.core.models import MarketSeries
 
 
@@ -69,3 +69,12 @@ def test_market_data_validation_filters_empty_series():
     assert ok
     assert reason == ""
     assert list(valid.keys()) == ["BTC/USDT"]
+
+
+def test_merge_managed_symbols_keeps_base_and_adds_held_without_duplicates():
+    managed = _merge_managed_symbols(
+        ["BTC/USDT", "ETH/USDT", "HYPE/USDT"],
+        ["OKB/USDT", "ETH/USDT", "ADA/USDT"],
+    )
+
+    assert managed == ["BTC/USDT", "ETH/USDT", "HYPE/USDT", "OKB/USDT", "ADA/USDT"]

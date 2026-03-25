@@ -294,6 +294,7 @@ execution:
   negative_expectancy_fast_fail_open_block_floor_bps: 0.0
 
   order_state_machine_path: reports/order_state_machine.json
+  force_close_unscored_positions: true
 
   # 当部分减仓触发 minSz dust 时，自动升级为整仓卖出（若整仓可交易）
   auto_upgrade_dust_sell_to_close: true

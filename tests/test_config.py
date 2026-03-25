@@ -86,6 +86,7 @@ def test_live_prod_sideways_churn_controls_load():
     assert cfg.execution.low_price_entry_threshold_usdt == 0.20
     assert cfg.execution.low_price_entry_extra_score_floor == 0.12
     assert cfg.execution.low_price_entry_extra_cost_bps == 20.0
+    assert cfg.execution.force_close_unscored_positions is True
 
 
 def test_live_prod_funding_thresholds_load():
