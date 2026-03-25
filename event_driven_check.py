@@ -13,6 +13,7 @@ import logging
 import subprocess
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 # Setup logging
 logging.basicConfig(
@@ -107,6 +108,62 @@ def find_latest_fused_signals_file(runs_dir: Path, max_age_minutes: int = 90):
         return None, None
 
 
+def _load_positions_snapshot(
+    positions_db_path: Optional[Path] = None,
+    portfolio_path: Optional[Path] = None,
+):
+    """Load live positions, preferring positions.sqlite over legacy portfolio.json."""
+    positions: dict[str, dict] = {}
+    position_symbols: set[str] = set()
+    source = 'missing'
+
+    db_path = positions_db_path or (REPORTS_DIR / 'positions.sqlite')
+    try:
+        from src.execution.position_store import PositionStore
+
+        store = PositionStore(str(db_path))
+        for pos in store.list():
+            qty = float(getattr(pos, 'qty', 0.0) or 0.0)
+            if qty <= 0:
+                continue
+            sym = str(getattr(pos, 'symbol', '') or '')
+            if not sym:
+                continue
+            positions[sym] = {
+                'entry_price': float(getattr(pos, 'avg_px', 0.0) or 0.0),
+                'quantity': qty,
+            }
+            position_symbols.add(sym)
+        if positions:
+            return positions, position_symbols, 'position_store'
+    except Exception as e:
+        logger.warning(f"Could not load positions from sqlite store: {e}")
+
+    legacy_portfolio_path = portfolio_path or (REPORTS_DIR / 'portfolio.json')
+    if legacy_portfolio_path.exists():
+        try:
+            with open(legacy_portfolio_path) as f:
+                portfolio = json.load(f)
+            for sym, data in (portfolio.get('positions', {}) or {}).items():
+                qty = float((data or {}).get('quantity', 0.0) or 0.0)
+                if qty <= 0:
+                    continue
+                sym = str(sym or '')
+                if not sym:
+                    continue
+                positions[sym] = {
+                    'entry_price': float((data or {}).get('avg_price', 0.0) or 0.0),
+                    'quantity': qty,
+                }
+                position_symbols.add(sym)
+            if positions:
+                source = 'portfolio_json'
+        except Exception as e:
+            logger.warning(f"Could not load legacy portfolio.json positions: {e}")
+
+    return positions, position_symbols, source
+
+
 def load_current_state(cfg=None, config_path: Path = None):
     """Load current market state from V5 reports."""
     try:
@@ -124,17 +181,9 @@ def load_current_state(cfg=None, config_path: Path = None):
                 regime_data = json.load(f)
                 regime = regime_data.get('regime', 'SIDEWAYS')
         
-        # Load portfolio (positions)
-        portfolio_path = REPORTS_DIR / 'portfolio.json'
-        positions = {}
-        if portfolio_path.exists():
-            with open(portfolio_path) as f:
-                portfolio = json.load(f)
-                for sym, data in portfolio.get('positions', {}).items():
-                    positions[sym] = {
-                        'entry_price': data.get('avg_price', 0),
-                        'quantity': data.get('quantity', 0)
-                    }
+        # Load live positions from sqlite first; fallback to legacy portfolio.json only when needed
+        positions, position_symbols, position_source = _load_positions_snapshot()
+        logger.info(f"Loaded {len(positions)} positions from {position_source}")
         
         # Build tradeable symbol universe (only strategy-tradeable symbols)
         cfg_symbols = cfg.get('symbols', []) if isinstance(cfg, dict) else getattr(cfg, 'symbols', [])
@@ -153,6 +202,9 @@ def load_current_state(cfg=None, config_path: Path = None):
                     tradeable_symbols = set(str(s) for s in (cache_obj.get('symbols') or []))
         except Exception as e:
             logger.warning(f"Could not load universe cache, fallback to cfg.symbols: {e}")
+
+        # Always keep current holdings inside event-driven watch scope so existing positions remain manageable.
+        tradeable_symbols.update(position_symbols)
 
         # Load prices from OKX API (filtered to tradeable universe only)
         prices = {}
