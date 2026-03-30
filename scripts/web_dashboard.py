@@ -2861,6 +2861,7 @@ def api_cost_calibration():
         avg_slippage_bps = 0
         avg_fee_bps = 0
         total_trade_count = 0
+        data_source = 'stats'
         
         # 优先从cost_stats_real读取已汇总的数据
         if cost_dir.exists():
@@ -2890,6 +2891,9 @@ def api_cost_calibration():
                         
                         day_trade_count += slippage_data.get('count', 0)
                     
+                    if day_trade_count <= 0:
+                        continue
+
                     avg_day_slippage = sum(day_slippage) / len(day_slippage) if day_slippage else 0
                     avg_day_fee = sum(day_fee) / len(day_fee) if day_fee else 0
                     total_day_cost = avg_day_slippage + avg_day_fee
@@ -2986,6 +2990,8 @@ def api_cost_calibration():
             calibration_data.sort(key=lambda x: x['date'])
             
             total_days = len(calibration_data)
+            if total_days > 0:
+                data_source = 'events'
             for d in calibration_data:
                 avg_slippage_bps += d['slippage_bps']
                 avg_fee_bps += d['fee_bps']
@@ -3011,7 +3017,7 @@ def api_cost_calibration():
             'total_trades': total_trade_count,
             'daily_stats': calibration_data[-7:],  # 最近7天
             'progress_percent': min(100, int(total_days / 7 * 100)),
-            'data_source': 'events' if total_days > 0 and not (cost_dir.exists() and list(cost_dir.glob('*.json'))) else 'stats',
+            'data_source': data_source,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
