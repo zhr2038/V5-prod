@@ -1440,6 +1440,7 @@ def api_positions():
         hidden_symbols = {
             'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
         }
+        authoritative_snapshot_seen = False
 
         def get_last_price_usdt(symbol: str) -> float:
             """获取币种最新价格，优先OKX实时API"""
@@ -1468,6 +1469,50 @@ def api_positions():
                 pass
             
             return 0.0
+
+        def choose_spot_qty(detail: Dict[str, Any]) -> float:
+            cash_bal = float(detail.get('cashBal') or 0)
+            eq_qty = float(detail.get('eq') or 0)
+            avail_bal = float(detail.get('availBal') or 0)
+            spot_bal = float(detail.get('spotBal') or 0)
+            if cash_bal > 0:
+                return cash_bal
+            if eq_qty > 0:
+                return eq_qty
+            if avail_bal > 0:
+                return avail_bal
+            if spot_bal > 0:
+                return spot_bal
+            return 0.0
+
+        def append_position(ccy: str, qty: float, eq_usd: float) -> None:
+            ccy = str(ccy or '')
+            if not ccy or ccy == 'USDT' or ccy in hidden_symbols:
+                return
+            qty = float(qty or 0)
+            if qty <= 0:
+                return
+
+            px = get_last_price_usdt(ccy)
+            eq_usd = float(eq_usd or 0)
+            if eq_usd <= 0 and px > 0:
+                eq_usd = qty * px
+            if eq_usd <= 0 or eq_usd < 0.5:
+                return
+
+            effective_px = eq_usd / qty if qty > 0 else 0.0
+            if effective_px > 0:
+                px = effective_px
+            if px <= 0:
+                return
+
+            positions.append({
+                'symbol': ccy,
+                'qty': round(qty, 8),
+                'avg_px': round(avg_price_hints.get(ccy, 0.0), 6),
+                'last_price': round(px, 6),
+                'value_usdt': round(eq_usd, 4)
+            })
 
         pos_db = REPORTS_DIR / 'positions.sqlite'
         positions = []
@@ -1530,47 +1575,14 @@ def api_positions():
                 data = resp.json()
                 if data.get('code') == '0' and data.get('data'):
                     live_okx_used = True
+                    authoritative_snapshot_seen = True
                     details = data['data'][0].get('details', [])
                     for d in details:
                         try:
                             ccy = str(d.get('ccy') or '')
-                            if not ccy or ccy == 'USDT' or ccy in hidden_symbols:
-                                continue
-                            # OKX API semantics for spot:
-                            # - eq / cashBal are base quantity (not USDT value)
-                            # - eqUsd is USDT-equivalent value
-                            cash_bal = float(d.get('cashBal') or 0)
-                            avail_bal = float(d.get('availBal') or 0)
-                            spot_bal = float(d.get('spotBal') or 0)
-                            eq_qty = float(d.get('eq') or 0)
-                            qty = max(cash_bal, avail_bal, spot_bal, eq_qty)
-                            if qty <= 0:
-                                continue
-
-                            px = get_last_price_usdt(ccy)
+                            qty = choose_spot_qty(d)
                             eq_usd = float(d.get('eqUsd') or 0)
-                            # fallback: if eqUsd missing, infer from qty*px
-                            if eq_usd <= 0 and px > 0:
-                                eq_usd = qty * px
-                            if eq_usd <= 0:
-                                continue
-
-                            effective_px = eq_usd / qty if qty > 0 else 0.0
-                            if effective_px > 0:
-                                px = effective_px
-                            if px <= 0:
-                                continue
-
-                            value = eq_usd
-                            if value < 0.5:
-                                continue
-                            positions.append({
-                                'symbol': ccy,
-                                'qty': round(qty, 8),
-                                'avg_px': round(avg_price_hints.get(ccy, 0.0), 6),
-                                'last_price': round(px, 6),
-                                'value_usdt': round(value, 4)
-                            })
+                            append_position(ccy, qty, eq_usd)
                         except Exception:
                             continue
         except Exception as e:
@@ -1580,8 +1592,23 @@ def api_positions():
 
         # 1) 回退 positions.sqlite（仅当实时OKX不可用且positions为空）
         # 注意：如果OKX API成功调用但返回空持仓，说明真的没持仓，不应回退到缓存
+        reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+        if not positions and reconcile_file.exists():
+            try:
+                reconcile = json.loads(reconcile_file.read_text(encoding='utf-8', errors='ignore'))
+                exchange_snapshot = reconcile.get('exchange_snapshot') or {}
+                ccy_cash_bal = exchange_snapshot.get('ccy_cashBal') or {}
+                ccy_eq_usd = exchange_snapshot.get('ccy_eqUsd') or {}
+                if isinstance(ccy_cash_bal, dict):
+                    authoritative_snapshot_seen = True
+                    for ccy, qty in ccy_cash_bal.items():
+                        eq_usd = ccy_eq_usd.get(ccy) if isinstance(ccy_eq_usd, dict) else 0
+                        append_position(ccy, qty, eq_usd)
+            except Exception:
+                pass
+
         fallback_source = None
-        if not live_okx_used and not positions and pos_db.exists():
+        if not authoritative_snapshot_seen and not positions and pos_db.exists():
             fallback_source = "positions.sqlite"
             conn = sqlite3.connect(str(pos_db))
             cur = conn.cursor()
@@ -1622,7 +1649,7 @@ def api_positions():
                     continue
 
         # 2) 回退：DB为空且OKX不可用时读取最新 runs/*/positions.jsonl
-        if not live_okx_used and not positions:
+        if not authoritative_snapshot_seen and not positions:
             runs_dir = REPORTS_DIR / 'runs'
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
@@ -2909,9 +2936,28 @@ def api_cost_calibration():
                         for line in f:
                             try:
                                 event = json.loads(line.strip())
-                                # 提取滑点和费率
-                                slippage = event.get('slippage_bps') or event.get('slippage_usdt', 0) / event.get('notional_usdt', 1) * 10000
-                                fee = event.get('fee_bps') or event.get('fee', 0) / event.get('notional_usdt', 1) * 10000
+                                notional = float(event.get('notional_usdt') or 0.0)
+
+                                slippage = event.get('slippage_bps')
+                                if slippage is None and notional > 0:
+                                    slip_usdt = event.get('slippage_usdt')
+                                    if slip_usdt is not None:
+                                        slippage = float(slip_usdt) / notional * 10000.0
+
+                                fee = event.get('fee_bps')
+                                if fee is None and notional > 0:
+                                    fee_usdt = event.get('fee_usdt')
+                                    if fee_usdt is None:
+                                        cost_total = event.get('cost_usdt_total')
+                                        slip_usdt = event.get('slippage_usdt')
+                                        if cost_total is not None and slip_usdt is not None:
+                                            fee_usdt = float(cost_total) - float(slip_usdt)
+                                    if fee_usdt is None:
+                                        raw_fee = event.get('fee')
+                                        if raw_fee is not None:
+                                            fee_usdt = raw_fee
+                                    if fee_usdt is not None:
+                                        fee = float(fee_usdt) / notional * 10000.0
                                 
                                 if slippage is not None and not isinstance(slippage, str):
                                     slippage_list.append(float(slippage))

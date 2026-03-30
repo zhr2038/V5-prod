@@ -113,6 +113,68 @@ def test_pipeline_applies_negative_expectancy_penalty_before_allocate():
     assert captured["HYPE/USDT"] == pytest.approx(0.40)
 
 
+def test_pipeline_applies_negative_expectancy_penalty_to_negative_scores_and_fast_fail():
+    cfg = AppConfig(symbols=["HYPE/USDT", "ETH/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.negative_expectancy_score_penalty_enabled = True
+    cfg.execution.negative_expectancy_score_penalty_min_closed_cycles = 2
+    cfg.execution.negative_expectancy_score_penalty_floor_bps = 10.0
+    cfg.execution.negative_expectancy_score_penalty_per_bps = 0.01
+    cfg.execution.negative_expectancy_score_penalty_max = 1.0
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_min_closed_cycles = 2
+    cfg.execution.negative_expectancy_fast_fail_open_block_floor_bps = 5.0
+    cfg.execution.negative_expectancy_cooldown_enabled = False
+
+    pipe = _build_pipe(cfg)
+    captured = {}
+
+    def _allocate(scores, market_data, regime_mult, audit=None):
+        captured.update(scores)
+        return SimpleNamespace(
+            target_weights={},
+            selected=[],
+            entry_candidates=[],
+            volatilities={},
+            notes="",
+        )
+
+    pipe.portfolio_engine.allocate = _allocate
+    pipe.negative_expectancy_cooldown.refresh = lambda force=False: {
+        "stats": {
+            "HYPE/USDT": {
+                "closed_cycles": 3,
+                "expectancy_bps": -12.0,
+                "pnl_sum_usdt": -0.30,
+                "closed_notional_usdt": 100.0,
+                "fast_fail_closed_cycles": 2,
+                "fast_fail_expectancy_bps": -20.0,
+            }
+        },
+        "symbols": {},
+    }
+
+    market_data = {
+        "HYPE/USDT": _series("HYPE/USDT", 30.0),
+        "ETH/USDT": _series("ETH/USDT", 2000.0),
+    }
+    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"HYPE/USDT": -0.20, "ETH/USDT": -0.10})
+
+    pipe.run(
+        market_data_1h=market_data,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=DecisionAudit(run_id="neg-penalty-negative-score"),
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert captured["HYPE/USDT"] == pytest.approx(-0.67)
+    assert captured["ETH/USDT"] == pytest.approx(-0.10)
+
+
 def test_pipeline_blocks_open_long_on_negative_expectancy():
     cfg = AppConfig(symbols=["OKB/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False

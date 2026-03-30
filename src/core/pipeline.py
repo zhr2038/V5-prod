@@ -429,40 +429,75 @@ class V5Pipeline:
         floor_bps = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_floor_bps', 5.0) or 5.0)
         penalty_per_bps = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_per_bps', 0.015) or 0.015)
         penalty_cap = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_max', 0.60) or 0.60)
+        ff_min_cycles = int(
+            getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_min_closed_cycles", 2) or 2
+        )
+        ff_floor_bps = float(
+            getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0) or 0.0
+        )
 
         adjusted_scores = dict(alpha.scores or {})
         penalized = []
         for sym, raw_score in list(adjusted_scores.items()):
             score = float(raw_score)
-            if score <= 0.0:
-                continue
             stat = stats_map.get(sym)
             if not isinstance(stat, dict):
                 continue
             closed_cycles = int(stat.get('closed_cycles') or 0)
-            if closed_cycles < min_cycles:
-                continue
             expectancy_bps = float(stat.get('expectancy_bps') or 0.0)
-            shortfall_bps = float(floor_bps) - expectancy_bps
-            if shortfall_bps <= 0.0:
+            shortfall_bps = 0.0
+            if closed_cycles >= min_cycles:
+                shortfall_bps = max(0.0, float(floor_bps) - expectancy_bps)
+
+            ff_closed_cycles = int(stat.get("fast_fail_closed_cycles") or 0)
+            ff_expectancy_bps = float(stat.get("fast_fail_expectancy_bps") or 0.0)
+            ff_shortfall_bps = 0.0
+            if ff_closed_cycles >= ff_min_cycles:
+                ff_shortfall_bps = max(0.0, float(ff_floor_bps) - ff_expectancy_bps)
+
+            total_shortfall_bps = shortfall_bps + ff_shortfall_bps
+            if total_shortfall_bps <= 0.0:
                 continue
-            penalty = min(float(penalty_cap), float(shortfall_bps) * float(penalty_per_bps))
+            penalty = min(float(penalty_cap), float(total_shortfall_bps) * float(penalty_per_bps))
             if penalty <= 0.0:
                 continue
             adjusted_scores[sym] = score - penalty
-            penalized.append((sym, score, adjusted_scores[sym], expectancy_bps, closed_cycles, penalty))
+            penalized.append(
+                (
+                    sym,
+                    score,
+                    adjusted_scores[sym],
+                    expectancy_bps,
+                    closed_cycles,
+                    ff_expectancy_bps,
+                    ff_closed_cycles,
+                    penalty,
+                )
+            )
 
             raw_bucket = alpha.raw_factors.setdefault(sym, {})
             raw_bucket["negative_expectancy_bps"] = expectancy_bps
             raw_bucket["negative_expectancy_closed_cycles"] = float(closed_cycles)
+            raw_bucket["negative_expectancy_fast_fail_bps"] = ff_expectancy_bps
+            raw_bucket["negative_expectancy_fast_fail_closed_cycles"] = float(ff_closed_cycles)
             z_bucket = alpha.z_factors.setdefault(sym, {})
             z_bucket["negative_expectancy_score_penalty"] = -float(penalty)
 
         if penalized and audit:
-            for sym, score_before, score_after, expectancy_bps, closed_cycles, penalty in penalized:
+            for (
+                sym,
+                score_before,
+                score_after,
+                expectancy_bps,
+                closed_cycles,
+                ff_expectancy_bps,
+                ff_closed_cycles,
+                penalty,
+            ) in penalized:
                 audit.add_note(
                     "NegativeExpectancy penalty: "
                     f"{sym} cycles={closed_cycles} expectancy_bps={expectancy_bps:.2f} "
+                    f"fast_fail_cycles={ff_closed_cycles} fast_fail_bps={ff_expectancy_bps:.2f} "
                     f"penalty={penalty:.4f} score={score_before:.4f}->{score_after:.4f}"
                 )
 

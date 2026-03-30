@@ -63,14 +63,17 @@ def test_live_prod_conflict_penalty_and_negative_expectancy_loads():
     assert cfg.alpha.mean_reversion.buy_score_multiplier == 0.75
     assert cfg.alpha.mean_reversion.sell_score_multiplier == 1.0
     assert cfg.execution.negative_expectancy_score_penalty_enabled is True
-    assert cfg.execution.negative_expectancy_score_penalty_floor_bps == 10.0
-    assert cfg.execution.negative_expectancy_score_penalty_per_bps == 0.02
+    assert cfg.execution.negative_expectancy_score_penalty_floor_bps == 15.0
+    assert cfg.execution.negative_expectancy_score_penalty_per_bps == 0.03
+    assert cfg.execution.negative_expectancy_score_penalty_max == 0.90
     assert cfg.execution.negative_expectancy_open_block_enabled is True
     assert cfg.execution.negative_expectancy_open_block_floor_bps == 25.0
-    assert cfg.execution.negative_expectancy_fast_fail_max_hold_minutes == 120
+    assert cfg.execution.negative_expectancy_lookback_hours == 72
+    assert cfg.execution.negative_expectancy_cooldown_hours == 48
+    assert cfg.execution.negative_expectancy_fast_fail_max_hold_minutes == 360
     assert cfg.execution.negative_expectancy_fast_fail_open_block_enabled is True
     assert cfg.execution.negative_expectancy_fast_fail_open_block_min_closed_cycles == 2
-    assert cfg.execution.negative_expectancy_fast_fail_open_block_floor_bps == 0.0
+    assert cfg.execution.negative_expectancy_fast_fail_open_block_floor_bps == 5.0
 
 
 def test_live_prod_sideways_churn_controls_load():
