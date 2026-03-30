@@ -154,3 +154,53 @@ def test_cost_calibration_fallback_uses_fee_usdt_and_cost_total(tmp_path):
     assert payload["avg_slippage_bps"] == pytest.approx(5.0)
     assert payload["avg_fee_bps"] == pytest.approx(10.0)
     assert payload["avg_total_cost_bps"] == pytest.approx(15.0)
+
+
+def test_cost_calibration_ignores_zero_trade_stats_and_falls_back_to_events(tmp_path):
+    module = load_web_dashboard_module()
+    reports_dir = tmp_path / "reports"
+    stats_dir = reports_dir / "cost_stats_real"
+    events_dir = reports_dir / "cost_events"
+    stats_dir.mkdir(parents=True)
+    events_dir.mkdir(parents=True)
+
+    (stats_dir / "daily_cost_stats_20260330.json").write_text(
+        json.dumps(
+            {
+                "buckets": {
+                    "spot": {
+                        "slippage_bps": {"count": 0, "mean": None},
+                        "fee_bps": {"count": 0, "mean": None},
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    (events_dir / "20260330.jsonl").write_text(
+        json.dumps(
+            {
+                "notional_usdt": 20.0,
+                "slippage_usdt": 0.01,
+                "fee_usdt": 0.02,
+                "cost_usdt_total": 0.03,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    module.REPORTS_DIR = reports_dir
+    client = module.app.test_client()
+
+    resp = client.get("/api/cost_calibration")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+
+    assert payload["data_source"] == "events"
+    assert payload["total_days"] == 1
+    assert payload["avg_slippage_bps"] == pytest.approx(5.0)
+    assert payload["avg_fee_bps"] == pytest.approx(10.0)
