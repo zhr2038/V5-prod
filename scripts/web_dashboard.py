@@ -1067,96 +1067,6 @@ def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equi
     return peak_equity
 
 
-def _env_flag_enabled(name: str) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return False
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _dashboard_live_account_enabled() -> bool:
-    return _env_flag_enabled("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT") or _env_flag_enabled("V5_DASHBOARD_ALLOW_LIVE_OKX")
-
-
-def _load_local_account_state() -> Dict[str, float]:
-    db_path = REPORTS_DIR / 'positions.sqlite'
-    if not db_path.exists():
-        return {}
-
-    try:
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-        cursor.execute("SELECT cash_usdt, equity_peak_usdt FROM account_state WHERE k='default'")
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return {}
-        return {
-            "cash_usdt": float(row[0] or 0.0),
-            "equity_peak_usdt": float(row[1] or 0.0),
-        }
-    except Exception:
-        return {}
-
-
-def _load_reconcile_cash() -> float:
-    reconcile_file = REPORTS_DIR / 'reconcile_status.json'
-    if not reconcile_file.exists():
-        return 0.0
-
-    try:
-        with open(reconcile_file, 'r', encoding='utf-8') as f:
-            reconcile = json.load(f)
-        return float(
-            reconcile.get('exchange_snapshot', {}).get('ccy_cashBal', {}).get('USDT')
-            or reconcile.get('local_snapshot', {}).get('cash_usdt', 0.0)
-            or 0.0
-        )
-    except Exception:
-        return 0.0
-
-
-def _load_workspace_exchange_creds() -> tuple[str, str, str]:
-    key = os.getenv('EXCHANGE_API_KEY') or ""
-    sec = os.getenv('EXCHANGE_API_SECRET') or ""
-    pp = os.getenv('EXCHANGE_PASSPHRASE') or ""
-
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv(str(WORKSPACE / '.env'))
-        key = os.getenv('EXCHANGE_API_KEY') or key
-        sec = os.getenv('EXCHANGE_API_SECRET') or sec
-        pp = os.getenv('EXCHANGE_PASSPHRASE') or pp
-    except Exception:
-        pass
-
-    if key and sec and pp:
-        return key, sec, pp
-
-    envp = WORKSPACE / '.env'
-    if not envp.exists():
-        return key, sec, pp
-
-    try:
-        for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
-            if not ln or ln.strip().startswith('#') or '=' not in ln:
-                continue
-            k, v = ln.split('=', 1)
-            k = k.strip()
-            v = v.strip().strip('"').strip("'")
-            if k == 'EXCHANGE_API_KEY' and not key:
-                key = v
-            elif k == 'EXCHANGE_API_SECRET' and not sec:
-                sec = v
-            elif k == 'EXCHANGE_PASSPHRASE' and not pp:
-                pp = v
-    except Exception:
-        pass
-
-    return key, sec, pp
-
-
 def _static_asset_version(filename: str) -> str:
     asset_path = WEB_DIR / 'static' / Path(filename)
     try:
@@ -1228,16 +1138,17 @@ def api_account():
     """账户信息API - 优先OKX实时数据"""
     try:
         # 优先从OKX获取实时余额
-        cash = 0.0
-        local_account_state = _load_local_account_state()
+        cash = 0
         try:
             import os, time, hmac, hashlib, base64, requests
             from dotenv import load_dotenv
             load_dotenv(str(WORKSPACE / '.env'))
             
-            key, sec, pp = _load_workspace_exchange_creds()
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
             
-            if _dashboard_live_account_enabled() and key and sec and pp:
+            if key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
                 msg = ts + 'GET' + path
@@ -1260,9 +1171,17 @@ def api_account():
         
         # 如果OKX获取失败，回退到reconcile文件
         if cash <= 0:
-            cash = _load_reconcile_cash()
-        if cash <= 0 and local_account_state:
-            cash = float(local_account_state.get("cash_usdt") or 0.0)
+            reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+            if reconcile_file.exists():
+                try:
+                    with open(reconcile_file, 'r') as f:
+                        reconcile = json.load(f)
+                    cash = (
+                        reconcile.get('exchange_snapshot', {}).get('ccy_cashBal', {}).get('USDT')
+                        or reconcile.get('local_snapshot', {}).get('cash_usdt', 0)
+                    )
+                except Exception:
+                    pass
         
         # 获取最新权益 - 排除异常数据
         conn = get_db_connection()
@@ -1339,14 +1258,13 @@ def api_account():
             # 未设置资金上限，使用传统计算方式
             # 从数据库读取峰值
             try:
-                if local_account_state and local_account_state.get("equity_peak_usdt"):
-                    peak_equity = _sanitize_peak_equity(
-                        total_equity,
-                        initial_capital,
-                        float(local_account_state["equity_peak_usdt"]),
-                    )
-                else:
-                    peak_equity = max(total_equity, initial_capital)
+                conn2 = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
+                cursor2 = conn2.cursor()
+                cursor2.execute("SELECT equity_peak_usdt FROM account_state WHERE k='default'")
+                row2 = cursor2.fetchone()
+                if row2 and row2[0]:
+                    peak_equity = _sanitize_peak_equity(total_equity, initial_capital, float(row2[0]))
+                conn2.close()
             except Exception:
                 peak_equity = max(total_equity, initial_capital)
             
@@ -1389,7 +1307,9 @@ def api_trades():
             import os, time, hmac, hashlib, base64
             from dotenv import load_dotenv
             load_dotenv(str(WORKSPACE / '.env'))
-            key, sec, pp = _load_workspace_exchange_creds()
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
             if not (key and sec and pp):
                 envp = WORKSPACE / '.env'
                 if envp.exists():
@@ -1405,7 +1325,7 @@ def api_trades():
                         elif k == 'EXCHANGE_PASSPHRASE' and not pp:
                             pp = v
 
-            if _dashboard_live_account_enabled() and key and sec and pp:
+            if key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/trade/fills?limit=100'
                 msg = ts + 'GET' + path
@@ -1520,6 +1440,7 @@ def api_positions():
         hidden_symbols = {
             'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
         }
+        authoritative_snapshot_seen = False
 
         def get_last_price_usdt(symbol: str) -> float:
             """获取币种最新价格，优先OKX实时API"""
@@ -1549,6 +1470,50 @@ def api_positions():
             
             return 0.0
 
+        def choose_spot_qty(detail: Dict[str, Any]) -> float:
+            cash_bal = float(detail.get('cashBal') or 0)
+            eq_qty = float(detail.get('eq') or 0)
+            avail_bal = float(detail.get('availBal') or 0)
+            spot_bal = float(detail.get('spotBal') or 0)
+            if cash_bal > 0:
+                return cash_bal
+            if eq_qty > 0:
+                return eq_qty
+            if avail_bal > 0:
+                return avail_bal
+            if spot_bal > 0:
+                return spot_bal
+            return 0.0
+
+        def append_position(ccy: str, qty: float, eq_usd: float) -> None:
+            ccy = str(ccy or '')
+            if not ccy or ccy == 'USDT' or ccy in hidden_symbols:
+                return
+            qty = float(qty or 0)
+            if qty <= 0:
+                return
+
+            px = get_last_price_usdt(ccy)
+            eq_usd = float(eq_usd or 0)
+            if eq_usd <= 0 and px > 0:
+                eq_usd = qty * px
+            if eq_usd <= 0 or eq_usd < 0.5:
+                return
+
+            effective_px = eq_usd / qty if qty > 0 else 0.0
+            if effective_px > 0:
+                px = effective_px
+            if px <= 0:
+                return
+
+            positions.append({
+                'symbol': ccy,
+                'qty': round(qty, 8),
+                'avg_px': round(avg_price_hints.get(ccy, 0.0), 6),
+                'last_price': round(px, 6),
+                'value_usdt': round(eq_usd, 4)
+            })
+
         pos_db = REPORTS_DIR / 'positions.sqlite'
         positions = []
         live_okx_used = False
@@ -1574,7 +1539,9 @@ def api_positions():
             import os, time, hmac, hashlib, base64
             from dotenv import load_dotenv
             load_dotenv(str(WORKSPACE / '.env'))
-            key, sec, pp = _load_workspace_exchange_creds()
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
             # fallback: parse .env manually when process env not populated
             if not (key and sec and pp):
                 try:
@@ -1593,7 +1560,7 @@ def api_positions():
                                 pp = v
                 except Exception as e:
                     okx_error = f"env_parse_error: {e}"
-            if _dashboard_live_account_enabled() and key and sec and pp:
+            if key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
                 msg = ts + 'GET' + path
@@ -1608,47 +1575,14 @@ def api_positions():
                 data = resp.json()
                 if data.get('code') == '0' and data.get('data'):
                     live_okx_used = True
+                    authoritative_snapshot_seen = True
                     details = data['data'][0].get('details', [])
                     for d in details:
                         try:
                             ccy = str(d.get('ccy') or '')
-                            if not ccy or ccy == 'USDT' or ccy in hidden_symbols:
-                                continue
-                            # OKX API semantics for spot:
-                            # - eq / cashBal are base quantity (not USDT value)
-                            # - eqUsd is USDT-equivalent value
-                            cash_bal = float(d.get('cashBal') or 0)
-                            avail_bal = float(d.get('availBal') or 0)
-                            spot_bal = float(d.get('spotBal') or 0)
-                            eq_qty = float(d.get('eq') or 0)
-                            qty = max(cash_bal, avail_bal, spot_bal, eq_qty)
-                            if qty <= 0:
-                                continue
-
-                            px = get_last_price_usdt(ccy)
+                            qty = choose_spot_qty(d)
                             eq_usd = float(d.get('eqUsd') or 0)
-                            # fallback: if eqUsd missing, infer from qty*px
-                            if eq_usd <= 0 and px > 0:
-                                eq_usd = qty * px
-                            if eq_usd <= 0:
-                                continue
-
-                            effective_px = eq_usd / qty if qty > 0 else 0.0
-                            if effective_px > 0:
-                                px = effective_px
-                            if px <= 0:
-                                continue
-
-                            value = eq_usd
-                            if value < 0.5:
-                                continue
-                            positions.append({
-                                'symbol': ccy,
-                                'qty': round(qty, 8),
-                                'avg_px': round(avg_price_hints.get(ccy, 0.0), 6),
-                                'last_price': round(px, 6),
-                                'value_usdt': round(value, 4)
-                            })
+                            append_position(ccy, qty, eq_usd)
                         except Exception:
                             continue
         except Exception as e:
@@ -1658,8 +1592,23 @@ def api_positions():
 
         # 1) 回退 positions.sqlite（仅当实时OKX不可用且positions为空）
         # 注意：如果OKX API成功调用但返回空持仓，说明真的没持仓，不应回退到缓存
+        reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+        if not positions and reconcile_file.exists():
+            try:
+                reconcile = json.loads(reconcile_file.read_text(encoding='utf-8', errors='ignore'))
+                exchange_snapshot = reconcile.get('exchange_snapshot') or {}
+                ccy_cash_bal = exchange_snapshot.get('ccy_cashBal') or {}
+                ccy_eq_usd = exchange_snapshot.get('ccy_eqUsd') or {}
+                if isinstance(ccy_cash_bal, dict):
+                    authoritative_snapshot_seen = True
+                    for ccy, qty in ccy_cash_bal.items():
+                        eq_usd = ccy_eq_usd.get(ccy) if isinstance(ccy_eq_usd, dict) else 0
+                        append_position(ccy, qty, eq_usd)
+            except Exception:
+                pass
+
         fallback_source = None
-        if not live_okx_used and not positions and pos_db.exists():
+        if not authoritative_snapshot_seen and not positions and pos_db.exists():
             fallback_source = "positions.sqlite"
             conn = sqlite3.connect(str(pos_db))
             cur = conn.cursor()
@@ -1700,7 +1649,7 @@ def api_positions():
                     continue
 
         # 2) 回退：DB为空且OKX不可用时读取最新 runs/*/positions.jsonl
-        if not live_okx_used and not positions:
+        if not authoritative_snapshot_seen and not positions:
             runs_dir = REPORTS_DIR / 'runs'
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
@@ -2987,9 +2936,28 @@ def api_cost_calibration():
                         for line in f:
                             try:
                                 event = json.loads(line.strip())
-                                # 提取滑点和费率
-                                slippage = event.get('slippage_bps') or event.get('slippage_usdt', 0) / event.get('notional_usdt', 1) * 10000
-                                fee = event.get('fee_bps') or event.get('fee', 0) / event.get('notional_usdt', 1) * 10000
+                                notional = float(event.get('notional_usdt') or 0.0)
+
+                                slippage = event.get('slippage_bps')
+                                if slippage is None and notional > 0:
+                                    slip_usdt = event.get('slippage_usdt')
+                                    if slip_usdt is not None:
+                                        slippage = float(slip_usdt) / notional * 10000.0
+
+                                fee = event.get('fee_bps')
+                                if fee is None and notional > 0:
+                                    fee_usdt = event.get('fee_usdt')
+                                    if fee_usdt is None:
+                                        cost_total = event.get('cost_usdt_total')
+                                        slip_usdt = event.get('slippage_usdt')
+                                        if cost_total is not None and slip_usdt is not None:
+                                            fee_usdt = float(cost_total) - float(slip_usdt)
+                                    if fee_usdt is None:
+                                        raw_fee = event.get('fee')
+                                        if raw_fee is not None:
+                                            fee_usdt = raw_fee
+                                    if fee_usdt is not None:
+                                        fee = float(fee_usdt) / notional * 10000.0
                                 
                                 if slippage is not None and not isinstance(slippage, str):
                                     slippage_list.append(float(slippage))
@@ -4406,9 +4374,11 @@ def api_health():
             from dotenv import load_dotenv
             load_dotenv(str(WORKSPACE / '.env'))
             
-            key, sec, pp = _load_workspace_exchange_creds()
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
             
-            if _dashboard_live_account_enabled() and key and sec and pp:
+            if key and sec and pp:
                 start = time.time()
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
@@ -4431,7 +4401,7 @@ def api_health():
                     checks.append({'name': 'OKX API', 'status': 'critical', 'detail': 'API响应异常'})
                     overall_status = 'critical'
             else:
-                checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'live检查未启用' if not _dashboard_live_account_enabled() else 'API密钥未配置'})
+                checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'API密钥未配置'})
         except Exception as e:
             checks.append({'name': 'OKX API', 'status': 'warning', 'detail': str(e)})
         

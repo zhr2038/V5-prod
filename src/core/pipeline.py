@@ -12,10 +12,6 @@ from pathlib import Path
 REPORTS_DIR = Path(__file__).parent.parent.parent / 'reports'
 
 
-def _coalesce(value: Any, default: Any) -> Any:
-    return default if value is None else value
-
-
 def _effective_deadband(base: float, cfg: AppConfig, audit: Optional[DecisionAudit]) -> float:
     """F3.1: widen deadband when daily budget exceeded (monitor-driven, controlled).
 
@@ -430,45 +426,78 @@ class V5Pipeline:
             return alpha
 
         min_cycles = int(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_min_closed_cycles', 2) or 2)
-        floor_bps = float(_coalesce(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_floor_bps', 5.0), 5.0))
-        penalty_per_bps = float(
-            _coalesce(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_per_bps', 0.015), 0.015)
+        floor_bps = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_floor_bps', 5.0) or 5.0)
+        penalty_per_bps = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_per_bps', 0.015) or 0.015)
+        penalty_cap = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_max', 0.60) or 0.60)
+        ff_min_cycles = int(
+            getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_min_closed_cycles", 2) or 2
         )
-        penalty_cap = float(_coalesce(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_max', 0.60), 0.60))
+        ff_floor_bps = float(
+            getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0) or 0.0
+        )
 
         adjusted_scores = dict(alpha.scores or {})
         penalized = []
         for sym, raw_score in list(adjusted_scores.items()):
             score = float(raw_score)
-            if score <= 0.0:
-                continue
             stat = stats_map.get(sym)
             if not isinstance(stat, dict):
                 continue
             closed_cycles = int(stat.get('closed_cycles') or 0)
-            if closed_cycles < min_cycles:
-                continue
             expectancy_bps = float(stat.get('expectancy_bps') or 0.0)
-            shortfall_bps = float(floor_bps) - expectancy_bps
-            if shortfall_bps <= 0.0:
+            shortfall_bps = 0.0
+            if closed_cycles >= min_cycles:
+                shortfall_bps = max(0.0, float(floor_bps) - expectancy_bps)
+
+            ff_closed_cycles = int(stat.get("fast_fail_closed_cycles") or 0)
+            ff_expectancy_bps = float(stat.get("fast_fail_expectancy_bps") or 0.0)
+            ff_shortfall_bps = 0.0
+            if ff_closed_cycles >= ff_min_cycles:
+                ff_shortfall_bps = max(0.0, float(ff_floor_bps) - ff_expectancy_bps)
+
+            total_shortfall_bps = shortfall_bps + ff_shortfall_bps
+            if total_shortfall_bps <= 0.0:
                 continue
-            penalty = min(float(penalty_cap), float(shortfall_bps) * float(penalty_per_bps))
+            penalty = min(float(penalty_cap), float(total_shortfall_bps) * float(penalty_per_bps))
             if penalty <= 0.0:
                 continue
             adjusted_scores[sym] = score - penalty
-            penalized.append((sym, score, adjusted_scores[sym], expectancy_bps, closed_cycles, penalty))
+            penalized.append(
+                (
+                    sym,
+                    score,
+                    adjusted_scores[sym],
+                    expectancy_bps,
+                    closed_cycles,
+                    ff_expectancy_bps,
+                    ff_closed_cycles,
+                    penalty,
+                )
+            )
 
             raw_bucket = alpha.raw_factors.setdefault(sym, {})
             raw_bucket["negative_expectancy_bps"] = expectancy_bps
             raw_bucket["negative_expectancy_closed_cycles"] = float(closed_cycles)
+            raw_bucket["negative_expectancy_fast_fail_bps"] = ff_expectancy_bps
+            raw_bucket["negative_expectancy_fast_fail_closed_cycles"] = float(ff_closed_cycles)
             z_bucket = alpha.z_factors.setdefault(sym, {})
             z_bucket["negative_expectancy_score_penalty"] = -float(penalty)
 
         if penalized and audit:
-            for sym, score_before, score_after, expectancy_bps, closed_cycles, penalty in penalized:
+            for (
+                sym,
+                score_before,
+                score_after,
+                expectancy_bps,
+                closed_cycles,
+                ff_expectancy_bps,
+                ff_closed_cycles,
+                penalty,
+            ) in penalized:
                 audit.add_note(
                     "NegativeExpectancy penalty: "
                     f"{sym} cycles={closed_cycles} expectancy_bps={expectancy_bps:.2f} "
+                    f"fast_fail_cycles={ff_closed_cycles} fast_fail_bps={ff_expectancy_bps:.2f} "
                     f"penalty={penalty:.4f} score={score_before:.4f}->{score_after:.4f}"
                 )
 
@@ -524,7 +553,7 @@ class V5Pipeline:
                         getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2
                     )
                     floor_bps = float(
-                        _coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0)
+                        getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0) or 5.0
                     )
                     closed_cycles = int((stat or {}).get("closed_cycles") or 0)
                     expectancy_bps = float((stat or {}).get("expectancy_bps") or 0.0)
@@ -1818,7 +1847,6 @@ class V5Pipeline:
         # Rebalance should also handle symbols currently held but removed from target universe.
         # Iterate union(current positions, target weights). For symbols not in target, desired weight = 0.
         held_symbols = {p.symbol for p in positions if float(getattr(p, 'qty', 0.0) or 0.0) > 0}
-        pos_by_sym = {p.symbol: p for p in positions}
         symbols_all = sorted(set(current_w.keys()) | set(target.keys()) | held_symbols)
 
         # Optional hard rule: force-close held symbols that are no longer in current scored universe.
@@ -1855,27 +1883,8 @@ class V5Pipeline:
             if drift > 0:
                 buy_candidates.append((sym, drift, tw))
         
-        # 预估本轮总买入/卖出缺口，用于在现金不足时按目标缺口缩放买单。
-        total_buy_gap_notional = 0.0
-        estimated_sell_notional = 0.0
-        for sym in symbols_all:
-            if sym in exit_symbols:
-                continue
-            tw = float(target.get(sym, 0.0))
-            held = pos_by_sym.get(sym)
-            cw = 0.0
-            if held is not None:
-                px_cur = float(prices.get(sym, float(getattr(held, "last_mark_px", 0.0) or 0.0)) or 0.0)
-                if equity > 0 and px_cur > 0:
-                    cw = (float(getattr(held, "qty", 0.0)) * px_cur) / float(equity)
-            drift = tw - cw
-            gap_notional = abs(float(drift)) * float(equity)
-            if drift > 0:
-                total_buy_gap_notional += gap_notional
-            elif drift < 0:
-                estimated_sell_notional += gap_notional
-
-        buy_sizing_budget = max(0.0, float(cash_usdt)) + max(0.0, float(estimated_sell_notional))
+        # 计算总买入权重，用于比例分配
+        total_buy_drift = sum(d for _, d, _ in buy_candidates) if buy_candidates else 0.0
 
         for sym in symbols_all:
             tw = float(target.get(sym, 0.0))
@@ -2000,12 +2009,14 @@ class V5Pipeline:
                 # drift > 0，需要加仓
                 side = "buy"
                 intent = "OPEN_LONG" if held is None else "REBALANCE"
-                desired_notional = abs(float(drift)) * float(equity)
-                if total_buy_gap_notional > 0 and buy_sizing_budget < total_buy_gap_notional:
-                    budget_ratio = buy_sizing_budget / total_buy_gap_notional
-                    notional = desired_notional * budget_ratio
+                # FIX: 按比例分配现金，而不是使用 drift * equity
+                # 这样可以避免第一个标的全额买入导致后续标的无法建仓
+                if total_buy_drift > 0 and cash_usdt > 0:
+                    # 按 drift 比例分配可用现金
+                    drift_ratio = abs(float(drift)) / total_buy_drift
+                    notional = drift_ratio * float(cash_usdt)
                 else:
-                    notional = desired_notional
+                    notional = abs(float(drift)) * float(equity)
                 if notional <= 0:
                     continue
 
@@ -2057,7 +2068,7 @@ class V5Pipeline:
                     getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2
                 )
                 floor_bps = float(
-                    _coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0)
+                    getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0) or 5.0
                 )
                 closed_cycles = int((neg_stats or {}).get("closed_cycles") or 0)
                 expectancy_bps = float((neg_stats or {}).get("expectancy_bps") or 0.0)
@@ -2192,12 +2203,8 @@ class V5Pipeline:
                     held_qty = float(getattr(held, "qty", 0.0) or 0.0)
                     held_value = held_qty * float(px)
                     premium = (float(px) / entry_px - 1.0) if entry_px > 0 else 0.0
-                    max_premium = float(
-                        _coalesce(getattr(self.cfg.execution, "anti_chase_max_entry_premium_pct", 0.015), 0.015)
-                    )
-                    max_add_ratio = float(
-                        _coalesce(getattr(self.cfg.execution, "anti_chase_max_add_notional_ratio", 0.25), 0.25)
-                    )
+                    max_premium = float(getattr(self.cfg.execution, "anti_chase_max_entry_premium_pct", 0.015) or 0.015)
+                    max_add_ratio = float(getattr(self.cfg.execution, "anti_chase_max_add_notional_ratio", 0.25) or 0.25)
 
                     if entry_px > 0 and premium > max_premium:
                         if audit:

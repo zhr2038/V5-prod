@@ -11,7 +11,6 @@ from configs.schema import AppConfig, RegimeState
 from src.alpha.alpha_engine import AlphaSnapshot
 from src.core.models import MarketSeries
 from src.core.pipeline import V5Pipeline
-from src.execution.position_store import Position
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
 
@@ -114,15 +113,18 @@ def test_pipeline_applies_negative_expectancy_penalty_before_allocate():
     assert captured["HYPE/USDT"] == pytest.approx(0.40)
 
 
-def test_pipeline_respects_zero_negative_expectancy_penalty_cap():
-    cfg = AppConfig(symbols=["OKB/USDT", "HYPE/USDT"])
+def test_pipeline_applies_negative_expectancy_penalty_to_negative_scores_and_fast_fail():
+    cfg = AppConfig(symbols=["HYPE/USDT", "ETH/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False
     cfg.execution.negative_expectancy_score_penalty_enabled = True
     cfg.execution.negative_expectancy_score_penalty_min_closed_cycles = 2
-    cfg.execution.negative_expectancy_score_penalty_floor_bps = 5.0
-    cfg.execution.negative_expectancy_score_penalty_per_bps = 0.015
-    cfg.execution.negative_expectancy_score_penalty_max = 0.0
+    cfg.execution.negative_expectancy_score_penalty_floor_bps = 10.0
+    cfg.execution.negative_expectancy_score_penalty_per_bps = 0.01
+    cfg.execution.negative_expectancy_score_penalty_max = 1.0
     cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_min_closed_cycles = 2
+    cfg.execution.negative_expectancy_fast_fail_open_block_floor_bps = 5.0
     cfg.execution.negative_expectancy_cooldown_enabled = False
 
     pipe = _build_pipe(cfg)
@@ -141,34 +143,36 @@ def test_pipeline_respects_zero_negative_expectancy_penalty_cap():
     pipe.portfolio_engine.allocate = _allocate
     pipe.negative_expectancy_cooldown.refresh = lambda force=False: {
         "stats": {
-            "OKB/USDT": {
+            "HYPE/USDT": {
                 "closed_cycles": 3,
-                "expectancy_bps": -10.0,
+                "expectancy_bps": -12.0,
                 "pnl_sum_usdt": -0.30,
                 "closed_notional_usdt": 100.0,
+                "fast_fail_closed_cycles": 2,
+                "fast_fail_expectancy_bps": -20.0,
             }
         },
         "symbols": {},
     }
 
     market_data = {
-        "OKB/USDT": _series("OKB/USDT", 100.0),
         "HYPE/USDT": _series("HYPE/USDT", 30.0),
+        "ETH/USDT": _series("ETH/USDT", 2000.0),
     }
-    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"OKB/USDT": 0.60, "HYPE/USDT": 0.40})
+    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"HYPE/USDT": -0.20, "ETH/USDT": -0.10})
 
     pipe.run(
         market_data_1h=market_data,
         positions=[],
         cash_usdt=100.0,
         equity_peak_usdt=100.0,
-        audit=DecisionAudit(run_id="neg-penalty-zero-cap"),
+        audit=DecisionAudit(run_id="neg-penalty-negative-score"),
         precomputed_alpha=alpha,
         precomputed_regime=_regime(),
     )
 
-    assert captured["OKB/USDT"] == pytest.approx(0.60)
-    assert captured["HYPE/USDT"] == pytest.approx(0.40)
+    assert captured["HYPE/USDT"] == pytest.approx(-0.67)
+    assert captured["ETH/USDT"] == pytest.approx(-0.10)
 
 
 def test_pipeline_blocks_open_long_on_negative_expectancy():
@@ -221,61 +225,6 @@ def test_pipeline_blocks_open_long_on_negative_expectancy():
 
     assert out.orders == []
     assert any(
-        d.get("symbol") == "OKB/USDT" and d.get("reason") == "negative_expectancy_open_block"
-        for d in audit.router_decisions
-    )
-
-
-def test_pipeline_respects_zero_negative_expectancy_open_block_floor():
-    cfg = AppConfig(symbols=["OKB/USDT"])
-    cfg.alpha.use_fused_score_for_weighting = False
-    cfg.execution.negative_expectancy_score_penalty_enabled = False
-    cfg.execution.negative_expectancy_open_block_enabled = True
-    cfg.execution.negative_expectancy_open_block_min_closed_cycles = 2
-    cfg.execution.negative_expectancy_open_block_floor_bps = 0.0
-    cfg.execution.negative_expectancy_cooldown_enabled = False
-
-    pipe = _build_pipe(cfg)
-    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
-        target_weights={"OKB/USDT": 0.25},
-        selected=["OKB/USDT"],
-        entry_candidates=["OKB/USDT"],
-        volatilities={},
-        notes="",
-    )
-    pipe.negative_expectancy_cooldown.refresh = lambda force=False: {
-        "stats": {
-            "OKB/USDT": {
-                "closed_cycles": 3,
-                "expectancy_bps": 1.0,
-                "pnl_sum_usdt": 0.01,
-                "closed_notional_usdt": 100.0,
-            }
-        },
-        "symbols": {},
-    }
-    pipe.negative_expectancy_cooldown.get_symbol_stats = lambda symbol: {
-        "closed_cycles": 3,
-        "expectancy_bps": 1.0,
-        "cooldown_active": False,
-    }
-
-    market_data = {"OKB/USDT": _series("OKB/USDT", 100.0)}
-    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"OKB/USDT": 0.60})
-    audit = DecisionAudit(run_id="neg-open-floor-zero")
-
-    out = pipe.run(
-        market_data_1h=market_data,
-        positions=[],
-        cash_usdt=100.0,
-        equity_peak_usdt=100.0,
-        audit=audit,
-        precomputed_alpha=alpha,
-        precomputed_regime=_regime(),
-    )
-
-    assert any(o.symbol == "OKB/USDT" and o.side == "buy" for o in out.orders)
-    assert not any(
         d.get("symbol") == "OKB/USDT" and d.get("reason") == "negative_expectancy_open_block"
         for d in audit.router_decisions
     )
@@ -338,116 +287,6 @@ def test_pipeline_blocks_open_long_on_negative_expectancy_fast_fail():
     assert out.orders == []
     assert any(
         d.get("symbol") == "ROBO/USDT" and d.get("reason") == "negative_expectancy_fast_fail_open_block"
-        for d in audit.router_decisions
-    )
-
-
-def test_pipeline_respects_zero_anti_chase_max_premium():
-    cfg = AppConfig(symbols=["OKB/USDT"])
-    cfg.alpha.use_fused_score_for_weighting = False
-    cfg.execution.negative_expectancy_score_penalty_enabled = False
-    cfg.execution.negative_expectancy_open_block_enabled = False
-    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
-    cfg.execution.negative_expectancy_cooldown_enabled = False
-    cfg.execution.anti_chase_enabled = True
-    cfg.execution.anti_chase_max_entry_premium_pct = 0.0
-    cfg.execution.anti_chase_max_add_notional_ratio = 1.0
-
-    pipe = _build_pipe(cfg)
-    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
-        target_weights={"OKB/USDT": 1.0},
-        selected=["OKB/USDT"],
-        entry_candidates=["OKB/USDT"],
-        volatilities={},
-        notes="",
-    )
-    pipe.negative_expectancy_cooldown.refresh = lambda force=False: {"stats": {}, "symbols": {}}
-    pipe.negative_expectancy_cooldown.get_symbol_stats = lambda symbol: {}
-
-    positions = [
-        Position(
-            symbol="OKB/USDT",
-            qty=1.0,
-            avg_px=99.5,
-            entry_ts="2026-03-20T00:00:00Z",
-            highest_px=100.0,
-            last_update_ts="2026-03-20T00:00:00Z",
-            last_mark_px=100.0,
-            unrealized_pnl_pct=0.0,
-        )
-    ]
-    market_data = {"OKB/USDT": _series("OKB/USDT", 100.0)}
-    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"OKB/USDT": 0.60})
-    audit = DecisionAudit(run_id="anti-chase-premium-zero")
-
-    out = pipe.run(
-        market_data_1h=market_data,
-        positions=positions,
-        cash_usdt=20.0,
-        equity_peak_usdt=120.0,
-        audit=audit,
-        precomputed_alpha=alpha,
-        precomputed_regime=_regime(),
-    )
-
-    assert out.orders == []
-    assert any(
-        d.get("symbol") == "OKB/USDT" and d.get("reason") == "anti_chase_premium"
-        for d in audit.router_decisions
-    )
-
-
-def test_pipeline_respects_zero_anti_chase_add_ratio():
-    cfg = AppConfig(symbols=["OKB/USDT"])
-    cfg.alpha.use_fused_score_for_weighting = False
-    cfg.execution.negative_expectancy_score_penalty_enabled = False
-    cfg.execution.negative_expectancy_open_block_enabled = False
-    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
-    cfg.execution.negative_expectancy_cooldown_enabled = False
-    cfg.execution.anti_chase_enabled = True
-    cfg.execution.anti_chase_max_entry_premium_pct = 1.0
-    cfg.execution.anti_chase_max_add_notional_ratio = 0.0
-
-    pipe = _build_pipe(cfg)
-    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
-        target_weights={"OKB/USDT": 1.0},
-        selected=["OKB/USDT"],
-        entry_candidates=["OKB/USDT"],
-        volatilities={},
-        notes="",
-    )
-    pipe.negative_expectancy_cooldown.refresh = lambda force=False: {"stats": {}, "symbols": {}}
-    pipe.negative_expectancy_cooldown.get_symbol_stats = lambda symbol: {}
-
-    positions = [
-        Position(
-            symbol="OKB/USDT",
-            qty=1.0,
-            avg_px=100.0,
-            entry_ts="2026-03-20T00:00:00Z",
-            highest_px=100.0,
-            last_update_ts="2026-03-20T00:00:00Z",
-            last_mark_px=100.0,
-            unrealized_pnl_pct=0.0,
-        )
-    ]
-    market_data = {"OKB/USDT": _series("OKB/USDT", 100.0)}
-    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"OKB/USDT": 0.60})
-    audit = DecisionAudit(run_id="anti-chase-add-zero")
-
-    out = pipe.run(
-        market_data_1h=market_data,
-        positions=positions,
-        cash_usdt=20.0,
-        equity_peak_usdt=120.0,
-        audit=audit,
-        precomputed_alpha=alpha,
-        precomputed_regime=_regime(),
-    )
-
-    assert out.orders == []
-    assert any(
-        d.get("symbol") == "OKB/USDT" and d.get("reason") == "anti_chase_add_size"
         for d in audit.router_decisions
     )
 

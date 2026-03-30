@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import uuid
 import importlib.util
@@ -108,3 +109,48 @@ def test_load_avg_cost_from_fills_matches_exact_inst_id(tmp_path):
     avg_cost = module._load_avg_cost_from_fills("ETH", 0.020562417, reports_dir=reports_dir)
 
     assert avg_cost == pytest.approx(1989 * 0.020583 / 0.020562417, rel=1e-6)
+
+
+def test_cost_calibration_fallback_uses_fee_usdt_and_cost_total(tmp_path):
+    module = load_web_dashboard_module()
+    reports_dir = tmp_path / "reports"
+    cost_events_dir = reports_dir / "cost_events"
+    cost_events_dir.mkdir(parents=True)
+
+    (cost_events_dir / "20260330.jsonl").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "event_type": "fill",
+                "ts": 1774868433,
+                "run_id": "20260330_19",
+                "window_start_ts": 1774864800,
+                "window_end_ts": 1774868400,
+                "symbol": "ETH/USDT",
+                "side": "sell",
+                "intent": "REBALANCE",
+                "regime": "Trending",
+                "router_action": "fill",
+                "notional_usdt": 10.0,
+                "slippage_usdt": 0.005,
+                "fee_usdt": 0.01,
+                "cost_usdt_total": 0.015,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    module.REPORTS_DIR = reports_dir
+    client = module.app.test_client()
+
+    resp = client.get("/api/cost_calibration")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+
+    assert payload["total_days"] == 1
+    assert payload["data_source"] == "events"
+    assert payload["avg_slippage_bps"] == pytest.approx(5.0)
+    assert payload["avg_fee_bps"] == pytest.approx(10.0)
+    assert payload["avg_total_cost_bps"] == pytest.approx(15.0)
