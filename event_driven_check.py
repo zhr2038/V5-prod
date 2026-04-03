@@ -477,6 +477,28 @@ def evaluate_live_trigger_throttle(
     }
 
 
+def should_bypass_live_trigger_throttle(actions) -> bool:
+    """Allow urgent risk-close actions to trigger a fresh live run immediately."""
+    for action in actions or []:
+        try:
+            priority = int(action.get('priority', 99))
+        except Exception:
+            priority = 99
+        side_action = str(action.get('action') or '').lower()
+        reason = str(action.get('reason') or '').lower()
+        if priority == 0 and side_action == 'close':
+            return True
+        if side_action == 'close' and (
+            reason.startswith('take_profit')
+            or reason == 'stop_loss'
+            or reason == 'trailing_stop'
+            or reason.startswith('rank_exit')
+            or reason == 'regime_risk_off'
+        ):
+            return True
+    return False
+
+
 def build_candidate_watchlist(state: dict, breakout_threshold_pct: float = 0.5, top_n: int = 10):
     """Build top candidate watchlist with rough trigger prices."""
     out = []
@@ -991,12 +1013,23 @@ def main():
             age_sec, last_run_id = get_last_live_run_age_sec()
             execution['last_run_age_sec'] = age_sec
             execution['last_run_id'] = last_run_id
-            throttle = evaluate_live_trigger_throttle(
+            bypass_throttle = should_bypass_live_trigger_throttle(result['actions'])
+            throttle = {
+                'throttled': False,
+                'reason': 'risk_close_bypass',
+                'min_interval_sec': max(0, int(active_min_interval_minutes or 0) * 60),
+            } if bypass_throttle else evaluate_live_trigger_throttle(
                 last_run_age_sec=age_sec,
                 last_run_id=last_run_id,
                 current_run_id=execution['current_target_run_id'],
                 min_interval_minutes=active_min_interval_minutes,
             )
+            if bypass_throttle:
+                logger.info(
+                    f"ACTIVE mode bypassing throttle for urgent risk actions: "
+                    f"last_run_id={last_run_id} current_run_id={execution['current_target_run_id']}"
+                )
+                execution['trigger_reason'] = 'event_actions_risk_bypass'
             if throttle['throttled']:
                 logger.info(
                     f"ACTIVE mode throttled: reason={throttle['reason']} last_run_id={last_run_id} "
@@ -1013,7 +1046,7 @@ def main():
                     'live_service_ok': exec_res.get('ok'),
                     'live_service_returncode': exec_res.get('returncode'),
                     'live_service_stderr': exec_res.get('stderr', ''),
-                    'trigger_reason': 'event_actions',
+                    'trigger_reason': execution.get('trigger_reason') or 'event_actions',
                 })
                 if exec_res.get('ok'):
                     logger.info("ACTIVE mode: live service start request accepted")

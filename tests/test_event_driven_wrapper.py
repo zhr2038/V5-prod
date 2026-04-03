@@ -8,6 +8,7 @@ from event_driven_check import (
     _load_positions_snapshot,
     find_latest_decision_audit_file,
     load_current_state,
+    should_bypass_live_trigger_throttle,
 )
 from src.execution.position_store import PositionStore
 
@@ -130,3 +131,12 @@ def test_load_current_state_keeps_held_symbols_in_event_scope(tmp_path, monkeypa
     assert state is not None
     assert "ADA/USDT" in state["positions"]
     assert "ADA/USDT" in state["prices"]
+
+
+def test_risk_close_actions_bypass_live_trigger_throttle():
+    assert should_bypass_live_trigger_throttle(
+        [{"symbol": "MON/USDT", "action": "close", "reason": "take_profit_5%", "priority": 0}]
+    ) is True
+    assert should_bypass_live_trigger_throttle(
+        [{"symbol": "BTC/USDT", "action": "open", "reason": "signal_rank_jump", "priority": 2}]
+    ) is False

@@ -558,12 +558,16 @@ def main() -> None:
         else:
             # If cap is not configured, skip blocking but keep observability
             if equity_cap is None or equity_cap <= 0:
-                log.warning(f"鈿狅笍 Budget action enabled but cap is None/invalid, skip budget blocking (equity={eq_now:.2f})")
+                log.info(
+                    f"Budget equity cap not configured; skip cap blocking and keep daily turnover/cost budget actions "
+                    f"(equity={eq_now:.2f})"
+                )
                 audit.budget = getattr(audit, 'budget', {}) or {}
                 audit.budget['equity_cap_usdt'] = equity_cap
                 audit.budget['current_equity_usdt'] = eq_now
                 audit.budget['utilization_pct'] = None
-                audit.budget['action_enabled'] = False
+                audit.budget['action_enabled'] = True
+                audit.budget['equity_cap_enforced'] = False
             else:
                 log.info(f"馃挵 瀹炴椂鏉冪泭妫€娴? {eq_now:.2f} USDT (涓婇檺: {equity_cap:.2f} USDT)")
 
