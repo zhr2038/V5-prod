@@ -116,6 +116,37 @@ class EventDecisionEngine:
             events_blocked_by_cooldown=blocked_count,
             reason="processed" if actions else "no_actionable_events"
         )
+
+    def _should_defer_take_profit_close(self, symbol: str, state: MarketState) -> bool:
+        """
+        Defer fixed take-profit closes when the symbol is still a live long target.
+
+        Rationale:
+        - Event-driven take profit runs intra-window.
+        - If the hourly selector still wants to hold the symbol, forcing a full close
+          can create churn: close now, re-open next window.
+        - We therefore only defer the fixed take-profit event when the symbol remains
+          in the current selected set and its live signal is still a positive buy.
+        """
+        if not symbol:
+            return False
+
+        selected = set(state.selected_symbols or [])
+        if symbol not in selected:
+            return False
+
+        signal = state.signals.get(symbol)
+        if not signal:
+            return False
+
+        signal_dict = signal.to_dict() if hasattr(signal, 'to_dict') else signal
+        direction = str((signal_dict or {}).get('direction', 'hold') or 'hold').lower()
+        try:
+            score = float((signal_dict or {}).get('score', 0.0) or 0.0)
+        except Exception:
+            score = 0.0
+
+        return direction == 'buy' and score > 0
     
     def _process_risk_events(self, events: List[TradingEvent], state: MarketState) -> List[Dict]:
         """Process risk events (P0) - immediate execution."""
@@ -160,6 +191,12 @@ class EventDecisionEngine:
                     })
                 
                 elif event.type == EventType.RISK_TAKE_PROFIT:
+                    if self._should_defer_take_profit_close(event.symbol, state):
+                        logger.info(
+                            "TAKE PROFIT deferred: %s remains selected with active buy signal",
+                            event.symbol,
+                        )
+                        continue
                     actions.append({
                         'symbol': event.symbol,
                         'action': 'close',
