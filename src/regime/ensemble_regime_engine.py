@@ -21,6 +21,10 @@ except ImportError:
     HMM_AVAILABLE = False
 
 
+def _coalesce(value, default):
+    return default if value is None else value
+
+
 @dataclass
 class RegimeResult:
     """RegimeResult类"""
@@ -477,7 +481,7 @@ class EnsembleRegimeEngine:
             'risk_off_threshold': float(getattr(self.cfg, 'funding_risk_off_threshold', -0.10) or -0.10),
             'breadth_threshold': float(getattr(self.cfg, 'funding_breadth_threshold', 0.68) or 0.68),
             'extreme_sentiment_threshold': float(
-                getattr(self.cfg, 'funding_extreme_sentiment_threshold', 0.12) or 0.12
+                _coalesce(getattr(self.cfg, 'funding_extreme_sentiment_threshold', None), 0.12)
             ),
             'extreme_breadth_threshold': float(
                 getattr(self.cfg, 'funding_extreme_breadth_threshold', 0.55) or 0.55

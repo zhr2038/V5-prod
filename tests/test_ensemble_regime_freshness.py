@@ -90,3 +90,34 @@ def test_funding_vote_v2_uses_composite_breadth_metrics(tmp_path):
     assert vote["state"] == "TRENDING"
     assert vote["trigger"] == "breadth"
     assert vote["composite"] is True
+
+
+def test_funding_vote_v2_respects_zero_extreme_sentiment_threshold(tmp_path):
+    engine = EnsembleRegimeEngine(
+        RegimeConfig(
+            funding_trending_threshold=0.10,
+            funding_risk_off_threshold=-0.10,
+            funding_breadth_threshold=0.90,
+            funding_extreme_sentiment_threshold=0.0,
+            funding_extreme_breadth_threshold=0.55,
+        )
+    )
+    engine.sentiment_cache_dir = tmp_path
+    _write_cache(
+        tmp_path / "funding_COMPOSITE_20260308.json",
+        {
+            "f6_sentiment": 0.01,
+            "positive_weight_share": 0.60,
+            "negative_weight_share": 0.40,
+            "strongest_sentiment": 0.01,
+            "max_abs_sentiment": 0.01,
+            "tier_breakdown": {"large": {"avg": 0.01, "count": 2}},
+        },
+        age_sec=10,
+    )
+
+    vote = engine._get_funding_vote_v2()
+
+    assert vote["state"] == "TRENDING"
+    assert vote["trigger"] == "extreme_breadth"
+    assert vote["composite"] is True
