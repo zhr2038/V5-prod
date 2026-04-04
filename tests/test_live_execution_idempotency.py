@@ -169,6 +169,103 @@ def test_sell_budget_blocks_second_sell_when_exchange_balance_is_stale() -> None
         assert result.state == "REJECTED"
 
 
+def test_dust_skip_does_not_consume_sell_budget(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["ETH"] = {"eq": "2.0", "availBal": "2.0", "cashBal": "2.0", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        pos.upsert_buy("ETH/USDT", qty=2.0, px=100.0)
+
+        monkeypatch.setattr(
+            "src.execution.live_execution_engine.OKXSpotInstrumentsCache.get_spec",
+            lambda self, inst_id: SimpleNamespace(lot_sz=0.1, min_sz=1.0),
+        )
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            auto_upgrade_dust_sell_to_close=False,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        dust_reject = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="sell",
+                intent="REBALANCE",
+                notional_usdt=50.0,
+                signal_price=100.0,
+                meta={"decision_hash": "dust-skip"},
+            )
+        )
+        close_result = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=200.0,
+                signal_price=100.0,
+                meta={"decision_hash": "close-after-dust"},
+            )
+        )
+
+        row = store.list_open(limit=10)[0]
+        req = json.loads(row.req_json)
+
+        assert dust_reject.state == "REJECTED"
+        assert close_result.state == "OPEN"
+        assert float(req["sz"]) == pytest.approx(2.0)
+
+
+def test_dust_auto_upgrade_reserves_full_sell_budget(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["ETH"] = {"eq": "2.0", "availBal": "2.0", "cashBal": "2.0", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        pos.upsert_buy("ETH/USDT", qty=2.0, px=100.0)
+
+        monkeypatch.setattr(
+            "src.execution.live_execution_engine.OKXSpotInstrumentsCache.get_spec",
+            lambda self, inst_id: SimpleNamespace(lot_sz=0.1, min_sz=1.0),
+        )
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        first = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="sell",
+                intent="REBALANCE",
+                notional_usdt=50.0,
+                signal_price=100.0,
+                meta={"decision_hash": "dust-upgrade"},
+            )
+        )
+        second = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=200.0,
+                signal_price=100.0,
+                meta={"decision_hash": "close-after-upgrade"},
+            )
+        )
+
+        row = store.list_open(limit=10)[0]
+        req = json.loads(row.req_json)
+
+        assert first.state == "OPEN"
+        assert float(req["sz"]) == pytest.approx(2.0)
+        assert second.state == "REJECTED"
+
+
 def test_buy_fill_uses_net_base_qty_when_fee_is_charged_in_base() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()

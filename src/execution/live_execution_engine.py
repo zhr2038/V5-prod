@@ -680,8 +680,6 @@ class LiveExecutionEngine:
             else:
                 qty_rounded = qty
 
-            self._sell_base_budget_remaining[budget_key] = max(0.0, float(sellable_qty) - float(qty_rounded))
-
             min_sz = float(specs.min_sz) if specs is not None else 0.0
             lot_sz = float(specs.lot_sz) if specs is not None else 0.0
             if min_sz > 0 and qty_rounded < min_sz:
@@ -714,6 +712,9 @@ class LiveExecutionEngine:
                         raise DustOrderSkip(o.symbol, qty=qty, qty_rounded=qty_rounded, min_sz=min_sz, lot_sz=lot_sz)
                 else:
                     raise DustOrderSkip(o.symbol, qty=qty, qty_rounded=qty_rounded, min_sz=min_sz, lot_sz=lot_sz)
+
+            reserved_qty = min(float(sellable_qty), max(0.0, float(qty_rounded)))
+            self._sell_base_budget_remaining[budget_key] = max(0.0, float(sellable_qty) - reserved_qty)
 
             # OKX rejects scientific notation (e.g. 5e-05) with 51000 Parameter sz error.
             # Always send plain decimal string and avoid float->str exponent.
