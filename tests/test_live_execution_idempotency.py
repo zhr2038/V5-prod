@@ -89,6 +89,25 @@ class ImmediateFillOKX(FakeOKX):
         return resp
 
 
+class RejectFirstAckOKX(FakeOKX):
+    def __init__(self):
+        super().__init__()
+        self._reject_next = True
+
+    def place_order(self, payload, exp_time_ms=None):
+        self.place_calls += 1
+        if self._reject_next:
+            self._reject_next = False
+            return SimpleNamespace(
+                data={
+                    "code": "1",
+                    "msg": "All operations failed",
+                    "data": [{"sCode": "51000", "sMsg": "Parameter sz error"}],
+                }
+            )
+        return super().place_order(payload, exp_time_ms=exp_time_ms)
+
+
 def test_place_idempotent_same_intent() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
@@ -266,6 +285,54 @@ def test_buy_budget_blocks_second_live_buy_when_first_reserves_quote(monkeypatch
         assert req["sz"] == "80.0"
 
 
+def test_buy_rejected_ack_releases_quote_budget(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = RejectFirstAckOKX()
+        okx.balance_by_ccy["USDT"] = {"eq": "100", "availBal": "100", "cashBal": "100", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        monkeypatch.setattr(
+            "src.execution.live_execution_engine.OKXSpotInstrumentsCache.get_spec",
+            lambda self, inst_id: SimpleNamespace(lot_sz=0.1, min_sz=1.0),
+        )
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            buy_quote_reserve_usdt=0.0,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        rejected = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="buy",
+                intent="OPEN_LONG",
+                notional_usdt=80.0,
+                signal_price=40.0,
+                meta={"decision_hash": "buy-reject-first"},
+            )
+        )
+        accepted = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="buy",
+                intent="OPEN_LONG",
+                notional_usdt=80.0,
+                signal_price=40.0,
+                meta={"decision_hash": "buy-after-reject"},
+            )
+        )
+
+        row = store.list_open(limit=10)[0]
+        req = json.loads(row.req_json)
+
+        assert rejected.state == "REJECTED"
+        assert accepted.state == "OPEN"
+        assert req["sz"] == "80.0"
+
+
 def test_dust_skip_does_not_consume_sell_budget(monkeypatch) -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
@@ -361,6 +428,54 @@ def test_dust_auto_upgrade_reserves_full_sell_budget(monkeypatch) -> None:
         assert first.state == "OPEN"
         assert float(req["sz"]) == pytest.approx(2.0)
         assert second.state == "REJECTED"
+
+
+def test_sell_rejected_ack_releases_sell_budget(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = RejectFirstAckOKX()
+        okx.balance_by_ccy["ETH"] = {"eq": "1.4", "availBal": "1.4", "cashBal": "1.4", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        pos.upsert_buy("ETH/USDT", qty=2.0, px=100.0)
+
+        monkeypatch.setattr(
+            "src.execution.live_execution_engine.OKXSpotInstrumentsCache.get_spec",
+            lambda self, inst_id: SimpleNamespace(lot_sz=0.1, min_sz=0.1),
+        )
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        rejected = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=150.0,
+                signal_price=100.0,
+                meta={"decision_hash": "sell-reject-first"},
+            )
+        )
+        accepted = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=150.0,
+                signal_price=100.0,
+                meta={"decision_hash": "sell-after-reject"},
+            )
+        )
+
+        row = store.list_open(limit=10)[0]
+        req = json.loads(row.req_json)
+
+        assert rejected.state == "REJECTED"
+        assert accepted.state == "OPEN"
+        assert req["sz"] == "1.4"
 
 
 def test_buy_fill_uses_net_base_qty_when_fee_is_charged_in_base() -> None:

@@ -396,6 +396,16 @@ class LiveExecutionEngine:
         }
         return make_decision_hash(payload)
 
+    def _snapshot_in_run_budgets(self) -> Tuple[Optional[float], Dict[str, float]]:
+        buy_budget = self._buy_quote_budget_remaining
+        sell_budget = {str(k): float(v) for k, v in self._sell_base_budget_remaining.items()}
+        return buy_budget, sell_budget
+
+    def _restore_in_run_budgets(self, snapshot: Tuple[Optional[float], Dict[str, float]]) -> None:
+        buy_budget, sell_budget = snapshot
+        self._buy_quote_budget_remaining = float(buy_budget) if buy_budget is not None else None
+        self._sell_base_budget_remaining = {str(k): float(v) for k, v in (sell_budget or {}).items()}
+
     def _check_open_long_entry_guard(self, o: Order, *, inst_id: str, tob: Optional[Dict[str, Any]]) -> None:
         """Guard NEW long entries against chasing and excessive microstructure cost."""
         if not bool(getattr(self.cfg, "open_long_entry_guard_enabled", False)):
@@ -869,6 +879,7 @@ class LiveExecutionEngine:
             tob = _public_mid_at_submit(inst_id=inst_id, timeout_sec=2.0)
             self._check_open_long_entry_guard(o, inst_id=inst_id, tob=tob)
 
+            budget_snapshot = self._snapshot_in_run_budgets()
             payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
             req_store = dict(payload)
             if tob:
@@ -965,6 +976,7 @@ class LiveExecutionEngine:
             ok_ack, ord_id, err_code, err_msg = _parse_okx_order_ack(ack.data)
             if not ok_ack:
                 # Exchange explicitly rejected the order: terminal REJECTED, no polling.
+                self._restore_in_run_budgets(budget_snapshot)
                 self.order_store.update_state(
                     clid,
                     new_state="REJECTED",
@@ -984,6 +996,8 @@ class LiveExecutionEngine:
             )
             # follow-up poll to get state if possible
             polled_state, polled_ord_id = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
+            if polled_state == "REJECTED":
+                self._restore_in_run_budgets(budget_snapshot)
 
             # Keep filled-order position sync centralized in _query_and_update().
             # place() already calls that path once after ACK; repeating the sync here
@@ -1014,6 +1028,8 @@ class LiveExecutionEngine:
             # short delay then query (eventual consistency)
             time.sleep(0.25)
             st, ord_id = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
+            if st == "REJECTED":
+                self._restore_in_run_budgets(budget_snapshot)
             return LiveExecutionResult(cl_ord_id=clid, state=st, ord_id=ord_id)
 
     def _extract_ord_id(self, resp: OKXResponse) -> Optional[str]:
