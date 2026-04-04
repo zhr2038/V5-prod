@@ -191,10 +191,10 @@ class LivePreflight:
                 position_store=self.position_store,
                 account_store=self.account_store,
                 max_total_drift_usdt=float(
-                    getattr(self.cfg, "preflight_bootstrap_patch_max_total_usdt", 50.0) or 50.0
+                    _coalesce(getattr(self.cfg, "preflight_bootstrap_patch_max_total_usdt", None), 50.0)
                 ),
                 min_interval_sec=int(
-                    getattr(self.cfg, "preflight_bootstrap_patch_min_interval_sec", 300) or 300
+                    _coalesce(getattr(self.cfg, "preflight_bootstrap_patch_min_interval_sec", None), 300)
                 ),
             )
             details["bootstrap_patch"] = {

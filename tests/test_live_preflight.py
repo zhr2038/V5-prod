@@ -470,6 +470,66 @@ def test_preflight_respects_zero_borrow_eps_config(monkeypatch):
         assert captured["neg_eq_eps"] == 0.0
 
 
+def test_preflight_bootstrap_patch_respects_zero_limits(monkeypatch):
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    class SequencedGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            calls["guard"] += 1
+            if calls["guard"] == 1:
+                return {"ok": False, "reason": "base_mismatch", "category": "HARD", "kill_switch": {"enabled": False}}
+            return {"ok": True, "reason": "ok", "category": "OK", "kill_switch": {"enabled": False}}
+
+    calls = {"guard": 0}
+    captured = {}
+
+    def _fake_controlled_patch_from_okx_balance(**kwargs):
+        captured["max_total_drift_usdt"] = kwargs["max_total_drift_usdt"]
+        captured["min_interval_sec"] = kwargs["min_interval_sec"]
+        return SimpleNamespace(
+            applied=False,
+            reason="too_large",
+            est_total_drift_usdt=1.0,
+            updated_cash=0.0,
+            updated_positions=0,
+        )
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: SequencedGuard())
+    monkeypatch.setattr(lp, "controlled_patch_from_okx_balance", _fake_controlled_patch_from_okx_balance)
+
+    cfg = SimpleNamespace(
+        reconcile_status_path="reconcile.json",
+        reconcile_dust_usdt_ignore=1.0,
+        preflight_bootstrap_patch_enabled=True,
+        preflight_bootstrap_patch_max_total_usdt=0.0,
+        preflight_bootstrap_patch_min_interval_sec=0,
+        enforce_account_config_check=False,
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        pf = lp.LivePreflight(
+            cfg,
+            okx=DummyOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "ALLOW"
+        assert captured["max_total_drift_usdt"] == 0.0
+        assert captured["min_interval_sec"] == 0
+
+
 def test_preflight_auto_fixes_fee_type_before_allowing_buys(monkeypatch):
     monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
     monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
