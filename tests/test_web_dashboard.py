@@ -82,8 +82,11 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     assert "position-kline-timeframes" in body
     assert "metrics.conversion_rate??metrics.last_conversion_rate??null" in body
     assert "account?.drawdown_pct??metrics.dd_pct??metrics.last_dd_pct??null" in body
+    assert "alphaScores.slice()" in body
     assert "item.display_score ?? item.score ?? 0" in body
     assert "item.raw_score ?? displayScore" in body
+    assert "style=\"left:50%;width:${width}%\"" in body
+    assert "style=\"right:50%;width:${width}%\"" in body
     assert "原始 ${fmtNum(rawScore, 3)}" in body
     assert "浮盈亏 / 收益率" in body
     assert "fmtUsd(pnlValue)" in body
@@ -783,20 +786,39 @@ def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
 
     shadow_workspace = tmp_path / "v5-shadow-tuned-xgboost"
     reports_dir = shadow_workspace / "reports"
-    run_dir = reports_dir / "runs" / "shadow_tuned_xgboost_20260313_05"
+    stale_run_dir = reports_dir / "runs" / "shadow_tuned_xgboost_20260318_22"
+    run_dir = reports_dir / "runs" / "shadow_tuned_xgboost_20260404_14"
     runtime_dir = reports_dir / "shadow_tuned_xgboost"
+    stale_run_dir.mkdir(parents=True, exist_ok=True)
     run_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
-    (run_dir / "decision_audit.json").write_text(
+    (stale_run_dir / "decision_audit.json").write_text(
         json.dumps(
             {
-                "run_id": "shadow_tuned_xgboost_20260313_05",
+                "run_id": "shadow_tuned_xgboost_20260318_22",
                 "ml_signal_overview": {
                     "configured_enabled": True,
                     "live_active": True,
-                    "prediction_count": 22,
-                    "impact_status": "positive",
+                    "prediction_count": None,
+                    "overlay_score_max_abs": None,
+                    "impact_status": None,
+                    "rolling_24h": {"points": 25, "topn_delta_mean_bps": 15.88, "status": "positive"},
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "shadow_tuned_xgboost_20260404_14",
+                "ml_signal_overview": {
+                    "configured_enabled": True,
+                    "live_active": False,
+                    "prediction_count": None,
+                    "impact_status": None,
                     "top_contributors": [
                         {
                             "symbol": "OKB/USDT",
@@ -832,15 +854,17 @@ def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
+    os.utime(stale_run_dir, (9_999_999_999, 9_999_999_999))
+    os.utime(run_dir, (1, 1))
     (runtime_dir / "ml_runtime_status.json").write_text(
         json.dumps(
             {
                 "configured_enabled": True,
-                "used_in_latest_snapshot": True,
-                "prediction_count": 22,
-                "ml_weight": 0.2,
-                "overlay_score_max_abs": 1.4836,
-                "ts": "2026-03-13T05:15:18Z",
+                "used_in_latest_snapshot": False,
+                "prediction_count": 11,
+                "ml_weight": 0.08,
+                "overlay_score_max_abs": 1.4569,
+                "ts": "2026-04-04T07:33:09.185251Z",
             },
             ensure_ascii=False,
         ),
@@ -849,8 +873,9 @@ def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     (runtime_dir / "ml_overlay_impact.json").write_text(
         json.dumps(
             {
-                "last_step": {"top_n": 3, "delta_bps": 12.4, "status": "positive"},
-                "rolling_24h": {"points": 8, "topn_delta_mean_bps": 9.7, "status": "positive"},
+                "last_step": {},
+                "rolling_24h": {"points": 25, "topn_delta_mean_bps": -4.68, "status": "mixed"},
+                "rolling_48h": {"points": 49, "topn_delta_mean_bps": -1.01, "status": "mixed"},
             },
             ensure_ascii=False,
         ),
@@ -865,10 +890,14 @@ def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     payload = response.get_json()
     assert payload["available"] is True
     assert payload["workspace"] == str(shadow_workspace)
-    assert payload["run_id"] == "shadow_tuned_xgboost_20260313_05"
-    assert payload["ml_signal_overview"]["live_active"] is True
-    assert payload["ml_signal_overview"]["overlay_score_max_abs"] == 1.4836
-    assert payload["ml_signal_overview"]["rolling_24h"]["topn_delta_mean_bps"] == 9.7
+    assert payload["run_id"] == "shadow_tuned_xgboost_20260404_14"
+    assert payload["ml_signal_overview"]["live_active"] is False
+    assert payload["ml_signal_overview"]["prediction_count"] == 11
+    assert payload["ml_signal_overview"]["overlay_score_max_abs"] == 1.4569
+    assert payload["ml_signal_overview"]["rolling_24h"]["topn_delta_mean_bps"] == -4.68
+    assert payload["ml_signal_overview"]["rolling_48h"]["topn_delta_mean_bps"] == -1.01
+    assert payload["impact_status"] == "mixed"
+    assert payload["last_updated"] == "2026-04-04T07:33:09.185251Z"
     assert payload["ml_signal_overview"]["top_contributors"][0]["symbol"] == "OKB/USDT"
 
 
@@ -1234,3 +1263,87 @@ def test_decision_chain_legacy_utc_run_time_is_not_double_shifted(monkeypatch, t
     payload = response.get_json()
     assert payload["rounds"][0]["run_id"] == "20260311_00"
     assert payload["rounds"][0]["time"] == "1970-01-01 09:00:00"
+
+
+class _DummyResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def test_api_positions_prefers_cash_balance_over_avail_balance(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setenv("EXCHANGE_API_KEY", "k")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "s")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "p")
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+
+    def fake_get(url, *args, **kwargs):
+        if "account/balance" in url:
+            return _DummyResponse({
+                "code": "0",
+                "data": [{
+                    "details": [{
+                        "ccy": "ETH",
+                        "cashBal": "0.1",
+                        "availBal": "2.0",
+                        "spotBal": "",
+                        "eq": "0.1",
+                        "eqUsd": "200.0",
+                    }]
+                }]
+            })
+        if "market/ticker" in url:
+            return _DummyResponse({"code": "0", "data": [{"last": "2000"}]})
+        raise AssertionError(url)
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    assert payload["positions"][0]["symbol"] == "ETH"
+    assert payload["positions"][0]["qty"] == 0.1
+    assert payload["positions"][0]["value_usdt"] == 200.0
+
+
+def test_api_positions_does_not_fallback_to_sqlite_when_reconcile_snapshot_confirms_flat(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setenv("EXCHANGE_API_KEY", "k")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "s")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "p")
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+
+    db_path = tmp_path / "positions.sqlite"
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('ETH/USDT', 1.0, 2000.0, 2000.0)")
+    con.commit()
+    con.close()
+
+    (tmp_path / "reconcile_status.json").write_text(
+        json.dumps({
+            "exchange_snapshot": {
+                "ccy_cashBal": {"USDT": "100.0"},
+                "ccy_eqUsd": {"USDT": "100.0"},
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    def fake_get(url, *args, **kwargs):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    assert payload["positions"] == []

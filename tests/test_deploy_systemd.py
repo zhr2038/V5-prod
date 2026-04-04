@@ -46,3 +46,9 @@ def test_v5_model_promotion_gate_timer_points_to_service():
     text = Path("deploy/systemd/v5-model-promotion-gate.timer").read_text(encoding="utf-8")
     assert "OnCalendar=*-*-* 00:40:00" in text
     assert "Unit=v5-model-promotion-gate.service" in text
+
+
+def test_install_systemd_production_only_disables_shadow_timers():
+    text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
+    assert "disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service" in text
+    assert "disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service" in text

@@ -29,10 +29,65 @@ class OKXCCXTProvider(MarketDataProvider):
         self.base_url = str(base_url).rstrip("/")
         self.timeout_sec = float(timeout_sec)
         self.max_ohlcv_batch = 300
+        # Public history-candles fetches bypass ccxt's internal limiter, so we
+        # throttle and back off here to avoid cold-start bursts hitting 429s.
+        self._history_request_interval_sec = 0.15 if bool(rate_limit) else 0.0
+        self._history_retry_backoff_sec = 0.8
+        self._history_retry_max_sleep_sec = 4.0
+        self._history_max_retries = 4
+        self._last_history_request_ts = 0.0
         try:
             self.ex.load_markets()
         except Exception:
             pass
+
+    def _throttle_history_request(self) -> None:
+        interval_sec = float(self._history_request_interval_sec or 0.0)
+        if interval_sec <= 0:
+            return
+
+        now = time.monotonic()
+        sleep_sec = interval_sec - (now - float(self._last_history_request_ts or 0.0))
+        if sleep_sec > 0:
+            time.sleep(sleep_sec)
+        self._last_history_request_ts = time.monotonic()
+
+    @staticmethod
+    def _is_rate_limited_error(exc: Exception) -> bool:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if int(status_code or 0) == 429:
+            return True
+
+        text = str(exc or "").strip().lower()
+        if not text:
+            return False
+        return (
+            "429" in text
+            or "too many requests" in text
+            or "rate limit" in text
+            or "too_many_requests" in text
+            or "too frequent" in text
+            or "50011" in text
+        )
+
+    def _rate_limit_sleep_sec(self, exc: Exception, attempt: int) -> float:
+        response = getattr(exc, "response", None)
+        retry_after = None
+        if response is not None:
+            retry_after = getattr(response, "headers", {}).get("Retry-After")
+        if retry_after:
+            try:
+                return max(float(retry_after), 0.0)
+            except (TypeError, ValueError):
+                pass
+
+        base = float(self._history_retry_backoff_sec or 0.0)
+        max_sleep = float(self._history_retry_max_sleep_sec or 0.0)
+        sleep_sec = base * (2 ** max(int(attempt), 0))
+        if max_sleep > 0:
+            sleep_sec = min(sleep_sec, max_sleep)
+        return max(sleep_sec, 0.0)
 
     @staticmethod
     def _timeframe_to_okx_bar(timeframe: str) -> str:
@@ -98,11 +153,33 @@ class OKXCCXTProvider(MarketDataProvider):
             "after": str(int(after_ms)),
             "limit": str(min(int(limit), int(self.max_ohlcv_batch))),
         }
-        r = requests.get(url, params=params, timeout=self.timeout_sec)
-        r.raise_for_status()
-        obj = r.json()
-        if str(obj.get("code", "0")) != "0":
-            raise RuntimeError(f"OKX history-candles error: code={obj.get('code')} msg={obj.get('msg')}")
+        max_attempts = max(int(self._history_max_retries or 0), 0) + 1
+
+        last_exc: Exception | None = None
+        for attempt in range(max_attempts):
+            self._throttle_history_request()
+            try:
+                r = requests.get(url, params=params, timeout=self.timeout_sec)
+                r.raise_for_status()
+                obj = r.json()
+                if str(obj.get("code", "0")) != "0":
+                    raise RuntimeError(f"OKX history-candles error: code={obj.get('code')} msg={obj.get('msg')}")
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt + 1 >= max_attempts or not self._is_rate_limited_error(exc):
+                    raise
+                sleep_sec = self._rate_limit_sleep_sec(exc, attempt)
+                if sleep_sec > 0:
+                    print(
+                        f"[OKXCCXT] Rate limited on history-candles for {inst_id}; "
+                        f"retry {attempt + 1}/{max_attempts - 1} in {sleep_sec:.2f}s"
+                    )
+                    time.sleep(sleep_sec)
+        else:
+            if last_exc is not None:
+                raise last_exc
+            return []
 
         rows = obj.get("data") or []
         out: List[List[float]] = []

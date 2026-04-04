@@ -296,14 +296,18 @@ def _iter_decision_audits(reports_dir: Path) -> List[Dict[str, Any]]:
         return []
 
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-    run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
 
     audits: List[Dict[str, Any]] = []
     for run_dir in run_dirs:
         audit = _load_json_payload(run_dir / 'decision_audit.json')
         if not audit:
             continue
-        audits.append({'run_dir': run_dir, 'audit': audit})
+        audits.append({
+            'run_dir': run_dir,
+            'audit': audit,
+            'sort_epoch': _decision_audit_sort_epoch(run_dir, audit),
+        })
+    audits.sort(key=lambda item: float(item.get('sort_epoch', 0.0) or 0.0), reverse=True)
     return audits
 
 
@@ -657,19 +661,64 @@ def _resolve_shadow_workspace() -> Optional[Path]:
     return None
 
 
+def _coerce_timestamp_epoch(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value or '').strip()
+    if not text:
+        return None
+
+    if text.endswith('Z'):
+        text = text[:-1] + '+00:00'
+
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _run_id_epoch(run_id: str) -> Optional[float]:
+    match = re.search(r'(\d{8})_(\d{2})(\d{2})?(\d{2})?$', str(run_id or '').strip())
+    if not match:
+        return None
+
+    date_part, hour_part, minute_part, second_part = match.groups()
+    timestamp = f"{date_part}{hour_part}{minute_part or '00'}{second_part or '00'}"
+    try:
+        return datetime.strptime(timestamp, '%Y%m%d%H%M%S').timestamp()
+    except ValueError:
+        return None
+
+
+def _decision_audit_sort_epoch(run_dir: Path, audit: Dict[str, Any]) -> float:
+    if isinstance(audit, dict):
+        for key in ('timestamp', 'now_ts', 'ts'):
+            epoch = _coerce_timestamp_epoch(audit.get(key))
+            if epoch is not None:
+                return epoch
+
+        epoch = _run_id_epoch(str(audit.get('run_id') or ''))
+        if epoch is not None:
+            return epoch
+
+    epoch = _run_id_epoch(run_dir.name)
+    if epoch is not None:
+        return epoch
+
+    try:
+        return (run_dir / 'decision_audit.json').stat().st_mtime
+    except OSError:
+        return run_dir.stat().st_mtime
+
+
 def _pick_latest_shadow_audit(reports_dir: Path) -> tuple[Optional[Path], Dict[str, Any]]:
     entries = _iter_decision_audits(reports_dir)
     if not entries:
         return None, {}
-
-    for entry in entries:
-        audit = entry.get('audit', {})
-        overview = audit.get('ml_signal_overview', {}) if isinstance(audit, dict) else {}
-        if isinstance(overview, dict) and overview:
-            return entry.get('run_dir'), audit
-
     latest = entries[0]
-    return latest.get('run_dir'), latest.get('audit', {})
+    audit = latest.get('audit', {})
+    return latest.get('run_dir'), audit if isinstance(audit, dict) else {}
 
 
 def _load_shadow_ml_overlay_summary(shadow_workspace: Path) -> Dict[str, Any]:
@@ -686,46 +735,62 @@ def _load_shadow_ml_overlay_summary(shadow_workspace: Path) -> Dict[str, Any]:
             overview.update(stored)
 
     if isinstance(runtime, dict) and runtime:
-        overview.setdefault('configured_enabled', bool(runtime.get('configured_enabled', False)))
-        overview.setdefault('promoted', bool(runtime.get('promotion_passed', False)))
-        overview.setdefault('live_active', bool(runtime.get('used_in_latest_snapshot', False)))
-        overview.setdefault('prediction_count', int(runtime.get('prediction_count', 0) or 0))
+        overview['configured_enabled'] = bool(runtime.get('configured_enabled', False))
+        overview['promoted'] = bool(runtime.get('promotion_passed', False))
+        overview['live_active'] = bool(runtime.get('used_in_latest_snapshot', False))
+        overview['prediction_count'] = int(runtime.get('prediction_count', 0) or 0)
         active_symbols = int(runtime.get('prediction_count', 0) or 0)
-        overview.setdefault('active_symbols', active_symbols)
-        overview.setdefault('coverage_count', active_symbols)
-        overview.setdefault('ml_weight', _coerce_float(runtime.get('ml_weight', 0.0)))
-        overview.setdefault('reason', str(runtime.get('reason') or runtime.get('error') or ''))
-        overview.setdefault('last_update', runtime.get('ts'))
-        overview.setdefault('overlay_transform', runtime.get('overlay_transform'))
-        overview.setdefault('overlay_transform_scale', _coerce_float(runtime.get('overlay_transform_scale', 0.0)))
-        overview.setdefault('overlay_transform_max_abs', _coerce_float(runtime.get('overlay_transform_max_abs', 0.0)))
-        overview.setdefault('overlay_score_max_abs', _coerce_float(runtime.get('overlay_score_max_abs', 0.0)))
+        overview['active_symbols'] = active_symbols
+        overview['coverage_count'] = active_symbols
+        overview['ml_weight'] = _coerce_float(runtime.get('ml_weight', 0.0))
+        overview['reason'] = str(runtime.get('reason') or runtime.get('error') or '')
+        overview['last_update'] = runtime.get('ts')
+        overview['overlay_transform'] = runtime.get('overlay_transform')
+        overview['overlay_transform_scale'] = _coerce_float(runtime.get('overlay_transform_scale', 0.0))
+        overview['overlay_transform_max_abs'] = _coerce_float(runtime.get('overlay_transform_max_abs', 0.0))
+        overview['overlay_score_max_abs'] = _coerce_float(runtime.get('overlay_score_max_abs', 0.0))
 
     if isinstance(impact_summary, dict) and impact_summary:
         last_step = impact_summary.get('last_step', {}) if isinstance(impact_summary.get('last_step', {}), dict) else {}
         rolling_24h = impact_summary.get('rolling_24h', {}) if isinstance(impact_summary.get('rolling_24h', {}), dict) else {}
-        overview.setdefault('last_step', last_step)
-        overview.setdefault('rolling_24h', rolling_24h)
-        overview.setdefault('impact_status', str(rolling_24h.get('status') or last_step.get('status') or 'insufficient'))
+        rolling_48h = impact_summary.get('rolling_48h', {}) if isinstance(impact_summary.get('rolling_48h', {}), dict) else {}
+        overview['last_step'] = last_step
+        overview['rolling_24h'] = rolling_24h
+        overview['rolling_48h'] = rolling_48h
+        overview['impact_status'] = str(
+            rolling_24h.get('status') or rolling_48h.get('status') or last_step.get('status') or 'insufficient'
+        )
 
     overview.setdefault('top_contributors', [])
     overview.setdefault('top_promoted', [])
     overview.setdefault('top_suppressed', [])
     overview.setdefault('impact_status', 'insufficient')
 
-    ts = None
-    if isinstance(audit, dict):
+    ts = overview.get('last_update')
+    if ts is None and isinstance(audit, dict):
         ts = audit.get('timestamp') or audit.get('now_ts')
     if ts is None and run_dir is not None:
         ts = run_dir.stat().st_mtime
+    run_id = str(audit.get('run_id') or (run_dir.name if run_dir is not None else '')) if isinstance(audit, dict) else ''
+    if run_id and _coerce_timestamp_epoch(ts) is None:
+        run_ts = _run_id_epoch(run_id)
+        if run_ts is not None:
+            ts = run_ts
 
     return {
         'available': bool(overview),
         'workspace': str(shadow_workspace),
         'reports_dir': str(reports_dir),
-        'run_id': str(audit.get('run_id') or (run_dir.name if run_dir is not None else '')),
+        'run_id': run_id,
         'timestamp': ts,
+        'as_of': overview.get('last_update'),
+        'last_updated': overview.get('last_update'),
+        'prediction_count': overview.get('prediction_count'),
+        'overlay_score_max_abs': overview.get('overlay_score_max_abs'),
+        'impact_status': overview.get('impact_status'),
         'ml_signal_overview': overview,
+        'rolling_24h': overview.get('rolling_24h'),
+        'rolling_48h': overview.get('rolling_48h'),
         'top_scores': audit.get('top_scores', []) if isinstance(audit, dict) else [],
         'notes': audit.get('notes', [])[:8] if isinstance(audit, dict) and isinstance(audit.get('notes', []), list) else [],
     }
@@ -1067,6 +1132,39 @@ def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equi
     return peak_equity
 
 
+def _maybe_float(value: Any) -> Optional[float]:
+    if value is None or value == '':
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _load_reconcile_cash_balance() -> tuple[bool, float]:
+    reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+    if not reconcile_file.exists():
+        return False, 0.0
+
+    try:
+        with open(reconcile_file, 'r', encoding='utf-8') as f:
+            reconcile = json.load(f)
+    except Exception:
+        return False, 0.0
+
+    exchange_cash = _maybe_float(
+        reconcile.get('exchange_snapshot', {}).get('ccy_cashBal', {}).get('USDT')
+    )
+    if exchange_cash is not None:
+        return True, exchange_cash
+
+    local_cash = _maybe_float(reconcile.get('local_snapshot', {}).get('cash_usdt'))
+    if local_cash is not None:
+        return True, local_cash
+
+    return False, 0.0
+
+
 def _static_asset_version(filename: str) -> str:
     asset_path = WEB_DIR / 'static' / Path(filename)
     try:
@@ -1138,7 +1236,7 @@ def api_account():
     """账户信息API - 优先OKX实时数据"""
     try:
         # 优先从OKX获取实时余额
-        cash = 0
+        has_reconcile_cash, cash = _load_reconcile_cash_balance()
         try:
             import os, time, hmac, hashlib, base64, requests
             from dotenv import load_dotenv
@@ -1148,7 +1246,7 @@ def api_account():
             sec = os.getenv('EXCHANGE_API_SECRET')
             pp = os.getenv('EXCHANGE_PASSPHRASE')
             
-            if key and sec and pp:
+            if (not has_reconcile_cash) and key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
                 msg = ts + 'GET' + path
@@ -4452,4 +4550,13 @@ if __name__ == '__main__':
     print("="*60)
     print(f"访问地址: http://0.0.0.0:5000")
     print("="*60)
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    host = "0.0.0.0"
+    port = int(os.getenv("V5_WEB_PORT", "5000") or 5000)
+    threads = int(os.getenv("V5_WEB_THREADS", "8") or 8)
+    try:
+        from waitress import serve
+
+        serve(app, host=host, port=port, threads=threads)
+    except Exception as exc:
+        print(f"Waitress unavailable, fallback to Flask dev server: {exc}")
+        app.run(host=host, port=port, debug=False)

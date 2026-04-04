@@ -15,7 +15,9 @@ dependencies = [
   "scipy>=1.10",
   "ccxt>=4.0",
   "flask>=3.0",
+  "waitress>=3.0",
   "scikit-learn>=1.4",
+  "xgboost>=3.2,<3.3",
   "paramiko>=3.5",
 ]
 

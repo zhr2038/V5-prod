@@ -46,7 +46,7 @@ function buildMlDetail(data) {
   if (Array.isArray(data.promotion_fail_reasons) && data.promotion_fail_reasons.length) {
     parts.push(`门控 ${data.promotion_fail_reasons.slice(0, 2).join(" / ")}`);
   }
-  return parts.join(" · ") || "等待 ML 链路状态...";
+  return parts.join(" · ") || "等待机器学习链路状态...";
 }
 
 function buildMlMeta(data) {

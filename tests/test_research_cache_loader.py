@@ -40,8 +40,10 @@ def test_load_cached_market_data_aligns_symbols_and_applies_limit(tmp_path) -> N
     assert sorted(market_data) == ["BTC/USDT", "ETH/USDT"]
     assert market_data["BTC/USDT"].close == [102.0, 103.0]
     assert market_data["ETH/USDT"].close == [201.0, 202.0]
+    assert all(ts > 1_000_000_000_000 for ts in market_data["BTC/USDT"].ts)
     assert summary["bars"] == 2
     assert summary["source"] == "cache"
+    assert summary["time_range"]["start_iso"] == "2026-01-01T02:00:00+00:00"
 
 
 def test_run_walk_forward_task_supports_cache_provider(monkeypatch, tmp_path) -> None:

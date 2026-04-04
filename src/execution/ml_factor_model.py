@@ -38,6 +38,14 @@ except ImportError:
     LIGHTGBM_AVAILABLE = False
     lgb = None
 
+try:
+    import xgboost as xgb
+
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    xgb = None
+
 
 def _safe_corr(a, b) -> float:
     try:
@@ -141,7 +149,7 @@ class _FallbackHistGradientBoostingRegressor:
 
 @dataclass
 class MLFactorConfig:
-    model_type: str = "ridge"  # ridge | hist_gbm | lightgbm
+    model_type: str = "ridge"  # ridge | hist_gbm | lightgbm | xgboost
     feature_groups: tuple[str, ...] = ("classic",)
 
     alpha: float = 10.0
@@ -158,6 +166,9 @@ class MLFactorConfig:
     min_child_samples: int = 30
     reg_alpha: float = 2.0
     reg_lambda: float = 5.0
+    compute_device: str = "auto"  # auto | cpu | cuda
+    max_bin: int = 256
+    n_jobs: int = -1
     random_state: int = 42
 
     train_lookback_days: int = 60
@@ -181,9 +192,12 @@ class MLFactorModel:
         self.scaler = None
         self.feature_names: List[str] = []
         self.is_trained = False
+        self.training_device = "cpu"
 
         if self.config.model_type == "lightgbm" and not LIGHTGBM_AVAILABLE:
             raise ImportError("lightgbm is required. Install with: pip install lightgbm")
+        if self.config.model_type == "xgboost" and not XGBOOST_AVAILABLE:
+            raise ImportError("xgboost is required. Install with: pip install xgboost")
 
     def _value_from_data(self, data, key: str):
         if isinstance(data, dict):
@@ -289,6 +303,7 @@ class MLFactorModel:
             print("\nRidge Model Performance:")
             print(f"  Train IC: {train_ic:.4f}")
             print(f"  Valid IC: {valid_ic:.4f}")
+            self.training_device = "cpu"
 
             coef_df = pd.DataFrame(
                 {"feature": self.feature_names, "coef": self.model.coef_}
@@ -324,6 +339,7 @@ class MLFactorModel:
             print("\nHistGradientBoosting Model Performance:")
             print(f"  Train IC: {train_ic:.4f}")
             print(f"  Valid IC: {valid_ic:.4f}")
+            self.training_device = "cpu"
 
         elif self.config.model_type == "lightgbm":
             self.model = lgb.LGBMRegressor(
@@ -338,6 +354,7 @@ class MLFactorModel:
                 reg_alpha=self.config.reg_alpha,
                 reg_lambda=self.config.reg_lambda,
                 random_state=self.config.random_state,
+                n_jobs=self.config.n_jobs,
                 verbose=-1,
             )
             self.model.fit(
@@ -358,11 +375,91 @@ class MLFactorModel:
             print("\nLightGBM Model Performance:")
             print(f"  Train IC: {train_ic:.4f}")
             print(f"  Valid IC: {valid_ic:.4f}")
+            self.training_device = "cpu"
+            self.print_feature_importance()
+        elif self.config.model_type == "xgboost":
+            self.scaler = None
+            preferred_device = self._preferred_xgboost_device()
+            self.model = self._fit_xgboost_model(
+                X_train,
+                y_train,
+                X_valid,
+                y_valid,
+                sample_weight=sample_weight,
+                device=preferred_device,
+            )
+
+            train_pred = self.model.predict(X_train)
+            valid_pred = self.model.predict(X_valid)
+            train_ic = _safe_corr(y_train, train_pred)
+            valid_ic = _safe_corr(y_valid, valid_pred)
+
+            print("\nXGBoost Model Performance:")
+            print(f"  Device: {self.training_device}")
+            print(f"  Train IC: {train_ic:.4f}")
+            print(f"  Valid IC: {valid_ic:.4f}")
             self.print_feature_importance()
         else:
             raise ValueError(f"Unknown model_type: {self.config.model_type}")
 
         self.is_trained = True
+
+    def _preferred_xgboost_device(self) -> str:
+        desired = str(self.config.compute_device or "auto").strip().lower()
+        if desired not in {"auto", "cpu", "cuda"}:
+            raise ValueError("compute_device must be one of: auto, cpu, cuda")
+        if desired == "auto":
+            return "cuda"
+        return desired
+
+    def _build_xgboost_model(self, *, device: str):
+        return xgb.XGBRegressor(
+            n_estimators=self.config.n_estimators,
+            max_depth=self.config.max_depth,
+            learning_rate=self.config.learning_rate,
+            subsample=self.config.subsample,
+            colsample_bytree=self.config.colsample_bytree,
+            reg_alpha=self.config.reg_alpha,
+            reg_lambda=self.config.reg_lambda,
+            max_bin=self.config.max_bin,
+            n_jobs=self.config.n_jobs,
+            random_state=self.config.random_state,
+            objective="reg:squarederror",
+            tree_method="hist",
+            device=device,
+            early_stopping_rounds=self.config.early_stopping_rounds,
+            verbosity=0,
+        )
+
+    def _fit_xgboost_model(
+        self,
+        X_train,
+        y_train,
+        X_valid,
+        y_valid,
+        *,
+        sample_weight=None,
+        device: str,
+    ):
+        fit_kwargs = {
+            "eval_set": [(X_valid, y_valid)],
+            "verbose": False,
+        }
+        if sample_weight is not None:
+            fit_kwargs["sample_weight"] = np.asarray(sample_weight, dtype=float)
+
+        model = self._build_xgboost_model(device=device)
+        try:
+            model.fit(X_train, y_train, **fit_kwargs)
+            self.training_device = str(device)
+            return model
+        except Exception:
+            if device != "cuda" or str(self.config.compute_device or "auto").strip().lower() != "auto":
+                raise
+            model = self._build_xgboost_model(device="cpu")
+            model.fit(X_train, y_train, **fit_kwargs)
+            self.training_device = "cpu"
+            return model
 
     def predict(self, symbol_features: Dict[str, float]) -> float:
         if not self.is_trained:
@@ -407,10 +504,13 @@ class MLFactorModel:
             "config": self.config.__dict__,
             "feature_names": self.feature_names,
             "model_type": self.config.model_type,
+            "training_device": self.training_device,
         }
 
         if self.config.model_type == "lightgbm":
             self.model.booster_.save_model(f"{path}.txt")
+        elif self.config.model_type == "xgboost":
+            self.model.save_model(f"{path}.json")
         elif self.config.model_type in {"ridge", "hist_gbm"}:
             artifact = {
                 "model": self.model,
@@ -436,6 +536,14 @@ class MLFactorModel:
                 raise ImportError("lightgbm is required to load this model")
             self.model = lgb.Booster(model_file=f"{path}.txt")
             self.scaler = None
+            self.training_device = "cpu"
+        elif self.config.model_type == "xgboost":
+            if not XGBOOST_AVAILABLE:
+                raise ImportError("xgboost is required to load this model")
+            self.model = xgb.XGBRegressor()
+            self.model.load_model(f"{path}.json")
+            self.scaler = None
+            self.training_device = str(model_data.get("training_device") or self.config.compute_device or "cpu")
         elif self.config.model_type in {"ridge", "hist_gbm"}:
             with open(f"{path}.pkl", "rb") as f:
                 artifact = pickle.load(f)
@@ -443,6 +551,7 @@ class MLFactorModel:
             self.scaler = artifact.get("scaler")
             if self.model is None:
                 raise RuntimeError("Invalid model artifact")
+            self.training_device = "cpu"
         else:
             raise ValueError(f"Unknown model_type: {self.config.model_type}")
 

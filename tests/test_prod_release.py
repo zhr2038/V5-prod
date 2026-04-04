@@ -17,6 +17,16 @@ def test_render_unit_text_rewrites_known_roots() -> None:
     assert rendered.count("/srv/v5-prod") == 2
 
 
+def test_render_unit_text_rewrites_shadow_root() -> None:
+    source = (
+        "WorkingDirectory=/home/admin/clawd/v5-shadow-tuned-xgboost\n"
+        "ExecStart=/home/admin/clawd/v5-shadow-tuned-xgboost/scripts/run_shadow_tuned_xgboost_hourly.sh\n"
+    )
+    rendered = render_unit_text(source, "/srv/v5-shadow-tuned-xgboost")
+    assert "/home/admin/clawd/v5-shadow-tuned-xgboost" not in rendered
+    assert rendered.count("/srv/v5-shadow-tuned-xgboost") == 2
+
+
 def test_iter_production_files_excludes_runtime_state(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("print('ok')", encoding="utf-8")
     (tmp_path / "reports").mkdir()
@@ -32,6 +42,49 @@ def test_iter_production_files_excludes_runtime_state(tmp_path: Path) -> None:
     )
 
     assert files == ["main.py", "scripts/run.py"]
+
+
+def test_iter_production_files_includes_explicit_model_file(tmp_path: Path) -> None:
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "ml_factor_model.pkl").write_bytes(b"binary-model")
+    (tmp_path / "models" / "ml_factor_model_active.txt").write_text(
+        "models/ml_factor_model",
+        encoding="utf-8",
+    )
+    (tmp_path / "models" / "ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "models" / "ml_factor_model_gpu_tuned.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "models" / "ml_factor_model_gpu_tuned_config.json").write_text("{}", encoding="utf-8")
+
+    files = list(
+        iter_production_files(
+            tmp_path,
+            items=(
+                "models/ml_factor_model.pkl",
+                "models/ml_factor_model_active.txt",
+                "models/ml_factor_model_config.json",
+                "models/ml_factor_model_gpu_tuned.json",
+                "models/ml_factor_model_gpu_tuned_config.json",
+            ),
+        )
+    )
+
+    assert [path.relative_to(tmp_path).as_posix() for path in files] == [
+        "models/ml_factor_model.pkl",
+        "models/ml_factor_model_active.txt",
+        "models/ml_factor_model_config.json",
+        "models/ml_factor_model_gpu_tuned.json",
+        "models/ml_factor_model_gpu_tuned_config.json",
+    ]
+
+
+def test_render_unit_text_rewrites_ubuntu_prod_root() -> None:
+    source = (
+        "WorkingDirectory=/home/ubuntu/clawd/v5-prod\n"
+        "ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python main.py\n"
+    )
+    rendered = render_unit_text(source, "/srv/v5-prod")
+    assert "/home/ubuntu/clawd/v5-prod" not in rendered
+    assert rendered.count("/srv/v5-prod") == 2
 
 
 def test_production_unit_mappings_include_sentiment_collect() -> None:

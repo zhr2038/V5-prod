@@ -13,6 +13,8 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 from scipy import stats
 
+from src.utils.math import zscore_cross_section
+
 log = logging.getLogger(__name__)
 
 
@@ -66,7 +68,8 @@ def robust_zscore_cross_section(values: Dict[str, float], winsorize_pct: float =
     
     # 3. 标准化：MAD -> 标准差近似 (MAD * 1.4826 ≈ std for normal)
     if mad < 1e-12:
-        return {k: 0.0 for k in keys}
+        clipped_values = {k: float(x) for k, x in zip(keys, xs)}
+        return zscore_cross_section(clipped_values)
     
     zs = (xs - med) / (mad * 1.4826)
     return {k: float(z) for k, z in zip(keys, zs)}

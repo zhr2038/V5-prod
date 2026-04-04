@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import math
 import tempfile
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from src.execution.ml_factor_model import MLFactorConfig, MLFactorModel
+from src.alpha.alpha_engine import AlphaEngine
+from src.execution.ml_factor_model import MLFactorConfig, MLFactorModel, XGBOOST_AVAILABLE
 
 
 def test_prepare_target_uses_compounded_future_return() -> None:
@@ -183,3 +185,50 @@ def test_model_roundtrip_save_load(model_type: str) -> None:
         pred2 = loaded.predict_batch(X)
 
     assert pred1.round(12).equals(pred2.round(12))
+
+
+@pytest.mark.skipif(not XGBOOST_AVAILABLE, reason="xgboost not installed")
+def test_xgboost_model_roundtrip_save_load_cpu() -> None:
+    cfg = MLFactorConfig(
+        model_type="xgboost",
+        target_mode="raw",
+        min_symbol_samples=1,
+        n_estimators=16,
+        max_depth=2,
+        learning_rate=0.1,
+        compute_device="cpu",
+    )
+    model = MLFactorModel(cfg)
+    X = pd.DataFrame(
+        {
+            "returns_24h": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.15, 0.25, 0.35, 0.45],
+            "momentum_5d": [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.95, 0.85, 0.75, 0.65],
+        }
+    )
+    y = pd.Series([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.25, 0.35, 0.45, 0.55])
+    model.feature_names = list(X.columns)
+    model.train(X.iloc[:7], y.iloc[:7], X.iloc[7:], y.iloc[7:])
+
+    with tempfile.TemporaryDirectory() as td:
+        path = f"{td}/ml_factor_model"
+        model.save_model(path)
+
+        loaded = MLFactorModel()
+        loaded.load_model(path)
+        pred1 = model.predict_batch(X)
+        pred2 = loaded.predict_batch(X)
+
+    assert pred1.round(12).equals(pred2.round(12))
+    assert model.training_device == "cpu"
+
+
+def test_alpha_engine_detects_xgboost_json_artifact() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        base = f"{td}/ml_factor_model"
+        Path(f"{base}.json").write_text("{}", encoding="utf-8")
+        Path(f"{base}_config.json").write_text("{}", encoding="utf-8")
+
+        assert AlphaEngine._ml_artifact_exists(Path(base)) is True
+        signature = AlphaEngine._ml_artifact_signature(Path(base))
+        assert signature is not None
+        assert "ml_factor_model.json" in signature

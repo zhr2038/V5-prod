@@ -1,0 +1,39 @@
+universe:
+  cache_path: reports/shadow_tuned_xgboost/universe_cache.json
+
+alpha:
+  optimizer_state_path: reports/shadow_tuned_xgboost/portfolio_optimizer_state.json
+  dynamic_weights_by_regime_path: reports/shadow_tuned_xgboost/alpha_dynamic_weights_by_regime.json
+  topk_dropout:
+    state_path: reports/shadow_tuned_xgboost/topk_dropout_state.json
+  dynamic_ic_weighting:
+    ic_monitor_path: reports/shadow_tuned_xgboost/alpha_ic_monitor.json
+  ml_factor:
+    enabled: true
+    model_path: models/ml_factor_model_gpu_tuned
+    active_model_pointer_path: reports/shadow_tuned_xgboost/unused_ml_model_pointer.txt
+    promotion_decision_path: reports/shadow_tuned_xgboost/unused_model_promotion_decision.json
+    runtime_status_path: reports/shadow_tuned_xgboost/ml_runtime_status.json
+    impact_summary_path: reports/shadow_tuned_xgboost/ml_overlay_impact.json
+    impact_history_path: reports/shadow_tuned_xgboost/ml_overlay_impact_history.jsonl
+    impact_state_path: reports/shadow_tuned_xgboost/ml_overlay_impact_state.json
+    require_promotion_passed: false
+    max_model_age_hours: 720
+
+regime:
+  regime_history_db_path: reports/shadow_tuned_xgboost/regime_history.db
+
+execution:
+  mode: dry_run
+  dry_run: true
+  collect_ml_training_data: false
+  ml_research_universe_path: reports/shadow_tuned_xgboost/universe_cache.json
+  order_store_path: reports/shadow_tuned_xgboost/orders.sqlite
+  kill_switch_path: reports/shadow_tuned_xgboost/kill_switch.json
+  reconcile_status_path: reports/shadow_tuned_xgboost/reconcile_status.json
+  slippage_db_path: reports/shadow_tuned_xgboost/slippage.sqlite
+  negative_expectancy_state_path: reports/shadow_tuned_xgboost/negative_expectancy_cooldown.json
+  order_state_machine_path: reports/shadow_tuned_xgboost/order_state_machine.json
+
+backtest:
+  cost_stats_dir: reports/shadow_tuned_xgboost/cost_stats

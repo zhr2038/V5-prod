@@ -6,192 +6,236 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>V5 交易总览</title>
+<title>V5 生产交易看板</title>
 <style>
 :root{
-  --bg:#071019;
-  --bg-soft:#0d1825;
-  --panel:rgba(9,18,29,.82);
-  --panel-strong:rgba(10,20,32,.94);
-  --panel-alt:rgba(15,28,43,.88);
-  --border:rgba(147,175,198,.14);
-  --border-strong:rgba(147,175,198,.24);
-  --ink:#edf5ff;
-  --muted:#8ea1b8;
-  --muted-strong:#b8c6d8;
-  --teal:#5edac7;
-  --cyan:#83d0ff;
-  --sand:#f1c56c;
-  --rose:#ff879d;
-  --green:#7bf1a7;
-  --shadow:0 26px 80px rgba(0,0,0,.34);
-  --glow:0 0 0 1px rgba(131,208,255,.06),0 24px 64px rgba(4,10,18,.4);
+  --bg:#050910;
+  --bg-soft:#0b1220;
+  --panel:#0d1524;
+  --panel-2:#111b2c;
+  --panel-3:#162338;
+  --line:rgba(169,189,214,.16);
+  --line-strong:rgba(169,189,214,.28);
+  --text:#edf3ff;
+  --text-soft:#a9b6cb;
+  --text-dim:#7f90aa;
+  --accent:#7fe0c8;
+  --accent-2:#f4bf68;
+  --accent-3:#7db9ff;
+  --danger:#ff7d91;
+  --success:#72f0a5;
+  --warn:#ffc97c;
+  --shadow:0 24px 60px rgba(0,0,0,.34);
   --radius-xl:32px;
   --radius-lg:24px;
   --radius-md:18px;
-  --radius-sm:14px;
-  --body:"MiSans","Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;
+  --radius-sm:12px;
+  --maxw:1780px;
   --mono:"JetBrains Mono","IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+  --sans:"MiSans","IBM Plex Sans","Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;
 }
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%}
 body{
   background:
-    radial-gradient(circle at 12% 0%,rgba(94,218,199,.18),transparent 24%),
-    radial-gradient(circle at 100% 12%,rgba(241,197,108,.14),transparent 20%),
-    radial-gradient(circle at 82% 82%,rgba(131,208,255,.16),transparent 22%),
-    linear-gradient(160deg,#040a11 0%,#09121d 38%,#0f1e2e 100%);
-  color:var(--ink);
-  font-family:var(--body);
+    radial-gradient(circle at 12% 10%, rgba(127,224,200,.14), transparent 28%),
+    radial-gradient(circle at 84% 14%, rgba(125,185,255,.12), transparent 26%),
+    radial-gradient(circle at 78% 88%, rgba(244,191,104,.11), transparent 22%),
+    linear-gradient(180deg,#04070d 0%,#0a111c 45%,#0d1421 100%);
+  color:var(--text);
+  font-family:var(--sans);
 }
-body::before,
-body::after{
+body::before{
   content:"";
   position:fixed;
-  inset:auto;
-  z-index:0;
+  inset:0;
   pointer-events:none;
-  filter:blur(48px);
-  opacity:.55;
+  background:
+    linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px);
+  background-size:32px 32px;
+  mask-image:linear-gradient(180deg, rgba(0,0,0,.55), transparent 82%);
+  opacity:.35;
 }
-body::before{left:-80px;bottom:10vh;width:260px;height:260px;background:rgba(94,218,199,.14)}
-body::after{right:-60px;top:12vh;width:240px;height:240px;background:rgba(131,208,255,.14)}
-.shell{
+@keyframes riseIn{
+  from{opacity:0; transform:translateY(18px) scale(.985)}
+  to{opacity:1; transform:translateY(0) scale(1)}
+}
+@keyframes glowSweep{
+  0%,100%{opacity:.65; transform:translateX(0)}
+  50%{opacity:1; transform:translateX(10px)}
+}
+.dashboard-shell{
   position:relative;
   z-index:1;
-  max-width:1600px;
+  max-width:var(--maxw);
   margin:0 auto;
   padding:24px 24px 36px;
   display:grid;
   gap:18px;
 }
-.hero,
 .panel,
 .metric,
-.status-card,
-.spotlight-card,
-.chip,
-.pill,
-.tiny,
-.symbol-chip{
-  -webkit-backdrop-filter:blur(16px);
-  backdrop-filter:blur(16px);
+.hero-plane,
+.rail-panel,
+.ml-band,
+.impact-panel{
+  background:linear-gradient(180deg, rgba(15,22,36,.94), rgba(9,15,26,.88));
+  border:1px solid var(--line);
+  box-shadow:var(--shadow);
+  backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px);
+  animation:riseIn .52s ease both;
+  transition:transform .22s ease, border-color .22s ease, box-shadow .22s ease, background .22s ease;
 }
-.hero{
+.hero-plane{animation-delay:.02s}
+.rail-panel:nth-child(1){animation-delay:.08s}
+.rail-panel:nth-child(2){animation-delay:.12s}
+.metric:nth-child(1){animation-delay:.08s}
+.metric:nth-child(2){animation-delay:.11s}
+.metric:nth-child(3){animation-delay:.14s}
+.metric:nth-child(4){animation-delay:.17s}
+.metric:nth-child(5){animation-delay:.20s}
+.ml-band{animation-delay:.1s}
+.panel:hover,
+.impact-panel:hover,
+.rail-panel:hover,
+.metric:hover{
+  transform:translateY(-2px);
+  border-color:var(--line-strong);
+  box-shadow:0 28px 72px rgba(0,0,0,.4);
+}
+.masthead{
   display:grid;
-  grid-template-columns:minmax(0,1.28fr) minmax(320px,.82fr);
+  grid-template-columns:minmax(0,1.38fr) minmax(320px,.82fr);
   gap:18px;
 }
-.hero-main,
-.status-card,
-.panel,
-.metric{
-  background:linear-gradient(180deg,rgba(9,19,31,.96),rgba(7,15,25,.82));
-  border:1px solid var(--border);
-  box-shadow:var(--shadow);
-}
-.hero-main{
+.hero-plane{
   position:relative;
   overflow:hidden;
-  padding:26px;
   border-radius:var(--radius-xl);
+  padding:30px;
+  min-height:270px;
 }
-.hero-main::after{
+.hero-plane::after{
   content:"";
   position:absolute;
-  right:-120px;
-  bottom:-120px;
-  width:280px;
-  height:280px;
+  right:-60px;
+  bottom:-110px;
+  width:320px;
+  height:320px;
   border-radius:50%;
-  background:radial-gradient(circle,rgba(131,208,255,.18),transparent 72%);
+  background:radial-gradient(circle, rgba(125,185,255,.22), transparent 72%);
 }
 .hero-top{
   display:flex;
+  align-items:flex-start;
   justify-content:space-between;
   gap:16px;
-  align-items:flex-start;
 }
-.eyebrow{
+.brand-mark,
+.meta-chip,
+.panel-tag,
+.pill,
+.tiny,
+.symbol-chip{
   display:inline-flex;
   align-items:center;
   gap:8px;
-  padding:8px 12px;
+  white-space:nowrap;
   border-radius:999px;
-  background:rgba(94,218,199,.12);
-  color:var(--teal);
   font:700 11px/1 var(--mono);
-  letter-spacing:.12em;
-  text-transform:uppercase;
-}
-.hero-title{
-  margin:18px 0 10px;
-  font-size:clamp(2.4rem,4vw,4.2rem);
-  line-height:.92;
-  letter-spacing:-.05em;
-}
-.hero-copy{
-  margin:0;
-  max-width:760px;
-  color:var(--muted);
-  font-size:1rem;
-  line-height:1.78;
-}
-.hero-grid{
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:12px;
-  margin-top:20px;
-}
-.hero-stat{
-  padding:16px;
-  border-radius:20px;
-  border:1px solid rgba(147,175,198,.1);
-  background:linear-gradient(180deg,rgba(8,16,27,.72),rgba(6,12,21,.48));
-}
-.kicker,
-.metric-kicker,
-.label,
-.mini-label,
-.stack-label,
-.vote-title,
-.chart-caption{
-  color:var(--muted);
-  font:700 11px/1.2 var(--mono);
   letter-spacing:.08em;
   text-transform:uppercase;
 }
+.brand-mark{
+  padding:10px 14px;
+  color:var(--accent);
+  background:rgba(127,224,200,.12);
+  border:1px solid rgba(127,224,200,.22);
+}
+.meta-chip,
+.panel-tag,
+.pill,
+.tiny,
+.symbol-chip{
+  padding:9px 12px;
+  color:var(--text);
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.08);
+}
+.dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--accent);
+  box-shadow:0 0 0 6px rgba(127,224,200,.12);
+}
+.hero-headline{
+  margin:24px 0 10px;
+  max-width:760px;
+  font-size:clamp(2rem, 3.7vw, 3.75rem);
+  line-height:.96;
+  letter-spacing:-.06em;
+  font-weight:760;
+}
+.hero-copy{
+  margin:0;
+  max-width:720px;
+  color:var(--text-soft);
+  font-size:1rem;
+  line-height:1.76;
+}
+.hero-stat-grid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:14px;
+  margin-top:24px;
+}
+.hero-stat{
+  padding:18px;
+  border-radius:var(--radius-md);
+  background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  border:1px solid rgba(255,255,255,.08);
+}
+.eyebrow,
+.metric-kicker,
+.kicker,
+.stack-label,
+.title-label,
+.mini-label,
+.chart-caption,
+.vote-title,
+.label{
+  color:var(--text-dim);
+  font:700 11px/1.2 var(--mono);
+  letter-spacing:.09em;
+  text-transform:uppercase;
+}
 .hero-stat-value,
-.stack-value,
-.metric-value{
+.metric-value,
+.stack-value{
   margin-top:10px;
-  font-weight:700;
-  letter-spacing:-.04em;
+  font-weight:760;
+  letter-spacing:-.05em;
 }
-.hero-stat-value{
-  font-size:1.12rem;
-}
-.hero-stat-copy,
+.hero-stat-value{font-size:1.22rem}
+.stack-value{font-size:1.12rem}
 .note,
-.subtle{
-  color:var(--muted);
-  font-size:.88rem;
+.subtle,
+.hero-note,
+.chart-copy{
+  color:var(--text-soft);
+  font-size:.92rem;
   line-height:1.68;
 }
-.hero-side{
+.status-rail{
   display:grid;
   gap:14px;
 }
-.status-card{
-  padding:18px;
+.rail-panel{
   border-radius:var(--radius-lg);
-}
-.stack-value{
-  display:flex;
-  align-items:center;
-  flex-wrap:wrap;
-  gap:10px;
-  font-size:1.08rem;
+  padding:18px;
 }
 .hero-strip,
 .meta-row{
@@ -200,55 +244,43 @@ body::after{right:-60px;top:12vh;width:240px;height:240px;background:rgba(131,20
   gap:10px;
   margin-top:16px;
 }
-.chip,
-.pill,
-.tiny,
-.alert,
-.symbol-chip{
-  display:inline-flex;
-  align-items:center;
-  gap:8px;
-  border-radius:999px;
-  font-size:.8rem;
-  font-weight:700;
-  white-space:nowrap;
-}
-.chip,
-.symbol-chip{
-  padding:9px 12px;
-  border:1px solid rgba(131,208,255,.12);
-  background:rgba(9,17,28,.72);
-  color:var(--ink);
-}
-.pill{
-  padding:8px 12px;
-  border:1px solid rgba(147,175,198,.12);
-  background:rgba(9,17,28,.72);
-}
-.dot{
-  width:8px;
-  height:8px;
-  border-radius:50%;
-  background:var(--teal);
-  box-shadow:0 0 0 6px rgba(94,218,199,.12);
-}
-.metric-grid{
+.metrics-strip{
   display:grid;
-  grid-template-columns:repeat(5,minmax(0,1fr));
+  grid-template-columns:repeat(5, minmax(0,1fr));
   gap:14px;
 }
 .metric{
-  padding:18px;
   border-radius:var(--radius-lg);
-  min-height:124px;
+  padding:18px;
+  min-height:130px;
 }
 .metric-value{
-  font-size:clamp(1.54rem,2vw,2.28rem);
+  font-size:clamp(1.55rem, 2vw, 2.38rem);
 }
-.panel{
+.workspace{
+  display:grid;
+  grid-template-columns:minmax(0,1.22fr) minmax(360px,.86fr);
+  gap:18px;
+  align-items:start;
+}
+.workspace-full{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(360px,.86fr);
+  gap:18px;
+  align-items:start;
+}
+.workspace-full .impact-panel{
+  grid-column:1 / -1;
+}
+.stack{
+  display:grid;
+  gap:18px;
+}
+.panel,
+.impact-panel,
+.ml-band{
   border-radius:var(--radius-xl);
-  padding:18px;
-  overflow:hidden;
+  padding:20px;
 }
 .panel-head{
   display:flex;
@@ -258,630 +290,712 @@ body::after{right:-60px;top:12vh;width:240px;height:240px;background:rgba(131,20
   margin-bottom:16px;
 }
 .title{
-  font-size:1.18rem;
-  font-weight:700;
-  line-height:1.32;
-  letter-spacing:-.03em;
-}
-.panel-tag{
-  padding:8px 12px;
-  border-radius:999px;
-  border:1px solid rgba(147,175,198,.12);
-  background:rgba(7,14,24,.72);
-  color:var(--muted-strong);
-  font:700 11px/1 var(--mono);
+  margin-top:8px;
+  font-size:clamp(1.3rem, 1.8vw, 1.85rem);
+  letter-spacing:-.04em;
+  font-weight:740;
 }
 .ml-band{
   padding:0;
+  overflow:hidden;
 }
 .ml-band-shell{
   display:grid;
-  grid-template-columns:minmax(280px,.9fr) minmax(0,1.55fr);
+  grid-template-columns:minmax(320px,.82fr) minmax(0,1.18fr);
+  gap:0;
 }
 .ml-band-main{
-  padding:20px 22px;
-  border-right:1px solid rgba(147,175,198,.1);
+  position:relative;
+  padding:24px;
+  border-right:1px solid var(--line);
   background:
-    radial-gradient(circle at 10% 20%,rgba(94,218,199,.12),transparent 28%),
-    linear-gradient(180deg,rgba(10,22,36,.96),rgba(7,16,27,.9));
+    radial-gradient(circle at 90% 18%, rgba(125,185,255,.18), transparent 28%),
+    linear-gradient(180deg, rgba(20,32,52,.94), rgba(10,18,30,.92));
+}
+.ml-band-main::after{
+  content:"";
+  position:absolute;
+  inset:auto -40px -40px auto;
+  width:180px;
+  height:180px;
+  border-radius:50%;
+  background:radial-gradient(circle, rgba(127,224,200,.16), transparent 72%);
 }
 .ml-band-title{
   margin-top:10px;
-  font-size:1.32rem;
-  font-weight:700;
-  letter-spacing:-.03em;
+  font-size:clamp(1.8rem, 2.4vw, 2.5rem);
+  letter-spacing:-.05em;
+  font-weight:760;
 }
 .ml-band-status{
-  margin-top:10px;
-  display:flex;
-  align-items:center;
-  gap:10px;
-  flex-wrap:wrap;
-  font-size:1.02rem;
-  font-weight:700;
+  margin-top:14px;
+  font:700 .95rem/1.4 var(--mono);
+  color:var(--accent);
 }
 .ml-band-detail{
-  margin-top:10px;
-  color:var(--muted);
-  font-size:.88rem;
-  line-height:1.72;
+  margin-top:12px;
+  color:var(--text-soft);
+  line-height:1.7;
 }
 .ml-band-meta{
   display:flex;
   flex-wrap:wrap;
   gap:8px;
-  margin-top:14px;
+  margin-top:18px;
 }
 .ml-progress{
-  margin-top:14px;
+  margin-top:18px;
   height:8px;
   border-radius:999px;
-  background:rgba(147,175,198,.12);
+  background:rgba(255,255,255,.08);
   overflow:hidden;
 }
-.ml-progress>span{
+.ml-progress span{
   display:block;
   height:100%;
   border-radius:inherit;
-  background:linear-gradient(90deg,rgba(94,218,199,.9),rgba(131,208,255,.92));
+  background:linear-gradient(90deg, var(--accent), var(--accent-3));
+  animation:glowSweep 3.2s ease-in-out infinite;
 }
 .ml-band-grid{
   display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:12px;
-  padding:18px;
-  align-content:center;
+  grid-template-columns:repeat(4, minmax(0,1fr));
+  gap:0;
 }
 .ml-stage{
-  min-height:128px;
-  border-radius:18px;
-  padding:16px;
-  background:rgba(4,11,19,.68);
-  border:1px solid rgba(147,175,198,.1);
+  min-height:150px;
+  padding:22px 18px;
+  border-left:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(16,24,39,.9), rgba(10,16,27,.82));
 }
-.ml-stage-top,
-.row,
-.vote-head,
-.position-card-top{
+.ml-stage-top{
   display:flex;
   justify-content:space-between;
-  align-items:flex-start;
-  gap:12px;
-  flex-wrap:wrap;
+  align-items:center;
 }
 .ml-stage-state{
   width:10px;
   height:10px;
   border-radius:50%;
-  background:rgba(147,175,198,.42);
-  box-shadow:0 0 0 8px rgba(147,175,198,.08);
+  background:rgba(255,255,255,.18);
 }
 .ml-stage.is-on .ml-stage-state{
-  background:var(--green);
-  box-shadow:0 0 0 8px rgba(123,241,167,.12);
+  background:var(--success);
+  box-shadow:0 0 0 5px rgba(114,240,165,.12);
+}
+.ml-stage.is-off .ml-stage-state{
+  background:rgba(255,255,255,.18);
 }
 .ml-stage-value{
-  margin-top:12px;
-  font-size:1.04rem;
-  font-weight:700;
+  margin-top:14px;
+  font-size:1.12rem;
+  font-weight:730;
 }
 .ml-stage-note{
-  margin-top:8px;
-  color:var(--muted);
-  font-size:.83rem;
-  line-height:1.62;
+  margin-top:10px;
+  color:var(--text-soft);
+  font-size:.88rem;
+  line-height:1.65;
 }
-.portfolio-stage{
+.dual{
   display:grid;
-  grid-template-columns:minmax(0,1.24fr) minmax(340px,.9fr);
+  grid-template-columns:minmax(0,1.08fr) minmax(320px,.92fr);
   gap:18px;
 }
-.spotlight-card{
+.chart-frame{
+  position:relative;
+  min-height:360px;
+  border-radius:var(--radius-lg);
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.08);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.01)),
+    linear-gradient(180deg, #0a111d 0%, #0c1523 100%);
+}
+.chart-stage-empty,
+.loading,
+.empty,
+.error{
+  min-height:140px;
   display:grid;
-  gap:16px;
+  place-items:center;
+  text-align:center;
+  color:var(--text-soft);
+  border:1px dashed rgba(255,255,255,.08);
+  border-radius:var(--radius-md);
+  background:rgba(255,255,255,.02);
+  padding:18px;
 }
-.chart-toolbar{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:14px;
-  flex-wrap:wrap;
+.chart-stage-empty{min-height:360px;border:none;background:none}
+.chart-stats{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:12px;
+  margin-top:14px;
 }
-.chart-copy{
-  color:var(--muted);
-  font-size:.92rem;
-  line-height:1.7;
+.stat-card{
+  padding:14px 16px;
+  border-radius:var(--radius-md);
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.03);
+}
+.stat-card-value{
+  margin-top:10px;
+  font-size:1.1rem;
+  font-weight:720;
+  letter-spacing:-.03em;
 }
 .segmented{
-  display:flex;
+  display:inline-flex;
   flex-wrap:wrap;
   gap:8px;
 }
-.segment{
-  appearance:none;
-  border:none;
-  padding:10px 14px;
-  border-radius:999px;
-  background:rgba(8,16,26,.84);
-  border:1px solid rgba(147,175,198,.12);
-  color:var(--muted-strong);
-  font:700 12px/1 var(--mono);
-  cursor:pointer;
-  transition:all .2s ease;
-}
-.segment:hover{border-color:rgba(131,208,255,.28);color:var(--ink)}
-.segment.is-active{
-  background:linear-gradient(135deg,rgba(94,218,199,.2),rgba(131,208,255,.18));
-  border-color:rgba(94,218,199,.28);
-  color:var(--ink);
-}
+.segmented button,
+.meta-row button,
 .symbol-chip{
   appearance:none;
+  border:none;
   cursor:pointer;
-  transition:all .2s ease;
 }
+.segmented button,
+.meta-row button{
+  padding:10px 14px;
+  border-radius:999px;
+  color:var(--text-soft);
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  font:700 .76rem/1 var(--mono);
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  transition:background .18s ease, color .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.segmented button:hover,
+.meta-row button:hover,
 .symbol-chip:hover{
   transform:translateY(-1px);
-  border-color:rgba(131,208,255,.28);
+  border-color:rgba(127,224,200,.34);
+  box-shadow:0 10px 24px rgba(0,0,0,.22);
 }
-.symbol-chip.is-active{
-  background:linear-gradient(135deg,rgba(94,218,199,.18),rgba(131,208,255,.12));
-  border-color:rgba(94,218,199,.28);
-  box-shadow:var(--glow);
-}
-.symbol-chip strong{font-size:.86rem}
-.chart-frame{
-  min-height:360px;
-  border-radius:26px;
-  border:1px solid rgba(147,175,198,.12);
-  background:
-    linear-gradient(180deg,rgba(7,15,25,.92),rgba(9,18,30,.86)),
-    radial-gradient(circle at top,rgba(131,208,255,.08),transparent 55%);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.02);
-  overflow:hidden;
-}
-.chart-frame svg{
-  display:block;
-  width:100%;
-  height:100%;
-  min-height:360px;
-}
-.chart-stage-empty{
-  min-height:360px;
-  display:grid;
-  place-items:center;
-  color:var(--muted);
-  padding:24px;
-  text-align:center;
-}
-.chart-stats{
-  display:grid;
-  grid-template-columns:repeat(6,minmax(0,1fr));
-  gap:10px;
-}
-.stat-card,
-.vote,
-.trade,
-.signal,
-.decision,
-.ops,
-.health,
-.alpha,
-.info,
-.mobile-item{
-  background:rgba(5,11,20,.66);
-  border:1px solid rgba(147,175,198,.1);
-  border-radius:18px;
-  padding:15px;
-}
-.stat-card-value,
-.value{
-  margin-top:8px;
-  font-size:1rem;
-  font-weight:700;
-  line-height:1.34;
+.segmented button.active,
+.meta-row button.active,
+.symbol-chip.active{
+  color:#051018;
+  background:linear-gradient(90deg, var(--accent), #c0f4e6);
+  border-color:transparent;
 }
 .position-grid,
-.signal-grid,
+.vote-grid,
 .ops-grid,
-.health-list,
-.alpha-list,
+.signal-grid,
 .trade-list,
+.alpha-list,
+.health-list,
 .decision-grid{
   display:grid;
   gap:12px;
 }
-.position-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
-.signal-grid,
-.ops-grid{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
-.main-grid{
-  display:grid;
-  grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);
-  gap:18px;
-}
-.column{
-  display:grid;
-  gap:18px;
-}
-.grid2{
-  display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:12px;
-}
-.table-shell{
-  overflow:auto;
-  border-radius:18px;
-  border:1px solid rgba(147,175,198,.1);
-  background:rgba(5,11,20,.66);
-}
-table{width:100%;border-collapse:collapse;min-width:560px}
-th,td{
-  padding:12px 14px;
-  border-bottom:1px solid rgba(147,175,198,.08);
-  text-align:left;
-  font-size:.9rem;
-}
-th{
-  color:var(--muted);
-  font:700 11px/1.2 var(--mono);
-  background:rgba(8,16,28,.95);
-  position:sticky;
-  top:0;
-}
-tr:last-child td{border-bottom:none}
-.text-right{text-align:right}
-.text-green{color:#8bf2ad}
-.text-red{color:#ff9dae}
-.mono{font-family:var(--mono)}
-.position-card-kpi{
-  margin-top:12px;
-  display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:10px;
-}
-.mini-value{
-  display:block;
-  margin-top:6px;
-  font-size:.92rem;
-  font-weight:700;
-}
-.bar,
-.prob-track{
-  height:8px;
-  border-radius:999px;
-  background:rgba(147,175,198,.12);
-  overflow:hidden;
-}
-.bar{margin-top:10px}
-.bar>span,
-.prob-track>span{
-  display:block;
-  height:100%;
-  border-radius:inherit;
-  background:linear-gradient(90deg,rgba(94,218,199,.86),rgba(131,208,255,.92));
-}
-.prob-list{display:grid;gap:8px;margin-top:12px}
-.prob-row{
-  display:grid;
-  grid-template-columns:56px 1fr auto;
-  gap:10px;
-  align-items:center;
-}
-.prob-label{font-size:.8rem;color:var(--muted)}
-.prob-value{font:700 11px/1 var(--mono)}
-.vote-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-.vote-value{margin-top:8px;font-size:1rem;font-weight:700}
-.vote-meta{
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-  margin-top:10px;
-}
-.vote-summary{
-  margin-top:10px;
-  color:var(--muted);
-  font-size:.84rem;
-  line-height:1.66;
-}
-.tiny{
-  padding:6px 10px;
-  background:rgba(13,25,40,.88);
-  border:1px solid rgba(147,175,198,.12);
-  color:var(--muted);
-  font-weight:600;
-}
-.history-wrap{
-  margin-top:14px;
-  padding-top:14px;
-  border-top:1px solid rgba(147,175,198,.12);
-}
-.history-title{
-  margin-bottom:10px;
-  color:var(--muted);
-  font:700 11px/1.2 var(--mono);
-  letter-spacing:.08em;
-}
-.history-grid{display:grid;gap:10px}
-.history-row{
-  display:grid;
-  grid-template-columns:60px 1fr;
-  gap:10px;
-  align-items:center;
-}
-.history-label{font-size:.8rem;color:var(--muted)}
-.history-track{
-  display:grid;
-  grid-auto-flow:column;
-  grid-auto-columns:minmax(0,1fr);
-  gap:4px;
-}
-.history-cell{
-  height:12px;
-  border-radius:999px;
-  background:rgba(147,175,198,.16);
-  cursor:pointer;
-}
-.history-cell.state-trending{background:rgba(123,241,167,.88)}
-.history-cell.state-sideways{background:rgba(241,197,108,.84)}
-.history-cell.state-riskoff{background:rgba(255,135,157,.84)}
-.hover-tip{
-  position:fixed;
-  z-index:60;
-  pointer-events:none;
-  min-width:176px;
-  max-width:236px;
-  padding:12px 14px;
-  border-radius:14px;
-  background:rgba(3,10,20,.96);
-  border:1px solid rgba(131,208,255,.18);
-  box-shadow:0 20px 48px rgba(2,6,23,.48);
-}
-.hover-tip[hidden]{display:none}
-.hover-tip-title{
-  margin-bottom:8px;
-  color:var(--muted);
-  font:700 12px/1.2 var(--mono);
-  letter-spacing:.08em;
-}
-.hover-tip-grid{display:grid;gap:6px}
-.hover-tip-row{
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-  font-size:.82rem;
-  line-height:1.4;
-}
-.hover-tip-row span{color:var(--muted)}
-.hover-tip-row strong{text-align:right}
-.loading,
-.empty,
-.error{
+.position-grid{grid-template-columns:repeat(auto-fit, minmax(220px,1fr))}
+.vote-grid{grid-template-columns:repeat(auto-fit, minmax(220px,1fr))}
+.ops-grid{grid-template-columns:repeat(auto-fit, minmax(240px,1fr))}
+.decision-grid,
+.signal-grid{grid-template-columns:repeat(auto-fit, minmax(260px,1fr))}
+.position-card,
+.vote,
+.ops,
+.signal,
+.trade,
+.alpha,
+.health,
+.decision,
+.mobile-item{
   padding:16px;
-  border-radius:16px;
-  text-align:center;
-  background:rgba(5,11,20,.66);
-  border:1px dashed rgba(147,175,198,.18);
+  border-radius:var(--radius-md);
+  border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018));
 }
-.loading{
-  color:var(--muted);
+.vote{
   position:relative;
   overflow:hidden;
 }
-.loading::after{
+.vote::before{
   content:"";
   position:absolute;
-  inset:0;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);
-  transform:translateX(-100%);
-  animation:shimmer 1.25s infinite;
+  inset:0 auto 0 0;
+  width:3px;
+  background:rgba(255,255,255,.12);
 }
-.error{color:var(--rose)}
-.state-trending,.risk-attack,.tone-positive{background:rgba(123,241,167,.14);color:#9cf2b9}
-.state-sideways,.risk-neutral,.tone-warn{background:rgba(241,197,108,.14);color:#f4d385}
-.state-riskoff,.risk-defense,.risk-protect,.tone-negative{background:rgba(255,135,157,.14);color:#ffacc0}
-.alert{
-  padding:8px 12px;
-  background:rgba(131,208,255,.14);
-  color:#d8efff;
-  border:1px solid rgba(131,208,255,.12);
-  margin:0 8px 8px 0;
+.vote-trending{
+  border-color:rgba(125,185,255,.24);
+  background:linear-gradient(180deg, rgba(125,185,255,.10), rgba(255,255,255,.018));
+}
+.vote-trending::before{
+  background:linear-gradient(180deg, #8bc3ff, #5e96da);
+}
+.vote-sideways{
+  border-color:rgba(244,191,104,.24);
+  background:linear-gradient(180deg, rgba(244,191,104,.10), rgba(255,255,255,.018));
+}
+.vote-sideways::before{
+  background:linear-gradient(180deg, #ffd68d, #d3a34b);
+}
+.vote-riskoff{
+  border-color:rgba(255,125,145,.24);
+  background:linear-gradient(180deg, rgba(255,125,145,.10), rgba(255,255,255,.018));
+}
+.vote-riskoff::before{
+  background:linear-gradient(180deg, #ff98aa, #d66a83);
+}
+.vote-trending .vote-value{color:#cfe4ff}
+.vote-sideways .vote-value{color:#ffe0b2}
+.vote-riskoff .vote-value{color:#ffd1d8}
+.vote-trending .prob-track span{
+  background:linear-gradient(90deg, #5d98e4, #8fd0ff);
+}
+.vote-sideways .prob-track span{
+  background:linear-gradient(90deg, #c99636, #f4bf68);
+}
+.vote-riskoff .prob-track span{
+  background:linear-gradient(90deg, #c95872, #ff879d);
+}
+.position-card-top,
+.vote-head,
+.row{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+.position-card-kpi,
+.grid2{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0,1fr));
+  gap:10px;
+  margin-top:12px;
+}
+.mini-value,
+.value{
+  margin-top:6px;
+  font-weight:720;
+  letter-spacing:-.03em;
+}
+.prob-list{
+  display:grid;
+  gap:10px;
+  margin-top:14px;
+}
+.prob-row{
+  display:grid;
+  grid-template-columns:54px minmax(0,1fr) 52px;
+  gap:10px;
+  align-items:center;
+}
+.prob-track{
+  height:8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  overflow:hidden;
+}
+.prob-track span{
+  display:block;
+  height:100%;
+  background:linear-gradient(90deg, var(--accent-3), var(--accent));
+}
+.prob-value{
+  text-align:right;
+  font:700 .8rem/1 var(--mono);
+  color:var(--text-soft);
+}
+.history-wrap{
+  margin-top:14px;
+}
+.history-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(120px,1fr));
+  gap:10px;
+}
+.history-row{
+  display:grid;
+  gap:8px;
+}
+.history-title{
+  font:700 .76rem/1 var(--mono);
+  color:var(--text-dim);
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.history-track{
+  display:grid;
+  gap:6px;
+}
+.history-cell{
+  min-height:38px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.03);
+  display:grid;
+  place-items:center;
+  cursor:default;
+  transition:transform .18s ease, border-color .18s ease, background .18s ease;
+}
+.history-cell.state-trending{
+  border-color:rgba(125,185,255,.26);
+  background:linear-gradient(180deg, rgba(125,185,255,.24), rgba(125,185,255,.10));
+  box-shadow:inset 0 0 0 1px rgba(125,185,255,.08);
+}
+.history-cell.state-sideways{
+  border-color:rgba(244,191,104,.26);
+  background:linear-gradient(180deg, rgba(244,191,104,.24), rgba(244,191,104,.10));
+  box-shadow:inset 0 0 0 1px rgba(244,191,104,.08);
+}
+.history-cell.state-riskoff{
+  border-color:rgba(255,125,145,.26);
+  background:linear-gradient(180deg, rgba(255,125,145,.24), rgba(255,125,145,.10));
+  box-shadow:inset 0 0 0 1px rgba(255,125,145,.08);
+}
+.history-cell:hover{
+  transform:translateY(-1px);
+  border-color:rgba(125,185,255,.26);
+  background:rgba(125,185,255,.06);
+}
+.table-shell{
+  overflow:auto;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:var(--radius-md);
+}
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+th,td{
+  padding:12px 14px;
+  border-bottom:1px solid rgba(255,255,255,.06);
+  text-align:left;
+}
+th{
+  font:700 .74rem/1 var(--mono);
+  color:var(--text-dim);
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+td{
+  color:var(--text-soft);
+  font-size:.92rem;
+}
+.text-right{text-align:right}
+.mono{font-family:var(--mono)}
+.subtle{color:var(--text-soft)}
+.info{color:var(--text-soft)}
+.bar{
+  height:8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  overflow:hidden;
+}
+.bar > span{
+  display:block;
+  height:100%;
+  background:linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+.bar.bidirectional{
+  position:relative;
+  height:10px;
+  border-radius:999px;
+  background:linear-gradient(90deg, rgba(255,255,255,.04) 0%, rgba(255,255,255,.09) 50%, rgba(255,255,255,.04) 100%);
+  overflow:hidden;
+}
+.bar.bidirectional::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:0;
+  bottom:0;
+  width:1px;
+  transform:translateX(-50%);
+  background:rgba(255,255,255,.22);
+}
+.bar-fill{
+  position:absolute;
+  top:0;
+  bottom:0;
+}
+.bar-fill.positive{
+  left:50%;
+  border-radius:0 999px 999px 0;
+  background:linear-gradient(90deg, #7fe0c8, #f4bf68);
+}
+.bar-fill.negative{
+  right:50%;
+  border-radius:999px 0 0 999px;
+  background:linear-gradient(90deg, #ff879d, #ffc97c);
+}
+.pill.state-trending{background:rgba(125,185,255,.14); color:#badaff; border-color:rgba(125,185,255,.24)}
+.pill.state-sideways{background:rgba(244,191,104,.14); color:#ffd59a; border-color:rgba(244,191,104,.22)}
+.pill.state-riskoff{background:rgba(255,125,145,.14); color:#ffbcc7; border-color:rgba(255,125,145,.24)}
+.pill.risk-attack{background:rgba(114,240,165,.14); color:#bdf6d0; border-color:rgba(114,240,165,.24)}
+.pill.risk-neutral{background:rgba(125,185,255,.14); color:#cce0ff; border-color:rgba(125,185,255,.24)}
+.pill.risk-defense{background:rgba(244,191,104,.14); color:#ffe0b0; border-color:rgba(244,191,104,.24)}
+.pill.risk-protect{background:rgba(255,125,145,.14); color:#ffd0d8; border-color:rgba(255,125,145,.24)}
+.tone-positive{color:var(--success)!important}
+.tone-warn{color:var(--warn)!important}
+.tone-negative{color:var(--danger)!important}
+.text-green{color:var(--success)!important}
+.text-red{color:var(--danger)!important}
+.impact-panel .panel-head{margin-bottom:18px}
+.hover-tip{
+  position:fixed;
+  z-index:50;
+  width:min(280px, calc(100vw - 24px));
+  padding:14px;
+  border-radius:var(--radius-md);
+  background:rgba(7,12,22,.96);
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 18px 60px rgba(0,0,0,.42);
+  pointer-events:none;
+}
+.hover-tip-title{
+  font-weight:720;
+  margin-bottom:10px;
+}
+.hover-tip-grid{
+  display:grid;
+  gap:8px;
+}
+.hover-tip-row{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  color:var(--text-soft);
+  font-size:.86rem;
 }
 .footer{
-  color:var(--muted);
-  font-size:.82rem;
-  text-align:right;
+  color:var(--text-dim);
+  text-align:center;
+  font-size:.85rem;
+  padding:4px 0 0;
 }
-@keyframes shimmer{100%{transform:translateX(100%)}}
-@media (max-width:1380px){
-  .metric-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .chart-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .ml-band-shell{grid-template-columns:1fr}
-  .ml-band-main{border-right:none;border-bottom:1px solid rgba(147,175,198,.12)}
-}
-@media (max-width:1180px){
-  .hero,
-  .portfolio-stage,
-  .main-grid,
-  .vote-grid,
-  .grid2,
-  .hero-grid{
+@media (max-width: 1200px){
+  .masthead,
+  .workspace,
+  .workspace-full,
+  .dual,
+  .ml-band-shell{
     grid-template-columns:1fr;
   }
-  .ml-band-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ml-stage{
+    border-left:none;
+    border-top:1px solid var(--line);
+  }
+  .ml-band-grid{
+    grid-template-columns:repeat(2, minmax(0,1fr));
+  }
 }
-@media (max-width:860px){
-  .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .chart-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width: 900px){
+  .dashboard-shell{padding:18px 16px 28px}
+  .metrics-strip,
+  .chart-stats{
+    grid-template-columns:repeat(2, minmax(0,1fr));
+  }
+  .hero-stat-grid{
+    grid-template-columns:1fr;
+  }
 }
-@media (max-width:760px){
-  .shell{padding:14px 14px 26px}
-  .hero-main,.panel,.metric,.status-card{padding:16px}
-  .hero-main,.panel{border-radius:24px}
-  .hero-title{font-size:2.3rem}
-  .ml-band-grid,
-  .metric-grid,
-  .chart-stats{grid-template-columns:1fr}
-  .ml-band-main{padding:16px}
-  .ml-band-grid{padding:14px}
-  .chart-frame,
-  .chart-frame svg,
-  .chart-stage-empty{min-height:300px}
-  table{min-width:500px}
-  .footer{text-align:left}
+@media (max-width: 680px){
+  .metrics-strip,
+  .chart-stats,
+  .ml-band-grid{
+    grid-template-columns:1fr;
+  }
+  .hero-plane,
+  .panel,
+  .impact-panel,
+  .rail-panel{
+    padding:18px;
+    border-radius:22px;
+  }
+  .hero-headline{
+    font-size:1.84rem;
+  }
+  .title{
+    font-size:1.22rem;
+  }
+  .panel-head,
+  .hero-top,
+  .position-card-top,
+  .vote-head,
+  .row{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .table-shell{
+    border:none;
+    overflow:visible;
+  }
+  table,thead,tbody,tr,th,td{display:block}
+  thead{display:none}
+  tr{
+    margin-bottom:12px;
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:16px;
+    background:rgba(255,255,255,.03);
+    overflow:hidden;
+  }
+  td{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    border-bottom:1px solid rgba(255,255,255,.05);
+  }
+  td:last-child{border-bottom:none}
 }
 </style>
 </head>
 <body>
-<div class="shell">
-  <section class="hero">
-    <div class="hero-main">
+<div class="dashboard-shell">
+  <section class="masthead">
+    <div class="hero-plane">
       <div class="hero-top">
-          <div class="eyebrow">V5 生产看板</div>
-        <div class="chip"><span class="dot"></span><span id="update-time">加载中...</span></div>
+        <div class="brand-mark">V5 生产交易看板</div>
+        <div class="meta-chip"><span class="dot"></span><span id="update-time">等待刷新</span></div>
       </div>
-      <h1 class="hero-title">交易指挥台</h1>
-      <p class="hero-copy">把市场状态、风控阈值、持仓结构和执行链路收进同一页。先看会影响仓位的核心信号，再看订单、健康和训练链路，减少在多个模块之间来回切换。</p>
-      <div class="hero-grid">
+      <div class="hero-headline">先看状态，再看信号，最后才看动作。</div>
+      <p class="hero-copy">这块看板只保留交易决策真正需要的内容：市场状态、风险档位、仓位、信号来源、执行路径和模型归因。文案压短，数字放大，移动端保持可用。</p>
+      <div class="hero-stat-grid">
         <div class="hero-stat">
-          <div class="kicker">市场体感</div>
+          <div class="eyebrow">市场体感</div>
           <div class="hero-stat-value" id="market-state-detail">--</div>
-          <div class="hero-stat-copy" id="market-detail">等待市场状态...</div>
+          <div class="hero-note" id="market-detail">等待市场状态</div>
         </div>
         <div class="hero-stat">
-          <div class="kicker">持仓倍率</div>
+          <div class="eyebrow">持仓倍率</div>
           <div class="hero-stat-value" id="position-multiplier">--</div>
-          <div class="hero-stat-copy">跟随市场/风险引擎动态调整</div>
+          <div class="hero-note">跟随市场和风险引擎动态缩放。</div>
         </div>
         <div class="hero-stat">
-              <div class="kicker">组合节奏</div>
-              <div class="hero-stat-value">30秒</div>
-          <div class="hero-stat-copy">页面自动刷新，保持与后台轮询同步</div>
+          <div class="eyebrow">刷新节奏</div>
+          <div class="hero-stat-value">30 秒</div>
+          <div class="hero-note">页面轮询与后台状态同步，不单独缓存旧结果。</div>
         </div>
       </div>
     </div>
 
-    <div class="hero-side">
-      <div class="status-card">
+    <div class="status-rail">
+      <div class="rail-panel">
         <div class="stack-label">市场状态</div>
         <div class="stack-value" id="market-state-val">--</div>
-        <div class="note">三路投票与信号健康直接影响整体仓位配置。</div>
+        <div class="note">三路投票和信号健康决定当下整体方向。</div>
       </div>
-      <div class="status-card">
+      <div class="rail-panel">
         <div class="stack-label">风险档位</div>
         <div class="stack-value" id="risk-level">--</div>
-        <div class="note" id="risk-detail">等待风险数据...</div>
+        <div class="note" id="risk-detail">等待风险数据</div>
         <div class="hero-strip">
-          <div class="chip"><span>当前回撤</span><strong id="current-drawdown">--</strong></div>
-          <div class="chip"><span>转化率</span><strong id="conversion-rate">--</strong></div>
+          <div class="pill"><span>当前回撤</span><strong id="current-drawdown">--</strong></div>
+          <div class="pill"><span>转化率</span><strong id="conversion-rate">--</strong></div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="metric-grid">
+  <section class="metrics-strip">
     <div class="metric">
       <div class="metric-kicker">总权益</div>
       <div class="metric-value" id="total-equity">--</div>
-      <div class="subtle" id="total-pnl">--</div>
+      <div class="subtle" id="total-pnl">等待权益变化</div>
     </div>
     <div class="metric">
       <div class="metric-kicker">现金</div>
       <div class="metric-value" id="cash-usdt">--</div>
-      <div class="subtle" id="cash-ratio">--</div>
+      <div class="subtle" id="cash-ratio">等待现金占比</div>
     </div>
     <div class="metric">
       <div class="metric-kicker">在仓市值</div>
       <div class="metric-value" id="positions-value">--</div>
-      <div class="subtle" id="positions-count-top">--</div>
+      <div class="subtle" id="positions-count-top">等待仓位数量</div>
     </div>
     <div class="metric">
       <div class="metric-kicker">系统健康</div>
       <div class="metric-value" id="health-update-time">--</div>
-      <div class="subtle" id="health-summary">等待健康检查...</div>
+      <div class="subtle" id="health-summary">等待健康检查</div>
     </div>
     <div class="metric">
-      <div class="metric-kicker">观察重点</div>
+      <div class="metric-kicker">当前焦点</div>
       <div class="metric-value">仓位 + 执行</div>
-      <div class="subtle">持仓 K 线和订单路径联动查看</div>
+      <div class="subtle">把交易过程和结果放在同一屏内联动查看。</div>
     </div>
   </section>
 
-  <section class="panel ml-band" id="ml-stage-band">
+  <section class="ml-band" id="ml-stage-band">
     <div class="ml-band-shell">
       <div class="ml-band-main">
-              <div class="kicker">机器学习链路</div>
+        <div class="kicker">机器学习链路</div>
         <div class="ml-band-title">采样到实盘</div>
         <div class="ml-band-status"><span id="ml-stage-status">--</span></div>
-              <div class="ml-band-detail" id="ml-stage-detail">等待机器学习链路状态...</div>
+        <div class="ml-band-detail" id="ml-stage-detail">等待机器学习链路状态</div>
         <div class="ml-band-meta" id="ml-stage-meta">
-          <span class="tiny">采样 --</span>
-          <span class="tiny">训练 --</span>
-          <span class="tiny">门控 --</span>
-          <span class="tiny">实盘 --</span>
+          <span class="tiny">加载中</span>
         </div>
         <div class="ml-progress"><span id="ml-stage-progress" style="width:0%"></span></div>
       </div>
       <div class="ml-band-grid" id="ml-stage-grid">
-        <div class="loading">加载中...</div>
+        <div class="loading">加载中</div>
       </div>
     </div>
   </section>
 
-  <section class="portfolio-stage">
-    <div class="panel spotlight-card">
-      <div class="chart-toolbar">
-        <div>
-          <div class="kicker">持仓聚焦</div>
-          <div class="title" id="position-spotlight-symbol">等待持仓...</div>
-          <div class="chart-copy" id="position-spotlight-copy">默认展示当前仓位中市值最高的币种，并支持切换时间周期。</div>
+  <section class="workspace">
+    <div class="stack">
+      <section class="dual">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="kicker">持仓聚焦</div>
+              <div class="title" id="position-spotlight-symbol">等待持仓</div>
+              <div class="chart-copy" id="position-spotlight-copy">默认展示当前仓位中市值最高的币种，并支持切换时间周期。</div>
+            </div>
+            <div class="panel-tag">K 线 + 摘要</div>
+          </div>
+          <div class="hero-strip">
+            <div class="segmented" id="position-kline-timeframes"></div>
+          </div>
+          <div id="position-kline-symbols" class="meta-row"></div>
+          <div id="position-kline-chart" class="chart-frame">
+            <div class="chart-stage-empty">暂无持仓，K 线图会在有仓位后显示。</div>
+          </div>
+          <div class="row" style="margin-top:14px;">
+            <div class="chart-caption" id="position-kline-source">数据源 --</div>
+          </div>
+          <div id="position-kline-summary" class="chart-stats">
+            <div class="stat-card">
+              <div class="mini-label">持仓市值</div>
+              <div class="stat-card-value">--</div>
+            </div>
+          </div>
         </div>
-        <div class="segmented" id="position-kline-timeframes">
-                <button type="button" class="segment is-active" data-timeframe="1h">1小时</button>
-                <button type="button" class="segment" data-timeframe="4h">4小时</button>
-                <button type="button" class="segment" data-timeframe="1d">1日</button>
-        </div>
-      </div>
-      <div id="position-kline-symbols" class="meta-row"></div>
-      <div id="position-kline-chart" class="chart-frame">
-        <div class="chart-stage-empty">暂无持仓，K 线图将在有仓位后显示。</div>
-      </div>
-      <div class="row">
-        <div class="chart-caption" id="position-kline-source">数据源 --</div>
-      </div>
-      <div id="position-kline-summary" class="chart-stats">
-        <div class="stat-card">
-          <div class="mini-label">持仓市值</div>
-          <div class="stat-card-value">--</div>
-        </div>
-      </div>
-    </div>
 
-    <div class="panel">
-      <div class="panel-head">
-        <div>
-          <div class="kicker">持仓清单</div>
-          <div class="title">当前仓位</div>
-          <div class="note" id="positions-subtitle">等待持仓数据...</div>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="kicker">持仓清单</div>
+              <div class="title">当前仓位</div>
+              <div class="note" id="positions-subtitle">等待持仓数据</div>
+            </div>
+            <div class="panel-tag">按市值排序</div>
+          </div>
+          <div id="positions-content"><div class="loading">加载中</div></div>
         </div>
-        <div class="panel-tag">按市值排序</div>
-      </div>
-      <div id="positions-content"><div class="loading">加载中...</div></div>
-    </div>
-  </section>
+      </section>
 
-  <section class="main-grid">
-    <div class="column">
       <div class="panel">
         <div class="panel-head">
           <div>
             <div class="kicker">市场雷达</div>
             <div class="title">三路投票</div>
-            <div class="note">HMM、资金费率和 RSS 的合成判断</div>
+            <div class="note">HMM、资金费率和 RSS 的合成判断。</div>
           </div>
           <div class="panel-tag">核心信号</div>
         </div>
-        <div id="ensemble-votes" class="vote-grid"><div class="loading">加载中...</div></div>
-        <div id="vote-history" class="history-wrap"><div class="loading">加载中...</div></div>
+        <div id="ensemble-votes" class="vote-grid"><div class="loading">加载中</div></div>
+        <div id="vote-history" class="history-wrap"><div class="loading">加载中</div></div>
       </div>
 
       <div class="panel">
@@ -889,35 +1003,25 @@ tr:last-child td{border-bottom:none}
           <div>
             <div class="kicker">策略信号</div>
             <div class="title">信号总览</div>
-            <div class="note" id="signals-time">等待策略信号...</div>
+            <div class="note" id="signals-time">等待策略信号</div>
           </div>
           <div class="panel-tag">选币到订单</div>
         </div>
-        <div id="signals-content"><div class="loading">加载中...</div></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="kicker">成交</div>
-            <div class="title">最近流水</div>
-            <div class="note">优先展示最近几笔可读成交</div>
-          </div>
-        </div>
-        <div id="trades-content" class="trade-list"><div class="loading">加载中...</div></div>
+        <div id="signals-content"><div class="loading">加载中</div></div>
       </div>
     </div>
 
-    <div class="column">
+    <div class="stack">
       <div class="panel">
         <div class="panel-head">
           <div>
             <div class="kicker">运行矩阵</div>
             <div class="title">服务与定时器</div>
-            <div class="note">主循环、事件驱动、训练、对账统一查看</div>
+            <div class="note">主循环、事件驱动、训练、对账统一查看。</div>
           </div>
+          <div class="panel-tag">运行状态</div>
         </div>
-        <div id="system-content" class="ops-grid"><div class="loading">加载中...</div></div>
+        <div id="system-content" class="ops-grid"><div class="loading">加载中</div></div>
       </div>
 
       <div class="panel">
@@ -925,11 +1029,11 @@ tr:last-child td{border-bottom:none}
           <div>
             <div class="kicker">执行路径</div>
             <div class="title">信号到订单</div>
-            <div class="note" id="decision-flow-time">等待执行路径...</div>
+            <div class="note" id="decision-flow-time">等待执行路径</div>
           </div>
           <div class="panel-tag">路由结果</div>
         </div>
-        <div id="decision-flow-content"><div class="loading">加载中...</div></div>
+        <div id="decision-flow-content"><div class="loading">加载中</div></div>
       </div>
 
       <div class="panel">
@@ -937,10 +1041,23 @@ tr:last-child td{border-bottom:none}
           <div>
             <div class="kicker">高分标的</div>
             <div class="title">因子排序</div>
-            <div class="note">只保留最靠前的一组目标币</div>
+            <div class="note">只保留最靠前的一组目标币。</div>
           </div>
+          <div class="panel-tag">前排机会</div>
         </div>
-        <div id="alpha-content" class="alpha-list"><div class="loading">加载中...</div></div>
+        <div id="alpha-content" class="alpha-list"><div class="loading">加载中</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="kicker">成交</div>
+            <div class="title">最近流水</div>
+            <div class="note">只展示最近几笔可读成交。</div>
+          </div>
+          <div class="panel-tag">执行结果</div>
+        </div>
+        <div id="trades-content" class="trade-list"><div class="loading">加载中</div></div>
       </div>
 
       <div class="panel">
@@ -948,28 +1065,31 @@ tr:last-child td{border-bottom:none}
           <div>
             <div class="kicker">健康检查</div>
             <div class="title">依赖状态</div>
-            <div class="note">数据库、OKX、磁盘与定时任务</div>
+            <div class="note">数据库、OKX、磁盘与定时任务。</div>
           </div>
+          <div class="panel-tag">基础设施</div>
         </div>
-        <div id="health-content" class="health-list"><div class="loading">加载中...</div></div>
+        <div id="health-content" class="health-list"><div class="loading">加载中</div></div>
       </div>
     </div>
   </section>
 
-  <section class="panel">
-    <div class="panel-head">
-      <div>
-        <div class="kicker">旁路模型叠加</div>
-        <div class="title" id="ml-impact-headline">调优版 XGBoost 归因</div>
-        <div class="note" id="ml-impact-subtitle">查看模型抬升了谁、压低了谁，以及最近 24 小时叠加效果。</div>
+  <section class="workspace-full">
+    <div class="impact-panel">
+      <div class="panel-head">
+        <div>
+          <div class="kicker">旁路模型叠加</div>
+          <div class="title" id="ml-impact-headline">调优版 XGBoost 归因</div>
+          <div class="note" id="ml-impact-subtitle">查看模型抬升了谁、压低了谁，以及最近 24 小时叠加效果。</div>
+        </div>
+        <div class="panel-tag">旁路 / 纸面</div>
       </div>
-      <div class="panel-tag">旁路 / 纸面</div>
+      <div id="ml-impact-content"><div class="loading">加载中</div></div>
     </div>
-    <div id="ml-impact-content"><div class="loading">加载中...</div></div>
   </section>
 
   <div id="history-tooltip" class="hover-tip" hidden></div>
-  <div class="footer">移动端会自动切换为单列布局，仍保留持仓 K 线与关键指标。</div>
+  <div class="footer">移动端会自动切成单列，但仍保留持仓 K 线、核心指标和执行路径。</div>
 </div>
 <script src="{{ url_for('static', filename='js/monitor_v2.js') }}?v={{ monitor_v2_js_version }}"></script>
 <script src="{{ url_for('static', filename='js/ml_status_panel.js') }}?v={{ ml_status_panel_js_version }}"></script>

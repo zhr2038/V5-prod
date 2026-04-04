@@ -1,115 +1,77 @@
-# V5 Trading Bot
+# V5 生产交易仓库
 
-[简体中文](./README.zh-CN.md)
+这个仓库现在是 V5 的主仓，不再只是研究目录。它覆盖了 OKX 现货实盘交易、事件驱动检查、风控、对账、Web 看板、ML 训练与门限、以及影子模型实验。
 
-V5 is the current OKX spot trading workspace used for production operations. It is no longer just a research repo: it includes the live trading loop, event-driven checks, risk controls, reconciliation, a Flask dashboard, and ML training/promotion support.
+## 当前定位
 
-## Overview
+- GitHub：代码和配置的源头
+- 当前生产运行目录示例：`/home/ubuntu/clawd/v5-prod`
+- 运行态长期保留在服务器本地：
+  - `.env`
+  - `.venv/`
+  - `reports/`
+  - `data/`
+  - `logs/`
+  - 模型二进制文件
 
-The repository currently covers:
+这个仓库故意不上传运行态数据、数据库、缓存和模型二进制。GitHub 保留的是可部署的代码面，不是服务器快照。
 
-- hourly production trading via `main.py`
-- event-driven checks via `event_driven_check.py`
-- OKX spot execution with explicit live arming
-- pre-trade safety checks: bills, ledger, reconcile, kill-switch
-- monitoring surfaces: health checks, audit artifacts, reports, web dashboard
-- ML data collection, training, promotion gate, and optional live overlay
+## 主入口
 
-Current production runtime root:
+- 小时主交易：`main.py`
+- 事件驱动检查：`event_driven_check.py`
+- Web 看板：`scripts/web_dashboard.py`
+- 主配置：`configs/live_prod.yaml`
 
-- `/home/admin/clawd/v5-prod`
+## 当前能力
 
-## Main Entry Points
+- OKX 现货实盘下单，带显式 live arm
+- 小时主策略和事件驱动并行
+- HMM / 资金费率 / RSS 组合式市场状态判断
+- 多策略融合评分、组合构建、换手控制、负期望拦截
+- 预检、对账、账本、kill switch、自愈同步
+- ML 数据采集、训练、门限、在线归因
+- 响应式中文 dashboard
 
-Core runtime:
+## 运行流程
 
-- `main.py`
-- `event_driven_check.py`
-- `scripts/web_dashboard.py`
+1. 读取 `.env` 和 `configs/live_prod.yaml`
+2. 从 OKX 拉取市场数据和账户状态
+3. 计算 alpha、regime、组合目标和风控约束
+4. 执行预检、对账和 kill switch 判断
+5. 生成订单并通过执行层下发
+6. 把订单、成交、仓位、审计和报表写入 `reports/`
 
-Primary production config:
+## ML 说明
 
-- `configs/live_prod.yaml`
+- 正式 ML 只在“最新门限通过”时参与 live 决策
+- 训练与门限链路：
+  - `scripts/daily_ml_training.py`
+  - `scripts/model_promotion_gate.py`
+- 正式模型元数据：
+  - `models/ml_factor_model_config.json`
+  - `models/ml_factor_model_active.txt`
+- 模型二进制默认不进 GitHub，需要在服务器本地保存
 
-Important production docs:
+## 影子模型
 
-- [Current Production Flow](./docs/CURRENT_PRODUCTION_FLOW.md)
-- [Production-Only Deployment](./docs/PRODUCTION_ONLY_DEPLOYMENT.md)
-- [Production Minimal Files](./docs/PRODUCTION_MINIMAL_FILES.md)
+当前保留了一个正在测试的 tuned XGBoost 影子模型链路，已经纳入仓库：
 
-## Architecture
+- 运行脚本：`scripts/run_shadow_tuned_xgboost.py`
+- 小时包装脚本：`scripts/run_shadow_tuned_xgboost_hourly.sh`
+- 覆盖配置：`configs/shadow_tuned_xgboost_overrides.yaml`
+- 影子模型元数据：
+  - `models/ml_factor_model_gpu_tuned.json`
+  - `models/ml_factor_model_gpu_tuned_config.json`
+- 对应 systemd unit：
+  - `deploy/systemd/v5-shadow-tuned-xgboost.user.service`
+  - `deploy/systemd/v5-shadow-tuned-xgboost.user.timer`
 
-Runtime flow:
+这个影子模型默认是 dry-run，不参与真钱交易。
 
-1. Load `.env` and `configs/live_prod.yaml`
-2. Pull market data from OKX public data APIs
-3. Build alpha, regime, portfolio, and risk decisions
-4. Run live preflight checks
-5. Generate and execute orders
-6. Persist orders, fills, positions, summaries, and audits under `reports/`
+## 本地启动
 
-Current regime engine is ensemble-based:
-
-- HMM
-- funding sentiment
-- RSS sentiment
-
-Current monitoring surfaces include:
-
-- dashboard APIs under `/api/*`
-- health endpoints under `/health`, `/ready`, `/liveness`
-- run artifacts under `reports/runs/<run_id>/`
-
-## Dashboard
-
-The dashboard backend lives in:
-
-- `scripts/web_dashboard.py`
-
-Frontend assets live in:
-
-- `web/templates/`
-- `web/static/`
-
-Current dashboard highlights:
-
-- single-page operational overview
-- market state, risk tier, positions, trades, signals, health, and ML stages
-- position spotlight with per-holding K-lines
-- responsive layout for desktop and mobile
-
-Useful endpoints:
-
-- `/`
-- `/monitor`
-- `/api/dashboard`
-- `/api/account`
-- `/api/positions`
-- `/api/market_state`
-- `/api/position_kline`
-- `/api/ml_training`
-
-Run locally:
-
-```bash
-python scripts/web_dashboard.py
-```
-
-Default local bind:
-
-- `http://127.0.0.1:5000`
-
-## Quick Start
-
-### 1. Create a virtual environment
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Windows PowerShell:
+PowerShell:
 
 ```powershell
 python -m venv .venv
@@ -117,9 +79,15 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Prepare `.env`
+Linux/macOS:
 
-At minimum:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+最少环境变量：
 
 ```env
 EXCHANGE_API_KEY=...
@@ -127,126 +95,89 @@ EXCHANGE_API_SECRET=...
 EXCHANGE_PASSPHRASE=...
 ```
 
-### 3. Run locally
-
-Dry-run style local run:
+本地跑主策略：
 
 ```bash
 python main.py
 ```
 
-Live-armed run:
+本地跑 dashboard：
 
 ```bash
-export V5_CONFIG=configs/live_prod.yaml
-export V5_DATA_PROVIDER=okx
-export V5_LIVE_ARM=YES
-python main.py
+python scripts/web_dashboard.py
 ```
 
-Important:
+默认地址：
 
-- live mode requires `V5_LIVE_ARM=YES`
-- production data provider must be `okx`
-- do not treat the dashboard as a trading frontend; it is an ops/monitoring surface
+- `http://127.0.0.1:5000`
 
-## Testing
+## 测试
 
-Run the main regression suite:
+全量回归：
 
 ```bash
 pytest -q
 ```
 
-Dashboard-focused tests:
+常用专项：
 
 ```bash
-pytest tests/test_web_dashboard.py
+pytest tests/test_web_dashboard.py -q
+pytest tests/test_pipeline_marking.py -q
+pytest tests/test_alpha_regime_integration.py -q
 ```
 
-## Production Deployment
+## 生产部署
 
-Recommended model:
+推荐方式是把服务器当成同步目标，而不是在服务器目录里直接 `git pull`。
 
-- GitHub is the source of truth
-- `/home/admin/clawd/v5-prod` is a synced runtime copy
-- runtime state such as `reports/`, `logs/`, `.env`, `.venv/`, and server-side caches stays on the server
-
-Sync the production release:
+同步命令示例：
 
 ```bash
 python deploy/sync_prod_release.py \
   --host <host> \
-  --user root \
-  --password '<password>' \
-  --remote-root /home/admin/clawd/v5-prod \
-  --service-user admin \
+  --user <user> \
+  --password '***' \
+  --remote-root /home/ubuntu/clawd/v5-prod \
+  --service-user ubuntu \
   --enable-prod-timer \
   --enable-event-driven-timer
 ```
 
-The production sync payload now includes:
+部署后重点检查：
 
-- `main.py`
-- `event_driven_check.py`
-- `configs/`
-- `deploy/`
-- `scripts/`
-- `src/`
-- `web/`
-- current production docs
+- `/health`
+- `kill_switch=false`
+- `reconcile.ok=true`
+- `v5-prod.user.timer`
+- `v5-event-driven.timer`
+- `v5-web-dashboard.service`
 
-Install user-level systemd units manually if needed:
+更多部署细节见：
 
-```bash
-bash deploy/install_systemd.sh --user
-```
+- `docs/CURRENT_PRODUCTION_FLOW.md`
+- `docs/PRODUCTION_ONLY_DEPLOYMENT.md`
+- `docs/PRODUCTION_MINIMAL_FILES.md`
 
-If user timers must keep running after logout:
+## 仓库结构
 
-```bash
-sudo loginctl enable-linger admin
-```
+- `src/`：交易、执行、风控、因子、regime、报表核心代码
+- `configs/`：生产配置、研究配置、影子模型覆盖配置
+- `scripts/`：运维脚本、训练脚本、dashboard、恢复脚本
+- `deploy/`：生产同步和 systemd 模板
+- `web/`：dashboard 前端模板和静态资源
+- `tests/`：核心回归测试
+- `docs/`：当前生产流和部署文档
+- `models/`：模型元数据；二进制模型由服务器本地保管
 
-## Repository Layout
+## 不在 GitHub 中的内容
 
-Main directories:
+下列内容默认不上传：
 
-- `src/`: core trading, execution, risk, regime, factors, reporting
-- `configs/`: production and support configs
-- `scripts/`: operational scripts, dashboard, reporting, recovery helpers
-- `web/`: dashboard templates and static assets
-- `deploy/`: systemd units and production sync helpers
-- `reports/`: runtime outputs, SQLite databases, run artifacts
-- `tests/`: regression tests
-
-Non-production or historical content still present in the repo:
-
-- `study_notes/`
-- `v4_export/`
-- `scripts/archive/`
-
-## Operational Notes
-
-- `reports/*` is runtime state; do not commit it to GitHub
-- avoid `git pull` as the normal deployment strategy inside the live runtime directory
-- do not use destructive Git commands on the production copy
-- backport server-side hotfixes into the repository before the next sync
-
-Key runtime outputs to inspect:
-
-- `reports/runs/<run_id>/decision_audit.json`
-- `reports/runs/<run_id>/summary.json`
-- `reports/runs/<run_id>/trades.csv`
-- `reports/reconcile_status.json`
-- `reports/kill_switch.json`
-- `reports/ledger_status.json`
-- `reports/ml_runtime_status.json`
-
-## Boundaries
-
-- OKX spot only
-- no leverage trading
-- no short selling
-- ML remains gated; it is not always promoted into live scoring
-- historical research content exists, but this README documents the current production path
+- `reports/` 运行态
+- `data/` 缓存和数据库
+- `logs/`
+- `.env`
+- `.venv/`
+- 模型二进制
+- 本地备份、归档和临时文件

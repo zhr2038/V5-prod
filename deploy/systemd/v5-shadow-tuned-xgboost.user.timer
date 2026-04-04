@@ -1,0 +1,11 @@
+[Unit]
+Description=Run V5 tuned XGBoost shadow hourly
+
+[Timer]
+OnCalendar=*-*-* *:03:30
+Persistent=true
+AccuracySec=30s
+Unit=v5-shadow-tuned-xgboost.user.service
+
+[Install]
+WantedBy=timers.target

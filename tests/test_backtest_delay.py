@@ -103,3 +103,66 @@ def test_backtest_turnover_is_normalized_by_initial_equity():
     res_large = BacktestEngine(fee_bps=0.0, slippage_bps=0.0).run(md, pipeline=OneShotBuyPipeline(), cfg=cfg_large)
 
     assert res_small.turnover == res_large.turnover
+
+
+def test_backtest_partial_sell_keeps_remaining_position_value():
+    n = 120
+    closes = [100.0] * n
+    md = {
+        "BTC/USDT": MarketSeries(
+            symbol="BTC/USDT",
+            timeframe="1h",
+            ts=list(range(n)),
+            open=closes,
+            high=closes,
+            low=closes,
+            close=closes,
+            volume=[1e7] * n,
+        )
+    }
+
+    class BuyThenHalfSellPipeline:
+        def __init__(self):
+            self.step = 0
+            self.clock = None
+
+        def run(self, market_data_1h, positions, cash_usdt, equity_peak_usdt):
+            self.step += 1
+            price = float(next(iter(market_data_1h.values())).close[-1])
+            if self.step == 1:
+                return SimpleNamespace(
+                    regime=SimpleNamespace(state="Trending"),
+                    orders=[
+                        Order(
+                            symbol="BTC/USDT",
+                            side="buy",
+                            intent="OPEN_LONG",
+                            notional_usdt=100.0,
+                            signal_price=price,
+                            meta={},
+                        )
+                    ],
+                )
+            if self.step == 2:
+                return SimpleNamespace(
+                    regime=SimpleNamespace(state="Trending"),
+                    orders=[
+                        Order(
+                            symbol="BTC/USDT",
+                            side="sell",
+                            intent="REBALANCE",
+                            notional_usdt=50.0,
+                            signal_price=price,
+                            meta={},
+                        )
+                    ],
+                )
+            return SimpleNamespace(regime=SimpleNamespace(state="Trending"), orders=[])
+
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.backtest.initial_equity_usdt = 100.0
+
+    res = BacktestEngine(fee_bps=0.0, slippage_bps=0.0).run(md, pipeline=BuyThenHalfSellPipeline(), cfg=cfg)
+
+    assert abs(res.max_dd) < 1e-9
+    assert abs(res.cagr) < 1e-6

@@ -6,6 +6,9 @@ from typing import Iterable, Iterator
 KNOWN_DEPLOY_ROOTS = (
     "/home/admin/clawd/v5-trading-bot",
     "/home/admin/clawd/v5-prod",
+    "/home/admin/clawd/v5-shadow-tuned-xgboost",
+    "/home/ubuntu/clawd/v5-prod",
+    "/home/ubuntu/clawd/v5-shadow-tuned-xgboost",
 )
 
 PRODUCTION_SYNC_ITEMS = (
@@ -13,6 +16,11 @@ PRODUCTION_SYNC_ITEMS = (
     "event_driven_check.py",
     "requirements.txt",
     "pyproject.toml",
+    "models/ml_factor_model.pkl",
+    "models/ml_factor_model_active.txt",
+    "models/ml_factor_model_config.json",
+    "models/ml_factor_model_gpu_tuned.json",
+    "models/ml_factor_model_gpu_tuned_config.json",
     "configs",
     "deploy",
     "scripts",
@@ -40,10 +48,15 @@ PRODUCTION_USER_UNIT_MAPPINGS = (
     ("v5-prod.user.timer", "v5-prod.user.timer"),
     ("v5-event-driven.service", "v5-event-driven.service"),
     ("v5-event-driven.timer", "v5-event-driven.timer"),
+    ("v5-web-dashboard.service", "v5-web-dashboard.service"),
     ("v5-sentiment-collect.service", "v5-sentiment-collect.service"),
     ("v5-sentiment-collect.timer", "v5-sentiment-collect.timer"),
     ("v5-auto-risk-eval.service", "v5-auto-risk-eval.service"),
     ("v5-auto-risk-eval.timer", "v5-auto-risk-eval.timer"),
+    ("v5-daily-ml-training.service", "v5-daily-ml-training.service"),
+    ("v5-daily-ml-training.timer", "v5-daily-ml-training.timer"),
+    ("v5-model-promotion-gate.service", "v5-model-promotion-gate.service"),
+    ("v5-model-promotion-gate.timer", "v5-model-promotion-gate.timer"),
     ("v5-reconcile.user.service", "v5-reconcile.service"),
     ("v5-reconcile.timer", "v5-reconcile.timer"),
     ("v5-ledger.user.service", "v5-ledger.service"),

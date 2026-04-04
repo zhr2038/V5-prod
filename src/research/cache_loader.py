@@ -49,6 +49,26 @@ def _load_symbol_cache_frame(cache_dir: Path, symbol: str, timeframe: str) -> pd
     return merged
 
 
+def _index_to_epoch_ms(index: pd.Index) -> list[int]:
+    raw = index.asi8.astype("int64")
+    if len(raw) == 0:
+        return []
+
+    sample = int(abs(raw[0]))
+    if sample >= 10**17:
+        scale = 1_000_000  # ns -> ms
+    elif sample >= 10**14:
+        scale = 1_000  # us -> ms
+    elif sample >= 10**11:
+        scale = 1  # already ms
+    else:
+        scale = -1  # seconds -> ms
+
+    if scale == -1:
+        return (raw * 1_000).astype(int).tolist()
+    return (raw // scale).astype(int).tolist()
+
+
 def load_cached_market_data(
     cache_dir: str | Path,
     symbols: list[str],
@@ -79,7 +99,7 @@ def load_cached_market_data(
     market_data: Dict[str, MarketSeries] = {}
     for symbol, frame in aligned_frames.items():
         sliced = frame.loc[common_index]
-        timestamps = (sliced.index.view("int64") // 1_000_000).astype(int).tolist()
+        timestamps = _index_to_epoch_ms(sliced.index)
         market_data[symbol] = MarketSeries(
             symbol=symbol,
             timeframe=timeframe,

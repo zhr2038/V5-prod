@@ -78,6 +78,7 @@ class BacktestEngine:
 
     def run(self, market_data: Dict[str, MarketSeries], pipeline=None, *, cfg=None, data_provider=None) -> BacktestResult:
         """Run"""
+        self._fallback_counts = Counter()
         syms = list(market_data.keys())
         if not syms:
             return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, cost_assumption=self._cost_assumption())
@@ -203,18 +204,39 @@ class BacktestEngine:
                     if p is None:
                         continue
 
-                    traded_notional += abs(notional)
+                    gross_proceeds = min(float(p.qty) * px, max(0.0, notional))
+                    if gross_proceeds <= 0.0:
+                        continue
 
-                    # Realize PnL (simplification: treat as full close)
-                    pnl = (px - p.avg_px) * p.qty
+                    qty_sold = min(float(p.qty), gross_proceeds / px)
+                    if qty_sold <= 0.0:
+                        continue
+
+                    traded_notional += abs(gross_proceeds)
+
+                    # Realize PnL only for the quantity that was actually sold.
+                    pnl = (px - p.avg_px) * qty_sold
                     if pnl >= 0:
                         gains += pnl
                     else:
                         losses += -pnl
 
                     # cash inflow net of costs
-                    cash += notional * (1.0 - cost)
-                    positions.pop(o.symbol, None)
+                    cash += gross_proceeds * (1.0 - cost)
+                    remaining_qty = max(0.0, float(p.qty) - qty_sold)
+                    if remaining_qty <= 1e-12:
+                        positions.pop(o.symbol, None)
+                    else:
+                        positions[o.symbol] = Position(
+                            symbol=o.symbol,
+                            qty=remaining_qty,
+                            avg_px=float(p.avg_px),
+                            entry_ts=p.entry_ts,
+                            highest_px=max(float(p.highest_px), px),
+                            last_update_ts=p.last_update_ts,
+                            last_mark_px=px,
+                            unrealized_pnl_pct=((px - float(p.avg_px)) / float(p.avg_px)) if float(p.avg_px) > 0 else 0.0,
+                        )
 
             turnovers.append(float(traded_notional) / max(float(initial_equity), 1e-12))
 

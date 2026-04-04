@@ -83,20 +83,29 @@ def arbitrate_orders(
 
     held = {str(getattr(p, "symbol", "")) for p in (positions or []) if float(getattr(p, "qty", 0.0) or 0.0) > 1e-12}
 
-    # Bootstrap state from current positions
-    for sym in held:
-        st = _state_for_symbol(state, sym)
-        if st.get("state") in {"FLAT", "COOLDOWN"}:
-            st["state"] = "LONG"
-
     # Expire state timers
     for sym, st in (state.get("symbols") or {}).items():
         if st.get("state") == "EXIT_PENDING":
             ep = int(st.get("exit_pending_until_ms") or 0)
             if ep > 0 and ep <= now_ms:
-                st["state"] = "COOLDOWN"
+                if sym in held:
+                    # Close was selected earlier but position still exists.
+                    # Do not enter post-exit cooldown on an unfilled/failed close.
+                    st["state"] = "LONG"
+                    st["exit_pending_until_ms"] = 0
+                    st["cooldown_until_ms"] = 0
+                    st["last_reason"] = "exit_pending_expired_still_held"
+                else:
+                    st["state"] = "COOLDOWN"
         if st.get("state") == "COOLDOWN" and int(st.get("cooldown_until_ms") or 0) <= now_ms:
             st["state"] = "FLAT"
+
+    # Bootstrap state from current positions after expiry handling so a stale EXIT_PENDING
+    # cannot immediately downgrade a still-held symbol into COOLDOWN.
+    for sym in held:
+        st = _state_for_symbol(state, sym)
+        if st.get("state") in {"FLAT", "COOLDOWN"}:
+            st["state"] = "LONG"
 
     grouped: Dict[str, List[Order]] = {}
     for o in orders or []:

@@ -9,12 +9,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from scripts.task_config_compat import load_task_config_with_compat as load_task_config_with_compat_legacy
 from src.research.task_runner import load_task_config, run_walk_forward_task
+
+
+def _load_walk_forward_task_config(raw_config_path: str) -> dict:
+    return load_task_config_with_compat_legacy(PROJECT_ROOT, raw_config_path, load_task_config)
 
 
 def main() -> int:
     config_path = os.getenv("V5_RESEARCH_TASK_CONFIG", "configs/research/walk_forward.yaml")
-    task_config = load_task_config(PROJECT_ROOT / config_path)
+    task_config = _load_walk_forward_task_config(config_path)
     if not task_config:
         print(f"unable to load walk-forward task config: {config_path}")
         return 1

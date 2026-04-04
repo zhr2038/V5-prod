@@ -1,70 +1,70 @@
-# V5 Trading Bot - Git Ignore
-
-# Runtime cache files
-data/sentiment_cache/
-*.cache
-.cache/
-
-# Database files (runtime generated)
-*.sqlite
-*.sqlite3
-*.db
-reports/*.sqlite
-reports/*.db
-
-# Log files
-*.log
-logs/
-.backup/
-
-# Environment files
+# Environment and Python caches
 .env
+.env.*
+!.env.example
 .venv/
+.venv_shadow/
 venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# IDE files
+# IDE and OS
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# OS files
 .DS_Store
 Thumbs.db
 
-# Temporary files
+# Temp and archives
+*.tmp
+*.cache
+.cache/
 tmp/
 temp/
-*.tmp
+*.bak
+*.bak.*
+*.backup
+*.backup.*
+*.new
+*.tar.gz
+*.zip
 
-# ============================================
-# 新增：本地归档/运行时文件不上传GitHub
-# ============================================
-
-# 备份文件（本地保留，GitHub删除）
-backups/*.tar.gz
-backups/*.zip
-
-# K线缓存数据（运行时下载，GitHub删除）
-data/cache/*.csv
-data/cache/*.json
-
-# 归档脚本（本地保留，GitHub删除）
+# Local-only folders
+archive/
+backups/
+memory/
 scripts/archive/
 
-# 运行历史记录（运行时生成，GitHub删除）
-reports/runs/
-reports/*.json
-reports/*.jsonl
-reports/cost_stats_real/
-reports/spread_stats/
+# Logs
+*.log
+logs/*
+!logs/.gitkeep
 
-# 模型文件（训练生成，GitHub删除）
+# Runtime reports
+reports/*
+!reports/.gitkeep
+
+# Runtime data and caches
+data/cache/
+data/sentiment_cache/
+data/*.db
+data/*.db.bak*
+data/*.sqlite
+data/*.sqlite3
+data/*.npy
+data/*.csv
+data/*.jsonl
+data/*.bak_
+!data/.gitkeep
+
+# Generated models
 models/*.pkl
 models/*.joblib

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -127,6 +129,17 @@ def _candidate_model_config(base_cfg: MLFactorConfig, model_type: str, task_conf
         params["min_child_samples"] = int(model_cfg.get("lightgbm_min_child_samples", base_cfg.min_child_samples))
         params["reg_alpha"] = float(model_cfg.get("lightgbm_reg_alpha", base_cfg.reg_alpha))
         params["reg_lambda"] = float(model_cfg.get("lightgbm_reg_lambda", base_cfg.reg_lambda))
+    elif model_type == "xgboost":
+        params["n_estimators"] = int(model_cfg.get("xgboost_n_estimators", base_cfg.n_estimators))
+        params["max_depth"] = int(model_cfg.get("xgboost_max_depth", base_cfg.max_depth))
+        params["learning_rate"] = float(model_cfg.get("xgboost_learning_rate", base_cfg.learning_rate))
+        params["subsample"] = float(model_cfg.get("xgboost_subsample", base_cfg.subsample))
+        params["colsample_bytree"] = float(model_cfg.get("xgboost_colsample_bytree", base_cfg.colsample_bytree))
+        params["reg_alpha"] = float(model_cfg.get("xgboost_reg_alpha", base_cfg.reg_alpha))
+        params["reg_lambda"] = float(model_cfg.get("xgboost_reg_lambda", base_cfg.reg_lambda))
+        params["max_bin"] = int(model_cfg.get("xgboost_max_bin", base_cfg.max_bin))
+        params["compute_device"] = str(model_cfg.get("xgboost_compute_device", base_cfg.compute_device))
+    params["n_jobs"] = int(model_cfg.get("n_jobs", base_cfg.n_jobs))
 
     return MLFactorConfig(**params)
 
@@ -156,11 +169,12 @@ def _candidate_cv_result(
     *,
     recency_half_life_days: float,
     recency_max_weight: float,
+    max_workers: int = 1,
+    gpu_max_workers: int = 1,
 ) -> dict[str, Any]:
     from src.execution.ml_time_series_cv import cross_sectional_ic
 
-    scores: list[float] = []
-    for train_idx, test_idx in cv.split(X, y, groups=groups):
+    def _score_split(train_idx, test_idx) -> float:
         X_train = X.iloc[train_idx].reset_index(drop=True)
         y_train = y.iloc[train_idx].reset_index(drop=True)
         X_test = X.iloc[test_idx].reset_index(drop=True)
@@ -174,11 +188,94 @@ def _candidate_cv_result(
         )
         model = _train_candidate_model(cfg, X_train, y_train, X_test, y_test, sample_weight=sample_weight)
         pred = model.predict_batch(X_test)
-        scores.append(float(cross_sectional_ic(test_groups, y_test, pred)))
+        return float(cross_sectional_ic(test_groups, y_test, pred))
+
+    splits = [(train_idx, test_idx) for train_idx, test_idx in cv.split(X, y, groups=groups)]
+    scores: list[float] = []
+    effective_workers = max(1, int(max_workers))
+    if cfg.model_type == "xgboost" and str(getattr(cfg, "compute_device", "auto")).strip().lower() != "cpu":
+        effective_workers = min(effective_workers, max(1, int(gpu_max_workers)))
+
+    if effective_workers <= 1 or len(splits) <= 1:
+        for train_idx, test_idx in splits:
+            scores.append(_score_split(train_idx, test_idx))
+    else:
+        with ThreadPoolExecutor(max_workers=min(effective_workers, len(splits))) as executor:
+            future_map = {
+                executor.submit(_score_split, train_idx, test_idx): idx
+                for idx, (train_idx, test_idx) in enumerate(splits)
+            }
+            ordered_scores: dict[int, float] = {}
+            for future in as_completed(future_map):
+                ordered_scores[int(future_map[future])] = float(future.result())
+            scores = [ordered_scores[idx] for idx in range(len(splits))]
     return {
         "scores": scores,
         "mean_score": float(pd.Series(scores).mean()) if scores else 0.0,
         "std_score": float(pd.Series(scores).std(ddof=0)) if scores else 0.0,
+    }
+
+
+def _train_candidate_result(
+    *,
+    candidate_cfg: MLFactorConfig,
+    model_type: str,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_valid: pd.DataFrame,
+    y_valid: pd.Series,
+    X: pd.DataFrame,
+    y: pd.Series,
+    groups: pd.Series,
+    cv: GroupedTimeSeriesSplit,
+    train_groups: pd.Series,
+    valid_groups: pd.Series,
+    recency_half_life_days: float,
+    recency_max_weight: float,
+    cv_workers: int,
+    gpu_cv_workers: int,
+) -> dict[str, Any]:
+    from src.execution.ml_time_series_cv import cross_sectional_ic
+
+    train_sample_weight = build_recency_sample_weights(
+        train_groups,
+        half_life_days=recency_half_life_days,
+        max_weight=recency_max_weight,
+    )
+    model = _train_candidate_model(
+        candidate_cfg,
+        X_train,
+        y_train,
+        X_valid,
+        y_valid,
+        sample_weight=train_sample_weight,
+    )
+    train_pred = model.predict_batch(X_train)
+    valid_pred = model.predict_batch(X_valid)
+    cv_res = _candidate_cv_result(
+        candidate_cfg,
+        X,
+        y,
+        groups,
+        cv,
+        recency_half_life_days=recency_half_life_days,
+        recency_max_weight=recency_max_weight,
+        max_workers=cv_workers,
+        gpu_max_workers=gpu_cv_workers,
+    )
+    return {
+        "model_type": model_type,
+        "config": candidate_cfg.__dict__,
+        "model": model,
+        "train_ic": float(cross_sectional_ic(train_groups, y_train, train_pred)),
+        "valid_ic": float(cross_sectional_ic(valid_groups, y_valid, valid_pred)),
+        "cv_mean_ic": float(cv_res["mean_score"]),
+        "cv_std_ic": float(cv_res["std_score"]),
+        "cv_scores": [float(x) for x in cv_res["scores"]],
+        "train_weight_mean": float(train_sample_weight.mean()),
+        "train_weight_max": float(train_sample_weight.max()),
+        "valid_pred": valid_pred.reset_index(drop=True),
+        "training_device": getattr(model, "training_device", "cpu"),
     }
 
 
@@ -261,6 +358,7 @@ def run_ml_training_task(
     model_cfg = task_config.get("model") or {}
     gate_cfg = task_config.get("gate") or {}
     recency_cfg = task_config.get("recency_weighting") or {}
+    parallel_cfg = task_config.get("parallel") or {}
 
     recorder = ResearchRecorder(base_dir=_project_path(project_root, paths_cfg.get("runs_dir", "reports/runs"), "reports/runs"))
     run = recorder.start_run(task_name=str(task_meta.get("name", "ml_training")), task_config=task_config)
@@ -279,6 +377,9 @@ def run_ml_training_task(
     rolling_window_days = float(dataset_cfg.get("rolling_window_days", 60))
     recency_half_life_days = float(recency_cfg.get("half_life_days", 5))
     recency_max_weight = float(recency_cfg.get("max_weight", 3.0))
+    candidate_workers = int(parallel_cfg.get("candidate_workers", 1))
+    cv_workers = int(parallel_cfg.get("cv_workers", 1))
+    gpu_cv_workers = int(parallel_cfg.get("gpu_cv_workers", 1))
 
     min_valid_ic = float(gate_cfg.get("min_valid_ic", 0.0))
     max_ic_gap = float(gate_cfg.get("max_ic_gap", 0.25))
@@ -377,65 +478,106 @@ def run_ml_training_task(
         prediction_horizon=prediction_horizon,
         train_lookback_days=int(dataset_cfg.get("rolling_window_days", 60)),
         alpha=float(model_cfg.get("ridge_alpha", 50.0)),
+        n_jobs=int(model_cfg.get("n_jobs", max(1, os.cpu_count() or 1))),
     )
     base_factor_cfg.feature_groups = feature_groups
 
-    candidate_results: list[dict[str, Any]] = []
+    candidate_jobs: list[tuple[str, MLFactorConfig]] = []
     for model_type in candidates:
         candidate_cfg = _candidate_model_config(base_factor_cfg, model_type, task_config)
         candidate_cfg.feature_groups = feature_groups
-        try:
-            train_sample_weight = build_recency_sample_weights(
-                train_groups,
-                half_life_days=recency_half_life_days,
-                max_weight=recency_max_weight,
-            )
-            model = _train_candidate_model(
-                candidate_cfg,
-                X_train,
-                y_train,
-                X_valid,
-                y_valid,
-                sample_weight=train_sample_weight,
-            )
-            train_pred = model.predict_batch(X_train)
-            valid_pred = model.predict_batch(X_valid)
-            cv_res = _candidate_cv_result(
-                candidate_cfg,
-                X,
-                y,
-                groups,
-                cv,
-                recency_half_life_days=recency_half_life_days,
-                recency_max_weight=recency_max_weight,
-            )
-            candidate_results.append(
-                {
-                    "model_type": model_type,
-                    "config": candidate_cfg.__dict__,
-                    "model": model,
-                    "train_ic": float(cross_sectional_ic(train_groups, y_train, train_pred)),
-                    "valid_ic": float(cross_sectional_ic(valid_groups, y_valid, valid_pred)),
-                    "cv_mean_ic": float(cv_res["mean_score"]),
-                    "cv_std_ic": float(cv_res["std_score"]),
-                    "cv_scores": [float(x) for x in cv_res["scores"]],
-                    "train_weight_mean": float(train_sample_weight.mean()),
-                    "train_weight_max": float(train_sample_weight.max()),
-                    "valid_pred": valid_pred.reset_index(drop=True),
-                }
-            )
-        except Exception as exc:
-            candidate_results.append(
-                {
-                    "model_type": model_type,
-                    "error": str(exc),
-                    "train_ic": -1.0,
-                    "valid_ic": -1.0,
-                    "cv_mean_ic": -1.0,
-                    "cv_std_ic": 999.0,
-                    "cv_scores": [],
-                }
-            )
+        candidate_jobs.append((model_type, candidate_cfg))
+
+    effective_candidate_workers = max(1, min(candidate_workers, len(candidate_jobs)))
+    gpu_candidate_count = sum(
+        1
+        for _, cfg in candidate_jobs
+        if cfg.model_type == "xgboost" and str(getattr(cfg, "compute_device", "auto")).strip().lower() != "cpu"
+    )
+    if gpu_candidate_count > 1:
+        effective_candidate_workers = 1
+    elif any(
+        cfg.model_type == "xgboost" and str(getattr(cfg, "compute_device", "auto")).strip().lower() != "cpu"
+        for _, cfg in candidate_jobs
+    ) and effective_candidate_workers > 1:
+        effective_candidate_workers = min(effective_candidate_workers, 2)
+
+    candidate_results: list[dict[str, Any]] = []
+    if effective_candidate_workers <= 1 or len(candidate_jobs) <= 1:
+        for model_type, candidate_cfg in candidate_jobs:
+            try:
+                candidate_results.append(
+                    _train_candidate_result(
+                        candidate_cfg=candidate_cfg,
+                        model_type=model_type,
+                        X_train=X_train,
+                        y_train=y_train,
+                        X_valid=X_valid,
+                        y_valid=y_valid,
+                        X=X,
+                        y=y,
+                        groups=groups,
+                        cv=cv,
+                        train_groups=train_groups,
+                        valid_groups=valid_groups,
+                        recency_half_life_days=recency_half_life_days,
+                        recency_max_weight=recency_max_weight,
+                        cv_workers=cv_workers,
+                        gpu_cv_workers=gpu_cv_workers,
+                    )
+                )
+            except Exception as exc:
+                candidate_results.append(
+                    {
+                        "model_type": model_type,
+                        "error": str(exc),
+                        "train_ic": -1.0,
+                        "valid_ic": -1.0,
+                        "cv_mean_ic": -1.0,
+                        "cv_std_ic": 999.0,
+                        "cv_scores": [],
+                    }
+                )
+    else:
+        with ThreadPoolExecutor(max_workers=effective_candidate_workers) as executor:
+            future_map = {
+                executor.submit(
+                    _train_candidate_result,
+                    candidate_cfg=candidate_cfg,
+                    model_type=model_type,
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_valid=X_valid,
+                    y_valid=y_valid,
+                    X=X,
+                    y=y,
+                    groups=groups,
+                    cv=cv,
+                    train_groups=train_groups,
+                    valid_groups=valid_groups,
+                    recency_half_life_days=recency_half_life_days,
+                    recency_max_weight=recency_max_weight,
+                    cv_workers=cv_workers,
+                    gpu_cv_workers=gpu_cv_workers,
+                ): model_type
+                for model_type, candidate_cfg in candidate_jobs
+            }
+            for future in as_completed(future_map):
+                model_type = str(future_map[future])
+                try:
+                    candidate_results.append(future.result())
+                except Exception as exc:
+                    candidate_results.append(
+                        {
+                            "model_type": model_type,
+                            "error": str(exc),
+                            "train_ic": -1.0,
+                            "valid_ic": -1.0,
+                            "cv_mean_ic": -1.0,
+                            "cv_std_ic": 999.0,
+                            "cv_scores": [],
+                        }
+                    )
 
     successful = [item for item in candidate_results if "model" in item]
     if not successful:
@@ -684,3 +826,13 @@ def run_walk_forward_task(
     run.write_json("analysis/portfolio_analysis_record.json", summary)
     recorder.finalize_run(run, status="completed", summary=summary)
     return {"exit_code": 0, "run_id": run.run_id, "folds": len(report.get("folds") or [])}
+
+
+def run_walk_forward_optimizer_task(
+    *,
+    project_root: str | Path,
+    task_config: dict[str, Any],
+) -> dict[str, Any]:
+    from src.research.walk_forward_optimizer import run_walk_forward_optimizer_task as _run
+
+    return _run(project_root=project_root, task_config=task_config)

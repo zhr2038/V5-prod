@@ -78,10 +78,15 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-prod.user.timer=v5-prod.user.timer \
       --mapping v5-event-driven.service=v5-event-driven.service \
       --mapping v5-event-driven.timer=v5-event-driven.timer \
+      --mapping v5-web-dashboard.service=v5-web-dashboard.service \
       --mapping v5-sentiment-collect.service=v5-sentiment-collect.service \
       --mapping v5-sentiment-collect.timer=v5-sentiment-collect.timer \
       --mapping v5-auto-risk-eval.service=v5-auto-risk-eval.service \
       --mapping v5-auto-risk-eval.timer=v5-auto-risk-eval.timer \
+      --mapping v5-daily-ml-training.service=v5-daily-ml-training.service \
+      --mapping v5-daily-ml-training.timer=v5-daily-ml-training.timer \
+      --mapping v5-model-promotion-gate.service=v5-model-promotion-gate.service \
+      --mapping v5-model-promotion-gate.timer=v5-model-promotion-gate.timer \
       --mapping v5-reconcile.user.service=v5-reconcile.service \
       --mapping v5-reconcile.timer=v5-reconcile.timer \
       --mapping v5-ledger.user.service=v5-ledger.service \
@@ -97,8 +102,15 @@ if [[ "$USER_MODE" == "1" ]]; then
   systemctl --user daemon-reload
 
   if [[ "$PRODUCTION_ONLY" == "1" ]]; then
+    # Production-only install must also disable stale shadow timers/services that may
+    # remain from previous experiments, otherwise they keep polluting reports/runs.
+    systemctl --user disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service >/dev/null 2>&1 || true
+    systemctl --user disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service >/dev/null 2>&1 || true
+    systemctl --user enable --now v5-web-dashboard.service
     systemctl --user enable --now v5-sentiment-collect.timer
     systemctl --user enable --now v5-auto-risk-eval.timer
+    systemctl --user enable --now v5-daily-ml-training.timer
+    systemctl --user enable --now v5-model-promotion-gate.timer
     systemctl --user enable --now v5-reconcile.timer
     systemctl --user enable --now v5-ledger.timer
     systemctl --user enable --now v5-cost-rollup-real.user.timer
@@ -108,7 +120,7 @@ if [[ "$USER_MODE" == "1" ]]; then
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|reconcile|ledger|cost-rollup-real)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer
