@@ -53,6 +53,7 @@ class EventMonitor:
         self.last_state: Optional[MarketState] = None
         self.price_high_24h: Dict[str, float] = {}
         self.price_low_24h: Dict[str, float] = {}
+        self.price_history: Dict[str, List[Dict[str, float]]] = {}
         self.last_trade_time_ms: int = 0
         self._load_state()
     
@@ -343,29 +344,25 @@ class EventMonitor:
     def _check_breakout_events(self, state: MarketState) -> List[TradingEvent]:
         """Check for price breakout events."""
         events = []
-        now_ms = int(time.time() * 1000)
-        
-        # Update price ranges
+        now_ms = self._resolve_market_timestamp_ms(state)
+        self._trim_price_history(now_ms)
+
+        # Check breakouts against the prior rolling window only.
+        threshold = max(0.0, float(self.config.breakout_threshold_pct or 0.0)) / 100.0
+
         for sym, px in state.prices.items():
-            if sym not in self.price_high_24h:
-                self.price_high_24h[sym] = px
-                self.price_low_24h[sym] = px
-            else:
-                self.price_high_24h[sym] = max(self.price_high_24h[sym], px)
-                self.price_low_24h[sym] = min(self.price_low_24h[sym], px)
-        
-        # Check breakouts
-        threshold = self.config.breakout_threshold_pct / 100
-        
-        for sym, px in state.prices.items():
-            if sym not in self.price_high_24h:
+            history = self.price_history.get(sym) or []
+            if not history:
                 continue
-            
-            high = self.price_high_24h[sym]
-            low = self.price_low_24h[sym]
-            
-            # Breakout up
-            if px >= high * (1 - threshold):
+
+            try:
+                high = max(float(sample.get('price', 0.0) or 0.0) for sample in history)
+                low = min(float(sample.get('price', 0.0) or 0.0) for sample in history)
+            except Exception:
+                continue
+
+            # Breakout up: price clears the prior rolling high by the configured threshold.
+            if high > 0 and px >= high * (1 + threshold):
                 events.append(TradingEvent(
                     type=EventType.BREAKOUT_UP,
                     symbol=sym,
@@ -377,9 +374,9 @@ class EventMonitor:
                     timestamp_ms=now_ms
                 ))
                 logger.info(f"BREAKOUT UP: {sym} @ {px:.4f} (resistance {high:.4f})")
-            
-            # Breakdown
-            elif px <= low * (1 + threshold):
+
+            # Breakdown: price clears the prior rolling low by the configured threshold.
+            elif low > 0 and px <= low * (1 - threshold):
                 events.append(TradingEvent(
                     type=EventType.BREAKOUT_DOWN,
                     symbol=sym,
@@ -391,8 +388,78 @@ class EventMonitor:
                     timestamp_ms=now_ms
                 ))
                 logger.info(f"BREAKOUT DOWN: {sym} @ {px:.4f} (support {low:.4f})")
-        
+
+        self._record_price_snapshot(state, now_ms)
+        self._refresh_price_ranges()
         return events
+
+    def _resolve_market_timestamp_ms(self, state: Optional[MarketState]) -> int:
+        """Prefer the market snapshot timestamp so rolling windows are deterministic."""
+        try:
+            ts = int(getattr(state, 'timestamp_ms', 0) or 0)
+            if ts > 0:
+                return ts
+        except Exception:
+            pass
+        return int(time.time() * 1000)
+
+    def _breakout_lookback_ms(self) -> int:
+        hours = max(0, int(self.config.breakout_lookback_hours or 0))
+        return hours * 3600 * 1000
+
+    def _trim_price_history(self, now_ms: int) -> None:
+        """Keep only samples inside the rolling breakout lookback window."""
+        lookback_ms = self._breakout_lookback_ms()
+        cutoff_ms = now_ms - lookback_ms
+        trimmed: Dict[str, List[Dict[str, float]]] = {}
+
+        for sym, samples in (self.price_history or {}).items():
+            kept: List[Dict[str, float]] = []
+            for sample in samples or []:
+                try:
+                    sample_ts = int(sample.get('timestamp_ms', 0) or 0)
+                    sample_px = float(sample.get('price', 0.0) or 0.0)
+                except Exception:
+                    continue
+                if sample_px <= 0:
+                    continue
+                if lookback_ms > 0 and sample_ts < cutoff_ms:
+                    continue
+                kept.append({'timestamp_ms': sample_ts, 'price': sample_px})
+            if kept:
+                trimmed[sym] = kept
+
+        self.price_history = trimmed
+
+    def _record_price_snapshot(self, state: MarketState, now_ms: int) -> None:
+        for sym, px in (state.prices or {}).items():
+            try:
+                price = float(px or 0.0)
+            except Exception:
+                continue
+            if price <= 0:
+                continue
+
+            history = self.price_history.setdefault(sym, [])
+            if history and int(history[-1].get('timestamp_ms', 0) or 0) == now_ms:
+                history[-1]['price'] = price
+            else:
+                history.append({'timestamp_ms': now_ms, 'price': price})
+
+        self._trim_price_history(now_ms)
+
+    def _refresh_price_ranges(self) -> None:
+        self.price_high_24h = {}
+        self.price_low_24h = {}
+        for sym, samples in (self.price_history or {}).items():
+            if not samples:
+                continue
+            prices = [float(sample.get('price', 0.0) or 0.0) for sample in samples]
+            prices = [px for px in prices if px > 0]
+            if not prices:
+                continue
+            self.price_high_24h[sym] = max(prices)
+            self.price_low_24h[sym] = min(prices)
     
     def _check_heartbeat(self) -> List[TradingEvent]:
         """Check if heartbeat is needed."""
@@ -428,6 +495,7 @@ class EventMonitor:
                 data = json.loads(path.read_text())
                 self.price_high_24h = data.get('price_high_24h', {})
                 self.price_low_24h = data.get('price_low_24h', {})
+                self.price_history = data.get('price_history', {})
                 self.last_trade_time_ms = data.get('last_trade_time_ms', 0)
                 # Load last_state for signal change detection
                 last_state_data = data.get('last_state')
@@ -456,6 +524,7 @@ class EventMonitor:
                         positions=last_state_data.get('positions', {}),
                         selected_symbols=last_state_data.get('selected_symbols', [])
                     )
+                self._refresh_price_ranges()
         except Exception as e:
             logger.warning(f"Failed to load monitor state: {e}")
     
@@ -494,6 +563,7 @@ class EventMonitor:
             data = {
                 'price_high_24h': self.price_high_24h,
                 'price_low_24h': self.price_low_24h,
+                'price_history': self.price_history,
                 'last_trade_time_ms': self.last_trade_time_ms,
                 'last_state': last_state_data,
                 'saved_at_ms': int(time.time() * 1000)
