@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 
 import pytest
@@ -126,6 +127,72 @@ def test_fill_reconciler_partial_buy_updates_position_store() -> None:
         assert pos is not None
         assert pos.qty == pytest.approx(0.0198)
         assert pos.avg_px == pytest.approx(105.0)
+
+
+def test_fill_reconciler_accumulates_order_fields_across_runs() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        fills = FillStore(path=f"{td}/fills.sqlite")
+        orders = OrderStore(path=f"{td}/orders.sqlite")
+
+        clid = "BUY_MULTI_PARTIAL"
+        orders.upsert_new(
+            cl_ord_id=clid,
+            run_id="r",
+            inst_id="BTC-USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            decision_hash="h-multi",
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=10.0,
+            req={"clOrdId": clid},
+        )
+
+        rec = FillReconciler(fill_store=fills, order_store=orders, okx=None)
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="BTC-USDT",
+                    trade_id="m1",
+                    ts_ms=1,
+                    ord_id="OIDM",
+                    cl_ord_id=clid,
+                    side="buy",
+                    fill_px="100",
+                    fill_sz="0.4",
+                    fee="-0.001",
+                    fee_ccy="BTC",
+                ),
+            ]
+        )
+        rec.reconcile()
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="BTC-USDT",
+                    trade_id="m2",
+                    ts_ms=2,
+                    ord_id="OIDM",
+                    cl_ord_id=clid,
+                    side="buy",
+                    fill_px="110",
+                    fill_sz="0.6",
+                    fee="-0.002",
+                    fee_ccy="BTC",
+                ),
+            ]
+        )
+        rec.reconcile()
+
+        row = orders.get(clid)
+        assert row is not None
+        fee_map = json.loads(str(row.fee))
+
+        assert float(row.acc_fill_sz) == pytest.approx(1.0)
+        assert float(row.avg_px) == pytest.approx(106.0)
+        assert fee_map == {"BTC": "-0.003"}
 
 
 def test_fill_reconciler_partial_sell_updates_position_store_idempotently() -> None:

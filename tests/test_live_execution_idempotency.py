@@ -760,3 +760,175 @@ def test_query_fill_after_partial_sell_does_not_double_reduce_position() -> None
         assert state == "FILLED"
         assert final_pos is not None
         assert final_pos.qty == pytest.approx(1.0)
+
+
+def test_query_fill_after_multiple_partial_buys_uses_cumulative_reconciled_state() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        fills = FillStore(path=f"{td}/fills.sqlite")
+
+        cfg = ExecutionConfig(reconcile_status_path=f"{td}/reconcile_status.json", kill_switch_path=f"{td}/kill_switch.json")
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+        rec = FillReconciler(fill_store=fills, order_store=store, okx=None, position_store=pos)
+
+        order = Order(
+            symbol="BTC/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=100.0,
+            signal_price=100.0,
+            meta={"decision_hash": "multi-partial-buy"},
+        )
+        placed = eng.place(order)
+        row = store.get(placed.cl_ord_id)
+
+        assert placed.state == "OPEN"
+        assert row is not None
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="BTC-USDT",
+                    trade_id="mpb-1",
+                    ts_ms=1,
+                    ord_id=str(row.ord_id),
+                    cl_ord_id=placed.cl_ord_id,
+                    side="buy",
+                    fill_px="100",
+                    fill_sz="0.4",
+                    fee="0",
+                    fee_ccy="BTC",
+                ),
+            ]
+        )
+        rec.reconcile()
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="BTC-USDT",
+                    trade_id="mpb-2",
+                    ts_ms=2,
+                    ord_id=str(row.ord_id),
+                    cl_ord_id=placed.cl_ord_id,
+                    side="buy",
+                    fill_px="100",
+                    fill_sz="0.3",
+                    fee="0",
+                    fee_ccy="BTC",
+                ),
+            ]
+        )
+        rec.reconcile()
+
+        row_after_partials = store.get(placed.cl_ord_id)
+        partial_pos = pos.get("BTC/USDT")
+        assert row_after_partials is not None
+        assert float(row_after_partials.acc_fill_sz) == pytest.approx(0.7)
+        assert partial_pos is not None
+        assert partial_pos.qty == pytest.approx(0.7)
+
+        okx._orders[placed.cl_ord_id]["state"] = "filled"
+        okx._orders[placed.cl_ord_id]["accFillSz"] = "1.0"
+        okx._orders[placed.cl_ord_id]["avgPx"] = "100"
+        okx.fills_by_ord_id[str(row.ord_id)] = [
+            {"fillSz": "0.4", "fee": "0", "feeCcy": "BTC"},
+            {"fillSz": "0.3", "fee": "0", "feeCcy": "BTC"},
+            {"fillSz": "0.3", "fee": "0", "feeCcy": "BTC"},
+        ]
+
+        state, _ = eng._query_and_update(inst_id="BTC-USDT", cl_ord_id=placed.cl_ord_id)
+        final_pos = pos.get("BTC/USDT")
+
+        assert state == "FILLED"
+        assert final_pos is not None
+        assert final_pos.qty == pytest.approx(1.0)
+
+
+def test_query_fill_after_multiple_partial_sells_uses_cumulative_reconciled_state() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["BTC"] = {"eq": "2.0", "availBal": "2.0", "cashBal": "2.0", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        fills = FillStore(path=f"{td}/fills.sqlite")
+        pos.upsert_buy("BTC/USDT", qty=2.0, px=100.0)
+
+        cfg = ExecutionConfig(reconcile_status_path=f"{td}/reconcile_status.json", kill_switch_path=f"{td}/kill_switch.json")
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+        rec = FillReconciler(fill_store=fills, order_store=store, okx=None, position_store=pos)
+
+        order = Order(
+            symbol="BTC/USDT",
+            side="sell",
+            intent="REBALANCE",
+            notional_usdt=100.0,
+            signal_price=100.0,
+            meta={"decision_hash": "multi-partial-sell"},
+        )
+        placed = eng.place(order)
+        row = store.get(placed.cl_ord_id)
+
+        assert placed.state == "OPEN"
+        assert row is not None
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="BTC-USDT",
+                    trade_id="mps-1",
+                    ts_ms=1,
+                    ord_id=str(row.ord_id),
+                    cl_ord_id=placed.cl_ord_id,
+                    side="sell",
+                    fill_px="100",
+                    fill_sz="0.4",
+                    fee="0",
+                    fee_ccy="BTC",
+                ),
+            ]
+        )
+        rec.reconcile()
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="BTC-USDT",
+                    trade_id="mps-2",
+                    ts_ms=2,
+                    ord_id=str(row.ord_id),
+                    cl_ord_id=placed.cl_ord_id,
+                    side="sell",
+                    fill_px="100",
+                    fill_sz="0.3",
+                    fee="0",
+                    fee_ccy="BTC",
+                ),
+            ]
+        )
+        rec.reconcile()
+
+        row_after_partials = store.get(placed.cl_ord_id)
+        partial_pos = pos.get("BTC/USDT")
+        assert row_after_partials is not None
+        assert float(row_after_partials.acc_fill_sz) == pytest.approx(0.7)
+        assert partial_pos is not None
+        assert partial_pos.qty == pytest.approx(1.3)
+
+        okx._orders[placed.cl_ord_id]["state"] = "filled"
+        okx._orders[placed.cl_ord_id]["accFillSz"] = "1.0"
+        okx._orders[placed.cl_ord_id]["avgPx"] = "100"
+        okx.fills_by_ord_id[str(row.ord_id)] = [
+            {"fillSz": "0.4", "fee": "0", "feeCcy": "BTC"},
+            {"fillSz": "0.3", "fee": "0", "feeCcy": "BTC"},
+            {"fillSz": "0.3", "fee": "0", "feeCcy": "BTC"},
+        ]
+
+        state, _ = eng._query_and_update(inst_id="BTC-USDT", cl_ord_id=placed.cl_ord_id)
+        final_pos = pos.get("BTC/USDT")
+
+        assert state == "FILLED"
+        assert final_pos is not None
+        assert final_pos.qty == pytest.approx(1.0)
