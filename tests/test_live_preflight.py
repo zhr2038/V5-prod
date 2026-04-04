@@ -418,6 +418,58 @@ def test_preflight_quote_liability_degrades_to_sell_only(monkeypatch):
         assert res.details["borrow_check"]["quote_liability_ccys"] == ["USDT"]
 
 
+def test_preflight_respects_zero_borrow_eps_config(monkeypatch):
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {"ok": True, "reason": "ok", "category": "OK", "kill_switch": {"enabled": False}}
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+
+    captured = {}
+
+    def _fake_check_okx_borrows(balance_resp, *, liab_eps, neg_eq_eps):
+        captured["liab_eps"] = liab_eps
+        captured["neg_eq_eps"] = neg_eq_eps
+        return SimpleNamespace(ok=True, items=[], reason="ok", raw={})
+
+    monkeypatch.setattr(lp, "check_okx_borrows", _fake_check_okx_borrows)
+
+    cfg = SimpleNamespace(
+        reconcile_status_path="reconcile.json",
+        reconcile_dust_usdt_ignore=1.0,
+        abort_on_borrow=True,
+        borrow_block_mode="symbol_only",
+        borrow_liab_eps=0.0,
+        borrow_neg_eq_eps=0.0,
+        enforce_account_config_check=False,
+    )
+
+    with tempfile.TemporaryDirectory() as td:
+        pf = lp.LivePreflight(
+            cfg,
+            okx=DummyOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "ALLOW"
+        assert captured["liab_eps"] == 0.0
+        assert captured["neg_eq_eps"] == 0.0
+
+
 def test_preflight_auto_fixes_fee_type_before_allowing_buys(monkeypatch):
     monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
     monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)

@@ -307,6 +307,41 @@ def test_entry_guard_respects_zero_max_spread_bps() -> None:
             )
 
 
+def test_buy_guard_respects_zero_borrow_liability_epsilon(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["USDT"] = {"eq": "100", "availBal": "100", "cashBal": "100", "liab": "0.000000000001"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        monkeypatch.setattr(
+            "src.execution.live_execution_engine.OKXSpotInstrumentsCache.get_spec",
+            lambda self, inst_id: SimpleNamespace(lot_sz=0.1, min_sz=0.1),
+        )
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            borrow_liab_eps=0.0,
+            buy_quote_reserve_usdt=0.0,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        result = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="buy",
+                intent="OPEN_LONG",
+                notional_usdt=10.0,
+                signal_price=100.0,
+                meta={"decision_hash": "buy-liab-eps-zero"},
+            )
+        )
+
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
+
+
 def test_buy_budget_blocks_second_live_buy_when_first_reserves_quote(monkeypatch) -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()

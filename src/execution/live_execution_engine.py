@@ -578,7 +578,7 @@ class LiveExecutionEngine:
                     except Exception as e:
                         raise ValueError(f"NO_BORROW_BUY_BLOCK: quote balance query failed: {e}")
 
-                    liab_eps = float(getattr(self.cfg, "borrow_liab_eps", 1e-6) or 1e-6)
+                    liab_eps = float(_coalesce(getattr(self.cfg, "borrow_liab_eps", None), 1e-6))
                     if liab_quote > liab_eps:
                         raise ValueError(
                             f"NO_BORROW_BUY_BLOCK: existing {quote_ccy} liability={liab_quote:.8f}"

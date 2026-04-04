@@ -49,6 +49,10 @@ def _to_bool(v: Any) -> bool:
     return s in {"1", "true", "yes", "on"}
 
 
+def _coalesce(value: Any, default: Any) -> Any:
+    return default if value is None else value
+
+
 def _borrow_symbol_for_ccy(ccy: Any) -> Optional[str]:
     base = str(ccy or "").strip().upper()
     if not base or base in {"USDT", "USDC", "USD"}:
@@ -267,8 +271,8 @@ class LivePreflight:
             bal = self.okx.get_balance()
             borrow_res = check_okx_borrows(
                 bal.data,
-                liab_eps=float(getattr(self.cfg, "borrow_liab_eps", 1e-6) or 1e-6),
-                neg_eq_eps=float(getattr(self.cfg, "borrow_neg_eq_eps", 1e-6) or 1e-6),
+                liab_eps=float(_coalesce(getattr(self.cfg, "borrow_liab_eps", None), 1e-6)),
+                neg_eq_eps=float(_coalesce(getattr(self.cfg, "borrow_neg_eq_eps", None), 1e-6)),
             )
             details["borrow_check"] = {
                 "ok": bool(borrow_res.ok),
