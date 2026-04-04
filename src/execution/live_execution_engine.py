@@ -45,6 +45,10 @@ def _load_json(path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _coalesce(value: Any, default: Any) -> Any:
+    return default if value is None else value
+
+
 def load_kill_switch_enabled(path: str) -> bool:
     """检查是否启用kill switch"""
     d = _load_json(path) or {}
@@ -470,7 +474,7 @@ class LiveExecutionEngine:
                 return
             raise ValueError(f"ENTRY_GUARD_NO_TOB: {inst_id}")
 
-        max_premium = float(getattr(self.cfg, "open_long_max_signal_premium_pct", 0.006) or 0.006)
+        max_premium = float(_coalesce(getattr(self.cfg, "open_long_max_signal_premium_pct", None), 0.006))
         premium = float(ref_px / signal_px - 1.0)
         if premium > max_premium:
             raise ValueError(
@@ -480,7 +484,7 @@ class LiveExecutionEngine:
 
         if bid > 0 and ask > 0 and mid > 0:
             spread_bps = float((ask - bid) / mid * 10000.0)
-            max_spread_bps = float(getattr(self.cfg, "open_long_max_spread_bps", 35.0) or 35.0)
+            max_spread_bps = float(_coalesce(getattr(self.cfg, "open_long_max_spread_bps", None), 35.0))
             if spread_bps > max_spread_bps:
                 raise ValueError(
                     f"ENTRY_GUARD_SPREAD: {inst_id} spread_bps={spread_bps:.2f} > max={max_spread_bps:.2f}"

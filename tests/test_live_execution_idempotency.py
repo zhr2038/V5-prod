@@ -247,6 +247,66 @@ def test_buy_dust_skip_does_not_consume_quote_budget(monkeypatch) -> None:
         assert req["sz"] == "80.0"
 
 
+def test_entry_guard_respects_zero_max_signal_premium_pct() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            open_long_entry_guard_enabled=True,
+            open_long_max_signal_premium_pct=0.0,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        order = Order(
+            symbol="BTC/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=10.0,
+            signal_price=100.0,
+            meta={"decision_hash": "guard-premium-zero"},
+        )
+
+        with pytest.raises(ValueError, match="ENTRY_GUARD_PREMIUM"):
+            eng._check_open_long_entry_guard(
+                order,
+                inst_id="BTC-USDT",
+                tob={"ask": 100.01, "bid": 100.0, "mid": 100.005},
+            )
+
+
+def test_entry_guard_respects_zero_max_spread_bps() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            open_long_entry_guard_enabled=True,
+            open_long_max_spread_bps=0.0,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        order = Order(
+            symbol="BTC/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=10.0,
+            signal_price=100.0,
+            meta={"decision_hash": "guard-spread-zero"},
+        )
+
+        with pytest.raises(ValueError, match="ENTRY_GUARD_SPREAD"):
+            eng._check_open_long_entry_guard(
+                order,
+                inst_id="BTC-USDT",
+                tob={"ask": 100.0, "bid": 99.9, "mid": 99.95},
+            )
+
+
 def test_buy_budget_blocks_second_live_buy_when_first_reserves_quote(monkeypatch) -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
