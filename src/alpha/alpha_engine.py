@@ -752,7 +752,7 @@ class AlphaEngine:
             control["mode"] = "downweighted"
             control["effective_ml_weight"] = min(
                 configured_weight,
-                float(getattr(ml_cfg, "online_control_downweight_ml_weight", 0.08) or 0.08),
+                float(_coalesce(getattr(ml_cfg, "online_control_downweight_ml_weight", None), 0.08)),
             )
             control["reason"] = "rolling_24h_negative"
             return control
