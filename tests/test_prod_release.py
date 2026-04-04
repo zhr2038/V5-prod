@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import stat
+import subprocess
 from pathlib import Path
 
 from deploy.prod_release import (
     PRODUCTION_USER_UNIT_MAPPINGS,
     iter_production_files,
+    production_snapshot,
     production_sync_relative_paths,
     production_sync_roots,
     render_unit_text,
@@ -97,6 +99,32 @@ def test_iter_production_files_includes_models_directory_contents(tmp_path: Path
         "models/hmm_regime_info.json",
         "models/ml_factor_model.txt",
     ]
+
+
+def test_production_snapshot_uses_head_not_dirty_worktree(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("print('head')\n", encoding="utf-8")
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy" / "install_systemd.sh").write_text("#!/bin/sh\necho head\n", encoding="utf-8")
+    (tmp_path / "scripts").mkdir()
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "codex@example.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Codex"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "add", "main.py", "deploy/install_systemd.sh"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    (tmp_path / "deploy" / "install_systemd.sh").write_text("#!/bin/sh\necho dirty\n", encoding="utf-8")
+    (tmp_path / "scripts" / "untracked.py").write_text("print('dirty')\n", encoding="utf-8")
+
+    with production_snapshot(tmp_path, items=("main.py", "deploy", "scripts")) as snapshot_root:
+        assert (snapshot_root / "main.py").read_text(encoding="utf-8") == "print('head')\n"
+        assert (snapshot_root / "deploy" / "install_systemd.sh").read_text(encoding="utf-8") == "#!/bin/sh\necho head\n"
+        assert not (snapshot_root / "scripts" / "untracked.py").exists()
 
 
 def test_render_unit_text_rewrites_ubuntu_prod_root() -> None:

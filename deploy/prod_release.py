@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import io
+import subprocess
+import tarfile
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator
 
@@ -132,3 +137,62 @@ def render_unit_text(text: str, root: str) -> str:
     if not rendered.endswith("\n"):
         rendered += "\n"
     return rendered
+
+
+def _extract_git_archive(blob: bytes, destination: Path) -> None:
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:") as archive:
+        for member in archive.getmembers():
+            member_path = destination / member.name
+            resolved = member_path.resolve()
+            if destination.resolve() not in resolved.parents and resolved != destination.resolve():
+                raise RuntimeError(f"unsafe archive member: {member.name}")
+        archive.extractall(destination)
+
+
+def _git_existing_items(root: Path, rev: str, items: Iterable[str]) -> tuple[str, ...]:
+    existing: list[str] = []
+    for item in items:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-tree", "--name-only", rev, "--", item],
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(f"git ls-tree failed for {rev}: {stderr.strip()}")
+        if proc.stdout.strip():
+            existing.append(item)
+    return tuple(existing)
+
+
+@contextmanager
+def production_snapshot(
+    workspace_root: Path,
+    *,
+    rev: str = "HEAD",
+    items: Iterable[str] = PRODUCTION_SYNC_ITEMS,
+) -> Iterator[Path]:
+    root = Path(workspace_root).resolve()
+    existing_items = _git_existing_items(root, rev, tuple(items))
+    with tempfile.TemporaryDirectory(prefix="prod-release-") as tmp_dir:
+        snapshot_root = Path(tmp_dir)
+        if not existing_items:
+            yield snapshot_root
+            return
+
+        archive_cmd = [
+            "git",
+            "-C",
+            str(root),
+            "archive",
+            "--format=tar",
+            rev,
+            "--",
+            *existing_items,
+        ]
+        proc = subprocess.run(archive_cmd, capture_output=True, check=False)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(f"git archive failed for {rev}: {stderr.strip()}")
+        _extract_git_archive(proc.stdout, snapshot_root)
+        yield snapshot_root

@@ -20,6 +20,7 @@ except ImportError as exc:  # pragma: no cover - exercised operationally
 
 from deploy.prod_release import (
     iter_production_files,
+    production_snapshot,
     production_sync_relative_paths,
     production_sync_roots,
 )
@@ -248,8 +249,9 @@ def main() -> None:
     try:
         sftp = client.open_sftp()
         _ensure_remote_dir(sftp, args.remote_root)
-        uploaded, skipped, rel_paths = _upload_files(sftp, workspace_root, args.remote_root)
-        pruned = [] if args.no_prune else _prune_remote_files(sftp, workspace_root, args.remote_root)
+        with production_snapshot(workspace_root) as snapshot_root:
+            uploaded, skipped, rel_paths = _upload_files(sftp, snapshot_root, args.remote_root)
+            pruned = [] if args.no_prune else _prune_remote_files(sftp, snapshot_root, args.remote_root)
         sftp.close()
 
         print(f"uploaded_files={uploaded}")
