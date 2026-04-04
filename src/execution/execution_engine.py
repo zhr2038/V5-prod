@@ -67,8 +67,10 @@ class ExecutionEngine:
         """Execute"""
         ts = datetime.utcnow().isoformat() + "Z"
 
-        fee_bps = float(getattr(self.cfg, 'fee_bps', 6.0) or 6.0)
-        slp_bps = float(getattr(self.cfg, 'slippage_bps', 5.0) or 5.0)
+        fee_bps_raw = getattr(self.cfg, 'fee_bps', 6.0)
+        slp_bps_raw = getattr(self.cfg, 'slippage_bps', 5.0)
+        fee_bps = 6.0 if fee_bps_raw is None else float(fee_bps_raw)
+        slp_bps = 5.0 if slp_bps_raw is None else float(slp_bps_raw)
 
         # dry-run: assume execution at signal_price
         for o in order_batch or []:

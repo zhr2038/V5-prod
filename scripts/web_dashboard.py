@@ -1257,6 +1257,77 @@ def _load_reconcile_cash_balance() -> tuple[bool, float]:
     return False, 0.0
 
 
+def _env_flag_enabled(name: str) -> bool:
+    value = str(os.getenv(name, '') or '').strip().lower()
+    return value in {'1', 'true', 'yes', 'on'}
+
+
+def _dashboard_live_account_enabled() -> bool:
+    return _env_flag_enabled('V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT') or _env_flag_enabled('V5_DASHBOARD_ALLOW_LIVE_OKX')
+
+
+def _load_local_account_state() -> Dict[str, float]:
+    db_path = REPORTS_DIR / 'positions.sqlite'
+    if not db_path.exists():
+        return {}
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT cash_usdt, equity_peak_usdt FROM account_state WHERE k='default'")
+        row = cursor.fetchone()
+        conn.close()
+    except Exception:
+        return {}
+
+    if not row:
+        return {}
+
+    return {
+        'cash_usdt': float(row[0] or 0.0),
+        'equity_peak_usdt': float(row[1] or 0.0),
+    }
+
+
+def _load_workspace_exchange_creds() -> tuple[str, str, str]:
+    key = str(os.getenv('EXCHANGE_API_KEY') or '')
+    sec = str(os.getenv('EXCHANGE_API_SECRET') or '')
+    pp = str(os.getenv('EXCHANGE_PASSPHRASE') or '')
+
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(str(WORKSPACE / '.env'))
+        key = key or str(os.getenv('EXCHANGE_API_KEY') or '')
+        sec = sec or str(os.getenv('EXCHANGE_API_SECRET') or '')
+        pp = pp or str(os.getenv('EXCHANGE_PASSPHRASE') or '')
+    except Exception:
+        pass
+
+    if key and sec and pp:
+        return key, sec, pp
+
+    envp = WORKSPACE / '.env'
+    if envp.exists():
+        try:
+            for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
+                if not ln or ln.strip().startswith('#') or '=' not in ln:
+                    continue
+                env_key, env_val = ln.split('=', 1)
+                env_key = env_key.strip()
+                env_val = env_val.strip().strip('"').strip("'")
+                if env_key == 'EXCHANGE_API_KEY' and not key:
+                    key = env_val
+                elif env_key == 'EXCHANGE_API_SECRET' and not sec:
+                    sec = env_val
+                elif env_key == 'EXCHANGE_PASSPHRASE' and not pp:
+                    pp = env_val
+        except Exception:
+            pass
+
+    return key, sec, pp
+
+
 def _static_asset_version(filename: str) -> str:
     asset_path = WEB_DIR / 'static' / Path(filename)
     try:
@@ -1329,16 +1400,12 @@ def api_account():
     try:
         # 优先从OKX获取实时余额
         has_reconcile_cash, cash = _load_reconcile_cash_balance()
+        local_account_state = _load_local_account_state()
         try:
-            import os, time, hmac, hashlib, base64, requests
-            from dotenv import load_dotenv
-            load_dotenv(str(WORKSPACE / '.env'))
-            
-            key = os.getenv('EXCHANGE_API_KEY')
-            sec = os.getenv('EXCHANGE_API_SECRET')
-            pp = os.getenv('EXCHANGE_PASSPHRASE')
-            
-            if (not has_reconcile_cash) and key and sec and pp:
+            import time, hmac, hashlib, base64
+
+            key, sec, pp = _load_workspace_exchange_creds()
+            if (not has_reconcile_cash) and _dashboard_live_account_enabled() and key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
                 msg = ts + 'GET' + path
@@ -1360,18 +1427,8 @@ def api_account():
             print(f"[account] OKX API错误: {e}")
         
         # 如果OKX获取失败，回退到reconcile文件
-        if cash <= 0:
-            reconcile_file = REPORTS_DIR / 'reconcile_status.json'
-            if reconcile_file.exists():
-                try:
-                    with open(reconcile_file, 'r') as f:
-                        reconcile = json.load(f)
-                    cash = (
-                        reconcile.get('exchange_snapshot', {}).get('ccy_cashBal', {}).get('USDT')
-                        or reconcile.get('local_snapshot', {}).get('cash_usdt', 0)
-                    )
-                except Exception:
-                    pass
+        if (not has_reconcile_cash) and cash <= 0:
+            cash = float(local_account_state.get('cash_usdt') or 0.0)
         
         # 获取最新权益 - 排除异常数据
         conn = get_db_connection()
@@ -1450,13 +1507,11 @@ def api_account():
             # 未设置资金上限，使用传统计算方式
             # 从数据库读取峰值
             try:
-                conn2 = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
-                cursor2 = conn2.cursor()
-                cursor2.execute("SELECT equity_peak_usdt FROM account_state WHERE k='default'")
-                row2 = cursor2.fetchone()
-                if row2 and row2[0]:
-                    peak_equity = _sanitize_peak_equity(total_equity, initial_capital, float(row2[0]))
-                conn2.close()
+                local_peak = float(local_account_state.get('equity_peak_usdt') or 0.0)
+                if local_peak > 0:
+                    peak_equity = _sanitize_peak_equity(total_equity, initial_capital, local_peak)
+                else:
+                    peak_equity = max(total_equity, initial_capital)
             except Exception:
                 peak_equity = max(total_equity, initial_capital)
             
@@ -1496,28 +1551,10 @@ def api_trades():
 
         # 0) 优先OKX实时成交
         try:
-            import os, time, hmac, hashlib, base64
-            from dotenv import load_dotenv
-            load_dotenv(str(WORKSPACE / '.env'))
-            key = os.getenv('EXCHANGE_API_KEY')
-            sec = os.getenv('EXCHANGE_API_SECRET')
-            pp = os.getenv('EXCHANGE_PASSPHRASE')
-            if not (key and sec and pp):
-                envp = WORKSPACE / '.env'
-                if envp.exists():
-                    for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
-                        if not ln or ln.strip().startswith('#') or '=' not in ln:
-                            continue
-                        k, v = ln.split('=', 1)
-                        k = k.strip(); v = v.strip().strip('"').strip("'")
-                        if k == 'EXCHANGE_API_KEY' and not key:
-                            key = v
-                        elif k == 'EXCHANGE_API_SECRET' and not sec:
-                            sec = v
-                        elif k == 'EXCHANGE_PASSPHRASE' and not pp:
-                            pp = v
+            import time, hmac, hashlib, base64
 
-            if key and sec and pp:
+            key, sec, pp = _load_workspace_exchange_creds()
+            if _dashboard_live_account_enabled() and key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/trade/fills?limit=100'
                 msg = ts + 'GET' + path
@@ -1733,31 +1770,10 @@ def api_positions():
         # 0) 优先实时OKX余额（与用户手动操作一致）
         okx_error = None
         try:
-            import os, time, hmac, hashlib, base64
-            from dotenv import load_dotenv
-            load_dotenv(str(WORKSPACE / '.env'))
-            key = os.getenv('EXCHANGE_API_KEY')
-            sec = os.getenv('EXCHANGE_API_SECRET')
-            pp = os.getenv('EXCHANGE_PASSPHRASE')
-            # fallback: parse .env manually when process env not populated
-            if not (key and sec and pp):
-                try:
-                    envp = WORKSPACE / '.env'
-                    if envp.exists():
-                        for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
-                            if not ln or ln.strip().startswith('#') or '=' not in ln:
-                                continue
-                            k, v = ln.split('=', 1)
-                            k = k.strip(); v = v.strip().strip('"').strip("'")
-                            if k == 'EXCHANGE_API_KEY' and not key:
-                                key = v
-                            elif k == 'EXCHANGE_API_SECRET' and not sec:
-                                sec = v
-                            elif k == 'EXCHANGE_PASSPHRASE' and not pp:
-                                pp = v
-                except Exception as e:
-                    okx_error = f"env_parse_error: {e}"
-            if key and sec and pp:
+            import time, hmac, hashlib, base64
+
+            key, sec, pp = _load_workspace_exchange_creds()
+            if _dashboard_live_account_enabled() and key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
                 msg = ts + 'GET' + path
@@ -4573,15 +4589,12 @@ def api_health():
         
         # 3. 检查OKX API
         try:
-            import os, time, hmac, hashlib, base64, requests
-            from dotenv import load_dotenv
-            load_dotenv(str(WORKSPACE / '.env'))
-            
-            key = os.getenv('EXCHANGE_API_KEY')
-            sec = os.getenv('EXCHANGE_API_SECRET')
-            pp = os.getenv('EXCHANGE_PASSPHRASE')
-            
-            if key and sec and pp:
+            import time, hmac, hashlib, base64
+
+            key, sec, pp = _load_workspace_exchange_creds()
+            if not _dashboard_live_account_enabled():
+                checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'live检查未启用'})
+            elif key and sec and pp:
                 start = time.time()
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/account/balance'
