@@ -16,11 +16,7 @@ PRODUCTION_SYNC_ITEMS = (
     "event_driven_check.py",
     "requirements.txt",
     "pyproject.toml",
-    "models/ml_factor_model.pkl",
-    "models/ml_factor_model_active.txt",
-    "models/ml_factor_model_config.json",
-    "models/ml_factor_model_gpu_tuned.json",
-    "models/ml_factor_model_gpu_tuned_config.json",
+    "models",
     "configs",
     "deploy",
     "scripts",
@@ -104,6 +100,27 @@ def iter_production_files(workspace_root: Path, items: Iterable[str] = PRODUCTIO
             if path not in seen:
                 seen.add(path)
                 yield path
+
+
+def production_sync_relative_paths(
+    workspace_root: Path,
+    items: Iterable[str] = PRODUCTION_SYNC_ITEMS,
+) -> set[str]:
+    return {
+        path.relative_to(Path(workspace_root).resolve()).as_posix()
+        for path in iter_production_files(workspace_root, items=items)
+    }
+
+
+def production_sync_roots(items: Iterable[str] = PRODUCTION_SYNC_ITEMS) -> tuple[str, ...]:
+    roots: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        root = Path(item).parts[0]
+        if root not in seen:
+            seen.add(root)
+            roots.append(root)
+    return tuple(roots)
 
 
 def render_unit_text(text: str, root: str) -> str:

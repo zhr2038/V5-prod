@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import posixpath
 import shlex
+import stat
 from pathlib import Path
 import sys
 
@@ -16,7 +18,11 @@ try:
 except ImportError as exc:  # pragma: no cover - exercised operationally
     raise SystemExit("missing dependency: paramiko") from exc
 
-from deploy.prod_release import iter_production_files
+from deploy.prod_release import (
+    iter_production_files,
+    production_sync_relative_paths,
+    production_sync_roots,
+)
 
 
 def _remote_join(root: str, rel_path: Path) -> str:
@@ -83,6 +89,48 @@ def _upload_files(sftp: paramiko.SFTPClient, workspace_root: Path, remote_root: 
     return uploaded, skipped, rel_paths
 
 
+def _iter_remote_files(sftp: paramiko.SFTPClient, remote_dir: str) -> list[str]:
+    try:
+        attrs = sftp.listdir_attr(remote_dir)
+    except FileNotFoundError:
+        return []
+
+    files: list[str] = []
+    for attr in attrs:
+        child = posixpath.join(remote_dir.rstrip("/"), attr.filename)
+        if stat.S_ISDIR(int(attr.st_mode)):
+            files.extend(_iter_remote_files(sftp, child))
+        else:
+            files.append(child)
+    return files
+
+
+def _collect_remote_sync_files(sftp: paramiko.SFTPClient, remote_root: str) -> set[str]:
+    remote_files: set[str] = set()
+    normalized_root = remote_root.rstrip("/")
+    for root in production_sync_roots():
+        remote_path = _remote_join(normalized_root, Path(root))
+        try:
+            attr = sftp.stat(remote_path)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISDIR(int(attr.st_mode)):
+            for child in _iter_remote_files(sftp, remote_path):
+                remote_files.add(posixpath.relpath(child, normalized_root))
+        else:
+            remote_files.add(root)
+    return remote_files
+
+
+def _prune_remote_files(sftp: paramiko.SFTPClient, workspace_root: Path, remote_root: str) -> list[str]:
+    expected = production_sync_relative_paths(workspace_root)
+    remote_files = _collect_remote_sync_files(sftp, remote_root)
+    stale = sorted(remote_files - expected)
+    for rel_path in stale:
+        sftp.remove(_remote_join(remote_root, Path(rel_path)))
+    return stale
+
+
 def _run(client: paramiko.SSHClient, command: str) -> tuple[int, str, str]:
     stdin, stdout, stderr = client.exec_command(command)
     out = stdout.read().decode("utf-8", errors="replace")
@@ -139,6 +187,16 @@ def _validate_units(client: paramiko.SSHClient, service_user: str) -> str:
         "&& systemctl --user is-enabled v5-reconcile.timer "
         "&& systemctl --user is-enabled v5-ledger.timer "
         "&& systemctl --user is-enabled v5-cost-rollup-real.user.timer "
+        "&& test \"$(systemctl --user is-active v5-web-dashboard.service)\" = active "
+        "&& test \"$(systemctl --user is-active v5-daily-ml-training.timer)\" = active "
+        "&& test \"$(systemctl --user is-active v5-model-promotion-gate.timer)\" = active "
+        "&& test \"$(systemctl --user is-active v5-sentiment-collect.timer)\" = active "
+        "&& test \"$(systemctl --user is-active v5-auto-risk-eval.timer)\" = active "
+        "&& test \"$(systemctl --user is-active v5-reconcile.timer)\" = active "
+        "&& test \"$(systemctl --user is-active v5-ledger.timer)\" = active "
+        "&& test \"$(systemctl --user is-active v5-cost-rollup-real.user.timer)\" = active "
+        "&& test \"$(systemctl --user is-active v5-prod.user.timer)\" = active "
+        "&& test \"$(systemctl --user is-active v5-event-driven.timer)\" = active "
         "&& systemctl --user show v5-web-dashboard.service --property=UnitFileState,ActiveState "
         "&& systemctl --user show v5-daily-ml-training.timer --property=UnitFileState "
         "&& systemctl --user show v5-model-promotion-gate.timer --property=UnitFileState "
@@ -164,6 +222,7 @@ def main() -> None:
     ap.add_argument("--remote-root", default="/home/admin/clawd/v5-prod")
     ap.add_argument("--service-user", default="admin")
     ap.add_argument("--skip-install", action="store_true")
+    ap.add_argument("--no-prune", action="store_true")
     ap.add_argument("--enable-prod-timer", action="store_true")
     ap.add_argument("--enable-event-driven-timer", action="store_true")
     args = ap.parse_args()
@@ -190,10 +249,12 @@ def main() -> None:
         sftp = client.open_sftp()
         _ensure_remote_dir(sftp, args.remote_root)
         uploaded, skipped, rel_paths = _upload_files(sftp, workspace_root, args.remote_root)
+        pruned = [] if args.no_prune else _prune_remote_files(sftp, workspace_root, args.remote_root)
         sftp.close()
 
         print(f"uploaded_files={uploaded}")
         print(f"skipped_files={skipped}")
+        print(f"pruned_files={len(pruned)}")
         if rel_paths:
             print(f"first_file={rel_paths[0]}")
             print(f"last_file={rel_paths[-1]}")
