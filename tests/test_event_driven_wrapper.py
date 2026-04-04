@@ -8,6 +8,7 @@ from event_driven_check import (
     _load_positions_snapshot,
     find_latest_decision_audit_file,
     load_current_state,
+    run_event_param_scan,
     should_bypass_live_trigger_throttle,
 )
 from src.execution.event_driven_integration import create_event_driven_trader
@@ -192,6 +193,73 @@ def test_event_driven_trader_build_market_state_reorders_stale_selected_symbols(
     )
 
     assert market_state.selected_symbols == ["MON/USDT", "ETH/USDT", "BTC/USDT"]
+
+
+def test_event_driven_trader_uses_custom_state_paths(tmp_path):
+    monitor_state = tmp_path / "scan_monitor_state.json"
+    cooldown_state = tmp_path / "scan_cooldown_state.json"
+
+    trader = create_event_driven_trader(
+        {
+            "enabled": True,
+            "monitor_state_path": str(monitor_state),
+            "cooldown_state_path": str(cooldown_state),
+        }
+    )
+
+    assert trader.monitor.config.state_path == str(monitor_state)
+    assert trader.cooldown.config.state_path == str(cooldown_state)
+
+
+def test_run_event_param_scan_does_not_touch_live_state_files(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    monitor_state = reports_dir / "event_monitor_state.json"
+    cooldown_state = reports_dir / "cooldown_state.json"
+    monitor_payload = '{"sentinel":"monitor"}'
+    cooldown_payload = '{"sentinel":"cooldown"}'
+    monitor_state.write_text(monitor_payload, encoding="utf-8")
+    cooldown_state.write_text(cooldown_payload, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    state = {
+        "timestamp_ms": 2_000,
+        "regime": "TRENDING_UP",
+        "prices": {"BTC/USDT": 105.0},
+        "positions": {},
+        "signals": {
+            "BTC/USDT": {
+                "symbol": "BTC/USDT",
+                "direction": "buy",
+                "score": 0.9,
+                "rank": 1,
+                "timestamp_ms": 2_000,
+            }
+        },
+        "selected_symbols": ["BTC/USDT"],
+    }
+    last_state = {
+        "timestamp_ms": 1_000,
+        "regime": "SIDEWAYS",
+        "prices": {"BTC/USDT": 100.0},
+        "positions": {},
+        "signals": {
+            "BTC/USDT": {
+                "symbol": "BTC/USDT",
+                "direction": "sell",
+                "score": 0.2,
+                "rank": 4,
+                "timestamp_ms": 1_000,
+            }
+        },
+        "selected_symbols": [],
+    }
+
+    result = run_event_param_scan(state, last_state, {})
+
+    assert result["count"] == 72
+    assert monitor_state.read_text(encoding="utf-8") == monitor_payload
+    assert cooldown_state.read_text(encoding="utf-8") == cooldown_payload
 
 
 def test_risk_close_actions_bypass_live_trigger_throttle():

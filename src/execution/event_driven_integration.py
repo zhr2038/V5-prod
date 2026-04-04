@@ -21,6 +21,8 @@ class EventDrivenConfig:
     """Configuration for event-driven trading."""
     enabled: bool = True
     check_interval_minutes: int = 15
+    monitor_state_path: str = "reports/event_monitor_state.json"
+    cooldown_state_path: str = "reports/cooldown_state.json"
     
     # Cooldown settings
     global_cooldown_p2_minutes: int = 30
@@ -57,7 +59,8 @@ class EventDrivenTrader:
         self.cooldown = CooldownManager(CooldownConfig(
             global_cooldown_p2_seconds=self.config.global_cooldown_p2_minutes * 60,
             symbol_cooldown_seconds=self.config.symbol_cooldown_minutes * 60,
-            signal_confirmation_periods=self.config.signal_confirmation_periods
+            signal_confirmation_periods=self.config.signal_confirmation_periods,
+            state_path=str(self.config.cooldown_state_path),
         ))
         
         self.monitor = EventMonitor(EventMonitorConfig(
@@ -65,7 +68,8 @@ class EventDrivenTrader:
             rank_jump_threshold=self.config.rank_jump_threshold,
             breakout_lookback_hours=self.config.breakout_lookback_hours,
             breakout_threshold_pct=self.config.breakout_threshold_pct,
-            heartbeat_interval_hours=self.config.heartbeat_interval_hours
+            heartbeat_interval_hours=self.config.heartbeat_interval_hours,
+            state_path=str(self.config.monitor_state_path),
         ))
         
         self.engine = EventDecisionEngine(
@@ -176,6 +180,8 @@ def create_event_driven_trader(cfg: Optional[Dict] = None) -> EventDrivenTrader:
     config = EventDrivenConfig(
         enabled=cfg.get('enabled', True),
         check_interval_minutes=cfg.get('check_interval_minutes', 15),
+        monitor_state_path=cfg.get('monitor_state_path', 'reports/event_monitor_state.json'),
+        cooldown_state_path=cfg.get('cooldown_state_path', 'reports/cooldown_state.json'),
         global_cooldown_p2_minutes=cfg.get('global_cooldown_p2_minutes', 30),
         symbol_cooldown_minutes=cfg.get('symbol_cooldown_minutes', 60),
         signal_confirmation_periods=cfg.get('signal_confirmation_periods', 2),

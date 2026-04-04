@@ -11,6 +11,7 @@ import json
 import time
 import logging
 import subprocess
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -750,40 +751,47 @@ def run_event_param_scan(state: dict, last_state: dict, ev_cfg: dict):
         lg.setLevel(logging.WARNING)
 
     try:
-        for sct in [0.25, 0.30, 0.35, 0.45]:
-            for rjt in [3, 4, 5]:
-                for scp in [2, 3]:
-                    for btp in [0.3, 0.5, 0.8]:
-                        cfg_i = dict(base)
-                        cfg_i.update({
-                            'score_change_threshold': float(sct),
-                            'rank_jump_threshold': int(rjt),
-                            'signal_confirmation_periods': int(scp),
-                            'breakout_threshold_pct': float(btp),
-                        })
-                        trader_i = create_event_driven_trader(cfg_i)
-                        res_i = trader_i.should_trade(state, last_state)
-                        actions_n = len(res_i.get('actions') or [])
-                        events_n = int(res_i.get('events_processed', 0) or 0)
-                        blocked_n = int(res_i.get('events_blocked', 0) or 0)
-                        score = actions_n * 5 + events_n - blocked_n * 2
-                        # soft penalty for over-loose settings
-                        score -= abs(float(sct) - float(base['score_change_threshold'])) * 5
-                        score -= abs(float(btp) - float(base['breakout_threshold_pct'])) * 2
+        with tempfile.TemporaryDirectory(prefix="v5_event_param_scan_") as temp_dir:
+            temp_root = Path(temp_dir)
+            candidate_idx = 0
+            for sct in [0.25, 0.30, 0.35, 0.45]:
+                for rjt in [3, 4, 5]:
+                    for scp in [2, 3]:
+                        for btp in [0.3, 0.5, 0.8]:
+                            candidate_idx += 1
+                            cfg_i = dict(base)
+                            cfg_i.update({
+                                'score_change_threshold': float(sct),
+                                'rank_jump_threshold': int(rjt),
+                                'signal_confirmation_periods': int(scp),
+                                'breakout_threshold_pct': float(btp),
+                                # Keep exploratory scans isolated from live persisted state.
+                                'monitor_state_path': str(temp_root / f"event_monitor_state_{candidate_idx}.json"),
+                                'cooldown_state_path': str(temp_root / f"cooldown_state_{candidate_idx}.json"),
+                            })
+                            trader_i = create_event_driven_trader(cfg_i)
+                            res_i = trader_i.should_trade(state, last_state)
+                            actions_n = len(res_i.get('actions') or [])
+                            events_n = int(res_i.get('events_processed', 0) or 0)
+                            blocked_n = int(res_i.get('events_blocked', 0) or 0)
+                            score = actions_n * 5 + events_n - blocked_n * 2
+                            # soft penalty for over-loose settings
+                            score -= abs(float(sct) - float(base['score_change_threshold'])) * 5
+                            score -= abs(float(btp) - float(base['breakout_threshold_pct'])) * 2
 
-                        grid.append({
-                            'params': {
-                                'score_change_threshold': sct,
-                                'rank_jump_threshold': rjt,
-                                'signal_confirmation_periods': scp,
-                                'breakout_threshold_pct': btp,
-                            },
-                            'actions': actions_n,
-                            'events_processed': events_n,
-                            'events_blocked': blocked_n,
-                            'should_trade': bool(res_i.get('should_trade', False)),
-                            'fitness': round(score, 4),
-                        })
+                            grid.append({
+                                'params': {
+                                    'score_change_threshold': sct,
+                                    'rank_jump_threshold': rjt,
+                                    'signal_confirmation_periods': scp,
+                                    'breakout_threshold_pct': btp,
+                                },
+                                'actions': actions_n,
+                                'events_processed': events_n,
+                                'events_blocked': blocked_n,
+                                'should_trade': bool(res_i.get('should_trade', False)),
+                                'fitness': round(score, 4),
+                            })
     finally:
         for n in noisy_names:
             logging.getLogger(n).setLevel(old_levels.get(n, logging.INFO))
