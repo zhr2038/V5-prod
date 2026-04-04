@@ -967,7 +967,12 @@ def main() -> None:
 
                 # reconcile + export
                 try:
-                    rec = FillReconciler(fill_store=fs, order_store=getattr(exec_engine, "order_store", None) or order_store, okx=client)
+                    rec = FillReconciler(
+                        fill_store=fs,
+                        order_store=getattr(exec_engine, "order_store", None) or order_store,
+                        okx=client,
+                        position_store=getattr(exec_engine, "position_store", None),
+                    )
                     rec.reconcile(limit=2000, max_get_order_per_run=10)
                 except Exception:
                     pass

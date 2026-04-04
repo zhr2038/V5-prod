@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.execution.fill_store import FillStore
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.order_store import OrderStore
+from src.execution.position_store import PositionStore
 
 
 log = logging.getLogger(__name__)
@@ -47,10 +48,63 @@ class FillReconciler:
     - Uses FillStore.fill_processed (S1) to ensure each (inst_id, trade_id) is processed once.
     """
 
-    def __init__(self, *, fill_store: FillStore, order_store: OrderStore, okx: Optional[OKXPrivateClient] = None):
+    def __init__(
+        self,
+        *,
+        fill_store: FillStore,
+        order_store: OrderStore,
+        okx: Optional[OKXPrivateClient] = None,
+        position_store: Optional[PositionStore] = None,
+    ):
         self.fill_store = fill_store
         self.order_store = order_store
         self.okx = okx
+        self.position_store = position_store
+
+    def _apply_position_delta(self, row, agg: FillAgg) -> None:
+        if self.position_store is None:
+            return
+        if agg.acc_fill_sz <= 0:
+            return
+
+        side = str(row.side or "").lower()
+        if side not in {"buy", "sell"}:
+            return
+
+        symbol = str(row.inst_id).replace("-", "/")
+        base_ccy = str(row.inst_id).split("-")[0].upper()
+        base_fee = agg.fees_by_ccy.get(base_ccy, Decimal("0"))
+
+        if side == "buy":
+            delta_qty = agg.acc_fill_sz + base_fee
+            if delta_qty <= 0:
+                return
+            fill_px = float(agg.vwap_px) if agg.vwap_px is not None else 0.0
+            if fill_px <= 0:
+                return
+            self.position_store.upsert_buy(symbol, qty=float(delta_qty), px=fill_px)
+            return
+
+        delta_qty = -agg.acc_fill_sz + base_fee
+        if delta_qty >= 0:
+            return
+
+        p = self.position_store.get(symbol)
+        if p is None:
+            log.warning("partial sell fill arrived for missing local position: %s", symbol)
+            return
+
+        new_qty = max(0.0, float(p.qty) + float(delta_qty))
+        if new_qty <= 0:
+            self.position_store.close_long(symbol)
+            try:
+                from src.execution.live_execution_engine import clear_risk_state_on_full_close
+
+                clear_risk_state_on_full_close(symbol)
+            except Exception:
+                pass
+        else:
+            self.position_store.set_qty(symbol, qty=new_qty)
 
     def _load_unprocessed_fills(self, limit: int = 2000) -> List[Dict[str, Any]]:
         return self.fill_store.list_unprocessed(limit=limit)
@@ -119,6 +173,7 @@ class FillReconciler:
                 continue
 
             clid = str(row.cl_ord_id)
+            row_state_before = str(row.state or "").upper()
 
             # Always at least PARTIAL if fill exists
             fee_json = json.dumps({k: str(v) for k, v in a.fees_by_ccy.items()}, ensure_ascii=False, separators=(",", ":"))
@@ -130,6 +185,8 @@ class FillReconciler:
                 fee=fee_json if a.fees_by_ccy else None,
                 event_type="FILL_AGG",
             )
+            if row_state_before != "FILLED":
+                self._apply_position_delta(row, a)
             updated += 1
 
             # Confirm terminal state via get_order when possible

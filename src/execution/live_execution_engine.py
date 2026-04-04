@@ -276,8 +276,8 @@ class LiveExecutionEngine:
     - idempotency anchored on clOrdId + OrderStore
     - strict gate: if kill-switch or reconcile not ok => SELL_ONLY
 
-    Note: This engine does not yet handle partial fills inventory accounting.
-    It focuses on idempotent submission & observability.
+    Note: partial-fill inventory sync relies on FillReconciler in poll_open/main.
+    This engine focuses on idempotent submission & observability at submit time.
     """
 
     def __init__(
@@ -1125,7 +1125,7 @@ class LiveExecutionEngine:
             from src.execution.fill_reconciler import FillReconciler
 
             fs = FillStore(path="reports/fills.sqlite")
-            rec = FillReconciler(fill_store=fs, order_store=self.order_store, okx=self.okx)
+            rec = FillReconciler(fill_store=fs, order_store=self.order_store, okx=self.okx, position_store=self.position_store)
             rec.reconcile(limit=2000, max_get_order_per_run=20)
         except Exception:
             pass
