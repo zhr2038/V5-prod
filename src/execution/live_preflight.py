@@ -156,7 +156,7 @@ class LivePreflight:
         th = ReconcileThresholds(
             abs_usdt_tol=float(getattr(self.cfg, "reconcile_abs_usdt_tol", 50.0)),
             abs_base_tol=1e-6,
-            dust_usdt_ignore=float(getattr(self.cfg, "reconcile_dust_usdt_ignore", 5.0) or 5.0),
+            dust_usdt_ignore=float(_coalesce(getattr(self.cfg, "reconcile_dust_usdt_ignore", None), 5.0)),
         )
         eng = ReconcileEngine(
             okx=self.okx,
