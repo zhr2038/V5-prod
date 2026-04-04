@@ -9,7 +9,13 @@ from configs.schema import AlphaConfig, RiskConfig
 from src.alpha.alpha_engine import AlphaEngine
 from src.core.models import MarketSeries
 from src.portfolio.portfolio_engine import PortfolioEngine
-from src.strategy.multi_strategy_system import Alpha6FactorStrategy, MultiStrategyAdapter, Signal, StrategyOrchestrator
+from src.strategy.multi_strategy_system import (
+    Alpha6FactorStrategy,
+    MeanReversionStrategy,
+    MultiStrategyAdapter,
+    Signal,
+    StrategyOrchestrator,
+)
 
 
 def _series(symbol: str) -> MarketSeries:
@@ -474,3 +480,100 @@ def test_multi_strategy_snapshot_exposes_alpha6_factor_telemetry():
     assert snapshot.telemetry_scores["HYPE/USDT"] == pytest.approx(-0.22)
     assert snapshot.raw_factors["FLOW/USDT"]["f1_mom_5d"] == pytest.approx(0.60)
     assert snapshot.z_factors["HYPE/USDT"]["f2_mom_20d"] == pytest.approx(0.30)
+
+
+def test_mean_reversion_strategy_respects_zero_volume_dry_ratio(monkeypatch):
+    strategy = MeanReversionStrategy(
+        config={
+            "volume_dry_ratio": 0.0,
+            "buy_score_multiplier": 1.0,
+            "mean_rev_threshold": 0.02,
+            "rsi_oversold": 30,
+        }
+    )
+    market_df = pd.DataFrame(
+        {
+            "symbol": ["FLOW/USDT"] * 20,
+            "close": [100.0] * 19 + [90.0],
+            "high": [101.0] * 20,
+            "low": [89.0] * 20,
+            "volume": [10.0] * 19 + [5.0],
+        }
+    )
+
+    monkeypatch.setattr(strategy, "_calculate_rsi", lambda closes, period: pd.Series([20.0] * len(closes), index=closes.index))
+    monkeypatch.setattr(
+        strategy,
+        "_calculate_bollinger",
+        lambda df: (
+            pd.Series([110.0] * len(df), index=df.index),
+            pd.Series([100.0] * len(df), index=df.index),
+            pd.Series([90.0] * len(df), index=df.index),
+        ),
+    )
+
+    signals = strategy.generate_signals(market_df)
+
+    assert signals == []
+
+
+def test_mean_reversion_strategy_respects_zero_buy_score_multiplier(monkeypatch):
+    strategy = MeanReversionStrategy(
+        config={
+            "volume_dry_ratio": 0.8,
+            "buy_score_multiplier": 0.0,
+            "mean_rev_threshold": 0.02,
+            "rsi_oversold": 30,
+        }
+    )
+    market_df = pd.DataFrame(
+        {
+            "symbol": ["FLOW/USDT"] * 20,
+            "close": [100.0] * 19 + [90.0],
+            "high": [101.0] * 20,
+            "low": [89.0] * 20,
+            "volume": [10.0] * 19 + [5.0],
+        }
+    )
+
+    monkeypatch.setattr(strategy, "_calculate_rsi", lambda closes, period: pd.Series([20.0] * len(closes), index=closes.index))
+    monkeypatch.setattr(
+        strategy,
+        "_calculate_bollinger",
+        lambda df: (
+            pd.Series([110.0] * len(df), index=df.index),
+            pd.Series([100.0] * len(df), index=df.index),
+            pd.Series([90.0] * len(df), index=df.index),
+        ),
+    )
+
+    signals = strategy.generate_signals(market_df)
+
+    assert len(signals) == 1
+    assert signals[0].symbol == "FLOW/USDT"
+    assert signals[0].score == pytest.approx(0.0)
+    assert signals[0].metadata["side_weight_multiplier"] == pytest.approx(0.0)
+
+
+def test_alpha6_strategy_respects_zero_alpha158_blend_weight():
+    strategy = Alpha6FactorStrategy(
+        config={
+            "use_sentiment": False,
+            "alpha158_enabled": True,
+            "alpha158_blend_weight": 0.0,
+            "weights": {
+                "f1_mom_5d": 1.0,
+                "f6_corr_pv_10": 1.0,
+            },
+        }
+    )
+
+    score = strategy._calculate_score(
+        {
+            "f1_mom_5d": 2.0,
+            "f6_corr_pv_10": 100.0,
+        },
+        strategy.factor_weights,
+    )
+
+    assert score == pytest.approx(2.0)

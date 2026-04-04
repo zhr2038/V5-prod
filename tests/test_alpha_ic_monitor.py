@@ -88,3 +88,44 @@ def test_alpha6_dynamic_ic_weighting_downweights_negative_factors_without_flippi
 
     assert weights["f1_mom_5d"] > 0.0
     assert weights["f2_mom_20d"] > weights["f1_mom_5d"]
+
+
+def test_alpha6_dynamic_ic_weighting_respects_zero_min_abs_ic(tmp_path):
+    ic_path = tmp_path / "alpha_ic_monitor.json"
+    ic_path.write_text(
+        json.dumps(
+            {
+                "factor_ic": {
+                    "f1_mom_5d": {
+                        "rank_ic_short": {"mean": 0.001, "count": 16},
+                        "rank_ic_long": {"mean": 0.001, "count": 32},
+                    },
+                    "f2_mom_20d": {
+                        "rank_ic_short": {"mean": 0.0, "count": 16},
+                        "rank_ic_long": {"mean": 0.0, "count": 32},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    strategy = Alpha6FactorStrategy(
+        config={
+            "weights": {
+                "f1_mom_5d": 1.0,
+                "f2_mom_20d": 1.0,
+            },
+            "use_sentiment": False,
+            "alpha158_enabled": False,
+            "dynamic_ic_weighting": {
+                "enabled": True,
+                "ic_monitor_path": str(ic_path),
+                "min_abs_ic": 0.0,
+            },
+        }
+    )
+
+    weights = strategy._resolve_dynamic_weights(strategy.factor_weights)
+
+    assert weights["f1_mom_5d"] > weights["f2_mom_20d"]

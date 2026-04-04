@@ -23,6 +23,10 @@ from pathlib import Path
 from src.alpha.qlib_factors import compute_alpha158_style_factors
 
 
+def _coalesce(value: Any, default: Any) -> Any:
+    return default if value is None else value
+
+
 class StrategyType(Enum):
     """策略类型"""
     TREND_FOLLOWING = "trend"           # 趋势跟踪
@@ -278,12 +282,12 @@ class MeanReversionStrategy(BaseStrategy):
             overbought = latest['rsi'] > self.config['rsi_overbought'] and deviation > self.config['mean_rev_threshold']
             
             # 成交量萎缩
-            volume_dry_ratio = float(self.config.get('volume_dry_ratio', 0.8) or 0.8)
+            volume_dry_ratio = float(_coalesce(self.config.get('volume_dry_ratio', 0.8), 0.8))
             volume_dry_up = latest['volume'] < latest['volume_ma'] * volume_dry_ratio
             
             if oversold and volume_dry_up:
                 score = (self.config['rsi_oversold'] - latest['rsi']) / self.config['rsi_oversold']
-                score *= float(self.config.get('buy_score_multiplier', 1.0) or 1.0)
+                score *= float(_coalesce(self.config.get('buy_score_multiplier', 1.0), 1.0))
                 score = min(max(score, 0.0), 1.0)
                 signal = Signal(
                     symbol=symbol,
@@ -297,7 +301,9 @@ class MeanReversionStrategy(BaseStrategy):
                         'deviation': deviation,
                         'bb_lower': latest['bb_lower'],
                         'volume_dry_ratio': volume_dry_ratio,
-                        'side_weight_multiplier': float(self.config.get('buy_score_multiplier', 1.0) or 1.0),
+                        'side_weight_multiplier': float(
+                            _coalesce(self.config.get('buy_score_multiplier', 1.0), 1.0)
+                        ),
                     }
                 )
                 signals.append(signal)
@@ -305,7 +311,7 @@ class MeanReversionStrategy(BaseStrategy):
             
             elif overbought and volume_dry_up:
                 score = (latest['rsi'] - self.config['rsi_overbought']) / (100 - self.config['rsi_overbought'])
-                score *= float(self.config.get('sell_score_multiplier', 1.0) or 1.0)
+                score *= float(_coalesce(self.config.get('sell_score_multiplier', 1.0), 1.0))
                 score = min(max(score, 0.0), 1.0)
                 signal = Signal(
                     symbol=symbol,
@@ -319,7 +325,9 @@ class MeanReversionStrategy(BaseStrategy):
                         'deviation': deviation,
                         'bb_upper': latest['bb_upper'],
                         'volume_dry_ratio': volume_dry_ratio,
-                        'side_weight_multiplier': float(self.config.get('sell_score_multiplier', 1.0) or 1.0),
+                        'side_weight_multiplier': float(
+                            _coalesce(self.config.get('sell_score_multiplier', 1.0), 1.0)
+                        ),
                     }
                 )
                 signals.append(signal)
@@ -461,7 +469,7 @@ class Alpha6FactorStrategy(BaseStrategy):
             if not isinstance(factor_ic, dict):
                 return dict(static_weights)
 
-            min_abs_ic = float(cfg.get('min_abs_ic', 0.003) or 0.003)
+            min_abs_ic = float(_coalesce(cfg.get('min_abs_ic', 0.003), 0.003))
             dyn: Dict[str, float] = {}
             for k in static_weights.keys():
                 rec = factor_ic.get(k) or {}
@@ -732,7 +740,7 @@ class Alpha6FactorStrategy(BaseStrategy):
             ov_score = 0.0
             for k in ov_keys:
                 ov_score += float(resolved_weights.get(k, 0.0)) * float(z_factors.get(k, 0.0))
-            blend = float(self.config.get('alpha158_blend_weight', 0.35) or 0.35)
+            blend = float(_coalesce(self.config.get('alpha158_blend_weight', 0.35), 0.35))
             blend = float(max(0.0, min(1.0, blend)))
             return (1.0 - blend) * base_score + blend * ov_score
 
