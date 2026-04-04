@@ -1955,7 +1955,7 @@ class V5Pipeline:
                 tw_eps = float(_coalesce(getattr(self.cfg.rebalance, "close_only_weight_eps", None), 0.001))
                 if abs(float(tw)) <= tw_eps and abs(float(cw)) > tw_eps:
                     # 清仓模式：死区大幅降低，确保能卖出
-                    cm = float(getattr(self.cfg.rebalance, "close_only_deadband_multiplier", 0.1) or 0.1)  # 0.5->0.1
+                    cm = float(_coalesce(getattr(self.cfg.rebalance, "close_only_deadband_multiplier", None), 0.1))
                     effective_deadband = min(float(effective_deadband), float(deadband) * float(cm))
                     if audit:
                         audit.add_note(f"Close-only: {sym} tw≈0, deadband {deadband}→{effective_deadband:.3f} (force exit)")
