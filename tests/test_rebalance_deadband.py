@@ -278,3 +278,52 @@ def test_close_only_deadband_multiplier_zero_respected_for_tiny_close_only_posit
     assert out.orders[0].symbol == "SOL/USDT"
     assert out.orders[0].side == "sell"
     assert audit.rebalance_effective_deadband_by_symbol["SOL/USDT"] == pytest.approx(0.0)
+
+
+def test_zero_dust_thresholds_allow_tiny_position_cleanup(tmp_path):
+    cfg = AppConfig(symbols=["SOL/USDT", "BTC/USDT"])
+    cfg.rebalance.deadband_sideways = 0.03
+    cfg.rebalance.deadband_trending = 0.03
+    cfg.rebalance.deadband_riskoff = 0.03
+    cfg.execution.dust_qty_threshold = 0.0
+    cfg.execution.dust_value_threshold = 0.0
+    cfg.budget.min_trade_notional_base = 0.0
+    cfg.budget.exchange_min_notional_enabled = False
+    cfg.alpha.use_fused_score_for_weighting = False
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={},
+        selected=[],
+        volatilities={},
+        notes="",
+    )
+
+    md = {"SOL/USDT": _series("SOL/USDT", 1.0), "BTC/USDT": _series("BTC/USDT", 100.0)}
+    positions = [
+        Position(
+            symbol="SOL/USDT",
+            qty=0.1,
+            avg_px=1.0,
+            entry_ts="t",
+            highest_px=1.0,
+            last_update_ts="t",
+            last_mark_px=1.0,
+            unrealized_pnl_pct=0.0,
+        )
+    ]
+    audit = DecisionAudit(run_id="dust-threshold-zero")
+
+    out = pipe.run(
+        market_data_1h=md,
+        positions=positions,
+        cash_usdt=0.9,
+        equity_peak_usdt=1.0,
+        audit=audit,
+        precomputed_regime=_sideways_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "SOL/USDT"
+    assert out.orders[0].side == "sell"
+    assert not any("Dust filter: SOL/USDT" in str(note) for note in audit.notes)

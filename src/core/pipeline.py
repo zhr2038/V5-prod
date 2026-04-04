@@ -1827,8 +1827,8 @@ class V5Pipeline:
         # Small-account-safe dust thresholds:
         # - value threshold is primary
         # - qty threshold only applies to tiny-value positions (to avoid wiping valid low-price holdings)
-        DUST_QTY_THRESHOLD = float(getattr(self.cfg.execution, 'dust_qty_threshold', 1e-6) or 1e-6)
-        DUST_VALUE_THRESHOLD = float(getattr(self.cfg.execution, 'dust_value_threshold', 0.5) or 0.5)
+        DUST_QTY_THRESHOLD = float(_coalesce(getattr(self.cfg.execution, 'dust_qty_threshold', None), 1e-6))
+        DUST_VALUE_THRESHOLD = float(_coalesce(getattr(self.cfg.execution, 'dust_value_threshold', None), 0.5))
 
         if equity > 0:
             for p in positions:
