@@ -1347,3 +1347,42 @@ def test_api_positions_does_not_fallback_to_sqlite_when_reconcile_snapshot_confi
         payload = module.api_positions().get_json()
 
     assert payload["positions"] == []
+
+
+def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "_load_reconcile_cash_balance", lambda: (True, 100.0))
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": []}))
+
+    conn = sqlite3.connect(str(tmp_path / "orders.sqlite"))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+            inst_id TEXT,
+            side TEXT,
+            notional_usdt REAL,
+            fee TEXT,
+            state TEXT,
+            avg_px TEXT
+        )
+        """
+    )
+    cur.executemany(
+        "INSERT INTO orders(inst_id, side, notional_usdt, fee, state, avg_px) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            ("BTC-USDT", "buy", 100.0, '{"BTC":"-0.001"}', "FILLED", "50000"),
+            ("BTC-USDT", "sell", 120.0, "0", "FILLED", "50000"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    with module.app.app_context():
+        payload = module.api_account().get_json()
+
+    assert payload["total_trades"] == 2
+    assert payload["total_fees"] == pytest.approx(-50.0)
+    assert payload["realized_pnl"] == pytest.approx(-30.0)

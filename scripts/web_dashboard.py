@@ -996,6 +996,77 @@ def get_db_connection():
     return None
 
 
+def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> float:
+    raw = str(raw_fee or '').strip()
+    if not raw:
+        return 0.0
+
+    try:
+        return float(raw)
+    except Exception:
+        pass
+
+    try:
+        fee_map = json.loads(raw)
+    except Exception:
+        return 0.0
+    if not isinstance(fee_map, dict):
+        return 0.0
+
+    inst = str(inst_id or '').upper()
+    if '-' in inst:
+        base_ccy, quote_ccy = inst.split('-', 1)
+    else:
+        base_ccy = inst.split('/', 1)[0]
+        quote_ccy = 'USDT'
+
+    px = float(avg_px or 0.0)
+    total_fee_usdt = 0.0
+    for ccy, value in fee_map.items():
+        try:
+            fee_val = float(value or 0.0)
+        except Exception:
+            continue
+        ccy_u = str(ccy or '').upper()
+        if ccy_u == quote_ccy:
+            total_fee_usdt += fee_val
+        elif ccy_u == base_ccy and px > 0:
+            total_fee_usdt += fee_val * px
+    return total_fee_usdt
+
+
+def _load_total_fees_from_orders(*, excluded_inst_ids: Optional[List[str]] = None, max_notional_usdt: float = 1000.0, reports_dir: Optional[Path] = None) -> float:
+    orders_db = (reports_dir or REPORTS_DIR) / 'orders.sqlite'
+    if not orders_db.exists():
+        return 0.0
+
+    excluded = [str(x) for x in (excluded_inst_ids or [])]
+    placeholders = ','.join(['?' for _ in excluded]) if excluded else ''
+    sql = """
+        SELECT inst_id, avg_px, fee
+        FROM orders
+        WHERE state='FILLED' AND notional_usdt < ?
+    """
+    params: List[Any] = [float(max_notional_usdt)]
+    if excluded:
+        sql += f" AND inst_id NOT IN ({placeholders})"
+        params.extend(excluded)
+
+    try:
+        conn = sqlite3.connect(str(orders_db))
+        cur = conn.cursor()
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return 0.0
+
+    total = 0.0
+    for inst_id, avg_px, fee in rows:
+        total += _signed_fee_usdt_from_order_fee(str(inst_id or ''), avg_px, fee)
+    return total
+
+
 def _to_inst_id(symbol: str, quote_ccy: str = 'USDT') -> str:
     raw = str(symbol or '').strip().upper()
     if not raw:
@@ -1291,8 +1362,7 @@ def api_account():
                 SELECT 
                     SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) as total_trades,
                     SUM(CASE WHEN side='buy' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_buy,
-                    SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell,
-                    SUM(CASE WHEN state='FILLED' THEN fee ELSE 0 END) as total_fees
+                    SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell
                 FROM orders
                 WHERE inst_id NOT IN ({placeholders})
                 AND notional_usdt < 1000  -- 排除异常大额
@@ -1304,7 +1374,10 @@ def api_account():
             total_trades = row[0] or 0
             total_buy = row[1] or 0
             total_sell = row[2] or 0
-            total_fees = row[3] or 0
+            total_fees = _load_total_fees_from_orders(
+                excluded_inst_ids=EXCLUDED_SYMBOLS,
+                max_notional_usdt=1000.0,
+            )
             
             # 计算已实现盈亏
             realized_pnl = float(total_sell) - float(total_buy) + float(total_fees)
