@@ -488,6 +488,9 @@ class LiveExecutionEngine:
             # Spot market buy: submit quote notional in USDT
             # OKX expects plain decimal string
             from decimal import Decimal
+            buy_budget_allowed: Optional[float] = None
+            buy_budget_avail_quote: Optional[float] = None
+            buy_budget_reserve = 0.0
 
             # Rank-exit re-entry cooldown: after FILLED rank_exit sell, delay OPEN_LONG re-entry.
             if str(o.intent or "").upper() == "OPEN_LONG":
@@ -539,18 +542,14 @@ class LiveExecutionEngine:
                     if self._buy_quote_budget_remaining is None:
                         self._buy_quote_budget_remaining = max(0.0, float(avail_quote) - float(reserve))
 
-                    allowed = max(0.0, float(self._buy_quote_budget_remaining))
-                    if float(notional) > allowed * (1.0 + max(0.0, slack)):
+                    buy_budget_allowed = max(0.0, float(self._buy_quote_budget_remaining))
+                    buy_budget_avail_quote = float(avail_quote)
+                    buy_budget_reserve = float(reserve)
+                    if float(notional) > buy_budget_allowed * (1.0 + max(0.0, slack)):
                         raise ValueError(
                             f"NO_BORROW_BUY_BLOCK: notional={float(notional):.6f} exceeds "
-                            f"quote_budget={allowed:.6f} {quote_ccy}"
+                            f"quote_budget={buy_budget_allowed:.6f} {quote_ccy}"
                         )
-
-                    self._buy_quote_budget_remaining = max(0.0, allowed - float(notional))
-                    log.info(
-                        "BUY_QUOTE_GUARD pass: notional=%.6f avail=%.6f reserve=%.6f remain=%.6f",
-                        float(notional), float(avail_quote), float(reserve), float(self._buy_quote_budget_remaining),
-                    )
 
             # Pre-check against minSz using signal price estimate to avoid predictable rejects.
             specs = OKXSpotInstrumentsCache().get_spec(inst_id)
@@ -565,6 +564,16 @@ class LiveExecutionEngine:
                         min_sz=float(specs.min_sz),
                         lot_sz=float(specs.lot_sz or 0.0),
                     )
+
+            if buy_budget_allowed is not None:
+                self._buy_quote_budget_remaining = max(0.0, float(buy_budget_allowed) - float(notional))
+                log.info(
+                    "BUY_QUOTE_GUARD pass: notional=%.6f avail=%.6f reserve=%.6f remain=%.6f",
+                    float(notional),
+                    float(buy_budget_avail_quote or 0.0),
+                    float(buy_budget_reserve),
+                    float(self._buy_quote_budget_remaining),
+                )
 
             payload["sz"] = format(Decimal(str(notional)), "f")
             payload["tgtCcy"] = "quote_ccy"
