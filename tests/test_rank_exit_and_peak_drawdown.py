@@ -197,6 +197,28 @@ def test_peak_drawdown_exit_generates_partial_sell_order(tmp_path):
     assert order.meta["reason"].startswith("profit_partial_peak_drawdown_8pct")
 
 
+def test_peak_drawdown_config_preserves_zero_values(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.peak_drawdown_exit.enabled = True
+    cfg.execution.peak_drawdown_exit.tier1_profit_pct = 0.0
+    cfg.execution.peak_drawdown_exit.tier1_retrace_pct = 0.0
+    cfg.execution.peak_drawdown_exit.tier1_sell_pct = 0.0
+    cfg.execution.peak_drawdown_exit.tier2_profit_pct = 0.0
+    cfg.execution.peak_drawdown_exit.tier2_retrace_pct = 0.0
+    cfg.execution.peak_drawdown_exit.tier2_sell_pct = 0.0
+    cfg.execution.peak_drawdown_exit.tier3_profit_pct = 0.0
+    cfg.execution.peak_drawdown_exit.tier3_retrace_pct = 0.0
+    cfg.execution.peak_drawdown_exit.tier3_sell_pct = 0.0
+
+    pipe = _build_pipe(cfg, tmp_path)
+
+    assert len(pipe.profit_taking.peak_drawdown_levels) == 3
+    for level in pipe.profit_taking.peak_drawdown_levels:
+        assert level.profit_pct == pytest.approx(0.0)
+        assert level.retrace_pct == pytest.approx(0.0)
+        assert level.sell_pct == pytest.approx(0.0)
+
+
 def test_close_only_sell_not_blocked_by_cash_gate(tmp_path):
     cfg = AppConfig(symbols=["BTC/USDT", "SUI/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False

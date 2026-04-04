@@ -188,19 +188,19 @@ class V5Pipeline:
         if peak_drawdown_cfg is not None and bool(getattr(peak_drawdown_cfg, "enabled", False)):
             peak_drawdown_levels = [
                 PeakDrawdownLevel(
-                    profit_pct=float(getattr(peak_drawdown_cfg, "tier1_profit_pct", 0.08) or 0.08),
-                    retrace_pct=float(getattr(peak_drawdown_cfg, "tier1_retrace_pct", 0.025) or 0.025),
-                    sell_pct=float(getattr(peak_drawdown_cfg, "tier1_sell_pct", 0.33) or 0.33),
+                    profit_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier1_profit_pct", None), 0.08)),
+                    retrace_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier1_retrace_pct", None), 0.025)),
+                    sell_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier1_sell_pct", None), 0.33)),
                 ),
                 PeakDrawdownLevel(
-                    profit_pct=float(getattr(peak_drawdown_cfg, "tier2_profit_pct", 0.15) or 0.15),
-                    retrace_pct=float(getattr(peak_drawdown_cfg, "tier2_retrace_pct", 0.04) or 0.04),
-                    sell_pct=float(getattr(peak_drawdown_cfg, "tier2_sell_pct", 0.50) or 0.50),
+                    profit_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier2_profit_pct", None), 0.15)),
+                    retrace_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier2_retrace_pct", None), 0.04)),
+                    sell_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier2_sell_pct", None), 0.50)),
                 ),
                 PeakDrawdownLevel(
-                    profit_pct=float(getattr(peak_drawdown_cfg, "tier3_profit_pct", 0.25) or 0.25),
-                    retrace_pct=float(getattr(peak_drawdown_cfg, "tier3_retrace_pct", 0.06) or 0.06),
-                    sell_pct=float(getattr(peak_drawdown_cfg, "tier3_sell_pct", 1.0) or 1.0),
+                    profit_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier3_profit_pct", None), 0.25)),
+                    retrace_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier3_retrace_pct", None), 0.06)),
+                    sell_pct=float(_coalesce(getattr(peak_drawdown_cfg, "tier3_sell_pct", None), 1.0)),
                 ),
             ]
         self.profit_taking = ProfitTakingManager(
