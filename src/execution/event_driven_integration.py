@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
-from src.execution.event_types import MarketState, SignalState
+from src.execution.event_types import MarketState, SignalState, top_selected_symbols
 from src.execution.event_monitor import EventMonitor, EventMonitorConfig
 from src.execution.cooldown_manager import CooldownManager, CooldownConfig
 from src.execution.event_decision_engine import EventDecisionEngine
@@ -136,7 +136,11 @@ class EventDrivenTrader:
                     timestamp_ms=int(sig.get('timestamp_ms', 0) or 0)
                 )
 
-        selected = state_dict.get('selected_symbols', []) or list(signals.keys())[:5]
+        selected = top_selected_symbols(
+            signals,
+            state_dict.get('selected_symbols', []) or None,
+            limit=5,
+        )
 
         return MarketState(
             timestamp_ms=int(state_dict.get('timestamp_ms', 0) or 0),

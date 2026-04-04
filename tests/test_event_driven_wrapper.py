@@ -10,6 +10,7 @@ from event_driven_check import (
     load_current_state,
     should_bypass_live_trigger_throttle,
 )
+from src.execution.event_driven_integration import create_event_driven_trader
 from src.execution.position_store import PositionStore
 
 
@@ -131,6 +132,66 @@ def test_load_current_state_keeps_held_symbols_in_event_scope(tmp_path, monkeypa
     assert state is not None
     assert "ADA/USDT" in state["positions"]
     assert "ADA/USDT" in state["prices"]
+
+
+def test_load_current_state_sorts_selected_symbols_by_signal_rank(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    (reports_dir / "regime.json").write_text(json.dumps({"regime": "TRENDING"}), encoding="utf-8")
+    (reports_dir / "alpha_snapshot.json").write_text(
+        json.dumps(
+            {
+                "scores": {
+                    "BTC/USDT": -0.1,
+                    "MON/USDT": 0.92,
+                    "ETH/USDT": 0.35,
+                    "SOL/USDT": 0.11,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    import event_driven_check as mod
+    import src.execution.price_fetcher as price_fetcher
+
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        price_fetcher,
+        "fetch_prices",
+        lambda: {
+            "BTC/USDT": 85000.0,
+            "MON/USDT": 0.027,
+            "ETH/USDT": 2500.0,
+            "SOL/USDT": 150.0,
+        },
+    )
+
+    state = load_current_state(cfg={"symbols": ["BTC/USDT", "MON/USDT", "ETH/USDT", "SOL/USDT"]})
+
+    assert state is not None
+    assert state["selected_symbols"][:4] == ["MON/USDT", "ETH/USDT", "SOL/USDT", "BTC/USDT"]
+
+
+def test_event_driven_trader_build_market_state_reorders_stale_selected_symbols():
+    trader = create_event_driven_trader({"enabled": True})
+    market_state = trader._build_market_state(
+        {
+            "timestamp_ms": 1,
+            "regime": "TRENDING",
+            "prices": {},
+            "positions": {},
+            "signals": {
+                "BTC/USDT": {"symbol": "BTC/USDT", "direction": "sell", "score": 0.1, "rank": 4, "timestamp_ms": 1},
+                "MON/USDT": {"symbol": "MON/USDT", "direction": "buy", "score": 0.9, "rank": 1, "timestamp_ms": 1},
+                "ETH/USDT": {"symbol": "ETH/USDT", "direction": "buy", "score": 0.4, "rank": 2, "timestamp_ms": 1},
+            },
+            "selected_symbols": ["BTC/USDT"],
+        }
+    )
+
+    assert market_state.selected_symbols == ["MON/USDT", "ETH/USDT", "BTC/USDT"]
 
 
 def test_risk_close_actions_bypass_live_trigger_throttle():

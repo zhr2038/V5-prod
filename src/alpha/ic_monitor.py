@@ -1,7 +1,7 @@
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -81,7 +81,7 @@ class AlphaICMonitor:
         score_source = telemetry_scores or raw_scores
         return {
             "ts_ms": int(now_ts_ms),
-            "ts_iso": datetime.utcfromtimestamp(int(now_ts_ms) / 1000.0).isoformat() + "Z",
+            "ts_iso": datetime.fromtimestamp(int(now_ts_ms) / 1000.0, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
             "scores": score_source,
             "routing_scores": raw_scores,
             "score_source": "telemetry_scores" if telemetry_scores else "scores",
@@ -205,7 +205,7 @@ class AlphaICMonitor:
         decay_ratio = float(short_mean / long_mean) if abs(long_mean) > 1e-12 else 0.0
 
         return {
-            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "score_source": (rows[-1].get("score_source") if rows else "scores"),
             "points_short": len(rows_short),
             "points_long": len(rows),

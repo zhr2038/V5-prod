@@ -5,7 +5,7 @@ from __future__ import print_function
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Iterable, Optional
 import time
 
 
@@ -132,3 +132,59 @@ class MarketState:
     signals: Dict = field(default_factory=dict)
     selected_symbols: list = field(default_factory=list)
     funding_rates: Dict[str, float] = field(default_factory=dict)
+
+
+def ordered_signal_symbols(signals: Dict[str, Any], limit: Optional[int] = None) -> list[str]:
+    """Return symbols ordered by signal desirability instead of dict insertion order.
+
+    Event-driven routing depends on the front of selected_symbols for:
+    - heartbeat/top-entry candidates
+    - intra-window take-profit deferral for still-selected symbols
+
+    Some loaders build `signals` from dict payloads whose insertion order is not a
+    reliable proxy for the latest rank ordering. We therefore sort primarily by
+    explicit rank, then by side desirability and score magnitude.
+    """
+    ordered: list[tuple[int, int, float, str]] = []
+
+    for sym, sig in (signals or {}).items():
+        if isinstance(sig, SignalState):
+            direction = str(sig.direction or "hold").lower()
+            score = float(sig.score or 0.0)
+            rank = int(sig.rank or 99)
+        elif isinstance(sig, dict):
+            direction = str(sig.get("direction", "hold") or "hold").lower()
+            score = float(sig.get("score", 0.0) or 0.0)
+            rank = int(sig.get("rank", 99) or 99)
+        else:
+            continue
+
+        if direction == "buy":
+            direction_bucket = 0
+        elif direction == "hold":
+            direction_bucket = 1
+        else:
+            direction_bucket = 2
+
+        ordered.append((rank, direction_bucket, -score, str(sym)))
+
+    symbols = [sym for _, _, _, sym in sorted(ordered)]
+    if limit is not None:
+        return symbols[: max(0, int(limit))]
+    return symbols
+
+
+def top_selected_symbols(
+    signals: Dict[str, Any],
+    selected_symbols: Optional[Iterable[str]] = None,
+    *,
+    limit: int = 5,
+) -> list[str]:
+    """Resolve event-driven selected symbols from the current ranked signal view.
+
+    Upstream payloads may still include a stale `selected_symbols` list from a
+    prior run. Event-driven decisions should follow the latest rank/score
+    ordering, not dict insertion order and not a stale persisted selection list.
+    """
+    _ = selected_symbols  # compatibility placeholder; current signal ordering wins
+    return ordered_signal_symbols(signals, limit=limit)

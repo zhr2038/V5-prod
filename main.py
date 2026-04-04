@@ -4,7 +4,7 @@ import logging
 import time
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -64,7 +64,7 @@ def save_trend_cache(alpha_snapshot, regime_result, symbols: list, timestamp: fl
 
     cache_data = {
         "timestamp": timestamp,
-        "timestamp_iso": datetime.utcfromtimestamp(timestamp).isoformat() + "Z",
+        "timestamp_iso": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
         "symbols": symbols,
         "alpha": {
             "scores": alpha_snapshot.scores if alpha_snapshot else {},
@@ -370,7 +370,7 @@ def main() -> None:
 
     run_id = os.getenv("V5_RUN_ID")
     if not run_id:
-        run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        run_id = _utc_now().strftime("%Y%m%d_%H%M%S")
     
     window_start_ts = _get_env_epoch_sec("V5_WINDOW_START_TS")
     window_end_ts = _get_env_epoch_sec("V5_WINDOW_END_TS")
@@ -465,6 +465,10 @@ def main() -> None:
         end_ts_ms=end_ts_ms,
     )
 
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
     ok_md, md_reason, md_1h = _validate_market_data_snapshot(
         symbols=scored_symbols,
         market_data=md_1h,
@@ -531,7 +535,7 @@ def main() -> None:
     acc = acc_store.get()
     held = store.list()
     # Mark-to-market at cycle start
-    now_ts = datetime.utcnow().isoformat() + "Z"
+    now_ts = _utc_now().isoformat().replace("+00:00", "Z")
     prices = {s: float(md_1h[s].close[-1]) for s in md_1h.keys() if md_1h[s].close}
     for p in held:
         s = md_1h.get(p.symbol)
@@ -681,7 +685,7 @@ def main() -> None:
             collector = AlphaHistoryCollector()
             collector.save_snapshot(
                 run_id=run_id,
-                ts=int(datetime.utcnow().timestamp()),
+                ts=int(_utc_now().timestamp()),
                 snapshot=out.alpha,
                 regime=str(out.regime.state.value if hasattr(out.regime.state, "value") else out.regime.state),
                 regime_multiplier=float(getattr(out.regime, "multiplier", 1.0) or 1.0),
@@ -699,7 +703,7 @@ def main() -> None:
         icm = AlphaICMonitor()
         closes = {s: float(md_1h[s].close[-1]) for s in md_1h.keys() if getattr(md_1h[s], 'close', None)}
         ic_summary = icm.update(
-            now_ts_ms=int(datetime.utcnow().timestamp() * 1000),
+            now_ts_ms=int(_utc_now().timestamp() * 1000),
             alpha_snapshot=out.alpha,
             closes=closes,
         )
@@ -745,7 +749,7 @@ def main() -> None:
 
         if window_end_ts is not None:
             evt = {
-                "ts": datetime.utcnow().isoformat() + "Z",
+                "ts": _utc_now().isoformat().replace("+00:00", "Z"),
                 "run_id": run_id,
                 "window_start_ts": window_start_ts,
                 "window_end_ts": window_end_ts,
@@ -858,7 +862,7 @@ def main() -> None:
                 pre_eq += float(p.qty) * float(s.close[-1])
         run_logger.log_equity(
             {
-                "ts": datetime.utcnow().isoformat() + "Z",
+                "ts": _utc_now().isoformat().replace("+00:00", "Z"),
                 "phase": "pre_trade",
                 "cash": pre_cash,
                 "equity": pre_eq,
@@ -1009,7 +1013,7 @@ def main() -> None:
                 # if hasattr(order, 'pnl'):
                 #     collector.update_trade_pnl(
                 #         symbol=order.symbol,
-                #         ts=int(datetime.utcnow().timestamp()),
+                #         ts=int(_utc_now().timestamp()),
                 #         pnl=order.pnl
                 #     )
         
@@ -1027,7 +1031,7 @@ def main() -> None:
                 post_eq += float(p.qty) * float(s.close[-1])
         run_logger.log_equity(
             {
-                "ts": datetime.utcnow().isoformat() + "Z",
+                "ts": _utc_now().isoformat().replace("+00:00", "Z"),
                 "phase": "post_trade",
                 "cash": post_cash,
                 "equity": post_eq,

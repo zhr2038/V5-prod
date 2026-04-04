@@ -30,7 +30,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import event-driven components
 try:
-    from src.execution.event_types import MarketState, SignalState
+    from src.execution.event_types import MarketState, SignalState, top_selected_symbols
     from src.execution.event_driven_integration import create_event_driven_trader
     from src.execution.event_action_bridge import persist_event_actions
     logger.info("✅ Event-driven modules loaded")
@@ -295,8 +295,8 @@ def load_current_state(cfg=None, config_path: Path = None):
                         )
                     logger.info(f"Loaded {len(signals)} signals from alpha snapshot (fallback)")
         
-        # Load selected symbols
-        selected = list(signals.keys())[:5]  # Top 5
+        # Resolve selected symbols by actual rank/signal quality rather than dict order.
+        selected = top_selected_symbols(signals, limit=5)
         
         return {
             'timestamp_ms': int(datetime.now().timestamp() * 1000),
@@ -865,7 +865,7 @@ def main():
                     'regime': last_data.get('regime', 'SIDEWAYS'),
                     'prices': last_data.get('prices', {}),
                     'signals': last_data.get('signals', {}),
-                    'selected_symbols': list(last_data.get('signals', {}).keys())[:5]
+                    'selected_symbols': top_selected_symbols(last_data.get('signals', {}) or {}, limit=5)
                 }
                 logger.info(f"Loaded signal history from {last_data.get('timestamp', 0)}")
         except Exception as e:
