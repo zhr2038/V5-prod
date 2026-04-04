@@ -22,66 +22,6 @@ def _dec(x: Optional[str]) -> Decimal:
     return Decimal(str(x))
 
 
-def _opt_dec(x: Optional[str]) -> Optional[Decimal]:
-    if x is None or x == "":
-        return None
-    try:
-        return Decimal(str(x))
-    except Exception:
-        return None
-
-
-def _fee_map(raw_fee: Optional[str]) -> Dict[str, Decimal]:
-    if raw_fee is None or str(raw_fee).strip() == "":
-        return {}
-    try:
-        obj = json.loads(str(raw_fee))
-    except Exception:
-        return {}
-    if not isinstance(obj, dict):
-        return {}
-    out: Dict[str, Decimal] = {}
-    for ccy, value in obj.items():
-        try:
-            out[str(ccy).upper()] = Decimal(str(value))
-        except Exception:
-            continue
-    return out
-
-
-def _merge_fee_maps(*fee_maps: Dict[str, Decimal]) -> Dict[str, Decimal]:
-    out: Dict[str, Decimal] = {}
-    for fee_map in fee_maps:
-        for ccy, value in (fee_map or {}).items():
-            key = str(ccy).upper()
-            out[key] = out.get(key, Decimal("0")) + Decimal(str(value))
-    return out
-
-
-def _merge_fill_stats(
-    *,
-    prev_acc_fill_sz: Decimal,
-    prev_avg_px: Optional[Decimal],
-    delta_acc_fill_sz: Decimal,
-    delta_vwap_px: Optional[Decimal],
-) -> Tuple[Decimal, Optional[Decimal]]:
-    total_acc_fill_sz = prev_acc_fill_sz + delta_acc_fill_sz
-    if total_acc_fill_sz <= 0:
-        return total_acc_fill_sz, None
-
-    total_notional = Decimal("0")
-    if prev_acc_fill_sz > 0 and prev_avg_px is not None and prev_avg_px > 0:
-        total_notional += prev_acc_fill_sz * prev_avg_px
-    if delta_acc_fill_sz > 0 and delta_vwap_px is not None and delta_vwap_px > 0:
-        total_notional += delta_acc_fill_sz * delta_vwap_px
-
-    if total_notional > 0:
-        return total_acc_fill_sz, (total_notional / total_acc_fill_sz)
-    if prev_acc_fill_sz > 0 and prev_avg_px is not None:
-        return total_acc_fill_sz, prev_avg_px
-    return total_acc_fill_sz, delta_vwap_px
-
-
 @dataclass
 class FillAgg:
     """FillAgg类"""
@@ -208,6 +148,41 @@ class FillReconciler:
 
         return aggs
 
+    def _aggregate_order_total(self, *, row, delta: FillAgg) -> FillAgg:
+        fills = self.fill_store.list_for_order(
+            inst_id=str(row.inst_id),
+            cl_ord_id=str(row.cl_ord_id or "") or None,
+            ord_id=str(row.ord_id or delta.ord_id or "") or None,
+        )
+        if not fills:
+            return delta
+
+        sum_sz = Decimal("0")
+        sum_px_sz = Decimal("0")
+        fees: Dict[str, Decimal] = {}
+        for it in fills:
+            sz = _dec(it.get("fill_sz"))
+            px = _dec(it.get("fill_px"))
+            if sz > 0 and px > 0:
+                sum_sz += sz
+                sum_px_sz += px * sz
+
+            ccy = it.get("fee_ccy")
+            fee = it.get("fee")
+            if ccy is not None and fee is not None and str(ccy) != "":
+                key = str(ccy).upper()
+                fees[key] = fees.get(key, Decimal("0")) + _dec(str(fee))
+
+        vwap = (sum_px_sz / sum_sz) if sum_sz > 0 else None
+        return FillAgg(
+            inst_id=str(row.inst_id),
+            cl_ord_id=str(row.cl_ord_id) if getattr(row, "cl_ord_id", None) else delta.cl_ord_id,
+            ord_id=str(row.ord_id) if getattr(row, "ord_id", None) else delta.ord_id,
+            acc_fill_sz=sum_sz,
+            vwap_px=vwap,
+            fees_by_ccy=fees,
+        )
+
     def reconcile(self, *, limit: int = 2000, max_get_order_per_run: int = 20) -> Dict[str, Any]:
         """Reconcile"""
         fills = self._load_unprocessed_fills(limit=limit)
@@ -234,25 +209,17 @@ class FillReconciler:
 
             clid = str(row.cl_ord_id)
             row_state_before = str(row.state or "").upper()
-            prev_acc_fill_sz = _dec(getattr(row, "acc_fill_sz", None))
-            prev_avg_px = _opt_dec(getattr(row, "avg_px", None))
-            prev_fee_map = _fee_map(getattr(row, "fee", None))
-            total_acc_fill_sz, total_avg_px = _merge_fill_stats(
-                prev_acc_fill_sz=prev_acc_fill_sz,
-                prev_avg_px=prev_avg_px,
-                delta_acc_fill_sz=a.acc_fill_sz,
-                delta_vwap_px=a.vwap_px,
-            )
-            total_fee_map = _merge_fee_maps(prev_fee_map, a.fees_by_ccy)
+            total = self._aggregate_order_total(row=row, delta=a)
+            next_state = row_state_before if row_state_before in {"FILLED", "CANCELED"} else ("PARTIAL" if total.acc_fill_sz > 0 else str(row.state))
 
             # Always at least PARTIAL if fill exists
-            fee_json = json.dumps({k: str(v) for k, v in total_fee_map.items()}, ensure_ascii=False, separators=(",", ":"))
+            fee_json = json.dumps({k: str(v) for k, v in total.fees_by_ccy.items()}, ensure_ascii=False, separators=(",", ":"))
             self.order_store.update_state(
                 clid,
-                new_state="PARTIAL" if a.acc_fill_sz > 0 else str(row.state),
-                acc_fill_sz=str(total_acc_fill_sz),
-                avg_px=(str(total_avg_px) if total_avg_px is not None else None),
-                fee=fee_json if total_fee_map else None,
+                new_state=next_state,
+                acc_fill_sz=str(total.acc_fill_sz),
+                avg_px=(str(total.vwap_px) if total.vwap_px is not None else None),
+                fee=fee_json if total.fees_by_ccy else None,
                 event_type="FILL_AGG",
             )
             if row_state_before != "FILLED":

@@ -195,6 +195,62 @@ def test_fill_reconciler_accumulates_order_fields_across_runs() -> None:
         assert fee_map == {"BTC": "-0.003"}
 
 
+def test_fill_reconciler_does_not_double_count_polled_filled_totals() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        fills = FillStore(path=f"{td}/fills.sqlite")
+        orders = OrderStore(path=f"{td}/orders.sqlite")
+
+        clid = "FILLED_ALREADY_POLLED"
+        orders.upsert_new(
+            cl_ord_id=clid,
+            run_id="r",
+            inst_id="OKB-USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            decision_hash="h-filled",
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=10.0,
+            req={"clOrdId": clid},
+        )
+        orders.update_state(
+            clid,
+            new_state="FILLED",
+            ord_id="OIDF",
+            acc_fill_sz="0.706776",
+            avg_px="97.4",
+            event_type="POLL",
+        )
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="OKB-USDT",
+                    trade_id="f1",
+                    ts_ms=1,
+                    ord_id="OIDF",
+                    cl_ord_id=clid,
+                    side="buy",
+                    fill_px="97.4",
+                    fill_sz="0.706776",
+                    fee="-0.000706776",
+                    fee_ccy="OKB",
+                ),
+            ]
+        )
+
+        rec = FillReconciler(fill_store=fills, order_store=orders, okx=None)
+        out = rec.reconcile()
+        row = orders.get(clid)
+
+        assert out["updated_orders"] == 1
+        assert row is not None
+        assert row.state == "FILLED"
+        assert float(row.acc_fill_sz) == pytest.approx(0.706776)
+        assert float(row.avg_px) == pytest.approx(97.4)
+        assert json.loads(str(row.fee)) == {"OKB": "-0.000706776"}
+
+
 def test_fill_reconciler_partial_sell_updates_position_store_idempotently() -> None:
     with tempfile.TemporaryDirectory() as td:
         fills = FillStore(path=f"{td}/fills.sqlite")

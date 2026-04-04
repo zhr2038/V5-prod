@@ -236,6 +236,67 @@ class FillStore:
             )
         return out
 
+    def list_for_order(
+        self,
+        *,
+        inst_id: str,
+        cl_ord_id: Optional[str] = None,
+        ord_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all stored fills associated with a specific order."""
+        inst_id_u = str(inst_id or "")
+        clid = str(cl_ord_id or "")
+        oid = str(ord_id or "")
+        if not inst_id_u or (not clid and not oid):
+            return []
+
+        where = ["inst_id=?"]
+        params: List[Any] = [inst_id_u]
+        if clid and oid:
+            where.append("(cl_ord_id=? OR ord_id=?)")
+            params.extend([clid, oid])
+        elif clid:
+            where.append("cl_ord_id=?")
+            params.append(clid)
+        else:
+            where.append("ord_id=?")
+            params.append(oid)
+
+        con = sqlite3.connect(str(self.path))
+        cur = con.cursor()
+        cur.execute(
+            f"""
+            SELECT inst_id, trade_id, ts_ms, ord_id, cl_ord_id, side, exec_type,
+                   fill_px, fill_sz, fee, fee_ccy, raw_json
+            FROM fills
+            WHERE {' AND '.join(where)}
+            ORDER BY ts_ms ASC
+            """,
+            tuple(params),
+        )
+        rows = cur.fetchall()
+        con.close()
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "inst_id": r[0],
+                    "trade_id": r[1],
+                    "ts_ms": int(r[2]),
+                    "ord_id": r[3],
+                    "cl_ord_id": r[4],
+                    "side": r[5],
+                    "exec_type": r[6],
+                    "fill_px": r[7],
+                    "fill_sz": r[8],
+                    "fee": r[9],
+                    "fee_ccy": r[10],
+                    "raw_json": r[11],
+                }
+            )
+        return out
+
     def list_recent(self, limit: int = 50) -> List[FillRow]:
         """List recent"""
         con = sqlite3.connect(str(self.path))
