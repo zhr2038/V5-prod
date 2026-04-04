@@ -64,3 +64,30 @@ def test_orderstore_upsert_idempotent() -> None:
         assert row is not None
         assert row.cl_ord_id == clid
         assert row.state == "NEW"
+
+
+def test_orderstore_unknown_can_recover_to_authoritative_state() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        st = OrderStore(path=f"{td}/orders.sqlite")
+        clid = "RECOVER1"
+
+        st.upsert_new(
+            cl_ord_id=clid,
+            run_id="r",
+            inst_id="BTC-USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            decision_hash="h2",
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=10.0,
+        )
+        st.update_state(clid, new_state="SENT")
+        st.update_state(clid, new_state="UNKNOWN", last_error_code="QUERY", last_error_msg="timeout")
+        st.update_state(clid, new_state="OPEN", ord_id="1001")
+        st.update_state(clid, new_state="FILLED", avg_px="100", acc_fill_sz="0.1")
+
+        row = st.get(clid)
+        assert row is not None
+        assert row.state == "FILLED"
+        assert row.ord_id == "1001"

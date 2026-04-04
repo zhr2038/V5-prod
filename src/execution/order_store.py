@@ -13,12 +13,14 @@ _STATE_RANK = {
     "NEW": 0,
     "SENT": 1,
     "ACK": 2,
+    # UNKNOWN is a transient query/submit uncertainty, not a terminal outcome.
+    # Later authoritative states (OPEN/PARTIAL/FILLED/CANCELED/REJECTED) must be able to replace it.
+    "UNKNOWN": 2,
     "OPEN": 3,
     "PARTIAL": 4,
     "FILLED": 5,
     "CANCELED": 6,
     "REJECTED": 6,
-    "UNKNOWN": 6,
 }
 
 
