@@ -1150,19 +1150,36 @@ function renderTrades(trades) {
 }
 
 function renderAlpha(alphaScores) {
-  const items = Array.isArray(alphaScores) ? alphaScores.slice(0, isMobileViewport() ? 4 : 6) : [];
+  const items = Array.isArray(alphaScores)
+    ? alphaScores.slice()
+      .sort((a, b) => {
+        const aRank = Number(a?.rank || 0);
+        const bRank = Number(b?.rank || 0);
+        if (aRank > 0 && bRank > 0 && aRank !== bRank) return aRank - bRank;
+        const aScore = Number(a?.display_score ?? a?.score ?? 0);
+        const bScore = Number(b?.display_score ?? b?.score ?? 0);
+        return bScore - aScore;
+      })
+      .slice(0, isMobileViewport() ? 4 : 6)
+    : [];
   if (!items.length) {
     setHtml("alpha-content", '<div class="empty">当前没有高分标的。</div>');
     return;
   }
-  setHtml("alpha-content", items.map((item) => {
+  setHtml("alpha-content", items.map((item, index) => {
     const displayScore = Number(item.display_score ?? item.score ?? 0);
     const rawScore = Number(item.raw_score ?? displayScore);
-    const rank = Number(item.rank || 0);
-    const width = Math.max(8, Math.min(100, Math.abs(displayScore) * 100));
+    const rank = Number(item.rank || index + 1);
+    const absScore = Math.abs(displayScore);
+    const width = absScore > 0 ? Math.max(4, Math.min(50, absScore * 50)) : 0;
+    const fill = width <= 0
+      ? ""
+      : (displayScore >= 0
+        ? `<span class="bar-fill positive" style="left:50%;width:${width}%"></span>`
+        : `<span class="bar-fill negative" style="right:50%;width:${width}%"></span>`);
     return `<div class="alpha">
-      <div class="row"><strong>${esc(`${rank ? `#${rank} ` : ""}${item.symbol || "--"}`)}</strong><span class="mono">${fmtNum(displayScore, 3)}</span></div>
-      <div class="bar"><span style="width:${width}%"></span></div>
+      <div class="row"><strong>${esc(`${rank ? `#${rank} ` : ""}${item.symbol || "--"}`)}</strong><span class="mono ${displayScore >= 0 ? "text-green" : "text-red"}">${fmtNum(displayScore, 3)}</span></div>
+      <div class="bar bidirectional">${fill}</div>
       <div class="subtle">原始 ${fmtNum(rawScore, 3)}</div>
     </div>`;
   }).join(""));

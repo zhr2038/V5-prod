@@ -82,8 +82,11 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     assert "position-kline-timeframes" in body
     assert "metrics.conversion_rate??metrics.last_conversion_rate??null" in body
     assert "account?.drawdown_pct??metrics.dd_pct??metrics.last_dd_pct??null" in body
+    assert "alphaScores.slice()" in body
     assert "item.display_score ?? item.score ?? 0" in body
     assert "item.raw_score ?? displayScore" in body
+    assert "style=\"left:50%;width:${width}%\"" in body
+    assert "style=\"right:50%;width:${width}%\"" in body
     assert "原始 ${fmtNum(rawScore, 3)}" in body
     assert "浮盈亏 / 收益率" in body
     assert "fmtUsd(pnlValue)" in body

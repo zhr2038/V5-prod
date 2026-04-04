@@ -552,13 +552,49 @@ tr:last-child td{border-bottom:none}
   background:rgba(147,175,198,.12);
   overflow:hidden;
 }
-.bar{margin-top:10px}
+.bar{
+  margin-top:10px;
+  height:8px;
+  border-radius:999px;
+  background:rgba(147,175,198,.12);
+  overflow:hidden;
+}
 .bar>span,
 .prob-track>span{
   display:block;
   height:100%;
   border-radius:inherit;
   background:linear-gradient(90deg,rgba(94,218,199,.86),rgba(131,208,255,.92));
+}
+.bar.bidirectional{
+  position:relative;
+  height:10px;
+  border-radius:999px;
+  background:linear-gradient(90deg, rgba(255,255,255,.04) 0%, rgba(255,255,255,.09) 50%, rgba(255,255,255,.04) 100%);
+  overflow:hidden;
+}
+.bar.bidirectional::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:0;
+  bottom:0;
+  width:1px;
+  transform:translateX(-50%);
+  background:rgba(255,255,255,.22);
+}
+.bar-fill{
+  position:absolute;
+  top:0;
+  bottom:0;
+}
+.bar-fill.positive{
+  border-radius:0 999px 999px 0;
+  background:linear-gradient(90deg, #7fe0c8, #f4bf68);
+}
+.bar-fill.negative{
+  border-radius:999px 0 0 999px;
+  background:linear-gradient(90deg, #ff879d, #ffc97c);
 }
 .prob-list{display:grid;gap:8px;margin-top:12px}
 .prob-row{
