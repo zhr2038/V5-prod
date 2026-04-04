@@ -410,6 +410,40 @@ class LiveExecutionEngine:
     def _budget_releasable_terminal_state(state: Optional[str]) -> bool:
         return str(state or "").upper() in {"REJECTED", "CANCELED"}
 
+    @staticmethod
+    def _fee_map_from_order_row_fee(raw_fee: Optional[str]) -> Dict[str, Decimal]:
+        if raw_fee is None or str(raw_fee).strip() == "":
+            return {}
+        try:
+            obj = json.loads(str(raw_fee))
+        except Exception:
+            return {}
+        if not isinstance(obj, dict):
+            return {}
+        out: Dict[str, Decimal] = {}
+        for ccy, value in obj.items():
+            try:
+                out[str(ccy).upper()] = Decimal(str(value))
+            except Exception:
+                continue
+        return out
+
+    def _known_base_delta_from_order_row(self, row) -> float:
+        if row is None:
+            return 0.0
+        side = str(getattr(row, "side", "") or "").lower()
+        inst_id = str(getattr(row, "inst_id", "") or "")
+        if side not in {"buy", "sell"} or not inst_id:
+            return 0.0
+
+        acc_fill_sz = Decimal(str(getattr(row, "acc_fill_sz", None) or "0"))
+        base_ccy = inst_id.split("-")[0].upper()
+        fee_map = self._fee_map_from_order_row_fee(getattr(row, "fee", None))
+        base_fee = fee_map.get(base_ccy, Decimal("0"))
+        if side == "buy":
+            return float(acc_fill_sz + base_fee)
+        return float((-acc_fill_sz) + base_fee)
+
     def _check_open_long_entry_guard(self, o: Order, *, inst_id: str, tob: Optional[Dict[str, Any]]) -> None:
         """Guard NEW long entries against chasing and excessive microstructure cost."""
         if not bool(getattr(self.cfg, "open_long_entry_guard_enabled", False)):
@@ -1046,6 +1080,7 @@ class LiveExecutionEngine:
         return None
 
     def _query_and_update(self, *, inst_id: str, cl_ord_id: str) -> Tuple[str, Optional[str]]:
+        row_before = self.order_store.get(cl_ord_id)
         try:
             qr = self.okx.get_order(inst_id=inst_id, cl_ord_id=cl_ord_id)
         except Exception as e:
@@ -1077,25 +1112,33 @@ class LiveExecutionEngine:
             try:
                 row = self.order_store.get(cl_ord_id)
                 if row is not None:
-                    acc_fill_sz = float(r0.get("accFillSz") or r0.get("acc_fill_sz") or 0.0)
+                    acc_fill_sz_total = float(r0.get("accFillSz") or r0.get("acc_fill_sz") or 0.0)
                     avg_px = float(r0.get("avgPx") or r0.get("avg_px") or 0.0)
-                    base_delta = self._compute_base_delta_from_fills(
+                    total_base_delta = self._compute_base_delta_from_fills(
                         inst_id=str(inst_id),
                         ord_id=str(ord_id or ""),
                         side=str(row.side or ""),
                     )
+                    prev_acc_fill_sz = float(getattr(row_before, "acc_fill_sz", None) or 0.0)
+                    prev_known_base_delta = self._known_base_delta_from_order_row(row_before)
                     if str(row.side).lower() == "buy":
-                        net_buy_qty = float(base_delta) if base_delta is not None else float(acc_fill_sz)
-                        if net_buy_qty > 0:
+                        if total_base_delta is not None:
+                            delta_buy_qty = float(total_base_delta) - float(prev_known_base_delta)
+                        else:
+                            delta_buy_qty = float(acc_fill_sz_total) - float(prev_acc_fill_sz)
+                        if delta_buy_qty > 0:
                             self.position_store.upsert_buy(
                                 str(row.inst_id).replace("-", "/"),
-                                qty=net_buy_qty,
+                                qty=float(delta_buy_qty),
                                 px=float(avg_px or 0.0),
                             )
                     elif str(row.side).lower() == "sell":
                         p = self.position_store.get(str(row.inst_id).replace("-", "/"))
                         if p is not None:
-                            reduce_qty = abs(float(base_delta)) if base_delta is not None else float(acc_fill_sz)
+                            if total_base_delta is not None:
+                                reduce_qty = max(0.0, -(float(total_base_delta) - float(prev_known_base_delta)))
+                            else:
+                                reduce_qty = max(0.0, float(acc_fill_sz_total) - float(prev_acc_fill_sz))
                             new_qty = max(0.0, float(p.qty) - float(reduce_qty))
                             if new_qty <= 0:
                                 self.position_store.close_long(str(row.inst_id).replace("-", "/"))
