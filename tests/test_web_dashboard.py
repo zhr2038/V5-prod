@@ -1386,3 +1386,80 @@ def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path
     assert payload["total_trades"] == 2
     assert payload["total_fees"] == pytest.approx(-50.0)
     assert payload["realized_pnl"] == pytest.approx(-30.0)
+
+
+def test_api_trades_converts_live_base_fee_to_signed_usdt(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setenv("EXCHANGE_API_KEY", "k")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "s")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "p")
+
+    def fake_get(url, *args, **kwargs):
+        assert "trade/fills" in url
+        return _DummyResponse({
+            "code": "0",
+            "data": [
+                {
+                    "instId": "BTC-USDT",
+                    "ts": "1710000000000",
+                    "fillPx": "50000",
+                    "fillSz": "0.002",
+                    "fee": "-0.0001",
+                    "feeCcy": "BTC",
+                    "side": "buy",
+                }
+            ],
+        })
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    with module.app.app_context():
+        payload = module.api_trades().get_json()
+
+    assert len(payload["trades"]) == 1
+    assert payload["trades"][0]["amount"] == pytest.approx(100.0)
+    assert payload["trades"][0]["fee"] == pytest.approx(-5.0)
+
+
+def test_api_trades_db_fallback_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.delenv("EXCHANGE_API_KEY", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_SECRET", raising=False)
+    monkeypatch.delenv("EXCHANGE_PASSPHRASE", raising=False)
+
+    conn = sqlite3.connect(str(tmp_path / "orders.sqlite"))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+            inst_id TEXT,
+            side TEXT,
+            notional_usdt REAL,
+            fee TEXT,
+            state TEXT,
+            avg_px TEXT,
+            created_ts INTEGER
+        )
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO orders(inst_id, side, notional_usdt, fee, state, avg_px, created_ts)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("BTC-USDT", "buy", 100.0, '{"BTC":"-0.001"}', "FILLED", "50000", 1710000000000),
+    )
+    conn.commit()
+    conn.close()
+
+    with module.app.app_context():
+        payload = module.api_trades().get_json()
+
+    assert len(payload["trades"]) == 1
+    assert payload["trades"][0]["symbol"] == "BTC-USDT"
+    assert payload["trades"][0]["amount"] == pytest.approx(100.0)
+    assert payload["trades"][0]["fee"] == pytest.approx(-50.0)

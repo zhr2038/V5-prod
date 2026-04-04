@@ -996,15 +996,51 @@ def get_db_connection():
     return None
 
 
+def _split_inst_id_base_quote(inst_id: str) -> tuple[str, str]:
+    inst = str(inst_id or '').upper()
+    if '-' in inst:
+        return tuple(inst.split('-', 1))
+    if '/' in inst:
+        return tuple(inst.split('/', 1))
+    return inst, 'USDT'
+
+
+def _signed_fee_usdt_from_fee_fields(inst_id: str, px: Any, fee_amount: Any, fee_ccy: Any = None) -> float:
+    try:
+        fee_val = float(fee_amount or 0.0)
+    except Exception:
+        return 0.0
+
+    fee_ccy_norm = str(fee_ccy or '').strip().upper()
+    if not fee_ccy_norm:
+        return fee_val
+
+    base_ccy, quote_ccy = _split_inst_id_base_quote(inst_id)
+    if fee_ccy_norm == quote_ccy:
+        return fee_val
+    if fee_ccy_norm != base_ccy:
+        return 0.0
+
+    try:
+        px_val = float(px or 0.0)
+    except Exception:
+        return 0.0
+    if px_val <= 0:
+        return 0.0
+    return fee_val * px_val
+
+
 def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> float:
     raw = str(raw_fee or '').strip()
     if not raw:
         return 0.0
 
     try:
-        return float(raw)
+        numeric_fee = float(raw)
     except Exception:
-        pass
+        numeric_fee = None
+    if numeric_fee is not None:
+        return _signed_fee_usdt_from_fee_fields(inst_id, avg_px, numeric_fee)
 
     try:
         fee_map = json.loads(raw)
@@ -1013,25 +1049,10 @@ def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> 
     if not isinstance(fee_map, dict):
         return 0.0
 
-    inst = str(inst_id or '').upper()
-    if '-' in inst:
-        base_ccy, quote_ccy = inst.split('-', 1)
-    else:
-        base_ccy = inst.split('/', 1)[0]
-        quote_ccy = 'USDT'
-
     px = float(avg_px or 0.0)
     total_fee_usdt = 0.0
     for ccy, value in fee_map.items():
-        try:
-            fee_val = float(value or 0.0)
-        except Exception:
-            continue
-        ccy_u = str(ccy or '').upper()
-        if ccy_u == quote_ccy:
-            total_fee_usdt += fee_val
-        elif ccy_u == base_ccy and px > 0:
-            total_fee_usdt += fee_val * px
+        total_fee_usdt += _signed_fee_usdt_from_fee_fields(inst_id, px, value, ccy)
     return total_fee_usdt
 
 
@@ -1520,7 +1541,12 @@ def api_trades():
                             px = float(r.get('fillPx') or 0)
                             sz = float(r.get('fillSz') or 0)
                             amount = px * sz
-                            fee = float(r.get('fee') or 0)
+                            fee = _signed_fee_usdt_from_fee_fields(
+                                inst,
+                                px,
+                                r.get('fee'),
+                                r.get('feeCcy') or r.get('fillFeeCcy'),
+                            )
                             trades.append({
                                 'symbol': inst,
                                 'side': str(r.get('side', '')),
@@ -1541,10 +1567,10 @@ def api_trades():
                 cursor = conn.cursor()
                 placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
                 cursor.execute(f"""
-                    SELECT 
-                        inst_id, side, notional_usdt, fee, state,
+                    SELECT
+                        inst_id, side, notional_usdt, fee, state, avg_px,
                         datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
-                    FROM orders 
+                    FROM orders
                     WHERE state='FILLED'
                     AND inst_id NOT IN ({placeholders})
                     AND notional_usdt < 1000
@@ -1558,9 +1584,9 @@ def api_trades():
                             'symbol': str(row[0]),
                             'side': str(row[1]),
                             'amount': round(float(row[2]), 4),
-                            'fee': round(float(row[3]), 6),
+                            'fee': round(_signed_fee_usdt_from_order_fee(str(row[0]), row[5], row[3]), 6),
                             'state': str(row[4]),
-                            'time': str(row[5])
+                            'time': str(row[6])
                         })
                     except (TypeError, ValueError):
                         continue
