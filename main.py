@@ -14,6 +14,7 @@ from src.data.mock_provider import MockProvider
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.account_store import AccountStore
 from src.execution.execution_engine import ExecutionEngine
+from src.execution.event_action_bridge import consume_event_actions_for_run
 from src.execution.position_store import PositionStore
 from src.reporting.reporting import dump_run_artifacts
 from src.core.models import MarketSeries, Order, PositionState
@@ -267,6 +268,68 @@ def _merge_managed_symbols(base_symbols: list[str], held_symbols: list[str]) -> 
     base = [str(s) for s in (base_symbols or []) if str(s).strip()]
     held = [str(s) for s in (held_symbols or []) if str(s).strip()]
     return list(dict.fromkeys(base + held))
+
+
+def _merge_event_close_override_orders(
+    *,
+    orders: list[Order],
+    positions,
+    prices: dict[str, float],
+    run_id: str,
+    audit=None,
+) -> list[Order]:
+    override_actions = consume_event_actions_for_run(run_id=run_id)
+    if not override_actions:
+        return list(orders or [])
+
+    held_map = {
+        str(getattr(p, "symbol", "") or ""): p
+        for p in (positions or [])
+        if float(getattr(p, "qty", 0.0) or 0.0) > 0.0
+    }
+    existing_close_symbols = {
+        str(getattr(o, "symbol", "") or "")
+        for o in (orders or [])
+        if str(getattr(o, "side", "")).lower() == "sell"
+        and str(getattr(o, "intent", "")).upper() == "CLOSE_LONG"
+    }
+
+    appended: list[Order] = []
+    skipped: list[str] = []
+    for action in override_actions:
+        symbol = str(action.get("symbol") or "").strip()
+        if not symbol or symbol in existing_close_symbols:
+            continue
+        pos = held_map.get(symbol)
+        qty = float(getattr(pos, "qty", 0.0) or 0.0) if pos is not None else 0.0
+        px = float(prices.get(symbol, 0.0) or 0.0)
+        if pos is None or qty <= 0.0 or px <= 0.0:
+            skipped.append(symbol)
+            continue
+
+        appended.append(
+            Order(
+                symbol=symbol,
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=float(qty * px),
+                signal_price=float(px),
+                meta={
+                    "source": "event_driven_override",
+                    "reason": str(action.get("reason") or "event_close"),
+                    "event_type": str(action.get("event_type") or ""),
+                    "priority": 0,
+                },
+            )
+        )
+        existing_close_symbols.add(symbol)
+
+    if audit is not None:
+        audit.add_note(
+            f"event close override: loaded={len(override_actions)} appended={len(appended)} skipped={skipped}"
+        )
+
+    return list(orders or []) + appended
 
 
 def main() -> None:
@@ -709,7 +772,13 @@ def main() -> None:
     acc.equity_peak_usdt = max(float(acc.equity_peak_usdt), float(eq))
     acc_store.set(acc)
 
-    orders = out.orders
+    orders = _merge_event_close_override_orders(
+        orders=list(out.orders or []),
+        positions=store.list(),
+        prices=prices,
+        run_id=run_id,
+        audit=audit,
+    )
 
     # Order arbitration layer: unified priority + per-symbol state machine
     # to avoid cross-module conflicts (close vs rebalance/open in same run, cooldown churn, etc.).

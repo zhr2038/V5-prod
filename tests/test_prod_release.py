@@ -46,6 +46,7 @@ def test_iter_production_files_excludes_runtime_state(tmp_path: Path) -> None:
 
 def test_iter_production_files_includes_explicit_model_file(tmp_path: Path) -> None:
     (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "ml_factor_model.pkl").write_bytes(b"binary-model")
     (tmp_path / "models" / "ml_factor_model_active.txt").write_text(
         "models/ml_factor_model",
         encoding="utf-8",
@@ -58,6 +59,7 @@ def test_iter_production_files_includes_explicit_model_file(tmp_path: Path) -> N
         iter_production_files(
             tmp_path,
             items=(
+                "models/ml_factor_model.pkl",
                 "models/ml_factor_model_active.txt",
                 "models/ml_factor_model_config.json",
                 "models/ml_factor_model_gpu_tuned.json",
@@ -67,6 +69,7 @@ def test_iter_production_files_includes_explicit_model_file(tmp_path: Path) -> N
     )
 
     assert [path.relative_to(tmp_path).as_posix() for path in files] == [
+        "models/ml_factor_model.pkl",
         "models/ml_factor_model_active.txt",
         "models/ml_factor_model_config.json",
         "models/ml_factor_model_gpu_tuned.json",

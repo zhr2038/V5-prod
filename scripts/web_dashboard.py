@@ -4452,4 +4452,13 @@ if __name__ == '__main__':
     print("="*60)
     print(f"访问地址: http://0.0.0.0:5000")
     print("="*60)
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    host = "0.0.0.0"
+    port = int(os.getenv("V5_WEB_PORT", "5000") or 5000)
+    threads = int(os.getenv("V5_WEB_THREADS", "8") or 8)
+    try:
+        from waitress import serve
+
+        serve(app, host=host, port=port, threads=threads)
+    except Exception as exc:
+        print(f"Waitress unavailable, fallback to Flask dev server: {exc}")
+        app.run(host=host, port=port, debug=False)

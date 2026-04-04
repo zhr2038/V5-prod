@@ -32,6 +32,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 try:
     from src.execution.event_types import MarketState, SignalState
     from src.execution.event_driven_integration import create_event_driven_trader
+    from src.execution.event_action_bridge import persist_event_actions
     logger.info("✅ Event-driven modules loaded")
 except Exception as e:
     logger.error(f"❌ Failed to load event-driven modules: {e}")
@@ -1039,6 +1040,15 @@ def main():
                     'trigger_reason': f"active_throttled:{throttle['reason']}",
                 })
             else:
+                persisted = persist_event_actions(
+                    actions=result['actions'],
+                    target_run_id=execution['current_target_run_id'],
+                )
+                if persisted:
+                    logger.info(
+                        "ACTIVE mode: persisted close override actions for run %s",
+                        execution['current_target_run_id'],
+                    )
                 logger.info(f"ACTIVE mode: starting {live_service_unit}")
                 exec_res = trigger_live_execution_service(live_service_unit)
                 execution.update({

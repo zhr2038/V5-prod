@@ -16,6 +16,7 @@ PRODUCTION_SYNC_ITEMS = (
     "event_driven_check.py",
     "requirements.txt",
     "pyproject.toml",
+    "models/ml_factor_model.pkl",
     "models/ml_factor_model_active.txt",
     "models/ml_factor_model_config.json",
     "models/ml_factor_model_gpu_tuned.json",
