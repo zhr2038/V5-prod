@@ -78,10 +78,11 @@ class ExecutionEngine:
             acc = self.account_store.get() if self.account_store else None
 
             px = float(o.signal_price)
-            notional = float(o.notional_usdt)
-            qty = (notional / px) if px else 0.0
-            fee = abs(notional) * fee_bps / 10_000.0
-            slp = abs(notional) * slp_bps / 10_000.0
+            requested_notional = float(o.notional_usdt)
+            qty = (requested_notional / px) if px else 0.0
+            executed_notional = float(requested_notional)
+            fee = abs(executed_notional) * fee_bps / 10_000.0
+            slp = abs(executed_notional) * slp_bps / 10_000.0
 
             realized_usdt = None
             realized_pct = None
@@ -91,14 +92,23 @@ class ExecutionEngine:
 
             if self.position_store and o.intent in {"OPEN_LONG", "REBALANCE"} and o.side == "buy":
                 if acc is not None:
-                    acc.cash_usdt = float(acc.cash_usdt) - notional - fee - slp
+                    acc.cash_usdt = float(acc.cash_usdt) - executed_notional - fee - slp
                 if qty > 0:
                     self.position_store.upsert_buy(o.symbol, qty=qty, px=px)
 
             elif self.position_store and o.intent in {"CLOSE_LONG", "REBALANCE"} and o.side == "sell":
-                # compute realized pnl using stored avg_px and qty (close full)
+                # Dry-run sells should mirror live semantics:
+                # - CLOSE_LONG closes the full local position
+                # - REBALANCE sells only the requested notional, capped by local qty
                 p = self.position_store.get(o.symbol) if self.position_store else None
-                close_qty = float(p.qty) if p else qty
+                held_qty = float(p.qty) if p else 0.0
+                if str(o.intent).upper() == "CLOSE_LONG":
+                    close_qty = held_qty if p else qty
+                else:
+                    close_qty = min(held_qty, qty) if p else qty
+                executed_notional = float(close_qty * px)
+                fee = abs(executed_notional) * fee_bps / 10_000.0
+                slp = abs(executed_notional) * slp_bps / 10_000.0
                 entry_px = float(p.avg_px) if p else px
                 gross = (px - entry_px) * close_qty
                 realized_usdt = float(gross) - fee - slp
@@ -107,7 +117,12 @@ class ExecutionEngine:
                 if acc is not None:
                     acc.cash_usdt = float(acc.cash_usdt) + (close_qty * px) - fee - slp
                 if self.position_store:
-                    self.position_store.close_long(o.symbol)
+                    if p is not None:
+                        new_qty = max(0.0, held_qty - close_qty)
+                        if new_qty <= 0.0:
+                            self.position_store.close_long(o.symbol)
+                        else:
+                            self.position_store.set_qty(o.symbol, qty=new_qty)
 
             if acc is not None and self.account_store:
                 self.account_store.set(acc)
@@ -129,7 +144,7 @@ class ExecutionEngine:
                             side=o.side,
                             qty=float(fill_qty),
                             price=px,
-                            notional_usdt=float(notional),
+                            notional_usdt=float(executed_notional),
                             fee_usdt=float(fee),
                             slippage_usdt=float(slp),
                             realized_pnl_usdt=realized_usdt,
@@ -160,7 +175,7 @@ class ExecutionEngine:
                 window_end_ts = max(window_start_ts + 1, int(window_end_ts))
 
                 # 使用Decimal进行精确计算
-                notional_dec = _to_decimal(notional)
+                notional_dec = _to_decimal(executed_notional)
                 fee_dec = _to_decimal(fee)
                 slp_dec = _to_decimal(slp)
                 
@@ -190,7 +205,7 @@ class ExecutionEngine:
                     "intent": o.intent,
                     "regime": meta.get("regime") or "Sideways",
                     "router_action": "fill",
-                    "notional_usdt": float(notional),
+                    "notional_usdt": float(executed_notional),
                     "mid_px": float(o.signal_price),
                     "bid": None,
                     "ask": None,
