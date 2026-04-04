@@ -406,6 +406,10 @@ class LiveExecutionEngine:
         self._buy_quote_budget_remaining = float(buy_budget) if buy_budget is not None else None
         self._sell_base_budget_remaining = {str(k): float(v) for k, v in (sell_budget or {}).items()}
 
+    @staticmethod
+    def _budget_releasable_terminal_state(state: Optional[str]) -> bool:
+        return str(state or "").upper() in {"REJECTED", "CANCELED"}
+
     def _check_open_long_entry_guard(self, o: Order, *, inst_id: str, tob: Optional[Dict[str, Any]]) -> None:
         """Guard NEW long entries against chasing and excessive microstructure cost."""
         if not bool(getattr(self.cfg, "open_long_entry_guard_enabled", False)):
@@ -996,7 +1000,7 @@ class LiveExecutionEngine:
             )
             # follow-up poll to get state if possible
             polled_state, polled_ord_id = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
-            if polled_state == "REJECTED":
+            if self._budget_releasable_terminal_state(polled_state):
                 self._restore_in_run_budgets(budget_snapshot)
 
             # Keep filled-order position sync centralized in _query_and_update().
@@ -1028,7 +1032,7 @@ class LiveExecutionEngine:
             # short delay then query (eventual consistency)
             time.sleep(0.25)
             st, ord_id = self._query_and_update(inst_id=inst_id, cl_ord_id=clid)
-            if st == "REJECTED":
+            if self._budget_releasable_terminal_state(st):
                 self._restore_in_run_budgets(budget_snapshot)
             return LiveExecutionResult(cl_ord_id=clid, state=st, ord_id=ord_id)
 

@@ -108,6 +108,14 @@ class RejectFirstAckOKX(FakeOKX):
         return super().place_order(payload, exp_time_ms=exp_time_ms)
 
 
+class CancelAfterAckOKX(FakeOKX):
+    def place_order(self, payload, exp_time_ms=None):
+        resp = super().place_order(payload, exp_time_ms=exp_time_ms)
+        clid = payload.get("clOrdId")
+        self._orders[clid]["state"] = "canceled"
+        return resp
+
+
 def test_place_idempotent_same_intent() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
@@ -333,6 +341,55 @@ def test_buy_rejected_ack_releases_quote_budget(monkeypatch) -> None:
         assert req["sz"] == "80.0"
 
 
+def test_buy_canceled_poll_releases_quote_budget(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = CancelAfterAckOKX()
+        okx.balance_by_ccy["USDT"] = {"eq": "100", "availBal": "100", "cashBal": "100", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        monkeypatch.setattr(
+            "src.execution.live_execution_engine.OKXSpotInstrumentsCache.get_spec",
+            lambda self, inst_id: SimpleNamespace(lot_sz=0.1, min_sz=1.0),
+        )
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            buy_quote_reserve_usdt=0.0,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        canceled = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="buy",
+                intent="OPEN_LONG",
+                notional_usdt=80.0,
+                signal_price=40.0,
+                meta={"decision_hash": "buy-cancel-first"},
+            )
+        )
+        accepted = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="buy",
+                intent="OPEN_LONG",
+                notional_usdt=80.0,
+                signal_price=40.0,
+                meta={"decision_hash": "buy-after-cancel"},
+            )
+        )
+
+        row = store.get(accepted.cl_ord_id)
+        req = json.loads(row.req_json)
+
+        assert canceled.state == "CANCELED"
+        assert accepted.state == "CANCELED"
+        assert okx.place_calls == 2
+        assert req["sz"] == "80.0"
+
+
 def test_dust_skip_does_not_consume_sell_budget(monkeypatch) -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
@@ -475,6 +532,55 @@ def test_sell_rejected_ack_releases_sell_budget(monkeypatch) -> None:
 
         assert rejected.state == "REJECTED"
         assert accepted.state == "OPEN"
+        assert req["sz"] == "1.4"
+
+
+def test_sell_canceled_poll_releases_sell_budget(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = CancelAfterAckOKX()
+        okx.balance_by_ccy["ETH"] = {"eq": "1.4", "availBal": "1.4", "cashBal": "1.4", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        pos.upsert_buy("ETH/USDT", qty=2.0, px=100.0)
+
+        monkeypatch.setattr(
+            "src.execution.live_execution_engine.OKXSpotInstrumentsCache.get_spec",
+            lambda self, inst_id: SimpleNamespace(lot_sz=0.1, min_sz=0.1),
+        )
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        canceled = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=150.0,
+                signal_price=100.0,
+                meta={"decision_hash": "sell-cancel-first"},
+            )
+        )
+        accepted = eng.place(
+            Order(
+                symbol="ETH/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=150.0,
+                signal_price=100.0,
+                meta={"decision_hash": "sell-after-cancel"},
+            )
+        )
+
+        row = store.get(accepted.cl_ord_id)
+        req = json.loads(row.req_json)
+
+        assert canceled.state == "CANCELED"
+        assert accepted.state == "CANCELED"
+        assert okx.place_calls == 2
         assert req["sz"] == "1.4"
 
 
