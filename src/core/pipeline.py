@@ -1621,7 +1621,7 @@ class V5Pipeline:
         if rank_scores:
             sorted_scores = sorted(rank_scores.items(), key=lambda x: x[1], reverse=True)
             symbol_ranks = {sym: idx + 1 for idx, (sym, _) in enumerate(sorted_scores)}
-            target_hold_eps = float(getattr(self.cfg.rebalance, 'close_only_weight_eps', 0.001) or 0.001)
+            target_hold_eps = float(_coalesce(getattr(self.cfg.rebalance, 'close_only_weight_eps', None), 0.001))
             rank_exit_max_rank = int(getattr(self.cfg.execution, 'rank_exit_max_rank', 3) or 3)
             rank_exit_confirm_rounds = int(getattr(self.cfg.execution, 'rank_exit_confirm_rounds', 2) or 2)
             rank_exit_strict_mode = bool(getattr(self.cfg.execution, 'rank_exit_strict_mode', False))
@@ -1939,7 +1939,7 @@ class V5Pipeline:
             
             # Banding 逻辑：新建仓阈值 > 维持仓阈值
             # 判断是否是新建仓（当前权重接近0）
-            eps = float(getattr(self.cfg.rebalance, "new_position_weight_eps", 0.001) or 0.001)
+            eps = float(_coalesce(getattr(self.cfg.rebalance, "new_position_weight_eps", None), 0.001))
             is_new_position = cw < eps
 
             # 调整 deadband：新建仓需要更大的信号强度；清仓（tw≈0）允许更小 deadband 以加速清理
@@ -1952,7 +1952,7 @@ class V5Pipeline:
 
             # If target weight is ~0 (close-only), shrink deadband (but keep sells allowed) to avoid stuck dust positions.
             try:
-                tw_eps = float(getattr(self.cfg.rebalance, "close_only_weight_eps", 0.001) or 0.001)
+                tw_eps = float(_coalesce(getattr(self.cfg.rebalance, "close_only_weight_eps", None), 0.001))
                 if abs(float(tw)) <= tw_eps and abs(float(cw)) > tw_eps:
                     # 清仓模式：死区大幅降低，确保能卖出
                     cm = float(getattr(self.cfg.rebalance, "close_only_deadband_multiplier", 0.1) or 0.1)  # 0.5->0.1
