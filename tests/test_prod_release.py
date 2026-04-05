@@ -275,6 +275,8 @@ def test_validate_units_requires_active_dashboard_and_timers(monkeypatch) -> Non
     assert _validate_units(object(), "ubuntu") == "ok"
     inner = captured["command"]
     assert "is-active v5-web-dashboard.service" in inner
+    assert "is-enabled v5-trade-monitor.timer" in inner
+    assert "is-active v5-trade-monitor.timer" in inner
     assert "is-active v5-prod.user.timer" in inner
     assert "is-active v5-event-driven.timer" in inner
 

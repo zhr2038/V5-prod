@@ -65,3 +65,10 @@ def test_install_systemd_production_only_disables_shadow_timers():
     text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
     assert "disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service" in text
     assert "disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service" in text
+
+
+def test_install_systemd_production_only_enables_trade_monitor_timer():
+    text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
+    assert "--mapping v5-trade-monitor.service=v5-trade-monitor.service" in text
+    assert "--mapping v5-trade-monitor.timer=v5-trade-monitor.timer" in text
+    assert "systemctl --user enable --now v5-trade-monitor.timer" in text

@@ -79,6 +79,8 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-event-driven.service=v5-event-driven.service \
       --mapping v5-event-driven.timer=v5-event-driven.timer \
       --mapping v5-web-dashboard.service=v5-web-dashboard.service \
+      --mapping v5-trade-monitor.service=v5-trade-monitor.service \
+      --mapping v5-trade-monitor.timer=v5-trade-monitor.timer \
       --mapping v5-sentiment-collect.service=v5-sentiment-collect.service \
       --mapping v5-sentiment-collect.timer=v5-sentiment-collect.timer \
       --mapping v5-auto-risk-eval.service=v5-auto-risk-eval.service \
@@ -107,6 +109,7 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service >/dev/null 2>&1 || true
     systemctl --user disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service >/dev/null 2>&1 || true
     systemctl --user enable --now v5-web-dashboard.service
+    systemctl --user enable --now v5-trade-monitor.timer
     systemctl --user enable --now v5-sentiment-collect.timer
     systemctl --user enable --now v5-auto-risk-eval.timer
     systemctl --user enable --now v5-daily-ml-training.timer
@@ -120,7 +123,7 @@ if [[ "$USER_MODE" == "1" ]]; then
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|trade-monitor|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer

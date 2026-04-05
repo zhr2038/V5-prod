@@ -195,6 +195,7 @@ def _install_units(
 def _validate_units(client: paramiko.SSHClient, service_user: str) -> str:
     inner = (
         "systemctl --user is-enabled v5-web-dashboard.service "
+        "&& systemctl --user is-enabled v5-trade-monitor.timer "
         "&& systemctl --user is-enabled v5-daily-ml-training.timer "
         "&& systemctl --user is-enabled v5-model-promotion-gate.timer "
         "&& systemctl --user is-enabled v5-sentiment-collect.timer "
@@ -203,6 +204,7 @@ def _validate_units(client: paramiko.SSHClient, service_user: str) -> str:
         "&& systemctl --user is-enabled v5-ledger.timer "
         "&& systemctl --user is-enabled v5-cost-rollup-real.user.timer "
         "&& test \"$(systemctl --user is-active v5-web-dashboard.service)\" = active "
+        "&& test \"$(systemctl --user is-active v5-trade-monitor.timer)\" = active "
         "&& test \"$(systemctl --user is-active v5-daily-ml-training.timer)\" = active "
         "&& test \"$(systemctl --user is-active v5-model-promotion-gate.timer)\" = active "
         "&& test \"$(systemctl --user is-active v5-sentiment-collect.timer)\" = active "
@@ -213,6 +215,7 @@ def _validate_units(client: paramiko.SSHClient, service_user: str) -> str:
         "&& test \"$(systemctl --user is-active v5-prod.user.timer)\" = active "
         "&& test \"$(systemctl --user is-active v5-event-driven.timer)\" = active "
         "&& systemctl --user show v5-web-dashboard.service --property=UnitFileState,ActiveState "
+        "&& systemctl --user show v5-trade-monitor.timer --property=UnitFileState,ActiveState "
         "&& systemctl --user show v5-daily-ml-training.timer --property=UnitFileState "
         "&& systemctl --user show v5-model-promotion-gate.timer --property=UnitFileState "
         "&& systemctl --user show v5-sentiment-collect.timer --property=UnitFileState "
