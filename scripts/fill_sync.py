@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import time
+from pathlib import Path
 
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
@@ -12,6 +12,14 @@ from src.execution.okx_private_client import OKXPrivateClient
 
 
 log = logging.getLogger("fill_sync")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _resolve_store_path(raw_path: str) -> str:
+    path = Path(str(raw_path).strip())
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return str(path)
 
 
 def sync_once(*, store: FillStore, client: OKXPrivateClient, limit: int = 100, max_pages: int = 20) -> int:
@@ -59,18 +67,19 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
+    db_path = _resolve_store_path(args.db)
     cfg = load_config(
-        resolve_runtime_config_path(args.config),
-        env_path=resolve_runtime_env_path(args.env),
+        resolve_runtime_config_path(args.config, project_root=PROJECT_ROOT),
+        env_path=resolve_runtime_env_path(args.env, project_root=PROJECT_ROOT),
     )
     if not (cfg.exchange.api_key and cfg.exchange.api_secret and cfg.exchange.passphrase):
         raise RuntimeError("Missing OKX API credentials (exchange.api_key/api_secret/passphrase)")
 
-    store = FillStore(path=str(args.db))
+    store = FillStore(path=db_path)
     client = OKXPrivateClient(exchange=cfg.exchange)
     try:
         n = sync_once(store=store, client=client, limit=args.limit, max_pages=args.max_pages)
-        log.info(f"fill_sync: new_fills={n} total={store.count()} db={args.db}")
+        log.info(f"fill_sync: new_fills={n} total={store.count()} db={db_path}")
         log.info(f"cursor(last_after)={store.get_state('last_after_cursor')} last_sync_ts_ms={store.get_state('last_sync_ts_ms')}")
     finally:
         client.close()
