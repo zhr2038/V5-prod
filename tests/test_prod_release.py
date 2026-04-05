@@ -12,7 +12,13 @@ from deploy.prod_release import (
     production_sync_roots,
     render_unit_text,
 )
-from deploy.sync_prod_release import _prune_remote_files, _user_bus_wrapped_command, _validate_units
+from deploy.sync_prod_release import (
+    _prune_remote_files,
+    _resolve_remote_root,
+    _resolve_service_user,
+    _user_bus_wrapped_command,
+    _validate_units,
+)
 
 
 def test_render_unit_text_rewrites_known_roots() -> None:
@@ -271,3 +277,13 @@ def test_validate_units_requires_active_dashboard_and_timers(monkeypatch) -> Non
     assert "is-active v5-web-dashboard.service" in inner
     assert "is-active v5-prod.user.timer" in inner
     assert "is-active v5-event-driven.timer" in inner
+
+
+def test_sync_prod_release_defaults_follow_ssh_user() -> None:
+    assert _resolve_remote_root("", "ubuntu") == "/home/ubuntu/clawd/v5-prod"
+    assert _resolve_service_user("", "ubuntu") == "ubuntu"
+
+
+def test_sync_prod_release_respects_explicit_overrides() -> None:
+    assert _resolve_remote_root("/srv/custom", "ubuntu") == "/srv/custom"
+    assert _resolve_service_user("admin", "ubuntu") == "admin"

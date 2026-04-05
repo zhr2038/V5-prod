@@ -151,6 +151,20 @@ def _user_bus_wrapped_command(service_user: str, inner: str) -> str:
     ).format(user=escaped_user, inner=escaped_inner)
 
 
+def _resolve_remote_root(raw_remote_root: str, ssh_user: str) -> str:
+    value = str(raw_remote_root or "").strip()
+    if value:
+        return value
+    return f"/home/{ssh_user}/clawd/v5-prod"
+
+
+def _resolve_service_user(raw_service_user: str, ssh_user: str) -> str:
+    value = str(raw_service_user or "").strip()
+    if value:
+        return value
+    return ssh_user
+
+
 def _install_units(
     client: paramiko.SSHClient,
     remote_root: str,
@@ -220,13 +234,15 @@ def main() -> None:
     ap.add_argument("--password", default="")
     ap.add_argument("--port", type=int, default=22)
     ap.add_argument("--key-file", default="")
-    ap.add_argument("--remote-root", default="/home/admin/clawd/v5-prod")
-    ap.add_argument("--service-user", default="admin")
+    ap.add_argument("--remote-root", default="")
+    ap.add_argument("--service-user", default="")
     ap.add_argument("--skip-install", action="store_true")
     ap.add_argument("--no-prune", action="store_true")
     ap.add_argument("--enable-prod-timer", action="store_true")
     ap.add_argument("--enable-event-driven-timer", action="store_true")
     args = ap.parse_args()
+    remote_root = _resolve_remote_root(args.remote_root, args.user)
+    service_user = _resolve_service_user(args.service_user, args.user)
 
     workspace_root = Path(__file__).resolve().parents[1]
 
@@ -248,10 +264,10 @@ def main() -> None:
     client.connect(**connect_kwargs)
     try:
         sftp = client.open_sftp()
-        _ensure_remote_dir(sftp, args.remote_root)
+        _ensure_remote_dir(sftp, remote_root)
         with production_snapshot(workspace_root) as snapshot_root:
-            uploaded, skipped, rel_paths = _upload_files(sftp, snapshot_root, args.remote_root)
-            pruned = [] if args.no_prune else _prune_remote_files(sftp, snapshot_root, args.remote_root)
+            uploaded, skipped, rel_paths = _upload_files(sftp, snapshot_root, remote_root)
+            pruned = [] if args.no_prune else _prune_remote_files(sftp, snapshot_root, remote_root)
         sftp.close()
 
         print(f"uploaded_files={uploaded}")
@@ -264,12 +280,12 @@ def main() -> None:
         if not args.skip_install:
             _install_units(
                 client,
-                remote_root=args.remote_root,
-                service_user=args.service_user,
+                remote_root=remote_root,
+                service_user=service_user,
                 enable_prod_timer=args.enable_prod_timer,
                 enable_event_driven_timer=args.enable_event_driven_timer,
             )
-            print(_validate_units(client, args.service_user))
+            print(_validate_units(client, service_user))
     finally:
         client.close()
 
