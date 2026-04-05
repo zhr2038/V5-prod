@@ -5,6 +5,7 @@ import json
 import logging
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from src.execution.account_store import AccountStore
 from src.execution.live_preflight import LivePreflight
 from src.execution.okx_private_client import OKXPrivateClient
@@ -13,7 +14,7 @@ from src.execution.position_store import PositionStore
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="configs/config.yaml")
+    ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
     ap.add_argument("--bills-db", default="reports/bills.sqlite")
@@ -22,7 +23,10 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
-    cfg = load_config(args.config, env_path=args.env)
+    cfg = load_config(
+        resolve_runtime_config_path(args.config),
+        env_path=resolve_runtime_env_path(args.env),
+    )
 
     ps = PositionStore(path=args.positions_db)
     ac = AccountStore(path=args.positions_db)

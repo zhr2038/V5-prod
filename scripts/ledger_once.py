@@ -5,6 +5,7 @@ import json
 import logging
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from src.execution.bills_store import BillsStore
 from src.execution.ledger_engine import LedgerEngine, LedgerThresholds
 from src.execution.okx_private_client import OKXPrivateClient
@@ -12,14 +13,17 @@ from src.execution.okx_private_client import OKXPrivateClient
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="configs/config.yaml")
+    ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--bills-db", default="reports/bills.sqlite")
     ap.add_argument("--out", default="reports/ledger_status.json")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
-    cfg = load_config(args.config, env_path=args.env)
+    cfg = load_config(
+        resolve_runtime_config_path(args.config),
+        env_path=resolve_runtime_env_path(args.env),
+    )
 
     client = OKXPrivateClient(exchange=cfg.exchange)
     try:

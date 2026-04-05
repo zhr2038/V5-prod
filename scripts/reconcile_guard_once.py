@@ -6,6 +6,7 @@ import logging
 import time
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from src.execution.account_store import AccountStore
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXRateLimitError
@@ -32,7 +33,7 @@ def _write_status(path: str, obj: dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="configs/config.yaml")
+    ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--out", default="reports/reconcile_status.json")
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
@@ -42,7 +43,10 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
-    cfg = load_config(args.config, env_path=args.env)
+    cfg = load_config(
+        resolve_runtime_config_path(args.config),
+        env_path=resolve_runtime_env_path(args.env),
+    )
 
     now = int(time.time() * 1000)
 

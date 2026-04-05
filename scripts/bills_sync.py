@@ -5,6 +5,7 @@ import logging
 import time
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from src.execution.bills_store import BillsStore, parse_okx_bills
 from src.execution.okx_private_client import OKXPrivateClient
 
@@ -63,7 +64,7 @@ def sync_once(*, store: BillsStore, client: OKXPrivateClient, limit: int = 100, 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="configs/config.yaml")
+    ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--db", default="reports/bills.sqlite")
     ap.add_argument("--limit", type=int, default=100)
@@ -71,7 +72,10 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
-    cfg = load_config(args.config, env_path=args.env)
+    cfg = load_config(
+        resolve_runtime_config_path(args.config),
+        env_path=resolve_runtime_env_path(args.env),
+    )
 
     store = BillsStore(path=str(args.db))
     client = OKXPrivateClient(exchange=cfg.exchange)

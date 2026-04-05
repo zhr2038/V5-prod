@@ -11,6 +11,8 @@ def test_reconcile_guard_once_uses_schema_default_dust_ignore(monkeypatch, tmp_p
     captured = {}
     out_path = tmp_path / "reconcile_status.json"
     positions_db = tmp_path / "positions.sqlite"
+    expected_cfg = (Path(reconcile_guard_once.__file__).resolve().parents[1] / "configs" / "live_prod.yaml").resolve()
+    expected_env = (Path(reconcile_guard_once.__file__).resolve().parents[1] / ".env").resolve()
 
     cfg = SimpleNamespace(
         exchange=SimpleNamespace(),
@@ -47,7 +49,12 @@ def test_reconcile_guard_once_uses_schema_default_dust_ignore(monkeypatch, tmp_p
                 "kill_switch": {"enabled": False},
             }
 
-    monkeypatch.setattr(reconcile_guard_once, "load_config", lambda *args, **kwargs: cfg)
+    def _fake_load_config(config_path, *, env_path):
+        captured["config_path"] = Path(config_path).resolve()
+        captured["env_path"] = Path(env_path).resolve()
+        return cfg
+
+    monkeypatch.setattr(reconcile_guard_once, "load_config", _fake_load_config)
     monkeypatch.setattr(reconcile_guard_once, "OKXPrivateClient", DummyClient)
     monkeypatch.setattr(reconcile_guard_once, "PositionStore", lambda path: SimpleNamespace(path=path))
     monkeypatch.setattr(reconcile_guard_once, "AccountStore", lambda path: SimpleNamespace(path=path))
@@ -58,10 +65,6 @@ def test_reconcile_guard_once_uses_schema_default_dust_ignore(monkeypatch, tmp_p
         "argv",
         [
             "reconcile_guard_once.py",
-            "--config",
-            "configs/live_prod.yaml",
-            "--env",
-            ".env",
             "--out",
             str(out_path),
             "--positions-db",
@@ -71,6 +74,8 @@ def test_reconcile_guard_once_uses_schema_default_dust_ignore(monkeypatch, tmp_p
 
     reconcile_guard_once.main()
 
+    assert captured["config_path"] == expected_cfg
+    assert captured["env_path"] == expected_env
     assert captured["thresholds"].abs_usdt_tol == 50.0
     assert captured["thresholds"].dust_usdt_ignore == 1.0
     assert captured["universe_bases"] == ["BTC"]

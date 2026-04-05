@@ -6,6 +6,7 @@ import os
 import time
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from src.execution.fill_store import FillStore, parse_okx_fills
 from src.execution.okx_private_client import OKXPrivateClient
 
@@ -49,7 +50,7 @@ def sync_once(*, store: FillStore, client: OKXPrivateClient, limit: int = 100, m
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="configs/config.yaml")
+    ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--db", default="reports/fills.sqlite")
     ap.add_argument("--limit", type=int, default=100)
@@ -58,7 +59,10 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
 
-    cfg = load_config(args.config, env_path=args.env)
+    cfg = load_config(
+        resolve_runtime_config_path(args.config),
+        env_path=resolve_runtime_env_path(args.env),
+    )
     if not (cfg.exchange.api_key and cfg.exchange.api_secret and cfg.exchange.passphrase):
         raise RuntimeError("Missing OKX API credentials (exchange.api_key/api_secret/passphrase)")
 

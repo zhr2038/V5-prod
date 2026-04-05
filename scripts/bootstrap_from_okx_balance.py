@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from src.execution.account_store import AccountStore
 from src.execution.highest_px_tracker import get_highest_price_tracker
 from src.execution.okx_private_client import OKXPrivateClient
@@ -34,7 +35,7 @@ def _mid_px(symbol: str, ts_ms: int) -> float:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="configs/config.yaml")
+    ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite local stores to match exchange snapshot")
@@ -42,7 +43,10 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
-    cfg = load_config(args.config, env_path=args.env)
+    cfg = load_config(
+        resolve_runtime_config_path(args.config),
+        env_path=resolve_runtime_env_path(args.env),
+    )
 
     client = OKXPrivateClient(exchange=cfg.exchange)
     ps = PositionStore(path=args.positions_db)
