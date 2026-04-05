@@ -16,6 +16,10 @@ from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
 log = logging.getLogger("reconcile_guard")
 
 
+def _coalesce(value, default):
+    return default if value is None else value
+
+
 def _write_status(path: str, obj: dict) -> None:
     from pathlib import Path
 
@@ -53,7 +57,9 @@ def main() -> None:
             thresholds=ReconcileThresholds(
                 abs_usdt_tol=float(args.abs_usdt_tol),
                 abs_base_tol=float(args.abs_base_tol),
-                dust_usdt_ignore=float(getattr(cfg.execution, "reconcile_dust_usdt_ignore", 0.0) or 0.0),
+                dust_usdt_ignore=float(
+                    _coalesce(getattr(cfg.execution, "reconcile_dust_usdt_ignore", None), 1.0)
+                ),
             ),
         )
         universe_bases = [str(s).split("/")[0] for s in (cfg.symbols or [])]
