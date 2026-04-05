@@ -38,7 +38,7 @@ def resolve_live_timer_unit_name() -> str:
                 return unit
         except Exception:
             pass
-    return "v5-prod"
+    return "v5-prod.user.timer"
 
 
 def load_env_file(path: Path) -> None:
