@@ -21,6 +21,10 @@ from src.execution.position_store import PositionStore
 from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
 
 
+def _coalesce(value, default):
+    return default if value is None else value
+
+
 def load_kill_switch(path: str) -> dict:
     p = Path(path)
     if not p.exists():
@@ -48,9 +52,9 @@ def main() -> None:
     ap.add_argument("--env", default=".env")
     ap.add_argument("--out", default="reports/reconcile_status.json")
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
-    ap.add_argument("--abs-usdt-tol", type=float, default=1.0)
+    ap.add_argument("--abs-usdt-tol", type=float, default=None)
     ap.add_argument("--abs-base-tol", type=float, default=1e-5)
-    ap.add_argument("--dust-usdt-ignore", type=float, default=2.0)
+    ap.add_argument("--dust-usdt-ignore", type=float, default=None)
     ap.add_argument("--retries", type=int, default=3)
     ap.add_argument("--retry-delay", type=float, default=2.0)
     ap.add_argument("--kill-switch-path", default="reports/kill_switch.json")
@@ -79,9 +83,13 @@ def main() -> None:
                 position_store=PositionStore(path=args.positions_db),
                 account_store=AccountStore(path=args.positions_db),
                 thresholds=ReconcileThresholds(
-                    abs_usdt_tol=float(args.abs_usdt_tol),
+                    abs_usdt_tol=float(
+                        _coalesce(args.abs_usdt_tol, _coalesce(getattr(cfg.execution, "reconcile_abs_usdt_tol", None), 50.0))
+                    ),
                     abs_base_tol=float(args.abs_base_tol),
-                    dust_usdt_ignore=float(args.dust_usdt_ignore),
+                    dust_usdt_ignore=float(
+                        _coalesce(args.dust_usdt_ignore, _coalesce(getattr(cfg.execution, "reconcile_dust_usdt_ignore", None), 1.0))
+                    ),
                 ),
             )
             obj = eng.reconcile(out_path=args.out)
