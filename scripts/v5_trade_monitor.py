@@ -1,252 +1,334 @@
 #!/usr/bin/env python3
 """
-V5 交易监控报警系统
-检查交易状态，异常时通过 Telegram 通知
+Trade monitor for the V5 production workspace.
 """
 
-import json
+from __future__ import annotations
+
+import os
+import re
+import shutil
 import sqlite3
 import subprocess
-from datetime import datetime, timedelta
-from pathlib import Path
 import sys
-import re
+import json
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Sequence
+from urllib import parse, request
 
-# 配置
-V5_DIR = Path("/home/admin/clawd/v5-prod")
-REPORTS_DIR = V5_DIR / "reports"
-LOGS_DIR = V5_DIR / "logs"
-DB_PATH = V5_DIR / "data" / "v5_live.db"
 
-# 报警阈值
-ALERT_THRESHOLDS = {
-    "no_trade_hours": 6,  # 6小时无交易报警
-    "no_trade_critical": 12,  # 12小时无交易严重报警
-    "borrow_detected": True,  # 检测到借贷立即报警
-    "preflight_abort": True,  # preflight失败立即报警
-    "consecutive_errors": 3,  # 连续3次错误报警
-}
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+from configs.runtime_config import resolve_runtime_env_path
+
 
 TELEGRAM_CHAT_ID = "5065024131"
+LIVE_SERVICE_UNITS = ("v5-prod.user.service", "v5-live-20u.user.service")
+ALERT_THRESHOLDS = {
+    "no_trade_hours": 6,
+    "no_trade_critical": 12,
+}
+FILL_SYNC_RE = re.compile(r"new_fills=(\d+)")
+JOURNAL_TS_RE = re.compile(r"^(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+(?P<clock>\d{2}:\d{2}:\d{2})")
 
 
-def run_command(cmd, timeout=30):
-    """运行命令并返回输出（兼容Python 3.6）"""
+@dataclass(frozen=True)
+class MonitorPaths:
+    project_root: Path
+    reports_dir: Path
+    logs_dir: Path
+    fills_db_path: Path
+    env_path: Path
+    alert_file: Path
+
+
+def build_paths(project_root: Path | None = None) -> MonitorPaths:
+    root = (project_root or PROJECT_ROOT).resolve()
+    reports_dir = root / "reports"
+    logs_dir = root / "logs"
+    env_path = Path(resolve_runtime_env_path(project_root=root))
+    return MonitorPaths(
+        project_root=root,
+        reports_dir=reports_dir,
+        logs_dir=logs_dir,
+        fills_db_path=reports_dir / "fills.sqlite",
+        env_path=env_path,
+        alert_file=reports_dir / "monitor_alert.txt",
+    )
+
+
+DEFAULT_PATHS = build_paths()
+
+
+def run_command(cmd: Sequence[str], timeout: int = 30) -> str:
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+        result = subprocess.run(
+            list(cmd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
         )
-        stdout, stderr = proc.communicate(timeout=timeout)
-        return stdout.decode('utf-8', errors='ignore')
-    except Exception as e:
-        print(f"[ERROR] 命令执行失败: {e}")
+        return result.stdout
+    except Exception as exc:
+        print(f"[ERROR] command failed: {exc}")
         return ""
 
 
-def get_last_trade_time():
-    """获取最后一笔交易时间"""
+def resolve_live_service_unit_name() -> str:
+    if shutil.which("systemctl") is None:
+        return LIVE_SERVICE_UNITS[0]
+
+    for unit in LIVE_SERVICE_UNITS:
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "status", unit],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                return unit
+        except Exception:
+            pass
+    return LIVE_SERVICE_UNITS[0]
+
+
+def _parse_journal_timestamp(line: str) -> datetime | None:
+    match = JOURNAL_TS_RE.match(line)
+    if not match:
+        return None
     try:
-        # 从 fills 表查询
-        if DB_PATH.exists():
-            conn = sqlite3.connect(str(DB_PATH))
-            cursor = conn.cursor()
-            cursor.execute("SELECT MAX(ts) FROM fills")
-            result = cursor.fetchone()
-            conn.close()
-            if result and result[0]:
-                return datetime.fromtimestamp(result[0] / 1000)
-    except Exception as e:
-        print(f"[ERROR] 查询数据库失败: {e}")
-    
-    # 回退：从日志解析
+        current_year = datetime.now().year
+        date_text = "{month} {day} {clock} {year}".format(
+            month=match.group("month"),
+            day=match.group("day"),
+            clock=match.group("clock"),
+            year=current_year,
+        )
+        return datetime.strptime(date_text, "%b %d %H:%M:%S %Y")
+    except Exception:
+        return None
+
+
+def get_last_trade_time(paths: MonitorPaths = DEFAULT_PATHS, *, service_unit: str | None = None) -> datetime | None:
     try:
-        output = run_command([
-            "journalctl", "--user", "-u", "v5-prod.user.service", 
-            "--since", "12 hours ago", "--no-pager", "-n", "1000"
-        ])
-        
-        for line in reversed(output.split('\n')):
-            if 'FILLS_SYNC new_fills=' in line and 'new_fills=0' not in line:
-                # 解析时间
-                parts = line.split()
-                if len(parts) >= 3:
-                    try:
-                        current_year = datetime.now().year
-                        date_str = f"{parts[0]} {parts[1]} {parts[2]} {current_year}"
-                        return datetime.strptime(date_str, "%b %d %H:%M:%S %Y")
-                    except:
-                        continue
-    except Exception as e:
-        print(f"[ERROR] 查询日志失败: {e}")
-    
+        if paths.fills_db_path.exists():
+            conn = sqlite3.connect(str(paths.fills_db_path))
+            try:
+                row = conn.execute("SELECT MAX(ts_ms) FROM fills").fetchone()
+            finally:
+                conn.close()
+            if row and row[0]:
+                return datetime.fromtimestamp(int(row[0]) / 1000)
+    except Exception as exc:
+        print(f"[ERROR] failed to query fill store: {exc}")
+
+    unit = service_unit or resolve_live_service_unit_name()
+    try:
+        output = run_command(
+            [
+                "journalctl",
+                "--user",
+                "-u",
+                unit,
+                "--since",
+                "12 hours ago",
+                "--no-pager",
+                "-n",
+                "1000",
+            ]
+        )
+        for line in reversed(output.splitlines()):
+            if "FILLS_SYNC new_fills=" in line and "new_fills=0" not in line:
+                ts = _parse_journal_timestamp(line)
+                if ts is not None:
+                    return ts
+    except Exception as exc:
+        print(f"[ERROR] failed to query journal: {exc}")
     return None
 
 
-def get_recent_errors():
-    """获取最近的错误信息"""
-    errors = []
+def get_recent_errors(*, service_unit: str | None = None) -> list[str]:
+    unit = service_unit or resolve_live_service_unit_name()
+    errors: list[str] = []
     try:
-        output = run_command([
-            "journalctl", "--user", "-u", "v5-prod.user.service",
-            "--since", "2 hours ago", "--no-pager", "-n", "500"
-        ])
-        
-        # 检查各类错误
+        output = run_command(
+            [
+                "journalctl",
+                "--user",
+                "-u",
+                unit,
+                "--since",
+                "2 hours ago",
+                "--no-pager",
+                "-n",
+                "500",
+            ]
+        )
         if "borrow_detected" in output:
             count = output.count("borrow_detected")
-            if count > 0:
-                errors.append(f"检测到借贷阻塞 (近2小时出现{count}次)")
-        
+            errors.append(f"borrow guard triggered {count} times in the last 2 hours")
         if "ABORT" in output:
             count = output.count("ABORT")
-            if count > 0:
-                errors.append(f"交易被中止 (近2小时出现{count}次)")
-        
+            errors.append(f"trade aborted {count} times in the last 2 hours")
         if "RuntimeError" in output:
             count = output.count("RuntimeError")
-            if count > 0:
-                errors.append(f"运行时错误 (近2小时出现{count}次)")
-            
-    except Exception as e:
-        print(f"[ERROR] 检查错误日志失败: {e}")
-    
+            errors.append(f"runtime error seen {count} times in the last 2 hours")
+    except Exception as exc:
+        print(f"[ERROR] failed to inspect recent errors: {exc}")
     return errors
 
 
-def get_recent_trades_count():
-    """获取最近6小时成交次数"""
+def get_recent_trades_count(*, service_unit: str | None = None) -> tuple[int, int]:
+    unit = service_unit or resolve_live_service_unit_name()
     try:
-        output = run_command([
-            "journalctl", "--user", "-u", "v5-prod.user.service",
-            "--since", "6 hours ago", "--no-pager"
-        ])
-        
-        # 统计成交次数
-        trades = output.count("FILLS_SYNC new_fills=")
-        total_fills = 0
-        for line in output.split('\n'):
-            if 'FILLS_SYNC new_fills=' in line:
-                try:
-                    match = re.search(r'new_fills=(\d+)', line)
-                    if match:
-                        total_fills += int(match.group(1))
-                except:
-                    continue
-        return trades, total_fills
-    except Exception as e:
-        print(f"[ERROR] 统计交易次数失败: {e}")
+        output = run_command(
+            [
+                "journalctl",
+                "--user",
+                "-u",
+                unit,
+                "--since",
+                "6 hours ago",
+                "--no-pager",
+            ]
+        )
+    except Exception as exc:
+        print(f"[ERROR] failed to inspect trade journal: {exc}")
         return 0, 0
 
+    trade_runs = 0
+    total_fills = 0
+    for line in output.splitlines():
+        if "FILLS_SYNC new_fills=" not in line:
+            continue
+        trade_runs += 1
+        match = FILL_SYNC_RE.search(line)
+        if match:
+            total_fills += int(match.group(1))
+    return trade_runs, total_fills
 
-def send_telegram_alert(message, priority="normal"):
-    """发送Telegram报警"""
-    try:
-        emoji = "🚨" if priority == "critical" else "⚠️" if priority == "warning" else "ℹ️"
-        full_message = f"{emoji} V5监控报警\n\n{message}\n\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        
-        # 读取bot token
-        env_file = V5_DIR / ".env"
-        bot_token = None
-        chat_id = TELEGRAM_CHAT_ID
-        
-        if env_file.exists():
-            with open(env_file) as f:
-                for line in f:
-                    if line.startswith("TELEGRAM_BOT_TOKEN="):
-                        bot_token = line.strip().split("=", 1)[1]
-                    if line.startswith("TELEGRAM_CHAT_ID="):
-                        chat_id = line.strip().split("=", 1)[1]
-        
-        if bot_token:
-            # 使用curl发送
-            import urllib.parse
-            encoded_msg = urllib.parse.quote(full_message)
-            cmd = [
-                "curl", "-s", "-X", "POST",
+
+def _load_telegram_settings(paths: MonitorPaths) -> tuple[str | None, str]:
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID") or TELEGRAM_CHAT_ID
+
+    if not paths.env_path.exists():
+        return bot_token, chat_id
+
+    for line in paths.env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key == "TELEGRAM_BOT_TOKEN" and not bot_token:
+            bot_token = value
+        elif key == "TELEGRAM_CHAT_ID" and not os.getenv("TELEGRAM_CHAT_ID"):
+            chat_id = value
+
+    return bot_token, chat_id
+
+
+def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPaths = DEFAULT_PATHS) -> bool:
+    icon = "[CRITICAL]" if priority == "critical" else "[WARN]" if priority == "warning" else "[INFO]"
+    full_message = (
+        f"{icon} V5 trade monitor\n\n"
+        f"{message}\n\n"
+        f"time: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    )
+
+    bot_token, chat_id = _load_telegram_settings(paths)
+    if bot_token:
+        try:
+            payload = parse.urlencode({"chat_id": chat_id, "text": full_message}).encode("utf-8")
+            req = request.Request(
                 f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                "-d", f"chat_id={chat_id}",
-                "-d", f"text={encoded_msg}"
-            ]
-            result = subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if result == 0:
-                print(f"[INFO] 报警已发送")
-                return True
-        
-        # 回退：写入文件
-        alert_file = V5_DIR / "reports" / "monitor_alert.txt"
-        with open(alert_file, 'w') as f:
-            f.write(full_message)
-        print(f"[INFO] 报警已记录到文件")
+                data=payload,
+                method="POST",
+            )
+            with request.urlopen(req, timeout=10):
+                pass
+            print("[INFO] alert sent to Telegram")
+            return True
+        except Exception as exc:
+            print(f"[ERROR] failed to send Telegram alert: {exc}")
+
+    try:
+        paths.alert_file.parent.mkdir(parents=True, exist_ok=True)
+        paths.alert_file.write_text(full_message, encoding="utf-8")
+        print("[INFO] alert written to monitor_alert.txt")
         return True
-        
-    except Exception as e:
-        print(f"[ERROR] 发送报警失败: {e}")
+    except Exception as exc:
+        print(f"[ERROR] failed to persist alert: {exc}")
         return False
 
 
-def check_and_alert():
-    """主检查函数"""
-    alerts = []
+def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
+    alerts: list[str] = []
     priority = "normal"
-    
-    # 1. 检查交易活跃度
-    last_trade = get_last_trade_time()
-    trade_runs, total_fills = get_recent_trades_count()
-    
-    if last_trade:
+    service_unit = resolve_live_service_unit_name()
+
+    last_trade = get_last_trade_time(paths, service_unit=service_unit)
+    trade_runs, total_fills = get_recent_trades_count(service_unit=service_unit)
+
+    if last_trade is not None:
         hours_since_trade = (datetime.now() - last_trade).total_seconds() / 3600
         if hours_since_trade >= ALERT_THRESHOLDS["no_trade_critical"]:
-            alerts.append(f"🔴 严重：已 {hours_since_trade:.1f} 小时无交易")
+            alerts.append(f"critical: no trade for {hours_since_trade:.1f} hours")
             priority = "critical"
         elif hours_since_trade >= ALERT_THRESHOLDS["no_trade_hours"]:
-            alerts.append(f"🟡 警告：已 {hours_since_trade:.1f} 小时无交易")
+            alerts.append(f"warning: no trade for {hours_since_trade:.1f} hours")
             priority = "warning"
     else:
-        alerts.append("🟡 无法获取最近交易时间")
-    
-    # 2. 检查交易执行次数
+        alerts.append("warning: unable to determine last trade time")
+
     if trade_runs == 0:
-        alerts.append("🟡 最近6小时无交易轮次")
-    elif total_fills == 0 and trade_runs > 0:
-        alerts.append(f"ℹ️ 最近6小时有{trade_runs}轮运行但无成交")
-    
-    # 3. 检查错误
-    errors = get_recent_errors()
+        alerts.append("warning: no trade sync runs in the last 6 hours")
+    elif total_fills == 0:
+        alerts.append(f"info: {trade_runs} sync runs in the last 6 hours but zero fills")
+
+    errors = get_recent_errors(service_unit=service_unit)
     if errors:
         alerts.extend(errors)
-        if any("借贷" in e or "中止" in e for e in errors):
+        if any("borrow" in item or "aborted" in item for item in errors):
             priority = "critical"
-    
-    # 4. 检查当前状态
-    try:
-        regime_file = REPORTS_DIR / "regime.json"
-        if regime_file.exists():
-            regime = json.loads(regime_file.read_text())
-            state = regime.get("state", "unknown")
+
+    regime_file = paths.reports_dir / "regime.json"
+    if regime_file.exists():
+        try:
+            regime = json.loads(regime_file.read_text(encoding="utf-8"))
+            state = str(regime.get("state") or "unknown")
             if state == "Risk-Off":
-                alerts.append(f"ℹ️ 当前市场状态: {state} (谨慎交易)")
-    except Exception as e:
-        pass
-    
-    # 发送报警
+                alerts.append("info: current market regime is Risk-Off")
+        except Exception:
+            pass
+
     if alerts:
-        message = "\n".join(alerts)
-        message += f"\n\n📊 统计: 近6小时{trade_runs}轮运行, {total_fills}笔成交"
-        send_telegram_alert(message, priority)
+        summary = "\n".join(alerts)
+        summary += f"\n\nstats: last 6 hours trade_runs={trade_runs}, fills={total_fills}"
+        send_telegram_alert(summary, priority=priority, paths=paths)
         return True
-    
-    print(f"[OK] {datetime.now().strftime('%H:%M')} 检查通过，无异常")
+
+    print(f"[OK] {datetime.now().strftime('%H:%M')} monitor check passed")
     return False
 
 
+def main(argv: Sequence[str] | None = None) -> int:
+    args = list(argv if argv is not None else sys.argv[1:])
+    has_alert = check_and_alert()
+    if "--silent" in args:
+        return 1 if has_alert else 0
+    return 0
+
+
 if __name__ == "__main__":
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] V5监控检查开始...")
-    
-    # 参数解析
-    if "--silent" in sys.argv:
-        has_alert = check_and_alert()
-        sys.exit(0 if not has_alert else 1)
-    else:
-        check_and_alert()
+    raise SystemExit(main())
