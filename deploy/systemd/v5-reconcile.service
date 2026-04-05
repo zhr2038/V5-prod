@@ -10,6 +10,6 @@ User=admin
 Group=admin
 Environment=PYTHONUNBUFFERED=1
 SyslogIdentifier=v5-reconcile
-ExecStart=/usr/bin/flock -n /tmp/v5_reconcile.lock -c "/bin/bash -lc '/home/admin/clawd/v5-trading-bot/.venv/bin/python scripts/reconcile_guard_once.py --out reports/reconcile_status.json'"
+ExecStart=/usr/bin/flock -n /tmp/v5_reconcile.lock -c "/bin/bash -lc '/home/admin/clawd/v5-trading-bot/.venv/bin/python scripts/reconcile_guard_once.py --config configs/live_prod.yaml --env .env --out reports/reconcile_status.json'"
 Restart=on-failure
 RestartSec=10

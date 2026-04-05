@@ -48,6 +48,19 @@ def test_v5_model_promotion_gate_timer_points_to_service():
     assert "Unit=v5-model-promotion-gate.service" in text
 
 
+def test_v5_reconcile_service_targets_live_prod_config():
+    text = Path("deploy/systemd/v5-reconcile.user.service").read_text(encoding="utf-8")
+    assert "WorkingDirectory=/home/admin/clawd/v5-trading-bot" in text
+    assert "scripts/reconcile_guard_once.py --config configs/live_prod.yaml --env .env --out reports/reconcile_status.json" in text
+
+
+def test_v5_ledger_service_targets_live_prod_config():
+    text = Path("deploy/systemd/v5-ledger.user.service").read_text(encoding="utf-8")
+    assert "WorkingDirectory=/home/admin/clawd/v5-trading-bot" in text
+    assert "scripts/bills_sync.py --config configs/live_prod.yaml --env .env --db reports/bills.sqlite" in text
+    assert "scripts/ledger_once.py --config configs/live_prod.yaml --env .env --bills-db reports/bills.sqlite --out reports/ledger_status.json" in text
+
+
 def test_install_systemd_production_only_disables_shadow_timers():
     text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
     assert "disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service" in text

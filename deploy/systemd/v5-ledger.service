@@ -10,6 +10,6 @@ User=admin
 Group=admin
 Environment=PYTHONUNBUFFERED=1
 SyslogIdentifier=v5-ledger
-ExecStart=/usr/bin/flock -n /tmp/v5_ledger.lock -c "/bin/bash -lc 'PYTHONPATH=. /home/admin/clawd/v5-trading-bot/.venv/bin/python scripts/bills_sync.py --db reports/bills.sqlite && PYTHONPATH=. /home/admin/clawd/v5-trading-bot/.venv/bin/python scripts/ledger_once.py --bills-db reports/bills.sqlite --out reports/ledger_status.json'"
+ExecStart=/usr/bin/flock -n /tmp/v5_ledger.lock -c "/bin/bash -lc 'PYTHONPATH=. /home/admin/clawd/v5-trading-bot/.venv/bin/python scripts/bills_sync.py --config configs/live_prod.yaml --env .env --db reports/bills.sqlite && PYTHONPATH=. /home/admin/clawd/v5-trading-bot/.venv/bin/python scripts/ledger_once.py --config configs/live_prod.yaml --env .env --bills-db reports/bills.sqlite --out reports/ledger_status.json'"
 Restart=on-failure
 RestartSec=10
