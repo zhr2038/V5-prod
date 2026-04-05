@@ -336,6 +336,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _coalesce(value, default):
+    return default if value is None else value
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent
     cfg_path = os.getenv("V5_CONFIG")
@@ -791,7 +795,7 @@ def main() -> None:
 
         orders_before = len(orders or [])
         sm_path = str(getattr(cfg.execution, "order_state_machine_path", "reports/order_state_machine.json") or "reports/order_state_machine.json")
-        cooldown_min = int(getattr(cfg.execution, "open_long_cooldown_minutes", 10) or 10)
+        cooldown_min = int(_coalesce(getattr(cfg.execution, "open_long_cooldown_minutes", None), 10))
         orders, arb_decisions = arbitrate_orders(
             orders=(orders or []),
             positions=store.list(),
