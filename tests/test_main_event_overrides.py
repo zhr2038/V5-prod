@@ -129,6 +129,60 @@ def test_main_reaches_market_data_validation_after_fetch(tmp_path: Path, monkeyp
         main_mod.main()
 
 
+def test_main_market_data_validation_respects_zero_min_coverage_ratio(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    cfg = SimpleNamespace(
+        symbols=["BTC/USDT"],
+        timeframe_main="1H",
+        universe=SimpleNamespace(
+            enabled=False,
+            use_universe_symbols=False,
+            min_data_coverage_ratio=0.0,
+        ),
+    )
+
+    class FakeAudit:
+        def __init__(self, *args, **kwargs) -> None:
+            self.universe_config = {}
+
+        def add_note(self, *_args, **_kwargs) -> None:
+            pass
+
+    class FakeProvider:
+        def fetch_ohlcv(self, symbols, timeframe, limit, end_ts_ms=None):
+            assert symbols == ["BTC/USDT"]
+            assert timeframe == "1H"
+            assert limit == 24 * 60
+            assert end_ts_ms is None
+            return {"BTC/USDT": SimpleNamespace(ts=[1], close=[1.0], high=[1.0])}
+
+    class ReachedValidation(RuntimeError):
+        pass
+
+    captured = {}
+
+    def _capture_validate(*args, **kwargs):
+        captured["min_coverage_ratio"] = kwargs["min_coverage_ratio"]
+        raise ReachedValidation("called")
+
+    monkeypatch.setattr(main_mod, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(main_mod, "setup_logging", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_mod, "build_provider", lambda _cfg: FakeProvider())
+    monkeypatch.setattr(main_mod, "PositionStore", lambda path: SimpleNamespace(list=lambda: []))
+    monkeypatch.setattr(main_mod, "AccountStore", lambda path: SimpleNamespace())
+
+    import src.reporting.decision_audit as decision_audit_mod
+
+    monkeypatch.setattr(decision_audit_mod, "DecisionAudit", FakeAudit)
+    monkeypatch.setattr(main_mod, "_validate_market_data_snapshot", _capture_validate)
+
+    with pytest.raises(ReachedValidation, match="called"):
+        main_mod.main()
+
+    assert captured["min_coverage_ratio"] == 0.0
+
+
 def test_main_order_arbitration_respects_zero_open_long_cooldown(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 

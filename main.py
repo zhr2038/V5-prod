@@ -477,7 +477,7 @@ def main() -> None:
         symbols=scored_symbols,
         market_data=md_1h,
         require_symbol="BTC/USDT" if bool(getattr(cfg.universe, "require_btc_benchmark", True)) else None,
-        min_coverage_ratio=float(getattr(cfg.universe, "min_data_coverage_ratio", 0.80) or 0.80),
+        min_coverage_ratio=float(_coalesce(getattr(cfg.universe, "min_data_coverage_ratio", None), 0.80)),
     )
     if not ok_md:
         log.error(md_reason)
