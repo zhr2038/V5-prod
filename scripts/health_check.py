@@ -22,14 +22,14 @@ REPORTS_DIR = WORKSPACE / "reports"
 HEALTH_FILE = REPORTS_DIR / "health_status.json"
 
 
-def resolve_live_unit_name() -> str:
+def resolve_live_timer_unit_name() -> str:
     if shutil.which("systemctl") is None:
-        return "v5-prod"
+        return "v5-prod.user.timer"
 
-    for unit in ("v5-prod", "v5-live-20u"):
+    for unit in ("v5-prod.user.timer", "v5-live-20u.user.timer"):
         try:
             result = subprocess.run(
-                ["systemctl", "--user", "status", f"{unit}.user.service"],
+                ["systemctl", "--user", "status", unit],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -70,9 +70,9 @@ class HealthChecker:
             }
 
         timers = [
-            (resolve_live_unit_name(), 70),
-            ("v5-reconcile", 10),
-            ("v5-trade-auditor", 70),
+            (resolve_live_timer_unit_name(), 70),
+            ("v5-reconcile.timer", 10),
+            ("v5-trade-monitor.timer", 70),
         ]
         issues: List[Dict[str, Any]] = []
 
@@ -83,7 +83,7 @@ class HealthChecker:
                         "systemctl",
                         "--user",
                         "show",
-                        f"{timer_name}.user.timer",
+                        timer_name,
                         "--property=LastTriggerUSec",
                     ],
                     capture_output=True,
