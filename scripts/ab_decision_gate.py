@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
-RUNS_DIR = REPORTS_DIR / 'runs'
-OUT = REPORTS_DIR / 'ab_gate_status.json'
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass
@@ -26,10 +25,19 @@ class Stat:
         return self.rebalance / self.selected
 
 
-def load_runs(limit: int = 120):
-    if not RUNS_DIR.exists():
+def _resolve_reports_dir(raw_reports_dir: str | None = None) -> Path:
+    if raw_reports_dir is None or not str(raw_reports_dir).strip():
+        return (PROJECT_ROOT / "reports").resolve()
+    path = Path(str(raw_reports_dir).strip())
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return path
+
+
+def load_runs(runs_dir: Path, limit: int = 120):
+    if not runs_dir.exists():
         return []
-    ds = [d for d in RUNS_DIR.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+    ds = [d for d in runs_dir.iterdir() if d.is_dir() and (d / "decision_audit.json").exists()]
     ds.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return ds[:limit]
 
@@ -39,17 +47,17 @@ def calc_current(run_dirs):
     deadband_drifts = []
     for d in run_dirs:
         try:
-            obj = json.loads((d / 'decision_audit.json').read_text(encoding='utf-8'))
-            c = obj.get('counts') or {}
+            obj = json.loads((d / "decision_audit.json").read_text(encoding="utf-8"))
+            c = obj.get("counts") or {}
             s.rounds += 1
-            s.selected += int(c.get('selected', 0) or 0)
-            s.rebalance += int(c.get('orders_rebalance', 0) or 0)
-            s.exits += int(c.get('orders_exit', 0) or 0)
-            for rd in (obj.get('router_decisions') or []):
-                if rd.get('reason') == 'deadband':
+            s.selected += int(c.get("selected", 0) or 0)
+            s.rebalance += int(c.get("orders_rebalance", 0) or 0)
+            s.exits += int(c.get("orders_exit", 0) or 0)
+            for rd in (obj.get("router_decisions") or []):
+                if rd.get("reason") == "deadband":
                     s.deadband_blocks += 1
                     try:
-                        deadband_drifts.append(abs(float(rd.get('drift') or 0)))
+                        deadband_drifts.append(abs(float(rd.get("drift") or 0)))
                     except Exception:
                         pass
         except Exception:
@@ -58,7 +66,6 @@ def calc_current(run_dirs):
 
 
 def simulate_candidate(current: Stat, deadband_drifts, old_deadband=0.04, new_deadband=0.03):
-    # 简化模拟：old挡住但new放行的部分，视为潜在新增rebalance
     opened = sum(1 for x in deadband_drifts if new_deadband < x <= old_deadband)
     sim = Stat(
         rounds=current.rounds,
@@ -73,59 +80,60 @@ def simulate_candidate(current: Stat, deadband_drifts, old_deadband=0.04, new_de
 def decide(cur: Stat, sim: Stat):
     cur_conv = cur.conversion
     sim_conv = sim.conversion
-    uplift = (sim_conv - cur_conv)
+    uplift = sim_conv - cur_conv
     rel_uplift = (uplift / cur_conv) if cur_conv > 0 else 0.0
 
-    # 守门规则（保守）：
-    # 1) 至少30轮样本
-    # 2) 转化率相对提升>=8%
-    # 3) 绝对提升>=2pct
-    ok = (
-        cur.rounds >= 30
-        and rel_uplift >= 0.08
-        and uplift >= 0.02
-    )
+    ok = cur.rounds >= 30 and rel_uplift >= 0.08 and uplift >= 0.02
     return ok, {
-        'current_conversion': round(cur_conv, 4),
-        'candidate_conversion': round(sim_conv, 4),
-        'uplift_abs': round(uplift, 4),
-        'uplift_rel': round(rel_uplift, 4),
+        "current_conversion": round(cur_conv, 4),
+        "candidate_conversion": round(sim_conv, 4),
+        "uplift_abs": round(uplift, 4),
+        "uplift_rel": round(rel_uplift, 4),
     }
 
 
-def main():
-    runs = load_runs(limit=120)
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--reports-dir", default=None)
+    parser.add_argument("--limit", type=int, default=120)
+    args = parser.parse_args()
+
+    reports_dir = _resolve_reports_dir(args.reports_dir)
+    runs_dir = reports_dir / "runs"
+    out_path = reports_dir / "ab_gate_status.json"
+
+    runs = load_runs(runs_dir, limit=args.limit)
     cur, drifts = calc_current(runs)
     sim, opened = simulate_candidate(cur, drifts)
     switch, detail = decide(cur, sim)
 
     out = {
-        'ts': datetime.now().isoformat(),
-        'window_runs': cur.rounds,
-        'current': {
-            'selected': cur.selected,
-            'rebalance': cur.rebalance,
-            'deadband_blocks': cur.deadband_blocks,
-            'conversion': round(cur.conversion, 4),
+        "ts": datetime.now().isoformat(),
+        "window_runs": cur.rounds,
+        "current": {
+            "selected": cur.selected,
+            "rebalance": cur.rebalance,
+            "deadband_blocks": cur.deadband_blocks,
+            "conversion": round(cur.conversion, 4),
         },
-        'candidate': {
-            'rebalance': sim.rebalance,
-            'deadband_blocks': sim.deadband_blocks,
-            'conversion': round(sim.conversion, 4),
-            'estimated_opened_from_deadband': int(opened),
+        "candidate": {
+            "rebalance": sim.rebalance,
+            "deadband_blocks": sim.deadband_blocks,
+            "conversion": round(sim.conversion, 4),
+            "estimated_opened_from_deadband": int(opened),
         },
-        'decision': {
-            'switch_recommended': bool(switch),
-            'reason': 'meets_gate' if switch else 'insufficient_evidence',
+        "decision": {
+            "switch_recommended": bool(switch),
+            "reason": "meets_gate" if switch else "insufficient_evidence",
             **detail,
         },
-        'note': 'advisory_only_no_auto_apply',
+        "note": "advisory_only_no_auto_apply",
     }
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding='utf-8')
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(out, ensure_ascii=False))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
