@@ -3,15 +3,24 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
 
-# allow running as a script from repo root
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
 
 from src.reporting.summary_writer import write_summary
+
+
+def _resolve_repo_path(value: str | Path | None, *, default: Path) -> Path:
+    path = Path(value) if value is not None else default
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
 
 
 def _utc_hour_floor(dt: datetime) -> datetime:
@@ -19,7 +28,6 @@ def _utc_hour_floor(dt: datetime) -> datetime:
 
 
 def window_ids(end_hour_exclusive: datetime, hours: int = 24) -> List[str]:
-    # end_hour_exclusive is aligned to hour
     out = []
     for i in range(hours, 0, -1):
         h = end_hour_exclusive - timedelta(hours=i)
@@ -30,7 +38,7 @@ def window_ids(end_hour_exclusive: datetime, hours: int = 24) -> List[str]:
 def _read_equity_jsonl(path: Path) -> List[Dict]:
     if not path.exists():
         return []
-    rows = []
+    rows: List[Dict] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -46,8 +54,8 @@ def _read_trades_csv(path: Path) -> List[Dict[str, str]]:
     if not path.exists():
         return []
     with path.open("r", encoding="utf-8") as f:
-        r = csv.DictReader(f)
-        return [dict(x) for x in r]
+        reader = csv.DictReader(f)
+        return [dict(row) for row in reader]
 
 
 def rollup(end_hour_exclusive: datetime, runs_dir: Path, out_dir: Path, hours: int = 24) -> Path:
@@ -57,66 +65,60 @@ def rollup(end_hour_exclusive: datetime, runs_dir: Path, out_dir: Path, hours: i
     tr_all: List[Dict[str, str]] = []
 
     for wid in window_ids(end_hour_exclusive, hours=hours):
-        rd = runs_dir / wid
-        eq_all.extend(_read_equity_jsonl(rd / "equity.jsonl"))
-        tr_all.extend(_read_trades_csv(rd / "trades.csv"))
+        run_dir = runs_dir / wid
+        eq_all.extend(_read_equity_jsonl(run_dir / "equity.jsonl"))
+        tr_all.extend(_read_trades_csv(run_dir / "trades.csv"))
 
-    # write merged artifacts
     if eq_all:
         (out_dir / "equity.jsonl").write_text(
-            "\n".join([json.dumps(x, ensure_ascii=False) for x in eq_all]) + "\n",
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in eq_all) + "\n",
             encoding="utf-8",
         )
 
     if tr_all:
         cols = list(tr_all[0].keys())
         with (out_dir / "trades.csv").open("w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=cols)
-            w.writeheader()
+            writer = csv.DictWriter(f, fieldnames=cols)
+            writer.writeheader()
             for row in tr_all:
-                w.writerow(row)
+                writer.writerow(row)
 
-    # rollup窗口语义：覆盖过去N小时 [start, end)
     window_end_ts = int(end_hour_exclusive.timestamp())
     window_start_ts = int((end_hour_exclusive - timedelta(hours=hours)).timestamp())
-
-    write_summary(
-        str(out_dir),
-        window_start_ts=window_start_ts,
-        window_end_ts=window_end_ts,
-    )
+    write_summary(str(out_dir), window_start_ts=window_start_ts, window_end_ts=window_end_ts)
     return out_dir / "summary.json"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--hours", type=int, default=24)
-    ap.add_argument("--runs_dir", default="reports/runs")
+    ap.add_argument("--runs_dir", default=None)
     ap.add_argument("--out_dir", default=None, help="default: reports/rollups/last24h_YYYYMMDD_HH")
-    ap.add_argument("--v4_reports_dir", default="/home/admin/clawd/v4-trading-bot/reports")
+    ap.add_argument("--v4_reports_dir", default=None)
     ap.add_argument("--compare_out", default=None, help="default: reports/compare/daily/v4_vs_v5_last24h_YYYYMMDD_HH.md")
     args = ap.parse_args()
 
     end = _utc_hour_floor(datetime.now(timezone.utc))
     tag = end.strftime("%Y%m%d_%H")
 
-    runs_dir = Path(args.runs_dir)
-    out_dir = Path(args.out_dir) if args.out_dir else Path(f"reports/rollups/last24h_{tag}")
+    runs_dir = _resolve_repo_path(args.runs_dir, default=PROJECT_ROOT / "reports" / "runs")
+    out_dir = _resolve_repo_path(args.out_dir, default=PROJECT_ROOT / "reports" / "rollups" / f"last24h_{tag}")
+    v4_reports_dir = _resolve_repo_path(args.v4_reports_dir, default=PROJECT_ROOT / "v4_export")
 
     v5_summary = rollup(end, runs_dir=runs_dir, out_dir=out_dir, hours=int(args.hours))
 
-    compare_out = Path(args.compare_out) if args.compare_out else Path(f"reports/compare/daily/v4_vs_v5_last24h_{tag}.md")
+    compare_out = _resolve_repo_path(
+        args.compare_out,
+        default=PROJECT_ROOT / "reports" / "compare" / "daily" / f"v4_vs_v5_last24h_{tag}.md",
+    )
     compare_out.parent.mkdir(parents=True, exist_ok=True)
-
-    # window alignment + auto v4 export happens here
-    import subprocess
 
     subprocess.check_call(
         [
             sys.executable,
             str(Path(__file__).resolve().parents[0] / "compare_runs.py"),
             "--v4_reports_dir",
-            str(args.v4_reports_dir),
+            str(v4_reports_dir),
             "--v5_summary",
             str(v5_summary),
             "--out",
