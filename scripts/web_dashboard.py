@@ -1104,16 +1104,35 @@ def _load_recent_fill_summary(*, reports_dir: Optional[Path] = None, now_dt: Opt
 
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
-            FROM orders
-            WHERE state = 'FILLED'
-            ORDER BY created_ts DESC
-            LIMIT ?
-            """,
-            (int(limit),),
-        )
+        try:
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts,
+                    run_id,
+                    inst_id,
+                    side,
+                    intent,
+                    notional_usdt,
+                    ord_id
+                FROM orders
+                WHERE state = 'FILLED'
+                ORDER BY event_ts DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+        except sqlite3.OperationalError:
+            cur.execute(
+                """
+                SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
+                FROM orders
+                WHERE state = 'FILLED'
+                ORDER BY created_ts DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
         fill_rows = cur.fetchall()
     finally:
         conn.close()
