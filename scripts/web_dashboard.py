@@ -4449,16 +4449,37 @@ def api_decision_audit():
             conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT created_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id
-                    FROM orders
-                    WHERE run_id = ?
-                    ORDER BY created_ts DESC
-                    LIMIT 100
-                    """,
-                    (run_id,),
-                )
+                try:
+                    cur.execute(
+                        """
+                        SELECT
+                            COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts,
+                            inst_id,
+                            side,
+                            intent,
+                            state,
+                            notional_usdt,
+                            last_error_code,
+                            last_error_msg,
+                            ord_id
+                        FROM orders
+                        WHERE run_id = ?
+                        ORDER BY event_ts DESC
+                        LIMIT 100
+                        """,
+                        (run_id,),
+                    )
+                except sqlite3.OperationalError:
+                    cur.execute(
+                        """
+                        SELECT created_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id
+                        FROM orders
+                        WHERE run_id = ?
+                        ORDER BY created_ts DESC
+                        LIMIT 100
+                        """,
+                        (run_id,),
+                    )
                 rows = cur.fetchall()
                 conn.close()
 
