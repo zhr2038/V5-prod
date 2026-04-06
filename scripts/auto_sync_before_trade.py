@@ -12,6 +12,11 @@ import time
 import logging
 from pathlib import Path
 
+from configs.runtime_config import (
+    resolve_runtime_config_path,
+    resolve_runtime_env_path,
+    resolve_runtime_path,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -71,17 +76,6 @@ def _balance_details(balance_resp):
         return details if isinstance(details, list) else []
     except Exception:
         return []
-
-
-def _resolve_config_path():
-    env_config = os.getenv('V5_CONFIG')
-    if env_config:
-        return env_config
-
-    for candidate in ('configs/live_prod.yaml', 'configs/live_20u_real.yaml', 'configs/config.yaml'):
-        if (WORKSPACE / candidate).exists():
-            return candidate
-    return 'configs/live_prod.yaml'
 
 
 def _sync_local_store_to_okx_snapshot(position_store, local_positions, okx_positions, logger=None):
@@ -160,10 +154,10 @@ def main():
         from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
         
         # Load config (prefer active V5_CONFIG)
-        cfg_path = _resolve_config_path()
+        cfg_path = resolve_runtime_config_path(project_root=WORKSPACE)
         cfg = load_config(
             cfg_path,
-            env_path=str(WORKSPACE / '.env')
+            env_path=resolve_runtime_env_path(project_root=WORKSPACE)
         )
         logger.info(f"Using config: {cfg_path}")
         
@@ -178,8 +172,12 @@ def main():
             logger.info(f"Balance details loaded: {len(balance_details)} assets")
 
             # Load stores
-            position_store = PositionStore(path='reports/positions.sqlite')
-            account_store = AccountStore(path='reports/positions.sqlite')
+            positions_db_path = resolve_runtime_path(
+                default='reports/positions.sqlite',
+                project_root=WORKSPACE,
+            )
+            position_store = PositionStore(path=positions_db_path)
+            account_store = AccountStore(path=positions_db_path)
             
             # Check current diff
             local_positions_list = position_store.list()
@@ -351,8 +349,15 @@ def main():
             
             logger.info("✅ Auto-sync completed successfully")
             
+            execution_cfg = getattr(cfg, 'execution', None)
+
             # Clear failure state
-            failure_state_path = Path('reports/reconcile_failure_state.json')
+            failure_state_path = Path(
+                resolve_runtime_path(
+                    default='reports/reconcile_failure_state.json',
+                    project_root=WORKSPACE,
+                )
+            )
             if failure_state_path.exists():
                 failure_state = json.loads(failure_state_path.read_text())
                 failure_state['consecutive_hard'] = 0
@@ -363,7 +368,13 @@ def main():
                 logger.info("✅ Reset failure state counters")
             
             # Update reconcile status to OK
-            reconcile_status_path = Path('reports/reconcile_status.json')
+            reconcile_status_path = Path(
+                resolve_runtime_path(
+                    getattr(execution_cfg, 'reconcile_status_path', None),
+                    default='reports/reconcile_status.json',
+                    project_root=WORKSPACE,
+                )
+            )
             reconcile_status = {
                 'schema_version': 1,
                 'ok': True,
@@ -382,7 +393,13 @@ def main():
             logger.info("✅ Updated reconcile status to OK")
             
             # Clear kill switch only when it is NOT a manual lock.
-            kill_switch_path = Path('reports/kill_switch.json')
+            kill_switch_path = Path(
+                resolve_runtime_path(
+                    getattr(execution_cfg, 'kill_switch_path', None),
+                    default='reports/kill_switch.json',
+                    project_root=WORKSPACE,
+                )
+            )
             if kill_switch_path.exists():
                 ks = json.loads(kill_switch_path.read_text())
                 if ks.get('enabled'):

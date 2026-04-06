@@ -1,11 +1,18 @@
+import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import configs.loader as config_loader
+import src.execution.account_store as account_store_module
+import src.execution.okx_private_client as okx_private_client_module
+import src.execution.position_store as position_store_module
+import scripts.auto_sync_before_trade as auto_sync_before_trade
 from scripts.auto_sync_before_trade import _sync_local_store_to_okx_snapshot
 from src.execution.position_store import PositionStore
 
@@ -46,3 +53,114 @@ def test_sync_closes_missing_symbol_and_creates_new_symbol(tmp_path):
     assert new_pos.qty == pytest.approx(2.0)
     assert new_pos.avg_px == pytest.approx(5.0)
     assert stats == {"closed": 1, "updated": 0, "created": 1}
+
+
+def test_auto_sync_before_trade_respects_custom_runtime_status_paths(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    custom_reconcile = reports_dir / "custom_reconcile_status.json"
+    custom_kill = reports_dir / "custom_kill_switch.json"
+    default_kill = reports_dir / "kill_switch.json"
+    failure_state_path = reports_dir / "reconcile_failure_state.json"
+
+    custom_kill.write_text(json.dumps({"enabled": True, "manual": False}, ensure_ascii=False), encoding="utf-8")
+    default_kill.write_text(json.dumps({"enabled": True, "manual": False}, ensure_ascii=False), encoding="utf-8")
+    failure_state_path.write_text(
+        json.dumps(
+            {
+                "consecutive_hard": 3,
+                "consecutive_soft": 2,
+                "consecutive_ok": 0,
+                "last_reason": "stale",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, exchange):
+            captured["exchange"] = exchange
+
+        def get_balance(self, ccy=None):
+            return SimpleNamespace(
+                data={
+                    "data": [
+                        {
+                            "details": [
+                                {"ccy": "USDT", "cashBal": "100", "availBal": "100", "eq": "100"},
+                            ]
+                        }
+                    ]
+                }
+            )
+
+        def close(self):
+            captured["client_closed"] = True
+
+    class FakePositionStore:
+        def __init__(self, path):
+            captured["position_store_path"] = Path(path).resolve()
+
+        def list(self):
+            return []
+
+        def get(self, symbol):
+            return None
+
+        def close_long(self, symbol):
+            return False
+
+        def set_qty(self, sym, qty):
+            raise AssertionError("set_qty should not be called in this scenario")
+
+        def upsert_buy(self, sym, qty, px):
+            raise AssertionError("upsert_buy should not be called in this scenario")
+
+    class FakeAccountStore:
+        def __init__(self, path):
+            captured["account_store_path"] = Path(path).resolve()
+
+        def get(self):
+            return SimpleNamespace(cash_usdt=0.0, equity_peak_usdt=0.0)
+
+        def set(self, state):
+            captured["account_cash"] = state.cash_usdt
+            captured["account_peak"] = state.equity_peak_usdt
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        symbols=[],
+        universe=SimpleNamespace(symbols=[]),
+        execution=SimpleNamespace(
+            reconcile_status_path="reports/custom_reconcile_status.json",
+            kill_switch_path="reports/custom_kill_switch.json",
+        ),
+    )
+
+    monkeypatch.setattr(auto_sync_before_trade, "WORKSPACE", workspace)
+    monkeypatch.setattr(config_loader, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(okx_private_client_module, "OKXPrivateClient", FakeClient)
+    monkeypatch.setattr(position_store_module, "PositionStore", FakePositionStore)
+    monkeypatch.setattr(account_store_module, "AccountStore", FakeAccountStore)
+
+    assert auto_sync_before_trade.main() == 0
+
+    assert captured["position_store_path"] == (reports_dir / "positions.sqlite").resolve()
+    assert captured["account_store_path"] == (reports_dir / "positions.sqlite").resolve()
+    assert captured["client_closed"] is True
+
+    reconcile_payload = json.loads(custom_reconcile.read_text(encoding="utf-8"))
+    assert reconcile_payload["ok"] is True
+    assert reconcile_payload["source"] == "auto_sync"
+
+    kill_payload = json.loads(custom_kill.read_text(encoding="utf-8"))
+    assert kill_payload["enabled"] is False
+    assert kill_payload["auto_sync_cleared"] is True
+
+    untouched_default_kill = json.loads(default_kill.read_text(encoding="utf-8"))
+    assert untouched_default_kill["enabled"] is True
