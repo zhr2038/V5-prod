@@ -4481,7 +4481,6 @@ def api_decision_audit():
                         (run_id,),
                     )
                 rows = cur.fetchall()
-                conn.close()
 
                 for r in rows:
                     state = str(r[4] or 'UNKNOWN').upper()
@@ -4498,21 +4497,49 @@ def api_decision_audit():
                     }
                     run_orders.append(rec)
 
-                execution_summary['total'] = len(run_orders)
-                for o in run_orders:
-                    st = str(o.get('state') or '').upper()
-                    if st == 'FILLED':
-                        execution_summary['filled'] += 1
-                    elif st == 'REJECTED':
-                        execution_summary['rejected'] += 1
-                        rs = str(o.get('last_error_code') or o.get('last_error_msg') or 'unknown')
-                        execution_summary['reject_reasons'][rs] = int(execution_summary['reject_reasons'].get(rs, 0)) + 1
-                    elif st in {'OPEN', 'PARTIAL', 'SENT', 'ACK', 'UNKNOWN'}:
-                        execution_summary['open_or_partial'] += 1
-                    elif st in {'CANCELED', 'CANCELLED'}:
-                        execution_summary['cancelled'] += 1
-                    else:
-                        execution_summary['other'] += 1
+                cur.execute(
+                    """
+                    SELECT
+                      COUNT(*) AS total,
+                      SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) AS filled,
+                      SUM(CASE WHEN state='REJECTED' THEN 1 ELSE 0 END) AS rejected,
+                      SUM(CASE WHEN state IN ('OPEN','PARTIAL','SENT','ACK','UNKNOWN') THEN 1 ELSE 0 END) AS open_like,
+                      SUM(CASE WHEN state IN ('CANCELED','CANCELLED') THEN 1 ELSE 0 END) AS cancelled
+                    FROM orders
+                    WHERE run_id = ?
+                    """,
+                    (run_id,),
+                )
+                summary_row = cur.fetchone() or (0, 0, 0, 0, 0)
+                execution_summary['total'] = int(summary_row[0] or 0)
+                execution_summary['filled'] = int(summary_row[1] or 0)
+                execution_summary['rejected'] = int(summary_row[2] or 0)
+                execution_summary['open_or_partial'] = int(summary_row[3] or 0)
+                execution_summary['cancelled'] = int(summary_row[4] or 0)
+                execution_summary['other'] = max(
+                    0,
+                    execution_summary['total']
+                    - execution_summary['filled']
+                    - execution_summary['rejected']
+                    - execution_summary['open_or_partial']
+                    - execution_summary['cancelled'],
+                )
+
+                cur.execute(
+                    """
+                    SELECT last_error_code, last_error_msg, COUNT(*)
+                    FROM orders
+                    WHERE run_id = ? AND state = 'REJECTED'
+                    GROUP BY last_error_code, last_error_msg
+                    """,
+                    (run_id,),
+                )
+                reject_rows = cur.fetchall()
+                for err_code, err_msg, cnt in reject_rows:
+                    rs = str(err_code or err_msg or 'unknown')
+                    execution_summary['reject_reasons'][rs] = int(cnt or 0)
+
+                conn.close()
         except Exception:
             pass
 
