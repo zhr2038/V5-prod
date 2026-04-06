@@ -15,7 +15,36 @@ import yaml
 from pathlib import Path
 from datetime import datetime
 
-WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
+CURRENT_PRODUCTION_TIMERS = (
+    'v5-prod.user.timer',
+    'v5-reconcile.timer',
+    'v5-trade-monitor.timer',
+)
+
+
+def resolve_workspace() -> Path:
+    raw = os.getenv('V5_WORKSPACE', '').strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return Path(__file__).resolve().parents[1]
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for line in path.read_text(encoding='utf-8', errors='ignore').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+WORKSPACE = resolve_workspace()
 CONFIG_DIR = WORKSPACE / 'configs'
 REPORTS_DIR = WORKSPACE / 'reports'
 DATA_DIR = WORKSPACE / 'data'
@@ -107,18 +136,19 @@ class ConfigValidator:
     def check_env_variables(self):
         """检查环境变量"""
         self.log("\n🔐 检查环境变量...")
-        
+
         # 加载.env文件
         env_file = WORKSPACE / '.env'
         if env_file.exists():
+            load_env_file(env_file)
             self.checks_passed += 1
             self.log("环境变量文件存在", 'PASS')
         else:
             self.warnings.append("缺少.env文件，将使用系统环境变量")
             self.log("环境变量文件不存在", 'WARN')
-        
+
         # 检查必要的环境变量
-        required_vars = ['EXCHANGE_API_KEY', 'EXCHANGE_API_SECRET']
+        required_vars = ['EXCHANGE_API_KEY', 'EXCHANGE_API_SECRET', 'EXCHANGE_PASSPHRASE']
         for var in required_vars:
             value = os.getenv(var)
             if value:
@@ -139,13 +169,7 @@ class ConfigValidator:
             capture_output=True, text=True
         )
         
-        expected_timers = [
-            'v5-live-20u.user.timer',
-            'v5-reconcile.user.timer',
-            'v5-trade-auditor.timer'
-        ]
-        
-        for timer in expected_timers:
+        for timer in CURRENT_PRODUCTION_TIMERS:
             if timer in result.stdout:
                 self.checks_passed += 1
                 self.log(f"定时任务存在: {timer}", 'PASS')
@@ -203,7 +227,7 @@ class ConfigValidator:
                 self.warnings.append(f"数据库不存在（将自动创建）: {db_path.name}")
                 self.log(f"数据库不存在: {db_path.name}", 'WARN')
     
-    def run_all_checks(self, config_name='live_20u_real.yaml'):
+    def run_all_checks(self, config_name='live_prod.yaml'):
         """运行所有检查"""
         print("=" * 60)
         print("🔍 V5 配置验证")
@@ -248,7 +272,7 @@ class ConfigValidator:
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='V5 配置验证工具')
-    parser.add_argument('--config', default='live_20u_real.yaml', help='配置文件名')
+    parser.add_argument('--config', default='live_prod.yaml', help='配置文件名')
     args = parser.parse_args()
     
     validator = ConfigValidator()
