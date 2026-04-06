@@ -130,15 +130,30 @@ class TradeAuditorV3:
         conn = sqlite3.connect(str(self.paths.orders_db))
         try:
             start_ts = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
-            rows = conn.execute(
-                """
-                SELECT inst_id, side, state, created_ts
-                FROM orders
-                WHERE created_ts > ?
-                ORDER BY created_ts DESC
-                """,
-                (start_ts,),
-            ).fetchall()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        inst_id,
+                        side,
+                        state,
+                        COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
+                    FROM orders
+                    WHERE COALESCE(NULLIF(updated_ts, 0), created_ts) > ?
+                    ORDER BY event_ts DESC
+                    """,
+                    (start_ts,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = conn.execute(
+                    """
+                    SELECT inst_id, side, state, created_ts
+                    FROM orders
+                    WHERE created_ts > ?
+                    ORDER BY created_ts DESC
+                    """,
+                    (start_ts,),
+                ).fetchall()
         finally:
             conn.close()
         return rows

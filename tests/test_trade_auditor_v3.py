@@ -69,6 +69,37 @@ def test_get_recent_orders_reads_workspace_orders_db(tmp_path) -> None:
     assert auditor.get_recent_orders(hours=2) == [("BTC-USDT", "buy", "FILLED", now_ms)]
 
 
+def test_get_recent_orders_uses_updated_ts_for_recent_fills(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    db_path = reports_dir / "orders.sqlite"
+
+    now_ms = int(datetime.now().timestamp() * 1000)
+    stale_created_ts = now_ms - 3 * 60 * 60 * 1000
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE orders (
+            inst_id TEXT,
+            side TEXT,
+            state TEXT,
+            created_ts INTEGER,
+            updated_ts INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO orders(inst_id, side, state, created_ts, updated_ts) VALUES (?, ?, ?, ?, ?)",
+        ("BTC-USDT", "buy", "FILLED", stale_created_ts, now_ms),
+    )
+    conn.commit()
+    conn.close()
+
+    auditor = trade_auditor_v3.TradeAuditorV3(workspace=tmp_path)
+
+    assert auditor.get_recent_orders(hours=2) == [("BTC-USDT", "buy", "FILLED", now_ms)]
+
+
 def test_get_market_state_uses_workspace_runs_dir(tmp_path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260405_230000"
     run_dir.mkdir(parents=True, exist_ok=True)
