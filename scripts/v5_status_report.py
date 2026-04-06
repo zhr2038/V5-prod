@@ -20,6 +20,10 @@ sys.path.insert(0, str(WORKSPACE))
 REPORTS_DIR = WORKSPACE / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
 ORDERS_DB = REPORTS_DIR / "orders.sqlite"
+LIVE_UNITS = (
+    ("v5-prod.user.service", "v5-prod.user.timer"),
+    ("v5-live-20u.user.service", "v5-live-20u.user.timer"),
+)
 
 
 def resolve_config_path() -> Path:
@@ -65,17 +69,23 @@ def get_latest_run_data() -> Optional[Dict[str, Any]]:
         return None
 
 
+def _unit_is_active(unit: str) -> bool:
+    result = subprocess.run(
+        ["systemctl", "--user", "is-active", unit],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return result.returncode == 0
+
+
 def get_service_status() -> str:
     try:
-        for unit in ("v5-prod.user.service", "v5-live-20u.user.service"):
-            result = subprocess.run(
-                ["systemctl", "--user", "is-active", unit],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
+        for service_unit, timer_unit in LIVE_UNITS:
+            if _unit_is_active(service_unit):
                 return "running"
+            if _unit_is_active(timer_unit):
+                return "scheduled"
         return "stopped"
     except Exception:
         return "unknown"
