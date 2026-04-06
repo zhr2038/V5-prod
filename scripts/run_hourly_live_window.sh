@@ -4,12 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-WIN_ID="$(date +%Y%m%d_%H)"
+WIN_ID="$(date -u +%Y%m%d_%H)"
 NOW_EPOCH="$(date +%s)"
 END_EPOCH=$(( NOW_EPOCH - (NOW_EPOCH % 3600) ))
 START_EPOCH=$(( END_EPOCH - 3600 ))
 
-echo "[V5-LIVE] WIN_ID=${WIN_ID} window=[${START_EPOCH}, ${END_EPOCH}) CST"
+echo "[V5-LIVE] WIN_ID=${WIN_ID} window=[${START_EPOCH}, ${END_EPOCH}) UTC"
 
 LOCK="/tmp/v5_live.lock"
 exec 9>"$LOCK"
