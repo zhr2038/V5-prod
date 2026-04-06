@@ -1,20 +1,21 @@
 """
-V5 健康检查模块
-提供 /health 和 /ready 端点用于监控
+V5 health endpoints used by monitoring.
 """
+
+from __future__ import annotations
 
 import json
 import sqlite3
 import time
 from pathlib import Path
+
 from flask import Blueprint, jsonify
 
-health_bp = Blueprint('health', __name__)
+health_bp = Blueprint("health", __name__)
 
-# 路径配置
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-REPORTS_DIR = PROJECT_ROOT / 'reports'
-CONFIGS_DIR = PROJECT_ROOT / 'configs'
+REPORTS_DIR = PROJECT_ROOT / "reports"
+CONFIGS_DIR = PROJECT_ROOT / "configs"
 
 
 def _resolve_active_config_path() -> Path:
@@ -36,127 +37,152 @@ def _resolve_active_config_path() -> Path:
 
 
 def _load_json_safe(path: Path) -> dict:
-    """安全加载JSON文件"""
     try:
         if path.exists():
-            return json.loads(path.read_text(encoding='utf-8'))
+            return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         pass
     return {}
 
 
+def _load_last_trade_ts_ms() -> int | None:
+    fills_db = REPORTS_DIR / "fills.sqlite"
+    try:
+        if fills_db.exists():
+            conn = sqlite3.connect(str(fills_db))
+            try:
+                row = conn.execute("SELECT MAX(ts_ms) FROM fills").fetchone()
+            finally:
+                conn.close()
+            ts_ms = row[0] if row else None
+            if ts_ms:
+                return int(ts_ms)
+    except Exception:
+        pass
+
+    orders_db = REPORTS_DIR / "orders.sqlite"
+    if not orders_db.exists():
+        return None
+
+    try:
+        conn = sqlite3.connect(str(orders_db))
+        try:
+            row = conn.execute(
+                """
+                SELECT MAX(
+                    CASE
+                        WHEN COALESCE(updated_ts, 0) > 0 THEN updated_ts
+                        ELSE created_ts
+                    END
+                )
+                FROM orders
+                WHERE state='FILLED'
+                """
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = conn.execute("SELECT MAX(created_ts) FROM orders WHERE state='FILLED'").fetchone()
+        finally:
+            conn.close()
+        ts_ms = row[0] if row else None
+        return int(ts_ms) if ts_ms else None
+    except Exception:
+        return None
+
+
 @health_bp.route("/health")
 def health_check():
-    """健康检查端点 - 返回详细状态"""
     checks = {
         "status": "healthy",
         "timestamp": time.time(),
-        "checks": {}
+        "checks": {},
     }
-    
-    # 1. 数据库连接检查
+
     try:
-        db_path = REPORTS_DIR / 'positions.sqlite'
+        db_path = REPORTS_DIR / "positions.sqlite"
         conn = sqlite3.connect(str(db_path))
         conn.execute("SELECT 1")
         conn.close()
         checks["checks"]["database"] = {"status": "ok"}
-    except Exception as e:
-        checks["checks"]["database"] = {"status": "error", "error": str(e)}
+    except Exception as exc:
+        checks["checks"]["database"] = {"status": "error", "error": str(exc)}
         checks["status"] = "unhealthy"
-    
-    # 2. Kill Switch状态
+
     try:
-        ks = _load_json_safe(REPORTS_DIR / 'kill_switch.json')
+        kill_switch = _load_json_safe(REPORTS_DIR / "kill_switch.json")
         checks["checks"]["kill_switch"] = {
             "status": "ok",
-            "enabled": ks.get("enabled", False),
-            "trigger": ks.get("trigger", "")
+            "enabled": kill_switch.get("enabled", False),
+            "trigger": kill_switch.get("trigger", ""),
         }
-        if ks.get("enabled"):
+        if kill_switch.get("enabled"):
             checks["status"] = "degraded"
-    except Exception as e:
-        checks["checks"]["kill_switch"] = {"status": "error", "error": str(e)}
-    
-    # 3. Reconcile状态
+    except Exception as exc:
+        checks["checks"]["kill_switch"] = {"status": "error", "error": str(exc)}
+
     try:
-        rec = _load_json_safe(REPORTS_DIR / 'reconcile_status.json')
+        reconcile = _load_json_safe(REPORTS_DIR / "reconcile_status.json")
         checks["checks"]["reconcile"] = {
-            "status": "ok" if rec.get("ok") else "warning",
-            "ok": rec.get("ok", False),
-            "reason": rec.get("reason", "")
+            "status": "ok" if reconcile.get("ok") else "warning",
+            "ok": reconcile.get("ok", False),
+            "reason": reconcile.get("reason", ""),
         }
-        if not rec.get("ok"):
+        if not reconcile.get("ok"):
             checks["status"] = "degraded"
-    except Exception as e:
-        checks["checks"]["reconcile"] = {"status": "error", "error": str(e)}
-    
-    # 4. 最近交易时间
+    except Exception as exc:
+        checks["checks"]["reconcile"] = {"status": "error", "error": str(exc)}
+
     try:
-        db_path = REPORTS_DIR / 'orders.sqlite'
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.execute("SELECT MAX(created_ts) FROM orders WHERE state='FILLED'")
-        last_order_ts = cursor.fetchone()[0]
-        conn.close()
-        
-        if last_order_ts:
-            age_min = (time.time() * 1000 - last_order_ts) / 60000
+        last_trade_ts = _load_last_trade_ts_ms()
+        if last_trade_ts:
+            age_min = (time.time() * 1000 - last_trade_ts) / 60000
             checks["checks"]["last_trade"] = {
                 "status": "ok" if age_min < 120 else "warning",
                 "age_minutes": round(age_min, 1),
-                "last_ts": last_order_ts
+                "last_ts": last_trade_ts,
             }
             if age_min >= 120:
                 checks["status"] = "degraded"
         else:
             checks["checks"]["last_trade"] = {"status": "warning", "message": "No trades yet"}
-    except Exception as e:
-        checks["checks"]["last_trade"] = {"status": "error", "error": str(e)}
-    
-    # 5. 自动风险档位状态
+    except Exception as exc:
+        checks["checks"]["last_trade"] = {"status": "error", "error": str(exc)}
+
     try:
-        risk = _load_json_safe(REPORTS_DIR / 'auto_risk_eval.json')
+        risk = _load_json_safe(REPORTS_DIR / "auto_risk_eval.json")
         checks["checks"]["risk_guard"] = {
             "status": "ok",
             "level": risk.get("current_level", "UNKNOWN"),
-            "drawdown": risk.get("metrics", {}).get("dd_pct", risk.get("metrics", {}).get("last_dd_pct", 0))
+            "drawdown": risk.get("metrics", {}).get("dd_pct", risk.get("metrics", {}).get("last_dd_pct", 0)),
         }
-    except Exception as e:
-        checks["checks"]["risk_guard"] = {"status": "error", "error": str(e)}
-    
+    except Exception as exc:
+        checks["checks"]["risk_guard"] = {"status": "error", "error": str(exc)}
+
     status_code = 200 if checks["status"] == "healthy" else 503
     return jsonify(checks), status_code
 
 
 @health_bp.route("/ready")
 def readiness_check():
-    """就绪检查 - 用于K8s等编排系统"""
     ready = True
-    reasons = []
-    
-    # 检查数据库可连接
+    reasons: list[str] = []
+
     try:
-        db_path = REPORTS_DIR / 'positions.sqlite'
+        db_path = REPORTS_DIR / "positions.sqlite"
         conn = sqlite3.connect(str(db_path))
         conn.execute("SELECT 1")
         conn.close()
-    except Exception as e:
+    except Exception as exc:
         ready = False
-        reasons.append(f"Database unavailable: {e}")
-    
-    # 检查配置存在
+        reasons.append(f"Database unavailable: {exc}")
+
     config_path = _resolve_active_config_path()
     if not config_path.exists():
         ready = False
         reasons.append(f"Config file missing: {config_path.name}")
-    
-    return jsonify({
-        "ready": ready,
-        "reasons": reasons
-    }), 200 if ready else 503
+
+    return jsonify({"ready": ready, "reasons": reasons}), 200 if ready else 503
 
 
 @health_bp.route("/liveness")
 def liveness_check():
-    """存活检查 - 最简单的健康检查"""
     return jsonify({"alive": True}), 200
