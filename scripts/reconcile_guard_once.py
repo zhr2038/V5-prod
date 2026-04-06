@@ -6,7 +6,7 @@ import logging
 import time
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXRateLimitError
@@ -35,7 +35,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
-    ap.add_argument("--out", default="reports/reconcile_status.json")
+    ap.add_argument("--out", default=None)
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
     ap.add_argument("--abs-usdt-tol", type=float, default=None)
     ap.add_argument("--abs-base-tol", type=float, default=1e-8)
@@ -47,6 +47,19 @@ def main() -> None:
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),
     )
+    out_path = resolve_runtime_path(
+        args.out if args.out is not None else getattr(cfg.execution, "reconcile_status_path", None),
+        default="reports/reconcile_status.json",
+    )
+    positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    failure_state_path = resolve_runtime_path(
+        getattr(cfg.execution, "reconcile_failure_state_path", None),
+        default="reports/reconcile_failure_state.json",
+    )
+    kill_switch_path = resolve_runtime_path(
+        getattr(cfg.execution, "kill_switch_path", None),
+        default="reports/kill_switch.json",
+    )
 
     now = int(time.time() * 1000)
 
@@ -56,8 +69,8 @@ def main() -> None:
     try:
         eng = ReconcileEngine(
             okx=client,
-            position_store=PositionStore(path=args.positions_db),
-            account_store=AccountStore(path=args.positions_db),
+            position_store=PositionStore(path=positions_db_path),
+            account_store=AccountStore(path=positions_db_path),
             thresholds=ReconcileThresholds(
                 abs_usdt_tol=float(
                     _coalesce(args.abs_usdt_tol, _coalesce(getattr(cfg.execution, "reconcile_abs_usdt_tol", None), 50.0))
@@ -70,13 +83,13 @@ def main() -> None:
         )
         universe_bases = [str(s).split("/")[0] for s in (cfg.symbols or [])]
         status = eng.reconcile(
-            out_path=args.out,
+            out_path=out_path,
             universe_bases=universe_bases,
             ccy_mode=str(getattr(cfg.execution, "reconcile_ccy_mode", "universe_only")),
         )
         status["generated_ts_ms"] = int(status.get("ts_ms") or now)
         status["source"] = str(args.source)
-        _write_status(args.out, status)
+        _write_status(out_path, status)
 
     except OKXRateLimitError as e:
         status = {
@@ -88,7 +101,7 @@ def main() -> None:
             "reason": "rate_limited",
             "error": {"type": "rate_limit", "detail": str(e), "http_status": None, "okx_code": "50011", "okx_msg": str(e)},
         }
-        _write_status(args.out, status)
+        _write_status(out_path, status)
 
     except OKXPrivateClientError as e:
         # best-effort parse for okx_code from message
@@ -102,7 +115,7 @@ def main() -> None:
             "reason": "network_error",
             "error": {"type": "client", "detail": detail},
         }
-        _write_status(args.out, status)
+        _write_status(out_path, status)
 
     except Exception as e:
         status = {
@@ -114,7 +127,7 @@ def main() -> None:
             "reason": "parse_error",
             "error": {"type": "exception", "detail": str(e)},
         }
-        _write_status(args.out, status)
+        _write_status(out_path, status)
 
     finally:
         client.close()
@@ -122,7 +135,9 @@ def main() -> None:
     # Apply guard with config
     ks_cfg = getattr(cfg.execution, 'kill_switch', {})
     gcfg = GuardConfig(
-        reconcile_status_path=args.out,
+        reconcile_status_path=out_path,
+        failure_state_path=failure_state_path,
+        kill_switch_path=kill_switch_path,
         auto_clear_enabled=getattr(ks_cfg, 'auto_clear_enabled', True),
         auto_clear_after_ok_count=getattr(ks_cfg, 'auto_clear_after_ok_count', 1),
         hard_fail_threshold=getattr(ks_cfg, 'hard_fail_threshold', 5),

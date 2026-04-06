@@ -5,7 +5,7 @@ import json
 import logging
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.bills_store import BillsStore
 from src.execution.ledger_engine import LedgerEngine, LedgerThresholds
 from src.execution.okx_private_client import OKXPrivateClient
@@ -24,11 +24,19 @@ def main() -> None:
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),
     )
+    bills_db_path = resolve_runtime_path(args.bills_db, default="reports/bills.sqlite")
+    out_path = resolve_runtime_path(args.out, default="reports/ledger_status.json")
+    state_path = resolve_runtime_path(default="reports/ledger_state.json")
 
     client = OKXPrivateClient(exchange=cfg.exchange)
     try:
-        eng = LedgerEngine(okx=client, bills_store=BillsStore(path=args.bills_db), thresholds=LedgerThresholds())
-        obj = eng.run(out_path=args.out)
+        eng = LedgerEngine(
+            okx=client,
+            bills_store=BillsStore(path=bills_db_path),
+            thresholds=LedgerThresholds(),
+            state_path=state_path,
+        )
+        obj = eng.run(out_path=out_path)
         payload = {
             "event": "LEDGER",
             "ok": obj.get("ok"),

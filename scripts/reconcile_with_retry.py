@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import PositionStore
@@ -50,14 +50,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
-    ap.add_argument("--out", default="reports/reconcile_status.json")
+    ap.add_argument("--out", default=None)
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
     ap.add_argument("--abs-usdt-tol", type=float, default=None)
     ap.add_argument("--abs-base-tol", type=float, default=1e-5)
     ap.add_argument("--dust-usdt-ignore", type=float, default=None)
     ap.add_argument("--retries", type=int, default=3)
     ap.add_argument("--retry-delay", type=float, default=2.0)
-    ap.add_argument("--kill-switch-path", default="reports/kill_switch.json")
+    ap.add_argument("--kill-switch-path", default=None)
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -65,10 +65,19 @@ def main() -> None:
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),
     )
+    out_path = resolve_runtime_path(
+        args.out if args.out is not None else getattr(cfg.execution, "reconcile_status_path", None),
+        default="reports/reconcile_status.json",
+    )
+    positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    kill_switch_path = resolve_runtime_path(
+        args.kill_switch_path if args.kill_switch_path is not None else getattr(cfg.execution, "kill_switch_path", None),
+        default="reports/kill_switch.json",
+    )
 
     client = OKXPrivateClient(exchange=cfg.exchange)
     
-    ks_before = load_kill_switch(args.kill_switch_path)
+    ks_before = load_kill_switch(kill_switch_path)
     was_enabled = ks_before.get("enabled", False)
     
     last_error = None
@@ -80,8 +89,8 @@ def main() -> None:
         try:
             eng = ReconcileEngine(
                 okx=client,
-                position_store=PositionStore(path=args.positions_db),
-                account_store=AccountStore(path=args.positions_db),
+                position_store=PositionStore(path=positions_db_path),
+                account_store=AccountStore(path=positions_db_path),
                 thresholds=ReconcileThresholds(
                     abs_usdt_tol=float(
                         _coalesce(args.abs_usdt_tol, _coalesce(getattr(cfg.execution, "reconcile_abs_usdt_tol", None), 50.0))
@@ -92,7 +101,7 @@ def main() -> None:
                     ),
                 ),
             )
-            obj = eng.reconcile(out_path=args.out)
+            obj = eng.reconcile(out_path=out_path)
             
             ok = obj.get("ok", False)
             reason = obj.get("reason")
@@ -110,7 +119,7 @@ def main() -> None:
             if ok:
                 # If reconcile succeeded and kill switch was enabled, disable it
                 if was_enabled:
-                    disable_kill_switch(args.kill_switch_path)
+                    disable_kill_switch(kill_switch_path)
                 return
             else:
                 last_error = reason

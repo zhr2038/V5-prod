@@ -36,3 +36,14 @@ def resolve_runtime_env_path(raw_env_path: str | None = None, *, project_root: P
     root = (project_root or PROJECT_ROOT).resolve()
     value = str(raw_env_path).strip() if raw_env_path is not None else ".env"
     return _resolve_path(value or ".env", project_root=root)
+
+
+def resolve_runtime_path(
+    raw_path: str | None = None,
+    *,
+    default: str,
+    project_root: Path | None = None,
+) -> str:
+    root = (project_root or PROJECT_ROOT).resolve()
+    value = str(raw_path).strip() if raw_path is not None else ""
+    return _resolve_path(value or default, project_root=root)

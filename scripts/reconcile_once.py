@@ -5,7 +5,7 @@ import json
 import logging
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import PositionStore
@@ -20,7 +20,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
-    ap.add_argument("--out", default="reports/reconcile_status.json")
+    ap.add_argument("--out", default=None)
     ap.add_argument("--positions-db", default="reports/positions.sqlite")
     ap.add_argument("--abs-usdt-tol", type=float, default=None)
     ap.add_argument("--abs-base-tol", type=float, default=1e-5)
@@ -32,13 +32,18 @@ def main() -> None:
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),
     )
+    out_path = resolve_runtime_path(
+        args.out if args.out is not None else getattr(cfg.execution, "reconcile_status_path", None),
+        default="reports/reconcile_status.json",
+    )
+    positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
 
     client = OKXPrivateClient(exchange=cfg.exchange)
     try:
         eng = ReconcileEngine(
             okx=client,
-            position_store=PositionStore(path=args.positions_db),
-            account_store=AccountStore(path=args.positions_db),
+            position_store=PositionStore(path=positions_db_path),
+            account_store=AccountStore(path=positions_db_path),
             thresholds=ReconcileThresholds(
                 abs_usdt_tol=float(
                     _coalesce(args.abs_usdt_tol, _coalesce(getattr(cfg.execution, "reconcile_abs_usdt_tol", None), 50.0))
@@ -49,14 +54,14 @@ def main() -> None:
                 ),
             ),
         )
-        obj = eng.reconcile(out_path=args.out)
+        obj = eng.reconcile(out_path=out_path)
         # Single-line structured log for ops / grep (helps G1.2 consecutive-fail analysis)
         payload = {
             "event": "RECONCILE",
             "ok": obj.get("ok"),
             "reason": obj.get("reason"),
             "max_abs_usdt_delta": (obj.get("stats", {}) or {}).get("max_abs_usdt_delta"),
-            "out": args.out,
+            "out": out_path,
         }
         logging.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     finally:

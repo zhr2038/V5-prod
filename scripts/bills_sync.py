@@ -5,7 +5,7 @@ import logging
 import time
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.bills_store import BillsStore, parse_okx_bills
 from src.execution.okx_private_client import OKXPrivateClient
 
@@ -77,7 +77,7 @@ def main() -> None:
         env_path=resolve_runtime_env_path(args.env),
     )
 
-    store = BillsStore(path=str(args.db))
+    store = BillsStore(path=resolve_runtime_path(args.db, default="reports/bills.sqlite"))
     client = OKXPrivateClient(exchange=cfg.exchange)
     try:
         sync_once(store=store, client=client, limit=args.limit, max_pages=args.max_pages)
