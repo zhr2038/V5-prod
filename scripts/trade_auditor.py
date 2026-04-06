@@ -65,15 +65,38 @@ def get_latest_orders(limit: int = 20, *, paths: AuditorPaths = DEFAULT_PATHS) -
 
     conn = sqlite3.connect(str(paths.orders_db))
     try:
-        rows = conn.execute(
-            """
-            SELECT cl_ord_id, inst_id, side, state, intent, ord_id, last_error_code, last_error_msg
-            FROM orders
-            ORDER BY rowid DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        try:
+            rows = conn.execute(
+                """
+                SELECT cl_ord_id, inst_id, side, state, intent, ord_id, last_error_code, last_error_msg
+                FROM (
+                    SELECT
+                        cl_ord_id,
+                        inst_id,
+                        side,
+                        state,
+                        intent,
+                        ord_id,
+                        last_error_code,
+                        last_error_msg,
+                        COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
+                    FROM orders
+                )
+                ORDER BY event_ts DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = conn.execute(
+                """
+                SELECT cl_ord_id, inst_id, side, state, intent, ord_id, last_error_code, last_error_msg
+                FROM orders
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
     finally:
         conn.close()
     return rows

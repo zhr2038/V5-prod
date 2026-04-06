@@ -55,6 +55,53 @@ def test_get_latest_orders_reads_workspace_orders_db(tmp_path) -> None:
     assert rows == [("cid-1", "BTC-USDT", "buy", "FILLED", "OPEN_LONG", "oid-1", None, None)]
 
 
+def test_get_latest_orders_prefers_recent_updated_event_ts(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    db_path = reports_dir / "orders.sqlite"
+
+    now_ms = 1_710_000_000_000
+    stale_created_ts = now_ms - 2 * 60 * 60 * 1000
+    older_event_ts = now_ms - 30 * 60 * 1000
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE orders (
+            cl_ord_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            state TEXT,
+            intent TEXT,
+            ord_id TEXT,
+            last_error_code TEXT,
+            last_error_msg TEXT,
+            created_ts INTEGER,
+            updated_ts INTEGER
+        )
+        """
+    )
+    conn.executemany(
+        """
+        INSERT INTO orders(
+            cl_ord_id, inst_id, side, state, intent, ord_id,
+            last_error_code, last_error_msg, created_ts, updated_ts
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("cid-old", "BTC-USDT", "buy", "FILLED", "OPEN_LONG", "oid-old", None, None, stale_created_ts, now_ms),
+            ("cid-newer-row", "ETH-USDT", "sell", "FILLED", "CLOSE_LONG", "oid-new", None, None, now_ms - 60_000, older_event_ts),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    rows = trade_auditor.get_latest_orders(1, paths=trade_auditor.build_paths(tmp_path))
+
+    assert rows == [("cid-old", "BTC-USDT", "buy", "FILLED", "OPEN_LONG", "oid-old", None, None)]
+
+
 def test_check_risk_limits_uses_workspace_reports_dir(tmp_path) -> None:
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
