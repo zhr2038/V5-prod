@@ -62,16 +62,21 @@ class HealthChecker:
         self.checks: List[Dict[str, Any]] = []
 
     @staticmethod
-    def _parse_timer_show_output(stdout: str) -> tuple[str | None, int | None]:
+    def _parse_timer_show_output(stdout: str) -> tuple[dict[str, str], str | None, int | None]:
+        props: dict[str, str] = {}
         last_trigger_text: str | None = None
         last_trigger_monotonic_usec: int | None = None
         for line in stdout.splitlines():
-            if line.startswith("LastTriggerUSec="):
-                value = line.split("=", 1)[1].strip()
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            props[key] = value
+            if key == "LastTriggerUSec":
                 if value and value != "n/a":
                     last_trigger_text = value
-            elif line.startswith("LastTriggerUSecMonotonic="):
-                value = line.split("=", 1)[1].strip()
+            elif key == "LastTriggerUSecMonotonic":
                 if value and value != "n/a":
                     try:
                         parsed = int(value)
@@ -79,7 +84,7 @@ class HealthChecker:
                         parsed = None
                     if parsed and parsed > 0:
                         last_trigger_monotonic_usec = parsed
-        return last_trigger_text, last_trigger_monotonic_usec
+        return props, last_trigger_text, last_trigger_monotonic_usec
 
     def check_timer_health(self) -> Dict[str, Any]:
         if shutil.which("systemctl") is None:
@@ -104,6 +109,9 @@ class HealthChecker:
                         "--user",
                         "show",
                         timer_name,
+                        "--property=LoadState",
+                        "--property=ActiveState",
+                        "--property=UnitFileState",
                         "--property=LastTriggerUSec",
                         "--property=LastTriggerUSecMonotonic",
                     ],
@@ -111,7 +119,32 @@ class HealthChecker:
                     text=True,
                     timeout=5,
                 )
-                last_trigger_text, last_trigger_monotonic_usec = self._parse_timer_show_output(result.stdout)
+                props, last_trigger_text, last_trigger_monotonic_usec = self._parse_timer_show_output(result.stdout)
+                load_state = props.get("LoadState", "")
+                active_state = props.get("ActiveState", "")
+                unit_file_state = props.get("UnitFileState", "")
+
+                if result.returncode != 0 or load_state == "not-found":
+                    issues.append({"timer": timer_name, "status": "missing", "detail": "unit not found"})
+                    continue
+                if unit_file_state not in {"enabled", "static", "alias"}:
+                    issues.append(
+                        {
+                            "timer": timer_name,
+                            "status": "disabled",
+                            "detail": unit_file_state or "not enabled",
+                        }
+                    )
+                    continue
+                if active_state != "active":
+                    issues.append(
+                        {
+                            "timer": timer_name,
+                            "status": "inactive",
+                            "detail": active_state or "inactive",
+                        }
+                    )
+                    continue
 
                 if last_trigger_monotonic_usec is None:
                     issues.append({"timer": timer_name, "status": "unknown", "detail": "no trigger time"})
@@ -130,7 +163,7 @@ class HealthChecker:
             except Exception as exc:
                 issues.append({"timer": timer_name, "status": "error", "detail": str(exc)})
 
-        if any(item["status"] in {"stalled", "error"} for item in issues):
+        if any(item["status"] in {"missing", "disabled", "inactive", "stalled", "error"} for item in issues):
             status = "critical"
         elif issues:
             status = "warning"

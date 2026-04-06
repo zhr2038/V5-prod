@@ -17,6 +17,9 @@ def test_health_check_uses_current_timer_unit_names(monkeypatch) -> None:
             return SimpleNamespace(
                 returncode=0,
                 stdout=(
+                    "LoadState=loaded\n"
+                    "ActiveState=active\n"
+                    "UnitFileState=enabled\n"
                     "LastTriggerUSec=Mon 2026-04-06 12:00:00 CST\n"
                     f"LastTriggerUSecMonotonic={now_mono_usec}\n"
                 ),
@@ -53,6 +56,9 @@ def test_health_check_marks_delayed_timer_from_monotonic_usec(monkeypatch) -> No
             return SimpleNamespace(
                 returncode=0,
                 stdout=(
+                    "LoadState=loaded\n"
+                    "ActiveState=active\n"
+                    "UnitFileState=enabled\n"
                     "LastTriggerUSec=Mon 2026-04-06 10:00:00 CST\n"
                     f"LastTriggerUSecMonotonic={last_trigger_mono_usec}\n"
                 ),
@@ -79,4 +85,45 @@ def test_health_check_marks_delayed_timer_from_monotonic_usec(monkeypatch) -> No
             "last_run": "Mon 2026-04-06 10:00:00 CST",
             "delay_min": 71.0,
         },
+    ]
+
+
+def test_health_check_marks_missing_or_disabled_timer_critical(monkeypatch) -> None:
+    def _fake_run(cmd, capture_output=True, text=True, timeout=5):
+        if cmd[:3] == ["systemctl", "--user", "status"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[:3] == ["systemctl", "--user", "show"]:
+            timer_name = cmd[3]
+            if timer_name == "v5-reconcile.timer":
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="LoadState=not-found\nActiveState=inactive\nUnitFileState=disabled\n",
+                    stderr="Unit v5-reconcile.timer could not be found.\n",
+                )
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "LoadState=loaded\n"
+                    "ActiveState=active\n"
+                    "UnitFileState=enabled\n"
+                    "LastTriggerUSec=Mon 2026-04-06 12:00:00 CST\n"
+                    "LastTriggerUSecMonotonic=500000000\n"
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(health_check.shutil, "which", lambda name: "/usr/bin/systemctl" if name == "systemctl" else None)
+    monkeypatch.setattr(health_check.subprocess, "run", _fake_run)
+    monkeypatch.setattr(health_check.time, "monotonic", lambda: 500.0)
+
+    result = health_check.HealthChecker().check_timer_health()
+
+    assert result["status"] == "critical"
+    assert result["details"] == [
+        {
+            "timer": "v5-reconcile.timer",
+            "status": "missing",
+            "detail": "unit not found",
+        }
     ]
