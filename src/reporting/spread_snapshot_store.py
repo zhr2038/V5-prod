@@ -7,6 +7,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass
 class SpreadSnapshot:
@@ -29,6 +31,13 @@ def _ymd_prev(ymd: str) -> str:
     return (dt - timedelta(days=1)).strftime("%Y%m%d")
 
 
+def _resolve_spread_snapshots_dir(base_dir: str | Path = "reports/spread_snapshots") -> Path:
+    path = Path(base_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
 class SpreadSnapshotStore:
     """Lightweight reader for reports/spread_snapshots/YYYYMMDD.jsonl.
 
@@ -38,8 +47,8 @@ class SpreadSnapshotStore:
     We cache per-day, per-symbol sorted snapshots for fast lookup.
     """
 
-    def __init__(self, base_dir: str = "reports/spread_snapshots"):
-        self.base_dir = Path(base_dir)
+    def __init__(self, base_dir: str | Path = "reports/spread_snapshots"):
+        self.base_dir = _resolve_spread_snapshots_dir(base_dir)
         self._cache: Dict[Tuple[str, str], List[SpreadSnapshot]] = {}
 
     def _load_day_symbol(self, ymd: str, symbol: str) -> List[SpreadSnapshot]:

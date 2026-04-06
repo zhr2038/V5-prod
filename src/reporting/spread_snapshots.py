@@ -5,13 +5,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_spread_snapshots_dir(base_dir: str | Path = "reports/spread_snapshots") -> Path:
+    path = Path(base_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
 
 def _utc_yyyymmdd_from_epoch_sec(ts: int) -> str:
     dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
     return dt.strftime("%Y%m%d")
 
 
-def append_spread_snapshot(event: Dict[str, Any], base_dir: str = "reports/spread_snapshots") -> Path:
+def append_spread_snapshot(event: Dict[str, Any], base_dir: str | Path = "reports/spread_snapshots") -> Path:
     """Append one NDJSON line of a spread snapshot.
 
     File name is based on window_end_ts's UTC date.
@@ -25,7 +34,7 @@ def append_spread_snapshot(event: Dict[str, Any], base_dir: str = "reports/sprea
         raise ValueError("spread_snapshot.window_end_ts is required")
 
     ymd = _utc_yyyymmdd_from_epoch_sec(int(we))
-    out_dir = Path(base_dir)
+    out_dir = _resolve_spread_snapshots_dir(base_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{ymd}.jsonl"
 

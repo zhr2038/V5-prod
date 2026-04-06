@@ -8,9 +8,18 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 # allow running as a script from repo root
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
 
 from src.reporting.spread_snapshots import compute_spread_stats
+
+
+def _resolve_repo_path(value: str | Path | None, *, default: Path) -> Path:
+    path = Path(value) if value is not None else default
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
 
 
 def _utc_yyyymmdd_from_epoch_sec(ts: int) -> str:
@@ -54,15 +63,17 @@ def rollup_day(day_ymd: str, snapshots_dir: Path, out_dir: Path) -> Path:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", default=None, help="UTC day YYYYMMDD (default: today UTC)")
-    ap.add_argument("--snapshots_dir", default="reports/spread_snapshots")
-    ap.add_argument("--out_dir", default="reports/spread_stats")
+    ap.add_argument("--snapshots_dir", default=None)
+    ap.add_argument("--out_dir", default=None)
     args = ap.parse_args()
 
     day = args.day
     if not day:
         day = datetime.now(timezone.utc).strftime("%Y%m%d")
 
-    out = rollup_day(day, snapshots_dir=Path(args.snapshots_dir), out_dir=Path(args.out_dir))
+    snapshots_dir = _resolve_repo_path(args.snapshots_dir, default=PROJECT_ROOT / "reports" / "spread_snapshots")
+    out_dir = _resolve_repo_path(args.out_dir, default=PROJECT_ROOT / "reports" / "spread_stats")
+    out = rollup_day(day, snapshots_dir=snapshots_dir, out_dir=out_dir)
     print(f"wrote {out}")
 
 
