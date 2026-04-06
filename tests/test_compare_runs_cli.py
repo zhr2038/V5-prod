@@ -27,7 +27,7 @@ def test_compare_runs_defaults_anchor_outputs_to_repo_root(monkeypatch, tmp_path
 
     def fake_check_call(cmd):
         captured["cmd"] = cmd
-        out_dir = fake_root / "v4_export"
+        out_dir = fake_root / "reports" / "compare" / "v4_export"
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "summary.json").write_text(
             json.dumps(
@@ -63,5 +63,45 @@ def test_compare_runs_defaults_anchor_outputs_to_repo_root(monkeypatch, tmp_path
     assert "num_trades" in out_path.read_text(encoding="utf-8")
     cmd = captured["cmd"]
     assert cmd[3] == str((fake_root / "legacy_v4_reports").resolve())
-    assert cmd[5] == str((fake_root / "v4_export").resolve())
+    assert cmd[5] == str((fake_root / "reports" / "compare" / "v4_export").resolve())
     assert not (tmp_path / "reports" / "compare" / "v4_vs_v5.md").exists()
+
+
+def test_compare_runs_rejects_same_v4_source_and_output_dir(monkeypatch, tmp_path: Path) -> None:
+    fake_root = tmp_path / "repo"
+    summary_dir = fake_root / "reports" / "rollups" / "last24h"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "v5",
+                "window_start_ts": 1700000000,
+                "window_end_ts": 1700003600,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(compare_runs, "PROJECT_ROOT", fake_root)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compare_runs.py",
+            "--v5_summary",
+            "reports/rollups/last24h/summary.json",
+            "--v4_reports_dir",
+            "legacy_v4_reports",
+            "--v4_out_dir",
+            "legacy_v4_reports",
+        ],
+    )
+
+    try:
+        compare_runs.main()
+    except SystemExit as exc:
+        assert str(exc) == "--v4_out_dir must differ from --v4_reports_dir"
+    else:
+        raise AssertionError("expected compare_runs.main() to reject identical v4 source/output dirs")

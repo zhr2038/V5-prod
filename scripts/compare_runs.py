@@ -21,6 +21,10 @@ def _resolve_repo_path(value: str | os.PathLike[str] | None, *, default: Path | 
     return path.resolve()
 
 
+def _default_v4_export_out_dir() -> Path:
+    return PROJECT_ROOT / "reports" / "compare" / "v4_export"
+
+
 def _ts_to_epoch_sec(v: Any) -> Optional[int]:
     """
     Accepts:
@@ -228,7 +232,7 @@ def main() -> None:
 
     v5_summary_path = _resolve_repo_path(args.v5_summary)
     out_path = _resolve_repo_path(args.out, default=PROJECT_ROOT / "reports" / "compare" / "v4_vs_v5.md")
-    v4_out_dir = _resolve_repo_path(args.v4_out_dir, default=PROJECT_ROOT / "v4_export")
+    v4_out_dir = _resolve_repo_path(args.v4_out_dir, default=_default_v4_export_out_dir())
 
     v5 = _load(str(v5_summary_path))
 
@@ -247,6 +251,8 @@ def main() -> None:
     v4_summary_path = str(_resolve_repo_path(args.v4_summary)) if args.v4_summary else None
     if args.v4_reports_dir:
         v4_reports_dir = _resolve_repo_path(args.v4_reports_dir)
+        if v4_reports_dir == v4_out_dir:
+            raise SystemExit("--v4_out_dir must differ from --v4_reports_dir")
         cmd = [
             sys.executable,
             str(Path(__file__).resolve().parents[0] / "export_v4_reports.py"),

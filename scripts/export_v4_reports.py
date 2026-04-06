@@ -51,6 +51,10 @@ def _no_data_summary(start_ts: int, end_ts: int) -> Dict[str, Any]:
 
 
 def export_v4_reports(*, v4_reports_dir: Path, out_dir: Path, start_ts: int, end_ts: int) -> Path:
+    v4_reports_dir = v4_reports_dir.resolve()
+    out_dir = out_dir.resolve()
+    if v4_reports_dir == out_dir:
+        raise ValueError("out_dir must differ from v4_reports_dir")
     out_dir.mkdir(parents=True, exist_ok=True)
     summary_path = out_dir / "summary.json"
     src_summary = v4_reports_dir / "summary.json"

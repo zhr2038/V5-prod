@@ -56,3 +56,20 @@ def test_export_v4_reports_reuses_matching_summary_and_artifacts(tmp_path: Path)
     assert payload["num_trades"] == 7
     assert (out_dir / "equity.jsonl").read_text(encoding="utf-8") == '{"ts":"2026-01-01T00:00:00Z"}\n'
     assert (out_dir / "trades.csv").read_text(encoding="utf-8") == "symbol\nBTC/USDT\n"
+
+
+def test_export_v4_reports_rejects_same_source_and_output_dir(tmp_path: Path) -> None:
+    source_dir = tmp_path / "same"
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        export_v4_reports.export_v4_reports(
+            v4_reports_dir=source_dir,
+            out_dir=source_dir,
+            start_ts=1700000000,
+            end_ts=1700003600,
+        )
+    except ValueError as exc:
+        assert str(exc) == "out_dir must differ from v4_reports_dir"
+    else:
+        raise AssertionError("expected export_v4_reports() to reject identical source/output dirs")
