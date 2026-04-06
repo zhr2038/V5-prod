@@ -61,6 +61,26 @@ class HealthChecker:
         self.status = "healthy"
         self.checks: List[Dict[str, Any]] = []
 
+    @staticmethod
+    def _parse_timer_show_output(stdout: str) -> tuple[str | None, int | None]:
+        last_trigger_text: str | None = None
+        last_trigger_monotonic_usec: int | None = None
+        for line in stdout.splitlines():
+            if line.startswith("LastTriggerUSec="):
+                value = line.split("=", 1)[1].strip()
+                if value and value != "n/a":
+                    last_trigger_text = value
+            elif line.startswith("LastTriggerUSecMonotonic="):
+                value = line.split("=", 1)[1].strip()
+                if value and value != "n/a":
+                    try:
+                        parsed = int(value)
+                    except ValueError:
+                        parsed = None
+                    if parsed and parsed > 0:
+                        last_trigger_monotonic_usec = parsed
+        return last_trigger_text, last_trigger_monotonic_usec
+
     def check_timer_health(self) -> Dict[str, Any]:
         if shutil.which("systemctl") is None:
             return {
@@ -85,34 +105,25 @@ class HealthChecker:
                         "show",
                         timer_name,
                         "--property=LastTriggerUSec",
+                        "--property=LastTriggerUSecMonotonic",
                     ],
                     capture_output=True,
                     text=True,
                     timeout=5,
                 )
-                last_trigger_usec = None
-                for line in result.stdout.splitlines():
-                    if line.startswith("LastTriggerUSec="):
-                        value = line.split("=", 1)[1].strip()
-                        if value and value != "n/a":
-                            try:
-                                last_trigger_usec = int(value)
-                            except ValueError:
-                                pass
-                        break
+                last_trigger_text, last_trigger_monotonic_usec = self._parse_timer_show_output(result.stdout)
 
-                if last_trigger_usec is None:
+                if last_trigger_monotonic_usec is None:
                     issues.append({"timer": timer_name, "status": "unknown", "detail": "no trigger time"})
                     continue
 
-                last_trigger = datetime.fromtimestamp(last_trigger_usec / 1_000_000)
-                delay = (datetime.now() - last_trigger).total_seconds() / 60
+                delay = max(0.0, (time.monotonic() * 1_000_000 - last_trigger_monotonic_usec) / 60_000_000)
                 if delay > max_delay_min:
                     issues.append(
                         {
                             "timer": timer_name,
                             "status": "stalled" if delay > max_delay_min * 2 else "delayed",
-                            "last_run": last_trigger.isoformat(timespec="minutes"),
+                            "last_run": last_trigger_text or "unknown",
                             "delay_min": round(delay, 1),
                         }
                     )
