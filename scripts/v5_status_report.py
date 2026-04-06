@@ -19,6 +19,7 @@ sys.path.insert(0, str(WORKSPACE))
 
 REPORTS_DIR = WORKSPACE / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
+FILLS_DB = REPORTS_DIR / "fills.sqlite"
 ORDERS_DB = REPORTS_DIR / "orders.sqlite"
 LIVE_UNITS = (
     ("v5-prod.user.service", "v5-prod.user.timer"),
@@ -115,18 +116,48 @@ def check_borrow_status() -> Dict[str, Any]:
     }
 
 
+def _format_ts_ms(ts_ms: int) -> str:
+    return datetime.fromtimestamp(int(ts_ms) / 1000).isoformat(timespec="minutes")
+
+
 def get_last_filled_trade_ts() -> Optional[str]:
+    try:
+        if FILLS_DB.exists():
+            conn = sqlite3.connect(str(FILLS_DB))
+            try:
+                row = conn.execute("SELECT MAX(ts_ms) FROM fills").fetchone()
+            finally:
+                conn.close()
+            ts_ms = row[0] if row else None
+            if ts_ms:
+                return _format_ts_ms(int(ts_ms))
+    except Exception:
+        pass
+
     if not ORDERS_DB.exists():
         return None
 
     try:
         conn = sqlite3.connect(str(ORDERS_DB))
-        row = conn.execute("SELECT MAX(created_ts) FROM orders WHERE state='FILLED'").fetchone()
-        conn.close()
+        try:
+            row = conn.execute(
+                """
+                SELECT MAX(
+                    CASE
+                        WHEN COALESCE(updated_ts, 0) > 0 THEN updated_ts
+                        ELSE created_ts
+                    END
+                )
+                FROM orders
+                WHERE state='FILLED'
+                """
+            ).fetchone()
+        finally:
+            conn.close()
         ts_ms = row[0] if row else None
         if not ts_ms:
             return None
-        return datetime.fromtimestamp(ts_ms / 1000).isoformat(timespec="minutes")
+        return _format_ts_ms(int(ts_ms))
     except Exception:
         return None
 
