@@ -19,6 +19,7 @@ class ReportPaths:
     reports_dir: Path
     runs_dir: Path
     orders_db: Path
+    fills_db: Path
 
 
 def build_paths(workspace: Path | None = None) -> ReportPaths:
@@ -29,6 +30,7 @@ def build_paths(workspace: Path | None = None) -> ReportPaths:
         reports_dir=reports_dir,
         runs_dir=reports_dir / "runs",
         orders_db=reports_dir / "orders.sqlite",
+        fills_db=reports_dir / "fills.sqlite",
     )
 
 
@@ -162,25 +164,80 @@ class TradingReportGenerator:
         return unique
 
     def load_trade_data(self, days: int = 7) -> list[dict[str, Any]]:
+        cutoff_ts = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
+
+        if self.paths.fills_db.exists():
+            with sqlite3.connect(str(self.paths.fills_db)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT inst_id, side, fill_notional, fill_px, fill_sz, fee, fee_ccy, ts_ms
+                    FROM fills
+                    WHERE ts_ms > ?
+                    ORDER BY ts_ms DESC, created_ts_ms DESC, trade_id DESC
+                    """,
+                    (cutoff_ts,),
+                )
+                rows = cursor.fetchall()
+
+            trades: list[dict[str, Any]] = []
+            for inst_id, side, fill_notional, fill_px, fill_sz, fee, fee_ccy, ts_ms in rows:
+                notional = 0.0
+                try:
+                    notional = float(fill_notional or 0.0)
+                except Exception:
+                    notional = 0.0
+                if notional <= 0.0:
+                    try:
+                        notional = float(fill_px or 0.0) * float(fill_sz or 0.0)
+                    except Exception:
+                        notional = 0.0
+
+                trades.append(
+                    {
+                        "symbol": str(inst_id or "").replace("-USDT", "").replace("/USDT", ""),
+                        "side": side,
+                        "state": "FILLED",
+                        "notional": notional,
+                        "fee": _signed_fee_usdt_from_fee_fields(str(inst_id or ""), fill_px, fee, fee_ccy),
+                        "ts": datetime.fromtimestamp(int(ts_ms or 0) / 1000),
+                    }
+                )
+            return trades
+
         if not self.paths.orders_db.exists():
             return []
 
-        cutoff_ts = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
         with sqlite3.connect(str(self.paths.orders_db)) as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT inst_id, side, state, notional_usdt, fee, avg_px, created_ts
-                FROM orders
-                WHERE created_ts > ? AND state = 'FILLED'
-                ORDER BY created_ts DESC
-                """,
-                (cutoff_ts,),
-            )
-            rows = cursor.fetchall()
+            try:
+                cursor.execute(
+                    """
+                    SELECT inst_id, side, state, notional_usdt, fee, avg_px, created_ts, updated_ts
+                    FROM orders
+                    WHERE COALESCE(NULLIF(updated_ts, 0), created_ts) > ? AND state = 'FILLED'
+                    ORDER BY COALESCE(NULLIF(updated_ts, 0), created_ts) DESC
+                    """,
+                    (cutoff_ts,),
+                )
+                rows = cursor.fetchall()
+            except sqlite3.OperationalError:
+                cursor.execute(
+                    """
+                    SELECT inst_id, side, state, notional_usdt, fee, avg_px, created_ts
+                    FROM orders
+                    WHERE created_ts > ? AND state = 'FILLED'
+                    ORDER BY created_ts DESC
+                    """,
+                    (cutoff_ts,),
+                )
+                rows = cursor.fetchall()
 
         trades: list[dict[str, Any]] = []
-        for inst_id, side, state, notional_usdt, fee, avg_px, created_ts in rows:
+        for row in rows:
+            inst_id, side, state, notional_usdt, fee, avg_px, created_ts = row[:7]
+            updated_ts = row[7] if len(row) > 7 else None
+            ts_ms = int(updated_ts or created_ts or 0)
             trades.append(
                 {
                     "symbol": str(inst_id or "").replace("-USDT", "").replace("/USDT", ""),
@@ -188,7 +245,7 @@ class TradingReportGenerator:
                     "state": state,
                     "notional": float(notional_usdt or 0),
                     "fee": _signed_fee_usdt_from_order_fee(str(inst_id or ""), avg_px, fee),
-                    "ts": datetime.fromtimestamp(float(created_ts or 0) / 1000),
+                    "ts": datetime.fromtimestamp(float(ts_ms) / 1000),
                 }
             )
         return trades
