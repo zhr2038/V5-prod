@@ -996,6 +996,149 @@ def get_db_connection():
     return None
 
 
+def _load_recent_fill_summary(*, reports_dir: Optional[Path] = None, now_dt: Optional[datetime] = None, limit: int = 200) -> Dict[str, Any]:
+    reports_path = reports_dir or REPORTS_DIR
+    summary = {
+        'count_60m': 0,
+        'count_24h': 0,
+        'latest_fill': None,
+    }
+    now_ms = int((now_dt or datetime.now()).timestamp() * 1000)
+    fills_db = reports_path / 'fills.sqlite'
+
+    if fills_db.exists():
+        try:
+            conn = sqlite3.connect(str(fills_db))
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT ts_ms, ord_id, cl_ord_id, inst_id, side
+                FROM fills
+                ORDER BY ts_ms DESC, created_ts_ms DESC, trade_id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+            fill_rows = cur.fetchall()
+            conn.close()
+        except Exception:
+            fill_rows = []
+
+        if fill_rows:
+            order_by_ord_id: Dict[str, Dict[str, Any]] = {}
+            order_by_cl_ord_id: Dict[str, Dict[str, Any]] = {}
+            orders_db = reports_path / 'orders.sqlite'
+            ord_ids = sorted({str(r[1]) for r in fill_rows if r[1]})
+            cl_ord_ids = sorted({str(r[2]) for r in fill_rows if r[2]})
+
+            if orders_db.exists() and (ord_ids or cl_ord_ids):
+                clauses: List[str] = []
+                params: List[Any] = []
+                if ord_ids:
+                    placeholders = ','.join(['?' for _ in ord_ids])
+                    clauses.append(f"ord_id IN ({placeholders})")
+                    params.extend(ord_ids)
+                if cl_ord_ids:
+                    placeholders = ','.join(['?' for _ in cl_ord_ids])
+                    clauses.append(f"cl_ord_id IN ({placeholders})")
+                    params.extend(cl_ord_ids)
+
+                try:
+                    conn = sqlite3.connect(str(orders_db))
+                    cur = conn.cursor()
+                    cur.execute(
+                        f"""
+                        SELECT ord_id, cl_ord_id, run_id, intent, notional_usdt, updated_ts, created_ts
+                        FROM orders
+                        WHERE {' OR '.join(clauses)}
+                        """,
+                        tuple(params),
+                    )
+                    order_rows = cur.fetchall()
+                    conn.close()
+                except Exception:
+                    order_rows = []
+
+                for ord_id, cl_ord_id, run_id, intent, notional_usdt, updated_ts, created_ts in order_rows:
+                    payload = {
+                        'run_id': str(run_id or ''),
+                        'intent': str(intent or ''),
+                        'notional_usdt': float(notional_usdt or 0.0),
+                        'sort_ts': int(updated_ts or created_ts or 0),
+                    }
+                    ord_id_key = str(ord_id or '')
+                    cl_ord_id_key = str(cl_ord_id or '')
+                    if ord_id_key and payload['sort_ts'] >= int(order_by_ord_id.get(ord_id_key, {}).get('sort_ts', -1)):
+                        order_by_ord_id[ord_id_key] = payload
+                    if cl_ord_id_key and payload['sort_ts'] >= int(order_by_cl_ord_id.get(cl_ord_id_key, {}).get('sort_ts', -1)):
+                        order_by_cl_ord_id[cl_ord_id_key] = payload
+
+            for idx, row in enumerate(fill_rows):
+                ts_ms = int(row[0] or 0)
+                if ts_ms <= 0:
+                    continue
+                age_ms = max(0, now_ms - ts_ms)
+                if age_ms <= 60 * 60 * 1000:
+                    summary['count_60m'] += 1
+                if age_ms <= 24 * 60 * 60 * 1000:
+                    summary['count_24h'] += 1
+
+                if idx == 0:
+                    ord_id = str(row[1] or '')
+                    cl_ord_id = str(row[2] or '')
+                    order_meta = order_by_ord_id.get(ord_id) or order_by_cl_ord_id.get(cl_ord_id) or {}
+                    summary['latest_fill'] = {
+                        'created_ts': ts_ms,
+                        'run_id': str(order_meta.get('run_id') or ''),
+                        'inst_id': str(row[3] or ''),
+                        'side': str(row[4] or ''),
+                        'intent': str(order_meta.get('intent') or ''),
+                        'notional_usdt': float(order_meta.get('notional_usdt') or 0.0),
+                        'ord_id': ord_id,
+                    }
+            return summary
+
+    conn = get_db_connection()
+    if not conn:
+        return summary
+
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
+            FROM orders
+            WHERE state = 'FILLED'
+            ORDER BY created_ts DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        )
+        fill_rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    for idx, row in enumerate(fill_rows):
+        ts_raw = int(row[0] or 0)
+        ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
+        age_ms = max(0, now_ms - ts_ms)
+        if age_ms <= 60 * 60 * 1000:
+            summary['count_60m'] += 1
+        if age_ms <= 24 * 60 * 60 * 1000:
+            summary['count_24h'] += 1
+        if idx == 0:
+            summary['latest_fill'] = {
+                'created_ts': ts_raw,
+                'run_id': str(row[1] or ''),
+                'inst_id': str(row[2] or ''),
+                'side': str(row[3] or ''),
+                'intent': str(row[4] or ''),
+                'notional_usdt': float(row[5] or 0.0),
+                'ord_id': str(row[6] or ''),
+            }
+    return summary
+
+
 def _split_inst_id_base_quote(inst_id: str) -> tuple[str, str]:
     inst = str(inst_id or '').upper()
     if '-' in inst:
@@ -4312,49 +4455,12 @@ def api_decision_audit():
             pass
 
         # Recent fill context + latest run with actual order attempts
-        recent_fill_summary = {
-            'count_60m': 0,
-            'count_24h': 0,
-            'latest_fill': None,
-        }
+        recent_fill_summary = _load_recent_fill_summary()
         latest_ordered_run_summary = None
         try:
             conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
-
-                # 1) Recent fills window
-                cur.execute(
-                    """
-                    SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
-                    FROM orders
-                    WHERE state = 'FILLED'
-                    ORDER BY created_ts DESC
-                    LIMIT 200
-                    """
-                )
-                fill_rows = cur.fetchall()
-
-                now_ms = int(datetime.now().timestamp() * 1000)
-                for i, r in enumerate(fill_rows):
-                    ts_raw = int(r[0] or 0)
-                    ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
-                    age_ms = max(0, now_ms - ts_ms)
-                    if age_ms <= 60 * 60 * 1000:
-                        recent_fill_summary['count_60m'] += 1
-                    if age_ms <= 24 * 60 * 60 * 1000:
-                        recent_fill_summary['count_24h'] += 1
-
-                    if i == 0:
-                        recent_fill_summary['latest_fill'] = {
-                            'created_ts': ts_raw,
-                            'run_id': str(r[1] or ''),
-                            'inst_id': str(r[2] or ''),
-                            'side': str(r[3] or ''),
-                            'intent': str(r[4] or ''),
-                            'notional_usdt': float(r[5] or 0.0),
-                            'ord_id': str(r[6] or ''),
-                        }
 
                 # 2) Latest run that has at least one order row (attempt)
                 cur.execute(

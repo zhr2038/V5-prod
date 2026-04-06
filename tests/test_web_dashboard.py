@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import subprocess
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -778,6 +779,124 @@ def test_api_decision_audit_falls_back_to_previous_run_strategy_signals(monkeypa
     assert payload["strategy_run_id"] == "20260313_14"
     assert payload["strategy_signals"][0]["strategy"] == "TrendFollowing"
     assert payload["fused_source_is_fallback"] is True
+
+
+def test_api_decision_audit_recent_fill_summary_prefers_fill_timestamps(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260313_16"
+    current_run.mkdir(parents=True, exist_ok=True)
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260313_16",
+                "regime": "TRENDING",
+                "counts": {"selected": 1, "orders_rebalance": 1, "orders_exit": 0},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(current_run, (2, 2))
+
+    orders_db = reports_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(orders_db))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+            created_ts INTEGER,
+            updated_ts INTEGER,
+            run_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            intent TEXT,
+            state TEXT,
+            notional_usdt REAL,
+            last_error_code TEXT,
+            last_error_msg TEXT,
+            ord_id TEXT,
+            cl_ord_id TEXT
+        )
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO orders(created_ts, updated_ts, run_id, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id, cl_ord_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            1_710_000_000_000,
+            1_710_000_000_000,
+            "20260313_16",
+            "BTC-USDT",
+            "buy",
+            "rebalance",
+            "FILLED",
+            100.0,
+            "",
+            "",
+            "ord-1",
+            "cl-1",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    fills_db = reports_dir / "fills.sqlite"
+    conn = sqlite3.connect(str(fills_db))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE fills (
+            ts_ms INTEGER,
+            ord_id TEXT,
+            cl_ord_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            created_ts_ms INTEGER,
+            trade_id TEXT
+        )
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO fills(ts_ms, ord_id, cl_ord_id, inst_id, side, created_ts_ms, trade_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            1_710_088_200_000,
+            "ord-1",
+            "cl-1",
+            "BTC-USDT",
+            "buy",
+            1_710_088_200_000,
+            "trade-1",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    class _FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(1_710_090_000, tz=tz)
+
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "datetime", _FrozenDateTime)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["recent_fill_summary"]["count_60m"] == 1
+    assert payload["recent_fill_summary"]["count_24h"] == 1
+    assert payload["recent_fill_summary"]["latest_fill"]["created_ts"] == 1_710_088_200_000
+    assert payload["recent_fill_summary"]["latest_fill"]["run_id"] == "20260313_16"
+    assert payload["recent_fill_summary"]["latest_fill"]["intent"] == "rebalance"
 
 
 def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
