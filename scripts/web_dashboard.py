@@ -1746,17 +1746,39 @@ def api_trades():
             if conn:
                 cursor = conn.cursor()
                 placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
-                cursor.execute(f"""
-                    SELECT
-                        inst_id, side, notional_usdt, fee, state, avg_px,
-                        datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
-                    FROM orders
-                    WHERE state='FILLED'
-                    AND inst_id NOT IN ({placeholders})
-                    AND notional_usdt < 1000
-                    ORDER BY created_ts DESC
-                    LIMIT 100
-                """, EXCLUDED_SYMBOLS)
+                try:
+                    cursor.execute(f"""
+                        SELECT
+                            inst_id,
+                            side,
+                            notional_usdt,
+                            fee,
+                            state,
+                            avg_px,
+                            datetime(
+                                COALESCE(NULLIF(updated_ts, 0), created_ts)/1000,
+                                'unixepoch',
+                                '+8 hours'
+                            ) as time
+                        FROM orders
+                        WHERE state='FILLED'
+                        AND inst_id NOT IN ({placeholders})
+                        AND notional_usdt < 1000
+                        ORDER BY COALESCE(NULLIF(updated_ts, 0), created_ts) DESC
+                        LIMIT 100
+                    """, EXCLUDED_SYMBOLS)
+                except sqlite3.OperationalError:
+                    cursor.execute(f"""
+                        SELECT
+                            inst_id, side, notional_usdt, fee, state, avg_px,
+                            datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
+                        FROM orders
+                        WHERE state='FILLED'
+                        AND inst_id NOT IN ({placeholders})
+                        AND notional_usdt < 1000
+                        ORDER BY created_ts DESC
+                        LIMIT 100
+                    """, EXCLUDED_SYMBOLS)
 
                 for row in cursor.fetchall():
                     try:

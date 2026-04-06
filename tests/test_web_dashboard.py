@@ -1692,3 +1692,47 @@ def test_api_trades_db_fallback_converts_json_fee_maps_to_signed_usdt(monkeypatc
     assert payload["trades"][0]["symbol"] == "BTC-USDT"
     assert payload["trades"][0]["amount"] == pytest.approx(100.0)
     assert payload["trades"][0]["fee"] == pytest.approx(-50.0)
+
+
+def test_api_trades_db_fallback_prefers_updated_ts_for_trade_time(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.delenv("EXCHANGE_API_KEY", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_SECRET", raising=False)
+    monkeypatch.delenv("EXCHANGE_PASSPHRASE", raising=False)
+
+    conn = sqlite3.connect(str(tmp_path / "orders.sqlite"))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+            inst_id TEXT,
+            side TEXT,
+            notional_usdt REAL,
+            fee TEXT,
+            state TEXT,
+            avg_px TEXT,
+            created_ts INTEGER,
+            updated_ts INTEGER
+        )
+        """
+    )
+    cur.executemany(
+        """
+        INSERT INTO orders(inst_id, side, notional_usdt, fee, state, avg_px, created_ts, updated_ts)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("BTC-USDT", "buy", 100.0, "0", "FILLED", "50000", 1710000000000, 1710003600000),
+            ("ETH-USDT", "buy", 90.0, "0", "FILLED", "3000", 1710001800000, 1710001800000),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    with module.app.app_context():
+        payload = module.api_trades().get_json()
+
+    assert payload["trades"][0]["symbol"] == "BTC-USDT"
+    assert payload["trades"][0]["time"] == "2024-03-10 01:00:00"
