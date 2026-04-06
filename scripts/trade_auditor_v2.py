@@ -65,16 +65,36 @@ class SmartTradeAuditor:
             now = datetime.now()
             end_ts = int(now.timestamp() * 1000)
             start_ts = int((now - timedelta(minutes=minutes)).timestamp() * 1000)
-            rows = conn.execute(
-                """
-                SELECT cl_ord_id, inst_id, side, state, intent, ord_id,
-                       last_error_code, last_error_msg, created_ts
-                FROM orders
-                WHERE created_ts BETWEEN ? AND ?
-                ORDER BY created_ts DESC
-                """,
-                (start_ts, end_ts),
-            ).fetchall()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        cl_ord_id,
+                        inst_id,
+                        side,
+                        state,
+                        intent,
+                        ord_id,
+                        last_error_code,
+                        last_error_msg,
+                        COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
+                    FROM orders
+                    WHERE COALESCE(NULLIF(updated_ts, 0), created_ts) BETWEEN ? AND ?
+                    ORDER BY event_ts DESC
+                    """,
+                    (start_ts, end_ts),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = conn.execute(
+                    """
+                    SELECT cl_ord_id, inst_id, side, state, intent, ord_id,
+                           last_error_code, last_error_msg, created_ts
+                    FROM orders
+                    WHERE created_ts BETWEEN ? AND ?
+                    ORDER BY created_ts DESC
+                    """,
+                    (start_ts, end_ts),
+                ).fetchall()
         finally:
             conn.close()
         return rows

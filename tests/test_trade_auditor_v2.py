@@ -56,6 +56,50 @@ def test_get_orders_in_window_reads_workspace_orders_db(tmp_path) -> None:
     ]
 
 
+def test_get_orders_in_window_uses_updated_ts_for_recent_events(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    db_path = reports_dir / "orders.sqlite"
+    now_ms = int(datetime.now().timestamp() * 1000)
+    stale_created_ts = now_ms - 2 * 60 * 60 * 1000
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE orders (
+            cl_ord_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            state TEXT,
+            intent TEXT,
+            ord_id TEXT,
+            last_error_code TEXT,
+            last_error_msg TEXT,
+            created_ts INTEGER,
+            updated_ts INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO orders(
+            cl_ord_id, inst_id, side, state, intent, ord_id,
+            last_error_code, last_error_msg, created_ts, updated_ts
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("cid-1", "BTC-USDT", "buy", "FILLED", "OPEN_LONG", "oid-1", None, None, stale_created_ts, now_ms),
+    )
+    conn.commit()
+    conn.close()
+
+    auditor = trade_auditor_v2.SmartTradeAuditor(workspace=tmp_path)
+
+    assert auditor.get_orders_in_window(minutes=65) == [
+        ("cid-1", "BTC-USDT", "buy", "FILLED", "OPEN_LONG", "oid-1", None, None, now_ms)
+    ]
+
+
 def test_check_market_regime_uses_workspace_runs_dir(tmp_path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260406_000000"
     run_dir.mkdir(parents=True, exist_ok=True)
