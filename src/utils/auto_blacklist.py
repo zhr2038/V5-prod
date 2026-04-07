@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 
 DEFAULT_PATH = "reports/auto_blacklist.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -24,8 +25,15 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _read(path: str) -> Dict[str, Any]:
+def _resolve_path(path: str) -> Path:
     p = Path(path)
+    if not p.is_absolute():
+        p = (PROJECT_ROOT / p).resolve()
+    return p
+
+
+def _read(path: str) -> Dict[str, Any]:
+    p = _resolve_path(path)
     if not p.exists():
         return {"schema_version": 1, "symbols": [], "entries": []}
     try:
@@ -36,7 +44,7 @@ def _read(path: str) -> Dict[str, Any]:
 
 
 def _write(path: str, obj: Dict[str, Any]) -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
