@@ -14,9 +14,7 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
-RISK_STATE_FILE = REPORTS_DIR / 'auto_risk_guard.json'
-ORDERS_DB = REPORTS_DIR / 'orders.sqlite'
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # 自动恢复阈值配置
 RECOVERY_THRESHOLDS = {
@@ -34,12 +32,15 @@ RECOVERY_THRESHOLDS = {
 class RiskAutoRecovery:
     """风控自动恢复管理器"""
     
-    def __init__(self):
+    def __init__(self, workspace: Path = PROJECT_ROOT):
+        self.workspace = Path(workspace).resolve()
+        self.reports_dir = self.workspace / 'reports'
+        self.risk_state_file = self.reports_dir / 'auto_risk_guard.json'
+        self.config_file = self.reports_dir / 'risk_recovery_config.json'
         self.config = self.load_config()
     
     def load_config(self):
         """加载配置"""
-        config_file = REPORTS_DIR / 'risk_recovery_config.json'
         default_config = {
             'enabled': True,           # 是否启用自动恢复
             'cooldown_hours': 24,      # 档位切换冷却期
@@ -48,9 +49,9 @@ class RiskAutoRecovery:
             'manual_override_until': None   # 手动暂停截止时间
         }
         
-        if config_file.exists():
+        if self.config_file.exists():
             try:
-                with open(config_file) as f:
+                with open(self.config_file) as f:
                     saved = json.load(f)
                     default_config.update(saved)
             except:
@@ -60,15 +61,15 @@ class RiskAutoRecovery:
     
     def save_config(self):
         """保存配置"""
-        config_file = REPORTS_DIR / 'risk_recovery_config.json'
-        with open(config_file, 'w') as f:
+        self.config_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.config_file, 'w') as f:
             json.dump(self.config, f, indent=2)
     
     def get_current_risk_state(self):
         """获取当前风险状态"""
-        if RISK_STATE_FILE.exists():
+        if self.risk_state_file.exists():
             try:
-                with open(RISK_STATE_FILE) as f:
+                with open(self.risk_state_file) as f:
                     return json.load(f)
             except:
                 pass
@@ -78,7 +79,7 @@ class RiskAutoRecovery:
         """获取回撤历史"""
         try:
             # 从equity曲线计算回撤
-            equity_file = REPORTS_DIR / 'equity_history.jsonl'
+            equity_file = self.reports_dir / 'equity_history.jsonl'
             if not equity_file.exists():
                 return []
             
@@ -192,7 +193,8 @@ class RiskAutoRecovery:
             state['recovered_from'] = old_level
             state['recovery_reason'] = 'auto'
             
-            with open(RISK_STATE_FILE, 'w') as f:
+            self.risk_state_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.risk_state_file, 'w') as f:
                 json.dump(state, f, indent=2)
             
             return True, f"已从{old_level}降级至{target_level}"
