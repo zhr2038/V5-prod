@@ -80,13 +80,41 @@ def _unit_is_active(unit: str) -> bool:
     return result.returncode == 0
 
 
+def _get_unit_load_state(unit: str) -> str:
+    result = subprocess.run(
+        ["systemctl", "--user", "show", unit, "--property=LoadState"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    for line in result.stdout.splitlines():
+        if line.startswith("LoadState="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+def _resolve_live_units() -> tuple[str, str]:
+    current_units = LIVE_UNITS[0]
+    legacy_units = LIVE_UNITS[1]
+
+    current_exists = any(_get_unit_load_state(unit) not in {"", "not-found"} for unit in current_units)
+    if current_exists:
+        return current_units
+
+    legacy_exists = any(_get_unit_load_state(unit) not in {"", "not-found"} for unit in legacy_units)
+    if legacy_exists:
+        return legacy_units
+
+    return current_units
+
+
 def get_service_status() -> str:
     try:
-        for service_unit, timer_unit in LIVE_UNITS:
-            if _unit_is_active(service_unit):
-                return "running"
-            if _unit_is_active(timer_unit):
-                return "scheduled"
+        service_unit, timer_unit = _resolve_live_units()
+        if _unit_is_active(service_unit):
+            return "running"
+        if _unit_is_active(timer_unit):
+            return "scheduled"
         return "stopped"
     except Exception:
         return "unknown"

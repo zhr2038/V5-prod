@@ -80,23 +80,36 @@ def run_command(cmd: Sequence[str], timeout: int = 30) -> str:
         return ""
 
 
+def _get_unit_load_state(unit: str) -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show", unit, "--property=LoadState"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return ""
+
+    for line in result.stdout.splitlines():
+        if line.startswith("LoadState="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
 def resolve_live_service_unit_name() -> str:
     if shutil.which("systemctl") is None:
         return LIVE_SERVICE_UNITS[0]
 
-    for unit in LIVE_SERVICE_UNITS:
-        try:
-            result = subprocess.run(
-                ["systemctl", "--user", "status", unit],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            if result.returncode == 0:
-                return unit
-        except Exception:
-            pass
+    current_unit = LIVE_SERVICE_UNITS[0]
+    if _get_unit_load_state(current_unit) not in {"", "not-found"}:
+        return current_unit
+
+    legacy_unit = LIVE_SERVICE_UNITS[1]
+    if _get_unit_load_state(legacy_unit) not in {"", "not-found"}:
+        return legacy_unit
+
     return LIVE_SERVICE_UNITS[0]
 
 

@@ -11,8 +11,8 @@ def test_health_check_uses_current_timer_unit_names(monkeypatch) -> None:
 
     def _fake_run(cmd, capture_output=True, text=True, timeout=5):
         commands.append(cmd)
-        if cmd[:3] == ["systemctl", "--user", "status"]:
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[:3] == ["systemctl", "--user", "show"] and cmd[-1] == "--property=LoadState":
+            return SimpleNamespace(returncode=0, stdout="LoadState=loaded\n", stderr="")
         if cmd[:3] == ["systemctl", "--user", "show"]:
             return SimpleNamespace(
                 returncode=0,
@@ -34,7 +34,7 @@ def test_health_check_uses_current_timer_unit_names(monkeypatch) -> None:
     result = health_check.HealthChecker().check_timer_health()
 
     assert result["status"] == "healthy"
-    checked_units = [cmd[3] for cmd in commands if cmd[:3] == ["systemctl", "--user", "show"]]
+    checked_units = [cmd[3] for cmd in commands if cmd[:3] == ["systemctl", "--user", "show"] and cmd[-1] != "--property=LoadState"]
     assert checked_units == [
         "v5-prod.user.timer",
         "v5-reconcile.timer",
@@ -46,8 +46,8 @@ def test_health_check_marks_delayed_timer_from_monotonic_usec(monkeypatch) -> No
     now_mono_usec = 10_000_000_000
 
     def _fake_run(cmd, capture_output=True, text=True, timeout=5):
-        if cmd[:3] == ["systemctl", "--user", "status"]:
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[:3] == ["systemctl", "--user", "show"] and cmd[-1] == "--property=LoadState":
+            return SimpleNamespace(returncode=0, stdout="LoadState=loaded\n", stderr="")
         if cmd[:3] == ["systemctl", "--user", "show"]:
             timer_name = cmd[3]
             last_trigger_mono_usec = 0 if timer_name == "v5-prod.user.timer" else now_mono_usec
@@ -90,8 +90,8 @@ def test_health_check_marks_delayed_timer_from_monotonic_usec(monkeypatch) -> No
 
 def test_health_check_marks_missing_or_disabled_timer_critical(monkeypatch) -> None:
     def _fake_run(cmd, capture_output=True, text=True, timeout=5):
-        if cmd[:3] == ["systemctl", "--user", "status"]:
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[:3] == ["systemctl", "--user", "show"] and cmd[-1] == "--property=LoadState":
+            return SimpleNamespace(returncode=0, stdout="LoadState=loaded\n", stderr="")
         if cmd[:3] == ["systemctl", "--user", "show"]:
             timer_name = cmd[3]
             if timer_name == "v5-reconcile.timer":
@@ -125,5 +125,55 @@ def test_health_check_marks_missing_or_disabled_timer_critical(monkeypatch) -> N
             "timer": "v5-reconcile.timer",
             "status": "missing",
             "detail": "unit not found",
+        }
+    ]
+
+
+def test_health_check_does_not_fall_back_to_legacy_timer_when_prod_exists(monkeypatch) -> None:
+    def _fake_run(cmd, capture_output=True, text=True, timeout=5):
+        if cmd[:3] == ["systemctl", "--user", "show"] and cmd[-1] == "--property=LoadState":
+            unit = cmd[3]
+            if unit in {"v5-prod.user.timer", "v5-live-20u.user.timer"}:
+                return SimpleNamespace(returncode=0, stdout="LoadState=loaded\n", stderr="")
+            return SimpleNamespace(returncode=0, stdout="LoadState=loaded\n", stderr="")
+        if cmd[:3] == ["systemctl", "--user", "show"]:
+            timer_name = cmd[3]
+            if timer_name == "v5-prod.user.timer":
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        "LoadState=loaded\n"
+                        "ActiveState=inactive\n"
+                        "UnitFileState=enabled\n"
+                        "LastTriggerUSec=n/a\n"
+                        "LastTriggerUSecMonotonic=n/a\n"
+                    ),
+                    stderr="",
+                )
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "LoadState=loaded\n"
+                    "ActiveState=active\n"
+                    "UnitFileState=enabled\n"
+                    "LastTriggerUSec=Mon 2026-04-06 12:00:00 CST\n"
+                    "LastTriggerUSecMonotonic=500000000\n"
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(health_check.shutil, "which", lambda name: "/usr/bin/systemctl" if name == "systemctl" else None)
+    monkeypatch.setattr(health_check.subprocess, "run", _fake_run)
+    monkeypatch.setattr(health_check.time, "monotonic", lambda: 500.0)
+
+    result = health_check.HealthChecker().check_timer_health()
+
+    assert result["status"] == "critical"
+    assert result["details"] == [
+        {
+            "timer": "v5-prod.user.timer",
+            "status": "inactive",
+            "detail": "inactive",
         }
     ]

@@ -22,22 +22,35 @@ REPORTS_DIR = WORKSPACE / "reports"
 HEALTH_FILE = REPORTS_DIR / "health_status.json"
 
 
+def _get_unit_load_state(unit: str) -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show", unit, "--property=LoadState"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return ""
+
+    for line in result.stdout.splitlines():
+        if line.startswith("LoadState="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
 def resolve_live_timer_unit_name() -> str:
     if shutil.which("systemctl") is None:
         return "v5-prod.user.timer"
 
-    for unit in ("v5-prod.user.timer", "v5-live-20u.user.timer"):
-        try:
-            result = subprocess.run(
-                ["systemctl", "--user", "status", unit],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return unit
-        except Exception:
-            pass
+    current_unit = "v5-prod.user.timer"
+    if _get_unit_load_state(current_unit) not in {"", "not-found"}:
+        return current_unit
+
+    legacy_unit = "v5-live-20u.user.timer"
+    if _get_unit_load_state(legacy_unit) not in {"", "not-found"}:
+        return legacy_unit
+
     return "v5-prod.user.timer"
 
 

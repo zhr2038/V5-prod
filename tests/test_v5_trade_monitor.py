@@ -43,3 +43,17 @@ def test_send_telegram_alert_falls_back_to_repo_reports_dir(tmp_path) -> None:
     assert ok is True
     assert paths.alert_file.exists()
     assert "test alert" in paths.alert_file.read_text(encoding="utf-8")
+
+
+def test_resolve_live_service_unit_name_prefers_prod_when_legacy_exists(monkeypatch) -> None:
+    def _fake_run(cmd, **kwargs):
+        if cmd[:3] == ["systemctl", "--user", "show"]:
+            unit = cmd[3]
+            if unit in {"v5-prod.user.service", "v5-live-20u.user.service"}:
+                return type("Result", (), {"stdout": "LoadState=loaded\n"})()
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(trade_monitor.shutil, "which", lambda name: "/usr/bin/systemctl" if name == "systemctl" else None)
+    monkeypatch.setattr(trade_monitor.subprocess, "run", _fake_run)
+
+    assert trade_monitor.resolve_live_service_unit_name() == "v5-prod.user.service"

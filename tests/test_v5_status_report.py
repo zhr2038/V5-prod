@@ -10,8 +10,19 @@ def _completed(returncode: int) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr="")
 
 
+def _show_completed(load_state: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=[],
+        returncode=0 if load_state != "not-found" else 1,
+        stdout=f"LoadState={load_state}\n",
+        stderr="",
+    )
+
+
 def test_get_service_status_reports_running_when_service_active(monkeypatch) -> None:
     def _fake_run(cmd, **kwargs):
+        if cmd[:3] == ["systemctl", "--user", "show"]:
+            return _show_completed("loaded")
         unit = cmd[-1]
         if unit == "v5-prod.user.service":
             return _completed(0)
@@ -24,6 +35,8 @@ def test_get_service_status_reports_running_when_service_active(monkeypatch) -> 
 
 def test_get_service_status_reports_scheduled_when_timer_active(monkeypatch) -> None:
     def _fake_run(cmd, **kwargs):
+        if cmd[:3] == ["systemctl", "--user", "show"]:
+            return _show_completed("loaded")
         unit = cmd[-1]
         if unit == "v5-prod.user.timer":
             return _completed(0)
@@ -35,7 +48,26 @@ def test_get_service_status_reports_scheduled_when_timer_active(monkeypatch) -> 
 
 
 def test_get_service_status_reports_stopped_when_units_inactive(monkeypatch) -> None:
-    monkeypatch.setattr(v5_status_report.subprocess, "run", lambda *args, **kwargs: _completed(1))
+    def _fake_run(cmd, **kwargs):
+        if cmd[:3] == ["systemctl", "--user", "show"]:
+            return _show_completed("loaded")
+        return _completed(1)
+
+    monkeypatch.setattr(v5_status_report.subprocess, "run", _fake_run)
+
+    assert v5_status_report.get_service_status() == "stopped"
+
+
+def test_get_service_status_does_not_fall_back_to_legacy_units_when_prod_exists(monkeypatch) -> None:
+    def _fake_run(cmd, **kwargs):
+        if cmd[:3] == ["systemctl", "--user", "show"]:
+            return _show_completed("loaded")
+        unit = cmd[-1]
+        if unit in {"v5-live-20u.user.service", "v5-live-20u.user.timer"}:
+            return _completed(0)
+        return _completed(1)
+
+    monkeypatch.setattr(v5_status_report.subprocess, "run", _fake_run)
 
     assert v5_status_report.get_service_status() == "stopped"
 
