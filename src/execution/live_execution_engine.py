@@ -875,7 +875,8 @@ class LiveExecutionEngine:
                     since_ts=since_ts,
                 )
                 if latest is not None:
-                    elapsed_sec = max(0.0, (now_ms - int(latest.updated_ts)) / 1000.0)
+                    latest_event_ts = int(latest.updated_ts) if int(latest.updated_ts) > 0 else int(latest.created_ts)
+                    elapsed_sec = max(0.0, (now_ms - latest_event_ts) / 1000.0)
                     remain_sec = max(0.0, cooldown_min * 60.0 - elapsed_sec)
                     self.order_store.upsert_new(
                         cl_ord_id=clid,
@@ -895,6 +896,7 @@ class LiveExecutionEngine:
                             "latest_filled_cl_ord_id": str(latest.cl_ord_id),
                             "latest_filled_run_id": str(latest.run_id),
                             "latest_filled_updated_ts": int(latest.updated_ts),
+                            "latest_filled_event_ts": latest_event_ts,
                             "elapsed_sec": float(round(elapsed_sec, 3)),
                             "remain_sec": float(round(remain_sec, 3)),
                         },

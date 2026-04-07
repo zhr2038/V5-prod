@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 
 from types import SimpleNamespace
@@ -136,6 +137,64 @@ def test_place_idempotent_same_intent() -> None:
         assert r1.cl_ord_id == r2.cl_ord_id
         # second call should not place again because order already exists and is non-terminal (will query)
         assert okx.place_calls == 1
+
+
+def test_open_long_cooldown_uses_created_ts_when_updated_ts_missing(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            open_long_cooldown_minutes=10,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        store.upsert_new(
+            cl_ord_id="FILLED1",
+            run_id="old-run",
+            inst_id="BTC-USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            decision_hash="old-h",
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=10.0,
+        )
+        store.update_state("FILLED1", new_state="FILLED", avg_px="100", acc_fill_sz="0.1")
+
+        recent_created_ts = 950_000
+        con = sqlite3.connect(str(store.path))
+        con.execute(
+            "UPDATE orders SET created_ts=?, updated_ts=? WHERE cl_ord_id=?",
+            (recent_created_ts, 0, "FILLED1"),
+        )
+        con.commit()
+        con.close()
+
+        monkeypatch.setattr("src.execution.live_execution_engine.time.time", lambda: 1_000.0)
+
+        result = eng.place(
+            Order(
+                symbol="BTC/USDT",
+                side="buy",
+                intent="OPEN_LONG",
+                notional_usdt=15.0,
+                signal_price=100.0,
+                meta={"decision_hash": "new-h"},
+            )
+        )
+
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
+        row = store.get(result.cl_ord_id)
+        assert row is not None
+        req = json.loads(row.req_json)
+        assert req["blocked_by_cooldown"] is True
+        assert req["latest_filled_updated_ts"] == 0
+        assert req["latest_filled_event_ts"] == recent_created_ts
 
 
 def test_sell_market_uses_position_qty() -> None:

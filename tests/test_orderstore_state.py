@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 
 from src.execution.order_store import OrderStore
@@ -91,3 +92,50 @@ def test_orderstore_unknown_can_recover_to_authoritative_state() -> None:
         assert row is not None
         assert row.state == "FILLED"
         assert row.ord_id == "1001"
+
+
+def test_get_latest_filled_prefers_event_ts_when_updated_ts_missing() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        st = OrderStore(path=f"{td}/orders.sqlite")
+        older = "OLDER1"
+        recent = "RECENT1"
+
+        st.upsert_new(
+            cl_ord_id=older,
+            run_id="r1",
+            inst_id="BTC-USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            decision_hash="h1",
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=10.0,
+        )
+        st.update_state(older, new_state="FILLED", avg_px="100", acc_fill_sz="0.1")
+        st.upsert_new(
+            cl_ord_id=recent,
+            run_id="r2",
+            inst_id="BTC-USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            decision_hash="h2",
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=20.0,
+        )
+        st.update_state(recent, new_state="FILLED", avg_px="110", acc_fill_sz="0.2")
+
+        con = sqlite3.connect(str(st.path))
+        con.execute("UPDATE orders SET created_ts=?, updated_ts=? WHERE cl_ord_id=?", (100_000, 0, older))
+        con.execute("UPDATE orders SET created_ts=?, updated_ts=? WHERE cl_ord_id=?", (950_000, 0, recent))
+        con.commit()
+        con.close()
+
+        row = st.get_latest_filled(
+            inst_id="BTC-USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            since_ts=900_000,
+        )
+        assert row is not None
+        assert row.cl_ord_id == recent

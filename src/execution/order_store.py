@@ -448,6 +448,7 @@ class OrderStore:
         """获取最近一笔已成交订单（可按方向/意图/时间过滤）。"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
+        event_ts_expr = "COALESCE(NULLIF(updated_ts, 0), created_ts)"
 
         sql = [
             """
@@ -474,10 +475,10 @@ class OrderStore:
             sql.append(" AND intent=?")
             params.append(str(intent))
         if since_ts is not None:
-            sql.append(" AND updated_ts>=?")
+            sql.append(f" AND {event_ts_expr}>=?")
             params.append(int(since_ts))
 
-        sql.append(" ORDER BY updated_ts DESC LIMIT 1")
+        sql.append(f" ORDER BY {event_ts_expr} DESC LIMIT 1")
         cur.execute("".join(sql), params)
         row = cur.fetchone()
         con.close()
