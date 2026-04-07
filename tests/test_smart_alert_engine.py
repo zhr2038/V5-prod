@@ -90,3 +90,42 @@ def test_check_no_buy_in_market_falls_back_to_order_updated_ts(tmp_path: Path) -
     alert = engine.check_no_buy_in_market()
 
     assert alert is None
+
+
+def test_check_no_buy_in_market_uses_orders_when_fill_store_lags(tmp_path: Path) -> None:
+    _seed_good_market_runs(tmp_path)
+
+    fills_db = tmp_path / "reports" / "fills.sqlite"
+    conn = sqlite3.connect(str(fills_db))
+    conn.execute("CREATE TABLE fills (side TEXT, ts_ms INTEGER)")
+    conn.execute(
+        "INSERT INTO fills(side, ts_ms) VALUES (?, ?)",
+        ("buy", 1_000),
+    )
+    conn.commit()
+    conn.close()
+
+    orders_db = tmp_path / "reports" / "orders.sqlite"
+    conn = sqlite3.connect(str(orders_db))
+    conn.execute(
+        """
+        CREATE TABLE orders (
+            side TEXT,
+            state TEXT,
+            created_ts INTEGER,
+            updated_ts INTEGER
+        )
+        """
+    )
+    now_ts = int(datetime.now().timestamp() * 1000)
+    conn.execute(
+        "INSERT INTO orders(side, state, created_ts, updated_ts) VALUES (?, ?, ?, ?)",
+        ("buy", "FILLED", 1_000, now_ts),
+    )
+    conn.commit()
+    conn.close()
+
+    engine = SmartAlertEngine(workspace=tmp_path)
+    alert = engine.check_no_buy_in_market()
+
+    assert alert is None

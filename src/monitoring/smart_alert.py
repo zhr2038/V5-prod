@@ -66,9 +66,7 @@ class SmartAlertEngine:
                 continue
         return audits
 
-    def _count_recent_buy_fills(self, hours: int = 6) -> int:
-        cutoff_ts = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
-
+    def _count_recent_buy_fills_from_fill_store(self, cutoff_ts: int) -> int | None:
         fills_db = self.reports_dir / "fills.sqlite"
         try:
             if fills_db.exists():
@@ -87,10 +85,12 @@ class SmartAlertEngine:
                 return int(row[0] or 0) if row else 0
         except Exception:
             pass
+        return None
 
+    def _count_recent_buy_filled_orders(self, cutoff_ts: int) -> int | None:
         orders_db = self.reports_dir / "orders.sqlite"
         if not orders_db.exists():
-            return 0
+            return None
 
         try:
             conn = sqlite3.connect(str(orders_db))
@@ -120,7 +120,18 @@ class SmartAlertEngine:
                 conn.close()
             return int(row[0] or 0) if row else 0
         except Exception:
-            return 0
+            return None
+
+    def _count_recent_buy_fills(self, hours: int = 6) -> int:
+        cutoff_ts = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
+        fills_count = self._count_recent_buy_fills_from_fill_store(cutoff_ts)
+        if fills_count and fills_count > 0:
+            return fills_count
+
+        orders_count = self._count_recent_buy_filled_orders(cutoff_ts)
+        if orders_count is not None:
+            return orders_count
+        return fills_count or 0
 
     def check_signal_no_trade(self) -> Optional[dict[str, Any]]:
         try:
