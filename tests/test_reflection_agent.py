@@ -23,6 +23,8 @@ def test_reflection_agent_load_recent_trades_uses_event_ts_and_fee_map(tmp_path:
             state TEXT,
             notional_usdt REAL,
             fee TEXT,
+            acc_fill_sz REAL,
+            avg_px REAL,
             created_ts INTEGER,
             updated_ts INTEGER
         )
@@ -30,10 +32,10 @@ def test_reflection_agent_load_recent_trades_uses_event_ts_and_fee_map(tmp_path:
     )
     conn.execute(
         """
-        INSERT INTO orders(inst_id, side, state, notional_usdt, fee, created_ts, updated_ts)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders(inst_id, side, state, notional_usdt, fee, acc_fill_sz, avg_px, created_ts, updated_ts)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("BTC-USDT", "buy", "FILLED", 100.0, '{"BTC":"-0.001"}', stale_created_ts, now_ms),
+        ("BTC-USDT", "buy", "FILLED", 100.0, '{"BTC":"-0.001"}', 5.0, 20.0, stale_created_ts, now_ms),
     )
     conn.commit()
     conn.close()
@@ -48,8 +50,24 @@ def test_reflection_agent_load_recent_trades_uses_event_ts_and_fee_map(tmp_path:
     assert len(trades) == 1
     row = trades.iloc[0]
     assert int(row["event_ts"]) == now_ms
-    assert float(row["fee_usdt"]) == 0.1
-    assert float(row["fee"]) == 0.1
+    assert float(row["fee_usdt"]) == 0.02
+    assert float(row["fee"]) == 0.02
+
+
+def test_reflection_agent_infers_fill_px_from_notional_and_fill_size_when_avg_px_missing(tmp_path: Path) -> None:
+    agent = ReflectionAgentV2(
+        db_path=str(tmp_path / "orders.sqlite"),
+        report_dir=str(tmp_path / "reflection"),
+        bills_db=str(tmp_path / "bills.sqlite"),
+    )
+
+    fee_usdt = agent._fee_cost_usdt_from_order_fee(
+        "BTC-USDT",
+        agent._infer_fill_px(None, 100.0, 5.0),
+        '{"BTC":"-0.001"}',
+    )
+
+    assert fee_usdt == 0.02
 
 
 def test_reflection_agent_pnl_attribution_prefers_event_ts_and_fee_usdt(tmp_path: Path) -> None:

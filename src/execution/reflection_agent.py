@@ -133,6 +133,24 @@ class ReflectionAgentV2:
         return fee_val * px_val
 
     @classmethod
+    def _infer_fill_px(cls, avg_px: Any, notional_usdt: Any, acc_fill_sz: Any) -> float:
+        try:
+            avg_px_val = float(avg_px or 0.0)
+        except Exception:
+            avg_px_val = 0.0
+        if avg_px_val > 0:
+            return avg_px_val
+
+        try:
+            notional_val = float(notional_usdt or 0.0)
+            fill_sz_val = float(acc_fill_sz or 0.0)
+        except Exception:
+            return 0.0
+        if fill_sz_val <= 0:
+            return 0.0
+        return notional_val / fill_sz_val
+
+    @classmethod
     def _fee_cost_usdt_from_order_fee(cls, inst_id: str, px: Any, raw_fee: Any) -> float:
         raw = str(raw_fee or '').strip()
         if not raw:
@@ -494,6 +512,7 @@ class ReflectionAgentV2:
             query = f"""
                 SELECT 
                     inst_id, side, state, notional_usdt, fee,
+                    acc_fill_sz, avg_px,
                     created_ts, updated_ts,
                     {self._order_event_ts_expr()} AS event_ts
                 FROM orders 
@@ -509,6 +528,7 @@ class ReflectionAgentV2:
                 legacy_query = f"""
                     SELECT 
                         inst_id, side, state, notional_usdt, fee,
+                        NULL AS acc_fill_sz, NULL AS avg_px,
                         created_ts, updated_ts, created_ts AS event_ts
                     FROM orders 
                     WHERE state = 'FILLED'
@@ -523,7 +543,11 @@ class ReflectionAgentV2:
                 df['fee_usdt'] = df.apply(
                     lambda row: self._fee_cost_usdt_from_order_fee(
                         row.get('inst_id', ''),
-                        row.get('notional_usdt', 0),
+                        self._infer_fill_px(
+                            row.get('avg_px', 0),
+                            row.get('notional_usdt', 0),
+                            row.get('acc_fill_sz', 0),
+                        ),
                         row.get('fee', 0),
                     ),
                     axis=1,
