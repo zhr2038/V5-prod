@@ -118,6 +118,9 @@ class LivePreflight:
     def _build_guard_config(self) -> GuardConfig:
         return GuardConfig(
             reconcile_status_path=self.reconcile_status_path,
+            failure_state_path=str(
+                getattr(self.cfg, "reconcile_failure_state_path", "reports/reconcile_failure_state.json")
+            ),
             kill_switch_path=str(getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json")),
         )
 

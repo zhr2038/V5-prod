@@ -68,6 +68,7 @@ def test_live_preflight_once_defaults_runtime_paths_to_repo_root(monkeypatch) ->
         exchange=SimpleNamespace(),
         execution=SimpleNamespace(
             reconcile_status_path="reports/custom_reconcile_status.json",
+            reconcile_failure_state_path="reports/custom_reconcile_failure_state.json",
             kill_switch_path="reports/custom_kill_switch.json",
         ),
     )
@@ -111,6 +112,9 @@ def test_live_preflight_once_defaults_runtime_paths_to_repo_root(monkeypatch) ->
     assert Path(captured["kwargs"]["ledger_status_path"]).resolve() == (workspace / "reports" / "ledger_status.json").resolve()
     assert Path(captured["kwargs"]["reconcile_status_path"]).resolve() == (
         workspace / "reports" / "custom_reconcile_status.json"
+    ).resolve()
+    assert Path(captured["execution_cfg"].reconcile_failure_state_path).resolve() == (
+        workspace / "reports" / "custom_reconcile_failure_state.json"
     ).resolve()
     assert Path(captured["execution_cfg"].kill_switch_path).resolve() == (
         workspace / "reports" / "custom_kill_switch.json"
