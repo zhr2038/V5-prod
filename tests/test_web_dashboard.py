@@ -1176,6 +1176,94 @@ def test_api_decision_audit_execution_summary_counts_all_orders_beyond_preview_l
     assert len(payload["run_orders"]) == 30
 
 
+def test_api_decision_audit_latest_ordered_run_summary_prefers_updated_ts(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260313_16"
+    current_run.mkdir(parents=True, exist_ok=True)
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260313_16",
+                "regime": "TRENDING",
+                "counts": {"selected": 2, "orders_rebalance": 2, "orders_exit": 0},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(current_run, (2, 2))
+
+    orders_db = reports_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(orders_db))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+            created_ts INTEGER,
+            updated_ts INTEGER,
+            run_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            intent TEXT,
+            state TEXT,
+            notional_usdt REAL,
+            last_error_code TEXT,
+            last_error_msg TEXT,
+            ord_id TEXT
+        )
+        """
+    )
+    cur.executemany(
+        """
+        INSERT INTO orders(created_ts, updated_ts, run_id, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                1_710_000_000_000,
+                1_710_088_200_000,
+                "20260313_14",
+                "BTC-USDT",
+                "buy",
+                "rebalance",
+                "FILLED",
+                100.0,
+                "",
+                "",
+                "ord-1",
+            ),
+            (
+                1_710_050_000_000,
+                1_710_050_000_000,
+                "20260313_15",
+                "ETH-USDT",
+                "buy",
+                "rebalance",
+                "FILLED",
+                90.0,
+                "",
+                "",
+                "ord-2",
+            ),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["latest_ordered_run_summary"]["run_id"] == "20260313_14"
+    assert payload["latest_ordered_run_summary"]["last_ts"] == 1_710_088_200_000
+
+
 def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

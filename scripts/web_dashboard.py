@@ -4552,15 +4552,28 @@ def api_decision_audit():
                 cur = conn.cursor()
 
                 # 2) Latest run that has at least one order row (attempt)
-                cur.execute(
-                    """
-                    SELECT run_id, MAX(created_ts) AS last_ts
-                    FROM orders
-                    GROUP BY run_id
-                    ORDER BY last_ts DESC
-                    LIMIT 20
-                    """
-                )
+                try:
+                    cur.execute(
+                        """
+                        SELECT
+                            run_id,
+                            MAX(COALESCE(NULLIF(updated_ts, 0), created_ts)) AS last_ts
+                        FROM orders
+                        GROUP BY run_id
+                        ORDER BY last_ts DESC
+                        LIMIT 20
+                        """
+                    )
+                except sqlite3.OperationalError:
+                    cur.execute(
+                        """
+                        SELECT run_id, MAX(created_ts) AS last_ts
+                        FROM orders
+                        GROUP BY run_id
+                        ORDER BY last_ts DESC
+                        LIMIT 20
+                        """
+                    )
                 run_rows = cur.fetchall()
                 for rr in run_rows:
                     cand_run = str(rr[0] or '')
