@@ -8,14 +8,31 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import json
 import sqlite3
-import sys
+from dataclasses import dataclass
 from pathlib import Path
 
+from configs.runtime_config import resolve_runtime_path
 
-def main() -> int:
-    db_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("reports/regime_history.db")
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class RegimeMonitorPaths:
+    workspace: Path
+    db_path: Path
+
+
+def build_paths(workspace: Path | None = None, db_path: str | None = None) -> RegimeMonitorPaths:
+    root = (workspace or PROJECT_ROOT).resolve()
+    resolved_db = Path(resolve_runtime_path(db_path, default="reports/regime_history.db", project_root=root))
+    return RegimeMonitorPaths(workspace=root, db_path=resolved_db)
+
+
+def check_regime_monitor(*, db_path: Path) -> int:
     if not db_path.exists():
         print(f"❌ regime history not found: {db_path}")
         return 2
@@ -46,11 +63,10 @@ def main() -> int:
     ts_ms, final_state, hmm_state, sideways_prob, alerts_json = rows[0]
     print(f"latest: ts={ts_ms} final={final_state} hmm={hmm_state} sideways_prob={sideways_prob}")
 
-    # consecutive sideways high-prob count
     streak = 0
-    for r in rows:
-        p = r[3]
-        if p is not None and float(p) >= 0.8:
+    for row in rows:
+        prob = row[3]
+        if prob is not None and float(prob) >= 0.8:
             streak += 1
         else:
             break
@@ -67,25 +83,34 @@ def main() -> int:
         print(f"latest alerts: {latest_alerts}")
 
     recent_alerts = []
-    for _, _, _, _, aj in rows:
-        if not aj:
+    for _, _, _, _, alerts_raw in rows:
+        if not alerts_raw:
             continue
         try:
-            arr = json.loads(aj)
-            if arr:
-                recent_alerts.extend(arr)
+            alerts = json.loads(alerts_raw)
+            if alerts:
+                recent_alerts.extend(alerts)
         except Exception:
             continue
     recent_alerts = sorted(set(recent_alerts))
     if recent_alerts:
         print(f"recent alerts(last20): {recent_alerts}")
 
-    if any(a in critical for a in latest_alerts):
+    if any(alert in critical for alert in latest_alerts):
         print("❌ critical regime alert detected")
         return 1
 
     print("✅ regime monitor healthy")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Quick regime monitor health check.")
+    parser.add_argument("db_path", nargs="?", default=None, help="Path to regime_history SQLite DB.")
+    args = parser.parse_args(argv)
+
+    paths = build_paths(db_path=args.db_path)
+    return check_regime_monitor(db_path=paths.db_path)
 
 
 if __name__ == "__main__":
