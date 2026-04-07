@@ -1005,6 +1005,14 @@ def _load_recent_fill_summary(*, reports_dir: Optional[Path] = None, now_dt: Opt
     }
     now_ms = int((now_dt or datetime.now()).timestamp() * 1000)
     fills_db = reports_path / 'fills.sqlite'
+    orders_db = reports_path / 'orders.sqlite'
+    fill_rows: List[Any] = []
+    order_rows: List[Any] = []
+    order_by_ord_id: Dict[str, Dict[str, Any]] = {}
+    order_by_cl_ord_id: Dict[str, Dict[str, Any]] = {}
+    recent_events: List[Dict[str, Any]] = []
+    fill_max_ts_by_ord: Dict[str, int] = {}
+    fill_max_ts_by_cl_ord: Dict[str, int] = {}
 
     if fills_db.exists():
         try:
@@ -1024,14 +1032,11 @@ def _load_recent_fill_summary(*, reports_dir: Optional[Path] = None, now_dt: Opt
         except Exception:
             fill_rows = []
 
+    if orders_db.exists():
         if fill_rows:
-            order_by_ord_id: Dict[str, Dict[str, Any]] = {}
-            order_by_cl_ord_id: Dict[str, Dict[str, Any]] = {}
-            orders_db = reports_path / 'orders.sqlite'
             ord_ids = sorted({str(r[1]) for r in fill_rows if r[1]})
             cl_ord_ids = sorted({str(r[2]) for r in fill_rows if r[2]})
-
-            if orders_db.exists() and (ord_ids or cl_ord_ids):
+            if ord_ids or cl_ord_ids:
                 clauses: List[str] = []
                 params: List[Any] = []
                 if ord_ids:
@@ -1054,12 +1059,12 @@ def _load_recent_fill_summary(*, reports_dir: Optional[Path] = None, now_dt: Opt
                         """,
                         tuple(params),
                     )
-                    order_rows = cur.fetchall()
+                    meta_rows = cur.fetchall()
                     conn.close()
                 except Exception:
-                    order_rows = []
+                    meta_rows = []
 
-                for ord_id, cl_ord_id, run_id, intent, notional_usdt, updated_ts, created_ts in order_rows:
+                for ord_id, cl_ord_id, run_id, intent, notional_usdt, updated_ts, created_ts in meta_rows:
                     payload = {
                         'run_id': str(run_id or ''),
                         'intent': str(intent or ''),
@@ -1073,72 +1078,116 @@ def _load_recent_fill_summary(*, reports_dir: Optional[Path] = None, now_dt: Opt
                     if cl_ord_id_key and payload['sort_ts'] >= int(order_by_cl_ord_id.get(cl_ord_id_key, {}).get('sort_ts', -1)):
                         order_by_cl_ord_id[cl_ord_id_key] = payload
 
-            for idx, row in enumerate(fill_rows):
-                ts_ms = int(row[0] or 0)
-                if ts_ms <= 0:
-                    continue
-                age_ms = max(0, now_ms - ts_ms)
-                if age_ms <= 60 * 60 * 1000:
-                    summary['count_60m'] += 1
-                if age_ms <= 24 * 60 * 60 * 1000:
-                    summary['count_24h'] += 1
-
-                if idx == 0:
-                    ord_id = str(row[1] or '')
-                    cl_ord_id = str(row[2] or '')
-                    order_meta = order_by_ord_id.get(ord_id) or order_by_cl_ord_id.get(cl_ord_id) or {}
-                    summary['latest_fill'] = {
-                        'created_ts': ts_ms,
-                        'run_id': str(order_meta.get('run_id') or ''),
-                        'inst_id': str(row[3] or ''),
-                        'side': str(row[4] or ''),
-                        'intent': str(order_meta.get('intent') or ''),
-                        'notional_usdt': float(order_meta.get('notional_usdt') or 0.0),
-                        'ord_id': ord_id,
-                    }
-            return summary
-
-    conn = get_db_connection()
-    if not conn:
-        return summary
-
-    try:
-        cur = conn.cursor()
         try:
-            cur.execute(
-                """
-                SELECT
-                    COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts,
-                    run_id,
-                    inst_id,
-                    side,
-                    intent,
-                    notional_usdt,
-                    ord_id
-                FROM orders
-                WHERE state = 'FILLED'
-                ORDER BY event_ts DESC
-                LIMIT ?
-                """,
-                (int(limit),),
-            )
-        except sqlite3.OperationalError:
-            cur.execute(
-                """
-                SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
-                FROM orders
-                WHERE state = 'FILLED'
-                ORDER BY created_ts DESC
-                LIMIT ?
-                """,
-                (int(limit),),
-            )
-        fill_rows = cur.fetchall()
-    finally:
-        conn.close()
+            conn = sqlite3.connect(str(orders_db))
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    SELECT
+                        COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts,
+                        run_id,
+                        inst_id,
+                        side,
+                        intent,
+                        notional_usdt,
+                        ord_id,
+                        cl_ord_id
+                    FROM orders
+                    WHERE state = 'FILLED'
+                    ORDER BY event_ts DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                )
+            except sqlite3.OperationalError:
+                try:
+                    cur.execute(
+                        """
+                        SELECT
+                            COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts,
+                            run_id,
+                            inst_id,
+                            side,
+                            intent,
+                            notional_usdt,
+                            ord_id,
+                            '' AS cl_ord_id
+                        FROM orders
+                        WHERE state = 'FILLED'
+                        ORDER BY event_ts DESC
+                        LIMIT ?
+                        """,
+                        (int(limit),),
+                    )
+                except sqlite3.OperationalError:
+                    cur.execute(
+                        """
+                        SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id, '' AS cl_ord_id
+                        FROM orders
+                        WHERE state = 'FILLED'
+                        ORDER BY created_ts DESC
+                        LIMIT ?
+                        """,
+                        (int(limit),),
+                    )
+            order_rows = cur.fetchall()
+            conn.close()
+        except Exception:
+            order_rows = []
 
-    for idx, row in enumerate(fill_rows):
+    for row in fill_rows:
+        ts_ms = int(row[0] or 0)
+        if ts_ms <= 0:
+            continue
+        ord_id = str(row[1] or '')
+        cl_ord_id = str(row[2] or '')
+        order_meta = order_by_ord_id.get(ord_id) or order_by_cl_ord_id.get(cl_ord_id) or {}
+        recent_events.append(
+            {
+                'created_ts': ts_ms,
+                'run_id': str(order_meta.get('run_id') or ''),
+                'inst_id': str(row[3] or ''),
+                'side': str(row[4] or ''),
+                'intent': str(order_meta.get('intent') or ''),
+                'notional_usdt': float(order_meta.get('notional_usdt') or 0.0),
+                'ord_id': ord_id,
+            }
+        )
+        if ord_id:
+            fill_max_ts_by_ord[ord_id] = max(ts_ms, int(fill_max_ts_by_ord.get(ord_id, 0)))
+        if cl_ord_id:
+            fill_max_ts_by_cl_ord[cl_ord_id] = max(ts_ms, int(fill_max_ts_by_cl_ord.get(cl_ord_id, 0)))
+
+    for row in order_rows:
         ts_raw = int(row[0] or 0)
+        ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
+        if ts_ms <= 0:
+            continue
+        ord_id = str(row[6] or '')
+        cl_ord_id = str(row[7] or '')
+        latest_fill_ts = max(
+            int(fill_max_ts_by_ord.get(ord_id, 0)),
+            int(fill_max_ts_by_cl_ord.get(cl_ord_id, 0)),
+        )
+        if latest_fill_ts >= ts_ms:
+            continue
+        recent_events.append(
+            {
+                'created_ts': ts_raw,
+                'run_id': str(row[1] or ''),
+                'inst_id': str(row[2] or ''),
+                'side': str(row[3] or ''),
+                'intent': str(row[4] or ''),
+                'notional_usdt': float(row[5] or 0.0),
+                'ord_id': ord_id,
+            }
+        )
+
+    recent_events.sort(key=lambda item: int(item.get('created_ts') or 0), reverse=True)
+
+    for idx, event in enumerate(recent_events[: int(limit)]):
+        ts_raw = int(event.get('created_ts') or 0)
         ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
         age_ms = max(0, now_ms - ts_ms)
         if age_ms <= 60 * 60 * 1000:
@@ -1148,12 +1197,12 @@ def _load_recent_fill_summary(*, reports_dir: Optional[Path] = None, now_dt: Opt
         if idx == 0:
             summary['latest_fill'] = {
                 'created_ts': ts_raw,
-                'run_id': str(row[1] or ''),
-                'inst_id': str(row[2] or ''),
-                'side': str(row[3] or ''),
-                'intent': str(row[4] or ''),
-                'notional_usdt': float(row[5] or 0.0),
-                'ord_id': str(row[6] or ''),
+                'run_id': str(event.get('run_id') or ''),
+                'inst_id': str(event.get('inst_id') or ''),
+                'side': str(event.get('side') or ''),
+                'intent': str(event.get('intent') or ''),
+                'notional_usdt': float(event.get('notional_usdt') or 0.0),
+                'ord_id': str(event.get('ord_id') or ''),
             }
     return summary
 
