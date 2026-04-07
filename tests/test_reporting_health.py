@@ -92,3 +92,33 @@ def test_health_falls_back_to_order_updated_ts_when_fills_missing(monkeypatch, t
     assert payload["checks"]["last_trade"]["status"] == "ok"
     assert payload["checks"]["last_trade"]["last_ts"] == updated_ts_ms
     assert payload["checks"]["last_trade"]["age_minutes"] == 5.0
+
+
+def test_health_uses_newer_filled_order_when_fill_store_lags(monkeypatch, tmp_path: Path) -> None:
+    reports_dir = _prepare_reports_dir(tmp_path)
+
+    orders_conn = sqlite3.connect(reports_dir / "orders.sqlite")
+    orders_conn.execute(
+        "CREATE TABLE orders (state TEXT, created_ts INTEGER, updated_ts INTEGER)"
+    )
+    orders_conn.execute(
+        "INSERT INTO orders(state, created_ts, updated_ts) VALUES (?, ?, ?)",
+        ("FILLED", 1_000, 9_880_000),
+    )
+    orders_conn.commit()
+    orders_conn.close()
+
+    fills_conn = sqlite3.connect(reports_dir / "fills.sqlite")
+    fills_conn.execute("CREATE TABLE fills (ts_ms INTEGER)")
+    fills_conn.execute("INSERT INTO fills(ts_ms) VALUES (?)", (9_700_000,))
+    fills_conn.commit()
+    fills_conn.close()
+
+    client = _make_client(monkeypatch, reports_dir, now_ts_s=10_000.0)
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["checks"]["last_trade"]["status"] == "ok"
+    assert payload["checks"]["last_trade"]["last_ts"] == 9_880_000
+    assert payload["checks"]["last_trade"]["age_minutes"] == 2.0

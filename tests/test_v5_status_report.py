@@ -108,3 +108,28 @@ def test_get_last_filled_trade_ts_falls_back_to_order_updated_ts(tmp_path, monke
     monkeypatch.setattr(v5_status_report, "ORDERS_DB", orders_db)
 
     assert v5_status_report.get_last_filled_trade_ts() == v5_status_report._format_ts_ms(1_710_000_600_000)
+
+
+def test_get_last_filled_trade_ts_uses_newer_order_event_when_fill_store_lags(tmp_path, monkeypatch) -> None:
+    fills_db = tmp_path / "fills.sqlite"
+    orders_db = tmp_path / "orders.sqlite"
+
+    conn = sqlite3.connect(str(fills_db))
+    conn.execute("CREATE TABLE fills (ts_ms INTEGER)")
+    conn.execute("INSERT INTO fills(ts_ms) VALUES (?)", (1_710_000_300_000,))
+    conn.commit()
+    conn.close()
+
+    conn = sqlite3.connect(str(orders_db))
+    conn.execute("CREATE TABLE orders (state TEXT, created_ts INTEGER, updated_ts INTEGER)")
+    conn.execute(
+        "INSERT INTO orders(state, created_ts, updated_ts) VALUES ('FILLED', ?, ?)",
+        (1_710_000_000_000, 1_710_000_900_000),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(v5_status_report, "FILLS_DB", fills_db)
+    monkeypatch.setattr(v5_status_report, "ORDERS_DB", orders_db)
+
+    assert v5_status_report.get_last_filled_trade_ts() == v5_status_report._format_ts_ms(1_710_000_900_000)

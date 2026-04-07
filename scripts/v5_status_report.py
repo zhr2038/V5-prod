@@ -148,7 +148,7 @@ def _format_ts_ms(ts_ms: int) -> str:
     return datetime.fromtimestamp(int(ts_ms) / 1000).isoformat(timespec="minutes")
 
 
-def get_last_filled_trade_ts() -> Optional[str]:
+def _get_latest_fill_ts_ms() -> Optional[int]:
     try:
         if FILLS_DB.exists():
             conn = sqlite3.connect(str(FILLS_DB))
@@ -158,10 +158,13 @@ def get_last_filled_trade_ts() -> Optional[str]:
                 conn.close()
             ts_ms = row[0] if row else None
             if ts_ms:
-                return _format_ts_ms(int(ts_ms))
+                return int(ts_ms)
     except Exception:
         pass
+    return None
 
+
+def _get_latest_filled_order_ts_ms() -> Optional[int]:
     if not ORDERS_DB.exists():
         return None
 
@@ -183,11 +186,23 @@ def get_last_filled_trade_ts() -> Optional[str]:
         finally:
             conn.close()
         ts_ms = row[0] if row else None
-        if not ts_ms:
-            return None
-        return _format_ts_ms(int(ts_ms))
+        return int(ts_ms) if ts_ms else None
     except Exception:
         return None
+
+
+def get_last_filled_trade_ts() -> Optional[str]:
+    candidates = [
+        ts_ms
+        for ts_ms in (
+            _get_latest_fill_ts_ms(),
+            _get_latest_filled_order_ts_ms(),
+        )
+        if ts_ms
+    ]
+    if not candidates:
+        return None
+    return _format_ts_ms(max(candidates))
 
 
 def build_next_run_hint() -> str:

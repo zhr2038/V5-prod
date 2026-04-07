@@ -45,7 +45,7 @@ def _load_json_safe(path: Path) -> dict:
     return {}
 
 
-def _load_last_trade_ts_ms() -> int | None:
+def _load_latest_fill_ts_ms() -> int | None:
     fills_db = REPORTS_DIR / "fills.sqlite"
     try:
         if fills_db.exists():
@@ -59,7 +59,10 @@ def _load_last_trade_ts_ms() -> int | None:
                 return int(ts_ms)
     except Exception:
         pass
+    return None
 
+
+def _load_latest_filled_order_ts_ms() -> int | None:
     orders_db = REPORTS_DIR / "orders.sqlite"
     if not orders_db.exists():
         return None
@@ -87,6 +90,13 @@ def _load_last_trade_ts_ms() -> int | None:
         return int(ts_ms) if ts_ms else None
     except Exception:
         return None
+
+
+def _load_last_trade_ts_ms() -> int | None:
+    fills_ts_ms = _load_latest_fill_ts_ms()
+    orders_ts_ms = _load_latest_filled_order_ts_ms()
+    candidates = [ts_ms for ts_ms in (fills_ts_ms, orders_ts_ms) if ts_ms]
+    return max(candidates) if candidates else None
 
 
 @health_bp.route("/health")
