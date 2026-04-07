@@ -11,6 +11,9 @@ from dotenv import load_dotenv
 from .schema import AppConfig
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def load_config(path: str = "configs/config.yaml", env_path: Optional[str] = ".env") -> AppConfig:
     """Load YAML config with ${ENV} substitution.
 
@@ -64,6 +67,8 @@ def load_blacklist(path: str) -> Dict[str, Any]:
     # static
     try:
         p = Path(path)
+        if not p.is_absolute():
+            p = (PROJECT_ROOT / p).resolve()
         if p.exists():
             obj = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(obj, dict) and isinstance(obj.get("symbols"), list):
@@ -73,7 +78,7 @@ def load_blacklist(path: str) -> Dict[str, Any]:
 
     # dynamic
     try:
-        ap = Path("reports/auto_blacklist.json")
+        ap = (PROJECT_ROOT / "reports" / "auto_blacklist.json").resolve()
         if ap.exists():
             obj = json.loads(ap.read_text(encoding="utf-8"))
             if isinstance(obj, dict) and isinstance(obj.get("symbols"), list):

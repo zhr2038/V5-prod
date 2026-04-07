@@ -1,3 +1,6 @@
+import json
+
+from configs import loader
 from configs.loader import load_config
 from configs.schema import ExecutionConfig
 
@@ -105,3 +108,27 @@ def test_live_prod_funding_thresholds_load():
 def test_execution_config_accepts_custom_reconcile_failure_state_path():
     cfg = ExecutionConfig(reconcile_failure_state_path="reports/custom_reconcile_failure_state.json")
     assert cfg.reconcile_failure_state_path == "reports/custom_reconcile_failure_state.json"
+
+
+def test_load_blacklist_anchors_static_and_dynamic_paths_to_workspace(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    elsewhere = tmp_path / "elsewhere"
+    (workspace / "configs").mkdir(parents=True, exist_ok=True)
+    (workspace / "reports").mkdir(parents=True, exist_ok=True)
+    elsewhere.mkdir(parents=True, exist_ok=True)
+
+    (workspace / "configs" / "blacklist.json").write_text(
+        json.dumps({"symbols": ["BTC/USDT"]}),
+        encoding="utf-8",
+    )
+    (workspace / "reports" / "auto_blacklist.json").write_text(
+        json.dumps({"symbols": ["ETH/USDT"]}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(loader, "PROJECT_ROOT", workspace.resolve())
+
+    blacklist = loader.load_blacklist("configs/blacklist.json")
+
+    assert blacklist["symbols"] == ["BTC/USDT", "ETH/USDT"]
