@@ -94,7 +94,9 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-ledger.user.service=v5-ledger.service \
       --mapping v5-ledger.timer=v5-ledger.timer \
       --mapping v5-cost-rollup-real.user.service=v5-cost-rollup-real.user.service \
-      --mapping v5-cost-rollup-real.user.timer=v5-cost-rollup-real.user.timer
+      --mapping v5-cost-rollup-real.user.timer=v5-cost-rollup-real.user.timer \
+      --mapping v5-spread-rollup.user.service=v5-spread-rollup.service \
+      --mapping v5-spread-rollup.timer=v5-spread-rollup.timer
   else
     render_units "$DST" --copy-all \
       --mapping v5-reconcile.user.service=v5-reconcile.service \
@@ -117,13 +119,14 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user enable --now v5-reconcile.timer
     systemctl --user enable --now v5-ledger.timer
     systemctl --user enable --now v5-cost-rollup-real.user.timer
+    systemctl --user enable --now v5-spread-rollup.timer
     if [[ "$ENABLE_PROD_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-prod.user.timer
     fi
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|trade-monitor|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|trade-monitor|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real|spread-rollup)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer

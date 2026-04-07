@@ -64,6 +64,8 @@ PRODUCTION_USER_UNIT_MAPPINGS = (
     ("v5-ledger.timer", "v5-ledger.timer"),
     ("v5-cost-rollup-real.user.service", "v5-cost-rollup-real.user.service"),
     ("v5-cost-rollup-real.user.timer", "v5-cost-rollup-real.user.timer"),
+    ("v5-spread-rollup.user.service", "v5-spread-rollup.service"),
+    ("v5-spread-rollup.timer", "v5-spread-rollup.timer"),
 )
 
 

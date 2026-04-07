@@ -149,6 +149,12 @@ def test_production_unit_mappings_include_sentiment_collect() -> None:
     assert mappings["v5-sentiment-collect.timer"] == "v5-sentiment-collect.timer"
 
 
+def test_production_unit_mappings_include_spread_rollup() -> None:
+    mappings = dict(PRODUCTION_USER_UNIT_MAPPINGS)
+    assert mappings["v5-spread-rollup.user.service"] == "v5-spread-rollup.service"
+    assert mappings["v5-spread-rollup.timer"] == "v5-spread-rollup.timer"
+
+
 def test_user_bus_wrapped_command_exports_user_bus() -> None:
     wrapped = _user_bus_wrapped_command("admin", "systemctl --user daemon-reload")
     assert "id -u admin" in wrapped
@@ -277,6 +283,8 @@ def test_validate_units_requires_active_dashboard_and_timers(monkeypatch) -> Non
     assert "is-active v5-web-dashboard.service" in inner
     assert "is-enabled v5-trade-monitor.timer" in inner
     assert "is-active v5-trade-monitor.timer" in inner
+    assert "is-enabled v5-spread-rollup.timer" in inner
+    assert "is-active v5-spread-rollup.timer" in inner
     assert "is-active v5-prod.user.timer" in inner
     assert "is-active v5-event-driven.timer" in inner
 

@@ -72,3 +72,10 @@ def test_install_systemd_production_only_enables_trade_monitor_timer():
     assert "--mapping v5-trade-monitor.service=v5-trade-monitor.service" in text
     assert "--mapping v5-trade-monitor.timer=v5-trade-monitor.timer" in text
     assert "systemctl --user enable --now v5-trade-monitor.timer" in text
+
+
+def test_install_systemd_production_only_enables_spread_rollup_timer():
+    text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
+    assert "--mapping v5-spread-rollup.user.service=v5-spread-rollup.service" in text
+    assert "--mapping v5-spread-rollup.timer=v5-spread-rollup.timer" in text
+    assert "systemctl --user enable --now v5-spread-rollup.timer" in text
