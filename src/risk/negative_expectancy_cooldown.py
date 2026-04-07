@@ -62,18 +62,28 @@ class NegativeExpectancyCooldown:
         lookback_ms = int(self.cfg.lookback_hours) * 3600 * 1000
         since_ms = int(time.time() * 1000) - max(0, lookback_ms)
 
-        sql = (
-            "SELECT inst_id, side, intent, state, acc_fill_sz, avg_px, updated_ts "
-            "FROM orders "
-            "WHERE state='FILLED' AND updated_ts >= ? "
-            "AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL "
-            "ORDER BY inst_id, updated_ts ASC"
-        )
-
         by_symbol: Dict[str, Dict[str, float]] = {}
+        conn = None
         try:
             conn = sqlite3.connect(str(p))
             conn.row_factory = sqlite3.Row
+            col_rows = conn.execute("PRAGMA table_info(orders)").fetchall()
+            cols = {str(r["name"]) for r in col_rows}
+            if "updated_ts" in cols and "created_ts" in cols:
+                event_ts_expr = "COALESCE(NULLIF(updated_ts, 0), created_ts)"
+            elif "created_ts" in cols:
+                event_ts_expr = "created_ts"
+            elif "updated_ts" in cols:
+                event_ts_expr = "updated_ts"
+            else:
+                return {}
+            sql = (
+                f"SELECT inst_id, side, intent, state, acc_fill_sz, avg_px, {event_ts_expr} AS event_ts "
+                "FROM orders "
+                f"WHERE state='FILLED' AND {event_ts_expr} >= ? "
+                "AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL "
+                f"ORDER BY inst_id, {event_ts_expr} ASC"
+            )
             rows = conn.execute(sql, (since_ms,)).fetchall()
         except Exception:
             return {}
@@ -95,10 +105,10 @@ class NegativeExpectancyCooldown:
             try:
                 qty = float(r["acc_fill_sz"] or 0.0)
                 px = float(r["avg_px"] or 0.0)
-                updated_ts = int(r["updated_ts"] or 0)
+                event_ts = int(r["event_ts"] or 0)
             except Exception:
                 continue
-            if qty <= 0 or px <= 0:
+            if qty <= 0 or px <= 0 or event_ts <= 0:
                 continue
 
             inv_lots.setdefault(sym, [])
@@ -120,7 +130,7 @@ class NegativeExpectancyCooldown:
                     {
                         "qty": qty,
                         "px": px,
-                        "ts": float(updated_ts),
+                        "ts": float(event_ts),
                     }
                 )
             elif side == "sell":
@@ -138,7 +148,7 @@ class NegativeExpectancyCooldown:
                     by_symbol[sym]["pnl_sum_usdt"] += float(pnl)
                     by_symbol[sym]["closed_notional_usdt"] += float(avg_cost * close_qty)
 
-                    hold_ms = max(0.0, float(updated_ts) - float(lot.get("ts") or updated_ts))
+                    hold_ms = max(0.0, float(event_ts) - float(lot.get("ts") or event_ts))
                     if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
                         by_symbol[sym]["fast_fail_closed_cycles"] += 1.0
                         by_symbol[sym]["fast_fail_pnl_sum_usdt"] += float(pnl)

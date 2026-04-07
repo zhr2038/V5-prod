@@ -74,3 +74,52 @@ def test_negative_expectancy_refresh_persists_stats_and_bps(tmp_path: Path):
     assert symbol_stats["cooldown_active"] is True
     assert symbol_stats["expectancy_bps"] == -100.0
     assert symbol_stats["fast_fail_expectancy_bps"] == -100.0
+
+
+def test_negative_expectancy_refresh_falls_back_to_created_ts_when_updated_ts_missing(tmp_path: Path):
+    orders_db = tmp_path / "orders.sqlite"
+    state_path = tmp_path / "negative_expectancy.json"
+
+    conn = sqlite3.connect(orders_db)
+    conn.execute(
+        """
+        CREATE TABLE orders (
+            inst_id TEXT,
+            side TEXT,
+            intent TEXT,
+            state TEXT,
+            acc_fill_sz REAL,
+            avg_px REAL,
+            created_ts INTEGER,
+            updated_ts INTEGER
+        )
+        """
+    )
+    now_ms = int(time.time() * 1000)
+    rows = [
+        ("ETH-USDT", "buy", "OPEN_LONG", "FILLED", 1.0, 100.0, now_ms - 60_000, 0),
+        ("ETH-USDT", "sell", "CLOSE_LONG", "FILLED", 1.0, 99.0, now_ms - 30_000, 0),
+    ]
+    conn.executemany("INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    conn.commit()
+    conn.close()
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=24,
+            min_closed_cycles=1,
+            expectancy_threshold_usdt=0.0,
+            cooldown_hours=24,
+            state_path=str(state_path),
+            orders_db_path=str(orders_db),
+        )
+    )
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["ETH/USDT"]
+
+    assert stats["closed_cycles"] == 1
+    assert stats["expectancy_usdt"] == -1.0
+    blocked = cooldown.is_blocked("ETH/USDT")
+    assert blocked is not None
