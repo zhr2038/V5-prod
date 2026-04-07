@@ -10,7 +10,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 import json
@@ -94,6 +94,68 @@ class ReflectionAgentV2:
         
         self.analysis_period_days = 7
         self.insights: List[TradeInsight] = []
+
+    @staticmethod
+    def _order_event_ts_expr() -> str:
+        return "COALESCE(NULLIF(updated_ts, 0), created_ts)"
+
+    @staticmethod
+    def _split_inst_id_base_quote(inst_id: str) -> Tuple[str, str]:
+        normalized = str(inst_id or '').replace('/', '-')
+        parts = [part.strip().upper() for part in normalized.split('-') if part.strip()]
+        if len(parts) >= 2:
+            return parts[0], parts[1]
+        return normalized.upper(), 'USDT'
+
+    @classmethod
+    def _signed_fee_usdt_from_fee_fields(cls, inst_id: str, px: Any, fee_amount: Any, fee_ccy: Any = None) -> float:
+        try:
+            fee_val = float(fee_amount or 0.0)
+        except Exception:
+            return 0.0
+
+        fee_ccy_norm = str(fee_ccy or '').strip().upper()
+        if not fee_ccy_norm:
+            return fee_val
+
+        base_ccy, quote_ccy = cls._split_inst_id_base_quote(inst_id)
+        if fee_ccy_norm == quote_ccy:
+            return fee_val
+        if fee_ccy_norm != base_ccy:
+            return 0.0
+
+        try:
+            px_val = float(px or 0.0)
+        except Exception:
+            return 0.0
+        if px_val <= 0:
+            return 0.0
+        return fee_val * px_val
+
+    @classmethod
+    def _fee_cost_usdt_from_order_fee(cls, inst_id: str, px: Any, raw_fee: Any) -> float:
+        raw = str(raw_fee or '').strip()
+        if not raw:
+            return 0.0
+
+        try:
+            numeric_fee = float(raw)
+        except Exception:
+            numeric_fee = None
+        if numeric_fee is not None:
+            return abs(cls._signed_fee_usdt_from_fee_fields(inst_id, px, numeric_fee))
+
+        try:
+            fee_map = json.loads(raw)
+        except Exception:
+            return 0.0
+        if not isinstance(fee_map, dict):
+            return 0.0
+
+        total_fee_usdt = 0.0
+        for ccy, value in fee_map.items():
+            total_fee_usdt += cls._signed_fee_usdt_from_fee_fields(inst_id, px, value, ccy)
+        return abs(total_fee_usdt)
         
     def run_daily_reflection(self) -> Dict:
         """运行每日反思分析"""
@@ -160,7 +222,15 @@ class ReflectionAgentV2:
     def _detect_anomalies(self, trades_df: pd.DataFrame):
         """检测异常交易"""
         # 1. 异常手续费
-        trades_df['fee_usdt'] = pd.to_numeric(trades_df['fee'], errors='coerce').abs()
+        if 'fee_usdt' not in trades_df.columns:
+            trades_df['fee_usdt'] = trades_df.apply(
+                lambda row: self._fee_cost_usdt_from_order_fee(
+                    row.get('inst_id', ''),
+                    row.get('notional_usdt', 0),
+                    row.get('fee', 0),
+                ),
+                axis=1,
+            )
         abnormal_fees = trades_df[trades_df['fee_usdt'] > trades_df['notional_usdt'] * 0.1]
         
         if len(abnormal_fees) > 0:
@@ -335,7 +405,8 @@ class ReflectionAgentV2:
         symbol_pnl = {}
         
         for symbol in trades_df['inst_id'].unique():
-            symbol_trades = trades_df[trades_df['inst_id'] == symbol].sort_values('created_ts')
+            sort_col = 'event_ts' if 'event_ts' in trades_df.columns else 'created_ts'
+            symbol_trades = trades_df[trades_df['inst_id'] == symbol].sort_values(sort_col)
             
             buy_queue = []
             realized_pnl = 0
@@ -344,7 +415,7 @@ class ReflectionAgentV2:
             for _, trade in symbol_trades.iterrows():
                 side = trade['side']
                 notional = trade['notional_usdt']
-                fee = abs(float(trade.get('fee', 0)))
+                fee = abs(float(trade.get('fee_usdt', trade.get('fee', 0)) or 0))
                 total_fees += fee
                 
                 if side == 'buy':
@@ -423,21 +494,47 @@ class ReflectionAgentV2:
             query = f"""
                 SELECT 
                     inst_id, side, state, notional_usdt, fee,
-                    created_ts, updated_ts
+                    created_ts, updated_ts,
+                    {self._order_event_ts_expr()} AS event_ts
                 FROM orders 
                 WHERE state = 'FILLED'
-                AND created_ts >= {start_timestamp}
+                AND {self._order_event_ts_expr()} >= {start_timestamp}
                 AND notional_usdt < 1000
-                ORDER BY created_ts DESC
+                ORDER BY event_ts DESC
             """
             
-            df = pd.read_sql_query(query, conn)
+            try:
+                df = pd.read_sql_query(query, conn)
+            except Exception:
+                legacy_query = f"""
+                    SELECT 
+                        inst_id, side, state, notional_usdt, fee,
+                        created_ts, updated_ts, created_ts AS event_ts
+                    FROM orders 
+                    WHERE state = 'FILLED'
+                    AND created_ts >= {start_timestamp}
+                    AND notional_usdt < 1000
+                    ORDER BY created_ts DESC
+                """
+                df = pd.read_sql_query(legacy_query, conn)
             conn.close()
             
-            df['fee'] = pd.to_numeric(df['fee'], errors='coerce').fillna(0)
+            if not df.empty:
+                df['fee_usdt'] = df.apply(
+                    lambda row: self._fee_cost_usdt_from_order_fee(
+                        row.get('inst_id', ''),
+                        row.get('notional_usdt', 0),
+                        row.get('fee', 0),
+                    ),
+                    axis=1,
+                )
+                df['fee'] = df['fee_usdt']
+            else:
+                df['fee_usdt'] = pd.Series(dtype='float64')
+                df['fee'] = pd.Series(dtype='float64')
             
             # 过滤极端异常值（手续费超过100 USDT或交易金额超过1000视为数据错误）
-            extreme_fee_mask = df['fee'].abs() > 100
+            extreme_fee_mask = df['fee_usdt'].abs() > 100
             extreme_notional_mask = df['notional_usdt'] > 1000
             extreme_mask = extreme_fee_mask | extreme_notional_mask
             extreme_count = extreme_mask.sum()
