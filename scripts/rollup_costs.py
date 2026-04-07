@@ -9,7 +9,16 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 # allow running as a script from repo root
 import sys
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
+
+def _resolve_repo_path(value: str | Path | None, *, default: Path) -> Path:
+    path = Path(value) if value is not None else default
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
 
 
 def _iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
@@ -96,8 +105,8 @@ def rollup_day(
     out_dir: str = "reports/cost_stats",
     source: Optional[str] = None,
 ) -> Path:
-    src = Path(base_dir) / f"{day_yyyymmdd}.jsonl"
-    dst = Path(out_dir)
+    src = _resolve_repo_path(base_dir, default=PROJECT_ROOT / "reports" / "cost_events") / f"{day_yyyymmdd}.jsonl"
+    dst = _resolve_repo_path(out_dir, default=PROJECT_ROOT / "reports" / "cost_stats")
     dst.mkdir(parents=True, exist_ok=True)
 
     all_events0 = list(_iter_jsonl(src))
@@ -196,7 +205,8 @@ def check_anomaly(
     - anomaly if today's p50 >= max(lookback_median * multiplier, abs_bps)
     """
 
-    out_path = Path(out_dir) / f"daily_cost_stats_{day_yyyymmdd}.json"
+    resolved_out_dir = _resolve_repo_path(out_dir, default=PROJECT_ROOT / "reports" / "cost_stats")
+    out_path = resolved_out_dir / f"daily_cost_stats_{day_yyyymmdd}.json"
     today_stats = {}
     try:
         today_stats = json.loads(out_path.read_text(encoding="utf-8"))
@@ -212,7 +222,7 @@ def check_anomaly(
     for i in range(1, int(lookback_days) + 1):
         di = d0 - timedelta(days=i)
         ds = di.strftime("%Y%m%d")
-        p = Path(out_dir) / f"daily_cost_stats_{ds}.json"
+        p = resolved_out_dir / f"daily_cost_stats_{ds}.json"
         if not p.exists():
             continue
         try:
@@ -251,8 +261,8 @@ def check_anomaly(
     }
 
     # write sidecar report for ops
-    rpt_path = Path(out_dir) / f"daily_cost_anomaly_{day_yyyymmdd}.json"
-    tmp = Path(out_dir) / f".daily_cost_anomaly_{day_yyyymmdd}.json.tmp"
+    rpt_path = resolved_out_dir / f"daily_cost_anomaly_{day_yyyymmdd}.json"
+    tmp = resolved_out_dir / f".daily_cost_anomaly_{day_yyyymmdd}.json.tmp"
     tmp.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(rpt_path)
 
