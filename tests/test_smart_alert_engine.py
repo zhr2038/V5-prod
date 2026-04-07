@@ -129,3 +129,32 @@ def test_check_no_buy_in_market_uses_orders_when_fill_store_lags(tmp_path: Path)
     alert = engine.check_no_buy_in_market()
 
     assert alert is None
+
+
+def test_check_kill_switch_ignores_nested_disabled_kill_switch_dict(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "kill_switch.json").write_text(
+        json.dumps({"kill_switch": {"enabled": False}}),
+        encoding="utf-8",
+    )
+
+    engine = SmartAlertEngine(workspace=tmp_path)
+
+    assert engine.check_kill_switch() is None
+
+
+def test_check_kill_switch_accepts_nested_enabled_kill_switch_dict(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "kill_switch.json").write_text(
+        json.dumps({"kill_switch": {"enabled": True}}),
+        encoding="utf-8",
+    )
+
+    engine = SmartAlertEngine(workspace=tmp_path)
+    alert = engine.check_kill_switch()
+
+    assert alert is not None
+    assert alert["type"] == "kill_switch"
+    assert alert["level"] == "critical"

@@ -12,7 +12,7 @@ from configs.schema import ExecutionConfig
 from src.core.models import Order
 from src.execution.fill_reconciler import FillReconciler
 from src.execution.fill_store import FillRow, FillStore
-from src.execution.live_execution_engine import LiveExecutionEngine
+from src.execution.live_execution_engine import LiveExecutionEngine, submit_gate_for_live
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
 
@@ -117,6 +117,23 @@ class CancelAfterAckOKX(FakeOKX):
         clid = payload.get("clOrdId")
         self._orders[clid]["state"] = "canceled"
         return resp
+
+
+def test_submit_gate_ignores_nested_disabled_kill_switch_dict() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        reconcile_path = f"{td}/reconcile_status.json"
+        kill_switch_path = f"{td}/kill_switch.json"
+        with open(reconcile_path, "w", encoding="utf-8") as f:
+            json.dump({"ok": True}, f)
+        with open(kill_switch_path, "w", encoding="utf-8") as f:
+            json.dump({"kill_switch": {"enabled": False}}, f)
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=reconcile_path,
+            kill_switch_path=kill_switch_path,
+        )
+
+        assert submit_gate_for_live(cfg) == ("ALLOW", True, False)
 
 
 def test_place_idempotent_same_intent() -> None:

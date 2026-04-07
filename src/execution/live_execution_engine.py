@@ -52,7 +52,18 @@ def _coalesce(value: Any, default: Any) -> Any:
 def load_kill_switch_enabled(path: str) -> bool:
     """检查是否启用kill switch"""
     d = _load_json(path) or {}
-    return bool(d.get("enabled") or d.get("kill_switch") or d.get("active"))
+    if "enabled" in d:
+        return bool(d.get("enabled"))
+    if "active" in d:
+        return bool(d.get("active"))
+    nested = d.get("kill_switch")
+    if isinstance(nested, dict):
+        if "enabled" in nested:
+            return bool(nested.get("enabled"))
+        if "active" in nested:
+            return bool(nested.get("active"))
+        return False
+    return bool(nested)
 
 
 def load_reconcile_ok(path: str) -> bool:

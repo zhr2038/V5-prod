@@ -13,6 +13,24 @@ from typing import Any, Optional
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _kill_switch_enabled(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if "enabled" in data:
+        return bool(data.get("enabled"))
+    if "active" in data:
+        return bool(data.get("active"))
+
+    nested = data.get("kill_switch")
+    if isinstance(nested, dict):
+        if "enabled" in nested:
+            return bool(nested.get("enabled"))
+        if "active" in nested:
+            return bool(nested.get("active"))
+        return False
+    return bool(nested)
+
+
 class SmartAlertEngine:
     """Emit only actionable anomaly alerts."""
 
@@ -245,7 +263,7 @@ class SmartAlertEngine:
             with kill_switch_file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            if (data.get("enabled") or data.get("active") or data.get("kill_switch")) and self._should_alert(
+            if _kill_switch_enabled(data) and self._should_alert(
                 "kill_switch", cooldown_minutes=30
             ):
                 return {
