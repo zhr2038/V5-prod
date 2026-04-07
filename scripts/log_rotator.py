@@ -10,11 +10,28 @@ V5 日志轮转工具
 
 import gzip
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timedelta
 
-LOGS_DIR = Path('/home/admin/clawd/v5-trading-bot/logs')
-ARCHIVE_DIR = LOGS_DIR / 'archive'
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class LogPaths:
+    workspace: Path
+    logs_dir: Path
+    archive_dir: Path
+
+
+def build_paths(workspace: Path | None = None) -> LogPaths:
+    root = (workspace or PROJECT_ROOT).resolve()
+    logs_dir = root / 'logs'
+    return LogPaths(
+        workspace=root,
+        logs_dir=logs_dir,
+        archive_dir=logs_dir / 'archive',
+    )
 
 # 保留策略
 KEEP_DAYS = 7           # 保持原样的天数
@@ -25,7 +42,8 @@ MAX_LOG_SIZE_MB = 100   # 单个日志文件最大大小
 class LogRotator:
     """日志轮转器"""
     
-    def __init__(self):
+    def __init__(self, workspace: Path | None = None):
+        self.paths = build_paths(workspace)
         self.stats = {'rotated': 0, 'compressed': 0, 'deleted': 0, 'space_saved_mb': 0}
     
     def log(self, msg):
@@ -38,7 +56,7 @@ class LogRotator:
     
     def rotate_large_logs(self):
         """轮转过大的日志文件"""
-        for log_file in LOGS_DIR.glob('*.log'):
+        for log_file in self.paths.logs_dir.glob('*.log'):
             size_mb = log_file.stat().st_size / (1024 * 1024)
             
             if size_mb > MAX_LOG_SIZE_MB:
@@ -60,9 +78,9 @@ class LogRotator:
     
     def compress_old_logs(self):
         """压缩旧日志"""
-        ARCHIVE_DIR.mkdir(exist_ok=True)
+        self.paths.archive_dir.mkdir(parents=True, exist_ok=True)
         
-        for log_file in LOGS_DIR.glob('*.log'):
+        for log_file in self.paths.logs_dir.glob('*.log'):
             # 跳过当前活跃的日志
             if '.' not in log_file.stem:
                 continue
@@ -71,7 +89,7 @@ class LogRotator:
             
             if age > KEEP_DAYS and age <= ARCHIVE_DAYS:
                 # 需要压缩
-                archive_path = ARCHIVE_DIR / f"{log_file.name}.gz"
+                archive_path = self.paths.archive_dir / f"{log_file.name}.gz"
                 
                 self.log(f"📦 压缩: {log_file.name}")
                 
@@ -89,7 +107,7 @@ class LogRotator:
     def delete_very_old_logs(self):
         """删除过期日志"""
         # 删除过期的压缩日志
-        for archive_file in ARCHIVE_DIR.glob('*.gz'):
+        for archive_file in self.paths.archive_dir.glob('*.gz'):
             age = self.get_file_age_days(archive_file)
             
             if age > ARCHIVE_DAYS:
@@ -102,7 +120,7 @@ class LogRotator:
     def clean_application_logs(self):
         """清理应用特定的日志目录"""
         # 清理v5_runtime.log等
-        for app_log in LOGS_DIR.glob('v5_*.log'):
+        for app_log in self.paths.logs_dir.glob('v5_*.log'):
             age = self.get_file_age_days(app_log)
             size_mb = app_log.stat().st_size / (1024 * 1024)
             
@@ -110,7 +128,7 @@ class LogRotator:
                 self.log(f"🗑️  清理应用日志: {app_log.name}")
                 
                 # 压缩后删除
-                archive_path = ARCHIVE_DIR / f"{app_log.name}.{datetime.now().strftime('%Y%m%d')}.gz"
+                archive_path = self.paths.archive_dir / f"{app_log.name}.{datetime.now().strftime('%Y%m%d')}.gz"
                 with open(app_log, 'rb') as f_in:
                     with gzip.open(archive_path, 'wb') as f_out:
                         shutil.copyfileobj(f_in, f_out)
@@ -125,7 +143,7 @@ class LogRotator:
         self.log("📝 V5 日志轮转开始")
         self.log("=" * 60)
         
-        if not LOGS_DIR.exists():
+        if not self.paths.logs_dir.exists():
             self.log("❌ 日志目录不存在")
             return
         
