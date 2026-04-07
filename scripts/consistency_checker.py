@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +44,64 @@ class BacktestLiveConsistencyChecker:
     @staticmethod
     def _order_event_ts_expr() -> str:
         return "COALESCE(NULLIF(updated_ts, 0), created_ts)"
+
+    @staticmethod
+    def _split_inst_id_base_quote(inst_id: str) -> tuple[str, str]:
+        normalized = str(inst_id or "").replace("/", "-")
+        parts = [part.strip().upper() for part in normalized.split("-") if part.strip()]
+        if len(parts) >= 2:
+            return parts[0], parts[1]
+        return normalized.upper(), "USDT"
+
+    @classmethod
+    def _signed_fee_usdt_from_fee_fields(cls, inst_id: str, px: Any, fee_amount: Any, fee_ccy: Any = None) -> float:
+        try:
+            fee_val = float(fee_amount or 0.0)
+        except Exception:
+            return 0.0
+
+        fee_ccy_norm = str(fee_ccy or "").strip().upper()
+        if not fee_ccy_norm:
+            return fee_val
+
+        base_ccy, quote_ccy = cls._split_inst_id_base_quote(inst_id)
+        if fee_ccy_norm == quote_ccy:
+            return fee_val
+        if fee_ccy_norm != base_ccy:
+            return 0.0
+
+        try:
+            px_val = float(px or 0.0)
+        except Exception:
+            return 0.0
+        if px_val <= 0:
+            return 0.0
+        return fee_val * px_val
+
+    @classmethod
+    def _fee_cost_usdt_from_order_fee(cls, inst_id: str, avg_px: Any, raw_fee: Any) -> float:
+        raw = str(raw_fee or "").strip()
+        if not raw:
+            return 0.0
+
+        try:
+            numeric_fee = float(raw)
+        except Exception:
+            numeric_fee = None
+        if numeric_fee is not None:
+            return abs(cls._signed_fee_usdt_from_fee_fields(inst_id, avg_px, numeric_fee))
+
+        try:
+            fee_map = json.loads(raw)
+        except Exception:
+            return 0.0
+        if not isinstance(fee_map, dict):
+            return 0.0
+
+        total_fee_usdt = 0.0
+        for ccy, value in fee_map.items():
+            total_fee_usdt += cls._signed_fee_usdt_from_fee_fields(inst_id, avg_px, value, ccy)
+        return abs(total_fee_usdt)
 
     def _load_order_state_counts(self, days=7):
         orders_db = self.paths.reports_dir / "orders.sqlite"
@@ -127,7 +186,7 @@ class BacktestLiveConsistencyChecker:
                         "fill_px": row[3],
                         "order_sz": row[4],
                         "fill_sz": row[5],
-                        "fee": row[6] or 0,
+                        "fee_usdt": self._fee_cost_usdt_from_order_fee(row[0], row[3], row[6]),
                         "ts": datetime.fromtimestamp((row[8] or 0) / 1000),
                     }
                 )
@@ -172,7 +231,7 @@ class BacktestLiveConsistencyChecker:
             print("No backtest cost data available.")
             return
 
-        total_fee = sum(float(t["fee"] or 0) for t in live_trades)
+        total_fee = sum(float(t.get("fee_usdt", 0) or 0) for t in live_trades)
         total_notional = sum(float(t.get("fill_px", 0) or 0) * float(t.get("fill_sz", 0) or 0) for t in live_trades)
         live_cost_bps = (total_fee / total_notional) * 10000 if total_notional > 0 else 0
         backtest_cost_bps = backtest_cost.get("avg_cost_bps", 0)

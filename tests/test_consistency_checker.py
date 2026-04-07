@@ -109,3 +109,63 @@ def test_consistency_checker_fill_rate_counts_use_updated_ts_for_recent_events(t
     states = checker._load_order_state_counts(days=7)
 
     assert states == {"FILLED": 1, "REJECTED": 1}
+
+
+def test_consistency_checker_load_live_trades_converts_json_fee_map_to_usdt_cost(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    db_path = reports_dir / "orders.sqlite"
+    now_ms = int(datetime.now().timestamp() * 1000)
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE orders (
+            inst_id TEXT,
+            side TEXT,
+            px REAL,
+            avg_px REAL,
+            sz REAL,
+            acc_fill_sz REAL,
+            fee TEXT,
+            state TEXT,
+            created_ts INTEGER,
+            updated_ts INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO orders(inst_id, side, px, avg_px, sz, acc_fill_sz, fee, state, created_ts, updated_ts)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("BTC-USDT", "buy", 100.0, 100.0, 1.0, 1.0, '{"BTC":"-0.001"}', "FILLED", now_ms, now_ms),
+    )
+    conn.commit()
+    conn.close()
+
+    checker = consistency_checker.BacktestLiveConsistencyChecker(workspace=tmp_path)
+    trades = checker.load_live_trades(days=7)
+
+    assert len(trades) == 1
+    assert trades[0]["fee_usdt"] == 0.1
+
+
+def test_consistency_checker_compare_cost_models_uses_positive_fee_cost(tmp_path) -> None:
+    checker = consistency_checker.BacktestLiveConsistencyChecker(workspace=tmp_path)
+    live_trades = [
+        {
+            "symbol": "BTC-USDT",
+            "side": "buy",
+            "order_px": 100.0,
+            "fill_px": 100.0,
+            "order_sz": 1.0,
+            "fill_sz": 1.0,
+            "fee_usdt": 0.1,
+            "ts": datetime.now(),
+        }
+    ]
+
+    checker.compare_cost_models(live_trades, {"avg_cost_bps": 10.0})
+
+    assert checker.results["recommendations"] == []
