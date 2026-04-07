@@ -43,6 +43,7 @@ class MonitorPaths:
     reports_dir: Path
     logs_dir: Path
     fills_db_path: Path
+    orders_db_path: Path
     env_path: Path
     alert_file: Path
 
@@ -57,6 +58,7 @@ def build_paths(project_root: Path | None = None) -> MonitorPaths:
         reports_dir=reports_dir,
         logs_dir=logs_dir,
         fills_db_path=reports_dir / "fills.sqlite",
+        orders_db_path=reports_dir / "orders.sqlite",
         env_path=env_path,
         alert_file=reports_dir / "monitor_alert.txt",
     )
@@ -130,7 +132,7 @@ def _parse_journal_timestamp(line: str) -> datetime | None:
         return None
 
 
-def get_last_trade_time(paths: MonitorPaths = DEFAULT_PATHS, *, service_unit: str | None = None) -> datetime | None:
+def _get_latest_fill_ts_ms(paths: MonitorPaths) -> int | None:
     try:
         if paths.fills_db_path.exists():
             conn = sqlite3.connect(str(paths.fills_db_path))
@@ -139,9 +141,58 @@ def get_last_trade_time(paths: MonitorPaths = DEFAULT_PATHS, *, service_unit: st
             finally:
                 conn.close()
             if row and row[0]:
-                return datetime.fromtimestamp(int(row[0]) / 1000)
+                return int(row[0])
     except Exception as exc:
         print(f"[ERROR] failed to query fill store: {exc}")
+    return None
+
+
+def _get_latest_filled_order_ts_ms(paths: MonitorPaths) -> int | None:
+    if not paths.orders_db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(paths.orders_db_path))
+        try:
+            try:
+                row = conn.execute(
+                    """
+                    SELECT MAX(
+                        CASE
+                            WHEN COALESCE(updated_ts, 0) > 0 THEN updated_ts
+                            ELSE created_ts
+                        END
+                    )
+                    FROM orders
+                    WHERE state = 'FILLED'
+                    """
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = conn.execute(
+                    "SELECT MAX(created_ts) FROM orders WHERE state = 'FILLED'"
+                ).fetchone()
+        finally:
+            conn.close()
+        if row and row[0]:
+            return int(row[0])
+    except Exception as exc:
+        print(f"[ERROR] failed to query order store: {exc}")
+    return None
+
+
+def get_last_trade_time(paths: MonitorPaths = DEFAULT_PATHS, *, service_unit: str | None = None) -> datetime | None:
+    latest_ts_ms = max(
+        (
+            ts_ms
+            for ts_ms in (
+                _get_latest_fill_ts_ms(paths),
+                _get_latest_filled_order_ts_ms(paths),
+            )
+            if ts_ms
+        ),
+        default=None,
+    )
+    if latest_ts_ms is not None:
+        return datetime.fromtimestamp(latest_ts_ms / 1000)
 
     unit = service_unit or resolve_live_service_unit_name()
     try:

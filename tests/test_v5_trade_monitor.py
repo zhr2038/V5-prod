@@ -13,6 +13,7 @@ def test_build_paths_anchor_monitor_artifacts_to_repo_root(tmp_path) -> None:
     assert paths.reports_dir == tmp_path / "reports"
     assert paths.logs_dir == tmp_path / "logs"
     assert paths.fills_db_path == tmp_path / "reports" / "fills.sqlite"
+    assert paths.orders_db_path == tmp_path / "reports" / "orders.sqlite"
     assert paths.env_path == tmp_path / ".env"
     assert paths.alert_file == tmp_path / "reports" / "monitor_alert.txt"
 
@@ -33,6 +34,33 @@ def test_get_last_trade_time_reads_repo_fill_store_ts_ms(tmp_path, monkeypatch) 
     monkeypatch.setattr(trade_monitor, "run_command", _unexpected_run_command)
 
     assert trade_monitor.get_last_trade_time(paths) == datetime.fromtimestamp(1_710_000_000_123 / 1000)
+
+
+def test_get_last_trade_time_uses_newer_filled_order_event_when_fill_store_lags(tmp_path, monkeypatch) -> None:
+    paths = trade_monitor.build_paths(tmp_path)
+    paths.reports_dir.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(paths.fills_db_path))
+    conn.execute("CREATE TABLE fills (ts_ms INTEGER)")
+    conn.execute("INSERT INTO fills(ts_ms) VALUES (?)", (1_710_000_000_123,))
+    conn.commit()
+    conn.close()
+
+    conn = sqlite3.connect(str(paths.orders_db_path))
+    conn.execute("CREATE TABLE orders (state TEXT, created_ts INTEGER, updated_ts INTEGER)")
+    conn.execute(
+        "INSERT INTO orders(state, created_ts, updated_ts) VALUES ('FILLED', ?, ?)",
+        (1_710_000_000_000, 1_710_000_900_000),
+    )
+    conn.commit()
+    conn.close()
+
+    def _unexpected_run_command(*args, **kwargs):
+        raise AssertionError("journalctl fallback should not run when order store has newer data")
+
+    monkeypatch.setattr(trade_monitor, "run_command", _unexpected_run_command)
+
+    assert trade_monitor.get_last_trade_time(paths) == datetime.fromtimestamp(1_710_000_900_000 / 1000)
 
 
 def test_send_telegram_alert_falls_back_to_repo_reports_dir(tmp_path) -> None:
