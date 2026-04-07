@@ -323,15 +323,43 @@ class ReflectionAgentV2:
             fills_df = pd.read_sql_query("SELECT * FROM fills", conn)
             conn.close()
             
+            if (
+                not fills_df.empty
+                and 'slippage_bps' in fills_df.columns
+                and 'ts_ms' in fills_df.columns
+                and 'event_ts' in trades_df.columns
+            ):
+                event_ts = pd.to_numeric(trades_df['event_ts'], errors='coerce').dropna()
+                if not event_ts.empty:
+                    start_ts = int(event_ts.min())
+                    end_ts = int(event_ts.max())
+                    fills_df = fills_df[
+                        pd.to_numeric(fills_df['ts_ms'], errors='coerce').between(start_ts, end_ts)
+                    ]
+
             if not fills_df.empty and 'slippage_bps' in fills_df.columns:
-                avg_slippage = fills_df['slippage_bps'].mean()
-                avg_fee = fills_df['fee'].sum() / fills_df['notional_usdt'].sum() * 10000
-                fill_rate = len(fills_df) / len(trades_df) if len(trades_df) > 0 else 0
+                avg_slippage = pd.to_numeric(fills_df['slippage_bps'], errors='coerce').dropna().mean()
+                total_notional = pd.to_numeric(fills_df.get('notional_usdt'), errors='coerce').dropna().sum()
+                total_fee = pd.to_numeric(fills_df.get('fee'), errors='coerce').dropna().sum()
+                avg_fee = (total_fee / total_notional * 10000) if total_notional > 0 else 0.0
+
+                order_count = None
+                for column in ('ord_id', 'cl_ord_id'):
+                    if column in fills_df.columns:
+                        unique_orders = fills_df[column].fillna('').astype(str).str.strip()
+                        unique_orders = unique_orders[unique_orders != '']
+                        if not unique_orders.empty:
+                            order_count = int(unique_orders.nunique())
+                            break
+                if order_count is None:
+                    order_count = int(len(fills_df))
+
+                fill_rate = min(1.0, order_count / len(trades_df)) if len(trades_df) > 0 else 0
             else:
                 avg_slippage = 5.0
                 avg_fee = 6.0
                 fill_rate = 0.95
-        except:
+        except Exception:
             avg_slippage = 5.0
             avg_fee = 6.0
             fill_rate = 0.95

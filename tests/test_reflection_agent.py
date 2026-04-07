@@ -103,3 +103,98 @@ def test_reflection_agent_pnl_attribution_prefers_event_ts_and_fee_usdt(tmp_path
     assert attribution["total_realized_pnl"] == 8.0
     assert attribution["winning_symbols"] == 1
     assert attribution["losing_symbols"] == 0
+
+
+def test_reflection_agent_execution_quality_filters_fills_to_trade_window(tmp_path: Path) -> None:
+    agent = ReflectionAgentV2(
+        db_path=str(tmp_path / "orders.sqlite"),
+        report_dir=str(tmp_path / "reflection"),
+        bills_db=str(tmp_path / "bills.sqlite"),
+    )
+
+    fills_db = tmp_path / "fills.sqlite"
+    conn = sqlite3.connect(str(fills_db))
+    conn.execute(
+        """
+        CREATE TABLE fills (
+            ts_ms INTEGER,
+            ord_id TEXT,
+            cl_ord_id TEXT,
+            slippage_bps REAL,
+            fee REAL,
+            notional_usdt REAL
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO fills(ts_ms, ord_id, cl_ord_id, slippage_bps, fee, notional_usdt) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (1_000, "old-1", "old-1", 99.0, 9.9, 100.0),
+            (2_000, "new-1", "new-1", 5.0, 0.1, 100.0),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    trades = pd.DataFrame(
+        [
+            {
+                "inst_id": "BTC-USDT",
+                "side": "buy",
+                "notional_usdt": 100.0,
+                "event_ts": 2_000,
+            }
+        ]
+    )
+
+    quality = agent._analyze_execution_quality(trades)
+
+    assert quality.avg_slippage_bps == 5.0
+    assert quality.avg_fee_bps == 10.0
+
+
+def test_reflection_agent_execution_quality_uses_unique_orders_for_fill_rate(tmp_path: Path) -> None:
+    agent = ReflectionAgentV2(
+        db_path=str(tmp_path / "orders.sqlite"),
+        report_dir=str(tmp_path / "reflection"),
+        bills_db=str(tmp_path / "bills.sqlite"),
+    )
+
+    fills_db = tmp_path / "fills.sqlite"
+    conn = sqlite3.connect(str(fills_db))
+    conn.execute(
+        """
+        CREATE TABLE fills (
+            ts_ms INTEGER,
+            ord_id TEXT,
+            cl_ord_id TEXT,
+            slippage_bps REAL,
+            fee REAL,
+            notional_usdt REAL
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO fills(ts_ms, ord_id, cl_ord_id, slippage_bps, fee, notional_usdt) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (2_000, "ord-1", "cl-1", 5.0, 0.1, 50.0),
+            (2_001, "ord-1", "cl-1", 6.0, 0.1, 50.0),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    trades = pd.DataFrame(
+        [
+            {
+                "inst_id": "BTC-USDT",
+                "side": "buy",
+                "notional_usdt": 100.0,
+                "event_ts": 2_001,
+            }
+        ]
+    )
+
+    quality = agent._analyze_execution_quality(trades)
+
+    assert quality.fill_rate == 1.0
