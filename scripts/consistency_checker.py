@@ -11,18 +11,32 @@ V5 回测-实盘一致性检查工具
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timedelta
-from collections import defaultdict
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
-WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class ConsistencyPaths:
+    workspace: Path
+    reports_dir: Path
+
+
+def build_paths(workspace: Path | None = None) -> ConsistencyPaths:
+    root = (workspace or PROJECT_ROOT).resolve()
+    return ConsistencyPaths(
+        workspace=root,
+        reports_dir=root / 'reports',
+    )
 
 
 class BacktestLiveConsistencyChecker:
     """回测-实盘一致性检查器"""
     
-    def __init__(self):
+    def __init__(self, workspace: Path | None = None):
+        self.paths = build_paths(workspace)
         self.results = {
             'slippage_diff': [],
             'fill_rate_diff': [],
@@ -35,7 +49,7 @@ class BacktestLiveConsistencyChecker:
     
     def load_live_trades(self, days=7):
         """加载实盘交易数据"""
-        orders_db = REPORTS_DIR / 'orders.sqlite'
+        orders_db = self.paths.reports_dir / 'orders.sqlite'
         if not orders_db.exists():
             return []
         
@@ -85,7 +99,7 @@ class BacktestLiveConsistencyChecker:
     
     def load_backtest_config(self):
         """加载回测成本配置"""
-        cost_files = list(REPORTS_DIR.glob('cost_stats_real/*.json'))
+        cost_files = list(self.paths.reports_dir.glob('cost_stats_real/*.json'))
         
         if not cost_files:
             return None
@@ -140,7 +154,7 @@ class BacktestLiveConsistencyChecker:
         print("📊 成交率分析")
         print("=" * 70)
         
-        orders_db = REPORTS_DIR / 'orders.sqlite'
+        orders_db = self.paths.reports_dir / 'orders.sqlite'
         if not orders_db.exists():
             print("⚠️  无订单数据库")
             return
@@ -194,7 +208,8 @@ class BacktestLiveConsistencyChecker:
             print("\n✅ 回测与实盘一致性良好")
         
         # 保存报告
-        report_file = REPORTS_DIR / f'consistency_check_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+        report_file = self.paths.reports_dir / f'consistency_check_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+        report_file.parent.mkdir(parents=True, exist_ok=True)
         with open(report_file, 'w') as f:
             json.dump({
                 'timestamp': datetime.now().isoformat(),
