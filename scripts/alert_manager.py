@@ -14,8 +14,7 @@ import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
 
-REPORTS_DIR = Path('/home/admin/clawd/v5-trading-bot/reports')
-ALERT_STATE_FILE = REPORTS_DIR / 'alert_state.json'
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # 告警级别
 ALERT_LEVELS = {
@@ -32,14 +31,17 @@ QUIET_HOURS = (23, 8)  # 23:00 - 08:00 静音（除非CRITICAL）
 class AlertManager:
     """告警管理器"""
     
-    def __init__(self):
+    def __init__(self, workspace: Path = PROJECT_ROOT):
+        self.workspace = Path(workspace).resolve()
+        self.reports_dir = self.workspace / 'reports'
+        self.alert_state_file = self.reports_dir / 'alert_state.json'
         self.state = self.load_state()
     
     def load_state(self):
         """加载告警状态"""
-        if ALERT_STATE_FILE.exists():
+        if self.alert_state_file.exists():
             try:
-                with open(ALERT_STATE_FILE) as f:
+                with open(self.alert_state_file) as f:
                     return json.load(f)
             except:
                 pass
@@ -47,7 +49,8 @@ class AlertManager:
     
     def save_state(self):
         """保存告警状态"""
-        with open(ALERT_STATE_FILE, 'w') as f:
+        self.alert_state_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.alert_state_file, 'w') as f:
             json.dump(self.state, f, indent=2)
     
     def is_quiet_hours(self):
