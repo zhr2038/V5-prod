@@ -46,6 +46,14 @@ def disable_kill_switch(path: str) -> None:
     logging.info(f"Kill switch disabled at {path}")
 
 
+def is_manual_kill_switch(ks: dict) -> bool:
+    if not isinstance(ks, dict):
+        return False
+    if bool(ks.get("manual")):
+        return True
+    return str(ks.get("trigger") or "").strip().lower() == "manual"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
@@ -78,7 +86,8 @@ def main() -> None:
     client = OKXPrivateClient(exchange=cfg.exchange)
     
     ks_before = load_kill_switch(kill_switch_path)
-    was_enabled = ks_before.get("enabled", False)
+    was_enabled = bool(ks_before.get("enabled", False))
+    was_manual = is_manual_kill_switch(ks_before)
     
     last_error = None
     for attempt in range(args.retries):
@@ -113,12 +122,13 @@ def main() -> None:
                 "reason": reason,
                 "max_abs_usdt_delta": (obj.get("stats", {}) or {}).get("max_abs_usdt_delta"),
                 "was_kill_switch_enabled": was_enabled,
+                "was_manual_kill_switch": was_manual,
             }
             logging.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             
             if ok:
                 # If reconcile succeeded and kill switch was enabled, disable it
-                if was_enabled:
+                if was_enabled and not was_manual:
                     disable_kill_switch(kill_switch_path)
                 return
             else:

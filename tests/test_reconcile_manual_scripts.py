@@ -215,3 +215,51 @@ def test_reconcile_with_retry_defaults_runtime_paths_to_config_and_repo_root(mon
     assert captured["out_path"] == (workspace / "reports" / "custom_reconcile_status.json").resolve()
     assert captured["kill_switch_load_path"] == expected_kill
     assert captured["kill_switch_disable_path"] == expected_kill
+
+
+def test_reconcile_with_retry_keeps_manual_kill_switch_enabled(monkeypatch) -> None:
+    captured = {}
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        execution=SimpleNamespace(
+            reconcile_abs_usdt_tol=50.0,
+            reconcile_dust_usdt_ignore=1.0,
+            reconcile_status_path="reports/custom_reconcile_status.json",
+            kill_switch_path="reports/custom_kill_switch.json",
+        ),
+    )
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class CapturingReconcileEngine:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def reconcile(self, *, out_path: str):
+            return {"ok": True, "reason": None, "stats": {}}
+
+    def _fake_disable_kill_switch(path: str) -> None:
+        captured["kill_switch_disable_path"] = path
+
+    monkeypatch.setattr(reconcile_with_retry, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(reconcile_with_retry, "OKXPrivateClient", DummyClient)
+    monkeypatch.setattr(reconcile_with_retry, "PositionStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(reconcile_with_retry, "AccountStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(reconcile_with_retry, "ReconcileEngine", CapturingReconcileEngine)
+    monkeypatch.setattr(
+        reconcile_with_retry,
+        "load_kill_switch",
+        lambda path: {"enabled": True, "manual": True, "trigger": "manual"},
+    )
+    monkeypatch.setattr(reconcile_with_retry, "disable_kill_switch", _fake_disable_kill_switch)
+    monkeypatch.setattr(sys, "argv", ["reconcile_with_retry.py"])
+
+    reconcile_with_retry.main()
+
+    assert "kill_switch_disable_path" not in captured
