@@ -8,13 +8,26 @@ V5 自动备份工具
 - 保留策略管理
 """
 
-import shutil
 import tarfile
+from dataclasses import dataclass
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
-WORKSPACE = Path('/home/admin/clawd/v5-trading-bot')
-BACKUP_DIR = WORKSPACE / 'backups'
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class BackupPaths:
+    workspace: Path
+    backup_dir: Path
+
+
+def build_paths(workspace: Path | None = None) -> BackupPaths:
+    root = (workspace or PROJECT_ROOT).resolve()
+    return BackupPaths(
+        workspace=root,
+        backup_dir=root / 'backups',
+    )
 
 # 备份配置
 BACKUP_ITEMS = [
@@ -36,7 +49,8 @@ KEEP_BACKUPS = 7  # 保留最近7个备份
 class BackupManager:
     """备份管理器"""
     
-    def __init__(self):
+    def __init__(self, workspace: Path | None = None):
+        self.paths = build_paths(workspace)
         self.stats = {'backed_up': 0, 'errors': 0, 'size_mb': 0}
     
     def log(self, msg):
@@ -44,11 +58,11 @@ class BackupManager:
     
     def create_backup(self, name=None):
         """创建备份"""
-        BACKUP_DIR.mkdir(exist_ok=True)
+        self.paths.backup_dir.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_name = name or f"v5_backup_{timestamp}"
-        backup_path = BACKUP_DIR / f"{backup_name}.tar.gz"
+        backup_path = self.paths.backup_dir / f"{backup_name}.tar.gz"
         
         self.log("=" * 60)
         self.log(f"🗄️  创建备份: {backup_name}")
@@ -56,7 +70,7 @@ class BackupManager:
         
         with tarfile.open(backup_path, 'w:gz') as tar:
             for item in BACKUP_ITEMS:
-                src_path = WORKSPACE / item
+                src_path = self.paths.workspace / item
                 if src_path.exists():
                     try:
                         if src_path.is_dir():
@@ -83,10 +97,10 @@ class BackupManager:
     
     def cleanup_old_backups(self):
         """清理旧备份"""
-        if not BACKUP_DIR.exists():
+        if not self.paths.backup_dir.exists():
             return
         
-        backups = sorted(BACKUP_DIR.glob('*.tar.gz'), key=lambda x: x.stat().st_mtime, reverse=True)
+        backups = sorted(self.paths.backup_dir.glob('*.tar.gz'), key=lambda x: x.stat().st_mtime, reverse=True)
         
         if len(backups) > KEEP_BACKUPS:
             to_delete = backups[KEEP_BACKUPS:]
@@ -100,11 +114,11 @@ class BackupManager:
     
     def list_backups(self):
         """列出所有备份"""
-        if not BACKUP_DIR.exists():
+        if not self.paths.backup_dir.exists():
             print("没有备份")
             return
         
-        backups = sorted(BACKUP_DIR.glob('*.tar.gz'), key=lambda x: x.stat().st_mtime, reverse=True)
+        backups = sorted(self.paths.backup_dir.glob('*.tar.gz'), key=lambda x: x.stat().st_mtime, reverse=True)
         
         print("\n📋 备份列表:")
         print("-" * 60)
@@ -117,7 +131,7 @@ class BackupManager:
     
     def restore_backup(self, backup_name):
         """恢复备份"""
-        backup_path = BACKUP_DIR / backup_name
+        backup_path = self.paths.backup_dir / backup_name
         if not backup_path.exists():
             self.log(f"❌ 备份不存在: {backup_name}")
             return False
@@ -125,8 +139,8 @@ class BackupManager:
         self.log(f"🔄 恢复备份: {backup_name}")
         
         # 创建恢复目录
-        restore_dir = WORKSPACE / f'restore_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-        restore_dir.mkdir(exist_ok=True)
+        restore_dir = self.paths.workspace / f'restore_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        restore_dir.mkdir(parents=True, exist_ok=True)
         
         with tarfile.open(backup_path, 'r:gz') as tar:
             tar.extractall(path=restore_dir)
