@@ -1,31 +1,48 @@
 #!/usr/bin/env python3
-"""Model promotion gate for V5.
-
-Purpose:
-- Turn research/training outputs into a clear go/no-go promotion decision.
-- Persist decision to reports/model_promotion_decision.json
-- Maintain a stable pointer models/ml_factor_model_active -> selected model path
-
-Gate inputs (from reports/ml_training_history.json latest entry):
-- valid_ic
-- cv_mean_ic
-- cv_std_ic
-- ic_gap
-
-Optional stability check:
-- last_k valid_ic mean
-"""
+"""Model promotion gate for V5."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import os
+import sys
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
-HISTORY_PATH = Path("reports/ml_training_history.json")
-DECISION_PATH = Path("reports/model_promotion_decision.json")
-ACTIVE_POINTER_PATH = Path("models/ml_factor_model_active.txt")
-MODEL_PATH = Path("models/ml_factor_model")
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+@dataclass(frozen=True)
+class PromotionPaths:
+    workspace: Path
+    history_path: Path
+    decision_path: Path
+    active_pointer_path: Path
+    model_path: Path
+    runs_dir: Path
+
+
+def resolve_workspace() -> Path:
+    raw = os.getenv("V5_WORKSPACE", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return PROJECT_ROOT
+
+
+def build_paths(workspace: str | Path | None = None) -> PromotionPaths:
+    root = Path(workspace).expanduser().resolve() if workspace is not None else resolve_workspace()
+    return PromotionPaths(
+        workspace=root,
+        history_path=(root / "reports" / "ml_training_history.json").resolve(),
+        decision_path=(root / "reports" / "model_promotion_decision.json").resolve(),
+        active_pointer_path=(root / "models" / "ml_factor_model_active.txt").resolve(),
+        model_path=(root / "models" / "ml_factor_model").resolve(),
+        runs_dir=(root / "reports" / "runs").resolve(),
+    )
 
 
 def _model_artifact_exists(base_path: Path) -> bool:
@@ -40,27 +57,37 @@ def _model_artifact_exists(base_path: Path) -> bool:
     )
 
 
-def _load_history():
-    if not HISTORY_PATH.exists():
+def _load_history(workspace: str | Path | None = None):
+    history_path = build_paths(workspace).history_path
+    if not history_path.exists():
         return []
     try:
-        obj = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+        obj = json.loads(history_path.read_text(encoding="utf-8"))
         return obj if isinstance(obj, list) else []
     except Exception:
         return []
 
 
-def _load_latest_training_entry() -> dict | None:
+def _load_latest_training_entry(workspace: str | Path | None = None) -> dict | None:
+    paths = build_paths(workspace)
     try:
         from src.research.recorder import load_latest_task_record
 
-        record = load_latest_task_record("ml_training", "analysis/model_training_record.json")
+        record = load_latest_task_record(
+            "ml_training",
+            "analysis/model_training_record.json",
+            base_dir=paths.runs_dir,
+        )
         if isinstance(record, dict):
             legacy = record.get("legacy_history_entry")
             if isinstance(legacy, dict):
                 return legacy
 
-        metrics = load_latest_task_record("ml_training", "metrics.json")
+        metrics = load_latest_task_record(
+            "ml_training",
+            "metrics.json",
+            base_dir=paths.runs_dir,
+        )
         if isinstance(metrics, dict):
             return metrics
     except Exception:
@@ -100,9 +127,10 @@ def _comparable_history_runs(hist: list[dict], latest: dict) -> list[dict]:
     return comparable
 
 
-def main() -> int:
-    hist = _load_history()
-    latest_run_entry = _load_latest_training_entry()
+def main(workspace: str | Path | None = None) -> int:
+    paths = build_paths(workspace)
+    hist = _load_history(paths.workspace)
+    latest_run_entry = _load_latest_training_entry(paths.workspace)
     if latest_run_entry:
         if not hist or str(hist[-1].get("run_id")) != str(latest_run_entry.get("run_id")):
             hist = [*hist, latest_run_entry]
@@ -112,8 +140,8 @@ def main() -> int:
             "passed": False,
             "reason": "no_training_history",
         }
-        DECISION_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DECISION_PATH.write_text(json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8")
+        paths.decision_path.parent.mkdir(parents=True, exist_ok=True)
+        paths.decision_path.write_text(json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(decision, ensure_ascii=False))
         return 1
 
@@ -147,12 +175,12 @@ def main() -> int:
     if recent_mean_valid_ic < 0.0:
         fail_reasons.append("recent_mean_valid_ic<0")
 
-    passed = len(fail_reasons) == 0 and _model_artifact_exists(MODEL_PATH)
+    passed = len(fail_reasons) == 0 and _model_artifact_exists(paths.model_path)
 
     decision = {
         "ts": datetime.now().isoformat(),
         "passed": passed,
-        "selected_model_path": str(MODEL_PATH),
+        "selected_model_path": str(paths.model_path),
         "metrics": {
             "valid_ic": valid_ic,
             "cv_mean_ic": cv_mean_ic,
@@ -169,12 +197,12 @@ def main() -> int:
         "fail_reasons": fail_reasons,
     }
 
-    DECISION_PATH.parent.mkdir(parents=True, exist_ok=True)
-    DECISION_PATH.write_text(json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8")
+    paths.decision_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.decision_path.write_text(json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if passed:
-        ACTIVE_POINTER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        ACTIVE_POINTER_PATH.write_text(str(MODEL_PATH), encoding="utf-8")
+        paths.active_pointer_path.parent.mkdir(parents=True, exist_ok=True)
+        paths.active_pointer_path.write_text(str(paths.model_path), encoding="utf-8")
 
     print(json.dumps(decision, ensure_ascii=False))
     return 0 if passed else 2
