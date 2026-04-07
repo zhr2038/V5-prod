@@ -62,11 +62,24 @@ def test_auto_sync_before_trade_respects_custom_runtime_status_paths(tmp_path, m
 
     custom_reconcile = reports_dir / "custom_reconcile_status.json"
     custom_kill = reports_dir / "custom_kill_switch.json"
+    custom_failure = reports_dir / "custom_reconcile_failure_state.json"
     default_kill = reports_dir / "kill_switch.json"
     failure_state_path = reports_dir / "reconcile_failure_state.json"
 
     custom_kill.write_text(json.dumps({"enabled": True, "manual": False}, ensure_ascii=False), encoding="utf-8")
     default_kill.write_text(json.dumps({"enabled": True, "manual": False}, ensure_ascii=False), encoding="utf-8")
+    custom_failure.write_text(
+        json.dumps(
+            {
+                "consecutive_hard": 4,
+                "consecutive_soft": 3,
+                "consecutive_ok": 0,
+                "last_reason": "custom_stale",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     failure_state_path.write_text(
         json.dumps(
             {
@@ -139,6 +152,7 @@ def test_auto_sync_before_trade_respects_custom_runtime_status_paths(tmp_path, m
         execution=SimpleNamespace(
             reconcile_status_path="reports/custom_reconcile_status.json",
             kill_switch_path="reports/custom_kill_switch.json",
+            reconcile_failure_state_path="reports/custom_reconcile_failure_state.json",
         ),
     )
 
@@ -164,3 +178,15 @@ def test_auto_sync_before_trade_respects_custom_runtime_status_paths(tmp_path, m
 
     untouched_default_kill = json.loads(default_kill.read_text(encoding="utf-8"))
     assert untouched_default_kill["enabled"] is True
+
+    failure_payload = json.loads(custom_failure.read_text(encoding="utf-8"))
+    assert failure_payload["consecutive_hard"] == 0
+    assert failure_payload["consecutive_soft"] == 0
+    assert failure_payload["consecutive_ok"] == 1
+    assert failure_payload["last_reason"] == "auto_sync_reset"
+
+    untouched_default_failure = json.loads(failure_state_path.read_text(encoding="utf-8"))
+    assert untouched_default_failure["consecutive_hard"] == 3
+    assert untouched_default_failure["consecutive_soft"] == 2
+    assert untouched_default_failure["consecutive_ok"] == 0
+    assert untouched_default_failure["last_reason"] == "stale"

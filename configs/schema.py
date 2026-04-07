@@ -417,6 +417,7 @@ class ExecutionConfig(BaseModel):
     order_store_path: str = Field(default="reports/orders.sqlite")
     kill_switch_path: str = Field(default="reports/kill_switch.json")
     reconcile_status_path: str = Field(default="reports/reconcile_status.json")
+    reconcile_failure_state_path: str = Field(default="reports/reconcile_failure_state.json")
 
     # Reconcile behavior (G1)
     reconcile_abs_usdt_tol: float = Field(default=50.0, ge=0, description="USDT drift tolerance used by live preflight reconcile.")

@@ -1,4 +1,5 @@
 from configs.loader import load_config
+from configs.schema import ExecutionConfig
 
 
 def test_config_loads():
@@ -99,3 +100,8 @@ def test_live_prod_funding_thresholds_load():
     assert cfg.regime.funding_breadth_threshold == 0.68
     assert cfg.regime.funding_extreme_sentiment_threshold == 0.12
     assert cfg.regime.funding_extreme_breadth_threshold == 0.55
+
+
+def test_execution_config_accepts_custom_reconcile_failure_state_path():
+    cfg = ExecutionConfig(reconcile_failure_state_path="reports/custom_reconcile_failure_state.json")
+    assert cfg.reconcile_failure_state_path == "reports/custom_reconcile_failure_state.json"

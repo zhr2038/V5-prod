@@ -354,6 +354,7 @@ def main():
             # Clear failure state
             failure_state_path = Path(
                 resolve_runtime_path(
+                    getattr(execution_cfg, 'reconcile_failure_state_path', None),
                     default='reports/reconcile_failure_state.json',
                     project_root=WORKSPACE,
                 )
