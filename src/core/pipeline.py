@@ -62,6 +62,7 @@ from configs.schema import AppConfig
 from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.execution.position_store import Position
+from src.execution.fill_store import derive_runtime_auto_risk_guard_path
 from src.execution.position_builder import PositionBuilder  # Phase 2: 分批建仓
 from src.execution.multi_level_stop_loss import MultiLevelStopLoss, StopLossConfig  # Phase 2: 动态止损
 from src.portfolio.portfolio_engine import PortfolioEngine, PortfolioSnapshot
@@ -209,7 +210,10 @@ class V5Pipeline:
         )
         
         # 自动风险档位守卫
-        self.auto_risk_guard = get_auto_risk_guard()
+        order_store_path = str(getattr(cfg.execution, "order_store_path", "reports/orders.sqlite"))
+        self.auto_risk_guard = get_auto_risk_guard(
+            derive_runtime_auto_risk_guard_path(order_store_path)
+        )
 
         # 负期望标的自动冷却（根因级抑制高成本来回交易）
         neg_feedback_enabled = any(
