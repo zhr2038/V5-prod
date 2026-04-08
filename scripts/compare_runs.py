@@ -114,6 +114,14 @@ def _fmt_bool(x: Any) -> str:
     return s
 
 
+def _to_bool(x: Any) -> bool:
+    if isinstance(x, bool):
+        return x
+    if x is None:
+        return False
+    return str(x).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _budget_reason_norm(reason: Any) -> str:
     if not reason:
         return "N/A"
@@ -158,7 +166,7 @@ def _budget_header_lines(v5: Dict[str, Any], v5_audit: Optional[Dict[str, Any]])
             lines.append(f"- v5 budget_used: turnover={tu}/{tb} cost_bps={cu}/{cb}")
 
     ba = (v5_audit.get("budget_action") or {}) if v5_audit else {}
-    if ba and bool(ba.get("enabled")):
+    if ba and _to_bool(ba.get("enabled")):
         if ba.get("deadband_effective") is not None:
             lines.append(
                 f"- v5 deadband_effective: {_fmt(ba.get('deadband_effective'))} "
