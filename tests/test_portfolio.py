@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from configs.schema import AlphaConfig, RiskConfig
+import src.portfolio.portfolio_engine as portfolio_engine_module
 from src.portfolio.portfolio_engine import PortfolioEngine
 from src.core.models import MarketSeries
 
@@ -161,3 +162,37 @@ def test_portfolio_optimizer_respects_zero_prev_weight_penalty(tmp_path: Path):
 
     assert snap.target_weights["A/USDT"] > 0.99
     assert snap.target_weights["B/USDT"] < 0.01
+
+
+def test_portfolio_dynamic_max_positions_uses_active_runtime_eval(monkeypatch, tmp_path: Path):
+    fake_root = tmp_path / "repo"
+    reports_dir = fake_root / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    configs_dir = fake_root / "configs"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    configs_dir.mkdir(parents=True, exist_ok=True)
+
+    (reports_dir / "auto_risk_eval.json").write_text(
+        json.dumps({"current_level": "ATTACK"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (runtime_dir / "auto_risk_eval.json").write_text(
+        json.dumps({"current_level": "PROTECT"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(portfolio_engine_module, "RUNTIME_PROJECT_ROOT", fake_root)
+
+    pe = PortfolioEngine(alpha_cfg=AlphaConfig(), risk_cfg=RiskConfig())
+
+    assert pe._get_dynamic_max_positions() == 1

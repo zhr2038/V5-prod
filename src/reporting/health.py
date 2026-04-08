@@ -12,7 +12,11 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify
 
-from src.execution.fill_store import derive_fill_store_path, derive_position_store_path
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_position_store_path,
+    derive_runtime_auto_risk_eval_path,
+)
 
 health_bp = Blueprint("health", __name__)
 
@@ -28,6 +32,7 @@ class HealthPaths:
     positions_db: Path
     kill_switch_path: Path
     reconcile_status_path: Path
+    auto_risk_eval_path: Path | None = None
 
 
 def _resolve_active_config_path() -> Path:
@@ -87,6 +92,7 @@ def _resolve_health_paths() -> HealthPaths:
         positions_db=derive_position_store_path(orders_db),
         kill_switch_path=_resolve_runtime_path(execution_cfg.get("kill_switch_path"), "reports/kill_switch.json"),
         reconcile_status_path=_resolve_runtime_path(execution_cfg.get("reconcile_status_path"), "reports/reconcile_status.json"),
+        auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
     )
 
 
@@ -257,7 +263,8 @@ def health_check():
         checks["checks"]["last_trade"] = {"status": "error", "error": str(exc)}
 
     try:
-        risk = _load_json_safe(REPORTS_DIR / "auto_risk_eval.json")
+        risk_eval_path = health_paths.auto_risk_eval_path or (REPORTS_DIR / "auto_risk_eval.json")
+        risk = _load_json_safe(risk_eval_path)
         checks["checks"]["risk_guard"] = {
             "status": "ok",
             "level": risk.get("current_level", "UNKNOWN"),

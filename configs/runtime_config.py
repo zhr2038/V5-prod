@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import yaml
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,3 +49,21 @@ def resolve_runtime_path(
     root = (project_root or PROJECT_ROOT).resolve()
     value = str(raw_path).strip() if raw_path is not None else ""
     return _resolve_path(value or default, project_root=root)
+
+
+def load_runtime_config(
+    raw_config_path: str | None = None,
+    *,
+    project_root: Path | None = None,
+) -> dict:
+    config_path = Path(
+        resolve_runtime_config_path(raw_config_path=raw_config_path, project_root=project_root)
+    )
+    if not config_path.exists():
+        return {}
+
+    try:
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}

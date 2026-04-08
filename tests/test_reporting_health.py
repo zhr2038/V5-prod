@@ -27,6 +27,10 @@ def _prepare_reports_dir(tmp_path: Path) -> Path:
         reports_dir / "auto_risk_eval.json",
         {"current_level": "LOW", "metrics": {"dd_pct": 0.0}},
     )
+    _write_json(
+        reports_dir / "shadow_auto_risk_eval.json",
+        {"current_level": "PROTECT", "metrics": {"dd_pct": 0.33}},
+    )
     return reports_dir
 
 
@@ -227,6 +231,10 @@ def test_health_uses_active_config_runtime_paths(monkeypatch, tmp_path: Path) ->
 
     _write_json(reports_dir / "shadow_kill_switch.json", {"enabled": True, "trigger": "manual"})
     _write_json(reports_dir / "shadow_reconcile_status.json", {"ok": False, "reason": "shadow drift"})
+    _write_json(
+        reports_dir / "shadow_auto_risk_eval.json",
+        {"current_level": "PROTECT", "metrics": {"dd_pct": 0.22}},
+    )
 
     (configs_dir / "live_prod.yaml").write_text(
         "\n".join(
@@ -258,6 +266,8 @@ def test_health_uses_active_config_runtime_paths(monkeypatch, tmp_path: Path) ->
     assert payload["checks"]["kill_switch"]["trigger"] == "manual"
     assert payload["checks"]["reconcile"]["ok"] is False
     assert payload["checks"]["reconcile"]["reason"] == "shadow drift"
+    assert payload["checks"]["risk_guard"]["level"] == "PROTECT"
+    assert payload["checks"]["risk_guard"]["drawdown"] == 0.22
     assert payload["checks"]["last_trade"]["last_ts"] == 9_940_000
     assert payload["checks"]["last_trade"]["age_minutes"] == 1.0
 

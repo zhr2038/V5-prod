@@ -8,8 +8,10 @@ import time
 
 import numpy as np
 
+from configs.runtime_config import PROJECT_ROOT as RUNTIME_PROJECT_ROOT, load_runtime_config, resolve_runtime_path
 from configs.schema import AlphaConfig, RiskConfig
 from src.core.models import MarketSeries
+from src.execution.fill_store import derive_runtime_auto_risk_eval_path
 from src.utils.math import clamp
 
 
@@ -288,7 +290,16 @@ class PortfolioEngine:
             pass
 
         try:
-            p = Path("reports/auto_risk_eval.json")
+            cfg = load_runtime_config(project_root=RUNTIME_PROJECT_ROOT)
+            execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+            orders_db = Path(
+                resolve_runtime_path(
+                    execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                    default="reports/orders.sqlite",
+                    project_root=RUNTIME_PROJECT_ROOT,
+                )
+            )
+            p = derive_runtime_auto_risk_eval_path(orders_db)
             if not p.exists():
                 return None
             obj = json.loads(p.read_text(encoding="utf-8"))

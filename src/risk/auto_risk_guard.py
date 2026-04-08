@@ -234,14 +234,20 @@ class AutoRiskGuard:
 
 
 # 全局实例
-_guard_instance: Optional[AutoRiskGuard] = None
+_guard_instances: Dict[str, AutoRiskGuard] = {}
 
-def get_auto_risk_guard() -> AutoRiskGuard:
+def get_auto_risk_guard(state_path: str | None = None) -> AutoRiskGuard:
     """获取全局风险守卫实例"""
-    global _guard_instance
-    if _guard_instance is None:
-        _guard_instance = AutoRiskGuard()
-    return _guard_instance
+    if state_path is None:
+        state_path = str((Path(__file__).parent.parent.parent / "reports" / "auto_risk_guard.json").resolve())
+    else:
+        state_path = str(Path(state_path).resolve())
+
+    guard = _guard_instances.get(state_path)
+    if guard is None:
+        guard = AutoRiskGuard(state_path=state_path)
+        _guard_instances[state_path] = guard
+    return guard
 
 
 if __name__ == '__main__':

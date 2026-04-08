@@ -34,6 +34,9 @@ from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
+    derive_runtime_auto_risk_eval_path,
+    derive_runtime_auto_risk_guard_path,
+    derive_runtime_reports_dir,
     derive_runtime_runs_dir,
 )
 from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
@@ -103,10 +106,12 @@ TIMER_TS_RE = re.compile(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})')
 
 @dataclass(frozen=True)
 class DashboardRuntimePaths:
+    reports_dir: Path
     orders_db: Path
     fills_db: Path
     positions_db: Path
     reconcile_status_path: Path
+    auto_risk_eval_path: Path
     runs_dir: Path
 
 
@@ -1464,7 +1469,9 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
         execution_cfg.get('order_store_path'),
         'reports/orders.sqlite',
     )
+    reports_dir = derive_runtime_reports_dir(orders_db)
     return DashboardRuntimePaths(
+        reports_dir=reports_dir,
         orders_db=orders_db,
         fills_db=derive_fill_store_path(orders_db),
         positions_db=derive_position_store_path(orders_db),
@@ -1472,6 +1479,7 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
             execution_cfg.get('reconcile_status_path'),
             'reports/reconcile_status.json',
         ),
+        auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
         runs_dir=derive_runtime_runs_dir(orders_db),
     )
 
@@ -4373,7 +4381,8 @@ def api_auto_risk_guard():
     try:
         from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard
 
-        eval_path = REPORTS_DIR / 'auto_risk_eval.json'
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
+        eval_path = runtime_paths.auto_risk_eval_path
         if eval_path.exists():
             with open(eval_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -4393,7 +4402,7 @@ def api_auto_risk_guard():
                 'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             })
 
-        guard = get_auto_risk_guard()
+        guard = get_auto_risk_guard(str(derive_runtime_auto_risk_guard_path(runtime_paths.orders_db)))
         return jsonify({
             'current_level': guard.current_level,
             'config': guard.get_current_config(),

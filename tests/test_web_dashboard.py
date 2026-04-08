@@ -2289,6 +2289,7 @@ def test_auto_risk_guard_api_uses_auto_risk_eval_file(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "load_config", lambda: {})
 
     (tmp_path / "auto_risk_eval.json").write_text(
         """
@@ -2313,6 +2314,40 @@ def test_auto_risk_guard_api_uses_auto_risk_eval_file(monkeypatch, tmp_path):
     assert payload["metrics"]["dd_pct"] == 0.0682
     assert payload["reason"] == "样本不足 (0轮)，维持当前档位"
     assert payload["config"]["max_positions"] == 3
+
+
+def test_auto_risk_guard_api_uses_active_runtime_eval_path(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (reports_dir / "auto_risk_eval.json").write_text(
+        json.dumps({"current_level": "ATTACK", "metrics": {"dd_pct": 0.01}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (runtime_dir / "auto_risk_eval.json").write_text(
+        json.dumps({"current_level": "PROTECT", "metrics": {"dd_pct": 0.25}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_level"] == "PROTECT"
+    assert payload["metrics"]["dd_pct"] == 0.25
 
 
 def test_market_state_backfills_hmm_vote_from_regime_history(monkeypatch):

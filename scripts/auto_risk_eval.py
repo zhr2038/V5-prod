@@ -21,12 +21,65 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_auto_risk_eval_path,
+    derive_runtime_auto_risk_guard_path,
+    derive_runtime_reports_dir,
+)
 from src.risk.auto_risk_guard import get_auto_risk_guard
 
 
 REPORTS_DIR = PROJECT_ROOT / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
 AUTO_RISK_EVAL_PATH = REPORTS_DIR / "auto_risk_eval.json"
+
+
+class AutoRiskEvalPaths:
+    def __init__(
+        self,
+        *,
+        reports_dir: Path,
+        runs_dir: Path,
+        auto_risk_eval_path: Path,
+        positions_db: Path,
+        auto_risk_guard_path: Path,
+    ) -> None:
+        self.reports_dir = reports_dir
+        self.runs_dir = runs_dir
+        self.auto_risk_eval_path = auto_risk_eval_path
+        self.positions_db = positions_db
+        self.auto_risk_guard_path = auto_risk_guard_path
+
+
+def _resolve_runtime_paths() -> AutoRiskEvalPaths:
+    try:
+        cfg = load_runtime_config(project_root=PROJECT_ROOT)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=PROJECT_ROOT,
+            )
+        )
+        reports_dir = derive_runtime_reports_dir(orders_db)
+        return AutoRiskEvalPaths(
+            reports_dir=reports_dir,
+            runs_dir=reports_dir / "runs",
+            auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
+            positions_db=derive_position_store_path(orders_db),
+            auto_risk_guard_path=derive_runtime_auto_risk_guard_path(orders_db),
+        )
+    except Exception:
+        return AutoRiskEvalPaths(
+            reports_dir=REPORTS_DIR,
+            runs_dir=RUNS_DIR,
+            auto_risk_eval_path=AUTO_RISK_EVAL_PATH,
+            positions_db=REPORTS_DIR / "positions.sqlite",
+            auto_risk_guard_path=REPORTS_DIR / "auto_risk_guard.json",
+        )
 
 
 def _sanitize_peak_equity(live_equity: float, peak_equity: float, initial_capital: float = 120.0) -> float:
@@ -47,11 +100,12 @@ def _sanitize_peak_equity(live_equity: float, peak_equity: float, initial_capita
 def load_recent_runs(hours: int = 24) -> List[Dict]:
     runs: List[Dict] = []
     cutoff = datetime.now() - timedelta(hours=hours)
+    runs_dir = _resolve_runtime_paths().runs_dir
 
-    if not RUNS_DIR.exists():
+    if not runs_dir.exists():
         return runs
 
-    for run_dir in sorted(RUNS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+    for run_dir in sorted(runs_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if not run_dir.is_dir():
             continue
         mtime = datetime.fromtimestamp(run_dir.stat().st_mtime)
@@ -136,7 +190,7 @@ def calculate_metrics(runs: List[Dict]) -> Dict:
         from src.risk.live_equity_fetcher import get_live_equity_from_okx
 
         eq_live = get_live_equity_from_okx()
-        acc_db = REPORTS_DIR / "positions.sqlite"
+        acc_db = _resolve_runtime_paths().positions_db
         peak = 0.0
         if acc_db.exists():
             con = sqlite3.connect(str(acc_db))
@@ -182,7 +236,8 @@ def calculate_metrics(runs: List[Dict]) -> Dict:
 
 
 def _write_eval_snapshot(guard, metrics: Dict, reason: str) -> None:
-    AUTO_RISK_EVAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    eval_path = _resolve_runtime_paths().auto_risk_eval_path
+    eval_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "ts": datetime.now().isoformat(),
         "current_level": guard.current_level,
@@ -191,12 +246,16 @@ def _write_eval_snapshot(guard, metrics: Dict, reason: str) -> None:
         "reason": reason,
         "history": guard.history[-5:],
     }
-    with open(AUTO_RISK_EVAL_PATH, "w", encoding="utf-8") as f:
+    with open(eval_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
 def evaluate_and_switch() -> None:
-    guard = get_auto_risk_guard()
+    runtime_paths = _resolve_runtime_paths()
+    try:
+        guard = get_auto_risk_guard(str(runtime_paths.auto_risk_guard_path))
+    except TypeError:
+        guard = get_auto_risk_guard()
     runs = load_recent_runs(hours=12)
     metrics = calculate_metrics(runs)
 
