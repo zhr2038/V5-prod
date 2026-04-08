@@ -17,6 +17,7 @@ from configs.runtime_config import (
     resolve_runtime_env_path,
     resolve_runtime_path,
 )
+from src.execution.fill_store import derive_position_store_path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -239,10 +240,12 @@ def main():
             logger.info(f"Balance details loaded: {len(balance_details)} assets")
 
             # Load stores
-            positions_db_path = resolve_runtime_path(
-                default='reports/positions.sqlite',
+            order_store_path = resolve_runtime_path(
+                getattr(getattr(cfg, 'execution', None), 'order_store_path', None),
+                default='reports/orders.sqlite',
                 project_root=WORKSPACE,
             )
+            positions_db_path = derive_position_store_path(order_store_path)
             position_store = PositionStore(path=positions_db_path)
             account_store = AccountStore(path=positions_db_path)
             
