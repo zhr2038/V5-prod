@@ -2591,6 +2591,76 @@ def test_market_state_prefers_live_funding_vote_over_snapshot(monkeypatch):
     assert funding["composite"] is True
 
 
+def test_api_market_state_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    seen: dict[str, Path] = {}
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "regime": {"hmm_weight": 0.35, "funding_weight": 0.4, "rss_weight": 0.25},
+        },
+    )
+
+    def fake_snapshot(path):
+        seen["snapshot"] = path
+        return {
+            "state": "TRENDING",
+            "position_multiplier": 1.2,
+            "method": "decision_audit",
+            "votes": {"hmm": {"state": "TRENDING", "confidence": 0.7}},
+            "alerts": [],
+            "monitor": {},
+        }
+
+    def fake_history_snapshot(path):
+        seen["history_snapshot"] = path
+        return {"votes": {}}
+
+    def fake_history(path, hours=24, max_points=24):
+        seen["history_24h"] = path
+        return [
+            {
+                "label": "04-08 10:00",
+                "final": {"state": "TRENDING", "confidence": 0.6, "score": 0.4},
+                "votes": {
+                    "hmm": {"state": "TRENDING", "confidence": 0.7},
+                    "funding": {"state": "SIDEWAYS", "confidence": 0.2, "sentiment": 0.01},
+                    "rss": {"state": "TRENDING", "confidence": 0.3, "sentiment": 0.2},
+                },
+            }
+        ]
+
+    monkeypatch.setattr(module, "_load_market_state_snapshot", fake_snapshot)
+    monkeypatch.setattr(module, "_load_latest_regime_history_snapshot", fake_history_snapshot)
+    monkeypatch.setattr(module, "_load_market_vote_history", fake_history)
+    monkeypatch.setattr(module, "_signal_health", lambda *args, **kwargs: {"status": "fresh", "is_fresh": True, "error": None})
+    monkeypatch.setattr(module, "_build_live_funding_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_build_live_rss_vote", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "calculate_market_indicators", lambda: {"price": 0.0})
+
+    response = client.get("/api/market_state")
+
+    assert response.status_code == 200
+    assert seen["snapshot"] == runtime_dir
+    assert seen["history_snapshot"] == runtime_dir
+    assert seen["history_24h"] == runtime_dir
+    payload = response.get_json()
+    assert payload["state"] == "TRENDING"
+    assert payload["history_24h"][0]["final"]["state"] == "TRENDING"
+
+
 def test_market_state_snapshot_falls_back_to_regime_json_after_failed_run(tmp_path):
     module = load_web_dashboard_module()
 

@@ -2918,15 +2918,16 @@ def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
 def api_market_state():
     """市场状态 API，补齐投票详情和情绪缓存健康。"""
     try:
-        snapshot = _load_market_state_snapshot(REPORTS_DIR)
-        history_snapshot = _load_latest_regime_history_snapshot(REPORTS_DIR)
+        config = load_config()
+        runtime_reports_dir = _resolve_dashboard_runtime_paths(config).reports_dir
+        snapshot = _load_market_state_snapshot(runtime_reports_dir)
+        history_snapshot = _load_latest_regime_history_snapshot(runtime_reports_dir)
         regime = str(snapshot.get('state') or 'SIDEWAYS')
         votes = snapshot.get('votes', {}) if isinstance(snapshot.get('votes', {}), dict) else {}
         history_votes = history_snapshot.get('votes', {}) if isinstance(history_snapshot.get('votes', {}), dict) else {}
         alerts = snapshot.get('alerts', []) if isinstance(snapshot.get('alerts', []), list) else []
         monitor = snapshot.get('monitor', {}) if isinstance(snapshot.get('monitor', {}), dict) else {}
 
-        config = load_config()
         regime_cfg = config.get('regime', {}) if isinstance(config, dict) else {}
         cache_dir = WORKSPACE / 'data' / 'sentiment_cache'
         signal_health = {
@@ -2971,7 +2972,7 @@ def api_market_state():
                 configured_weights['rss'],
             ),
         }
-        history_24h = _load_market_vote_history(REPORTS_DIR, hours=24, max_points=24)
+        history_24h = _load_market_vote_history(runtime_reports_dir, hours=24, max_points=24)
         hmm_history_vote = history_votes.get('hmm', {}) if isinstance(history_votes.get('hmm', {}), dict) else {}
         hmm_vote = votes.get('hmm', {})
         if not isinstance(hmm_vote, dict):
