@@ -58,24 +58,24 @@ def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
         if "enabled" in data or "active" in data:
             normalized = dict(data)
             if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+                normalized["enabled"] = _to_bool(normalized.get("active"))
             return normalized
 
         nested = data.get("kill_switch")
         if isinstance(nested, dict):
             normalized = dict(nested)
             if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+                normalized["enabled"] = _to_bool(normalized.get("active"))
             return normalized
 
         normalized = dict(data)
-        normalized["enabled"] = bool(nested)
+        normalized["enabled"] = _to_bool(nested)
         return normalized
 
     if data is None:
         return {"enabled": False}
 
-    return {"enabled": bool(data)}
+    return {"enabled": _to_bool(data)}
 
 
 def _is_manual_kill_switch(data: Any) -> bool:
@@ -221,7 +221,7 @@ class LivePreflight:
         reconcile_ok = bool(out.get("ok"))
         reconcile_reason = out.get("reason")
         kill_switch_state = _normalize_kill_switch(out.get("kill_switch"))
-        kill_switch_enabled = bool(kill_switch_state.get("enabled"))
+        kill_switch_enabled = _to_bool(kill_switch_state.get("enabled"))
         details["reconcile"] = {
             "ok": reconcile_ok,
             "reason": reconcile_reason,
@@ -261,7 +261,7 @@ class LivePreflight:
             reconcile_ok = bool(out.get("ok"))
             reconcile_reason = out.get("reason")
             kill_switch_state = _normalize_kill_switch(out.get("kill_switch"))
-            kill_switch_enabled = bool(kill_switch_state.get("enabled"))
+            kill_switch_enabled = _to_bool(kill_switch_state.get("enabled"))
             details["reconcile_after_patch"] = {
                 "ok": reconcile_ok,
                 "reason": reconcile_reason,

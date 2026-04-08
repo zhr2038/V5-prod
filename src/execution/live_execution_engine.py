@@ -49,21 +49,29 @@ def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def load_kill_switch_enabled(path: str) -> bool:
     """检查是否启用kill switch"""
     d = _load_json(path) or {}
     if "enabled" in d:
-        return bool(d.get("enabled"))
+        return _to_bool(d.get("enabled"))
     if "active" in d:
-        return bool(d.get("active"))
+        return _to_bool(d.get("active"))
     nested = d.get("kill_switch")
     if isinstance(nested, dict):
         if "enabled" in nested:
-            return bool(nested.get("enabled"))
+            return _to_bool(nested.get("enabled"))
         if "active" in nested:
-            return bool(nested.get("active"))
+            return _to_bool(nested.get("active"))
         return False
-    return bool(nested)
+    return _to_bool(nested)
 
 
 def load_reconcile_ok(path: str) -> bool:
@@ -75,9 +83,9 @@ def load_reconcile_ok(path: str) -> bool:
     if d is None:
         return True
     if "ok" in d:
-        return bool(d.get("ok"))
+        return _to_bool(d.get("ok"))
     if "reconcile_ok" in d:
-        return bool(d.get("reconcile_ok"))
+        return _to_bool(d.get("reconcile_ok"))
     return True
 
 

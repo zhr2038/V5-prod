@@ -136,6 +136,23 @@ def test_submit_gate_ignores_nested_disabled_kill_switch_dict() -> None:
         assert submit_gate_for_live(cfg) == ("ALLOW", True, False)
 
 
+def test_submit_gate_ignores_string_false_kill_switch_and_reconcile() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        reconcile_path = f"{td}/reconcile_status.json"
+        kill_switch_path = f"{td}/kill_switch.json"
+        with open(reconcile_path, "w", encoding="utf-8") as f:
+            json.dump({"ok": "false"}, f)
+        with open(kill_switch_path, "w", encoding="utf-8") as f:
+            json.dump({"enabled": "false"}, f)
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=reconcile_path,
+            kill_switch_path=kill_switch_path,
+        )
+
+        assert submit_gate_for_live(cfg) == ("SELL_ONLY", False, False)
+
+
 def test_place_idempotent_same_intent() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()

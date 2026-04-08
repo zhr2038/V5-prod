@@ -132,3 +132,23 @@ def test_manual_flag_kill_switch_not_auto_cleared() -> None:
         persisted = json.loads(open(kill, "r", encoding="utf-8").read())
         assert persisted["enabled"] is True
         assert persisted["manual"] is True
+
+
+def test_string_false_kill_switch_does_not_block() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        status = f"{td}/reconcile_status.json"
+        state = f"{td}/reconcile_failure_state.json"
+        kill = f"{td}/kill_switch.json"
+        cfg = GuardConfig(
+            reconcile_status_path=status,
+            failure_state_path=state,
+            kill_switch_path=kill,
+            stale_threshold_sec=10**9,
+        )
+        g = KillSwitchGuard(cfg)
+
+        _write(kill, {"kill_switch": {"enabled": "false", "trigger": "manual"}})
+        _write(status, {"generated_ts_ms": int(time.time() * 1000), "ok": True})
+        out = g.apply()
+        ks = out.get("kill_switch") or {}
+        assert ks.get("enabled") is False

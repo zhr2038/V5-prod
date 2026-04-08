@@ -34,37 +34,37 @@ def _read_json(path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
-    if isinstance(data, dict):
-        if "enabled" in data or "active" in data:
-            normalized = dict(data)
-            if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
-            return normalized
-
-        nested = data.get("kill_switch")
-        if isinstance(nested, dict):
-            normalized = dict(nested)
-            if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
-            return normalized
-
-        normalized = dict(data)
-        normalized["enabled"] = bool(nested)
-        return normalized
-
-    if data is None:
-        return {"enabled": False}
-
-    return {"enabled": bool(data)}
-
-
 def _to_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
+    if isinstance(data, dict):
+        if "enabled" in data or "active" in data:
+            normalized = dict(data)
+            if "enabled" not in normalized:
+                normalized["enabled"] = _to_bool(normalized.get("active"))
+            return normalized
+
+        nested = data.get("kill_switch")
+        if isinstance(nested, dict):
+            normalized = dict(nested)
+            if "enabled" not in normalized:
+                normalized["enabled"] = _to_bool(normalized.get("active"))
+            return normalized
+
+        normalized = dict(data)
+        normalized["enabled"] = _to_bool(nested)
+        return normalized
+
+    if data is None:
+        return {"enabled": False}
+
+    return {"enabled": _to_bool(data)}
 
 
 def _is_manual_kill_switch(data: Any) -> bool:
@@ -160,7 +160,9 @@ class KillSwitchGuard:
         }
 
     def _load_kill_switch(self) -> Dict[str, Any]:
-        return _normalize_kill_switch(_read_json(self.cfg.kill_switch_path))
+        normalized = _normalize_kill_switch(_read_json(self.cfg.kill_switch_path))
+        normalized["enabled"] = _to_bool(normalized.get("enabled"))
+        return normalized
 
     def apply(self) -> Dict[str, Any]:
         """Apply"""
