@@ -139,7 +139,10 @@ class AlphaEngine:
             return {}
 
         try:
-            p = Path(str(getattr(self.cfg, "dynamic_weights_by_regime_path", "") or ""))
+            p = self._resolve_repo_path(
+                getattr(self.cfg, "dynamic_weights_by_regime_path", None),
+                "reports/alpha_dynamic_weights_by_regime.json",
+            )
             if not p.exists():
                 return {}
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -224,7 +227,10 @@ class AlphaEngine:
             if not ic_cfg or not bool(getattr(ic_cfg, 'enabled', False)):
                 return dict(default_weights)
 
-            p = Path(str(getattr(ic_cfg, 'ic_monitor_path', 'reports/alpha_ic_monitor.json')))
+            p = self._resolve_repo_path(
+                getattr(ic_cfg, 'ic_monitor_path', 'reports/alpha_ic_monitor.json'),
+                'reports/alpha_ic_monitor.json',
+            )
             if not p.exists():
                 return dict(default_weights)
 

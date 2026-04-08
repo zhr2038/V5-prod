@@ -54,3 +54,86 @@ def test_alpha_engine_resolves_equity_validation_from_repo_root(monkeypatch, tmp
     engine.repo_root = workspace
 
     assert engine._resolve_total_capital_usdt() == pytest.approx(123.45)
+
+
+def test_alpha_engine_resolves_regime_weight_override_from_repo_root(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "alpha_dynamic_weights_by_regime.json").write_text(
+        json.dumps(
+            {
+                "regimes": {
+                    "Trending": {
+                        "weights": {
+                            "f1_mom_5d": 0.7,
+                            "f2_mom_20d": 0.2,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    other_cwd = tmp_path / "elsewhere"
+    other_cwd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(other_cwd)
+
+    cfg = AlphaConfig(
+        dynamic_weights_by_regime_enabled=True,
+        dynamic_weights_by_regime_path="reports/alpha_dynamic_weights_by_regime.json",
+    )
+    engine = AlphaEngine(cfg)
+    engine.repo_root = workspace
+    engine.set_regime_context("TRENDING")
+
+    weights = engine._resolve_classic_base_weights(
+        {
+            "f1_mom_5d": 0.2,
+            "f2_mom_20d": 0.3,
+        }
+    )
+
+    assert weights["f1_mom_5d"] == pytest.approx(0.7)
+    assert weights["f2_mom_20d"] == pytest.approx(0.2)
+
+
+def test_alpha_engine_resolves_ic_monitor_from_repo_root(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "alpha_ic_monitor.json").write_text(
+        json.dumps(
+            {
+                "factor_ic": {
+                    "f1_mom_5d": {
+                        "rank_ic_short": {"mean": 0.015, "count": 16},
+                        "rank_ic_long": {"mean": 0.010, "count": 32},
+                    },
+                    "f2_mom_20d": {
+                        "rank_ic_short": {"mean": 0.0, "count": 16},
+                        "rank_ic_long": {"mean": 0.0, "count": 32},
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    other_cwd = tmp_path / "elsewhere"
+    other_cwd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(other_cwd)
+
+    cfg = AlphaConfig()
+    cfg.dynamic_ic_weighting.enabled = True
+    cfg.dynamic_ic_weighting.ic_monitor_path = "reports/alpha_ic_monitor.json"
+    engine = AlphaEngine(cfg)
+    engine.repo_root = workspace
+
+    weights = engine._load_dynamic_ic_weights(
+        {
+            "f1_mom_5d": 1.0,
+            "f2_mom_20d": 1.0,
+        }
+    )
+
+    assert weights["f1_mom_5d"] > weights["f2_mom_20d"]
