@@ -298,3 +298,76 @@ def test_fill_reconciler_partial_sell_updates_position_store_idempotently() -> N
         assert out2["updated_orders"] == 0
         assert pos is not None
         assert pos.qty == pytest.approx(0.599)
+
+
+def test_fill_reconciler_exports_into_custom_runtime_dirs(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    shadow_dir = tmp_path / "reports" / "shadow_runtime"
+    runs_dir = shadow_dir / "runs" / "shadow_run"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "TRENDING",
+                "router_decisions": [
+                    {
+                        "symbol": "BTC/USDT",
+                        "deadband": 0.12,
+                        "drift": 0.34,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fills = FillStore(path=str(shadow_dir / "fills.sqlite"))
+    orders = OrderStore(path=str(shadow_dir / "orders.sqlite"))
+
+    clid = "SHADOW_FILL_EXPORT"
+    orders.upsert_new(
+        cl_ord_id=clid,
+        run_id="shadow_run",
+        inst_id="BTC-USDT",
+        side="buy",
+        intent="OPEN_LONG",
+        decision_hash="shadow-h",
+        td_mode="cash",
+        ord_type="market",
+        notional_usdt=10.0,
+        window_start_ts=1,
+        window_end_ts=2,
+        req={"_meta": {"mid_px_at_submit": 100.0, "bid": 99.0, "ask": 101.0, "ts_ms": 1}},
+    )
+    fills.upsert_many(
+        [
+            FillRow(
+                inst_id="BTC-USDT",
+                trade_id="shadow-1",
+                ts_ms=2,
+                ord_id="OID-SHADOW",
+                cl_ord_id=clid,
+                side="buy",
+                fill_px="101",
+                fill_sz="1",
+                fee="0",
+                fee_ccy="USDT",
+            )
+        ]
+    )
+
+    rec = FillReconciler(fill_store=fills, order_store=orders, okx=None)
+    out = rec.reconcile()
+
+    assert out["fills_exported"] == 1
+    assert (shadow_dir / "runs" / "shadow_run" / "trades.csv").exists()
+    assert not (tmp_path / "reports" / "runs" / "shadow_run" / "trades.csv").exists()
+
+    cost_event_files = list((shadow_dir / "cost_events").glob("*.jsonl"))
+    assert len(cost_event_files) == 1
+    event = json.loads(cost_event_files[0].read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert event["regime"] == "TRENDING"
+    assert event["deadband_pct"] == pytest.approx(0.12)
+    assert event["drift"] == pytest.approx(0.34)
+    assert not (tmp_path / "reports" / "cost_events").exists()

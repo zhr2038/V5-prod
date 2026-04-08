@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
+from src.execution.fill_store import (
+    derive_runtime_cost_events_dir,
+    derive_runtime_spread_snapshots_dir,
+)
 from src.reporting.trade_log import Fill, TradeLogWriter
 from src.reporting.cost_events import append_cost_event
 from src.reporting.spread_snapshot_store import SpreadSnapshotStore
@@ -172,7 +176,9 @@ def export_fill(
 
     spread_bps = None
     if mid is None:
-        ss = spread_store or SpreadSnapshotStore()
+        ss = spread_store or SpreadSnapshotStore(
+            base_dir=str(derive_runtime_spread_snapshots_dir(order_store_path))
+        )
         snap = None
         try:
             snap = ss.get_latest_before(symbol=symbol, ts_ms=int(fill_ts_ms))
@@ -259,7 +265,7 @@ def export_fill(
             "deadband_pct": deadband_pct,
             "drift": drift,
         }
-        append_cost_event(event)
+        append_cost_event(event, base_dir=str(derive_runtime_cost_events_dir(order_store_path)))
         cost_event_written = True
 
     return ExportResult(trade_written=trade_written, cost_event_written=cost_event_written)

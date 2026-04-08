@@ -29,6 +29,26 @@ def derive_fill_store_path(order_store_path: Union[str, Path]) -> Path:
     return path.with_name("fills.sqlite")
 
 
+def derive_runtime_reports_dir(order_store_path: Union[str, Path]) -> Path:
+    """Derive the runtime reports directory from the effective orders DB path."""
+    return Path(order_store_path).parent
+
+
+def derive_runtime_runs_dir(order_store_path: Union[str, Path]) -> Path:
+    """Derive the matching runs directory from the effective orders DB path."""
+    return derive_runtime_reports_dir(order_store_path) / "runs"
+
+
+def derive_runtime_cost_events_dir(order_store_path: Union[str, Path]) -> Path:
+    """Derive the matching cost_events directory from the effective orders DB path."""
+    return derive_runtime_reports_dir(order_store_path) / "cost_events"
+
+
+def derive_runtime_spread_snapshots_dir(order_store_path: Union[str, Path]) -> Path:
+    """Derive the matching spread_snapshots directory from the effective orders DB path."""
+    return derive_runtime_reports_dir(order_store_path) / "spread_snapshots"
+
+
 @dataclass
 class FillRow:
     """FillRow类"""

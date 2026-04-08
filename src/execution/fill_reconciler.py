@@ -5,9 +5,10 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.execution.fill_store import FillStore
+from src.execution.fill_store import FillStore, derive_runtime_runs_dir
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
@@ -251,16 +252,14 @@ class FillReconciler:
 
         # Cache per-run context for richer cost_events bucketing (regime/deadband/drift)
         run_ctx_cache: Dict[str, Dict[str, Any]] = {}
+        runs_root = derive_runtime_runs_dir(getattr(self.order_store, "path", "reports/orders.sqlite"))
 
         def _load_run_ctx(run_id: str) -> Dict[str, Any]:
             if run_id in run_ctx_cache:
                 return run_ctx_cache[run_id]
             ctx: Dict[str, Any] = {"regime": None, "by_symbol": {}}
             try:
-                import os
-                from pathlib import Path
-
-                p = Path(os.path.join("reports", "runs", str(run_id), "decision_audit.json"))
+                p = Path(runs_root) / str(run_id) / "decision_audit.json"
                 if p.exists():
                     obj = json.loads(p.read_text(encoding="utf-8"))
                     ctx["regime"] = obj.get("regime")
@@ -315,7 +314,7 @@ class FillReconciler:
                     intent=str(row.intent),
                     window_start_ts=row.window_start_ts,
                     window_end_ts=row.window_end_ts,
-                    run_dir=f"reports/runs/{row.run_id}",
+                    run_dir=str(Path(runs_root) / str(row.run_id)),
                     regime=(ctx.get("regime") if isinstance(ctx, dict) else None),
                     deadband_pct=((sym_ctx or {}).get("deadband") if isinstance(sym_ctx, dict) else None),
                     drift=((sym_ctx or {}).get("drift") if isinstance(sym_ctx, dict) else None),

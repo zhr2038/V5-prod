@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 
+from src.execution.fill_store import derive_runtime_cost_events_dir
 from src.execution.order_store import OrderStore
 from src.reporting.fill_trade_exporter import export_fill
 
@@ -56,7 +57,7 @@ def test_slippage_prefers_mid_at_submit_over_snapshot(tmp_path, monkeypatch):
     assert rows[0]["slippage_usdt"] == "1"
 
     # Verify cost event also records submit mid as the reference source.
-    cost_event_files = list((tmp_path / "reports" / "cost_events").glob("*.jsonl"))
+    cost_event_files = list(derive_runtime_cost_events_dir(tmp_path / "orders.sqlite").glob("*.jsonl"))
     assert len(cost_event_files) == 1
     lines = cost_event_files[0].read_text(encoding="utf-8").strip().splitlines()
     event = json.loads(lines[-1])
