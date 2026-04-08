@@ -3567,7 +3567,8 @@ def api_ic_diagnostics():
     """IC诊断进度API"""
     try:
         # 查找IC诊断文件（按修改时间，避免文件名排序误判）
-        ic_files = list(REPORTS_DIR.glob('ic_diagnostics_*.json'))
+        runtime_reports_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir
+        ic_files = list(runtime_reports_dir.glob('ic_diagnostics_*.json'))
 
         if not ic_files:
             return jsonify({

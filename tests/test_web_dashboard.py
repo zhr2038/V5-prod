@@ -2268,6 +2268,85 @@ def test_api_reflection_reports_uses_active_runtime_reflection_dir(monkeypatch, 
     assert payload["reports"][0]["medium_priority"] == 1
 
 
+def test_api_ic_diagnostics_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    runtime_dir = reports_dir / "shadow_runtime"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime_file = runtime_dir / "ic_diagnostics_20260408.json"
+    root_file = reports_dir / "ic_diagnostics_20260409.json"
+    runtime_file.write_text(
+        json.dumps(
+            {
+                "overall_tradable": {
+                    "ic": {
+                        "factor_runtime": {
+                            "mean": 0.11,
+                            "p50": 0.1,
+                            "p75": 0.2,
+                            "p25": 0.0,
+                            "count": 10,
+                        }
+                    },
+                    "used_points": 10,
+                    "used_timestamps": 5,
+                },
+                "by_regime": {},
+                "lookback_days": 30,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    root_file.write_text(
+        json.dumps(
+            {
+                "overall_tradable": {
+                    "ic": {
+                        "factor_root": {
+                            "mean": -0.22,
+                            "p50": -0.2,
+                            "p75": -0.1,
+                            "p25": -0.3,
+                            "count": 12,
+                        }
+                    },
+                    "used_points": 12,
+                    "used_timestamps": 6,
+                },
+                "by_regime": {},
+                "lookback_days": 30,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(root_file, (runtime_file.stat().st_mtime + 100, runtime_file.stat().st_mtime + 100))
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    response = client.get("/api/ic_diagnostics")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ready"
+    assert payload["source_file"] == "ic_diagnostics_20260408.json"
+    assert payload["overall_ic"] == 0.11
+    assert payload["sample_count"] == 10
+    assert payload["factors"][0]["name"] == "factor_runtime"
+
+
 def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
