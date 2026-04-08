@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from types import SimpleNamespace
 
 import scripts.health_check as health_check
@@ -177,3 +178,48 @@ def test_health_check_does_not_fall_back_to_legacy_timer_when_prod_exists(monkey
             "detail": "inactive",
         }
     ]
+
+
+def test_health_check_database_uses_runtime_db_paths_from_active_config(monkeypatch, tmp_path) -> None:
+    workspace = tmp_path
+    reports_dir = workspace / "reports"
+    shadow_dir = reports_dir / "shadow_runtime"
+    configs_dir = workspace / "configs"
+    shadow_dir.mkdir(parents=True, exist_ok=True)
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    for db_name, table_name in (
+        ("orders.sqlite", "orders"),
+        ("positions.sqlite", "positions"),
+        ("fills.sqlite", "fills"),
+    ):
+        db_path = shadow_dir / db_name
+        con = sqlite3.connect(str(db_path))
+        try:
+            con.execute(f"CREATE TABLE {table_name} (id INTEGER)")
+            con.commit()
+        finally:
+            con.close()
+
+    monkeypatch.setattr(health_check, "WORKSPACE", workspace)
+    monkeypatch.setattr(health_check, "REPORTS_DIR", reports_dir)
+
+    result = health_check.HealthChecker().check_database_health()
+
+    assert result["status"] == "healthy"
+    assert [item["db"] for item in result["details"]] == [
+        "orders.sqlite",
+        "positions.sqlite",
+        "fills.sqlite",
+    ]
+    assert all(item["status"] == "healthy" for item in result["details"])

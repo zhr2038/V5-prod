@@ -10,12 +10,20 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
 import requests
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_fill_store_path, derive_position_store_path
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 REPORTS_DIR = WORKSPACE / "reports"
@@ -67,6 +75,30 @@ def load_env_file(path: Path) -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+def _resolve_health_database_paths() -> list[tuple[Path, str]]:
+    try:
+        cfg = load_runtime_config(project_root=WORKSPACE)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=WORKSPACE,
+            )
+        ).resolve()
+        return [
+            (orders_db, "orders"),
+            (derive_position_store_path(orders_db).resolve(), "positions"),
+            (derive_fill_store_path(orders_db).resolve(), "fills"),
+        ]
+    except Exception:
+        return [
+            (REPORTS_DIR / "orders.sqlite", "orders"),
+            (REPORTS_DIR / "positions.sqlite", "positions"),
+            (REPORTS_DIR / "fills.sqlite", "fills"),
+        ]
 
 
 class HealthChecker:
@@ -187,8 +219,8 @@ class HealthChecker:
 
     def check_database_health(self) -> Dict[str, Any]:
         checks: List[Dict[str, Any]] = []
-        for db_name, table_name in (("orders.sqlite", "orders"), ("positions.sqlite", "positions")):
-            db_path = REPORTS_DIR / db_name
+        for db_path, table_name in _resolve_health_database_paths():
+            db_name = db_path.name
             if not db_path.exists():
                 checks.append({"db": db_name, "status": "warning", "detail": "missing"})
                 continue
