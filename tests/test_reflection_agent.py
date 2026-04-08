@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 
+from src.execution import reflection_agent as reflection_module
 from src.execution.reflection_agent import ReflectionAgentV2
 
 
@@ -198,3 +200,61 @@ def test_reflection_agent_execution_quality_uses_unique_orders_for_fill_rate(tmp
     quality = agent._analyze_execution_quality(trades)
 
     assert quality.fill_rate == 1.0
+
+
+def test_reflection_agent_uses_active_runtime_paths_for_defaults(monkeypatch, tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    (reports_dir / "ic_diagnostics_30d_20u.json").write_text(
+        json.dumps(
+            {
+                "overall_tradable": {
+                    "ic": {
+                        "f1_mom_5d": {"mean": -0.05},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runtime_dir / "ic_diagnostics_30d_20u.json").write_text(
+        json.dumps(
+            {
+                "overall_tradable": {
+                    "ic": {
+                        "f1_mom_5d": {"mean": 0.06},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(reflection_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(reflection_module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        reflection_module,
+        "load_runtime_config",
+        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    monkeypatch.setattr(
+        reflection_module,
+        "resolve_runtime_path",
+        lambda raw_path=None, default="reports/orders.sqlite", project_root=None: str(
+            (tmp_path / (raw_path or default)).resolve()
+        ),
+    )
+
+    agent = reflection_module.ReflectionAgentV2()
+
+    assert agent.db_path == str((runtime_dir / "orders.sqlite").resolve())
+    assert agent.report_dir == (runtime_dir / "reflection").resolve()
+    assert agent.ic_file == (runtime_dir / "ic_diagnostics_30d_20u.json").resolve()
+    assert not (reports_dir / "reflection").exists()
+
+    factors = agent._analyze_factor_effectiveness()
+    assert factors[0].ic == 0.06
+    assert factors[0].status == "effective"

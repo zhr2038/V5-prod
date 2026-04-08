@@ -20,8 +20,28 @@ import pandas as pd
 import numpy as np
 from decimal import Decimal
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_reports_dir
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = PROJECT_ROOT / 'reports'
+
+
+def _resolve_reflection_runtime_paths() -> Tuple[Path, Path]:
+    try:
+        cfg = load_runtime_config(project_root=PROJECT_ROOT)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=PROJECT_ROOT,
+            )
+        ).resolve()
+        reports_dir = derive_runtime_reports_dir(orders_db).resolve()
+        return orders_db, reports_dir
+    except Exception:
+        return (REPORTS_DIR / 'orders.sqlite').resolve(), REPORTS_DIR.resolve()
 
 
 class AlertLevel(Enum):
@@ -83,14 +103,18 @@ class ReflectionAgentV2:
     
     def __init__(
         self,
-        db_path: str = str(REPORTS_DIR / 'orders.sqlite'),
-        report_dir: str = str(REPORTS_DIR / 'reflection'),
-        bills_db: str = str(REPORTS_DIR / 'bills.sqlite')
+        db_path: Optional[str] = None,
+        report_dir: Optional[str] = None,
+        bills_db: Optional[str] = None,
+        ic_file: Optional[str] = None,
     ):
-        self.db_path = db_path
-        self.report_dir = Path(report_dir)
+        runtime_orders_db, runtime_reports_dir = _resolve_reflection_runtime_paths()
+        self.db_path = str(Path(db_path).resolve()) if db_path else str(runtime_orders_db)
+        self.reports_dir = runtime_reports_dir
+        self.report_dir = Path(report_dir).resolve() if report_dir else (runtime_reports_dir / 'reflection').resolve()
         self.report_dir.mkdir(parents=True, exist_ok=True)
-        self.bills_db = bills_db
+        self.bills_db = str(Path(bills_db).resolve()) if bills_db else str((runtime_reports_dir / 'bills.sqlite').resolve())
+        self.ic_file = Path(ic_file).resolve() if ic_file else (runtime_reports_dir / 'ic_diagnostics_30d_20u.json').resolve()
         
         self.analysis_period_days = 7
         self.insights: List[TradeInsight] = []
@@ -376,7 +400,7 @@ class ReflectionAgentV2:
         factors = []
         
         # 读取IC诊断数据
-        ic_file = REPORTS_DIR / 'ic_diagnostics_30d_20u.json'
+        ic_file = self.ic_file
         if ic_file.exists():
             with open(ic_file, 'r') as f:
                 ic_data = json.load(f)
