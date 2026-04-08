@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import csv
 import json
-import tempfile
 
 from src.execution.order_store import OrderStore
 from src.reporting.fill_trade_exporter import export_fill
 
 
-def test_slippage_prefers_mid_at_submit_over_snapshot(tmp_path):
+def test_slippage_prefers_mid_at_submit_over_snapshot(tmp_path, monkeypatch):
     # Prepare an order with submit mid meta
+    monkeypatch.chdir(tmp_path)
     os = OrderStore(path=str(tmp_path / "orders.sqlite"))
     clid = "c1"
     os.upsert_new(
@@ -47,11 +48,17 @@ def test_slippage_prefers_mid_at_submit_over_snapshot(tmp_path):
         spread_store=None,
     )
 
-    # Verify cost_event got mid_source=submit (read last line)
-    ymd = "19700101"  # epoch day
-    p = tmp_path / "cost_events" / f"{ymd}.jsonl"
-    # exporter writes to default reports/cost_events, so instead just ensure slippage computed (trade csv)
+    # Verify trade log used the submit-time mid instead of falling back to empty slippage.
     csvp = run_dir / "trades.csv"
-    txt = csvp.read_text(encoding="utf-8")
-    assert "slippage_usdt" in txt
-    assert ",1.0," in txt or ",1," in txt
+    with csvp.open("r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["slippage_usdt"] == "1"
+
+    # Verify cost event also records submit mid as the reference source.
+    cost_event_files = list((tmp_path / "reports" / "cost_events").glob("*.jsonl"))
+    assert len(cost_event_files) == 1
+    lines = cost_event_files[0].read_text(encoding="utf-8").strip().splitlines()
+    event = json.loads(lines[-1])
+    assert event["mid_source"] == "submit"
+    assert event["mid_px_at_submit"] == 100.0
