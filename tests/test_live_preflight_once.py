@@ -119,3 +119,54 @@ def test_live_preflight_once_defaults_runtime_paths_to_repo_root(monkeypatch) ->
     assert Path(captured["execution_cfg"].kill_switch_path).resolve() == (
         workspace / "reports" / "custom_kill_switch.json"
     ).resolve()
+
+
+def test_live_preflight_once_uses_runtime_positions_db_from_order_store_path(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+    workspace = Path(live_preflight_once.__file__).resolve().parents[1]
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+            reconcile_status_path="reports/custom_reconcile_status.json",
+            reconcile_failure_state_path="reports/custom_reconcile_failure_state.json",
+            kill_switch_path="reports/custom_kill_switch.json",
+        ),
+    )
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class DummyPreflight:
+        def __init__(self, execution_cfg, **kwargs) -> None:
+            captured["execution_cfg"] = execution_cfg
+            captured["kwargs"] = kwargs
+
+        def run(self, *, max_pages: int, max_status_age_sec: int):
+            return SimpleNamespace(decision="ALLOW", reconcile_ok=True, ledger_ok=True, kill_switch_enabled=False)
+
+    def _fake_position_store(path: str):
+        captured["positions_db_path"] = Path(path).resolve()
+        return SimpleNamespace(path=path)
+
+    def _fake_account_store(path: str):
+        captured["account_db_path"] = Path(path).resolve()
+        return SimpleNamespace(path=path)
+
+    monkeypatch.setattr(live_preflight_once, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(live_preflight_once, "PositionStore", _fake_position_store)
+    monkeypatch.setattr(live_preflight_once, "AccountStore", _fake_account_store)
+    monkeypatch.setattr(live_preflight_once, "OKXPrivateClient", DummyClient)
+    monkeypatch.setattr(live_preflight_once, "LivePreflight", DummyPreflight)
+    monkeypatch.setattr(sys, "argv", ["live_preflight_once.py"])
+
+    live_preflight_once.main()
+
+    assert captured["positions_db_path"] == (workspace / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
+    assert captured["account_db_path"] == (workspace / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
+    assert Path(captured["kwargs"]["bills_db_path"]).resolve() == (workspace / "reports" / "bills.sqlite").resolve()

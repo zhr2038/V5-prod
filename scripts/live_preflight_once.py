@@ -7,6 +7,7 @@ import logging
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
+from src.execution.fill_store import derive_position_store_path
 from src.execution.live_preflight import LivePreflight
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import PositionStore
@@ -16,7 +17,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
-    ap.add_argument("--positions-db", default="reports/positions.sqlite")
+    ap.add_argument("--positions-db", default=None)
     ap.add_argument("--bills-db", default="reports/bills.sqlite")
     ap.add_argument("--max-pages", type=int, default=5)
     ap.add_argument("--max-status-age-sec", type=int, default=180)
@@ -27,7 +28,14 @@ def main() -> None:
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),
     )
-    positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    if args.positions_db:
+        positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    else:
+        order_store_path = resolve_runtime_path(
+            getattr(cfg.execution, "order_store_path", None),
+            default="reports/orders.sqlite",
+        )
+        positions_db_path = derive_position_store_path(order_store_path)
     bills_db_path = resolve_runtime_path(args.bills_db, default="reports/bills.sqlite")
     reconcile_status_path = resolve_runtime_path(
         getattr(cfg.execution, "reconcile_status_path", None),
