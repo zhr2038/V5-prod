@@ -4038,7 +4038,7 @@ def api_decision_chain():
     """决策归因面板API - 展示策略信号到执行的完整链路"""
     try:
         # 获取最近5轮决策记录
-        runs_dir = REPORTS_DIR / 'runs'
+        runs_dir = _resolve_dashboard_runtime_paths(load_config()).runs_dir
         if not runs_dir.exists():
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
 

@@ -2517,6 +2517,66 @@ def test_decision_chain_legacy_utc_run_time_is_not_double_shifted(monkeypatch, t
     assert payload["rounds"][0]["time"] == "1970-01-01 09:00:00"
 
 
+def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_run = reports_dir / "runs" / "20260408_02"
+    runtime_run = runtime_dir / "runs" / "20260408_01"
+    root_run.mkdir(parents=True, exist_ok=True)
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (root_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260408_02",
+                "now_ts": 1_710_000_000,
+                "regime": "SIDEWAYS",
+                "top_scores": [{"symbol": "BTC/USDT", "score": 0.5, "rank": 1}],
+                "counts": {"selected": 1, "targets_pre_risk": 1, "orders_rebalance": 0, "orders_exit": 0},
+                "router_decisions": [{"reason": "deadband", "symbol": "BTC/USDT", "drift": 0.02, "deadband": 0.04}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260408_01",
+                "now_ts": 1_710_000_600,
+                "regime": "TRENDING",
+                "top_scores": [{"symbol": "ETH/USDT", "score": 0.9, "rank": 1}],
+                "counts": {"selected": 2, "targets_pre_risk": 2, "orders_rebalance": 1, "orders_exit": 0},
+                "router_decisions": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(root_run, (20, 20))
+    os.utime(runtime_run, (10, 10))
+
+    response = client.get("/api/decision_chain")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rounds"][0]["run_id"] == "20260408_01"
+    assert payload["rounds"][0]["strategy_signals"][0]["symbol"] == "ETH/USDT"
+    assert payload["rounds"][0]["execution_result"]["orders_rebalance"] == 1
+
+
 class _DummyResponse:
     def __init__(self, payload):
         self._payload = payload
