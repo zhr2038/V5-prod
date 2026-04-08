@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -76,3 +77,19 @@ def test_ab_decision_gate_defaults_to_active_runtime_reports_dir(monkeypatch, tm
     assert payload["window_runs"] == 1
     assert payload["current"]["selected"] == 12
     assert payload["current"]["rebalance"] == 3
+
+
+def test_ab_decision_gate_script_runs_from_outside_repo() -> None:
+    script_path = (Path(ab_decision_gate.__file__)).resolve()
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), "--help"],
+        cwd=script_path.parent.parent.parent,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--reports-dir" in result.stdout
