@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
 from src.execution.clordid import make_cl_ord_id, make_decision_hash
+from src.execution.fill_store import derive_position_store_path
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
@@ -315,8 +316,9 @@ class LiveExecutionEngine:
     ):
         self.cfg = cfg
         self.okx = okx
-        self.order_store = order_store or OrderStore(path=str(getattr(cfg, "order_store_path", "reports/orders.sqlite")))
-        self.position_store = position_store or PositionStore(path="reports/positions.sqlite")
+        order_store_path = str(getattr(cfg, "order_store_path", "reports/orders.sqlite"))
+        self.order_store = order_store or OrderStore(path=order_store_path)
+        self.position_store = position_store or PositionStore(path=str(derive_position_store_path(order_store_path)))
         self.run_id = str(run_id or "")
         self.exp_time_ms = exp_time_ms
         self._closed = False  # 跟踪资源状态

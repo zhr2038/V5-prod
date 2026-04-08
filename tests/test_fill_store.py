@@ -3,7 +3,13 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from src.execution.fill_store import FillRow, FillStore, derive_fill_store_path, parse_okx_fills
+from src.execution.fill_store import (
+    FillRow,
+    FillStore,
+    derive_fill_store_path,
+    derive_position_store_path,
+    parse_okx_fills,
+)
 
 
 def test_fill_store_dedup_by_inst_trade_id() -> None:
@@ -48,3 +54,10 @@ def test_derive_fill_store_path_tracks_custom_order_store_names() -> None:
     assert derive_fill_store_path("reports/shadow_orders.sqlite") == Path("reports/shadow_fills.sqlite")
     assert derive_fill_store_path("reports/orders_accelerated.sqlite") == Path("reports/fills_accelerated.sqlite")
     assert derive_fill_store_path("reports/shadow_tuned_xgboost/orders.sqlite") == Path("reports/shadow_tuned_xgboost/fills.sqlite")
+
+
+def test_derive_position_store_path_tracks_custom_order_store_names() -> None:
+    assert derive_position_store_path("reports/orders.sqlite") == Path("reports/positions.sqlite")
+    assert derive_position_store_path("reports/shadow_orders.sqlite") == Path("reports/shadow_positions.sqlite")
+    assert derive_position_store_path("reports/orders_accelerated.sqlite") == Path("reports/positions_accelerated.sqlite")
+    assert derive_position_store_path("reports/shadow_tuned_xgboost/orders.sqlite") == Path("reports/shadow_tuned_xgboost/positions.sqlite")

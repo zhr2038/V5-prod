@@ -364,6 +364,7 @@ def test_main_writes_run_artifacts_into_runtime_reports_dir(tmp_path: Path, monk
     class FakePositionStore:
         def __init__(self, path: str) -> None:
             self.path = path
+            captured["position_store_path"] = path
 
         def list(self):
             return []
@@ -371,6 +372,7 @@ def test_main_writes_run_artifacts_into_runtime_reports_dir(tmp_path: Path, monk
     class FakeAccountStore:
         def __init__(self, path: str) -> None:
             self.path = path
+            captured["account_store_path"] = path
             self._acc = SimpleNamespace(cash_usdt=100.0, equity_peak_usdt=100.0)
 
         def get(self):
@@ -474,3 +476,5 @@ def test_main_writes_run_artifacts_into_runtime_reports_dir(tmp_path: Path, monk
     assert not root_run_dir.exists()
     assert Path(captured["dump_reports_dir"]).resolve() == (tmp_path / "reports" / "shadow_runtime").resolve()
     assert Path(captured["spread_base_dir"]).resolve() == (tmp_path / "reports" / "shadow_runtime" / "spread_snapshots").resolve()
+    assert Path(captured["position_store_path"]).resolve() == (tmp_path / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
+    assert Path(captured["account_store_path"]).resolve() == (tmp_path / "reports" / "shadow_runtime" / "positions.sqlite").resolve()

@@ -271,6 +271,21 @@ def test_poll_open_uses_fill_store_derived_from_order_store(monkeypatch) -> None
         assert captured["reconcile_called"] == (2000, 20)
 
 
+def test_live_execution_engine_defaults_position_store_from_order_store_path() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        cfg = ExecutionConfig(
+            order_store_path=f"{td}/shadow_orders.sqlite",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+        )
+
+        eng = LiveExecutionEngine(cfg, okx=okx, run_id="r")
+
+        assert eng.order_store.path == Path(td) / "shadow_orders.sqlite"
+        assert eng.position_store.path == Path(td) / "shadow_positions.sqlite"
+
+
 def test_sell_market_uses_position_qty() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()

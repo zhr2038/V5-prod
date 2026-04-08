@@ -16,6 +16,7 @@ from src.execution.account_store import AccountStore
 from src.execution.execution_engine import ExecutionEngine
 from src.execution.event_action_bridge import consume_event_actions_for_run
 from src.execution.fill_store import (
+    derive_position_store_path,
     derive_runtime_reports_dir,
     derive_runtime_runs_dir,
     derive_runtime_spread_snapshots_dir,
@@ -416,8 +417,10 @@ def main() -> None:
     provider = build_provider(cfg)
 
     # load persisted positions/account early so current holdings always stay in managed market-data scope
-    store = PositionStore(path="reports/positions.sqlite")
-    acc_store = AccountStore(path="reports/positions.sqlite")
+    order_store_path = str(getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite"))
+    positions_db_path = str(derive_position_store_path(order_store_path))
+    store = PositionStore(path=positions_db_path)
+    acc_store = AccountStore(path=positions_db_path)
     held = store.list()
     held_symbols = [
         str(getattr(p, "symbol", "") or "")

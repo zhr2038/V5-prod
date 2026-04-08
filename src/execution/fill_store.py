@@ -29,6 +29,23 @@ def derive_fill_store_path(order_store_path: Union[str, Path]) -> Path:
     return path.with_name("fills.sqlite")
 
 
+def derive_position_store_path(order_store_path: Union[str, Path]) -> Path:
+    """Derive the matching positions DB path from the effective orders DB path.
+
+    Examples:
+    - reports/orders.sqlite -> reports/positions.sqlite
+    - reports/shadow_orders.sqlite -> reports/shadow_positions.sqlite
+    - reports/orders_accelerated.sqlite -> reports/positions_accelerated.sqlite
+    - reports/shadow_tuned_xgboost/orders.sqlite -> reports/shadow_tuned_xgboost/positions.sqlite
+    """
+    path = Path(order_store_path)
+    if path.name == "orders.sqlite":
+        return path.with_name("positions.sqlite")
+    if "orders" in path.stem:
+        return path.with_name(path.name.replace("orders", "positions", 1))
+    return path.with_name("positions.sqlite")
+
+
 def derive_runtime_reports_dir(order_store_path: Union[str, Path]) -> Path:
     """Derive the runtime reports directory from the effective orders DB path."""
     return Path(order_store_path).parent
