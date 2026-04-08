@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -229,6 +230,45 @@ def test_open_long_cooldown_uses_created_ts_when_updated_ts_missing(monkeypatch)
         assert req["blocked_by_cooldown"] is True
         assert req["latest_filled_updated_ts"] == 0
         assert req["latest_filled_event_ts"] == recent_created_ts
+
+
+def test_poll_open_uses_fill_store_derived_from_order_store(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/shadow_orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+        )
+
+        captured = {}
+
+        class DummyFillStore:
+            def __init__(self, path: str) -> None:
+                captured["fill_store_path"] = path
+                self.path = Path(path)
+
+        class DummyReconciler:
+            def __init__(self, *, fill_store, order_store, okx, position_store) -> None:
+                captured["reconciler_fill_path"] = str(fill_store.path)
+                captured["order_store_path"] = str(order_store.path)
+
+            def reconcile(self, limit: int, max_get_order_per_run: int) -> None:
+                captured["reconcile_called"] = (limit, max_get_order_per_run)
+
+        monkeypatch.setattr("src.execution.fill_store.FillStore", DummyFillStore)
+        monkeypatch.setattr("src.execution.fill_reconciler.FillReconciler", DummyReconciler)
+
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+        out = eng.poll_open(limit=5)
+
+        assert out == []
+        assert Path(captured["fill_store_path"]) == Path(td) / "shadow_fills.sqlite"
+        assert captured["reconciler_fill_path"] == str(Path(td) / "shadow_fills.sqlite")
+        assert captured["order_store_path"] == str(Path(td) / "shadow_orders.sqlite")
+        assert captured["reconcile_called"] == (2000, 20)
 
 
 def test_sell_market_uses_position_qty() -> None:

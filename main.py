@@ -945,12 +945,15 @@ def main() -> None:
     # This is needed because get_order polling alone doesn't guarantee fills are exported.
     if is_live:
         try:
-            from src.execution.fill_store import FillStore, parse_okx_fills
+            from src.execution.fill_store import FillStore, derive_fill_store_path, parse_okx_fills
             from src.execution.fill_reconciler import FillReconciler
 
             client = getattr(exec_engine, "okx", None)
             if client is not None:
-                fs = FillStore(path="reports/fills.sqlite")
+                live_order_store = getattr(exec_engine, "order_store", None)
+                if live_order_store is None:
+                    raise RuntimeError("live execution engine missing order_store")
+                fs = FillStore(path=str(derive_fill_store_path(live_order_store.path)))
                 # page newest fills backward; keep small to limit API usage
                 after = None
                 total_new = 0
@@ -973,7 +976,7 @@ def main() -> None:
                 try:
                     rec = FillReconciler(
                         fill_store=fs,
-                        order_store=getattr(exec_engine, "order_store", None) or order_store,
+                        order_store=live_order_store,
                         okx=client,
                         position_store=getattr(exec_engine, "position_store", None),
                     )

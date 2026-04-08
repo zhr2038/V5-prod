@@ -1189,10 +1189,10 @@ class LiveExecutionEngine:
         """Poll open"""
         # 0) Optional: sync fills into FillStore then reconcile into OrderStore.
         try:
-            from src.execution.fill_store import FillStore
+            from src.execution.fill_store import FillStore, derive_fill_store_path
             from src.execution.fill_reconciler import FillReconciler
 
-            fs = FillStore(path="reports/fills.sqlite")
+            fs = FillStore(path=str(derive_fill_store_path(self.order_store.path)))
             rec = FillReconciler(fill_store=fs, order_store=self.order_store, okx=self.okx, position_store=self.position_store)
             rec.reconcile(limit=2000, max_get_order_per_run=20)
         except Exception:

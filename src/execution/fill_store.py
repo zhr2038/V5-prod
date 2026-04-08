@@ -5,11 +5,28 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def derive_fill_store_path(order_store_path: Union[str, Path]) -> Path:
+    """Derive the matching fills DB path from the effective orders DB path.
+
+    Examples:
+    - reports/orders.sqlite -> reports/fills.sqlite
+    - reports/shadow_orders.sqlite -> reports/shadow_fills.sqlite
+    - reports/orders_accelerated.sqlite -> reports/fills_accelerated.sqlite
+    - reports/shadow_tuned_xgboost/orders.sqlite -> reports/shadow_tuned_xgboost/fills.sqlite
+    """
+    path = Path(order_store_path)
+    if path.name == "orders.sqlite":
+        return path.with_name("fills.sqlite")
+    if "orders" in path.stem:
+        return path.with_name(path.name.replace("orders", "fills", 1))
+    return path.with_name("fills.sqlite")
 
 
 @dataclass
