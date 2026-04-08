@@ -12,7 +12,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify
 
-from src.execution.fill_store import derive_fill_store_path
+from src.execution.fill_store import derive_fill_store_path, derive_position_store_path
 
 health_bp = Blueprint("health", __name__)
 
@@ -25,6 +25,7 @@ CONFIGS_DIR = PROJECT_ROOT / "configs"
 class HealthPaths:
     orders_db: Path
     fills_db: Path
+    positions_db: Path
     kill_switch_path: Path
     reconcile_status_path: Path
 
@@ -83,6 +84,7 @@ def _resolve_health_paths() -> HealthPaths:
     return HealthPaths(
         orders_db=orders_db,
         fills_db=derive_fill_store_path(orders_db),
+        positions_db=derive_position_store_path(orders_db),
         kill_switch_path=_resolve_runtime_path(execution_cfg.get("kill_switch_path"), "reports/kill_switch.json"),
         reconcile_status_path=_resolve_runtime_path(execution_cfg.get("reconcile_status_path"), "reports/reconcile_status.json"),
     )
@@ -174,6 +176,24 @@ def _load_last_trade_ts_ms() -> int | None:
     return max(candidates) if candidates else None
 
 
+def _check_runtime_positions_db(path: Path) -> None:
+    conn = sqlite3.connect(str(path))
+    try:
+        row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table'
+              AND name IN ('positions', 'account_state')
+            LIMIT 1
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise RuntimeError("missing positions/account_state tables")
+
+
 @health_bp.route("/health")
 def health_check():
     checks = {
@@ -184,13 +204,14 @@ def health_check():
     health_paths = _resolve_health_paths()
 
     try:
-        db_path = REPORTS_DIR / "positions.sqlite"
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("SELECT 1")
-        conn.close()
-        checks["checks"]["database"] = {"status": "ok"}
+        _check_runtime_positions_db(health_paths.positions_db)
+        checks["checks"]["database"] = {"status": "ok", "path": str(health_paths.positions_db)}
     except Exception as exc:
-        checks["checks"]["database"] = {"status": "error", "error": str(exc)}
+        checks["checks"]["database"] = {
+            "status": "error",
+            "error": str(exc),
+            "path": str(health_paths.positions_db),
+        }
         checks["status"] = "unhealthy"
 
     try:
@@ -253,15 +274,13 @@ def health_check():
 def readiness_check():
     ready = True
     reasons: list[str] = []
+    health_paths = _resolve_health_paths()
 
     try:
-        db_path = REPORTS_DIR / "positions.sqlite"
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("SELECT 1")
-        conn.close()
+        _check_runtime_positions_db(health_paths.positions_db)
     except Exception as exc:
         ready = False
-        reasons.append(f"Database unavailable: {exc}")
+        reasons.append(f"Database unavailable ({health_paths.positions_db}): {exc}")
 
     config_path = _resolve_active_config_path()
     if not config_path.exists():
