@@ -1,15 +1,23 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
-from src.execution.highest_px_tracker import get_highest_price_tracker
+from src.execution.fill_store import derive_position_store_path
+from src.execution.highest_px_tracker import HighestPriceTracker
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import Position, PositionStore
 from src.reporting.spread_snapshot_store import SpreadSnapshotStore
@@ -22,10 +30,23 @@ def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _mid_px(symbol: str, ts_ms: int) -> float:
+def _derive_runtime_artifact_paths(positions_db_path: str | Path) -> tuple[Path, Path]:
+    positions_path = Path(positions_db_path).resolve()
+    reports_dir = positions_path.parent
+    if positions_path.name == "positions.sqlite":
+        highest_state_path = reports_dir / "highest_px_state.json"
+    elif "positions" in positions_path.stem:
+        highest_state_path = positions_path.with_name(
+            positions_path.name.replace("positions", "highest_px_state", 1)
+        ).with_suffix(".json")
+    else:
+        highest_state_path = reports_dir / "highest_px_state.json"
+    return reports_dir / "spread_snapshots", highest_state_path
+
+
+def _mid_px(symbol: str, ts_ms: int, *, spread_store: SpreadSnapshotStore) -> float:
     try:
-        ss = SpreadSnapshotStore()
-        snap = ss.get_latest_before(symbol=symbol, ts_ms=ts_ms)
+        snap = spread_store.get_latest_before(symbol=symbol, ts_ms=ts_ms)
         if snap is not None and snap.mid and snap.mid > 0:
             return float(snap.mid)
     except Exception:
@@ -37,7 +58,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
-    ap.add_argument("--positions-db", default="reports/positions.sqlite")
+    ap.add_argument("--positions-db", default=None)
     ap.add_argument("--overwrite", action="store_true", help="Overwrite local stores to match exchange snapshot")
     ap.add_argument("--min_non_usdt", type=float, default=0.0, help="Ignore non-USDT assets whose cashBal is below this")
     args = ap.parse_args()
@@ -48,9 +69,21 @@ def main() -> None:
         env_path=resolve_runtime_env_path(args.env),
     )
 
+    if args.positions_db:
+        positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    else:
+        order_store_path = resolve_runtime_path(
+            getattr(cfg.execution, "order_store_path", None),
+            default="reports/orders.sqlite",
+        )
+        positions_db_path = str(derive_position_store_path(order_store_path))
+    spread_snapshots_dir, highest_state_path = _derive_runtime_artifact_paths(positions_db_path)
+
     client = OKXPrivateClient(exchange=cfg.exchange)
-    ps = PositionStore(path=args.positions_db)
-    ac = AccountStore(path=args.positions_db)
+    ps = PositionStore(path=positions_db_path)
+    ac = AccountStore(path=positions_db_path)
+    spread_store = SpreadSnapshotStore(base_dir=spread_snapshots_dir)
+    tracker = HighestPriceTracker(state_path=str(highest_state_path))
 
     try:
         r = client.get_balance(ccy=None)
@@ -77,7 +110,6 @@ def main() -> None:
                 continue
 
         now_ms = int(time.time() * 1000)
-        tracker = get_highest_price_tracker()
 
         if args.overwrite:
             for p in ps.list():
@@ -98,7 +130,7 @@ def main() -> None:
                 continue
 
             symbol = f"{ccy}/USDT"
-            mid = _mid_px(symbol, now_ms)
+            mid = _mid_px(symbol, now_ms, spread_store=spread_store)
             now_ts = _iso_utc_now()
             avg_px = mid if mid > 0 else 0.0
             tracked_high = tracker.get_highest_px(symbol, float(avg_px))
