@@ -111,6 +111,7 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service >/dev/null 2>&1 || true
     systemctl --user disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service >/dev/null 2>&1 || true
     systemctl --user enable --now v5-web-dashboard.service
+    systemctl --user restart v5-web-dashboard.service
     systemctl --user enable --now v5-trade-monitor.timer
     systemctl --user enable --now v5-sentiment-collect.timer
     systemctl --user enable --now v5-auto-risk-eval.timer

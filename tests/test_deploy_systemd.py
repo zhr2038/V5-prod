@@ -79,6 +79,12 @@ def test_install_systemd_production_only_enables_trade_monitor_timer():
     assert "systemctl --user enable --now v5-trade-monitor.timer" in text
 
 
+def test_install_systemd_production_only_restarts_web_dashboard_service():
+    text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
+    assert "systemctl --user enable --now v5-web-dashboard.service" in text
+    assert "systemctl --user restart v5-web-dashboard.service" in text
+
+
 def test_install_systemd_production_only_enables_spread_rollup_timer():
     text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
     assert "--mapping v5-spread-rollup.user.service=v5-spread-rollup.service" in text
