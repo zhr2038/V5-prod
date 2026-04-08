@@ -18,6 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
+
 
 @dataclass(frozen=True)
 class AuditorPaths:
@@ -31,19 +33,52 @@ class AuditorPaths:
     reconcile_file: Path
 
 
+def _load_active_config(*, project_root: Path) -> dict[str, Any]:
+    config_path = Path(resolve_runtime_config_path(project_root=project_root))
+    try:
+        import yaml
+
+        if config_path.exists():
+            return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    return {}
+
+
 def build_paths(workspace: Path | None = None) -> AuditorPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    reports_dir = root / "reports"
+    cfg = _load_active_config(project_root=root)
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=root,
+        )
+    )
+    reports_dir = orders_db.parent.resolve()
     logs_dir = root / "logs"
     return AuditorPaths(
         workspace=root,
         reports_dir=reports_dir,
         runs_dir=reports_dir / "runs",
-        orders_db=reports_dir / "orders.sqlite",
+        orders_db=orders_db,
         log_file=logs_dir / "trade_audit.log",
         alert_file=logs_dir / "trade_alert.json",
-        kill_switch_file=reports_dir / "kill_switch.json",
-        reconcile_file=reports_dir / "reconcile_status.json",
+        kill_switch_file=Path(
+            resolve_runtime_path(
+                execution_cfg.get("kill_switch_path"),
+                default="reports/kill_switch.json",
+                project_root=root,
+            )
+        ),
+        reconcile_file=Path(
+            resolve_runtime_path(
+                execution_cfg.get("reconcile_status_path"),
+                default="reports/reconcile_status.json",
+                project_root=root,
+            )
+        ),
     )
 
 

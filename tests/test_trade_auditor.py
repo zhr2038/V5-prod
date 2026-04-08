@@ -19,6 +19,34 @@ def test_build_paths_anchor_trade_auditor_to_repo_root(tmp_path) -> None:
     assert paths.reconcile_file == tmp_path / "reports" / "reconcile_status.json"
 
 
+def test_build_paths_follow_active_config_runtime_paths(tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+                "  kill_switch_path: reports/shadow_runtime/kill_switch_shadow.json",
+                "  reconcile_status_path: reports/shadow_runtime/reconcile_shadow.json",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    paths = trade_auditor.build_paths(tmp_path)
+
+    assert paths.workspace == tmp_path.resolve()
+    assert paths.reports_dir == tmp_path / "reports" / "shadow_runtime"
+    assert paths.runs_dir == tmp_path / "reports" / "shadow_runtime" / "runs"
+    assert paths.orders_db == tmp_path / "reports" / "shadow_runtime" / "orders.sqlite"
+    assert paths.kill_switch_file == tmp_path / "reports" / "shadow_runtime" / "kill_switch_shadow.json"
+    assert paths.reconcile_file == tmp_path / "reports" / "shadow_runtime" / "reconcile_shadow.json"
+    assert paths.log_file == tmp_path / "logs" / "trade_audit.log"
+    assert paths.alert_file == tmp_path / "logs" / "trade_alert.json"
+
+
 def test_get_latest_orders_reads_workspace_orders_db(tmp_path) -> None:
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -146,6 +174,48 @@ def test_check_risk_limits_treats_string_false_reconcile_as_failure(tmp_path) ->
 
     assert len(issues) == 1
     assert "drift" in issues[0]
+
+
+def test_check_risk_limits_uses_active_config_runtime_state_files(tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    shadow_dir = tmp_path / "reports" / "shadow_runtime"
+    shadow_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+                "  kill_switch_path: reports/shadow_runtime/kill_switch_shadow.json",
+                "  reconcile_status_path: reports/shadow_runtime/reconcile_shadow.json",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "reports").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "reports" / "kill_switch.json").write_text(
+        json.dumps({"enabled": False}),
+        encoding="utf-8",
+    )
+    (tmp_path / "reports" / "reconcile_status.json").write_text(
+        json.dumps({"ok": True}),
+        encoding="utf-8",
+    )
+    (shadow_dir / "kill_switch_shadow.json").write_text(
+        json.dumps({"enabled": True, "reason": "shadow-stop"}),
+        encoding="utf-8",
+    )
+    (shadow_dir / "reconcile_shadow.json").write_text(
+        json.dumps({"ok": False, "reason": "shadow-drift"}),
+        encoding="utf-8",
+    )
+
+    issues = trade_auditor.check_risk_limits(paths=trade_auditor.build_paths(tmp_path))
+
+    assert len(issues) == 2
+    assert any("shadow-stop" in issue for issue in issues)
+    assert any("shadow-drift" in issue for issue in issues)
 
 
 def test_run_audit_writes_alert_and_log_to_workspace(tmp_path) -> None:
