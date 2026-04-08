@@ -43,6 +43,59 @@ def _as_float(v):
         return 0.0
 
 
+def _normalize_kill_switch(data):
+    if isinstance(data, dict):
+        if "enabled" in data or "active" in data:
+            normalized = dict(data)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        nested = data.get("kill_switch")
+        if isinstance(nested, dict):
+            normalized = dict(nested)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        normalized = dict(data)
+        normalized["enabled"] = bool(nested)
+        return normalized
+
+    if data is None:
+        return {"enabled": False}
+
+    return {"enabled": bool(data)}
+
+
+def _kill_switch_is_manual(data):
+    normalized = _normalize_kill_switch(data)
+    if bool(normalized.get("manual")):
+        return True
+    return str(normalized.get("trigger") or "").strip().lower() == "manual"
+
+
+def _clear_kill_switch_payload(data, *, ts_ms):
+    if isinstance(data, dict):
+        payload = dict(data)
+        nested = payload.get("kill_switch")
+        if isinstance(nested, dict):
+            nested_payload = dict(nested)
+            nested_payload["enabled"] = False
+            if "active" in nested_payload:
+                nested_payload["active"] = False
+            payload["kill_switch"] = nested_payload
+        payload["enabled"] = False
+        if "active" in payload:
+            payload["active"] = False
+    else:
+        payload = {"enabled": False}
+
+    payload["auto_sync_cleared"] = True
+    payload["auto_sync_ts_ms"] = int(ts_ms)
+    return payload
+
+
 def _extract_spot_qty(detail):
     """Extract best-effort spot quantity from OKX balance detail."""
     # Prefer cash/available balances; fall back to eq.
@@ -402,15 +455,18 @@ def main():
                 )
             )
             if kill_switch_path.exists():
-                ks = json.loads(kill_switch_path.read_text())
+                ks_raw = json.loads(kill_switch_path.read_text())
+                ks = _normalize_kill_switch(ks_raw)
                 if ks.get('enabled'):
-                    if bool(ks.get('manual')):
+                    if _kill_switch_is_manual(ks):
                         logger.info("ℹ️ Manual kill switch detected, keep enabled")
                     else:
-                        ks['enabled'] = False
-                        ks['auto_sync_cleared'] = True
-                        ks['auto_sync_ts_ms'] = int(time.time() * 1000)
-                        kill_switch_path.write_text(json.dumps(ks, indent=2))
+                        kill_switch_path.write_text(
+                            json.dumps(
+                                _clear_kill_switch_payload(ks_raw, ts_ms=int(time.time() * 1000)),
+                                indent=2,
+                            )
+                        )
                         logger.info("✅ Kill switch disabled by auto-sync")
             
             return 0

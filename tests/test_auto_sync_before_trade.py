@@ -66,7 +66,10 @@ def test_auto_sync_before_trade_respects_custom_runtime_status_paths(tmp_path, m
     default_kill = reports_dir / "kill_switch.json"
     failure_state_path = reports_dir / "reconcile_failure_state.json"
 
-    custom_kill.write_text(json.dumps({"enabled": True, "manual": False}, ensure_ascii=False), encoding="utf-8")
+    custom_kill.write_text(
+        json.dumps({"kill_switch": {"enabled": True, "manual": False}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
     default_kill.write_text(json.dumps({"enabled": True, "manual": False}, ensure_ascii=False), encoding="utf-8")
     custom_failure.write_text(
         json.dumps(
@@ -175,6 +178,7 @@ def test_auto_sync_before_trade_respects_custom_runtime_status_paths(tmp_path, m
     kill_payload = json.loads(custom_kill.read_text(encoding="utf-8"))
     assert kill_payload["enabled"] is False
     assert kill_payload["auto_sync_cleared"] is True
+    assert kill_payload["kill_switch"]["enabled"] is False
 
     untouched_default_kill = json.loads(default_kill.read_text(encoding="utf-8"))
     assert untouched_default_kill["enabled"] is True

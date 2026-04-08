@@ -25,19 +25,64 @@ def _coalesce(value, default):
     return default if value is None else value
 
 
-def load_kill_switch(path: str) -> dict:
+def _normalize_kill_switch(data) -> dict:
+    if isinstance(data, dict):
+        if "enabled" in data or "active" in data:
+            normalized = dict(data)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        nested = data.get("kill_switch")
+        if isinstance(nested, dict):
+            normalized = dict(nested)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        normalized = dict(data)
+        normalized["enabled"] = bool(nested)
+        return normalized
+
+    if data is None:
+        return {"enabled": False}
+
+    return {"enabled": bool(data)}
+
+
+def _read_kill_switch_raw(path: str):
     p = Path(path)
     if not p.exists():
-        return {"enabled": False}
+        return None
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
-        return {"enabled": False}
+        return None
+
+
+def _clear_kill_switch_payload(data) -> dict:
+    if isinstance(data, dict):
+        payload = dict(data)
+        nested = payload.get("kill_switch")
+        if isinstance(nested, dict):
+            nested_payload = dict(nested)
+            nested_payload["enabled"] = False
+            if "active" in nested_payload:
+                nested_payload["active"] = False
+            payload["kill_switch"] = nested_payload
+        payload["enabled"] = False
+        if "active" in payload:
+            payload["active"] = False
+        return payload
+    return {"enabled": False}
+
+
+def load_kill_switch(path: str) -> dict:
+    return _normalize_kill_switch(_read_kill_switch_raw(path))
 
 
 def disable_kill_switch(path: str) -> None:
-    ks = load_kill_switch(path)
-    ks["enabled"] = False
+    ks = _clear_kill_switch_payload(_read_kill_switch_raw(path))
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
@@ -47,11 +92,10 @@ def disable_kill_switch(path: str) -> None:
 
 
 def is_manual_kill_switch(ks: dict) -> bool:
-    if not isinstance(ks, dict):
-        return False
-    if bool(ks.get("manual")):
+    normalized = _normalize_kill_switch(ks)
+    if bool(normalized.get("manual")):
         return True
-    return str(ks.get("trigger") or "").strip().lower() == "manual"
+    return str(normalized.get("trigger") or "").strip().lower() == "manual"
 
 
 def main() -> None:
