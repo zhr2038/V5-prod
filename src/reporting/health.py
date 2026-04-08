@@ -7,15 +7,26 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from flask import Blueprint, jsonify
+
+from src.execution.fill_store import derive_fill_store_path
 
 health_bp = Blueprint("health", __name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = PROJECT_ROOT / "reports"
 CONFIGS_DIR = PROJECT_ROOT / "configs"
+
+
+@dataclass(frozen=True)
+class HealthPaths:
+    orders_db: Path
+    fills_db: Path
+    kill_switch_path: Path
+    reconcile_status_path: Path
 
 
 def _resolve_active_config_path() -> Path:
@@ -43,6 +54,38 @@ def _load_json_safe(path: Path) -> dict:
     except Exception:
         pass
     return {}
+
+
+def _load_active_config() -> dict:
+    try:
+        import yaml
+
+        path = _resolve_active_config_path()
+        if path.exists():
+            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def _resolve_runtime_path(raw_path: object, default_rel_path: str) -> Path:
+    raw = str(raw_path or default_rel_path).strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+def _resolve_health_paths() -> HealthPaths:
+    cfg = _load_active_config()
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    orders_db = _resolve_runtime_path(execution_cfg.get("order_store_path"), "reports/orders.sqlite")
+    return HealthPaths(
+        orders_db=orders_db,
+        fills_db=derive_fill_store_path(orders_db),
+        kill_switch_path=_resolve_runtime_path(execution_cfg.get("kill_switch_path"), "reports/kill_switch.json"),
+        reconcile_status_path=_resolve_runtime_path(execution_cfg.get("reconcile_status_path"), "reports/reconcile_status.json"),
+    )
 
 
 def _to_bool(value: object) -> bool:
@@ -78,8 +121,7 @@ def _normalize_kill_switch(data: object) -> dict:
     return {"enabled": _to_bool(data)}
 
 
-def _load_latest_fill_ts_ms() -> int | None:
-    fills_db = REPORTS_DIR / "fills.sqlite"
+def _load_latest_fill_ts_ms(fills_db: Path) -> int | None:
     try:
         if fills_db.exists():
             conn = sqlite3.connect(str(fills_db))
@@ -95,8 +137,7 @@ def _load_latest_fill_ts_ms() -> int | None:
     return None
 
 
-def _load_latest_filled_order_ts_ms() -> int | None:
-    orders_db = REPORTS_DIR / "orders.sqlite"
+def _load_latest_filled_order_ts_ms(orders_db: Path) -> int | None:
     if not orders_db.exists():
         return None
 
@@ -126,8 +167,9 @@ def _load_latest_filled_order_ts_ms() -> int | None:
 
 
 def _load_last_trade_ts_ms() -> int | None:
-    fills_ts_ms = _load_latest_fill_ts_ms()
-    orders_ts_ms = _load_latest_filled_order_ts_ms()
+    paths = _resolve_health_paths()
+    fills_ts_ms = _load_latest_fill_ts_ms(paths.fills_db)
+    orders_ts_ms = _load_latest_filled_order_ts_ms(paths.orders_db)
     candidates = [ts_ms for ts_ms in (fills_ts_ms, orders_ts_ms) if ts_ms]
     return max(candidates) if candidates else None
 
@@ -139,6 +181,7 @@ def health_check():
         "timestamp": time.time(),
         "checks": {},
     }
+    health_paths = _resolve_health_paths()
 
     try:
         db_path = REPORTS_DIR / "positions.sqlite"
@@ -151,7 +194,7 @@ def health_check():
         checks["status"] = "unhealthy"
 
     try:
-        kill_switch = _normalize_kill_switch(_load_json_safe(REPORTS_DIR / "kill_switch.json"))
+        kill_switch = _normalize_kill_switch(_load_json_safe(health_paths.kill_switch_path))
         kill_switch_enabled = _to_bool(kill_switch.get("enabled"))
         checks["checks"]["kill_switch"] = {
             "status": "ok",
@@ -164,7 +207,7 @@ def health_check():
         checks["checks"]["kill_switch"] = {"status": "error", "error": str(exc)}
 
     try:
-        reconcile = _load_json_safe(REPORTS_DIR / "reconcile_status.json")
+        reconcile = _load_json_safe(health_paths.reconcile_status_path)
         reconcile_ok = _to_bool(reconcile.get("ok"))
         checks["checks"]["reconcile"] = {
             "status": "ok" if reconcile_ok else "warning",
