@@ -15,6 +15,11 @@ from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.account_store import AccountStore
 from src.execution.execution_engine import ExecutionEngine
 from src.execution.event_action_bridge import consume_event_actions_for_run
+from src.execution.fill_store import (
+    derive_runtime_reports_dir,
+    derive_runtime_runs_dir,
+    derive_runtime_spread_snapshots_dir,
+)
 from src.execution.position_store import PositionStore
 from src.reporting.reporting import dump_run_artifacts
 from src.core.models import MarketSeries, Order, PositionState
@@ -340,6 +345,22 @@ def _coalesce(value, default):
     return default if value is None else value
 
 
+def _resolve_runtime_run_paths(cfg: AppConfig, run_id: str) -> dict[str, Path]:
+    order_store_path = str(
+        getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
+        or "reports/orders.sqlite"
+    )
+    reports_dir = derive_runtime_reports_dir(order_store_path)
+    runs_dir = derive_runtime_runs_dir(order_store_path)
+    run_dir = runs_dir / str(run_id)
+    return {
+        "reports_dir": reports_dir,
+        "runs_dir": runs_dir,
+        "run_dir": run_dir,
+        "spread_snapshots_dir": derive_runtime_spread_snapshots_dir(order_store_path),
+    }
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent
     cfg_path = os.getenv("V5_CONFIG")
@@ -371,14 +392,17 @@ def main() -> None:
     except Exception as e:
         log.warning(f"Dynamic alpha weights load failed: {e}")
 
-    Path("reports").mkdir(exist_ok=True)
-
-    # 鍒涘缓DecisionAudit锛堥渶瑕佸厛瀹氫箟run_id锛?
-    from src.reporting.decision_audit import DecisionAudit
-
     run_id = os.getenv("V5_RUN_ID")
     if not run_id:
         run_id = _utc_now().strftime("%Y%m%d_%H%M%S")
+    runtime_paths = _resolve_runtime_run_paths(cfg, run_id)
+    runtime_reports_dir = runtime_paths["reports_dir"]
+    runtime_run_dir = runtime_paths["run_dir"]
+    runtime_spread_snapshots_dir = runtime_paths["spread_snapshots_dir"]
+    runtime_reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # 鍒涘缓DecisionAudit锛堥渶瑕佸厛瀹氫箟run_id锛?
+    from src.reporting.decision_audit import DecisionAudit
     
     window_start_ts = _get_env_epoch_sec("V5_WINDOW_START_TS")
     window_end_ts = _get_env_epoch_sec("V5_WINDOW_END_TS")
@@ -483,7 +507,7 @@ def main() -> None:
         log.error(md_reason)
         audit.reject("market_data_coverage_insufficient")
         audit.add_note(md_reason)
-        audit.save(f"reports/runs/{run_id}")
+        audit.save(str(runtime_run_dir))
         return
     scored_available = len([sym for sym in scored_symbols if sym in md_1h])
     if scored_available < len(scored_symbols):
@@ -552,7 +576,7 @@ def main() -> None:
     # Run unified pipeline with equity/drawdown scaling
     from src.core.run_logger import RunLogger
 
-    run_logger = RunLogger(run_dir=f"reports/runs/{run_id}")
+    run_logger = RunLogger(run_dir=str(runtime_run_dir))
 
     # F3.1 pre-run budget action input: load today's budget state (UTC) and set audit.budget
     try:
@@ -653,7 +677,7 @@ def main() -> None:
                     audit.budget['current_equity_usdt'] = eq_now
                     audit.budget['utilization_pct'] = budget_result.get('utilization')
                     audit.budget['action_enabled'] = True
-                    audit.save(f"reports/runs/{run_id}")
+                    audit.save(str(runtime_run_dir))
                     log.info("V5 live run completed (BUDGET LIMITED)")
                     return
                 elif budget_result['utilization'] > 90:
@@ -759,16 +783,16 @@ def main() -> None:
                 "window_end_ts": window_end_ts,
                 "symbols": rows,
             }
-            append_spread_snapshot(evt)
+            append_spread_snapshot(evt, base_dir=str(runtime_spread_snapshots_dir))
             # also keep a per-run copy for easy inspection
-            Path(f"reports/runs/{run_id}/spread_snapshot.json").write_text(
+            (runtime_run_dir / "spread_snapshot.json").write_text(
                 json.dumps(evt, ensure_ascii=False, indent=2), encoding="utf-8"
             )
     except Exception as e:
         log.warning(f"spread snapshot failed: {e}")
     
     # 淇濆瓨DecisionAudit
-    audit.save(f"reports/runs/{run_id}")
+    audit.save(str(runtime_run_dir))
 
     # Update account peak equity
     # (equity is logged inside pipeline; recompute here quickly)
@@ -818,7 +842,7 @@ def main() -> None:
 
     from src.reporting.trade_log import TradeLogWriter
 
-    trade_log = TradeLogWriter(run_dir=f"reports/runs/{run_id}")
+    trade_log = TradeLogWriter(run_dir=str(runtime_run_dir))
 
     def make_executor():
         mode = getattr(cfg.execution, "mode", "dry_run")
@@ -1065,7 +1089,7 @@ def main() -> None:
                 raise ValueError(f"Invalid window: {window_start_ts} -> {window_end_ts}")
 
         summ = write_summary(
-            f"reports/runs/{run_id}",
+            str(runtime_run_dir),
             window_start_ts=window_start_ts,
             window_end_ts=window_end_ts,
         )
@@ -1075,7 +1099,7 @@ def main() -> None:
             if is_live:
                 from src.reporting.summary_writer import refresh_summary_metrics
 
-                summ = refresh_summary_metrics(f"reports/runs/{run_id}")
+                summ = refresh_summary_metrics(str(runtime_run_dir))
         except Exception:
             pass
 
@@ -1086,7 +1110,7 @@ def main() -> None:
             from src.reporting.decision_audit import load_decision_audit
             from src.reporting.metrics import read_trades_csv
 
-            trades = read_trades_csv(f"reports/runs/{run_id}/trades.csv")
+            trades = read_trades_csv(str(runtime_run_dir / "trades.csv"))
             notionals = [abs(float(t.get("notional_usdt") or 0.0)) for t in trades]
             turnover_inc = float(sum(notionals))
             cost_inc = float(sum(float(t.get("fee_usdt") or 0.0) + float(t.get("slippage_usdt") or 0.0) for t in trades))
@@ -1120,18 +1144,18 @@ def main() -> None:
                 "small_trade_ratio_today": st.small_trade_ratio_today,
                 "small_trade_notional_cutoff": st.small_trade_notional_cutoff,
             }
-            attach_budget(f"reports/runs/{run_id}", budget_dict)
+            attach_budget(str(runtime_run_dir), budget_dict)
 
-            audit = load_decision_audit(f"reports/runs/{run_id}")
+            audit = load_decision_audit(str(runtime_run_dir))
             if audit is not None:
                 audit.budget = budget_dict
-                audit.save(f"reports/runs/{run_id}")
+                audit.save(str(runtime_run_dir))
 
                 # Also attach exit signals into summary for explainability
                 try:
                     from src.reporting.summary_writer import attach_exit_signals
 
-                    attach_exit_signals(f"reports/runs/{run_id}", audit.exit_signals or [])
+                    attach_exit_signals(str(runtime_run_dir), audit.exit_signals or [])
                 except Exception:
                     pass
         except Exception:
@@ -1141,7 +1165,7 @@ def main() -> None:
         pass
 
     dump_run_artifacts(
-        reports_dir="reports",
+        reports_dir=str(runtime_reports_dir),
         alpha=alpha_snap,
         regime=regime,
         portfolio=out.portfolio,

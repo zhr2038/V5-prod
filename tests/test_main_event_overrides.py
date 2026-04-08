@@ -7,6 +7,7 @@ import pytest
 
 import main as main_mod
 from main import _merge_event_close_override_orders
+from src.core.models import ExecutionReport
 from src.core.models import Order
 from src.execution.event_action_bridge import persist_event_actions
 from src.execution.position_store import PositionStore
@@ -320,3 +321,156 @@ def test_main_order_arbitration_respects_zero_open_long_cooldown(tmp_path: Path,
 
     assert captured["cooldown_minutes"] == 0
     assert captured["state_path"] == str(tmp_path / "reports" / "order_state_machine.json")
+
+
+def test_main_writes_run_artifacts_into_runtime_reports_dir(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("V5_RUN_ID", "shadow_run")
+    monkeypatch.setenv("V5_WINDOW_START_TS", "1700000000")
+    monkeypatch.setenv("V5_WINDOW_END_TS", "1700003600")
+
+    cfg = SimpleNamespace(
+        symbols=["BTC/USDT"],
+        timeframe_main="1H",
+        universe=SimpleNamespace(
+            enabled=False,
+            use_universe_symbols=False,
+            min_data_coverage_ratio=0.0,
+        ),
+        budget=SimpleNamespace(
+            live_equity_cap_usdt=None,
+            action_enabled=False,
+            turnover_budget_per_day=1_000_000.0,
+            cost_budget_bps_per_day=10_000.0,
+            min_trade_notional_base=5.0,
+        ),
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+            order_state_machine_path=str(tmp_path / "reports" / "shadow_runtime" / "order_state_machine.json"),
+            mode="dry_run",
+        ),
+        exchange=SimpleNamespace(api_key="", api_secret="", passphrase=""),
+    )
+
+    class FakeProvider:
+        def fetch_ohlcv(self, symbols, timeframe, limit, end_ts_ms=None):
+            assert symbols == ["BTC/USDT"]
+            return {"BTC/USDT": SimpleNamespace(ts=[1], close=[100.0], high=[101.0])}
+
+        def fetch_top_of_book(self, symbols):
+            assert symbols == ["BTC/USDT"]
+            return {"BTC/USDT": {"bid": 99.0, "ask": 101.0}}
+
+    class FakePositionStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def list(self):
+            return []
+
+    class FakeAccountStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+            self._acc = SimpleNamespace(cash_usdt=100.0, equity_peak_usdt=100.0)
+
+        def get(self):
+            return self._acc
+
+        def set(self, acc) -> None:
+            self._acc = acc
+
+    class FakePipeline:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.regime_engine = SimpleNamespace(
+                detect=lambda _btc: SimpleNamespace(
+                    state=SimpleNamespace(value="SIDEWAYS"),
+                    multiplier=1.0,
+                    atr_pct=0.0,
+                    ma20=0.0,
+                    ma60=0.0,
+                )
+            )
+            self.alpha_engine = SimpleNamespace(
+                set_regime_context=lambda *_args, **_kwargs: None,
+                compute_snapshot=lambda _market_data: SimpleNamespace(
+                    scores={},
+                    ranks={},
+                    raw={},
+                    raw_factors={},
+                    z_factors={},
+                    raw_scores={},
+                    telemetry_scores={},
+                    base_scores={},
+                    base_raw_scores={},
+                    ml_attribution_scores={},
+                    ml_overlay_scores={},
+                    ml_overlay_raw_scores={},
+                    ml_runtime={},
+                ),
+            )
+
+        def run(self, **_kwargs):
+            alpha = self.alpha_engine.compute_snapshot({})
+            regime = self.regime_engine.detect(None)
+            portfolio = SimpleNamespace(selected=[])
+            return SimpleNamespace(
+                alpha=alpha,
+                regime=regime,
+                portfolio=portfolio,
+                orders=[],
+            )
+
+    class FakeICMonitor:
+        def update(self, **_kwargs):
+            return None
+
+    class FakeExecutionEngine:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def execute(self, orders):
+            return ExecutionReport(timestamp="2026-04-08T00:00:00Z", dry_run=True, orders=list(orders), notes="")
+
+    captured: dict[str, str] = {}
+
+    def _fake_dump_run_artifacts(*, reports_dir, alpha, regime, portfolio, execution):
+        captured["dump_reports_dir"] = str(reports_dir)
+
+    def _fake_append_spread_snapshot(event, base_dir="reports/spread_snapshots"):
+        captured["spread_base_dir"] = str(base_dir)
+        return Path(base_dir) / "20260101.jsonl"
+
+    monkeypatch.setattr(main_mod, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(main_mod, "setup_logging", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_mod, "build_provider", lambda _cfg: FakeProvider())
+    monkeypatch.setattr(main_mod, "PositionStore", FakePositionStore)
+    monkeypatch.setattr(main_mod, "AccountStore", FakeAccountStore)
+    monkeypatch.setattr(main_mod, "ExecutionEngine", FakeExecutionEngine)
+    monkeypatch.setattr(main_mod, "_validate_market_data_snapshot", lambda **kwargs: (True, "ok", kwargs["market_data"]))
+    monkeypatch.setattr(main_mod, "_merge_event_close_override_orders", lambda **kwargs: list(kwargs["orders"]))
+    monkeypatch.setattr(main_mod, "dump_run_artifacts", _fake_dump_run_artifacts)
+    monkeypatch.setattr(main_mod, "ALPHA_HISTORY_ENABLED", False)
+
+    import src.alpha.ic_monitor as ic_monitor_mod
+    import src.core.pipeline as pipeline_mod
+    import src.execution.order_arbitrator as order_arbitrator_mod
+    import src.reporting.spread_snapshots as spread_snapshots_mod
+
+    monkeypatch.setattr(ic_monitor_mod, "AlphaICMonitor", FakeICMonitor)
+    monkeypatch.setattr(pipeline_mod, "V5Pipeline", FakePipeline)
+    monkeypatch.setattr(order_arbitrator_mod, "arbitrate_orders", lambda **kwargs: (list(kwargs["orders"]), []))
+    monkeypatch.setattr(spread_snapshots_mod, "append_spread_snapshot", _fake_append_spread_snapshot)
+
+    main_mod.main()
+
+    shadow_run_dir = tmp_path / "reports" / "shadow_runtime" / "runs" / "shadow_run"
+    root_run_dir = tmp_path / "reports" / "runs" / "shadow_run"
+
+    assert (shadow_run_dir / "decision_audit.json").exists()
+    assert (shadow_run_dir / "equity.jsonl").exists()
+    assert (shadow_run_dir / "trades.csv").exists()
+    assert (shadow_run_dir / "summary.json").exists()
+    assert (shadow_run_dir / "spread_snapshot.json").exists()
+    assert not root_run_dir.exists()
+    assert Path(captured["dump_reports_dir"]).resolve() == (tmp_path / "reports" / "shadow_runtime").resolve()
+    assert Path(captured["spread_base_dir"]).resolve() == (tmp_path / "reports" / "shadow_runtime" / "spread_snapshots").resolve()
