@@ -43,34 +43,48 @@ def _as_float(v):
         return 0.0
 
 
+def _to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _normalize_kill_switch(data):
     if isinstance(data, dict):
         if "enabled" in data or "active" in data:
             normalized = dict(data)
-            if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+            normalized["enabled"] = _to_bool(
+                normalized.get("enabled")
+                if "enabled" in normalized
+                else normalized.get("active")
+            )
             return normalized
 
         nested = data.get("kill_switch")
         if isinstance(nested, dict):
             normalized = dict(nested)
-            if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+            normalized["enabled"] = _to_bool(
+                normalized.get("enabled")
+                if "enabled" in normalized
+                else normalized.get("active")
+            )
             return normalized
 
         normalized = dict(data)
-        normalized["enabled"] = bool(nested)
+        normalized["enabled"] = _to_bool(nested)
         return normalized
 
     if data is None:
         return {"enabled": False}
 
-    return {"enabled": bool(data)}
+    return {"enabled": _to_bool(data)}
 
 
 def _kill_switch_is_manual(data):
     normalized = _normalize_kill_switch(data)
-    if bool(normalized.get("manual")):
+    if _to_bool(normalized.get("manual")):
         return True
     return str(normalized.get("trigger") or "").strip().lower() == "manual"
 

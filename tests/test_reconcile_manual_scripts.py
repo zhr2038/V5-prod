@@ -328,3 +328,53 @@ def test_reconcile_with_retry_disables_nested_auto_kill_switch_after_success(mon
     assert payload["enabled"] is False
     assert raw_payload["enabled"] is False
     assert raw_payload["kill_switch"]["enabled"] is False
+
+
+def test_reconcile_with_retry_disables_string_auto_kill_switch_after_success(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    kill_switch_path = reports_dir / "custom_kill_switch.json"
+    kill_switch_path.write_text(
+        json.dumps({"kill_switch": {"enabled": "true", "manual": "false", "trigger": "auto"}}),
+        encoding="utf-8",
+    )
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        execution=SimpleNamespace(
+            reconcile_abs_usdt_tol=50.0,
+            reconcile_dust_usdt_ignore=1.0,
+            reconcile_status_path=str(reports_dir / "custom_reconcile_status.json"),
+            kill_switch_path=str(kill_switch_path),
+        ),
+    )
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class CapturingReconcileEngine:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def reconcile(self, *, out_path: str):
+            return {"ok": True, "reason": None, "stats": {}}
+
+    monkeypatch.setattr(reconcile_with_retry, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(reconcile_with_retry, "OKXPrivateClient", DummyClient)
+    monkeypatch.setattr(reconcile_with_retry, "PositionStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(reconcile_with_retry, "AccountStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(reconcile_with_retry, "ReconcileEngine", CapturingReconcileEngine)
+    monkeypatch.setattr(sys, "argv", ["reconcile_with_retry.py"])
+
+    reconcile_with_retry.main()
+
+    payload = reconcile_with_retry.load_kill_switch(str(kill_switch_path))
+    raw_payload = json.loads(kill_switch_path.read_text(encoding="utf-8"))
+    assert payload["enabled"] is False
+    assert raw_payload["enabled"] is False
+    assert raw_payload["kill_switch"]["enabled"] is False

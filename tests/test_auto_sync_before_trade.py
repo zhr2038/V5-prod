@@ -194,3 +194,109 @@ def test_auto_sync_before_trade_respects_custom_runtime_status_paths(tmp_path, m
     assert untouched_default_failure["consecutive_soft"] == 2
     assert untouched_default_failure["consecutive_ok"] == 0
     assert untouched_default_failure["last_reason"] == "stale"
+
+
+def test_auto_sync_before_trade_clears_string_auto_kill_switch(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    custom_reconcile = reports_dir / "custom_reconcile_status.json"
+    custom_kill = reports_dir / "custom_kill_switch.json"
+    custom_failure = reports_dir / "custom_reconcile_failure_state.json"
+
+    custom_kill.write_text(
+        json.dumps(
+            {"kill_switch": {"enabled": "true", "manual": "false", "trigger": "auto"}},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    custom_failure.write_text(
+        json.dumps(
+            {
+                "consecutive_hard": 4,
+                "consecutive_soft": 3,
+                "consecutive_ok": 0,
+                "last_reason": "custom_stale",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeClient:
+        def __init__(self, exchange):
+            self.exchange = exchange
+
+        def get_balance(self, ccy=None):
+            return SimpleNamespace(
+                data={
+                    "data": [
+                        {
+                            "details": [
+                                {"ccy": "USDT", "cashBal": "100", "availBal": "100", "eq": "100"},
+                            ]
+                        }
+                    ]
+                }
+            )
+
+        def close(self):
+            pass
+
+    class FakePositionStore:
+        def __init__(self, path):
+            self.path = path
+
+        def list(self):
+            return []
+
+        def get(self, symbol):
+            return None
+
+        def close_long(self, symbol):
+            return False
+
+        def set_qty(self, sym, qty):
+            raise AssertionError("set_qty should not be called in this scenario")
+
+        def upsert_buy(self, sym, qty, px):
+            raise AssertionError("upsert_buy should not be called in this scenario")
+
+    class FakeAccountStore:
+        def __init__(self, path):
+            self.path = path
+
+        def get(self):
+            return SimpleNamespace(cash_usdt=0.0, equity_peak_usdt=0.0)
+
+        def set(self, state):
+            self.state = state
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        symbols=[],
+        universe=SimpleNamespace(symbols=[]),
+        execution=SimpleNamespace(
+            reconcile_status_path="reports/custom_reconcile_status.json",
+            kill_switch_path="reports/custom_kill_switch.json",
+            reconcile_failure_state_path="reports/custom_reconcile_failure_state.json",
+        ),
+    )
+
+    monkeypatch.setattr(auto_sync_before_trade, "WORKSPACE", workspace)
+    monkeypatch.setattr(config_loader, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(okx_private_client_module, "OKXPrivateClient", FakeClient)
+    monkeypatch.setattr(position_store_module, "PositionStore", FakePositionStore)
+    monkeypatch.setattr(account_store_module, "AccountStore", FakeAccountStore)
+
+    assert auto_sync_before_trade.main() == 0
+
+    reconcile_payload = json.loads(custom_reconcile.read_text(encoding="utf-8"))
+    assert reconcile_payload["ok"] is True
+
+    kill_payload = json.loads(custom_kill.read_text(encoding="utf-8"))
+    assert kill_payload["enabled"] is False
+    assert kill_payload["kill_switch"]["enabled"] is False
+    assert kill_payload["auto_sync_cleared"] is True
