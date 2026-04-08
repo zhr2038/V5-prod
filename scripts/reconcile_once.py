@@ -7,6 +7,7 @@ import logging
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
+from src.execution.fill_store import derive_position_store_path
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import PositionStore
 from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
@@ -21,7 +22,7 @@ def main() -> None:
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--out", default=None)
-    ap.add_argument("--positions-db", default="reports/positions.sqlite")
+    ap.add_argument("--positions-db", default=None)
     ap.add_argument("--abs-usdt-tol", type=float, default=None)
     ap.add_argument("--abs-base-tol", type=float, default=1e-5)
     ap.add_argument("--dust-usdt-ignore", type=float, default=None, help="Ignore non-USDT diffs whose estimated USDT value is below this (0=strict)")
@@ -36,7 +37,14 @@ def main() -> None:
         args.out if args.out is not None else getattr(cfg.execution, "reconcile_status_path", None),
         default="reports/reconcile_status.json",
     )
-    positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    if args.positions_db:
+        positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    else:
+        order_store_path = resolve_runtime_path(
+            getattr(cfg.execution, "order_store_path", None),
+            default="reports/orders.sqlite",
+        )
+        positions_db_path = derive_position_store_path(order_store_path)
 
     client = OKXPrivateClient(exchange=cfg.exchange)
     try:
