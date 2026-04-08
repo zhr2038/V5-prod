@@ -34,6 +34,31 @@ def _read_json(path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
+    if isinstance(data, dict):
+        if "enabled" in data or "active" in data:
+            normalized = dict(data)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        nested = data.get("kill_switch")
+        if isinstance(nested, dict):
+            normalized = dict(nested)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        normalized = dict(data)
+        normalized["enabled"] = bool(nested)
+        return normalized
+
+    if data is None:
+        return {"enabled": False}
+
+    return {"enabled": bool(data)}
+
+
 @dataclass
 class GuardConfig:
     """GuardConfig类"""
@@ -122,10 +147,7 @@ class KillSwitchGuard:
         }
 
     def _load_kill_switch(self) -> Dict[str, Any]:
-        ks = _read_json(self.cfg.kill_switch_path) or {}
-        if "enabled" not in ks:
-            ks["enabled"] = False
-        return ks
+        return _normalize_kill_switch(_read_json(self.cfg.kill_switch_path))
 
     def apply(self) -> Dict[str, Any]:
         """Apply"""

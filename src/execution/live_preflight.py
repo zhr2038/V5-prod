@@ -53,6 +53,31 @@ def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
 
 
+def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
+    if isinstance(data, dict):
+        if "enabled" in data or "active" in data:
+            normalized = dict(data)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        nested = data.get("kill_switch")
+        if isinstance(nested, dict):
+            normalized = dict(nested)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        normalized = dict(data)
+        normalized["enabled"] = bool(nested)
+        return normalized
+
+    if data is None:
+        return {"enabled": False}
+
+    return {"enabled": bool(data)}
+
+
 def _borrow_symbol_for_ccy(ccy: Any) -> Optional[str]:
     base = str(ccy or "").strip().upper()
     if not base or base in {"USDT", "USDC", "USD"}:
@@ -172,7 +197,8 @@ class LivePreflight:
         out = self._run_reconcile_guard(eng=eng, guard_cfg=guard_cfg)
         reconcile_ok = bool(out.get("ok"))
         reconcile_reason = out.get("reason")
-        kill_switch_enabled = bool((out.get("kill_switch") or {}).get("enabled"))
+        kill_switch_state = _normalize_kill_switch(out.get("kill_switch"))
+        kill_switch_enabled = bool(kill_switch_state.get("enabled"))
         details["reconcile"] = {
             "ok": reconcile_ok,
             "reason": reconcile_reason,
@@ -180,7 +206,7 @@ class LivePreflight:
         }
         details["kill_switch"] = {
             "enabled": kill_switch_enabled,
-            "trigger": (out.get("kill_switch") or {}).get("trigger"),
+            "trigger": kill_switch_state.get("trigger"),
         }
 
         if (
@@ -211,7 +237,8 @@ class LivePreflight:
             out = self._run_reconcile_guard(eng=eng, guard_cfg=guard_cfg)
             reconcile_ok = bool(out.get("ok"))
             reconcile_reason = out.get("reason")
-            kill_switch_enabled = bool((out.get("kill_switch") or {}).get("enabled"))
+            kill_switch_state = _normalize_kill_switch(out.get("kill_switch"))
+            kill_switch_enabled = bool(kill_switch_state.get("enabled"))
             details["reconcile_after_patch"] = {
                 "ok": reconcile_ok,
                 "reason": reconcile_reason,
@@ -219,7 +246,7 @@ class LivePreflight:
             }
             details["kill_switch_after_patch"] = {
                 "enabled": kill_switch_enabled,
-                "trigger": (out.get("kill_switch") or {}).get("trigger"),
+                "trigger": kill_switch_state.get("trigger"),
             }
 
         rec_obj = _read_json(self.reconcile_status_path)
