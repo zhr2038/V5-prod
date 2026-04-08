@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from configs.schema import AlphaConfig
@@ -34,3 +36,21 @@ def test_alpha_engine_multi_strategy_respects_zero_valued_overrides():
     assert engine.multi_strategy_adapter.orchestrator.conflict_min_confidence == 0.0
     assert engine.multi_strategy_adapter.orchestrator.conflict_penalty_strength == 0.0
     assert float(engine.multi_strategy_adapter.orchestrator.strategy_allocations[engine.mean_reversion_strategy.name]) == 0.0
+
+
+def test_alpha_engine_resolves_equity_validation_from_repo_root(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "equity_validation.json").write_text(
+        json.dumps({"okx_total_eq": 123.45}),
+        encoding="utf-8",
+    )
+    other_cwd = tmp_path / "elsewhere"
+    other_cwd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(other_cwd)
+
+    engine = AlphaEngine(AlphaConfig())
+    engine.repo_root = workspace
+
+    assert engine._resolve_total_capital_usdt() == pytest.approx(123.45)

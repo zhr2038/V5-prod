@@ -321,7 +321,7 @@ class AlphaEngine:
 
         # 2) live equity snapshot
         try:
-            p = Path('reports/equity_validation.json')
+            p = self._resolve_repo_path("reports/equity_validation.json", "reports/equity_validation.json")
             if p.exists():
                 obj = json.loads(p.read_text(encoding='utf-8'))
                 for key in ('okx_total_eq', 'calculated_total_eq'):
