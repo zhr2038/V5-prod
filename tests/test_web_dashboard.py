@@ -537,6 +537,121 @@ def test_api_scores_falls_back_to_alpha_snapshot_when_runs_empty(monkeypatch, tm
     assert [item["symbol"] for item in payload["scores"][:2]] == ["SOL/USDT", "BTC/USDT"]
 
 
+def test_api_scores_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_run = reports_dir / "runs" / "20260311_02"
+    runtime_run = runtime_dir / "runs" / "20260311_01"
+    root_run.mkdir(parents=True, exist_ok=True)
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (root_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "SIDEWAYS",
+                "top_scores": [
+                    {"symbol": "BTC/USDT", "score": 0.95, "display_score": 0.95, "raw_score": 1.9, "rank": 1},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "TRENDING",
+                "top_scores": [
+                    {"symbol": "ETH/USDT", "score": 0.88, "display_score": 0.88, "raw_score": 1.4, "rank": 1},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(root_run, (20, 20))
+    os.utime(runtime_run, (10, 10))
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_run"] == "20260311_01"
+    assert payload["regime"] == "TRENDING"
+    assert payload["scores"][0]["symbol"] == "ETH/USDT"
+
+
+def test_api_scores_falls_back_to_active_runtime_alpha_snapshot(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_run = reports_dir / "runs" / "20260311_02"
+    runtime_run = runtime_dir / "runs" / "20260311_01"
+    root_run.mkdir(parents=True, exist_ok=True)
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    failed_payload = json.dumps(
+        {
+            "regime": "Unknown",
+            "top_scores": [],
+            "counts": {"universe": 0, "scored": 0},
+            "notes": ["No market data returned from provider"],
+        },
+        ensure_ascii=False,
+    )
+    (root_run / "decision_audit.json").write_text(failed_payload, encoding="utf-8")
+    (runtime_run / "decision_audit.json").write_text(failed_payload, encoding="utf-8")
+    (reports_dir / "alpha_snapshot.json").write_text(
+        json.dumps({"scores": {"BTC/USDT": 0.91}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "regime.json").write_text(
+        json.dumps({"state": "Sideways", "multiplier": 0.8, "votes": {}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (runtime_dir / "alpha_snapshot.json").write_text(
+        json.dumps({"scores": {"ETH/USDT": 0.97, "SOL/USDT": 0.75}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (runtime_dir / "regime.json").write_text(
+        json.dumps({"state": "Trending", "multiplier": 1.2, "votes": {}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    os.utime(root_run, (20, 20))
+    os.utime(runtime_run, (10, 10))
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_run"] == "alpha_snapshot"
+    assert payload["regime"] == "Trending"
+    assert [item["symbol"] for item in payload["scores"][:2]] == ["ETH/USDT", "SOL/USDT"]
+
+
 def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

@@ -2327,6 +2327,7 @@ def api_position_kline():
 def api_scores():
     """币种评分API（当前run vs 上一个run 的排名变化）"""
     try:
+        runtime_reports_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir
         current_run_id: Optional[str] = None
         previous_run_id: Optional[str] = None
         current_regime = 'Unknown'
@@ -2334,7 +2335,7 @@ def api_scores():
         previous_scores: List[Dict[str, Any]] = []
 
         usable_runs: List[Dict[str, Any]] = []
-        for entry in _iter_decision_audits(REPORTS_DIR):
+        for entry in _iter_decision_audits(runtime_reports_dir):
             items = _normalize_top_scores(entry['audit'].get('top_scores', []))
             if not items:
                 continue
@@ -2352,7 +2353,7 @@ def api_scores():
                 previous_run_id = usable_runs[1]['run_id']
                 previous_scores = usable_runs[1]['scores']
         else:
-            alpha_snapshot = _load_alpha_snapshot_scores(REPORTS_DIR)
+            alpha_snapshot = _load_alpha_snapshot_scores(runtime_reports_dir)
             if alpha_snapshot:
                 current_run_id = str(alpha_snapshot.get('current_run') or 'alpha_snapshot')
                 current_regime = str(alpha_snapshot.get('regime') or 'Unknown')
