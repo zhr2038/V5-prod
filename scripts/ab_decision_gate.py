@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from configs.runtime_config import resolve_runtime_config_path
+from src.execution.fill_store import derive_runtime_runs_dir
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -25,9 +28,36 @@ class Stat:
         return self.rebalance / self.selected
 
 
+def _load_active_config(*, project_root: Path) -> dict:
+    config_path = Path(resolve_runtime_config_path(project_root=project_root))
+    try:
+        import yaml
+
+        if config_path.exists():
+            return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def _resolve_runtime_path(raw_path: object, *, default: str, project_root: Path) -> Path:
+    value = str(raw_path or default).strip()
+    path = Path(value)
+    if not path.is_absolute():
+        path = project_root / path
+    return path.resolve()
+
+
 def _resolve_reports_dir(raw_reports_dir: str | None = None) -> Path:
     if raw_reports_dir is None or not str(raw_reports_dir).strip():
-        return (PROJECT_ROOT / "reports").resolve()
+        cfg = _load_active_config(project_root=PROJECT_ROOT)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = _resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+        return derive_runtime_runs_dir(orders_db).parent.resolve()
     path = Path(str(raw_reports_dir).strip())
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()

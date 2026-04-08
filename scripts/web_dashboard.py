@@ -4185,9 +4185,11 @@ def api_shadow_test():
     try:
         import sys
         sys.path.insert(0, str(WORKSPACE))
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
+        runtime_reports_dir = runtime_paths.orders_db.parent
         
         # 获取最近7天的运行数据用于对比
-        runs_dir = REPORTS_DIR / 'runs'
+        runs_dir = runtime_paths.runs_dir
         if not runs_dir.exists():
             return jsonify({'status': 'no_data', 'message': '暂无运行数据'})
         
@@ -4264,14 +4266,19 @@ def api_shadow_test():
         # 读取/刷新 A/B gate 评估（建议是否切参）
         ab_gate = None
         try:
-            gate_path = REPORTS_DIR / 'ab_gate_status.json'
+            gate_path = runtime_reports_dir / 'ab_gate_status.json'
             need_refresh = True
             if gate_path.exists():
                 age_sec = max(0, (datetime.now().timestamp() - gate_path.stat().st_mtime))
                 need_refresh = age_sec > 1800  # 30分钟
             if need_refresh:
                 subprocess.run(
-                    [str(WORKSPACE / '.venv/bin/python'), str(WORKSPACE / 'scripts/ab_decision_gate.py')],
+                    [
+                        str(WORKSPACE / '.venv/bin/python'),
+                        str(WORKSPACE / 'scripts/ab_decision_gate.py'),
+                        '--reports-dir',
+                        str(runtime_reports_dir),
+                    ],
                     cwd=str(WORKSPACE),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

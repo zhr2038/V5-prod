@@ -2577,6 +2577,85 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["rounds"][0]["execution_result"]["orders_rebalance"] == 1
 
 
+def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_run = reports_dir / "runs" / "20260408_02"
+    runtime_run = runtime_dir / "runs" / "20260408_01"
+    root_run.mkdir(parents=True, exist_ok=True)
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (root_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "counts": {"selected": 100, "orders_rebalance": 40, "orders_exit": 5},
+                "router_decisions": [{"reason": "deadband", "drift": 0.035}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "counts": {"selected": 10, "orders_rebalance": 2, "orders_exit": 1},
+                "router_decisions": [{"reason": "deadband", "drift": 0.035}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(root_run, (20, 20))
+    os.utime(runtime_run, (10, 10))
+
+    (runtime_dir / "ab_gate_status.json").write_text(
+        json.dumps(
+            {
+                "window_runs": 1,
+                "current": {"conversion": 0.2},
+                "candidate": {"conversion": 0.3},
+                "decision": {"switch_recommended": True},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "ab_gate_status.json").write_text(
+        json.dumps(
+            {
+                "window_runs": 99,
+                "current": {"conversion": 0.4},
+                "candidate": {"conversion": 0.5},
+                "decision": {"switch_recommended": False},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/shadow_test")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["window_rounds"] == 1
+    assert payload["comparison"]["current"]["avg_selected_per_round"] == 10.0
+    assert payload["comparison"]["current"]["avg_rebalance_per_round"] == 2.0
+    assert payload["ab_gate"]["window_runs"] == 1
+    assert payload["ab_gate"]["decision"]["switch_recommended"] is True
+
+
 class _DummyResponse:
     def __init__(self, payload):
         self._payload = payload
