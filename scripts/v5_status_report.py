@@ -284,10 +284,12 @@ def generate_report() -> str:
 
 
 def main() -> int:
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    cfg = load_config()
+    reports_dir = _resolve_status_paths(cfg).orders_db.parent
+    reports_dir.mkdir(parents=True, exist_ok=True)
     report = generate_report()
     print(report)
-    output = REPORTS_DIR / f"status_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+    output = reports_dir / f"status_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
     output.write_text(report, encoding="utf-8")
     return 0
 
