@@ -4890,6 +4890,7 @@ def api_shadow_ml_overlay():
 def api_health():
     """系统健康检查API"""
     try:
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         checks = []
         overall_status = 'healthy'
         
@@ -4913,7 +4914,7 @@ def api_health():
         
         # 2. 检查数据库
         try:
-            orders_db = REPORTS_DIR / 'orders.sqlite'
+            orders_db = runtime_paths.orders_db
             if orders_db.exists():
                 conn = sqlite3.connect(str(orders_db))
                 cursor = conn.cursor()

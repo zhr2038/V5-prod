@@ -2207,6 +2207,48 @@ def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path)
     assert any(check.get("name") == "OKX API" and check.get("status") == "warning" for check in payload["checks"])
 
 
+def test_health_api_uses_active_runtime_orders_db(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "SYSTEMCTL_BIN", None)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_KEY", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_SECRET", raising=False)
+    monkeypatch.delenv("EXCHANGE_PASSPHRASE", raising=False)
+
+    root_orders_db = reports_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(root_orders_db))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE orders (inst_id TEXT)")
+    cur.execute("INSERT INTO orders(inst_id) VALUES ('BTC-USDT')")
+    conn.commit()
+    conn.close()
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "critical"
+    assert any(
+        check.get("status") == "critical" and "orders.sqlite" in str(check.get("detail", ""))
+        for check in payload["checks"]
+    )
+
+
 def test_auto_risk_guard_api_uses_auto_risk_eval_file(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
