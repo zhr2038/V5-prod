@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-V5 自动备份工具
-
-功能：
-- 备份关键数据文件
-- 支持本地和远程备份
-- 保留策略管理
+V5 automated backup helper.
 """
+
+from __future__ import annotations
 
 import tarfile
 from dataclasses import dataclass
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
+from src.execution.fill_store import derive_fill_store_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,170 +26,208 @@ def build_paths(workspace: Path | None = None) -> BackupPaths:
     root = (workspace or PROJECT_ROOT).resolve()
     return BackupPaths(
         workspace=root,
-        backup_dir=root / 'backups',
+        backup_dir=root / "backups",
     )
 
-# 备份配置
-BACKUP_ITEMS = [
-    'reports/orders.sqlite',
-    'reports/positions.sqlite',
-    'reports/fills.sqlite',
-    'reports/bills.sqlite',
-    'configs/',
-    'memory/',
-    'MEMORY.md',
-    'SOUL.md',
-    'IDENTITY.md',
-    'USER.md'
+
+STATIC_BACKUP_ITEMS = [
+    "reports/positions.sqlite",
+    "reports/bills.sqlite",
+    "configs/",
+    "memory/",
+    "MEMORY.md",
+    "SOUL.md",
+    "IDENTITY.md",
+    "USER.md",
 ]
 
-KEEP_BACKUPS = 7  # 保留最近7个备份
+KEEP_BACKUPS = 7
 
 
 class BackupManager:
-    """备份管理器"""
-    
+    """Create and retain workspace backups."""
+
     def __init__(self, workspace: Path | None = None):
         self.paths = build_paths(workspace)
-        self.stats = {'backed_up': 0, 'errors': 0, 'size_mb': 0}
-    
+        self.stats = {"backed_up": 0, "errors": 0, "size_mb": 0.0}
+
+    def _load_active_config(self):
+        config_path = Path(resolve_runtime_config_path(project_root=self.paths.workspace))
+        try:
+            import yaml
+
+            if config_path.exists():
+                return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            pass
+        return {}
+
+    def _runtime_backup_paths(self) -> list[Path]:
+        cfg = self._load_active_config()
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path"),
+                default="reports/orders.sqlite",
+                project_root=self.paths.workspace,
+            )
+        ).resolve()
+        fills_db = derive_fill_store_path(orders_db).resolve()
+        kill_switch = Path(
+            resolve_runtime_path(
+                execution_cfg.get("kill_switch_path"),
+                default="reports/kill_switch.json",
+                project_root=self.paths.workspace,
+            )
+        ).resolve()
+        reconcile_status = Path(
+            resolve_runtime_path(
+                execution_cfg.get("reconcile_status_path"),
+                default="reports/reconcile_status.json",
+                project_root=self.paths.workspace,
+            )
+        ).resolve()
+        return [orders_db, fills_db, kill_switch, reconcile_status]
+
+    def _iter_backup_items(self):
+        seen: set[Path] = set()
+
+        for item in STATIC_BACKUP_ITEMS:
+            path = (self.paths.workspace / item).resolve()
+            if path in seen:
+                continue
+            seen.add(path)
+            yield path, item
+
+        for path in self._runtime_backup_paths():
+            if path in seen:
+                continue
+            seen.add(path)
+            try:
+                arcname = str(path.relative_to(self.paths.workspace)).replace("\\", "/")
+            except ValueError:
+                arcname = f"external_runtime/{path.name}"
+            yield path, arcname
+
     def log(self, msg):
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
-    
+
     def create_backup(self, name=None):
-        """创建备份"""
         self.paths.backup_dir.mkdir(parents=True, exist_ok=True)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = name or f"v5_backup_{timestamp}"
         backup_path = self.paths.backup_dir / f"{backup_name}.tar.gz"
-        
+
         self.log("=" * 60)
-        self.log(f"🗄️  创建备份: {backup_name}")
+        self.log(f"Creating backup: {backup_name}")
         self.log("=" * 60)
-        
-        with tarfile.open(backup_path, 'w:gz') as tar:
-            for item in BACKUP_ITEMS:
-                src_path = self.paths.workspace / item
+
+        with tarfile.open(backup_path, "w:gz") as tar:
+            for src_path, arcname in self._iter_backup_items():
                 if src_path.exists():
                     try:
-                        if src_path.is_dir():
-                            tar.add(src_path, arcname=item)
-                            self.log(f"📁 备份目录: {item}")
-                        else:
-                            tar.add(src_path, arcname=item)
-                            self.log(f"📄 备份文件: {item}")
-                        self.stats['backed_up'] += 1
-                    except Exception as e:
-                        self.log(f"❌ 备份失败 {item}: {e}")
-                        self.stats['errors'] += 1
+                        tar.add(src_path, arcname=arcname)
+                        kind = "directory" if src_path.is_dir() else "file"
+                        self.log(f"backed up {kind}: {arcname}")
+                        self.stats["backed_up"] += 1
+                    except Exception as exc:
+                        self.log(f"backup failed {arcname}: {exc}")
+                        self.stats["errors"] += 1
                 else:
-                    self.log(f"⚠️  跳过不存在: {item}")
-        
-        # 计算备份大小
+                    self.log(f"skip missing: {arcname}")
+
         size_mb = backup_path.stat().st_size / (1024 * 1024)
-        self.stats['size_mb'] = size_mb
-        
-        self.log(f"✅ 备份完成: {backup_path}")
-        self.log(f"📦 大小: {size_mb:.1f} MB")
-        
+        self.stats["size_mb"] = size_mb
+
+        self.log(f"backup complete: {backup_path}")
+        self.log(f"size: {size_mb:.1f} MB")
         return backup_path
-    
+
     def cleanup_old_backups(self):
-        """清理旧备份"""
         if not self.paths.backup_dir.exists():
             return
-        
-        backups = sorted(self.paths.backup_dir.glob('*.tar.gz'), key=lambda x: x.stat().st_mtime, reverse=True)
-        
+
+        backups = sorted(self.paths.backup_dir.glob("*.tar.gz"), key=lambda x: x.stat().st_mtime, reverse=True)
+
         if len(backups) > KEEP_BACKUPS:
             to_delete = backups[KEEP_BACKUPS:]
-            self.log(f"\n🗑️  清理 {len(to_delete)} 个旧备份...")
+            self.log(f"cleaning {len(to_delete)} old backups...")
             for backup in to_delete:
                 try:
                     backup.unlink()
-                    self.log(f"  删除: {backup.name}")
-                except Exception as e:
-                    self.log(f"  删除失败: {backup.name} - {e}")
-    
+                    self.log(f"deleted: {backup.name}")
+                except Exception as exc:
+                    self.log(f"delete failed: {backup.name} - {exc}")
+
     def list_backups(self):
-        """列出所有备份"""
         if not self.paths.backup_dir.exists():
-            print("没有备份")
+            print("no backups")
             return
-        
-        backups = sorted(self.paths.backup_dir.glob('*.tar.gz'), key=lambda x: x.stat().st_mtime, reverse=True)
-        
-        print("\n📋 备份列表:")
+
+        backups = sorted(self.paths.backup_dir.glob("*.tar.gz"), key=lambda x: x.stat().st_mtime, reverse=True)
+
+        print("\nbackup list:")
         print("-" * 60)
         for i, backup in enumerate(backups, 1):
             size_mb = backup.stat().st_size / (1024 * 1024)
             mtime = datetime.fromtimestamp(backup.stat().st_mtime)
             print(f"{i}. {backup.name}")
-            print(f"   大小: {size_mb:.1f} MB  时间: {mtime.strftime('%Y-%m-%d %H:%M')}")
+            print(f"   size: {size_mb:.1f} MB  time: {mtime.strftime('%Y-%m-%d %H:%M')}")
         print("-" * 60)
-    
+
     def restore_backup(self, backup_name):
-        """恢复备份"""
         backup_path = self.paths.backup_dir / backup_name
         if not backup_path.exists():
-            self.log(f"❌ 备份不存在: {backup_name}")
+            self.log(f"backup missing: {backup_name}")
             return False
-        
-        self.log(f"🔄 恢复备份: {backup_name}")
-        
-        # 创建恢复目录
-        restore_dir = self.paths.workspace / f'restore_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+
+        self.log(f"restoring backup: {backup_name}")
+
+        restore_dir = self.paths.workspace / f"restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         restore_dir.mkdir(parents=True, exist_ok=True)
-        
-        with tarfile.open(backup_path, 'r:gz') as tar:
+
+        with tarfile.open(backup_path, "r:gz") as tar:
             tar.extractall(path=restore_dir)
-        
-        self.log(f"✅ 备份已解压到: {restore_dir}")
-        self.log("⚠️  请手动检查并移动到正确位置")
-        
+
+        self.log(f"backup extracted to: {restore_dir}")
+        self.log("please review restored files before replacing runtime data")
         return True
-    
+
     def run(self):
-        """运行备份流程"""
-        self.log("🚀 开始备份流程")
-        
-        # 1. 创建备份
-        backup_path = self.create_backup()
-        
-        # 2. 清理旧备份
+        self.log("starting backup flow")
+        self.create_backup()
         self.cleanup_old_backups()
-        
-        # 3. 输出统计
         self.log("\n" + "=" * 60)
-        self.log("📊 备份统计")
+        self.log("backup stats")
         self.log("=" * 60)
-        self.log(f"已备份: {self.stats['backed_up']} 项")
-        self.log(f"错误: {self.stats['errors']} 项")
-        self.log(f"备份大小: {self.stats['size_mb']:.1f} MB")
+        self.log(f"backed up: {self.stats['backed_up']}")
+        self.log(f"errors: {self.stats['errors']}")
+        self.log(f"backup size: {self.stats['size_mb']:.1f} MB")
         self.log("=" * 60)
 
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='V5 自动备份工具')
-    parser.add_argument('action', choices=['backup', 'list', 'restore'], default='backup', nargs='?')
-    parser.add_argument('--name', help='备份名称')
-    parser.add_argument('--restore-file', help='要恢复的备份文件名')
+
+    parser = argparse.ArgumentParser(description="V5 automated backup helper")
+    parser.add_argument("action", choices=["backup", "list", "restore"], default="backup", nargs="?")
+    parser.add_argument("--name", help="Backup name")
+    parser.add_argument("--restore-file", help="Backup archive to restore")
     args = parser.parse_args()
-    
+
     manager = BackupManager()
-    
-    if args.action == 'backup':
+
+    if args.action == "backup":
         manager.run()
-    elif args.action == 'list':
+    elif args.action == "list":
         manager.list_backups()
-    elif args.action == 'restore':
+    elif args.action == "restore":
         if args.restore_file:
             manager.restore_backup(args.restore_file)
         else:
-            print("❌ 请指定 --restore-file 参数")
+            print("missing --restore-file")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
