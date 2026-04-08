@@ -27,7 +27,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
+from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
 from src.execution.okx_private_client import OKXPrivateClient
 
 
@@ -50,6 +51,19 @@ def _ensure_positions_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _resolve_runtime_paths(cfg: Any) -> tuple[Path, Path]:
+    order_store_path = Path(
+        resolve_runtime_path(
+            getattr(getattr(cfg, "execution", None), "order_store_path", None),
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    positions_db = derive_position_store_path(order_store_path).resolve()
+    equity_file = derive_runtime_named_json_path(order_store_path, "equity_validation").resolve()
+    return positions_db, equity_file
+
+
 def sync_positions(*, config_path: str | None = None, env_path: str = ".env") -> dict[str, Any] | None:
     print("Sync positions from OKX")
     print("=" * 50)
@@ -63,6 +77,9 @@ def sync_positions(*, config_path: str | None = None, env_path: str = ".env") ->
         resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT),
         env_path=resolve_runtime_env_path(env_path, project_root=PROJECT_ROOT),
     )
+    positions_db, equity_file = _resolve_runtime_paths(cfg)
+    positions_db.parent.mkdir(parents=True, exist_ok=True)
+    equity_file.parent.mkdir(parents=True, exist_ok=True)
     okx = OKXPrivateClient(exchange=cfg.exchange)
 
     try:
@@ -139,8 +156,8 @@ def sync_positions(*, config_path: str | None = None, env_path: str = ".env") ->
         else:
             print(f"  WARN: equity difference is {diff:.4f} USDT")
 
-        print(f"\nUpdating local positions DB: {POSITIONS_DB}")
-        conn = sqlite3.connect(str(POSITIONS_DB))
+        print(f"\nUpdating local positions DB: {positions_db}")
+        conn = sqlite3.connect(str(positions_db))
         try:
             _ensure_positions_table(conn)
             cursor = conn.cursor()
@@ -205,8 +222,8 @@ def sync_positions(*, config_path: str | None = None, env_path: str = ".env") ->
             "positions_count": len(position_details),
             "positions": position_details,
         }
-        EQUITY_FILE.write_text(json.dumps(equity_data, indent=2), encoding="utf-8")
-        print(f"\nEquity validation written to {EQUITY_FILE}")
+        equity_file.write_text(json.dumps(equity_data, indent=2), encoding="utf-8")
+        print(f"\nEquity validation written to {equity_file}")
 
         print("\n" + "=" * 50)
         print("Position sync complete")
