@@ -7,7 +7,7 @@ from pathlib import Path
 
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
-from src.execution.fill_store import FillStore, parse_okx_fills
+from src.execution.fill_store import FillStore, derive_fill_store_path, parse_okx_fills
 from src.execution.okx_private_client import OKXPrivateClient
 
 
@@ -60,20 +60,24 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
-    ap.add_argument("--db", default="reports/fills.sqlite")
+    ap.add_argument("--db", default=None)
     ap.add_argument("--limit", type=int, default=100)
     ap.add_argument("--max-pages", type=int, default=20)
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
-
-    db_path = _resolve_store_path(args.db)
     cfg = load_config(
         resolve_runtime_config_path(args.config, project_root=PROJECT_ROOT),
         env_path=resolve_runtime_env_path(args.env, project_root=PROJECT_ROOT),
     )
     if not (cfg.exchange.api_key and cfg.exchange.api_secret and cfg.exchange.passphrase):
         raise RuntimeError("Missing OKX API credentials (exchange.api_key/api_secret/passphrase)")
+
+    raw_db_path = args.db
+    if raw_db_path is None:
+        order_store_path = getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
+        raw_db_path = str(derive_fill_store_path(order_store_path))
+    db_path = _resolve_store_path(raw_db_path)
 
     store = FillStore(path=db_path)
     client = OKXPrivateClient(exchange=cfg.exchange)
