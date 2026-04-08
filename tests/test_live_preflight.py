@@ -156,6 +156,57 @@ def test_preflight_abort_on_nested_kill_switch(monkeypatch):
         assert res.details["kill_switch"]["trigger"] == "manual"
 
 
+def test_preflight_does_not_auto_clear_manual_kill_switch(monkeypatch):
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {
+                "ok": True,
+                "reason": "ok",
+                "category": "OK",
+                "kill_switch": {"enabled": True, "manual": True, "trigger": "ops_override"},
+            }
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    cfg = SimpleNamespace(
+        reconcile_status_path="reconcile.json",
+        reconcile_dust_usdt_ignore=1.0,
+        auto_clear_kill_switch_if_ok=True,
+    )
+    with tempfile.TemporaryDirectory() as td:
+        kill_path = f"{td}/kill_switch.json"
+        with open(kill_path, "w", encoding="utf-8") as f:
+            json.dump({"kill_switch": {"enabled": True, "manual": True, "trigger": "ops_override"}}, f)
+        cfg.kill_switch_path = kill_path
+        pf = lp.LivePreflight(
+            cfg,
+            okx=DummyOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "ABORT"
+        assert res.reason == "kill_switch"
+        assert "kill_switch_auto_cleared" not in (res.details or {})
+        with open(kill_path, "r", encoding="utf-8") as f:
+            persisted = json.load(f)
+        assert persisted["kill_switch"]["enabled"] is True
+        assert persisted["kill_switch"]["manual"] is True
+
+
 def test_preflight_sell_only_if_ledger_not_ok(monkeypatch):
     monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
     monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)

@@ -106,3 +106,29 @@ def test_nested_manual_kill_switch_remains_enabled() -> None:
         ks = out.get("kill_switch") or {}
         assert ks.get("enabled") is True
         assert ks.get("trigger") == "manual"
+
+
+def test_manual_flag_kill_switch_not_auto_cleared() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        status = f"{td}/reconcile_status.json"
+        state = f"{td}/reconcile_failure_state.json"
+        kill = f"{td}/kill_switch.json"
+        cfg = GuardConfig(
+            reconcile_status_path=status,
+            failure_state_path=state,
+            kill_switch_path=kill,
+            stale_threshold_sec=10**9,
+            auto_clear_enabled=True,
+            auto_clear_after_ok_count=1,
+        )
+        g = KillSwitchGuard(cfg)
+
+        _write(kill, {"enabled": True, "manual": True, "trigger": "ops_override"})
+        _write(status, {"generated_ts_ms": int(time.time() * 1000), "ok": True})
+        out = g.apply()
+        ks = out.get("kill_switch") or {}
+        assert ks.get("enabled") is True
+        assert ks.get("manual") is True
+        persisted = json.loads(open(kill, "r", encoding="utf-8").read())
+        assert persisted["enabled"] is True
+        assert persisted["manual"] is True

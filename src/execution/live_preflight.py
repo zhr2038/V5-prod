@@ -78,6 +78,29 @@ def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
     return {"enabled": bool(data)}
 
 
+def _is_manual_kill_switch(data: Any) -> bool:
+    normalized = _normalize_kill_switch(data)
+    return _to_bool(normalized.get("manual")) or str(normalized.get("trigger") or "").strip().lower() == "manual"
+
+
+def _clear_kill_switch_payload(data: Any, *, now_ms: int, reason: str) -> Dict[str, Any]:
+    if isinstance(data, dict):
+        payload = dict(data)
+    else:
+        payload = {}
+    nested = payload.get("kill_switch")
+    if isinstance(nested, dict):
+        nested_payload = dict(nested)
+        nested_payload["enabled"] = False
+        nested_payload["auto_cleared_ts_ms"] = now_ms
+        nested_payload["auto_cleared_reason"] = reason
+        payload["kill_switch"] = nested_payload
+    payload["enabled"] = False
+    payload["auto_cleared_ts_ms"] = now_ms
+    payload["auto_cleared_reason"] = reason
+    return payload
+
+
 def _borrow_symbol_for_ccy(ccy: Any) -> Optional[str]:
     base = str(ccy or "").strip().upper()
     if not base or base in {"USDT", "USDC", "USD"}:
@@ -277,13 +300,16 @@ class LivePreflight:
                     and bool(ledger_ok)
                 ):
                     ks_path = str(getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json"))
-                    ks_obj = _read_json(ks_path) or {}
-                    ks_obj["enabled"] = False
-                    ks_obj["auto_cleared_ts_ms"] = _now_ms()
-                    ks_obj["auto_cleared_reason"] = "preflight_ok"
-                    _write_json(ks_path, ks_obj)
-                    kill_switch_enabled = False
-                    details["kill_switch_auto_cleared"] = True
+                    ks_obj = _read_json(ks_path)
+                    if not _is_manual_kill_switch(ks_obj):
+                        ks_obj = _clear_kill_switch_payload(
+                            ks_obj,
+                            now_ms=_now_ms(),
+                            reason="preflight_ok",
+                        )
+                        _write_json(ks_path, ks_obj)
+                        kill_switch_enabled = False
+                        details["kill_switch_auto_cleared"] = True
             except Exception:
                 pass
 

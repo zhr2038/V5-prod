@@ -59,6 +59,19 @@ def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
     return {"enabled": bool(data)}
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_manual_kill_switch(data: Any) -> bool:
+    normalized = _normalize_kill_switch(data)
+    return _to_bool(normalized.get("manual")) or str(normalized.get("trigger") or "").strip().lower() == "manual"
+
+
 @dataclass
 class GuardConfig:
     """GuardConfig类"""
@@ -224,7 +237,7 @@ class KillSwitchGuard:
         if (
             bool(ks.get("enabled"))
             and self.cfg.auto_clear_enabled
-            and str(ks.get("trigger") or "").lower() != "manual"
+            and not _is_manual_kill_switch(ks)
             and int(st.get("consecutive_ok") or 0) >= self.cfg.auto_clear_after_ok_count
         ):
             
