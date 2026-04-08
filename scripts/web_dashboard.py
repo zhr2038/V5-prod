@@ -18,7 +18,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -31,6 +31,11 @@ from configs.loader import load_config as load_app_config
 
 from src.core.models import MarketSeries
 from src.data.okx_ccxt_provider import OKXCCXTProvider
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_position_store_path,
+    derive_runtime_runs_dir,
+)
 from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
 from src.regime.rss_vote_utils import build_rss_vote
 from src.research.cache_loader import load_cached_market_data
@@ -94,6 +99,28 @@ def _resolve_react_build_path() -> Path:
 REACT_BUILD_PATH = _resolve_react_build_path()
 SYSTEMCTL_BIN = shutil.which('systemctl')
 TIMER_TS_RE = re.compile(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})')
+
+
+@dataclass(frozen=True)
+class DashboardRuntimePaths:
+    orders_db: Path
+    fills_db: Path
+    positions_db: Path
+    reconcile_status_path: Path
+    runs_dir: Path
+
+
+def _resolve_workspace_relative_path(raw_path: object, default: str) -> Path:
+    raw = str(raw_path or default).strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        parts = path.parts
+        if parts and parts[0] == 'reports':
+            remainder = Path(*parts[1:]) if len(parts) > 1 else Path()
+            path = REPORTS_DIR / remainder
+        else:
+            path = WORKSPACE / path
+    return path.resolve()
 
 app = Flask(
     __name__,
@@ -1275,8 +1302,9 @@ def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> 
     return total_fee_usdt
 
 
-def _load_total_fees_from_orders(*, excluded_inst_ids: Optional[List[str]] = None, max_notional_usdt: float = 1000.0, reports_dir: Optional[Path] = None) -> float:
-    orders_db = (reports_dir or REPORTS_DIR) / 'orders.sqlite'
+def _load_total_fees_from_orders(*, excluded_inst_ids: Optional[List[str]] = None, max_notional_usdt: float = 1000.0, reports_dir: Optional[Path] = None, orders_db: Optional[Path] = None) -> float:
+    if orders_db is None:
+        orders_db = (reports_dir or REPORTS_DIR) / 'orders.sqlite'
     if not orders_db.exists():
         return 0.0
 
@@ -1319,13 +1347,14 @@ def _to_inst_id(symbol: str, quote_ccy: str = 'USDT') -> str:
     return f'{raw}-{quote_ccy}'
 
 
-def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Optional[Path] = None) -> Optional[float]:
+def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Optional[Path] = None, fills_db: Optional[Path] = None) -> Optional[float]:
     if float(current_qty or 0.0) <= 0:
         return None
 
     base_symbol = str(symbol or '').split('/')[0].split('-')[0].upper()
     inst_id = _to_inst_id(base_symbol)
-    fills_db = (reports_dir or REPORTS_DIR) / 'fills.sqlite'
+    if fills_db is None:
+        fills_db = (reports_dir or REPORTS_DIR) / 'fills.sqlite'
     if not fills_db.exists() or not inst_id:
         return None
 
@@ -1428,6 +1457,25 @@ def load_config():
         return {}
 
 
+def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> DashboardRuntimePaths:
+    config = cfg if isinstance(cfg, dict) else load_config()
+    execution_cfg = config.get('execution', {}) if isinstance(config, dict) else {}
+    orders_db = _resolve_workspace_relative_path(
+        execution_cfg.get('order_store_path'),
+        'reports/orders.sqlite',
+    )
+    return DashboardRuntimePaths(
+        orders_db=orders_db,
+        fills_db=derive_fill_store_path(orders_db),
+        positions_db=derive_position_store_path(orders_db),
+        reconcile_status_path=_resolve_workspace_relative_path(
+            execution_cfg.get('reconcile_status_path'),
+            'reports/reconcile_status.json',
+        ),
+        runs_dir=derive_runtime_runs_dir(orders_db),
+    )
+
+
 def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equity: float) -> float:
     total_equity = float(total_equity or 0.0)
     initial_capital = float(initial_capital or 0.0)
@@ -1452,8 +1500,8 @@ def _maybe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _load_reconcile_cash_balance() -> tuple[bool, float]:
-    reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+def _load_reconcile_cash_balance(runtime_paths: Optional[DashboardRuntimePaths] = None) -> tuple[bool, float]:
+    reconcile_file = (runtime_paths or _resolve_dashboard_runtime_paths()).reconcile_status_path
     if not reconcile_file.exists():
         return False, 0.0
 
@@ -1485,8 +1533,8 @@ def _dashboard_live_account_enabled() -> bool:
     return _env_flag_enabled('V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT') or _env_flag_enabled('V5_DASHBOARD_ALLOW_LIVE_OKX')
 
 
-def _load_local_account_state() -> Dict[str, float]:
-    db_path = REPORTS_DIR / 'positions.sqlite'
+def _load_local_account_state(runtime_paths: Optional[DashboardRuntimePaths] = None) -> Dict[str, float]:
+    db_path = (runtime_paths or _resolve_dashboard_runtime_paths()).positions_db
     if not db_path.exists():
         return {}
 
@@ -1618,8 +1666,16 @@ def api_account():
     """账户信息API - 优先OKX实时数据"""
     try:
         # 优先从OKX获取实时余额
-        has_reconcile_cash, cash = _load_reconcile_cash_balance()
-        local_account_state = _load_local_account_state()
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
+        try:
+            has_reconcile_cash, cash = _load_reconcile_cash_balance(runtime_paths=runtime_paths)
+        except TypeError:
+            has_reconcile_cash, cash = _load_reconcile_cash_balance()
+        try:
+            local_account_state = _load_local_account_state(runtime_paths=runtime_paths)
+        except TypeError:
+            local_account_state = _load_local_account_state()
         try:
             import time, hmac, hashlib, base64
 
@@ -1650,7 +1706,12 @@ def api_account():
             cash = float(local_account_state.get('cash_usdt') or 0.0)
         
         # 获取最新权益 - 排除异常数据
-        conn = get_db_connection()
+        conn = None
+        if runtime_paths.orders_db.exists():
+            try:
+                conn = sqlite3.connect(str(runtime_paths.orders_db))
+            except Exception:
+                conn = None
         if conn:
             cursor = conn.cursor()
             # 使用参数化查询排除异常币种
@@ -1674,6 +1735,7 @@ def api_account():
             total_fees = _load_total_fees_from_orders(
                 excluded_inst_ids=EXCLUDED_SYMBOLS,
                 max_notional_usdt=1000.0,
+                orders_db=runtime_paths.orders_db,
             )
             
             # 计算已实现盈亏
@@ -1710,7 +1772,6 @@ def api_account():
         
         # 计算回撤（基于资金上限）
         # 修复：小资金测试时，不应使用历史大资金峰值
-        config = load_config()
         budget_cap = float(config.get('budget', {}).get('live_equity_cap_usdt', 0) or 0)
         drawdown_pct = 0.0
         peak_equity = initial_capital  # 默认使用初始资金作为峰值
@@ -1912,6 +1973,7 @@ def api_trades():
 def api_positions():
     """持仓信息API（优先 positions.sqlite，回退最新 run 的 positions.jsonl）"""
     try:
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         hidden_symbols = {
             'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
         }
@@ -1989,7 +2051,7 @@ def api_positions():
                 'value_usdt': round(eq_usd, 4)
             })
 
-        pos_db = REPORTS_DIR / 'positions.sqlite'
+        pos_db = runtime_paths.positions_db
         positions = []
         live_okx_used = False
         avg_price_hints: Dict[str, float] = {}
@@ -2046,7 +2108,7 @@ def api_positions():
 
         # 1) 回退 positions.sqlite（仅当实时OKX不可用且positions为空）
         # 注意：如果OKX API成功调用但返回空持仓，说明真的没持仓，不应回退到缓存
-        reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+        reconcile_file = runtime_paths.reconcile_status_path
         if not positions and reconcile_file.exists():
             try:
                 reconcile = json.loads(reconcile_file.read_text(encoding='utf-8', errors='ignore'))
@@ -2104,7 +2166,7 @@ def api_positions():
 
         # 2) 回退：DB为空且OKX不可用时读取最新 runs/*/positions.jsonl
         if not authoritative_snapshot_seen and not positions:
-            runs_dir = REPORTS_DIR / 'runs'
+            runs_dir = runtime_paths.runs_dir
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
                 for run_dir in run_dirs[:12]:
@@ -2152,7 +2214,11 @@ def api_positions():
             symbol = p.get('symbol', '')
             if not symbol:
                 continue
-            avg_cost = _load_avg_cost_from_fills(symbol, float(p.get('qty', 0) or 0.0))
+            avg_cost = _load_avg_cost_from_fills(
+                symbol,
+                float(p.get('qty', 0) or 0.0),
+                fills_db=runtime_paths.fills_db,
+            )
             if avg_cost and avg_cost > 0:
                 p['avg_px'] = round(avg_cost, 6)
 

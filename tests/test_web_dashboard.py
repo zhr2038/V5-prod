@@ -1793,6 +1793,95 @@ def test_account_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path
     assert response.get_json()["cash_usdt"] == 11.48
 
 
+def test_account_api_uses_active_runtime_paths(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {
+                "order_store_path": "reports/shadow_runtime/orders.sqlite",
+                "reconcile_status_path": "reports/shadow_runtime/reconcile_status.json",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": [{"symbol": "OKB", "value_usdt": 100.0}]}))
+
+    (reports_dir / "reconcile_status.json").write_text(
+        json.dumps({"exchange_snapshot": {"ccy_cashBal": {"USDT": 11.0}}}),
+        encoding="utf-8",
+    )
+    (runtime_dir / "reconcile_status.json").write_text(
+        json.dumps({"exchange_snapshot": {"ccy_cashBal": {"USDT": 50.0}}}),
+        encoding="utf-8",
+    )
+
+    root_positions_db = reports_dir / "positions.sqlite"
+    con = sqlite3.connect(str(root_positions_db))
+    cur = con.cursor()
+    cur.execute(
+        "CREATE TABLE account_state (k TEXT PRIMARY KEY, cash_usdt REAL NOT NULL, equity_peak_usdt REAL NOT NULL, scale_basis_usdt REAL DEFAULT 0.0)"
+    )
+    cur.execute("INSERT INTO account_state VALUES ('default', 11.0, 151.0, 0.0)")
+    con.commit()
+    con.close()
+
+    runtime_positions_db = runtime_dir / "positions.sqlite"
+    con = sqlite3.connect(str(runtime_positions_db))
+    cur = con.cursor()
+    cur.execute(
+        "CREATE TABLE account_state (k TEXT PRIMARY KEY, cash_usdt REAL NOT NULL, equity_peak_usdt REAL NOT NULL, scale_basis_usdt REAL DEFAULT 0.0)"
+    )
+    cur.execute("INSERT INTO account_state VALUES ('default', 50.0, 170.0, 0.0)")
+    con.commit()
+    con.close()
+
+    root_orders_db = reports_dir / "orders.sqlite"
+    con = sqlite3.connect(str(root_orders_db))
+    cur = con.cursor()
+    cur.execute(
+        "CREATE TABLE orders (inst_id TEXT, side TEXT, notional_usdt REAL, fee TEXT, state TEXT, avg_px TEXT)"
+    )
+    cur.execute("INSERT INTO orders VALUES ('BTC-USDT', 'buy', 90.0, '0', 'FILLED', '45000')")
+    con.commit()
+    con.close()
+
+    runtime_orders_db = runtime_dir / "orders.sqlite"
+    con = sqlite3.connect(str(runtime_orders_db))
+    cur = con.cursor()
+    cur.execute(
+        "CREATE TABLE orders (inst_id TEXT, side TEXT, notional_usdt REAL, fee TEXT, state TEXT, avg_px TEXT)"
+    )
+    cur.executemany(
+        "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            ("BTC-USDT", "buy", 100.0, "0", "FILLED", "50000"),
+            ("ETH-USDT", "sell", 120.0, "0", "FILLED", "2500"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    response = client.get("/api/account")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["cash_usdt"] == 50.0
+    assert payload["total_equity_usdt"] == 150.0
+    assert payload["total_trades"] == 2
+    assert payload["peak_equity_usdt"] == 170.0
+
+
 def test_trades_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -2178,6 +2267,64 @@ def test_api_positions_does_not_fallback_to_sqlite_when_reconcile_snapshot_confi
         payload = module.api_positions().get_json()
 
     assert payload["positions"] == []
+
+
+def test_api_positions_uses_runtime_runs_and_fill_db(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_runs_dir = reports_dir / "runs" / "20260408_00"
+    runtime_runs_dir = runtime_dir / "runs" / "20260408_01"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    runtime_runs_dir.mkdir(parents=True, exist_ok=True)
+    root_runs_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {
+                "order_store_path": "reports/shadow_runtime/orders.sqlite",
+                "reconcile_status_path": "reports/shadow_runtime/reconcile_status.json",
+            }
+        },
+    )
+
+    root_positions_db = reports_dir / "positions.sqlite"
+    con = sqlite3.connect(str(root_positions_db))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('BTC/USDT', 1.0, 30000.0, 30000.0)")
+    con.commit()
+    con.close()
+
+    (root_runs_dir / "positions.jsonl").write_text(
+        json.dumps({"symbol": "BTC/USDT", "qty": 1.0, "mark_px": 30000.0, "avg_px": 30000.0}) + "\n",
+        encoding="utf-8",
+    )
+    (runtime_runs_dir / "positions.jsonl").write_text(
+        json.dumps({"symbol": "ETH/USDT", "qty": 2.0, "mark_px": 2000.0, "avg_px": 1800.0}) + "\n",
+        encoding="utf-8",
+    )
+
+    seen: dict[str, Path] = {}
+
+    def fake_load_avg_cost(symbol, current_qty, reports_dir=None, fills_db=None):
+        seen["fills_db"] = fills_db
+        return None
+
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", fake_load_avg_cost)
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")))
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    assert [row["symbol"] for row in payload["positions"]] == ["ETH"]
+    assert seen["fills_db"] == runtime_dir / "fills.sqlite"
 
 
 def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):
