@@ -10,12 +10,15 @@ import os
 import sqlite3
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKSPACE))
+
+from src.execution.fill_store import derive_fill_store_path
 
 REPORTS_DIR = WORKSPACE / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
@@ -46,6 +49,13 @@ def resolve_config_path() -> Path:
 CONFIG_PATH = resolve_config_path()
 
 
+@dataclass(frozen=True)
+class StatusPaths:
+    orders_db: Path
+    fills_db: Path
+    auto_blacklist_path: Path
+
+
 def load_config() -> Dict[str, Any]:
     try:
         import yaml
@@ -53,6 +63,25 @@ def load_config() -> Dict[str, Any]:
         return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
     except Exception:
         return {}
+
+
+def _resolve_runtime_path(raw_path: object, default_path: Path) -> Path:
+    raw = str(raw_path or default_path).strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = WORKSPACE / path
+    return path.resolve()
+
+
+def _resolve_status_paths(cfg: Optional[Dict[str, Any]] = None) -> StatusPaths:
+    config = cfg if isinstance(cfg, dict) else load_config()
+    execution_cfg = config.get("execution", {}) if isinstance(config, dict) else {}
+    orders_db = _resolve_runtime_path(execution_cfg.get("order_store_path"), ORDERS_DB)
+    return StatusPaths(
+        orders_db=orders_db,
+        fills_db=derive_fill_store_path(orders_db),
+        auto_blacklist_path=orders_db.parent / "auto_blacklist.json",
+    )
 
 
 def get_latest_run_data() -> Optional[Dict[str, Any]]:
@@ -120,11 +149,12 @@ def get_service_status() -> str:
         return "unknown"
 
 
-def check_borrow_status() -> Dict[str, Any]:
-    cfg = load_config()
-    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+def check_borrow_status(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    config = cfg if isinstance(cfg, dict) else load_config()
+    paths = _resolve_status_paths(config)
+    execution_cfg = config.get("execution", {}) if isinstance(config, dict) else {}
 
-    blacklist_file = REPORTS_DIR / "auto_blacklist.json"
+    blacklist_file = paths.auto_blacklist_path
     entries = []
     if blacklist_file.exists():
         try:
@@ -148,10 +178,10 @@ def _format_ts_ms(ts_ms: int) -> str:
     return datetime.fromtimestamp(int(ts_ms) / 1000).isoformat(timespec="minutes")
 
 
-def _get_latest_fill_ts_ms() -> Optional[int]:
+def _get_latest_fill_ts_ms(path: Path) -> Optional[int]:
     try:
-        if FILLS_DB.exists():
-            conn = sqlite3.connect(str(FILLS_DB))
+        if path.exists():
+            conn = sqlite3.connect(str(path))
             try:
                 row = conn.execute("SELECT MAX(ts_ms) FROM fills").fetchone()
             finally:
@@ -164,12 +194,12 @@ def _get_latest_fill_ts_ms() -> Optional[int]:
     return None
 
 
-def _get_latest_filled_order_ts_ms() -> Optional[int]:
-    if not ORDERS_DB.exists():
+def _get_latest_filled_order_ts_ms(path: Path) -> Optional[int]:
+    if not path.exists():
         return None
 
     try:
-        conn = sqlite3.connect(str(ORDERS_DB))
+        conn = sqlite3.connect(str(path))
         try:
             row = conn.execute(
                 """
@@ -191,12 +221,13 @@ def _get_latest_filled_order_ts_ms() -> Optional[int]:
         return None
 
 
-def get_last_filled_trade_ts() -> Optional[str]:
+def get_last_filled_trade_ts(cfg: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    paths = _resolve_status_paths(cfg)
     candidates = [
         ts_ms
         for ts_ms in (
-            _get_latest_fill_ts_ms(),
-            _get_latest_filled_order_ts_ms(),
+            _get_latest_fill_ts_ms(paths.fills_db),
+            _get_latest_filled_order_ts_ms(paths.orders_db),
         )
         if ts_ms
     ]
@@ -213,9 +244,9 @@ def build_next_run_hint() -> str:
 def generate_report() -> str:
     cfg = load_config()
     run_data = get_latest_run_data() or {}
-    borrow = check_borrow_status()
+    borrow = check_borrow_status(cfg)
     service_status = get_service_status()
-    last_trade = get_last_filled_trade_ts() or "n/a"
+    last_trade = get_last_filled_trade_ts(cfg) or "n/a"
     budget_cap = cfg.get("budget", {}).get("live_equity_cap_usdt", "n/a") if isinstance(cfg, dict) else "n/a"
 
     counts = run_data.get("counts", {}) if isinstance(run_data, dict) else {}
