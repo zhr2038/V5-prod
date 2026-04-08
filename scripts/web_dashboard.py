@@ -3997,7 +3997,7 @@ def api_ml_training():
 def api_reflection_reports():
     """反思Agent报告列表API（兼容V1/V2结构）"""
     try:
-        reflection_dir = REPORTS_DIR / 'reflection'
+        reflection_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir / 'reflection'
 
         if not reflection_dir.exists():
             return jsonify({'reports': [], 'message': '暂无反思报告'})

@@ -2207,6 +2207,67 @@ def test_ml_training_api_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
     assert payload["runtime_prediction_count"] == 7
 
 
+def test_api_reflection_reports_uses_active_runtime_reflection_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    root_reflection_dir = reports_dir / "reflection"
+    runtime_reflection_dir = reports_dir / "shadow_runtime" / "reflection"
+    root_reflection_dir.mkdir(parents=True, exist_ok=True)
+    runtime_reflection_dir.mkdir(parents=True, exist_ok=True)
+
+    (root_reflection_dir / "reflection_20260408_010000.json").write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "total_realized_pnl": -99.0,
+                    "total_trades": 9,
+                    "total_symbols": 4,
+                },
+                "alerts": [{"level": "critical"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_reflection_dir / "reflection_20260408_020000.json").write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "total_realized_pnl": 12.34,
+                    "total_trades": 2,
+                    "total_symbols": 1,
+                },
+                "alerts": [{"level": "warning"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    response = client.get("/api/reflection_reports")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total_reports"] == 1
+    assert len(payload["reports"]) == 1
+    assert payload["reports"][0]["filename"] == "reflection_20260408_020000.json"
+    assert payload["reports"][0]["total_pnl"] == 12.34
+    assert payload["reports"][0]["trade_count"] == 2
+    assert payload["reports"][0]["high_priority"] == 0
+    assert payload["reports"][0]["medium_priority"] == 1
+
+
 def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
