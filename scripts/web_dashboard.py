@@ -3384,10 +3384,14 @@ def api_cost_calibration():
     """F2成本校准进度API - 从定时任务生成的真实成本数据计算"""
     try:
         # 优先读取定时任务生成的真实成本数据 (cost_stats_real)
-        cost_dir = REPORTS_DIR / 'cost_stats_real'
+        runtime_reports_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir
+        root_fallback_cost_dir = REPORTS_DIR / 'cost_stats'
+        cost_dir = runtime_reports_dir / 'cost_stats_real'
         if not cost_dir.exists():
             cost_dir = REPORTS_DIR / 'cost_stats'  # 兼容旧路径
-        events_dir = REPORTS_DIR / 'cost_events'
+        events_dir = runtime_reports_dir / 'cost_events'
+        if cost_dir == root_fallback_cost_dir:
+            cost_dir = runtime_reports_dir / 'cost_stats'
         
         calibration_data = []
         total_days = 0

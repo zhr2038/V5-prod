@@ -2661,6 +2661,67 @@ def test_api_market_state_uses_active_runtime_reports_dir(monkeypatch, tmp_path)
     assert payload["history_24h"][0]["final"]["state"] == "TRENDING"
 
 
+def test_api_cost_calibration_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_cost_dir = reports_dir / "cost_stats_real"
+    runtime_cost_dir = runtime_dir / "cost_stats_real"
+    root_cost_dir.mkdir(parents=True, exist_ok=True)
+    runtime_cost_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (root_cost_dir / "daily_cost_stats_20260407.json").write_text(
+        json.dumps(
+            {
+                "buckets": {
+                    "all": {
+                        "slippage_bps": {"mean": 9.0, "count": 3},
+                        "fee_bps": {"mean": 4.0, "count": 3},
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_cost_dir / "daily_cost_stats_20260408.json").write_text(
+        json.dumps(
+            {
+                "buckets": {
+                    "all": {
+                        "slippage_bps": {"mean": 1.5, "count": 2},
+                        "fee_bps": {"mean": 0.5, "count": 2},
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/cost_calibration")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "calibrating"
+    assert payload["total_days"] == 1
+    assert payload["avg_slippage_bps"] == 1.5
+    assert payload["avg_fee_bps"] == 0.5
+    assert payload["avg_total_cost_bps"] == 2.0
+    assert payload["daily_stats"][0]["date"] == "20260408"
+
+
 def test_market_state_snapshot_falls_back_to_regime_json_after_failed_run(tmp_path):
     module = load_web_dashboard_module()
 
