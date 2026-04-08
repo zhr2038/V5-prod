@@ -2249,6 +2249,42 @@ def test_health_api_uses_active_runtime_orders_db(monkeypatch, tmp_path):
     )
 
 
+def test_api_equity_history_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_run = reports_dir / "runs" / "20260408_02"
+    runtime_run = runtime_dir / "runs" / "20260408_01"
+    root_run.mkdir(parents=True, exist_ok=True)
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (root_run / "equity.jsonl").write_text(
+        json.dumps({"ts": "2026-04-08T10:00:00", "equity": 999.0}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    (runtime_run / "equity.jsonl").write_text(
+        json.dumps({"ts": "2026-04-08T11:00:00", "equity": 123.0}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/equity_history")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload == [{"timestamp": "2026-04-08T11:00:00", "value": 123.0}]
+
+
 def test_auto_risk_guard_api_uses_auto_risk_eval_file(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

@@ -3052,7 +3052,7 @@ def api_market_state():
 
 def _load_equity_points(limit: int = 800):
     """从 reports/runs/*/equity.jsonl 聚合权益点（真实口径：cash+持仓市值）。"""
-    runs_dir = REPORTS_DIR / 'runs'
+    runs_dir = _resolve_dashboard_runtime_paths(load_config()).runs_dir
     points = []
     if not runs_dir.exists():
         return points
