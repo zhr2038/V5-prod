@@ -11,10 +11,20 @@ V5 风控自动恢复机制
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import (
+    derive_runtime_auto_risk_guard_path,
+    derive_runtime_named_json_path,
+    derive_runtime_reports_dir,
+)
 
 # 自动恢复阈值配置
 RECOVERY_THRESHOLDS = {
@@ -34,9 +44,18 @@ class RiskAutoRecovery:
     
     def __init__(self, workspace: Path = PROJECT_ROOT):
         self.workspace = Path(workspace).resolve()
-        self.reports_dir = self.workspace / 'reports'
-        self.risk_state_file = self.reports_dir / 'auto_risk_guard.json'
-        self.config_file = self.reports_dir / 'risk_recovery_config.json'
+        cfg = load_runtime_config(project_root=self.workspace)
+        execution_cfg = cfg.get('execution', {}) if isinstance(cfg, dict) else {}
+        order_store_path = Path(
+            resolve_runtime_path(
+                execution_cfg.get('order_store_path') if isinstance(execution_cfg, dict) else None,
+                default='reports/orders.sqlite',
+                project_root=self.workspace,
+            )
+        ).resolve()
+        self.reports_dir = derive_runtime_reports_dir(order_store_path).resolve()
+        self.risk_state_file = derive_runtime_auto_risk_guard_path(order_store_path).resolve()
+        self.config_file = derive_runtime_named_json_path(order_store_path, 'risk_recovery_config').resolve()
         self.config = self.load_config()
     
     def load_config(self):

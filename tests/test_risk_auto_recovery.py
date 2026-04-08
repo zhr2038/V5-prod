@@ -36,3 +36,33 @@ def test_risk_auto_recovery_creates_workspace_reports_when_saving_state(tmp_path
     state = json.loads(manager.risk_state_file.read_text(encoding="utf-8"))
     assert state["level"] == "DEFENSE"
     assert state["recovery_reason"] == "auto"
+
+
+def test_risk_auto_recovery_uses_runtime_paths_from_order_store_path(tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=tmp_path)
+    manager.config["enabled"] = False
+    manager.save_config()
+    success, _ = manager.execute_recovery("DEFENSE")
+
+    expected_reports_dir = (tmp_path / "reports" / "shadow_runtime").resolve()
+    assert manager.reports_dir == expected_reports_dir
+    assert manager.risk_state_file == (expected_reports_dir / "auto_risk_guard.json").resolve()
+    assert manager.config_file == (expected_reports_dir / "risk_recovery_config.json").resolve()
+    assert success is True
+    assert manager.config_file.exists()
+    assert manager.risk_state_file.exists()
+    assert not (tmp_path / "reports" / "auto_risk_guard.json").exists()
+    assert not (tmp_path / "reports" / "risk_recovery_config.json").exists()
