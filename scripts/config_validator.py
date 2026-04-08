@@ -50,6 +50,30 @@ REPORTS_DIR = WORKSPACE / 'reports'
 DATA_DIR = WORKSPACE / 'data'
 
 
+def _resolve_workspace_relative_path(raw_path, default: str) -> Path:
+    value = str(raw_path or default).strip()
+    path = Path(value)
+    if not path.is_absolute():
+        path = WORKSPACE / path
+    return path.resolve()
+
+
+def _derive_fill_store_path(order_store_path: Path) -> Path:
+    if order_store_path.name == 'orders.sqlite':
+        return order_store_path.with_name('fills.sqlite')
+    if 'orders' in order_store_path.stem:
+        return order_store_path.with_name(order_store_path.name.replace('orders', 'fills', 1))
+    return order_store_path.with_name('fills.sqlite')
+
+
+def _derive_position_store_path(order_store_path: Path) -> Path:
+    if order_store_path.name == 'orders.sqlite':
+        return order_store_path.with_name('positions.sqlite')
+    if 'orders' in order_store_path.stem:
+        return order_store_path.with_name(order_store_path.name.replace('orders', 'positions', 1))
+    return order_store_path.with_name('positions.sqlite')
+
+
 class ConfigValidator:
     """配置验证器"""
     
@@ -57,6 +81,7 @@ class ConfigValidator:
         self.errors = []
         self.warnings = []
         self.checks_passed = 0
+        self.active_config = {}
     
     def log(self, msg, level='INFO'):
         prefix = {'INFO': 'ℹ️', 'PASS': '✅', 'WARN': '⚠️', 'FAIL': '❌'}
@@ -126,6 +151,7 @@ class ConfigValidator:
                     self.warnings.append(f"配置项建议存在: {key}")
                     self.log(f"配置项缺失: {key}", 'WARN')
             
+            self.active_config = config if isinstance(config, dict) else {}
             return config
             
         except yaml.YAMLError as e:
@@ -203,10 +229,15 @@ class ConfigValidator:
         
         import sqlite3
         
+        execution_cfg = self.active_config.get('execution', {}) if isinstance(self.active_config, dict) else {}
+        orders_db = _resolve_workspace_relative_path(
+            execution_cfg.get('order_store_path') if isinstance(execution_cfg, dict) else None,
+            'reports/orders.sqlite',
+        )
         db_files = [
-            REPORTS_DIR / 'orders.sqlite',
-            REPORTS_DIR / 'positions.sqlite',
-            REPORTS_DIR / 'fills.sqlite'
+            orders_db,
+            _derive_position_store_path(orders_db),
+            _derive_fill_store_path(orders_db),
         ]
         
         for db_path in db_files:
