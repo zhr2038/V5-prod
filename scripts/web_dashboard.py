@@ -3789,12 +3789,13 @@ def _api_ml_training_v2():
         existing = [p for p in _model_artifact_candidates(base_path) if p.exists()]
         return max(existing, key=lambda p: p.stat().st_mtime) if existing else None
 
+    runtime_reports_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir
     configured_enabled = False
     min_samples = 200
     model_base_path = WORKSPACE / 'models' / 'ml_factor_model'
     pointer_path = WORKSPACE / 'models' / 'ml_factor_model_active.txt'
-    promotion_path = REPORTS_DIR / 'model_promotion_decision.json'
-    runtime_path = REPORTS_DIR / 'ml_runtime_status.json'
+    promotion_path = runtime_reports_dir / 'model_promotion_decision.json'
+    runtime_path = runtime_reports_dir / 'ml_runtime_status.json'
     try:
         cfg = load_app_config(str(CONFIG_PATH), env_path=None)
         ml_cfg = getattr(getattr(cfg, 'alpha', None), 'ml_factor', None)
@@ -3820,7 +3821,7 @@ def _api_ml_training_v2():
 
     total_samples = 0
     labeled_samples = 0
-    db_path = REPORTS_DIR / 'ml_training_data.db'
+    db_path = runtime_reports_dir / 'ml_training_data.db'
     if db_path.exists():
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()
@@ -3831,7 +3832,7 @@ def _api_ml_training_v2():
         conn.close()
 
     latest_history = {}
-    history_path = REPORTS_DIR / 'ml_training_history.json'
+    history_path = runtime_reports_dir / 'ml_training_history.json'
     if history_path.exists():
         try:
             hist_obj = json.loads(history_path.read_text(encoding='utf-8'))
