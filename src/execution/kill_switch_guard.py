@@ -179,7 +179,7 @@ class KillSwitchGuard:
             gen_ts_ms = 0
 
         age_ms = max(0, now - gen_ts_ms) if gen_ts_ms > 0 else None
-        ok0 = bool(status.get("ok")) if status else False
+        ok0 = _to_bool(status.get("ok")) if status else False
         reason0 = status.get("reason")
 
         # Capture OKX error code/msg if present

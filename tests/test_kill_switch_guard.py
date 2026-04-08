@@ -152,3 +152,37 @@ def test_string_false_kill_switch_does_not_block() -> None:
         out = g.apply()
         ks = out.get("kill_switch") or {}
         assert ks.get("enabled") is False
+
+
+def test_string_false_reconcile_ok_triggers_hard_failure() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        status = f"{td}/reconcile_status.json"
+        state = f"{td}/reconcile_failure_state.json"
+        kill = f"{td}/kill_switch.json"
+        cfg = GuardConfig(
+            reconcile_status_path=status,
+            failure_state_path=state,
+            kill_switch_path=kill,
+            hard_fail_threshold=1,
+            stale_threshold_sec=10**9,
+        )
+        g = KillSwitchGuard(cfg)
+
+        _write(
+            status,
+            {
+                "generated_ts_ms": int(time.time() * 1000),
+                "ok": "false",
+                "reason": "usdt_mismatch",
+                "stats": {"max_abs_usdt_delta": 10.0},
+            },
+        )
+        out = g.apply()
+        st = out.get("failure_state") or {}
+        ks = out.get("kill_switch") or {}
+
+        assert out.get("ok") is False
+        assert out.get("reason") == "usdt_mismatch"
+        assert out.get("category") == "HARD"
+        assert int(st.get("consecutive_hard") or 0) == 1
+        assert ks.get("enabled") is True
