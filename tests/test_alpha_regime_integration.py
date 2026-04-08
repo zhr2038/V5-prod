@@ -513,3 +513,96 @@ def test_alpha_engine_ml_overlay_requires_latest_promotion_pass(tmp_path, monkey
     assert runtime["promotion_fail_reasons"] == ["valid_ic<0.00", "cv_mean_ic<0.01"]
     assert runtime["model_path"] == str(promoted_model)
     assert snapshot.ml_overlay_scores == {}
+
+
+def test_alpha_engine_ml_overlay_rejects_string_false_promotion_pass(tmp_path, monkeypatch):
+    candidate_model = tmp_path / "candidate_ml_factor_model"
+    (tmp_path / "candidate_ml_factor_model.pkl").write_bytes(b"test")
+    (tmp_path / "candidate_ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+
+    promoted_model = tmp_path / "promoted_ml_factor_model"
+    (tmp_path / "promoted_ml_factor_model.pkl").write_bytes(b"test")
+    (tmp_path / "promoted_ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+
+    pointer_path = tmp_path / "ml_factor_model_active.txt"
+    pointer_path.write_text(str(promoted_model), encoding="utf-8")
+
+    decision_path = tmp_path / "model_promotion_decision.json"
+    decision_path.write_text(
+        json.dumps({"passed": "false", "fail_reasons": ["gate_failed"], "ts": "2026-03-10T00:40:00Z"}),
+        encoding="utf-8",
+    )
+
+    runtime_path = tmp_path / "ml_runtime_status.json"
+    impact_summary_path = tmp_path / "ml_overlay_impact.json"
+    impact_history_path = tmp_path / "ml_overlay_impact_history.jsonl"
+
+    feature_cols = [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position",
+    ]
+    loaded_paths: list[str] = []
+
+    def _fake_load_model(self, path: str) -> None:
+        loaded_paths.append(path)
+        self.feature_names = list(feature_cols)
+        self.is_trained = True
+
+    def _fake_predict_batch(self, features_df: pd.DataFrame) -> pd.Series:
+        values = pd.Series(range(1, len(features_df) + 1), index=features_df.index, dtype=float)
+        return values
+
+    monkeypatch.setattr("src.execution.ml_factor_model.MLFactorModel.load_model", _fake_load_model)
+    monkeypatch.setattr("src.execution.ml_factor_model.MLFactorModel.predict_batch", _fake_predict_batch)
+
+    engine = AlphaEngine(
+        AlphaConfig(
+            ml_factor=MLFactorLiveConfig(
+                enabled=True,
+                ml_weight=0.20,
+                overlay_transform="tanh",
+                overlay_transform_scale=1.6,
+                overlay_transform_max_abs=1.1,
+                model_path=str(candidate_model),
+                active_model_pointer_path=str(pointer_path),
+                promotion_decision_path=str(decision_path),
+                runtime_status_path=str(runtime_path),
+                impact_summary_path=str(impact_summary_path),
+                impact_history_path=str(impact_history_path),
+                require_promotion_passed=True,
+                min_symbols=3,
+            )
+        )
+    )
+    engine.use_multi_strategy = True
+    engine.multi_strategy_adapter = object()
+    engine._compute_multi_strategy_scores = lambda _: {"AAA/USDT": 0.40}
+
+    market_data = {
+        "AAA/USDT": _build_market_series("AAA/USDT", 10.0, 0.05),
+        "BBB/USDT": _build_market_series("BBB/USDT", 20.0, 0.03),
+        "CCC/USDT": _build_market_series("CCC/USDT", 30.0, 0.01),
+    }
+
+    snapshot = engine.compute_snapshot(market_data)
+    runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+
+    assert loaded_paths == []
+    assert runtime["used_in_latest_snapshot"] is False
+    assert runtime["prediction_count"] == 0
+    assert runtime["reason"] == "promotion_not_passed"
+    assert runtime["promotion_passed"] is False
+    assert runtime["latest_decision_passed"] is False
+    assert runtime["promotion_fail_reasons"] == ["gate_failed"]
+    assert runtime["model_path"] == str(promoted_model)
+    assert snapshot.ml_overlay_scores == {}

@@ -49,6 +49,14 @@ def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass
 class AlphaSnapshot:
     """Alpha因子快照
@@ -822,8 +830,8 @@ class AlphaEngine:
         if decision_path.exists():
             try:
                 decision = json.loads(decision_path.read_text(encoding="utf-8"))
-                status["latest_decision_passed"] = bool(decision.get("passed"))
-                status["promotion_passed"] = bool(status["latest_decision_passed"])
+                status["latest_decision_passed"] = _to_bool(decision.get("passed"))
+                status["promotion_passed"] = _to_bool(status["latest_decision_passed"])
                 if decision.get("fail_reasons"):
                     status["promotion_fail_reasons"] = [str(x) for x in decision.get("fail_reasons") or []]
             except Exception:
