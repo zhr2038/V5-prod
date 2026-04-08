@@ -660,6 +660,53 @@ def test_api_decision_audit_exposes_ml_signal_overview(monkeypatch, tmp_path):
     assert ml["top_suppressed"][0]["symbol"] == "ETH/USDT"
 
 
+def test_api_decision_audit_ml_signal_overview_treats_string_false_as_false(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260312_02"
+    current_run.mkdir(parents=True, exist_ok=True)
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260312_02",
+                "regime": "TRENDING",
+                "counts": {"selected": 0, "orders_rebalance": 0, "orders_exit": 0},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_runtime_status.json").write_text(
+        json.dumps(
+            {
+                "configured_enabled": "false",
+                "promotion_passed": "false",
+                "used_in_latest_snapshot": "false",
+                "prediction_count": 0,
+                "reason": "disabled",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "model_promotion_decision.json").write_text(
+        json.dumps({"passed": "false"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    ml = response.get_json()["ml_signal_overview"]
+    assert ml["configured_enabled"] is False
+    assert ml["promoted"] is False
+    assert ml["live_active"] is False
+
+
 def test_api_decision_audit_prefers_current_run_embedded_strategy_signals(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -1457,8 +1504,9 @@ def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     (runtime_dir / "ml_runtime_status.json").write_text(
         json.dumps(
             {
-                "configured_enabled": True,
-                "used_in_latest_snapshot": False,
+                "configured_enabled": "false",
+                "promotion_passed": "false",
+                "used_in_latest_snapshot": "false",
                 "prediction_count": 11,
                 "ml_weight": 0.08,
                 "overlay_score_max_abs": 1.4569,
@@ -1489,6 +1537,8 @@ def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     assert payload["available"] is True
     assert payload["workspace"] == str(shadow_workspace)
     assert payload["run_id"] == "shadow_tuned_xgboost_20260404_14"
+    assert payload["ml_signal_overview"]["configured_enabled"] is False
+    assert payload["ml_signal_overview"]["promoted"] is False
     assert payload["ml_signal_overview"]["live_active"] is False
     assert payload["ml_signal_overview"]["prediction_count"] == 11
     assert payload["ml_signal_overview"]["overlay_score_max_abs"] == 1.4569
@@ -1574,6 +1624,80 @@ def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
     }
     assert payload["latest_model"] in {"ml_factor_model.pkl", "ml_factor_model_config.json"}
     assert payload["runtime_prediction_count"] == 3
+
+
+def test_ml_training_api_treats_string_false_flags_as_false(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    models_dir = module.WORKSPACE / "models"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    db_path = reports_dir / "ml_training_data.db"
+    conn = sqlite3.connect(str(db_path))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE feature_snapshots(id INTEGER PRIMARY KEY, label_filled INTEGER NOT NULL)")
+    cur.execute("INSERT INTO feature_snapshots(label_filled) VALUES (1)")
+    conn.commit()
+    conn.close()
+
+    (reports_dir / "ml_training_history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "timestamp": "2026-03-10T00:30:00Z",
+                    "valid_ic": 0.12,
+                    "gate": {"passed": "false"},
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "model_promotion_decision.json").write_text(
+        json.dumps(
+            {
+                "ts": "2026-03-10T00:40:00Z",
+                "passed": "false",
+                "fail_reasons": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_runtime_status.json").write_text(
+        json.dumps(
+            {
+                "ts": "2026-03-10T01:00:00Z",
+                "used_in_latest_snapshot": "false",
+                "reason": "disabled",
+                "prediction_count": 0,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (models_dir / "ml_factor_model.pkl").write_bytes(b"test")
+    (models_dir / "ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+    (models_dir / "ml_factor_model_active.txt").write_text("models/ml_factor_model", encoding="utf-8")
+
+    response = client.get("/api/ml_training")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["phase"] == "trained"
+    assert payload["stages"] == {
+        "sampling": True,
+        "trained": True,
+        "promoted": False,
+        "liveActive": False,
+    }
+    assert payload["last_training_gate_passed"] is False
 
 
 def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):

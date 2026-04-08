@@ -447,6 +447,14 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _normalize_symbol_key(symbol: Any) -> str:
     return str(symbol or '').strip().upper().replace('-', '/')
 
@@ -585,9 +593,9 @@ def _build_ml_signal_overview(
     except Exception:
         prediction_count = 0
 
-    configured_enabled = bool(runtime.get('configured_enabled', False))
-    promoted = bool(runtime.get('promotion_passed', promotion.get('passed', False)))
-    live_active = bool(runtime.get('used_in_latest_snapshot', False))
+    configured_enabled = _to_bool(runtime.get('configured_enabled', False))
+    promoted = _to_bool(runtime.get('promotion_passed', promotion.get('passed', False)))
+    live_active = _to_bool(runtime.get('used_in_latest_snapshot', False))
     overlay_mode = str(runtime.get('overlay_mode') or impact_summary.get('overlay_mode') or 'disabled')
     coverage_count = prediction_count if prediction_count > 0 else len(nonzero_rows)
     reason = str(runtime.get('reason') or runtime.get('error') or '')
@@ -735,9 +743,9 @@ def _load_shadow_ml_overlay_summary(shadow_workspace: Path) -> Dict[str, Any]:
             overview.update(stored)
 
     if isinstance(runtime, dict) and runtime:
-        overview['configured_enabled'] = bool(runtime.get('configured_enabled', False))
-        overview['promoted'] = bool(runtime.get('promotion_passed', False))
-        overview['live_active'] = bool(runtime.get('used_in_latest_snapshot', False))
+        overview['configured_enabled'] = _to_bool(runtime.get('configured_enabled', False))
+        overview['promoted'] = _to_bool(runtime.get('promotion_passed', False))
+        overview['live_active'] = _to_bool(runtime.get('used_in_latest_snapshot', False))
         overview['prediction_count'] = int(runtime.get('prediction_count', 0) or 0)
         active_symbols = int(runtime.get('prediction_count', 0) or 0)
         overview['active_symbols'] = active_symbols
@@ -3781,8 +3789,8 @@ def _api_ml_training_v2():
     stages = {
         'sampling': effective_samples > 0,
         'trained': _model_artifact_exists(model_base_path),
-        'promoted': bool(decision.get('passed')) and pointer_path.exists() and _model_artifact_exists(active_model_base),
-        'liveActive': bool(runtime.get('used_in_latest_snapshot')),
+        'promoted': _to_bool(decision.get('passed')) and pointer_path.exists() and _model_artifact_exists(active_model_base),
+        'liveActive': _to_bool(runtime.get('used_in_latest_snapshot')),
     }
     if stages['liveActive']:
         phase = 'live_active'
@@ -3815,7 +3823,7 @@ def _api_ml_training_v2():
         'model_date': model_time.strftime('%Y-%m-%d %H:%M') if model_time else None,
         'last_ic': round(float(latest_history.get('valid_ic')), 4) if latest_history.get('valid_ic') is not None else None,
         'last_training_ts': latest_history.get('timestamp'),
-        'last_training_gate_passed': bool(((latest_history.get('gate') or {}).get('passed'))),
+        'last_training_gate_passed': _to_bool(((latest_history.get('gate') or {}).get('passed'))),
         'last_promotion_ts': decision.get('ts'),
         'promotion_fail_reasons': [str(x) for x in (decision.get('fail_reasons') or [])],
         'last_runtime_ts': runtime.get('ts'),
