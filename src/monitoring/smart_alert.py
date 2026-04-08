@@ -13,22 +13,30 @@ from typing import Any, Optional
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _kill_switch_enabled(data: Any) -> bool:
     if not isinstance(data, dict):
-        return False
+        return _to_bool(data)
     if "enabled" in data:
-        return bool(data.get("enabled"))
+        return _to_bool(data.get("enabled"))
     if "active" in data:
-        return bool(data.get("active"))
+        return _to_bool(data.get("active"))
 
     nested = data.get("kill_switch")
     if isinstance(nested, dict):
         if "enabled" in nested:
-            return bool(nested.get("enabled"))
+            return _to_bool(nested.get("enabled"))
         if "active" in nested:
-            return bool(nested.get("active"))
+            return _to_bool(nested.get("active"))
         return False
-    return bool(nested)
+    return _to_bool(nested)
 
 
 class SmartAlertEngine:
