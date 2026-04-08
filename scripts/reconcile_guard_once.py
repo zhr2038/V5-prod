@@ -8,6 +8,7 @@ import time
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
+from src.execution.fill_store import derive_position_store_path
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXRateLimitError
 from src.execution.position_store import PositionStore
@@ -36,7 +37,7 @@ def main() -> None:
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--out", default=None)
-    ap.add_argument("--positions-db", default="reports/positions.sqlite")
+    ap.add_argument("--positions-db", default=None)
     ap.add_argument("--abs-usdt-tol", type=float, default=None)
     ap.add_argument("--abs-base-tol", type=float, default=1e-8)
     ap.add_argument("--source", default="timer")
@@ -51,7 +52,14 @@ def main() -> None:
         args.out if args.out is not None else getattr(cfg.execution, "reconcile_status_path", None),
         default="reports/reconcile_status.json",
     )
-    positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    if args.positions_db:
+        positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
+    else:
+        order_store_path = resolve_runtime_path(
+            getattr(cfg.execution, "order_store_path", None),
+            default="reports/orders.sqlite",
+        )
+        positions_db_path = derive_position_store_path(order_store_path)
     failure_state_path = resolve_runtime_path(
         getattr(cfg.execution, "reconcile_failure_state_path", None),
         default="reports/reconcile_failure_state.json",
