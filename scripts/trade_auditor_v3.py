@@ -26,25 +26,52 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-from configs.runtime_config import resolve_runtime_env_path
+from configs.runtime_config import (
+    resolve_runtime_config_path,
+    resolve_runtime_env_path,
+    resolve_runtime_path,
+)
 
 
 @dataclass(frozen=True)
 class AuditorPaths:
     workspace: Path
     reports_dir: Path
+    runs_dir: Path
     orders_db: Path
     env_path: Path
 
 
+def _load_active_config(*, project_root: Path) -> dict[str, Any]:
+    config_path = Path(resolve_runtime_config_path(project_root=project_root))
+    try:
+        import yaml
+
+        if config_path.exists():
+            return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    return {}
+
+
 def build_paths(workspace: Path | None = None) -> AuditorPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    reports_dir = root / "reports"
+    cfg = _load_active_config(project_root=root)
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=root,
+        )
+    )
+    reports_dir = orders_db.parent.resolve()
     env_path = Path(resolve_runtime_env_path(project_root=root))
     return AuditorPaths(
         workspace=root,
         reports_dir=reports_dir,
-        orders_db=reports_dir / "orders.sqlite",
+        runs_dir=reports_dir / "runs",
+        orders_db=orders_db,
         env_path=env_path,
     )
 
@@ -160,7 +187,7 @@ class TradeAuditorV3:
 
     def get_market_state(self) -> dict[str, Any]:
         try:
-            runs_dir = self.paths.reports_dir / "runs"
+            runs_dir = self.paths.runs_dir
             if runs_dir.exists():
                 run_dirs = [
                     d

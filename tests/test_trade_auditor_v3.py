@@ -13,7 +13,25 @@ def test_build_paths_anchor_trade_auditor_to_repo_root(tmp_path) -> None:
 
     assert paths.workspace == tmp_path.resolve()
     assert paths.reports_dir == tmp_path / "reports"
+    assert paths.runs_dir == tmp_path / "reports" / "runs"
     assert paths.orders_db == tmp_path / "reports" / "orders.sqlite"
+    assert paths.env_path == tmp_path / ".env"
+
+
+def test_build_paths_follow_active_config_runtime_paths(tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "execution:\n  order_store_path: reports/shadow_runtime/orders.sqlite\n",
+        encoding="utf-8",
+    )
+
+    paths = trade_auditor_v3.build_paths(tmp_path)
+
+    assert paths.workspace == tmp_path.resolve()
+    assert paths.reports_dir == tmp_path / "reports" / "shadow_runtime"
+    assert paths.runs_dir == tmp_path / "reports" / "shadow_runtime" / "runs"
+    assert paths.orders_db == tmp_path / "reports" / "shadow_runtime" / "orders.sqlite"
     assert paths.env_path == tmp_path / ".env"
 
 
@@ -105,6 +123,31 @@ def test_get_market_state_uses_workspace_runs_dir(tmp_path) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "decision_audit.json").write_text(
         '{"regime":"Risk-Off","regime_details":{"position_multiplier":0.25}}',
+        encoding="utf-8",
+    )
+
+    auditor = trade_auditor_v3.TradeAuditorV3(workspace=tmp_path)
+
+    assert auditor.get_market_state() == {"state": "Risk-Off", "multiplier": 0.25}
+
+
+def test_get_market_state_uses_active_config_runtime_runs_dir(tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    shadow_run_dir = tmp_path / "reports" / "shadow_runtime" / "runs" / "20260405_230000"
+    shadow_run_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "execution:\n  order_store_path: reports/shadow_runtime/orders.sqlite\n",
+        encoding="utf-8",
+    )
+    (shadow_run_dir / "decision_audit.json").write_text(
+        '{"regime":"Risk-Off","regime_details":{"position_multiplier":0.25}}',
+        encoding="utf-8",
+    )
+    (tmp_path / "reports").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "reports" / "runs" / "20260404_230000").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "reports" / "runs" / "20260404_230000" / "decision_audit.json").write_text(
+        '{"regime":"Sideways","regime_details":{"position_multiplier":0.9}}',
         encoding="utf-8",
     )
 
