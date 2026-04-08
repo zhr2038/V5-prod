@@ -134,6 +134,20 @@ def test_check_risk_limits_accepts_nested_enabled_kill_switch(tmp_path) -> None:
     assert "manual-stop" in issues[0]
 
 
+def test_check_risk_limits_treats_string_false_reconcile_as_failure(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "reconcile_status.json").write_text(
+        json.dumps({"ok": "false", "reason": "drift"}),
+        encoding="utf-8",
+    )
+
+    issues = trade_auditor.check_risk_limits(paths=trade_auditor.build_paths(tmp_path))
+
+    assert len(issues) == 1
+    assert "drift" in issues[0]
+
+
 def test_run_audit_writes_alert_and_log_to_workspace(tmp_path) -> None:
     paths = trade_auditor.build_paths(tmp_path)
     paths.reports_dir.mkdir(parents=True, exist_ok=True)

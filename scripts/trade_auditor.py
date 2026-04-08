@@ -50,29 +50,37 @@ def build_paths(workspace: Path | None = None) -> AuditorPaths:
 DEFAULT_PATHS = build_paths()
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _normalize_kill_switch(data: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         if "enabled" in data or "active" in data:
             normalized = dict(data)
             if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+                normalized["enabled"] = _to_bool(normalized.get("active"))
             return normalized
 
         nested = data.get("kill_switch")
         if isinstance(nested, dict):
             normalized = dict(nested)
             if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+                normalized["enabled"] = _to_bool(normalized.get("active"))
             return normalized
 
         normalized = dict(data)
-        normalized["enabled"] = bool(nested)
+        normalized["enabled"] = _to_bool(nested)
         return normalized
 
     if data is None:
         return {"enabled": False}
 
-    return {"enabled": bool(data)}
+    return {"enabled": _to_bool(data)}
 
 
 def log(msg: str, paths: AuditorPaths = DEFAULT_PATHS) -> None:
@@ -169,7 +177,7 @@ def check_risk_limits(*, paths: AuditorPaths = DEFAULT_PATHS) -> list[str]:
     if paths.kill_switch_file.exists():
         try:
             ks = _normalize_kill_switch(json.loads(paths.kill_switch_file.read_text(encoding="utf-8")))
-            if ks.get("enabled"):
+            if _to_bool(ks.get("enabled")):
                 issues.append(f"Kill Switch 已启用: {ks.get('reason', 'unknown')}")
         except Exception:
             pass
@@ -177,7 +185,7 @@ def check_risk_limits(*, paths: AuditorPaths = DEFAULT_PATHS) -> list[str]:
     if paths.reconcile_file.exists():
         try:
             rc = json.loads(paths.reconcile_file.read_text(encoding="utf-8"))
-            if not rc.get("ok"):
+            if not _to_bool(rc.get("ok")):
                 issues.append(f"对账异常: {rc.get('reason', 'unknown')}")
         except Exception:
             pass

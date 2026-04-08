@@ -160,3 +160,19 @@ def test_check_risk_controls_accepts_nested_enabled_kill_switch(tmp_path) -> Non
     assert len(issues) == 1
     assert issues[0]["level"] == "CRITICAL"
     assert "manual-stop" in issues[0]["message"]
+
+
+def test_check_risk_controls_treats_string_false_reconcile_as_failure(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "reconcile_status.json").write_text(
+        json.dumps({"ok": "false", "reason": "drift"}),
+        encoding="utf-8",
+    )
+
+    auditor = trade_auditor_v2.SmartTradeAuditor(workspace=tmp_path)
+    issues = auditor.check_risk_controls()
+
+    assert len(issues) == 1
+    assert issues[0]["level"] == "WARNING"
+    assert "drift" in issues[0]["message"]

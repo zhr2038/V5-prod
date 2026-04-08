@@ -41,29 +41,37 @@ def build_paths(workspace: Path | None = None) -> AuditorPaths:
     )
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _normalize_kill_switch(data: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         if "enabled" in data or "active" in data:
             normalized = dict(data)
             if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+                normalized["enabled"] = _to_bool(normalized.get("active"))
             return normalized
 
         nested = data.get("kill_switch")
         if isinstance(nested, dict):
             normalized = dict(nested)
             if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+                normalized["enabled"] = _to_bool(normalized.get("active"))
             return normalized
 
         normalized = dict(data)
-        normalized["enabled"] = bool(nested)
+        normalized["enabled"] = _to_bool(nested)
         return normalized
 
     if data is None:
         return {"enabled": False}
 
-    return {"enabled": bool(data)}
+    return {"enabled": _to_bool(data)}
 
 
 class SmartTradeAuditor:
@@ -246,7 +254,7 @@ class SmartTradeAuditor:
         if kill_switch.exists():
             try:
                 ks = _normalize_kill_switch(json.loads(kill_switch.read_text(encoding="utf-8")))
-                if ks.get("enabled"):
+                if _to_bool(ks.get("enabled")):
                     issues.append(
                         {
                             "level": "CRITICAL",
@@ -260,7 +268,7 @@ class SmartTradeAuditor:
         if reconcile.exists():
             try:
                 rc = json.loads(reconcile.read_text(encoding="utf-8"))
-                if not rc.get("ok"):
+                if not _to_bool(rc.get("ok")):
                     issues.append(
                         {
                             "level": "WARNING",

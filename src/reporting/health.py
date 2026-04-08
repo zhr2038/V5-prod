@@ -45,29 +45,37 @@ def _load_json_safe(path: Path) -> dict:
     return {}
 
 
+def _to_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _normalize_kill_switch(data: object) -> dict:
     if isinstance(data, dict):
         if "enabled" in data or "active" in data:
             normalized = dict(data)
             if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+                normalized["enabled"] = _to_bool(normalized.get("active"))
             return normalized
 
         nested = data.get("kill_switch")
         if isinstance(nested, dict):
             normalized = dict(nested)
             if "enabled" not in normalized:
-                normalized["enabled"] = bool(normalized.get("active"))
+                normalized["enabled"] = _to_bool(normalized.get("active"))
             return normalized
 
         normalized = dict(data)
-        normalized["enabled"] = bool(nested)
+        normalized["enabled"] = _to_bool(nested)
         return normalized
 
     if data is None:
         return {"enabled": False}
 
-    return {"enabled": bool(data)}
+    return {"enabled": _to_bool(data)}
 
 
 def _load_latest_fill_ts_ms() -> int | None:
@@ -144,24 +152,26 @@ def health_check():
 
     try:
         kill_switch = _normalize_kill_switch(_load_json_safe(REPORTS_DIR / "kill_switch.json"))
+        kill_switch_enabled = _to_bool(kill_switch.get("enabled"))
         checks["checks"]["kill_switch"] = {
             "status": "ok",
-            "enabled": kill_switch.get("enabled", False),
+            "enabled": kill_switch_enabled,
             "trigger": kill_switch.get("trigger", ""),
         }
-        if kill_switch.get("enabled"):
+        if kill_switch_enabled:
             checks["status"] = "degraded"
     except Exception as exc:
         checks["checks"]["kill_switch"] = {"status": "error", "error": str(exc)}
 
     try:
         reconcile = _load_json_safe(REPORTS_DIR / "reconcile_status.json")
+        reconcile_ok = _to_bool(reconcile.get("ok"))
         checks["checks"]["reconcile"] = {
-            "status": "ok" if reconcile.get("ok") else "warning",
-            "ok": reconcile.get("ok", False),
+            "status": "ok" if reconcile_ok else "warning",
+            "ok": reconcile_ok,
             "reason": reconcile.get("reason", ""),
         }
-        if not reconcile.get("ok"):
+        if not reconcile_ok:
             checks["status"] = "degraded"
     except Exception as exc:
         checks["checks"]["reconcile"] = {"status": "error", "error": str(exc)}

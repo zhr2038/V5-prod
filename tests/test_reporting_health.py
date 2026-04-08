@@ -139,3 +139,17 @@ def test_health_reports_nested_enabled_kill_switch(monkeypatch, tmp_path: Path) 
     assert payload["status"] == "degraded"
     assert payload["checks"]["kill_switch"]["enabled"] is True
     assert payload["checks"]["kill_switch"]["trigger"] == "manual"
+
+
+def test_health_degrades_when_reconcile_ok_is_string_false(monkeypatch, tmp_path: Path) -> None:
+    reports_dir = _prepare_reports_dir(tmp_path)
+    _write_json(reports_dir / "reconcile_status.json", {"ok": "false", "reason": "drift"})
+
+    client = _make_client(monkeypatch, reports_dir, now_ts_s=10_000.0)
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    payload = response.get_json()
+    assert payload["status"] == "degraded"
+    assert payload["checks"]["reconcile"]["status"] == "warning"
+    assert payload["checks"]["reconcile"]["ok"] is False
