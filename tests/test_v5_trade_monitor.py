@@ -18,6 +18,24 @@ def test_build_paths_anchor_monitor_artifacts_to_repo_root(tmp_path) -> None:
     assert paths.alert_file == tmp_path / "reports" / "monitor_alert.txt"
 
 
+def test_build_paths_follow_active_config_order_store_path(tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "execution:\n  order_store_path: reports/shadow_runtime/orders.sqlite\n",
+        encoding="utf-8",
+    )
+
+    paths = trade_monitor.build_paths(tmp_path)
+
+    assert paths.project_root == tmp_path.resolve()
+    assert paths.reports_dir == tmp_path / "reports" / "shadow_runtime"
+    assert paths.logs_dir == tmp_path / "logs"
+    assert paths.orders_db_path == tmp_path / "reports" / "shadow_runtime" / "orders.sqlite"
+    assert paths.fills_db_path == tmp_path / "reports" / "shadow_runtime" / "fills.sqlite"
+    assert paths.alert_file == tmp_path / "reports" / "shadow_runtime" / "monitor_alert.txt"
+
+
 def test_get_last_trade_time_reads_repo_fill_store_ts_ms(tmp_path, monkeypatch) -> None:
     paths = trade_monitor.build_paths(tmp_path)
     paths.reports_dir.mkdir(parents=True, exist_ok=True)

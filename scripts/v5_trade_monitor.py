@@ -23,8 +23,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-
-from configs.runtime_config import resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from src.execution.fill_store import derive_fill_store_path
 
 
 TELEGRAM_CHAT_ID = "5065024131"
@@ -48,17 +48,45 @@ class MonitorPaths:
     alert_file: Path
 
 
+def _load_active_config(*, project_root: Path) -> dict:
+    config_path = Path(resolve_runtime_config_path(project_root=project_root))
+    try:
+        import yaml
+
+        if config_path.exists():
+            return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def _resolve_runtime_path(raw_path: object, *, default: str, project_root: Path) -> Path:
+    value = str(raw_path or default).strip()
+    path = Path(value)
+    if not path.is_absolute():
+        path = project_root / path
+    return path.resolve()
+
+
 def build_paths(project_root: Path | None = None) -> MonitorPaths:
     root = (project_root or PROJECT_ROOT).resolve()
-    reports_dir = root / "reports"
+    cfg = _load_active_config(project_root=root)
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    orders_db_path = _resolve_runtime_path(
+        execution_cfg.get("order_store_path"),
+        default="reports/orders.sqlite",
+        project_root=root,
+    )
+    fills_db_path = derive_fill_store_path(orders_db_path)
+    reports_dir = orders_db_path.parent.resolve()
     logs_dir = root / "logs"
     env_path = Path(resolve_runtime_env_path(project_root=root))
     return MonitorPaths(
         project_root=root,
         reports_dir=reports_dir,
         logs_dir=logs_dir,
-        fills_db_path=reports_dir / "fills.sqlite",
-        orders_db_path=reports_dir / "orders.sqlite",
+        fills_db_path=fills_db_path,
+        orders_db_path=orders_db_path,
         env_path=env_path,
         alert_file=reports_dir / "monitor_alert.txt",
     )
