@@ -4400,7 +4400,9 @@ def api_auto_risk_guard():
 def api_decision_audit():
     """获取最新决策审计数据（策略信号带回退，避免前端空白）"""
     try:
-        runs_dir = REPORTS_DIR / 'runs'
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
+        runtime_reports_dir = runtime_paths.orders_db.parent
+        runs_dir = runtime_paths.runs_dir
         if not runs_dir.exists():
             return jsonify({'error': 'No runs directory'}), 404
 
@@ -4517,7 +4519,7 @@ def api_decision_audit():
         # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.
         held_symbols = set()
         try:
-            con = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
+            con = sqlite3.connect(str(runtime_paths.positions_db))
             cur = con.cursor()
             cur.execute("SELECT symbol FROM positions WHERE qty > 0")
             held_symbols = {str(r[0]) for r in cur.fetchall()}
@@ -4569,7 +4571,9 @@ def api_decision_audit():
             'reject_reasons': {},
         }
         try:
-            conn = get_db_connection()
+            conn = None
+            if runtime_paths.orders_db.exists():
+                conn = sqlite3.connect(str(runtime_paths.orders_db))
             if conn:
                 cur = conn.cursor()
                 try:
@@ -4667,10 +4671,12 @@ def api_decision_audit():
             pass
 
         # Recent fill context + latest run with actual order attempts
-        recent_fill_summary = _load_recent_fill_summary()
+        recent_fill_summary = _load_recent_fill_summary(reports_dir=runtime_reports_dir)
         latest_ordered_run_summary = None
         try:
-            conn = get_db_connection()
+            conn = None
+            if runtime_paths.orders_db.exists():
+                conn = sqlite3.connect(str(runtime_paths.orders_db))
             if conn:
                 cur = conn.cursor()
 
@@ -4808,7 +4814,7 @@ def api_decision_audit():
             if isinstance(item, dict) and item.get('symbol'):
                 preferred_ml_symbols.append(str(item.get('symbol')))
         stored_ml_overview = audit_data.get('ml_signal_overview', {}) if isinstance(audit_data, dict) else {}
-        ml_signal_overview = _build_ml_signal_overview(REPORTS_DIR, preferred_symbols=preferred_ml_symbols)
+        ml_signal_overview = _build_ml_signal_overview(runtime_reports_dir, preferred_symbols=preferred_ml_symbols)
         if isinstance(stored_ml_overview, dict) and stored_ml_overview:
             merged_ml_overview = dict(stored_ml_overview)
             merged_ml_overview.update({k: v for k, v in ml_signal_overview.items() if v not in (None, {}, [], "")})

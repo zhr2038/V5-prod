@@ -1425,6 +1425,262 @@ def test_api_decision_audit_latest_ordered_run_summary_prefers_updated_ts(monkey
     assert payload["latest_ordered_run_summary"]["last_ts"] == 1_710_088_200_000
 
 
+def test_api_decision_audit_uses_active_runtime_paths(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_runs_dir = reports_dir / "runs"
+    runtime_runs_dir = runtime_dir / "runs"
+    root_run = root_runs_dir / "20260408_02"
+    runtime_run = runtime_runs_dir / "20260408_01"
+    root_run.mkdir(parents=True, exist_ok=True)
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {
+                "order_store_path": "reports/shadow_runtime/orders.sqlite",
+                "reconcile_status_path": "reports/shadow_runtime/reconcile_status.json",
+            }
+        },
+    )
+
+    (root_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260408_02",
+                "regime": "SIDEWAYS",
+                "counts": {"selected": 1, "orders_rebalance": 1, "orders_exit": 0},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260408_01",
+                "regime": "TRENDING",
+                "counts": {"selected": 2, "orders_rebalance": 2, "orders_exit": 0},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (root_run / "strategy_signals.json").write_text(
+        json.dumps(
+            {
+                "strategies": [
+                    {
+                        "strategy": "RootStrategy",
+                        "signals": [
+                            {"symbol": "ETH/USDT", "side": "buy", "score": 0.9},
+                            {"symbol": "BTC/USDT", "side": "sell", "score": 0.8},
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_run / "strategy_signals.json").write_text(
+        json.dumps(
+            {
+                "strategies": [
+                    {
+                        "strategy": "ShadowStrategy",
+                        "signals": [
+                            {"symbol": "BTC/USDT", "side": "buy", "score": 0.9},
+                            {"symbol": "ETH/USDT", "side": "sell", "score": 0.8},
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(root_run, (20, 20))
+    os.utime(runtime_run, (10, 10))
+
+    root_positions_db = reports_dir / "positions.sqlite"
+    conn = sqlite3.connect(str(root_positions_db))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('BTC/USDT', 1.0, 30000.0, 30000.0)")
+    conn.commit()
+    conn.close()
+
+    runtime_positions_db = runtime_dir / "positions.sqlite"
+    conn = sqlite3.connect(str(runtime_positions_db))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('ETH/USDT', 2.0, 1800.0, 2000.0)")
+    conn.commit()
+    conn.close()
+
+    root_orders_db = reports_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(root_orders_db))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+            created_ts INTEGER,
+            updated_ts INTEGER,
+            run_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            intent TEXT,
+            state TEXT,
+            notional_usdt REAL,
+            last_error_code TEXT,
+            last_error_msg TEXT,
+            ord_id TEXT,
+            cl_ord_id TEXT
+        )
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO orders(created_ts, updated_ts, run_id, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id, cl_ord_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            1_710_000_000_000,
+            1_710_099_000_000,
+            "20260408_02",
+            "SOL-USDT",
+            "buy",
+            "rebalance",
+            "FILLED",
+            90.0,
+            "",
+            "",
+            "root-ord",
+            "root-cl",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    runtime_orders_db = runtime_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(runtime_orders_db))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+            created_ts INTEGER,
+            updated_ts INTEGER,
+            run_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            intent TEXT,
+            state TEXT,
+            notional_usdt REAL,
+            last_error_code TEXT,
+            last_error_msg TEXT,
+            ord_id TEXT,
+            cl_ord_id TEXT
+        )
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO orders(created_ts, updated_ts, run_id, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id, cl_ord_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            1_710_050_000_000,
+            1_710_088_200_000,
+            "20260408_01",
+            "ETH-USDT",
+            "sell",
+            "rebalance",
+            "FILLED",
+            120.0,
+            "",
+            "",
+            "shadow-ord",
+            "shadow-cl",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    root_fills_db = reports_dir / "fills.sqlite"
+    conn = sqlite3.connect(str(root_fills_db))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE fills (
+            ts_ms INTEGER,
+            ord_id TEXT,
+            cl_ord_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            created_ts_ms INTEGER,
+            trade_id TEXT
+        )
+        """
+    )
+    cur.execute(
+        "INSERT INTO fills(ts_ms, ord_id, cl_ord_id, inst_id, side, created_ts_ms, trade_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (1_710_099_000_000, "root-ord", "root-cl", "SOL-USDT", "buy", 1_710_099_000_000, "root-trade"),
+    )
+    conn.commit()
+    conn.close()
+
+    runtime_fills_db = runtime_dir / "fills.sqlite"
+    conn = sqlite3.connect(str(runtime_fills_db))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE fills (
+            ts_ms INTEGER,
+            ord_id TEXT,
+            cl_ord_id TEXT,
+            inst_id TEXT,
+            side TEXT,
+            created_ts_ms INTEGER,
+            trade_id TEXT
+        )
+        """
+    )
+    cur.execute(
+        "INSERT INTO fills(ts_ms, ord_id, cl_ord_id, inst_id, side, created_ts_ms, trade_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (1_710_088_200_000, "shadow-ord", "shadow-cl", "ETH-USDT", "sell", 1_710_088_200_000, "shadow-trade"),
+    )
+    conn.commit()
+    conn.close()
+
+    class _FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(1_710_100_000, tz=tz)
+
+    monkeypatch.setattr(module, "datetime", _FrozenDateTime)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["run_id"] == "20260408_01"
+    assert payload["strategy_run_id"] == "20260408_01"
+    assert payload["latest_ordered_run_summary"]["run_id"] == "20260408_01"
+    assert payload["recent_fill_summary"]["latest_fill"]["run_id"] == "20260408_01"
+    assert payload["actionable_signals"]["held_symbols"] == ["ETH/USDT"]
+    assert [row["symbol"] for row in payload["actionable_signals"]["buy_candidates"]] == ["BTC/USDT"]
+    assert [row["symbol"] for row in payload["actionable_signals"]["sell_candidates"]] == ["ETH/USDT"]
+
+
 def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
