@@ -48,6 +48,11 @@ def test_v5_model_promotion_gate_timer_points_to_service():
     assert "Unit=v5-model-promotion-gate.service" in text
 
 
+def test_v5_web_dashboard_service_enables_live_okx_health_check():
+    text = Path("deploy/systemd/v5-web-dashboard.service").read_text(encoding="utf-8")
+    assert "Environment=V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT=1" in text
+
+
 def test_v5_reconcile_service_targets_live_prod_config():
     text = Path("deploy/systemd/v5-reconcile.user.service").read_text(encoding="utf-8")
     assert "WorkingDirectory=/home/admin/clawd/v5-trading-bot" in text

@@ -9,6 +9,7 @@ WorkingDirectory=/home/admin/clawd/v5-prod
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/admin/clawd/v5-prod
 Environment=V5_WORKSPACE=/home/admin/clawd/v5-prod
+Environment=V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT=1
 ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/web_dashboard.py'
 Restart=always
 RestartSec=5
