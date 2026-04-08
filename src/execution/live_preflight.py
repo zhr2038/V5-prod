@@ -195,7 +195,7 @@ class LivePreflight:
 
         led = LedgerEngine(okx=self.okx, bills_store=store, state_path=self.ledger_state_path)
         ledger_obj = led.run(out_path=self.ledger_status_path)
-        ledger_ok = bool(ledger_obj.get("ok"))
+        ledger_ok = _to_bool(ledger_obj.get("ok"))
         if not ledger_ok and ledger_obj.get("reason") == "dust_baseline_reset":
             ledger_ok = True
         details["ledger"] = {
@@ -218,7 +218,7 @@ class LivePreflight:
         guard_cfg = self._build_guard_config()
 
         out = self._run_reconcile_guard(eng=eng, guard_cfg=guard_cfg)
-        reconcile_ok = bool(out.get("ok"))
+        reconcile_ok = _to_bool(out.get("ok"))
         reconcile_reason = out.get("reason")
         kill_switch_state = _normalize_kill_switch(out.get("kill_switch"))
         kill_switch_enabled = _to_bool(kill_switch_state.get("enabled"))
@@ -258,7 +258,7 @@ class LivePreflight:
             }
 
             out = self._run_reconcile_guard(eng=eng, guard_cfg=guard_cfg)
-            reconcile_ok = bool(out.get("ok"))
+            reconcile_ok = _to_bool(out.get("ok"))
             reconcile_reason = out.get("reason")
             kill_switch_state = _normalize_kill_switch(out.get("kill_switch"))
             kill_switch_enabled = _to_bool(kill_switch_state.get("enabled"))

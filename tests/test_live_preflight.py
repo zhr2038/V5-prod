@@ -287,6 +287,80 @@ def test_preflight_sell_only_if_ledger_not_ok(monkeypatch):
         assert res.decision == "SELL_ONLY"
 
 
+def test_preflight_sell_only_if_ledger_string_false(monkeypatch):
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+
+    class StringFalseLedger(DummyLedger):
+        def run(self, *, out_path: str):
+            obj = {"ts_ms": 1000, "ok": "false", "reason": "ledger_mismatch_base", "bills_aggregate": {"count": 0}}
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(obj, f)
+            return obj
+
+    monkeypatch.setattr(lp, "LedgerEngine", StringFalseLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {"ok": True, "reason": "ok", "category": "OK", "kill_switch": {"enabled": False}}
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    cfg = SimpleNamespace(reconcile_status_path="reconcile.json", reconcile_dust_usdt_ignore=1.0)
+    with tempfile.TemporaryDirectory() as td:
+        pf = lp.LivePreflight(
+            cfg,
+            okx=DummyOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "SELL_ONLY"
+        assert res.reason == "reconcile_or_ledger_not_ok"
+
+
+def test_preflight_sell_only_if_reconcile_string_false(monkeypatch):
+    monkeypatch.setattr(lp, "BillsStore", DummyBillsStore)
+    monkeypatch.setattr(lp, "bills_sync_once", lambda **kwargs: 0)
+    monkeypatch.setattr(lp, "LedgerEngine", DummyLedger)
+    monkeypatch.setattr(lp, "ReconcileEngine", DummyRecon)
+
+    class DummyGuard:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply(self):
+            return {"ok": "false", "reason": "usdt_mismatch", "category": "HARD", "kill_switch": {"enabled": False}}
+
+    monkeypatch.setattr(lp, "KillSwitchGuard", lambda *a, **k: DummyGuard())
+    monkeypatch.setattr(lp, "_now_ms", lambda: 1000)
+
+    cfg = SimpleNamespace(reconcile_status_path="reconcile.json", reconcile_dust_usdt_ignore=1.0)
+    with tempfile.TemporaryDirectory() as td:
+        pf = lp.LivePreflight(
+            cfg,
+            okx=DummyOKX(),
+            position_store=object(),
+            account_store=object(),
+            bills_db_path=f"{td}/bills.sqlite",
+            ledger_state_path=f"{td}/ledger_state.json",
+            ledger_status_path=f"{td}/ledger_status.json",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+        )
+        res = pf.run(max_pages=1, max_status_age_sec=180)
+        assert res.decision == "SELL_ONLY"
+        assert res.reason == "reconcile_or_ledger_not_ok"
+
+
 def test_preflight_refreshes_reconcile_before_account_config_error(monkeypatch):
     calls = {"reconcile": 0, "guard": 0, "account_config": 0}
     captured = {}
