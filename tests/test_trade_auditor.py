@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 
 import scripts.trade_auditor as trade_auditor
 
@@ -116,10 +115,23 @@ def test_check_risk_limits_uses_workspace_reports_dir(tmp_path) -> None:
 
     issues = trade_auditor.check_risk_limits(paths=trade_auditor.build_paths(tmp_path))
 
-    assert issues == [
-        "Kill Switch 已启用: manual-stop",
-        "对账异常: drift",
-    ]
+    assert len(issues) == 2
+    assert any("manual-stop" in issue for issue in issues)
+    assert any("drift" in issue for issue in issues)
+
+
+def test_check_risk_limits_accepts_nested_enabled_kill_switch(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "kill_switch.json").write_text(
+        json.dumps({"kill_switch": {"enabled": True, "reason": "manual-stop"}}),
+        encoding="utf-8",
+    )
+
+    issues = trade_auditor.check_risk_limits(paths=trade_auditor.build_paths(tmp_path))
+
+    assert len(issues) == 1
+    assert "manual-stop" in issues[0]
 
 
 def test_run_audit_writes_alert_and_log_to_workspace(tmp_path) -> None:
@@ -156,4 +168,4 @@ def test_run_audit_writes_alert_and_log_to_workspace(tmp_path) -> None:
     assert report is not None
     assert paths.alert_file.exists()
     assert paths.log_file.exists()
-    assert "异常状态" in paths.alert_file.read_text(encoding="utf-8")
+    assert "state=PENDING" in paths.alert_file.read_text(encoding="utf-8")

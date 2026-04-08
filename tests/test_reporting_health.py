@@ -122,3 +122,20 @@ def test_health_uses_newer_filled_order_when_fill_store_lags(monkeypatch, tmp_pa
     assert payload["checks"]["last_trade"]["status"] == "ok"
     assert payload["checks"]["last_trade"]["last_ts"] == 9_880_000
     assert payload["checks"]["last_trade"]["age_minutes"] == 2.0
+
+
+def test_health_reports_nested_enabled_kill_switch(monkeypatch, tmp_path: Path) -> None:
+    reports_dir = _prepare_reports_dir(tmp_path)
+    _write_json(
+        reports_dir / "kill_switch.json",
+        {"kill_switch": {"enabled": True, "trigger": "manual"}},
+    )
+
+    client = _make_client(monkeypatch, reports_dir, now_ts_s=10_000.0)
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    payload = response.get_json()
+    assert payload["status"] == "degraded"
+    assert payload["checks"]["kill_switch"]["enabled"] is True
+    assert payload["checks"]["kill_switch"]["trigger"] == "manual"

@@ -41,6 +41,31 @@ def build_paths(workspace: Path | None = None) -> AuditorPaths:
     )
 
 
+def _normalize_kill_switch(data: Any) -> dict[str, Any]:
+    if isinstance(data, dict):
+        if "enabled" in data or "active" in data:
+            normalized = dict(data)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        nested = data.get("kill_switch")
+        if isinstance(nested, dict):
+            normalized = dict(nested)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        normalized = dict(data)
+        normalized["enabled"] = bool(nested)
+        return normalized
+
+    if data is None:
+        return {"enabled": False}
+
+    return {"enabled": bool(data)}
+
+
 class SmartTradeAuditor:
     def __init__(self, workspace: Path | None = None) -> None:
         self.paths = build_paths(workspace)
@@ -220,7 +245,7 @@ class SmartTradeAuditor:
         kill_switch = self.paths.reports_dir / "kill_switch.json"
         if kill_switch.exists():
             try:
-                ks = json.loads(kill_switch.read_text(encoding="utf-8"))
+                ks = _normalize_kill_switch(json.loads(kill_switch.read_text(encoding="utf-8")))
                 if ks.get("enabled"):
                     issues.append(
                         {

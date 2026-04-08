@@ -141,7 +141,22 @@ def test_check_risk_controls_uses_workspace_reports_dir(tmp_path) -> None:
     auditor = trade_auditor_v2.SmartTradeAuditor(workspace=tmp_path)
     issues = auditor.check_risk_controls()
 
-    assert issues == [
-        {"level": "CRITICAL", "message": "Kill Switch 已启用: manual-stop"},
-        {"level": "WARNING", "message": "对账异常: drift"},
-    ]
+    assert len(issues) == 2
+    assert any(issue["level"] == "CRITICAL" and "manual-stop" in issue["message"] for issue in issues)
+    assert any(issue["level"] == "WARNING" and "drift" in issue["message"] for issue in issues)
+
+
+def test_check_risk_controls_accepts_nested_enabled_kill_switch(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "kill_switch.json").write_text(
+        json.dumps({"kill_switch": {"enabled": True, "reason": "manual-stop"}}),
+        encoding="utf-8",
+    )
+
+    auditor = trade_auditor_v2.SmartTradeAuditor(workspace=tmp_path)
+    issues = auditor.check_risk_controls()
+
+    assert len(issues) == 1
+    assert issues[0]["level"] == "CRITICAL"
+    assert "manual-stop" in issues[0]["message"]

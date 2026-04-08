@@ -50,6 +50,31 @@ def build_paths(workspace: Path | None = None) -> AuditorPaths:
 DEFAULT_PATHS = build_paths()
 
 
+def _normalize_kill_switch(data: Any) -> dict[str, Any]:
+    if isinstance(data, dict):
+        if "enabled" in data or "active" in data:
+            normalized = dict(data)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        nested = data.get("kill_switch")
+        if isinstance(nested, dict):
+            normalized = dict(nested)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        normalized = dict(data)
+        normalized["enabled"] = bool(nested)
+        return normalized
+
+    if data is None:
+        return {"enabled": False}
+
+    return {"enabled": bool(data)}
+
+
 def log(msg: str, paths: AuditorPaths = DEFAULT_PATHS) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
@@ -143,7 +168,7 @@ def check_risk_limits(*, paths: AuditorPaths = DEFAULT_PATHS) -> list[str]:
 
     if paths.kill_switch_file.exists():
         try:
-            ks = json.loads(paths.kill_switch_file.read_text(encoding="utf-8"))
+            ks = _normalize_kill_switch(json.loads(paths.kill_switch_file.read_text(encoding="utf-8")))
             if ks.get("enabled"):
                 issues.append(f"Kill Switch 已启用: {ks.get('reason', 'unknown')}")
         except Exception:

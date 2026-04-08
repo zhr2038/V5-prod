@@ -45,6 +45,31 @@ def _load_json_safe(path: Path) -> dict:
     return {}
 
 
+def _normalize_kill_switch(data: object) -> dict:
+    if isinstance(data, dict):
+        if "enabled" in data or "active" in data:
+            normalized = dict(data)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        nested = data.get("kill_switch")
+        if isinstance(nested, dict):
+            normalized = dict(nested)
+            if "enabled" not in normalized:
+                normalized["enabled"] = bool(normalized.get("active"))
+            return normalized
+
+        normalized = dict(data)
+        normalized["enabled"] = bool(nested)
+        return normalized
+
+    if data is None:
+        return {"enabled": False}
+
+    return {"enabled": bool(data)}
+
+
 def _load_latest_fill_ts_ms() -> int | None:
     fills_db = REPORTS_DIR / "fills.sqlite"
     try:
@@ -118,7 +143,7 @@ def health_check():
         checks["status"] = "unhealthy"
 
     try:
-        kill_switch = _load_json_safe(REPORTS_DIR / "kill_switch.json")
+        kill_switch = _normalize_kill_switch(_load_json_safe(REPORTS_DIR / "kill_switch.json"))
         checks["checks"]["kill_switch"] = {
             "status": "ok",
             "enabled": kill_switch.get("enabled", False),
