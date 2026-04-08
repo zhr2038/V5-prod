@@ -1827,6 +1827,7 @@ def api_account():
 def api_trades():
     """交易历史API（优先OKX实时成交，回退DB，再回退runs/*/trades.csv）"""
     try:
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         trades = []
 
         # 0) 优先OKX实时成交
@@ -1879,7 +1880,9 @@ def api_trades():
 
         # 1) 回退订单库
         if not trades:
-            conn = get_db_connection()
+            conn = None
+            if runtime_paths.orders_db.exists():
+                conn = sqlite3.connect(str(runtime_paths.orders_db))
             if conn:
                 cursor = conn.cursor()
                 placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
@@ -1933,7 +1936,7 @@ def api_trades():
 
         # 2) 回退 runs/*/trades.csv
         if not trades:
-            runs_dir = REPORTS_DIR / 'runs'
+            runs_dir = runtime_paths.runs_dir
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
                 for run_dir in run_dirs[:24]:

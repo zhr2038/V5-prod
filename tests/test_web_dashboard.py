@@ -2742,3 +2742,74 @@ def test_api_trades_db_fallback_prefers_updated_ts_for_trade_time(monkeypatch, t
 
     assert payload["trades"][0]["symbol"] == "BTC-USDT"
     assert payload["trades"][0]["time"] == "2024-03-10 01:00:00"
+
+
+def test_api_trades_uses_active_runtime_paths(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    root_run = reports_dir / "runs" / "20260408_02"
+    runtime_run = runtime_dir / "runs" / "20260408_01"
+    root_run.mkdir(parents=True, exist_ok=True)
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    monkeypatch.delenv("EXCHANGE_API_KEY", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_SECRET", raising=False)
+    monkeypatch.delenv("EXCHANGE_PASSPHRASE", raising=False)
+
+    root_orders_db = reports_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(root_orders_db))
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE orders (
+            inst_id TEXT,
+            side TEXT,
+            notional_usdt REAL,
+            fee TEXT,
+            state TEXT,
+            avg_px TEXT,
+            created_ts INTEGER
+        )
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO orders(inst_id, side, notional_usdt, fee, state, avg_px, created_ts)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("BTC-USDT", "buy", 100.0, "0.5", "FILLED", "50000", 1_710_000_000_000),
+    )
+    conn.commit()
+    conn.close()
+
+    (root_run / "trades.csv").write_text(
+        "symbol,side,notional_usdt,fee_usdt,ts\n"
+        "BTC/USDT,buy,100,0.5,2024-04-08 10:00:00\n",
+        encoding="utf-8",
+    )
+    (runtime_run / "trades.csv").write_text(
+        "symbol,side,notional_usdt,fee_usdt,ts\n"
+        "ETH/USDT,sell,200,1.5,2024-04-08 11:00:00\n",
+        encoding="utf-8",
+    )
+    os.utime(root_run, (20, 20))
+    os.utime(runtime_run, (10, 10))
+
+    with module.app.app_context():
+        payload = module.api_trades().get_json()
+
+    assert len(payload["trades"]) == 1
+    assert payload["trades"][0]["symbol"] == "ETH-USDT"
+    assert payload["trades"][0]["amount"] == pytest.approx(200.0)
+    assert payload["trades"][0]["fee"] == pytest.approx(1.5)
+    assert payload["trades"][0]["time"] == "2024-04-08 11:00:00"
