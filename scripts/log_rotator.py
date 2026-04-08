@@ -10,6 +10,7 @@ V5 日志轮转工具
 
 import gzip
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -47,12 +48,20 @@ class LogRotator:
         self.stats = {'rotated': 0, 'compressed': 0, 'deleted': 0, 'space_saved_mb': 0}
     
     def log(self, msg):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+        try:
+            print(line)
+        except UnicodeEncodeError:
+            fallback = line.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(
+                sys.stdout.encoding or "utf-8",
+                errors="replace",
+            )
+            print(fallback)
     
     def get_file_age_days(self, path):
         """获取文件年龄（天）"""
         mtime = datetime.fromtimestamp(path.stat().st_mtime)
-        return (datetime.now() - mtime).days
+        return (datetime.now() - mtime).total_seconds() / 86400
     
     def rotate_large_logs(self):
         """轮转过大的日志文件"""

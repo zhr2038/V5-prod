@@ -6,11 +6,74 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
+from src.execution.fill_store import derive_fill_store_path
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass(frozen=True)
+class SmartAlertPaths:
+    reports_dir: Path
+    runs_dir: Path
+    fills_db: Path
+    orders_db: Path
+    alerts_state_file: Path
+    reconcile_file: Path
+    kill_switch_file: Path
+    ic_file: Path
+
+
+def _load_active_config(*, workspace: Path) -> dict[str, Any]:
+    config_path = Path(resolve_runtime_config_path(project_root=workspace))
+    try:
+        import yaml
+
+        if config_path.exists():
+            return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def _resolve_paths(*, workspace: Path) -> SmartAlertPaths:
+    cfg = _load_active_config(workspace=workspace)
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=workspace,
+        )
+    )
+    reports_dir = orders_db.parent.resolve()
+    return SmartAlertPaths(
+        reports_dir=reports_dir,
+        runs_dir=reports_dir / "runs",
+        fills_db=derive_fill_store_path(orders_db),
+        orders_db=orders_db,
+        alerts_state_file=reports_dir / "alerts_state.json",
+        reconcile_file=Path(
+            resolve_runtime_path(
+                execution_cfg.get("reconcile_status_path"),
+                default="reports/reconcile_status.json",
+                project_root=workspace,
+            )
+        ),
+        kill_switch_file=Path(
+            resolve_runtime_path(
+                execution_cfg.get("kill_switch_path"),
+                default="reports/kill_switch.json",
+                project_root=workspace,
+            )
+        ),
+        ic_file=reports_dir / "ic_diagnostics_30d_20u.json",
+    )
 
 
 def _to_bool(value: Any) -> bool:
@@ -44,8 +107,9 @@ class SmartAlertEngine:
 
     def __init__(self, workspace: Path = PROJECT_ROOT):
         self.workspace = workspace
-        self.reports_dir = workspace / "reports"
-        self.alerts_state_file = self.reports_dir / "alerts_state.json"
+        self.paths = _resolve_paths(workspace=workspace)
+        self.reports_dir = self.paths.reports_dir
+        self.alerts_state_file = self.paths.alerts_state_file
         self._load_state()
 
     def _load_state(self) -> None:
@@ -72,7 +136,7 @@ class SmartAlertEngine:
         return False
 
     def _load_recent_run_audits(self, limit: int) -> list[dict[str, Any]]:
-        runs_dir = self.reports_dir / "runs"
+        runs_dir = self.paths.runs_dir
         if not runs_dir.exists():
             return []
 
@@ -93,7 +157,7 @@ class SmartAlertEngine:
         return audits
 
     def _count_recent_buy_fills_from_fill_store(self, cutoff_ts: int) -> int | None:
-        fills_db = self.reports_dir / "fills.sqlite"
+        fills_db = self.paths.fills_db
         try:
             if fills_db.exists():
                 conn = sqlite3.connect(str(fills_db))
@@ -114,7 +178,7 @@ class SmartAlertEngine:
         return None
 
     def _count_recent_buy_filled_orders(self, cutoff_ts: int) -> int | None:
-        orders_db = self.reports_dir / "orders.sqlite"
+        orders_db = self.paths.orders_db
         if not orders_db.exists():
             return None
 
@@ -215,7 +279,7 @@ class SmartAlertEngine:
 
     def check_drawdown(self) -> Optional[dict[str, Any]]:
         try:
-            reconcile_file = self.reports_dir / "reconcile_status.json"
+            reconcile_file = self.paths.reconcile_file
             if not reconcile_file.exists():
                 return None
 
@@ -238,7 +302,7 @@ class SmartAlertEngine:
 
     def check_ic_degradation(self) -> Optional[dict[str, Any]]:
         try:
-            ic_file = self.reports_dir / "ic_diagnostics_30d_20u.json"
+            ic_file = self.paths.ic_file
             if not ic_file.exists():
                 return None
 
@@ -264,7 +328,7 @@ class SmartAlertEngine:
 
     def check_kill_switch(self) -> Optional[dict[str, Any]]:
         try:
-            kill_switch_file = self.reports_dir / "kill_switch.json"
+            kill_switch_file = self.paths.kill_switch_file
             if not kill_switch_file.exists():
                 return None
 
