@@ -62,7 +62,11 @@ from configs.schema import AppConfig
 from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.execution.position_store import Position
-from src.execution.fill_store import derive_runtime_auto_risk_guard_path, derive_runtime_named_artifact_path
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_auto_risk_guard_path,
+    derive_runtime_named_artifact_path,
+)
 from src.execution.position_builder import PositionBuilder  # Phase 2: 分批建仓
 from src.execution.multi_level_stop_loss import MultiLevelStopLoss, StopLossConfig  # Phase 2: 动态止损
 from src.portfolio.portfolio_engine import PortfolioEngine, PortfolioSnapshot
@@ -1399,7 +1403,12 @@ class V5Pipeline:
         cap_eq = getattr(self.cfg.budget, "live_equity_cap_usdt", None)
         
         # 读取数据库中的历史 scale_basis
-        acc_store = AccountStore(path=str(REPORTS_DIR / 'positions.sqlite'))
+        runtime_order_store_path = Path(
+            str(getattr(self.cfg.execution, "order_store_path", "reports/orders.sqlite"))
+        )
+        if not runtime_order_store_path.is_absolute():
+            runtime_order_store_path = (REPORTS_DIR.parent / runtime_order_store_path).resolve()
+        acc_store = AccountStore(path=str(derive_position_store_path(runtime_order_store_path).resolve()))
         acc_state = acc_store.get()
         old_scale_basis = float(acc_state.scale_basis_usdt or 0)
         
