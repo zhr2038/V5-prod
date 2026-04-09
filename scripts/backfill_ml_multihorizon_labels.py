@@ -16,7 +16,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from src.data.okx_ccxt_provider import OKXCCXTProvider
+from src.execution.fill_store import derive_runtime_reports_dir
 from src.execution.ml_data_collector import MLDataCollector
 
 
@@ -309,9 +311,31 @@ def backfill_multihorizon_labels(
         conn.close()
 
 
+def _resolve_cli_or_default_path(raw_path: str, *, default_path: Path) -> Path:
+    text = str(raw_path or "").strip()
+    if not text:
+        return default_path.resolve()
+    path = Path(text)
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return path
+
+
+def _runtime_training_db_path(raw_config_path: str | None = None) -> Path:
+    cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
+    execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+    order_store_path = resolve_runtime_path(
+        execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+        default="reports/orders.sqlite",
+        project_root=PROJECT_ROOT,
+    )
+    return (derive_runtime_reports_dir(order_store_path) / "ml_training_data.db").resolve()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bulk backfill 6h/12h/24h ML labels from cache and OKX public candles")
-    parser.add_argument("--db-path", default=str(PROJECT_ROOT / "reports/ml_training_data.db"))
+    parser.add_argument("--config", default="", help="Optional config path used to resolve runtime defaults")
+    parser.add_argument("--db-path", default="", help="SQLite DB path (default: runtime ml_training_data.db)")
     parser.add_argument("--cache-dir", default=str(PROJECT_ROOT / "data/cache"))
     parser.add_argument("--as-of-ms", type=int, default=int(time.time() * 1000))
     parser.add_argument("--symbol", default=None, help="Only process one symbol, e.g. BTC/USDT")
@@ -323,8 +347,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    db_path = Path(args.db_path)
-    cache_dir = Path(args.cache_dir)
+    db_path = _resolve_cli_or_default_path(args.db_path, default_path=_runtime_training_db_path(args.config or None))
+    cache_dir = _resolve_cli_or_default_path(args.cache_dir, default_path=(PROJECT_ROOT / "data" / "cache"))
     if not db_path.exists():
         print(f"db not found: {db_path}")
         return 1

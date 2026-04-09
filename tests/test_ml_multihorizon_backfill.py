@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pandas as pd
 
+import scripts.backfill_ml_multihorizon_labels as multihorizon_script
 from scripts.backfill_ml_multihorizon_labels import backfill_multihorizon_labels
 from src.core.models import MarketSeries
 from src.execution.ml_data_collector import MLDataCollector
@@ -157,3 +159,98 @@ def test_backfill_multihorizon_labels_skips_rows_younger_than_24h(tmp_path: Path
     assert result["rows_pending"] == 0
     assert result["rows_filled"] == 0
     assert row == (None, None, None, 0)
+
+
+def test_multihorizon_script_defaults_to_runtime_db_from_order_store_path(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+    fake_root = tmp_path / "repo"
+    runtime_dir = fake_root / "reports" / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs").mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs" / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runtime_db = runtime_dir / "ml_training_data.db"
+    runtime_db.write_text("", encoding="utf-8")
+
+    def _fake_backfill_multihorizon_labels(**kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "symbols": 0,
+            "rows_pending": 0,
+            "rows_filled": 0,
+            "rows_failed": 0,
+            "cache_symbols": 0,
+            "api_symbols": 0,
+        }
+
+    monkeypatch.setattr(multihorizon_script, "PROJECT_ROOT", fake_root)
+    monkeypatch.setattr(multihorizon_script, "backfill_multihorizon_labels", _fake_backfill_multihorizon_labels)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backfill_ml_multihorizon_labels.py",
+            "--skip-api",
+            "--as-of-ms",
+            "1700000000000",
+        ],
+    )
+
+    assert multihorizon_script.main() == 0
+    assert Path(captured["kwargs"]["db_path"]).resolve() == runtime_db.resolve()
+
+
+def test_multihorizon_script_respects_explicit_db_override(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+    fake_root = tmp_path / "repo"
+    runtime_dir = fake_root / "reports" / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs").mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs" / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    explicit_db = tmp_path / "custom" / "training.sqlite"
+    explicit_db.parent.mkdir(parents=True, exist_ok=True)
+    explicit_db.write_text("", encoding="utf-8")
+
+    def _fake_backfill_multihorizon_labels(**kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "symbols": 0,
+            "rows_pending": 0,
+            "rows_filled": 0,
+            "rows_failed": 0,
+            "cache_symbols": 0,
+            "api_symbols": 0,
+        }
+
+    monkeypatch.setattr(multihorizon_script, "PROJECT_ROOT", fake_root)
+    monkeypatch.setattr(multihorizon_script, "backfill_multihorizon_labels", _fake_backfill_multihorizon_labels)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backfill_ml_multihorizon_labels.py",
+            "--skip-api",
+            "--db-path",
+            str(explicit_db),
+            "--as-of-ms",
+            "1700000000000",
+        ],
+    )
+
+    assert multihorizon_script.main() == 0
+    assert Path(captured["kwargs"]["db_path"]).resolve() == explicit_db.resolve()
