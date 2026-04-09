@@ -3472,6 +3472,60 @@ def test_api_positions_uses_runtime_runs_and_fill_db(monkeypatch, tmp_path):
     assert seen["fills_db"] == runtime_dir / "fills.sqlite"
 
 
+def test_api_positions_derives_runtime_reconcile_status_when_config_uses_legacy_default(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {
+                "order_store_path": "reports/shadow_runtime/orders.sqlite",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")))
+
+    (reports_dir / "reconcile_status.json").write_text(
+        json.dumps(
+            {
+                "exchange_snapshot": {
+                    "ccy_cashBal": {"BTC": "1.0"},
+                    "ccy_eqUsd": {"BTC": "100.0"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runtime_dir / "reconcile_status.json").write_text(
+        json.dumps(
+            {
+                "exchange_snapshot": {
+                    "ccy_cashBal": {"ETH": "2.0"},
+                    "ccy_eqUsd": {"ETH": "400.0"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    assert [row["symbol"] for row in payload["positions"]] == ["ETH"]
+    assert payload["positions"][0]["qty"] == 2.0
+    assert payload["positions"][0]["value_usdt"] == 400.0
+
+
 def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)

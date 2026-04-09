@@ -1512,7 +1512,8 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
         orders_db=orders_db,
         fills_db=derive_fill_store_path(orders_db),
         positions_db=derive_position_store_path(orders_db),
-        reconcile_status_path=_resolve_workspace_relative_path(
+        reconcile_status_path=_resolve_dashboard_runtime_artifact_path(
+            orders_db,
             execution_cfg.get('reconcile_status_path'),
             'reports/reconcile_status.json',
         ),
