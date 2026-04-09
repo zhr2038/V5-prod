@@ -75,3 +75,50 @@ def test_backup_manager_includes_active_config_runtime_state_files(tmp_path) -> 
     assert "reports/shadow_runtime/reconcile_shadow.json" in names
     assert "reports/positions.sqlite" not in names
     assert "reports/bills.sqlite" not in names
+
+
+def test_backup_manager_derives_runtime_state_files_when_config_uses_legacy_defaults(tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_orders.sqlite",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "orders.sqlite").write_text("root-orders", encoding="utf-8")
+    (reports_dir / "kill_switch.json").write_text("root-kill", encoding="utf-8")
+    (reports_dir / "reconcile_status.json").write_text("root-reconcile", encoding="utf-8")
+
+    (reports_dir / "shadow_orders.sqlite").write_text("shadow-orders", encoding="utf-8")
+    (reports_dir / "shadow_fills.sqlite").write_text("shadow-fills", encoding="utf-8")
+    (reports_dir / "shadow_positions.sqlite").write_text("shadow-positions", encoding="utf-8")
+    (reports_dir / "shadow_bills.sqlite").write_text("shadow-bills", encoding="utf-8")
+    (reports_dir / "shadow_ledger_state.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_ledger_status.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_kill_switch.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_reconcile_status.json").write_text("{}", encoding="utf-8")
+
+    manager = backup_manager.BackupManager(workspace=tmp_path)
+    backup_path = manager.create_backup(name="runtime_legacy_default_backup")
+
+    with tarfile.open(backup_path, "r:gz") as archive:
+        names = archive.getnames()
+
+    assert "reports/shadow_orders.sqlite" in names
+    assert "reports/shadow_fills.sqlite" in names
+    assert "reports/shadow_positions.sqlite" in names
+    assert "reports/shadow_bills.sqlite" in names
+    assert "reports/shadow_ledger_state.json" in names
+    assert "reports/shadow_ledger_status.json" in names
+    assert "reports/shadow_kill_switch.json" in names
+    assert "reports/shadow_reconcile_status.json" in names
+    assert "reports/kill_switch.json" not in names
+    assert "reports/reconcile_status.json" not in names

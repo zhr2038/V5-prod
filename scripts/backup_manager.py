@@ -65,6 +65,18 @@ class BackupManager:
             pass
         return {}
 
+    def _resolve_runtime_json_path(self, raw_path: object, *, orders_db: Path, base_name: str, legacy_default: str) -> Path:
+        raw = str(raw_path or "").strip()
+        if not raw or raw == legacy_default:
+            return derive_runtime_named_json_path(orders_db, base_name).resolve()
+        return Path(
+            resolve_runtime_path(
+                raw,
+                default=legacy_default,
+                project_root=self.paths.workspace,
+            )
+        ).resolve()
+
     def _runtime_backup_paths(self) -> list[Path]:
         cfg = self._load_active_config()
         execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
@@ -80,20 +92,18 @@ class BackupManager:
         bills_db = derive_runtime_named_artifact_path(orders_db, "bills", ".sqlite").resolve()
         ledger_state = derive_runtime_named_json_path(orders_db, "ledger_state").resolve()
         ledger_status = derive_runtime_named_json_path(orders_db, "ledger_status").resolve()
-        kill_switch = Path(
-            resolve_runtime_path(
-                execution_cfg.get("kill_switch_path"),
-                default="reports/kill_switch.json",
-                project_root=self.paths.workspace,
-            )
-        ).resolve()
-        reconcile_status = Path(
-            resolve_runtime_path(
-                execution_cfg.get("reconcile_status_path"),
-                default="reports/reconcile_status.json",
-                project_root=self.paths.workspace,
-            )
-        ).resolve()
+        kill_switch = self._resolve_runtime_json_path(
+            execution_cfg.get("kill_switch_path"),
+            orders_db=orders_db,
+            base_name="kill_switch",
+            legacy_default="reports/kill_switch.json",
+        )
+        reconcile_status = self._resolve_runtime_json_path(
+            execution_cfg.get("reconcile_status_path"),
+            orders_db=orders_db,
+            base_name="reconcile_status",
+            legacy_default="reports/reconcile_status.json",
+        )
         return [orders_db, fills_db, positions_db, bills_db, ledger_state, ledger_status, kill_switch, reconcile_status]
 
     def _iter_backup_items(self):
