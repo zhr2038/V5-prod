@@ -12,6 +12,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,13 @@ ORDERS_DB = REPORTS_DIR / "orders.sqlite"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_named_json_path,
+    derive_runtime_reports_dir,
+)
+
 DUST_CRITERIA = {
     "max_qty": 0.1,
     "max_value_usdt": 0.5,
@@ -33,11 +41,64 @@ DUST_CRITERIA = {
 DUST_SYMBOLS = {"PROMPT", "SPACE", "KITE", "WLFI", "MERL", "J", "PEPE", "XAUT"}
 
 
+@dataclass
+class DustCleanerPaths:
+    reports_dir: Path
+    orders_db: Path
+    positions_db: Path
+    dust_config_path: Path
+
+
+def _derive_cleanup_report_path(order_store_path: Path, timestamp: str) -> Path:
+    path = Path(order_store_path)
+    if path.name == "orders.sqlite":
+        return path.with_name(f"dust_cleanup_{timestamp}.json")
+    if "orders" in path.stem:
+        report_name = path.stem.replace("orders", "dust_cleanup", 1)
+        return path.with_name(f"{report_name}_{timestamp}.json")
+    return path.with_name(f"dust_cleanup_{timestamp}.json")
+
+
+def _resolve_default_paths(project_root: Path | None = None) -> DustCleanerPaths:
+    root = Path(project_root or PROJECT_ROOT).resolve()
+    try:
+        cfg = load_runtime_config(project_root=root)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=root,
+            )
+        ).resolve()
+        return DustCleanerPaths(
+            reports_dir=derive_runtime_reports_dir(orders_db).resolve(),
+            orders_db=orders_db,
+            positions_db=derive_position_store_path(orders_db).resolve(),
+            dust_config_path=derive_runtime_named_json_path(orders_db, "dust_config").resolve(),
+        )
+    except Exception:
+        return DustCleanerPaths(
+            reports_dir=REPORTS_DIR.resolve(),
+            orders_db=ORDERS_DB.resolve(),
+            positions_db=POSITIONS_DB.resolve(),
+            dust_config_path=(REPORTS_DIR / "dust_config.json").resolve(),
+        )
+
+
 class DustCleaner:
     def __init__(self, reports_dir: Path | None = None):
-        self.reports_dir = (reports_dir or REPORTS_DIR).resolve()
-        self.positions_db = self.reports_dir / "positions.sqlite"
-        self.orders_db = self.reports_dir / "orders.sqlite"
+        if reports_dir is not None:
+            self.reports_dir = Path(reports_dir).resolve()
+            self.positions_db = (self.reports_dir / "positions.sqlite").resolve()
+            self.orders_db = (self.reports_dir / "orders.sqlite").resolve()
+            self.dust_config_path = (self.reports_dir / "dust_config.json").resolve()
+        else:
+            runtime_paths = _resolve_default_paths()
+            self.reports_dir = runtime_paths.reports_dir
+            self.positions_db = runtime_paths.positions_db
+            self.orders_db = runtime_paths.orders_db
+            self.dust_config_path = runtime_paths.dust_config_path
         self.stats = {"marked": 0, "already_excluded": 0, "errors": 0}
         self.dust_list: list[dict[str, Any]] = []
 
@@ -141,8 +202,7 @@ class DustCleaner:
         self.log("=" * 60)
 
     def update_reconcile_config(self) -> Path:
-        self.reports_dir.mkdir(parents=True, exist_ok=True)
-        config_file = self.reports_dir / "dust_config.json"
+        self.dust_config_path.parent.mkdir(parents=True, exist_ok=True)
         config = {
             "dust_symbols": sorted(DUST_SYMBOLS),
             "dust_criteria": DUST_CRITERIA,
@@ -151,13 +211,14 @@ class DustCleaner:
             "excluded_from_borrow_check": True,
             "updated_at": datetime.now().isoformat(),
         }
-        config_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
-        self.log(f"Dust config saved: {config_file}")
-        return config_file
+        self.dust_config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        self.log(f"Dust config saved: {self.dust_config_path}")
+        return self.dust_config_path
 
     def generate_report(self) -> dict[str, Any]:
-        self.reports_dir.mkdir(parents=True, exist_ok=True)
-        report_file = self.reports_dir / f"dust_cleanup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        report_file = _derive_cleanup_report_path(self.orders_db, timestamp)
+        report_file.parent.mkdir(parents=True, exist_ok=True)
         report = {
             "timestamp": datetime.now().isoformat(),
             "dust_criteria": DUST_CRITERIA,
