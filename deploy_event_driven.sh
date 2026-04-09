@@ -4,10 +4,34 @@
 # Phase 1: Parallel mode (event-driven logs, standard V5 executes)
 #
 
-set -e
+set -euo pipefail
 
-ROOT="/home/admin/clawd/v5-prod"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
+
+CONFIG_FILE="${V5_CONFIG:-}"
+if [[ -z "$CONFIG_FILE" ]]; then
+  if [[ -f "$ROOT/configs/live_prod.yaml" ]]; then
+    CONFIG_FILE="$ROOT/configs/live_prod.yaml"
+  else
+    CONFIG_FILE="$ROOT/configs/live_20u_real.yaml"
+  fi
+elif [[ "$CONFIG_FILE" != /* ]]; then
+  CONFIG_FILE="$ROOT/$CONFIG_FILE"
+fi
+
+STANDARD_TIMER_UNIT="v5-prod.user.timer"
+if ! systemctl --user cat "$STANDARD_TIMER_UNIT" >/dev/null 2>&1; then
+  STANDARD_TIMER_UNIT="v5-live-20u.user.timer"
+fi
+
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$ROOT/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+else
+  PYTHON_BIN="$(command -v python)"
+fi
 
 echo "=================================="
 echo "Event-Driven Trading Deployment"
@@ -16,14 +40,14 @@ echo ""
 
 # Backup current config
 echo "[1/5] Backing up current configuration..."
-cp configs/live_20u_real.yaml configs/live_20u_real.yaml.backup.$(date +%Y%m%d_%H%M%S)
+cp "$CONFIG_FILE" "$CONFIG_FILE.backup.$(date +%Y%m%d_%H%M%S)"
 echo "✅ Backup created"
 
 # Add event-driven config (disabled by default)
 echo ""
 echo "[2/5] Adding event-driven configuration..."
-if ! grep -q "event_driven:" configs/live_20u_real.yaml; then
-    cat >> configs/live_20u_real.yaml << 'EOF'
+if ! grep -q "event_driven:" "$CONFIG_FILE"; then
+    cat >> "$CONFIG_FILE" << 'EOF'
 
 # Event-Driven Trading Configuration
 event_driven:
@@ -47,21 +71,13 @@ fi
 # Create event-driven timer (disabled initially)
 echo ""
 echo "[3/5] Setting up event-driven timer..."
-cp deploy/systemd/v5-event-driven.timer ~/.config/systemd/user/
-cp deploy/systemd/v5-reconcile.user.service ~/.config/systemd/user/v5-event-driven.service 2>/dev/null || true
-
-# Modify the service to run our check script
-cat > ~/.config/systemd/user/v5-event-driven.service << 'EOF'
-[Unit]
-Description=V5 Event-Driven Trading Check (15min)
-
-[Service]
-Type=oneshot
-WorkingDirectory=/home/admin/clawd/v5-prod
-Environment=PYTHONPATH=/home/admin/clawd/v5-prod
-EnvironmentFile=/home/admin/clawd/v5-prod/.env
-ExecStart=/home/admin/clawd/v5-prod/.venv/bin/python /home/admin/clawd/v5-prod/event_driven_check.py
-EOF
+mkdir -p ~/.config/systemd/user
+"$PYTHON_BIN" "$ROOT/deploy/render_systemd_units.py" \
+    --src-dir "$ROOT/deploy/systemd" \
+    --dst-dir "$HOME/.config/systemd/user" \
+    --root "$ROOT" \
+    --mapping v5-event-driven.service=v5-event-driven.service \
+    --mapping v5-event-driven.timer=v5-event-driven.timer
 
 echo "✅ Timer configured"
 
@@ -84,13 +100,14 @@ echo "Deployment Complete!"
 echo "=================================="
 echo ""
 echo "Current Status:"
-echo "  - Standard V5: $(systemctl --user is-active v5-live-20u.user.timer)"
+echo "  - Standard V5: $(systemctl --user is-active "$STANDARD_TIMER_UNIT" 2>/dev/null || echo 'unknown')"
 echo "  - Event-Driven: $(systemctl --user is-active v5-event-driven.timer)"
 echo ""
 echo "Mode: PARALLEL (Phase 1)"
 echo "  - Event-driven logs to: reports/event_driven_log.jsonl"
 echo "  - Standard V5 continues to execute trades"
 echo "  - Event-driven config: enabled=false (log only)"
+echo "  - Config file: $CONFIG_FILE"
 echo ""
 echo "To enable active mode (Phase 2):"
 echo "  1. Edit configs/live_20u_real.yaml"
