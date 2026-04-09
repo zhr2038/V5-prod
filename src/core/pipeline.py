@@ -66,6 +66,7 @@ from src.execution.fill_store import (
     derive_position_store_path,
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
 )
 from src.execution.position_builder import PositionBuilder  # Phase 2: 分批建仓
 from src.execution.multi_level_stop_loss import MultiLevelStopLoss, StopLossConfig  # Phase 2: 动态止损
@@ -214,7 +215,12 @@ class V5Pipeline:
         )
         
         # 自动风险档位守卫
-        order_store_path = str(getattr(cfg.execution, "order_store_path", "reports/orders.sqlite"))
+        runtime_order_store_path = Path(
+            str(getattr(cfg.execution, "order_store_path", "reports/orders.sqlite"))
+        )
+        if not runtime_order_store_path.is_absolute():
+            runtime_order_store_path = (REPORTS_DIR.parent / runtime_order_store_path).resolve()
+        order_store_path = str(runtime_order_store_path)
         self.auto_risk_guard = get_auto_risk_guard(
             derive_runtime_auto_risk_guard_path(order_store_path)
         )
@@ -228,6 +234,20 @@ class V5Pipeline:
                 bool(getattr(cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
             ]
         )
+        raw_negexp_state_path = str(
+            getattr(cfg.execution, "negative_expectancy_state_path", "reports/negative_expectancy_cooldown.json")
+            or ""
+        ).strip()
+        if not raw_negexp_state_path or raw_negexp_state_path == "reports/negative_expectancy_cooldown.json":
+            negexp_state_path = derive_runtime_named_json_path(
+                runtime_order_store_path,
+                "negative_expectancy_cooldown",
+            ).resolve()
+        else:
+            negexp_state_path = Path(raw_negexp_state_path)
+            if not negexp_state_path.is_absolute():
+                negexp_state_path = (REPORTS_DIR.parent / negexp_state_path).resolve()
+
         self.negative_expectancy_cooldown = NegativeExpectancyCooldown(
             NegativeExpectancyConfig(
                 enabled=neg_feedback_enabled,
@@ -235,8 +255,8 @@ class V5Pipeline:
                 min_closed_cycles=int(getattr(cfg.execution, 'negative_expectancy_min_closed_cycles', 4) or 4),
                 expectancy_threshold_usdt=float(getattr(cfg.execution, 'negative_expectancy_threshold_usdt', 0.0) or 0.0),
                 cooldown_hours=int(getattr(cfg.execution, 'negative_expectancy_cooldown_hours', 24) or 24),
-                state_path=str(getattr(cfg.execution, 'negative_expectancy_state_path', 'reports/negative_expectancy_cooldown.json')),
-                orders_db_path=str(getattr(cfg.execution, 'order_store_path', 'reports/orders.sqlite')),
+                state_path=str(negexp_state_path),
+                orders_db_path=str(runtime_order_store_path),
                 fast_fail_max_hold_minutes=int(
                     getattr(cfg.execution, 'negative_expectancy_fast_fail_max_hold_minutes', 120) or 120
                 ),
@@ -245,11 +265,6 @@ class V5Pipeline:
         
         # Phase 3: 初始化ML数据收集器（传入data_provider以便从API获取历史K线）
         from src.execution.ml_data_collector import MLDataCollector
-        runtime_order_store_path = Path(
-            str(getattr(cfg.execution, "order_store_path", "reports/orders.sqlite"))
-        )
-        if not runtime_order_store_path.is_absolute():
-            runtime_order_store_path = (REPORTS_DIR.parent / runtime_order_store_path).resolve()
         self.data_collector = MLDataCollector(
             db_path=str(
                 derive_runtime_named_artifact_path(

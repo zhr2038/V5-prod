@@ -10,6 +10,7 @@ from src.execution.fill_store import (
     derive_position_store_path,
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
 )
 from src.regime.regime_engine import RegimeResult
 
@@ -76,9 +77,9 @@ def test_pipeline_uses_runtime_auto_risk_guard_path(monkeypatch):
     pipe = pipeline_module.V5Pipeline(cfg)
 
     assert pipe.auto_risk_guard is sentinel
-    assert captured["state_path"] == derive_runtime_auto_risk_guard_path(
-        "reports/shadow_runtime/orders.sqlite"
-    )
+    assert Path(captured["state_path"]) == derive_runtime_auto_risk_guard_path(
+        (pipeline_module.REPORTS_DIR.parent / "reports/shadow_runtime/orders.sqlite").resolve()
+    ).resolve()
 
 
 def test_pipeline_uses_runtime_ml_training_db_path(monkeypatch):
@@ -107,6 +108,44 @@ def test_pipeline_uses_runtime_ml_training_db_path(monkeypatch):
     ).resolve()
     assert captured["db_path"] == expected_db
     assert pipe.data_collector is not None
+
+
+def test_pipeline_uses_runtime_negative_expectancy_state_path(monkeypatch):
+    cfg = AppConfig(
+        symbols=["BTC/USDT"],
+        execution=ExecutionConfig(
+            order_store_path="reports/shadow_orders.sqlite",
+            negative_expectancy_cooldown_enabled=True,
+        ),
+    )
+
+    pipe = pipeline_module.V5Pipeline(cfg)
+
+    expected_path = derive_runtime_named_json_path(
+        (pipeline_module.REPORTS_DIR.parent / "reports/shadow_orders.sqlite").resolve(),
+        "negative_expectancy_cooldown",
+    ).resolve()
+    assert Path(pipe.negative_expectancy_cooldown.cfg.state_path) == expected_path
+    assert Path(pipe.negative_expectancy_cooldown.cfg.orders_db_path) == (
+        pipeline_module.REPORTS_DIR.parent / "reports/shadow_orders.sqlite"
+    ).resolve()
+
+
+def test_pipeline_preserves_custom_negative_expectancy_state_path(monkeypatch):
+    cfg = AppConfig(
+        symbols=["BTC/USDT"],
+        execution=ExecutionConfig(
+            order_store_path="reports/shadow_orders.sqlite",
+            negative_expectancy_cooldown_enabled=True,
+            negative_expectancy_state_path="reports/custom_negexp_state.json",
+        ),
+    )
+
+    pipe = pipeline_module.V5Pipeline(cfg)
+
+    assert Path(pipe.negative_expectancy_cooldown.cfg.state_path) == (
+        pipeline_module.REPORTS_DIR.parent / "reports/custom_negexp_state.json"
+    ).resolve()
 
 
 def test_pipeline_uses_runtime_position_store_for_scale_basis(monkeypatch):
