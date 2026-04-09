@@ -936,7 +936,12 @@ def main() -> None:
                     ledger_status_path=str(
                         derive_runtime_named_json_path(runtime_order_store_path, "ledger_status")
                     ),
-                    reconcile_status_path=str(getattr(cfg.execution, "reconcile_status_path", "reports/reconcile_status.json")),
+                    reconcile_status_path=str(
+                        derive_runtime_named_json_path(runtime_order_store_path, "reconcile_status")
+                        if str(getattr(cfg.execution, "reconcile_status_path", "") or "").strip()
+                        in {"", "reports/reconcile_status.json"}
+                        else getattr(cfg.execution, "reconcile_status_path")
+                    ),
                 )
                 res = pf.run(
                     max_pages=int(getattr(cfg.execution, "preflight_max_pages", 5)),

@@ -11,6 +11,10 @@ from scripts.bills_sync import sync_once as bills_sync_once
 from src.execution.bills_store import BillsStore
 from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
 from src.execution.borrow_guard import check_okx_borrows
+from src.execution.fill_store import (
+    derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
+)
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 from src.execution.ledger_engine import LedgerEngine
 from src.execution.okx_private_client import OKXPrivateClient
@@ -51,6 +55,31 @@ def _to_bool(v: Any) -> bool:
 
 def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
+
+
+def _resolve_runtime_artifact_path(
+    raw_path: Optional[str],
+    *,
+    order_store_path: str,
+    base_name: str,
+    legacy_default: str,
+    suffix: str,
+) -> str:
+    if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
+        return str(derive_runtime_named_artifact_path(order_store_path, base_name, suffix))
+    return str(raw_path)
+
+
+def _resolve_runtime_json_path(
+    raw_path: Optional[str],
+    *,
+    order_store_path: str,
+    base_name: str,
+    legacy_default: str,
+) -> str:
+    if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
+        return str(derive_runtime_named_json_path(order_store_path, base_name))
+    return str(raw_path)
 
 
 def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
@@ -140,12 +169,43 @@ class LivePreflight:
         self.okx = okx
         self.position_store = position_store
         self.account_store = account_store
-        self.bills_db_path = str(bills_db_path)
-        self.ledger_state_path = str(ledger_state_path)
-        self.ledger_status_path = str(ledger_status_path)
-        self.reconcile_status_path = str(
-            reconcile_status_path
-            or getattr(cfg, "reconcile_status_path", "reports/reconcile_status.json")
+        self.order_store_path = str(getattr(cfg, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite")
+        self.bills_db_path = _resolve_runtime_artifact_path(
+            bills_db_path,
+            order_store_path=self.order_store_path,
+            base_name="bills",
+            legacy_default="reports/bills.sqlite",
+            suffix=".sqlite",
+        )
+        self.ledger_state_path = _resolve_runtime_json_path(
+            ledger_state_path,
+            order_store_path=self.order_store_path,
+            base_name="ledger_state",
+            legacy_default="reports/ledger_state.json",
+        )
+        self.ledger_status_path = _resolve_runtime_json_path(
+            ledger_status_path,
+            order_store_path=self.order_store_path,
+            base_name="ledger_status",
+            legacy_default="reports/ledger_status.json",
+        )
+        self.reconcile_status_path = _resolve_runtime_json_path(
+            reconcile_status_path if reconcile_status_path is not None else getattr(cfg, "reconcile_status_path", None),
+            order_store_path=self.order_store_path,
+            base_name="reconcile_status",
+            legacy_default="reports/reconcile_status.json",
+        )
+        self.reconcile_failure_state_path = _resolve_runtime_json_path(
+            getattr(cfg, "reconcile_failure_state_path", None),
+            order_store_path=self.order_store_path,
+            base_name="reconcile_failure_state",
+            legacy_default="reports/reconcile_failure_state.json",
+        )
+        self.kill_switch_path = _resolve_runtime_json_path(
+            getattr(cfg, "kill_switch_path", None),
+            order_store_path=self.order_store_path,
+            base_name="kill_switch",
+            legacy_default="reports/kill_switch.json",
         )
 
     def _status_is_fresh(self, obj: Optional[Dict[str, Any]], *, max_age_sec: int) -> bool:
@@ -166,10 +226,8 @@ class LivePreflight:
     def _build_guard_config(self) -> GuardConfig:
         return GuardConfig(
             reconcile_status_path=self.reconcile_status_path,
-            failure_state_path=str(
-                getattr(self.cfg, "reconcile_failure_state_path", "reports/reconcile_failure_state.json")
-            ),
-            kill_switch_path=str(getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json")),
+            failure_state_path=self.reconcile_failure_state_path,
+            kill_switch_path=self.kill_switch_path,
         )
 
     def _run_reconcile_guard(
@@ -299,15 +357,14 @@ class LivePreflight:
                     and bool(reconcile_ok)
                     and bool(ledger_ok)
                 ):
-                    ks_path = str(getattr(self.cfg, "kill_switch_path", "reports/kill_switch.json"))
-                    ks_obj = _read_json(ks_path)
+                    ks_obj = _read_json(self.kill_switch_path)
                     if not _is_manual_kill_switch(ks_obj):
                         ks_obj = _clear_kill_switch_payload(
                             ks_obj,
                             now_ms=_now_ms(),
                             reason="preflight_ok",
                         )
-                        _write_json(ks_path, ks_obj)
+                        _write_json(self.kill_switch_path, ks_obj)
                         kill_switch_enabled = False
                         details["kill_switch_auto_cleared"] = True
             except Exception:

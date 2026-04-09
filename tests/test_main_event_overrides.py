@@ -661,7 +661,7 @@ def test_main_uses_runtime_budget_state_dir_for_read_and_write(tmp_path: Path, m
     assert captured["update_budget_state_run_id"] == "shadow_run"
 
 
-def test_main_live_preflight_uses_runtime_bills_and_ledger_paths(tmp_path: Path, monkeypatch) -> None:
+def test_main_live_preflight_uses_runtime_bills_ledger_and_status_paths(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("V5_LIVE_ARM", "YES")
 
@@ -683,7 +683,6 @@ def test_main_live_preflight_uses_runtime_bills_and_ledger_paths(tmp_path: Path,
         execution=SimpleNamespace(
             order_store_path="reports/shadow_runtime/orders.sqlite",
             order_state_machine_path=str(tmp_path / "reports" / "shadow_runtime" / "order_state_machine.json"),
-            reconcile_status_path=str(tmp_path / "reports" / "shadow_runtime" / "reconcile_status.json"),
             mode="live",
             preflight_enabled=True,
             preflight_fail_action="sell_only",

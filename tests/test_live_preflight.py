@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import src.execution.live_preflight as lp
@@ -420,6 +421,25 @@ def test_preflight_refreshes_reconcile_before_account_config_error(monkeypatch):
         assert calls["account_config"] == 1
         assert captured["guard_cfg"].kill_switch_path == kill_path
         assert captured["guard_cfg"].failure_state_path == failure_path
+
+
+def test_preflight_derives_runtime_default_state_paths_from_order_store():
+    cfg = SimpleNamespace(order_store_path="reports/shadow_runtime/orders.sqlite")
+
+    pf = lp.LivePreflight(
+        cfg,
+        okx=object(),
+        position_store=object(),
+        account_store=object(),
+    )
+
+    assert Path(pf.bills_db_path) == Path("reports/shadow_runtime/bills.sqlite")
+    assert Path(pf.ledger_state_path) == Path("reports/shadow_runtime/ledger_state.json")
+    assert Path(pf.ledger_status_path) == Path("reports/shadow_runtime/ledger_status.json")
+    assert Path(pf.reconcile_status_path) == Path("reports/shadow_runtime/reconcile_status.json")
+    guard_cfg = pf._build_guard_config()
+    assert Path(guard_cfg.failure_state_path) == Path("reports/shadow_runtime/reconcile_failure_state.json")
+    assert Path(guard_cfg.kill_switch_path) == Path("reports/shadow_runtime/kill_switch.json")
 
 
 def test_preflight_kill_switch_short_circuits_buy_gating_checks(monkeypatch):
