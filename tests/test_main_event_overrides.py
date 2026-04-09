@@ -478,3 +478,175 @@ def test_main_writes_run_artifacts_into_runtime_reports_dir(tmp_path: Path, monk
     assert Path(captured["spread_base_dir"]).resolve() == (tmp_path / "reports" / "shadow_runtime" / "spread_snapshots").resolve()
     assert Path(captured["position_store_path"]).resolve() == (tmp_path / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
     assert Path(captured["account_store_path"]).resolve() == (tmp_path / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
+
+
+def test_main_live_preflight_uses_runtime_bills_and_ledger_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("V5_LIVE_ARM", "YES")
+
+    cfg = SimpleNamespace(
+        symbols=["BTC/USDT"],
+        timeframe_main="1H",
+        universe=SimpleNamespace(
+            enabled=False,
+            use_universe_symbols=False,
+            min_data_coverage_ratio=0.0,
+        ),
+        budget=SimpleNamespace(
+            live_equity_cap_usdt=None,
+            action_enabled=False,
+            turnover_budget_per_day=1_000_000.0,
+            cost_budget_bps_per_day=10_000.0,
+            min_trade_notional_base=5.0,
+        ),
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+            order_state_machine_path=str(tmp_path / "reports" / "shadow_runtime" / "order_state_machine.json"),
+            reconcile_status_path=str(tmp_path / "reports" / "shadow_runtime" / "reconcile_status.json"),
+            mode="live",
+            preflight_enabled=True,
+            preflight_fail_action="sell_only",
+            live_arm_env="V5_LIVE_ARM",
+            live_arm_value="YES",
+        ),
+        exchange=SimpleNamespace(api_key="k", api_secret="s", passphrase="p"),
+    )
+
+    class FakeProvider:
+        def fetch_ohlcv(self, symbols, timeframe, limit, end_ts_ms=None):
+            assert symbols == ["BTC/USDT"]
+            return {"BTC/USDT": SimpleNamespace(ts=[1], close=[100.0], high=[101.0])}
+
+        def fetch_top_of_book(self, symbols):
+            return {"BTC/USDT": {"bid": 99.0, "ask": 101.0}}
+
+    class FakePositionStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def list(self):
+            return []
+
+    class FakeAccountStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+            self._acc = SimpleNamespace(cash_usdt=100.0, equity_peak_usdt=100.0)
+
+        def get(self):
+            return self._acc
+
+        def set(self, acc) -> None:
+            self._acc = acc
+
+    class FakePipeline:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.regime_engine = SimpleNamespace(
+                detect=lambda _btc: SimpleNamespace(
+                    state=SimpleNamespace(value="SIDEWAYS"),
+                    multiplier=1.0,
+                    atr_pct=0.0,
+                    ma20=0.0,
+                    ma60=0.0,
+                )
+            )
+            self.alpha_engine = SimpleNamespace(
+                set_regime_context=lambda *_args, **_kwargs: None,
+                compute_snapshot=lambda _market_data: SimpleNamespace(
+                    scores={},
+                    ranks={},
+                    raw={},
+                    raw_factors={},
+                    z_factors={},
+                    raw_scores={},
+                    telemetry_scores={},
+                    base_scores={},
+                    base_raw_scores={},
+                    ml_attribution_scores={},
+                    ml_overlay_scores={},
+                    ml_overlay_raw_scores={},
+                    ml_runtime={},
+                ),
+            )
+
+        def run(self, **_kwargs):
+            alpha = self.alpha_engine.compute_snapshot({})
+            regime = self.regime_engine.detect(None)
+            portfolio = SimpleNamespace(selected=[])
+            return SimpleNamespace(alpha=alpha, regime=regime, portfolio=portfolio, orders=[])
+
+    class FakeICMonitor:
+        def update(self, **_kwargs):
+            return None
+
+    class FakeTradeLogWriter:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+    class FakeOrderStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+    class FakeOKXPrivateClient:
+        def __init__(self, exchange) -> None:
+            self.exchange = exchange
+
+    class FakeLiveExecutionEngine:
+        def __init__(self, cfg, *, okx, order_store, position_store, run_id, exp_time_ms=None) -> None:
+            self.cfg = cfg
+            self.okx = okx
+            self.order_store = order_store
+            self.position_store = position_store
+
+        def poll_open(self, limit=200):
+            return []
+
+    class StopAfterPreflight(RuntimeError):
+        pass
+
+    captured: dict[str, str] = {}
+
+    class FakeLivePreflight:
+        def __init__(self, cfg, **kwargs) -> None:
+            captured["bills_db_path"] = kwargs["bills_db_path"]
+            captured["ledger_state_path"] = kwargs["ledger_state_path"]
+            captured["ledger_status_path"] = kwargs["ledger_status_path"]
+            captured["reconcile_status_path"] = kwargs["reconcile_status_path"]
+
+        def run(self, **_kwargs):
+            raise StopAfterPreflight("captured")
+
+    monkeypatch.setattr(main_mod, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(main_mod, "setup_logging", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_mod, "build_provider", lambda _cfg: FakeProvider())
+    monkeypatch.setattr(main_mod, "PositionStore", FakePositionStore)
+    monkeypatch.setattr(main_mod, "AccountStore", FakeAccountStore)
+    monkeypatch.setattr(main_mod, "_validate_market_data_snapshot", lambda **kwargs: (True, "ok", kwargs["market_data"]))
+    monkeypatch.setattr(main_mod, "_merge_event_close_override_orders", lambda **kwargs: list(kwargs["orders"]))
+    monkeypatch.setattr(main_mod, "ALPHA_HISTORY_ENABLED", False)
+
+    import src.alpha.ic_monitor as ic_monitor_mod
+    import src.core.pipeline as pipeline_mod
+    import src.execution.live_execution_engine as live_execution_engine_mod
+    import src.execution.live_preflight as live_preflight_mod
+    import src.execution.okx_private_client as okx_private_client_mod
+    import src.execution.order_arbitrator as order_arbitrator_mod
+    import src.execution.order_store as order_store_mod
+    import src.reporting.trade_log as trade_log_mod
+
+    monkeypatch.setattr(ic_monitor_mod, "AlphaICMonitor", FakeICMonitor)
+    monkeypatch.setattr(pipeline_mod, "V5Pipeline", FakePipeline)
+    monkeypatch.setattr(order_arbitrator_mod, "arbitrate_orders", lambda **kwargs: (list(kwargs["orders"]), []))
+    monkeypatch.setattr(okx_private_client_mod, "OKXPrivateClient", FakeOKXPrivateClient)
+    monkeypatch.setattr(order_store_mod, "OrderStore", FakeOrderStore)
+    monkeypatch.setattr(live_execution_engine_mod, "LiveExecutionEngine", FakeLiveExecutionEngine)
+    monkeypatch.setattr(live_preflight_mod, "LivePreflight", FakeLivePreflight)
+    monkeypatch.setattr(trade_log_mod, "TradeLogWriter", FakeTradeLogWriter)
+
+    with pytest.raises(StopAfterPreflight, match="captured"):
+        main_mod.main()
+
+    runtime_dir = tmp_path / "reports" / "shadow_runtime"
+    assert Path(captured["bills_db_path"]).resolve() == (runtime_dir / "bills.sqlite").resolve()
+    assert Path(captured["ledger_state_path"]).resolve() == (runtime_dir / "ledger_state.json").resolve()
+    assert Path(captured["ledger_status_path"]).resolve() == (runtime_dir / "ledger_status.json").resolve()
+    assert Path(captured["reconcile_status_path"]).resolve() == (runtime_dir / "reconcile_status.json").resolve()

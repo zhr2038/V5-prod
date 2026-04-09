@@ -17,6 +17,8 @@ from src.execution.execution_engine import ExecutionEngine
 from src.execution.event_action_bridge import consume_event_actions_for_run
 from src.execution.fill_store import (
     derive_position_store_path,
+    derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
     derive_runtime_reports_dir,
     derive_runtime_runs_dir,
     derive_runtime_spread_snapshots_dir,
@@ -915,14 +917,24 @@ def main() -> None:
 
             client = getattr(exec_engine, "okx", None)
             if client is not None:
+                runtime_order_store_path = str(
+                    getattr(cfg.execution, "order_store_path", "reports/orders.sqlite")
+                    or "reports/orders.sqlite"
+                )
                 pf = LivePreflight(
                     cfg.execution,
                     okx=client,
                     position_store=store,
                     account_store=acc_store,
-                    bills_db_path="reports/bills.sqlite",
-                    ledger_state_path="reports/ledger_state.json",
-                    ledger_status_path="reports/ledger_status.json",
+                    bills_db_path=str(
+                        derive_runtime_named_artifact_path(runtime_order_store_path, "bills", ".sqlite")
+                    ),
+                    ledger_state_path=str(
+                        derive_runtime_named_json_path(runtime_order_store_path, "ledger_state")
+                    ),
+                    ledger_status_path=str(
+                        derive_runtime_named_json_path(runtime_order_store_path, "ledger_status")
+                    ),
                     reconcile_status_path=str(getattr(cfg.execution, "reconcile_status_path", "reports/reconcile_status.json")),
                 )
                 res = pf.run(
