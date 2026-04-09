@@ -6,7 +6,11 @@ from src.alpha.alpha_engine import AlphaSnapshot
 from src.core.models import MarketSeries
 from src.core.pipeline import V5Pipeline
 from src.execution.account_store import AccountState
-from src.execution.fill_store import derive_position_store_path, derive_runtime_auto_risk_guard_path
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_auto_risk_guard_path,
+    derive_runtime_named_artifact_path,
+)
 from src.regime.regime_engine import RegimeResult
 
 
@@ -75,6 +79,34 @@ def test_pipeline_uses_runtime_auto_risk_guard_path(monkeypatch):
     assert captured["state_path"] == derive_runtime_auto_risk_guard_path(
         "reports/shadow_runtime/orders.sqlite"
     )
+
+
+def test_pipeline_uses_runtime_ml_training_db_path(monkeypatch):
+    captured = {}
+
+    class FakeCollector:
+        def __init__(self, db_path="reports/ml_training_data.db", data_provider=None):
+            captured["db_path"] = Path(db_path)
+            captured["data_provider"] = data_provider
+
+    import src.execution.ml_data_collector as ml_data_collector_module
+
+    monkeypatch.setattr(ml_data_collector_module, "MLDataCollector", FakeCollector)
+
+    cfg = AppConfig(
+        symbols=["BTC/USDT"],
+        execution=ExecutionConfig(order_store_path="reports/shadow_orders.sqlite"),
+    )
+
+    pipe = pipeline_module.V5Pipeline(cfg)
+
+    expected_db = derive_runtime_named_artifact_path(
+        (pipeline_module.REPORTS_DIR.parent / "reports/shadow_orders.sqlite").resolve(),
+        "ml_training_data",
+        ".db",
+    ).resolve()
+    assert captured["db_path"] == expected_db
+    assert pipe.data_collector is not None
 
 
 def test_pipeline_uses_runtime_position_store_for_scale_basis(monkeypatch):

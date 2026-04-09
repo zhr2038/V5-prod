@@ -245,7 +245,21 @@ class V5Pipeline:
         
         # Phase 3: 初始化ML数据收集器（传入data_provider以便从API获取历史K线）
         from src.execution.ml_data_collector import MLDataCollector
-        self.data_collector = MLDataCollector(data_provider=self._data_provider)
+        runtime_order_store_path = Path(
+            str(getattr(cfg.execution, "order_store_path", "reports/orders.sqlite"))
+        )
+        if not runtime_order_store_path.is_absolute():
+            runtime_order_store_path = (REPORTS_DIR.parent / runtime_order_store_path).resolve()
+        self.data_collector = MLDataCollector(
+            db_path=str(
+                derive_runtime_named_artifact_path(
+                    runtime_order_store_path,
+                    "ml_training_data",
+                    ".db",
+                ).resolve()
+            ),
+            data_provider=self._data_provider,
+        )
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         """按市值计价更新持仓
