@@ -17,6 +17,12 @@ from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import PositionStore
 
 
+def _resolve_runtime_json_path(raw_path, *, order_store_path: str, base_name: str, legacy_default: str) -> str:
+    if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
+        return str(derive_runtime_named_json_path(order_store_path, base_name))
+    return resolve_runtime_path(raw_path, default=legacy_default)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
@@ -44,17 +50,23 @@ def main() -> None:
         bills_db_path = resolve_runtime_path(args.bills_db, default="reports/bills.sqlite")
     else:
         bills_db_path = str(derive_runtime_named_artifact_path(order_store_path, "bills", ".sqlite"))
-    reconcile_status_path = resolve_runtime_path(
+    reconcile_status_path = _resolve_runtime_json_path(
         getattr(cfg.execution, "reconcile_status_path", None),
-        default="reports/reconcile_status.json",
+        order_store_path=order_store_path,
+        base_name="reconcile_status",
+        legacy_default="reports/reconcile_status.json",
     )
-    reconcile_failure_state_path = resolve_runtime_path(
+    reconcile_failure_state_path = _resolve_runtime_json_path(
         getattr(cfg.execution, "reconcile_failure_state_path", None),
-        default="reports/reconcile_failure_state.json",
+        order_store_path=order_store_path,
+        base_name="reconcile_failure_state",
+        legacy_default="reports/reconcile_failure_state.json",
     )
-    kill_switch_path = resolve_runtime_path(
+    kill_switch_path = _resolve_runtime_json_path(
         getattr(cfg.execution, "kill_switch_path", None),
-        default="reports/kill_switch.json",
+        order_store_path=order_store_path,
+        base_name="kill_switch",
+        legacy_default="reports/kill_switch.json",
     )
     setattr(cfg.execution, "reconcile_status_path", reconcile_status_path)
     setattr(cfg.execution, "reconcile_failure_state_path", reconcile_failure_state_path)

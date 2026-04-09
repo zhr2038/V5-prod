@@ -178,6 +178,52 @@ def test_live_preflight_once_uses_runtime_positions_db_from_order_store_path(mon
     ).resolve()
 
 
+def test_live_preflight_once_derives_runtime_default_state_paths_from_order_store_path(monkeypatch) -> None:
+    captured = {}
+    workspace = Path(live_preflight_once.__file__).resolve().parents[1]
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+        ),
+    )
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class DummyPreflight:
+        def __init__(self, execution_cfg, **kwargs) -> None:
+            captured["execution_cfg"] = execution_cfg
+            captured["kwargs"] = kwargs
+
+        def run(self, *, max_pages: int, max_status_age_sec: int):
+            return SimpleNamespace(decision="ALLOW", reconcile_ok=True, ledger_ok=True, kill_switch_enabled=False)
+
+    monkeypatch.setattr(live_preflight_once, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(live_preflight_once, "PositionStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(live_preflight_once, "AccountStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(live_preflight_once, "OKXPrivateClient", DummyClient)
+    monkeypatch.setattr(live_preflight_once, "LivePreflight", DummyPreflight)
+    monkeypatch.setattr(sys, "argv", ["live_preflight_once.py"])
+
+    live_preflight_once.main()
+
+    assert Path(captured["kwargs"]["reconcile_status_path"]).resolve() == (
+        workspace / "reports" / "shadow_runtime" / "reconcile_status.json"
+    ).resolve()
+    assert Path(captured["execution_cfg"].reconcile_failure_state_path).resolve() == (
+        workspace / "reports" / "shadow_runtime" / "reconcile_failure_state.json"
+    ).resolve()
+    assert Path(captured["execution_cfg"].kill_switch_path).resolve() == (
+        workspace / "reports" / "shadow_runtime" / "kill_switch.json"
+    ).resolve()
+
+
 def test_live_preflight_once_keeps_explicit_bills_db_override(monkeypatch, tmp_path: Path) -> None:
     captured = {}
 
