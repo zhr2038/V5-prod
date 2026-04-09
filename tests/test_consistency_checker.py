@@ -12,6 +12,76 @@ def test_consistency_checker_build_paths_anchor_to_workspace(tmp_path) -> None:
 
     assert paths.workspace == tmp_path.resolve()
     assert paths.reports_dir == (tmp_path / "reports").resolve()
+    assert paths.orders_db == (tmp_path / "reports" / "orders.sqlite").resolve()
+
+
+def test_consistency_checker_uses_active_runtime_orders_and_reports_dir(tmp_path) -> None:
+    reports_dir = tmp_path / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    configs_dir = tmp_path / "configs"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    root_orders = reports_dir / "orders.sqlite"
+    runtime_orders = runtime_dir / "orders.sqlite"
+    now_ms = int(datetime.now().timestamp() * 1000)
+
+    for db_path, inst_id in ((root_orders, "ROOT-USDT"), (runtime_orders, "RUNTIME-USDT")):
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE orders (
+                inst_id TEXT,
+                side TEXT,
+                px REAL,
+                avg_px REAL,
+                sz REAL,
+                acc_fill_sz REAL,
+                fee REAL,
+                state TEXT,
+                created_ts INTEGER,
+                updated_ts INTEGER
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO orders(inst_id, side, px, avg_px, sz, acc_fill_sz, fee, state, created_ts, updated_ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (inst_id, "buy", 100.0, 101.0, 1.0, 1.0, 0.1, "FILLED", now_ms, now_ms),
+        )
+        conn.commit()
+        conn.close()
+
+    (reports_dir / "cost_stats_real").mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "cost_stats_real").mkdir(parents=True, exist_ok=True)
+    (reports_dir / "cost_stats_real" / "root.json").write_text(json.dumps({"avg_cost_bps": 99.0}), encoding="utf-8")
+    (runtime_dir / "cost_stats_real" / "runtime.json").write_text(json.dumps({"avg_cost_bps": 12.5}), encoding="utf-8")
+
+    checker = consistency_checker.BacktestLiveConsistencyChecker(workspace=tmp_path)
+
+    assert checker.paths.reports_dir == runtime_dir.resolve()
+    assert checker.paths.orders_db == runtime_orders.resolve()
+    trades = checker.load_live_trades(days=7)
+    assert [trade["symbol"] for trade in trades] == ["RUNTIME-USDT"]
+    assert checker.load_backtest_config()["avg_cost_bps"] == 12.5
+
+    checker.generate_report()
+
+    assert not list(reports_dir.glob("consistency_check_*.json"))
+    runtime_reports = list(runtime_dir.glob("consistency_check_*.json"))
+    assert len(runtime_reports) == 1
 
 
 def test_consistency_checker_reads_and_writes_under_workspace_reports(tmp_path) -> None:

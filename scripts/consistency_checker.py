@@ -3,26 +3,49 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_reports_dir
 
 
 @dataclass(frozen=True)
 class ConsistencyPaths:
     workspace: Path
     reports_dir: Path
+    orders_db: Path
 
 
 def build_paths(workspace: Path | None = None) -> ConsistencyPaths:
     root = (workspace or PROJECT_ROOT).resolve()
+    try:
+        cfg = load_runtime_config(project_root=root)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=root,
+            )
+        ).resolve()
+        reports_dir = derive_runtime_reports_dir(orders_db).resolve()
+    except Exception:
+        reports_dir = (root / "reports").resolve()
+        orders_db = (reports_dir / "orders.sqlite").resolve()
+
     return ConsistencyPaths(
         workspace=root,
-        reports_dir=root / "reports",
+        reports_dir=reports_dir,
+        orders_db=orders_db,
     )
 
 
@@ -104,7 +127,7 @@ class BacktestLiveConsistencyChecker:
         return abs(total_fee_usdt)
 
     def _load_order_state_counts(self, days=7):
-        orders_db = self.paths.reports_dir / "orders.sqlite"
+        orders_db = self.paths.orders_db
         if not orders_db.exists():
             return {}
 
@@ -139,7 +162,7 @@ class BacktestLiveConsistencyChecker:
 
     def load_live_trades(self, days=7):
         """Load recently filled live orders for cost/slippage checks."""
-        orders_db = self.paths.reports_dir / "orders.sqlite"
+        orders_db = self.paths.orders_db
         if not orders_db.exists():
             return []
 
@@ -255,7 +278,7 @@ class BacktestLiveConsistencyChecker:
         print("Fill Rate Analysis")
         print("=" * 70)
 
-        orders_db = self.paths.reports_dir / "orders.sqlite"
+        orders_db = self.paths.orders_db
         if not orders_db.exists():
             print("No orders database found.")
             return
