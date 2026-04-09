@@ -257,6 +257,18 @@ def test_event_driven_trader_uses_custom_state_paths(tmp_path):
     assert trader.cooldown.config.state_path == str(cooldown_state)
 
 
+def test_event_driven_trader_uses_runtime_state_paths_from_order_store_path(tmp_path):
+    trader = create_event_driven_trader(
+        {
+            "enabled": True,
+            "order_store_path": str(tmp_path / "reports" / "shadow_orders.sqlite"),
+        }
+    )
+
+    assert trader.monitor.config.state_path == str(tmp_path / "reports" / "shadow_event_monitor_state.json")
+    assert trader.cooldown.config.state_path == str(tmp_path / "reports" / "shadow_cooldown_state.json")
+
+
 def test_run_event_param_scan_does_not_touch_live_state_files(tmp_path, monkeypatch):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()

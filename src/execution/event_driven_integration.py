@@ -12,6 +12,7 @@ from src.execution.event_types import MarketState, SignalState, top_selected_sym
 from src.execution.event_monitor import EventMonitor, EventMonitorConfig
 from src.execution.cooldown_manager import CooldownManager, CooldownConfig
 from src.execution.event_decision_engine import EventDecisionEngine
+from src.execution.fill_store import derive_runtime_named_json_path
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,19 @@ class EventDrivenConfig:
     
     # Heartbeat
     heartbeat_interval_hours: int = 4
+
+
+def _resolve_runtime_state_path(
+    raw_path: str | None,
+    *,
+    order_store_path: str | None,
+    base_name: str,
+    legacy_default: str,
+) -> str:
+    value = str(raw_path or "").strip()
+    if order_store_path and (not value or value == legacy_default):
+        return str(derive_runtime_named_json_path(order_store_path, base_name))
+    return value or legacy_default
 
 
 class EventDrivenTrader:
@@ -176,12 +190,24 @@ def create_event_driven_trader(cfg: Optional[Dict] = None) -> EventDrivenTrader:
     """Factory function to create event-driven trader from config."""
     if cfg is None:
         cfg = {}
+
+    order_store_path = str(cfg.get("order_store_path") or "").strip() or None
     
     config = EventDrivenConfig(
         enabled=cfg.get('enabled', True),
         check_interval_minutes=cfg.get('check_interval_minutes', 15),
-        monitor_state_path=cfg.get('monitor_state_path', 'reports/event_monitor_state.json'),
-        cooldown_state_path=cfg.get('cooldown_state_path', 'reports/cooldown_state.json'),
+        monitor_state_path=_resolve_runtime_state_path(
+            cfg.get('monitor_state_path'),
+            order_store_path=order_store_path,
+            base_name='event_monitor_state',
+            legacy_default='reports/event_monitor_state.json',
+        ),
+        cooldown_state_path=_resolve_runtime_state_path(
+            cfg.get('cooldown_state_path'),
+            order_store_path=order_store_path,
+            base_name='cooldown_state',
+            legacy_default='reports/cooldown_state.json',
+        ),
         global_cooldown_p2_minutes=cfg.get('global_cooldown_p2_minutes', 30),
         symbol_cooldown_minutes=cfg.get('symbol_cooldown_minutes', 60),
         signal_confirmation_periods=cfg.get('signal_confirmation_periods', 2),

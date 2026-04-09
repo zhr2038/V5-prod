@@ -1016,6 +1016,7 @@ def main():
 
     trader = create_event_driven_trader({
         'enabled': True,
+        'order_store_path': str(paths.order_store_path),
         'check_interval_minutes': int(ev_cfg.get('check_interval_minutes', adaptive_cd.get('check_interval_minutes', 15)) or 15),
         'global_cooldown_p2_minutes': int(adaptive_cd.get('global_cooldown_p2_minutes', ev_cfg.get('global_cooldown_p2_minutes', 30)) or 30),
         'symbol_cooldown_minutes': int(adaptive_cd.get('symbol_cooldown_minutes', ev_cfg.get('symbol_cooldown_minutes', 60)) or 60),
