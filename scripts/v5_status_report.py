@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 WORKSPACE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKSPACE))
 
-from src.execution.fill_store import derive_fill_store_path
+from src.execution.fill_store import derive_fill_store_path, derive_runtime_runs_dir
 
 REPORTS_DIR = WORKSPACE / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
@@ -54,6 +54,7 @@ class StatusPaths:
     orders_db: Path
     fills_db: Path
     auto_blacklist_path: Path
+    runs_dir: Path
 
 
 def load_config() -> Dict[str, Any]:
@@ -81,14 +82,16 @@ def _resolve_status_paths(cfg: Optional[Dict[str, Any]] = None) -> StatusPaths:
         orders_db=orders_db,
         fills_db=derive_fill_store_path(orders_db),
         auto_blacklist_path=orders_db.parent / "auto_blacklist.json",
+        runs_dir=derive_runtime_runs_dir(orders_db),
     )
 
 
-def get_latest_run_data() -> Optional[Dict[str, Any]]:
-    if not RUNS_DIR.exists():
+def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    runs_dir = _resolve_status_paths(cfg).runs_dir
+    if not runs_dir.exists():
         return None
 
-    run_dirs = [path for path in RUNS_DIR.iterdir() if path.is_dir() and (path / "decision_audit.json").exists()]
+    run_dirs = [path for path in runs_dir.iterdir() if path.is_dir() and (path / "decision_audit.json").exists()]
     if not run_dirs:
         return None
 
@@ -243,7 +246,7 @@ def build_next_run_hint() -> str:
 
 def generate_report() -> str:
     cfg = load_config()
-    run_data = get_latest_run_data() or {}
+    run_data = get_latest_run_data(cfg) or {}
     borrow = check_borrow_status(cfg)
     service_status = get_service_status()
     last_trade = get_last_filled_trade_ts(cfg) or "n/a"

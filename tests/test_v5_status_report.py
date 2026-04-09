@@ -262,3 +262,44 @@ def test_main_writes_status_report_to_active_runtime_reports_dir(tmp_path, monke
     assert v5_status_report.main() == 0
     assert list(shadow_dir.glob("status_report_*.txt"))
     assert not list(root_reports_dir.glob("status_report_*.txt"))
+
+
+def test_get_latest_run_data_follows_active_config_runtime_runs_dir(tmp_path, monkeypatch) -> None:
+    root_reports_dir = tmp_path / "reports"
+    shadow_dir = root_reports_dir / "shadow_runtime"
+    root_orders_db = root_reports_dir / "orders.sqlite"
+    shadow_orders_db = shadow_dir / "orders.sqlite"
+    config_path = tmp_path / "live_prod.yaml"
+
+    root_reports_dir.mkdir(parents=True, exist_ok=True)
+    shadow_dir.mkdir(parents=True, exist_ok=True)
+    root_orders_db.write_text("", encoding="utf-8")
+    shadow_orders_db.write_text("", encoding="utf-8")
+
+    root_run = root_reports_dir / "runs" / "20260409_00"
+    shadow_run = shadow_dir / "runs" / "20260409_01"
+    root_run.mkdir(parents=True, exist_ok=True)
+    shadow_run.mkdir(parents=True, exist_ok=True)
+    (root_run / "decision_audit.json").write_text(
+        json.dumps({"regime": "ROOT", "counts": {"orders_rebalance": 1}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (shadow_run / "decision_audit.json").write_text(
+        json.dumps({"regime": "SHADOW", "counts": {"orders_rebalance": 2}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    config_path.write_text(
+        f"execution:\n  order_store_path: {json.dumps(str(shadow_orders_db))}\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(v5_status_report, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(v5_status_report, "REPORTS_DIR", root_reports_dir)
+    monkeypatch.setattr(v5_status_report, "ORDERS_DB", root_orders_db)
+
+    run_data = v5_status_report.get_latest_run_data()
+
+    assert run_data is not None
+    assert run_data["regime"] == "SHADOW"
+    assert run_data["counts"]["orders_rebalance"] == 2
