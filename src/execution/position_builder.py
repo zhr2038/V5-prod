@@ -34,7 +34,8 @@ class PositionBuilder:
         stages: List[float] = None,
         price_drop_threshold: float = 0.02,  # 2%下跌买入第二批
         trend_confirmation_bars: int = 2,     # 2根K线确认趋势
-        max_stage_interval_hours: int = 48    # 最大建仓周期48小时
+        max_stage_interval_hours: int = 48,   # 最大建仓周期48小时
+        state_path: str = "reports/position_builder_state.json",
     ):
         self.stages = stages or [0.3, 0.3, 0.4]
         self.price_drop_threshold = price_drop_threshold
@@ -43,7 +44,7 @@ class PositionBuilder:
         
         # 存储每个币种的建仓状态
         self.position_states: Dict[str, PositionStage] = {}
-        self.state_file = Path("reports/position_builder_state.json")
+        self.state_file = Path(state_path)
         self._load_state()
     
     def _load_state(self):

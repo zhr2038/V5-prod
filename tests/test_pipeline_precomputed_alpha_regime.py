@@ -148,6 +148,33 @@ def test_pipeline_preserves_custom_negative_expectancy_state_path(monkeypatch):
     ).resolve()
 
 
+def test_pipeline_uses_runtime_state_files_for_trade_managers():
+    cfg = AppConfig(
+        symbols=["BTC/USDT"],
+        execution=ExecutionConfig(order_store_path="reports/shadow_orders.sqlite"),
+    )
+
+    pipe = pipeline_module.V5Pipeline(cfg)
+    runtime_order_store = (pipeline_module.REPORTS_DIR.parent / "reports/shadow_orders.sqlite").resolve()
+
+    assert pipe.position_builder.state_file.resolve() == derive_runtime_named_json_path(
+        runtime_order_store,
+        "position_builder_state",
+    ).resolve()
+    assert pipe.stop_loss_manager.state_file.resolve() == derive_runtime_named_json_path(
+        runtime_order_store,
+        "stop_loss_state",
+    ).resolve()
+    assert pipe.fixed_stop_loss.state_file.resolve() == derive_runtime_named_json_path(
+        runtime_order_store,
+        "fixed_stop_loss_state",
+    ).resolve()
+    assert pipe.profit_taking.state_file.resolve() == derive_runtime_named_json_path(
+        runtime_order_store,
+        "profit_taking_state",
+    ).resolve()
+
+
 def test_pipeline_uses_runtime_position_store_for_scale_basis(monkeypatch):
     captured = {}
 

@@ -151,6 +151,11 @@ class V5Pipeline:
 
         self.clock = clock or SystemClock()
         self._data_provider = data_provider  # 数据提供者（用于ML数据收集器从API获取历史K线）
+        runtime_order_store_path = Path(
+            str(getattr(cfg.execution, "order_store_path", "reports/orders.sqlite"))
+        )
+        if not runtime_order_store_path.is_absolute():
+            runtime_order_store_path = (REPORTS_DIR.parent / runtime_order_store_path).resolve()
         self.alpha_engine = AlphaEngine(cfg.alpha)
         
         # RegimeEngine选择：Ensemble（HMM+情绪）或传统MA
@@ -170,14 +175,26 @@ class V5Pipeline:
         self.position_builder = PositionBuilder(
             stages=[0.3, 0.3, 0.4],
             price_drop_threshold=0.02,
-            trend_confirmation_bars=2
+            trend_confirmation_bars=2,
+            state_path=str(
+                derive_runtime_named_json_path(
+                    runtime_order_store_path,
+                    "position_builder_state",
+                ).resolve()
+            ),
         )
         self.stop_loss_manager = MultiLevelStopLoss(
             config=StopLossConfig(
                 tight_pct=0.03,
                 normal_pct=0.05,
                 loose_pct=0.08
-            )
+            ),
+            state_path=str(
+                derive_runtime_named_json_path(
+                    runtime_order_store_path,
+                    "stop_loss_state",
+                ).resolve()
+            ),
         )
         
         # 固定比例止损（买入后立即生效的硬性止损）
@@ -185,7 +202,13 @@ class V5Pipeline:
             config=FixedStopLossConfig(
                 enabled=True,
                 base_stop_pct=0.05  # 5%硬性止损
-            )
+            ),
+            state_path=str(
+                derive_runtime_named_json_path(
+                    runtime_order_store_path,
+                    "fixed_stop_loss_state",
+                ).resolve()
+            ),
         )
         
         # 程序化利润管理
@@ -212,14 +235,15 @@ class V5Pipeline:
         self.profit_taking = ProfitTakingManager(
             rank_exit_strict_mode=bool(getattr(cfg.execution, "rank_exit_strict_mode", False)),
             peak_drawdown_levels=peak_drawdown_levels,
+            state_path=str(
+                derive_runtime_named_json_path(
+                    runtime_order_store_path,
+                    "profit_taking_state",
+                ).resolve()
+            ),
         )
         
         # 自动风险档位守卫
-        runtime_order_store_path = Path(
-            str(getattr(cfg.execution, "order_store_path", "reports/orders.sqlite"))
-        )
-        if not runtime_order_store_path.is_absolute():
-            runtime_order_store_path = (REPORTS_DIR.parent / runtime_order_store_path).resolve()
         order_store_path = str(runtime_order_store_path)
         self.auto_risk_guard = get_auto_risk_guard(
             derive_runtime_auto_risk_guard_path(order_store_path)

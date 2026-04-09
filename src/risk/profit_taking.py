@@ -63,6 +63,7 @@ class ProfitTakingManager:
         *,
         rank_exit_strict_mode: bool = False,
         peak_drawdown_levels: Optional[List[PeakDrawdownLevel]] = None,
+        state_path: str = "reports/profit_taking_state.json",
     ):
         self.profit_levels = [
             ProfitLevel(profit_pct=0.10, action="breakeven", stop_pct=0.0),
@@ -76,7 +77,7 @@ class ProfitTakingManager:
             key=lambda level: float(level.profit_pct),
         )
         self.positions: Dict[str, PositionProfitState] = {}
-        self.state_file = Path("reports/profit_taking_state.json")
+        self.state_file = Path(state_path)
         self._load_state()
 
     @staticmethod

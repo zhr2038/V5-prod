@@ -62,10 +62,10 @@ class MultiLevelStopLoss:
     4. 盈利15%+：追踪止损（保护80%利润）
     """
     
-    def __init__(self, config: StopLossConfig = None):
+    def __init__(self, config: StopLossConfig = None, state_path: str = "reports/stop_loss_state.json"):
         self.config = config or StopLossConfig()
         self.positions: Dict[str, PositionStopState] = {}
-        self.state_file = Path("reports/stop_loss_state.json")
+        self.state_file = Path(state_path)
         self._load_state()
     
     def _load_state(self):

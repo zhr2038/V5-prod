@@ -43,11 +43,11 @@ class FixedStopLossManager:
     - MultiLevelStopLoss: 盈利后的动态止损（保本/追踪）
     """
     
-    def __init__(self, config: FixedStopLossConfig = None):
+    def __init__(self, config: FixedStopLossConfig = None, state_path: str = "reports/fixed_stop_loss_state.json"):
         self.config = config or FixedStopLossConfig()
         self.entry_prices: Dict[str, float] = {}  # symbol -> entry_price
         self.entry_times: Dict[str, datetime] = {}  # symbol -> entry_time
-        self.state_file = Path("reports/fixed_stop_loss_state.json")
+        self.state_file = Path(state_path)
         self._load_state()
     
     def _load_state(self):
