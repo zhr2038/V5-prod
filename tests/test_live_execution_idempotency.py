@@ -13,7 +13,11 @@ from configs.schema import ExecutionConfig
 from src.core.models import Order
 from src.execution.fill_reconciler import FillReconciler
 from src.execution.fill_store import FillRow, FillStore
-from src.execution.live_execution_engine import LiveExecutionEngine, submit_gate_for_live
+from src.execution.live_execution_engine import (
+    LiveExecutionEngine,
+    _record_rank_exit_fill,
+    submit_gate_for_live,
+)
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
 
@@ -284,6 +288,90 @@ def test_live_execution_engine_defaults_position_store_from_order_store_path() -
 
         assert eng.order_store.path == Path(td) / "shadow_orders.sqlite"
         assert eng.position_store.path == Path(td) / "shadow_positions.sqlite"
+
+
+def test_full_close_clears_runtime_risk_state_files_without_touching_root() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = ImmediateFillOKX()
+        cfg = ExecutionConfig(
+            order_store_path=f"{td}/shadow_orders.sqlite",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+        )
+        pos = PositionStore(path=f"{td}/shadow_positions.sqlite")
+        pos.upsert_buy("BTC/USDT", qty=0.706776, px=100.0)
+        eng = LiveExecutionEngine(cfg, okx=okx, position_store=pos, run_id="r")
+
+        runtime_files = {
+            Path(f): {"BTC/USDT": {"source": "runtime"}, "ETH/USDT": {"source": "runtime-keep"}}
+            for f in eng.risk_state_files
+        }
+        root_files = {
+            Path(td) / "stop_loss_state.json": {"BTC/USDT": {"source": "root-stop"}},
+            Path(td) / "fixed_stop_loss_state.json": {"BTC/USDT": {"source": "root-fixed"}},
+            Path(td) / "profit_taking_state.json": {"BTC/USDT": {"source": "root-profit"}},
+            Path(td) / "highest_px_state.json": {"BTC/USDT": {"source": "root-highest"}},
+        }
+        for path, payload in {**runtime_files, **root_files}.items():
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+        result = eng.place(
+            Order(
+                symbol="BTC/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=70.0,
+                signal_price=100.0,
+                meta={"decision_hash": "shadow-full-close"},
+            )
+        )
+
+        assert result.state == "FILLED"
+        for path in runtime_files:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            assert "BTC/USDT" not in payload
+            assert "ETH/USDT" in payload
+        for path in root_files:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            assert payload["BTC/USDT"]["source"].startswith("root-")
+
+
+def test_rank_exit_reentry_cooldown_uses_runtime_state_file() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        cfg = ExecutionConfig(
+            order_store_path=f"{td}/shadow_orders.sqlite",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            rank_exit_reentry_cooldown_minutes=10,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, run_id="r")
+
+        assert Path(eng.rank_exit_cooldown_state_path) == Path(td) / "shadow_rank_exit_cooldown_state.json"
+        (Path(td) / "rank_exit_cooldown_state.json").write_text(
+            json.dumps({"BTC/USDT": {"last_rank_exit_ts_ms": 1, "reason": "root-stale"}}),
+            encoding="utf-8",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("src.execution.live_execution_engine.time.time", lambda: 950.0)
+            mp.setattr("src.execution.live_execution_engine._public_mid_at_submit", lambda **kwargs: None)
+            _record_rank_exit_fill("BTC/USDT", "rank_exit_score", path=eng.rank_exit_cooldown_state_path)
+            mp.setattr("src.execution.live_execution_engine.time.time", lambda: 1_000.0)
+            assert Path(eng.rank_exit_cooldown_state_path).exists()
+            result = eng.place(
+                Order(
+                    symbol="BTC/USDT",
+                    side="buy",
+                    intent="OPEN_LONG",
+                    notional_usdt=10.0,
+                    signal_price=100.0,
+                    meta={"decision_hash": "runtime-rank-exit"},
+                )
+            )
+
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
 
 
 def test_sell_market_uses_position_qty() -> None:

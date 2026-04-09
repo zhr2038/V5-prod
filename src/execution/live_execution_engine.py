@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
 from src.execution.clordid import make_cl_ord_id, make_decision_hash
-from src.execution.fill_store import derive_position_store_path
+from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
@@ -56,6 +56,10 @@ def _to_bool(value: Any) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def load_kill_switch_enabled(path: str) -> bool:
@@ -113,12 +117,12 @@ def _remove_symbol_from_state_file(path: str, symbol: str) -> bool:
         return False
 
 
-def clear_risk_state_on_full_close(symbol: str) -> None:
+def clear_risk_state_on_full_close(symbol: str, state_files: Optional[List[str]] = None) -> None:
     """Clear symbol state in stop/profit trackers after full close.
 
     This prevents stale stop-loss/profit state from contaminating a later re-entry.
     """
-    files = [
+    files = state_files or [
         "reports/stop_loss_state.json",
         "reports/fixed_stop_loss_state.json",
         "reports/profit_taking_state.json",
@@ -318,7 +322,19 @@ class LiveExecutionEngine:
         self.okx = okx
         order_store_path = str(getattr(cfg, "order_store_path", "reports/orders.sqlite"))
         self.order_store = order_store or OrderStore(path=order_store_path)
-        self.position_store = position_store or PositionStore(path=str(derive_position_store_path(order_store_path)))
+        effective_order_store_path = str(getattr(self.order_store, "path", order_store_path))
+        self.position_store = position_store or PositionStore(
+            path=str(derive_position_store_path(effective_order_store_path))
+        )
+        self.risk_state_files = [
+            str(derive_runtime_named_json_path(effective_order_store_path, "stop_loss_state")),
+            str(derive_runtime_named_json_path(effective_order_store_path, "fixed_stop_loss_state")),
+            str(derive_runtime_named_json_path(effective_order_store_path, "profit_taking_state")),
+            str(derive_runtime_named_json_path(effective_order_store_path, "highest_px_state")),
+        ]
+        self.rank_exit_cooldown_state_path = str(
+            derive_runtime_named_json_path(effective_order_store_path, "rank_exit_cooldown_state")
+        )
         self.run_id = str(run_id or "")
         self.exp_time_ms = exp_time_ms
         self._closed = False  # 跟踪资源状态
@@ -569,7 +585,11 @@ class LiveExecutionEngine:
             if str(o.intent or "").upper() == "OPEN_LONG":
                 cooldown_min = int(getattr(self.cfg, "rank_exit_reentry_cooldown_minutes", 0) or 0)
                 if cooldown_min > 0:
-                    remain_ms = _rank_exit_cooldown_remaining_ms(o.symbol, cooldown_min)
+                    remain_ms = _rank_exit_cooldown_remaining_ms(
+                        o.symbol,
+                        cooldown_min,
+                        path=self.rank_exit_cooldown_state_path,
+                    )
                     if remain_ms > 0:
                         remain_sec = remain_ms / 1000.0
                         raise ValueError(
@@ -1005,7 +1025,7 @@ class LiveExecutionEngine:
                     est_notional = est_qty * px if px > 0 else 0.0
                     if est_notional > 0 and est_notional < DUST_NOTIONAL_USDT:
                         self.position_store.close_long(o.symbol)
-                        clear_risk_state_on_full_close(o.symbol)
+                        clear_risk_state_on_full_close(o.symbol, state_files=self.risk_state_files)
                         log.info(
                             f"DUST_LOCAL_CLOSE: {o.symbol} est_notional={est_notional:.6f} < {DUST_NOTIONAL_USDT}"
                         )
@@ -1073,7 +1093,7 @@ class LiveExecutionEngine:
                     try:
                         reason = str((o.meta or {}).get("reason", "") or "")
                         if str(o.side).lower() == "sell" and reason.startswith("rank_exit_"):
-                            _record_rank_exit_fill(o.symbol, reason)
+                            _record_rank_exit_fill(o.symbol, reason, path=self.rank_exit_cooldown_state_path)
                     except Exception:
                         pass
             except Exception:
@@ -1169,7 +1189,10 @@ class LiveExecutionEngine:
                             new_qty = max(0.0, float(p.qty) - float(reduce_qty))
                             if new_qty <= 0:
                                 self.position_store.close_long(str(row.inst_id).replace("-", "/"))
-                                clear_risk_state_on_full_close(str(row.inst_id).replace("-", "/"))
+                                clear_risk_state_on_full_close(
+                                    str(row.inst_id).replace("-", "/"),
+                                    state_files=self.risk_state_files,
+                                )
                             else:
                                 self.position_store.set_qty(str(row.inst_id).replace("-", "/"), qty=new_qty)
             except Exception as e:
