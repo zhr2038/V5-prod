@@ -11,7 +11,12 @@ from datetime import datetime
 from pathlib import Path
 
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
-from src.execution.fill_store import derive_fill_store_path, derive_position_store_path
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_position_store_path,
+    derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,7 +36,6 @@ def build_paths(workspace: Path | None = None) -> BackupPaths:
 
 
 STATIC_BACKUP_ITEMS = [
-    "reports/bills.sqlite",
     "configs/",
     "memory/",
     "MEMORY.md",
@@ -73,6 +77,9 @@ class BackupManager:
         ).resolve()
         fills_db = derive_fill_store_path(orders_db).resolve()
         positions_db = derive_position_store_path(orders_db).resolve()
+        bills_db = derive_runtime_named_artifact_path(orders_db, "bills", ".sqlite").resolve()
+        ledger_state = derive_runtime_named_json_path(orders_db, "ledger_state").resolve()
+        ledger_status = derive_runtime_named_json_path(orders_db, "ledger_status").resolve()
         kill_switch = Path(
             resolve_runtime_path(
                 execution_cfg.get("kill_switch_path"),
@@ -87,7 +94,7 @@ class BackupManager:
                 project_root=self.paths.workspace,
             )
         ).resolve()
-        return [orders_db, fills_db, positions_db, kill_switch, reconcile_status]
+        return [orders_db, fills_db, positions_db, bills_db, ledger_state, ledger_status, kill_switch, reconcile_status]
 
     def _iter_backup_items(self):
         seen: set[Path] = set()
