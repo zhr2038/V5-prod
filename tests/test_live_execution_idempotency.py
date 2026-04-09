@@ -158,6 +158,27 @@ def test_submit_gate_ignores_string_false_kill_switch_and_reconcile() -> None:
         assert submit_gate_for_live(cfg) == ("SELL_ONLY", False, False)
 
 
+def test_submit_gate_uses_runtime_default_status_paths_from_order_store() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root_reconcile_path = Path(td) / "reconcile_status.json"
+        root_kill_switch_path = Path(td) / "kill_switch.json"
+        runtime_dir = Path(td) / "shadow_runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        runtime_reconcile_path = runtime_dir / "reconcile_status.json"
+        runtime_kill_switch_path = runtime_dir / "kill_switch.json"
+
+        root_reconcile_path.write_text(json.dumps({"ok": False}), encoding="utf-8")
+        root_kill_switch_path.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+        runtime_reconcile_path.write_text(json.dumps({"ok": True}), encoding="utf-8")
+        runtime_kill_switch_path.write_text(json.dumps({"enabled": False}), encoding="utf-8")
+
+        cfg = ExecutionConfig(
+            order_store_path=str(runtime_dir / "orders.sqlite"),
+        )
+
+        assert submit_gate_for_live(cfg) == ("ALLOW", True, False)
+
+
 def test_place_idempotent_same_intent() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()

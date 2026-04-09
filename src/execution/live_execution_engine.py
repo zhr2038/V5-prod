@@ -62,6 +62,14 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _resolve_runtime_json_path(cfg: ExecutionConfig, *, attr_name: str, base_name: str, legacy_default: str) -> str:
+    raw_path = getattr(cfg, attr_name, None)
+    if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
+        order_store_path = str(getattr(cfg, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite")
+        return str(derive_runtime_named_json_path(order_store_path, base_name))
+    return str(raw_path)
+
+
 def load_kill_switch_enabled(path: str) -> bool:
     """检查是否启用kill switch"""
     d = _load_json(path) or {}
@@ -188,8 +196,22 @@ def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
     - reconcile not ok + allow_trade_on_small_reconcile_drift => ALLOW (forced)
     - otherwise reconcile not ok => SELL_ONLY
     """
-    ks = load_kill_switch_enabled(getattr(cfg, "kill_switch_path", "reports/kill_switch.json"))
-    rc_ok = load_reconcile_ok(getattr(cfg, "reconcile_status_path", "reports/reconcile_status.json"))
+    ks = load_kill_switch_enabled(
+        _resolve_runtime_json_path(
+            cfg,
+            attr_name="kill_switch_path",
+            base_name="kill_switch",
+            legacy_default="reports/kill_switch.json",
+        )
+    )
+    rc_ok = load_reconcile_ok(
+        _resolve_runtime_json_path(
+            cfg,
+            attr_name="reconcile_status_path",
+            base_name="reconcile_status",
+            legacy_default="reports/reconcile_status.json",
+        )
+    )
 
     if ks:
         return "SELL_ONLY", rc_ok, ks
