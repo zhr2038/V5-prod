@@ -17,7 +17,10 @@ from configs.runtime_config import (
     resolve_runtime_env_path,
     resolve_runtime_path,
 )
-from src.execution.fill_store import derive_position_store_path
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_named_json_path,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -109,6 +112,29 @@ def _clear_kill_switch_payload(data, *, ts_ms):
     payload["auto_sync_cleared"] = True
     payload["auto_sync_ts_ms"] = int(ts_ms)
     return payload
+
+
+def _resolve_runtime_state_json_path(raw_path, *, order_store_path, base_name, legacy_default):
+    if raw_path is None or (isinstance(raw_path, str) and not raw_path.strip()):
+        return derive_runtime_named_json_path(order_store_path, base_name)
+
+    resolved = Path(
+        resolve_runtime_path(
+            raw_path,
+            default=legacy_default,
+            project_root=WORKSPACE,
+        )
+    )
+    legacy_resolved = Path(
+        resolve_runtime_path(
+            legacy_default,
+            default=legacy_default,
+            project_root=WORKSPACE,
+        )
+    )
+    if resolved == legacy_resolved:
+        return derive_runtime_named_json_path(order_store_path, base_name)
+    return resolved
 
 
 def _extract_spot_qty(detail):
@@ -422,12 +448,11 @@ def main():
             execution_cfg = getattr(cfg, 'execution', None)
 
             # Clear failure state
-            failure_state_path = Path(
-                resolve_runtime_path(
-                    getattr(execution_cfg, 'reconcile_failure_state_path', None),
-                    default='reports/reconcile_failure_state.json',
-                    project_root=WORKSPACE,
-                )
+            failure_state_path = _resolve_runtime_state_json_path(
+                getattr(execution_cfg, 'reconcile_failure_state_path', None),
+                order_store_path=order_store_path,
+                base_name='reconcile_failure_state',
+                legacy_default='reports/reconcile_failure_state.json',
             )
             if failure_state_path.exists():
                 failure_state = json.loads(failure_state_path.read_text())
@@ -439,12 +464,11 @@ def main():
                 logger.info("✅ Reset failure state counters")
             
             # Update reconcile status to OK
-            reconcile_status_path = Path(
-                resolve_runtime_path(
-                    getattr(execution_cfg, 'reconcile_status_path', None),
-                    default='reports/reconcile_status.json',
-                    project_root=WORKSPACE,
-                )
+            reconcile_status_path = _resolve_runtime_state_json_path(
+                getattr(execution_cfg, 'reconcile_status_path', None),
+                order_store_path=order_store_path,
+                base_name='reconcile_status',
+                legacy_default='reports/reconcile_status.json',
             )
             reconcile_status = {
                 'schema_version': 1,
@@ -464,12 +488,11 @@ def main():
             logger.info("✅ Updated reconcile status to OK")
             
             # Clear kill switch only when it is NOT a manual lock.
-            kill_switch_path = Path(
-                resolve_runtime_path(
-                    getattr(execution_cfg, 'kill_switch_path', None),
-                    default='reports/kill_switch.json',
-                    project_root=WORKSPACE,
-                )
+            kill_switch_path = _resolve_runtime_state_json_path(
+                getattr(execution_cfg, 'kill_switch_path', None),
+                order_store_path=order_store_path,
+                base_name='kill_switch',
+                legacy_default='reports/kill_switch.json',
             )
             if kill_switch_path.exists():
                 ks_raw = json.loads(kill_switch_path.read_text())

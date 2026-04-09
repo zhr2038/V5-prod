@@ -276,6 +276,155 @@ def test_auto_sync_before_trade_uses_runtime_positions_db_from_order_store_path(
     assert captured["client_closed"] is True
 
 
+def test_auto_sync_before_trade_derives_runtime_default_state_paths_from_order_store(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime_kill = runtime_dir / "kill_switch.json"
+    root_kill = reports_dir / "kill_switch.json"
+    runtime_failure = runtime_dir / "reconcile_failure_state.json"
+    root_failure = reports_dir / "reconcile_failure_state.json"
+    runtime_reconcile = runtime_dir / "reconcile_status.json"
+    root_reconcile = reports_dir / "reconcile_status.json"
+
+    runtime_kill.write_text(
+        json.dumps({"kill_switch": {"enabled": True, "manual": False}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    root_kill.write_text(json.dumps({"enabled": True, "manual": False}, ensure_ascii=False), encoding="utf-8")
+    runtime_failure.write_text(
+        json.dumps(
+            {
+                "consecutive_hard": 4,
+                "consecutive_soft": 3,
+                "consecutive_ok": 0,
+                "last_reason": "runtime_stale",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    root_failure.write_text(
+        json.dumps(
+            {
+                "consecutive_hard": 9,
+                "consecutive_soft": 8,
+                "consecutive_ok": 0,
+                "last_reason": "root_stale",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    root_reconcile.write_text(
+        json.dumps({"ok": False, "source": "root_stale"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, exchange):
+            self.exchange = exchange
+
+        def get_balance(self, ccy=None):
+            return SimpleNamespace(
+                data={
+                    "data": [
+                        {
+                            "details": [
+                                {"ccy": "USDT", "cashBal": "100", "availBal": "100", "eq": "100"},
+                            ]
+                        }
+                    ]
+                }
+            )
+
+        def close(self):
+            captured["client_closed"] = True
+
+    class FakePositionStore:
+        def __init__(self, path):
+            captured["position_store_path"] = Path(path).resolve()
+
+        def list(self):
+            return []
+
+        def get(self, symbol):
+            return None
+
+        def close_long(self, symbol):
+            return False
+
+        def set_qty(self, sym, qty):
+            raise AssertionError("set_qty should not be called in this scenario")
+
+        def upsert_buy(self, sym, qty, px):
+            raise AssertionError("upsert_buy should not be called in this scenario")
+
+    class FakeAccountStore:
+        def __init__(self, path):
+            captured["account_store_path"] = Path(path).resolve()
+
+        def get(self):
+            return SimpleNamespace(cash_usdt=0.0, equity_peak_usdt=0.0)
+
+        def set(self, state):
+            captured["account_cash"] = state.cash_usdt
+            captured["account_peak"] = state.equity_peak_usdt
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        symbols=[],
+        universe=SimpleNamespace(symbols=[]),
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+        ),
+    )
+
+    monkeypatch.setattr(auto_sync_before_trade, "WORKSPACE", workspace)
+    monkeypatch.setattr(config_loader, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(okx_private_client_module, "OKXPrivateClient", FakeClient)
+    monkeypatch.setattr(position_store_module, "PositionStore", FakePositionStore)
+    monkeypatch.setattr(account_store_module, "AccountStore", FakeAccountStore)
+
+    assert auto_sync_before_trade.main() == 0
+
+    assert captured["position_store_path"] == (runtime_dir / "positions.sqlite").resolve()
+    assert captured["account_store_path"] == (runtime_dir / "positions.sqlite").resolve()
+    assert captured["client_closed"] is True
+
+    runtime_reconcile_payload = json.loads(runtime_reconcile.read_text(encoding="utf-8"))
+    assert runtime_reconcile_payload["ok"] is True
+    assert runtime_reconcile_payload["source"] == "auto_sync"
+
+    root_reconcile_payload = json.loads(root_reconcile.read_text(encoding="utf-8"))
+    assert root_reconcile_payload["ok"] is False
+    assert root_reconcile_payload["source"] == "root_stale"
+
+    runtime_kill_payload = json.loads(runtime_kill.read_text(encoding="utf-8"))
+    assert runtime_kill_payload["enabled"] is False
+    assert runtime_kill_payload["kill_switch"]["enabled"] is False
+    assert runtime_kill_payload["auto_sync_cleared"] is True
+
+    root_kill_payload = json.loads(root_kill.read_text(encoding="utf-8"))
+    assert root_kill_payload["enabled"] is True
+
+    runtime_failure_payload = json.loads(runtime_failure.read_text(encoding="utf-8"))
+    assert runtime_failure_payload["consecutive_hard"] == 0
+    assert runtime_failure_payload["consecutive_soft"] == 0
+    assert runtime_failure_payload["consecutive_ok"] == 1
+    assert runtime_failure_payload["last_reason"] == "auto_sync_reset"
+
+    root_failure_payload = json.loads(root_failure.read_text(encoding="utf-8"))
+    assert root_failure_payload["consecutive_hard"] == 9
+    assert root_failure_payload["consecutive_soft"] == 8
+    assert root_failure_payload["consecutive_ok"] == 0
+    assert root_failure_payload["last_reason"] == "root_stale"
+
+
 def test_auto_sync_before_trade_clears_string_auto_kill_switch(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     reports_dir = workspace / "reports"
