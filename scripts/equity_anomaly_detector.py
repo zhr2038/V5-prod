@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,11 @@ import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_reports_dir, derive_runtime_runs_dir
 
 
 @dataclass(frozen=True)
@@ -23,15 +29,43 @@ class DetectorPaths:
     workspace: Path
     reports_dir: Path
     runs_dir: Path
+    orders_db: Path
+
+
+def _derive_anomaly_report_path(order_store_path: Path, timestamp: str) -> Path:
+    path = Path(order_store_path)
+    if path.name == "orders.sqlite":
+        return path.with_name(f"equity_anomaly_{timestamp}.json")
+    if "orders" in path.stem:
+        report_name = path.stem.replace("orders", "equity_anomaly", 1)
+        return path.with_name(f"{report_name}_{timestamp}.json")
+    return path.with_name(f"equity_anomaly_{timestamp}.json")
 
 
 def build_paths(workspace: Path | None = None) -> DetectorPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    reports_dir = root / "reports"
+    try:
+        cfg = load_runtime_config(project_root=root)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=root,
+            )
+        ).resolve()
+        reports_dir = derive_runtime_reports_dir(orders_db).resolve()
+        runs_dir = derive_runtime_runs_dir(orders_db).resolve()
+    except Exception:
+        reports_dir = (root / "reports").resolve()
+        runs_dir = (reports_dir / "runs").resolve()
+        orders_db = (reports_dir / "orders.sqlite").resolve()
+
     return DetectorPaths(
         workspace=root,
         reports_dir=reports_dir,
-        runs_dir=reports_dir / "runs",
+        runs_dir=runs_dir,
+        orders_db=orders_db,
     )
 
 
@@ -203,7 +237,8 @@ class EquityAnomalyDetector:
         return all_anomalies
 
     def save_report(self, anomalies: list[dict[str, Any]]) -> Path:
-        report_file = self.paths.reports_dir / f'equity_anomaly_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_file = _derive_anomaly_report_path(self.paths.orders_db, timestamp)
         report = {
             "timestamp": datetime.now().isoformat(),
             "stats": self.stats,
