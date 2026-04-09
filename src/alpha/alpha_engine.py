@@ -18,7 +18,7 @@ from src.utils.math import safe_pct_change, zscore_cross_section
 from configs.schema import AlphaConfig
 from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
 from src.alpha.qlib_factors import compute_alpha158_style_factors
-from src.execution.fill_store import derive_runtime_named_artifact_path
+from src.execution.fill_store import derive_runtime_named_artifact_path, derive_runtime_reports_dir
 
 # 多策略集成
 try:
@@ -379,7 +379,7 @@ class AlphaEngine:
         # 创建策略编排器
         orchestrator = StrategyOrchestrator(
             total_capital=total_capital,
-            audit_root=self.repo_root / "reports",
+            audit_root=derive_runtime_reports_dir(self._resolve_runtime_order_store_path()).resolve(),
             conflict_penalty_enabled=bool(
                 getattr(self.cfg, "multi_strategy_conflict_penalty_enabled", True)
             ),

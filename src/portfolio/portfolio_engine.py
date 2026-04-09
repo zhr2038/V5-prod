@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import json
+import os
 import time
 
 import numpy as np
@@ -11,7 +12,11 @@ import numpy as np
 from configs.runtime_config import PROJECT_ROOT as RUNTIME_PROJECT_ROOT, load_runtime_config, resolve_runtime_path
 from configs.schema import AlphaConfig, RiskConfig
 from src.core.models import MarketSeries
-from src.execution.fill_store import derive_runtime_auto_risk_eval_path
+from src.execution.fill_store import (
+    derive_runtime_auto_risk_eval_path,
+    derive_runtime_named_artifact_path,
+    derive_runtime_runs_dir,
+)
 from src.utils.math import clamp
 
 
@@ -51,14 +56,56 @@ class PortfolioEngine:
     def set_run_id(self, run_id: Optional[str]) -> None:
         self.run_id = str(run_id or "").strip()
 
+    @staticmethod
+    def _runtime_project_root() -> Path:
+        raw = str(os.getenv("V5_WORKSPACE") or "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return RUNTIME_PROJECT_ROOT.resolve()
+
+    def _resolve_runtime_order_store_path(self) -> Path:
+        root = self._runtime_project_root()
+        cfg = load_runtime_config(project_root=root)
+        execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+        return Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=root,
+            )
+        ).resolve()
+
+    def _resolve_repo_path(self, raw_path: Optional[str], default: str) -> Path:
+        raw = str(raw_path or default).strip().replace("\\", "/")
+        path = Path(raw)
+        if not path.is_absolute():
+            path = self._runtime_project_root() / path
+        return path.resolve()
+
+    def _resolve_runtime_artifact_path(self, raw_path: Optional[str], legacy_default: str) -> Path:
+        raw = str(raw_path or "").strip().replace("\\", "/")
+        if not raw or raw == legacy_default:
+            name = Path(legacy_default).name
+            suffix = ".jsonl" if name.endswith(".jsonl") else Path(name).suffix
+            base_name = name[: -len(suffix)] if suffix else name
+            return derive_runtime_named_artifact_path(
+                self._resolve_runtime_order_store_path(),
+                base_name,
+                suffix,
+            ).resolve()
+        return self._resolve_repo_path(raw, legacy_default)
+
     def _strategy_signals_path(self) -> Optional[Path]:
         if not self.run_id:
             return None
-        return Path("reports") / "runs" / self.run_id / "strategy_signals.json"
+        return (derive_runtime_runs_dir(self._resolve_runtime_order_store_path()) / self.run_id / "strategy_signals.json").resolve()
 
     def _load_optimizer_state(self) -> Dict[str, Any]:
         try:
-            p = Path(str(getattr(self.alpha_cfg, 'optimizer_state_path', 'reports/portfolio_optimizer_state.json')))
+            p = self._resolve_runtime_artifact_path(
+                getattr(self.alpha_cfg, 'optimizer_state_path', None),
+                'reports/portfolio_optimizer_state.json',
+            )
             if not p.exists():
                 return {'weights': {}, 'updated_ts': 0}
             obj = json.loads(p.read_text(encoding='utf-8'))
@@ -75,7 +122,10 @@ class PortfolioEngine:
 
     def _save_optimizer_state(self, weights: Dict[str, float]) -> None:
         try:
-            p = Path(str(getattr(self.alpha_cfg, 'optimizer_state_path', 'reports/portfolio_optimizer_state.json')))
+            p = self._resolve_runtime_artifact_path(
+                getattr(self.alpha_cfg, 'optimizer_state_path', None),
+                'reports/portfolio_optimizer_state.json',
+            )
             p.parent.mkdir(parents=True, exist_ok=True)
             obj = {
                 'weights': {str(k): float(v) for k, v in (weights or {}).items()},
@@ -92,7 +142,10 @@ class PortfolioEngine:
             cfg = getattr(self.alpha_cfg, "topk_dropout", None)
             if not cfg:
                 return {"selected": [], "hold_cycles": {}, "updated_ts": 0}
-            p = Path(str(getattr(cfg, "state_path", "reports/topk_dropout_state.json")))
+            p = self._resolve_runtime_artifact_path(
+                getattr(cfg, "state_path", None),
+                "reports/topk_dropout_state.json",
+            )
             if not p.exists():
                 return {"selected": [], "hold_cycles": {}, "updated_ts": 0}
             obj = json.loads(p.read_text(encoding="utf-8"))
@@ -110,7 +163,10 @@ class PortfolioEngine:
             cfg = getattr(self.alpha_cfg, "topk_dropout", None)
             if not cfg:
                 return
-            p = Path(str(getattr(cfg, "state_path", "reports/topk_dropout_state.json")))
+            p = self._resolve_runtime_artifact_path(
+                getattr(cfg, "state_path", None),
+                "reports/topk_dropout_state.json",
+            )
             p.parent.mkdir(parents=True, exist_ok=True)
             obj = {
                 "selected": list(selected or []),

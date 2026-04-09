@@ -115,6 +115,35 @@ def test_alpha_engine_reweights_mean_reversion_allocation_by_regime():
     assert sideways_alloc["MeanReversion"] > trend_alloc["MeanReversion"]
 
 
+def test_alpha_engine_multi_strategy_audit_root_follows_active_runtime(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    runtime_dir = workspace / "reports" / "shadow_runtime"
+    configs_dir = workspace / "configs"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("V5_WORKSPACE", str(workspace))
+
+    engine = AlphaEngine(AlphaConfig(use_multi_strategy=True))
+    engine.set_run_id("runtime-audit")
+
+    assert engine.multi_strategy_adapter is not None
+    assert (
+        engine.multi_strategy_adapter.orchestrator.strategy_signals_path()
+        == (runtime_dir / "runs" / "runtime-audit" / "strategy_signals.json").resolve()
+    )
+
+
 def _build_market_series(symbol: str, base_price: float, slope: float) -> MarketSeries:
     bars = 24 * 25
     ts = [1_700_000_000_000 + i * 3_600_000 for i in range(bars)]

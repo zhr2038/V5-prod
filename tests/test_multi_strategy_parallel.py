@@ -287,7 +287,12 @@ def test_strategy_orchestrator_keeps_latest_payload_without_run_id():
 
 
 def test_portfolio_engine_loads_only_current_run_fused_signals(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    (tmp_path / "configs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "configs" / "live_prod.yaml").write_text(
+        "execution:\n  order_store_path: reports/orders.sqlite\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("V5_WORKSPACE", str(tmp_path))
     current = tmp_path / "reports" / "runs" / "current_run"
     stale = tmp_path / "reports" / "runs" / "stale_run"
     current.mkdir(parents=True)
