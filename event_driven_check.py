@@ -205,12 +205,14 @@ def _load_json_mapping(path: Path) -> dict[str, Any]:
 def _merge_runtime_stop_state(
     positions: dict[str, dict],
     *,
+    stop_loss_state_path: Optional[Path] = None,
     profit_taking_state_path: Optional[Path] = None,
     fixed_stop_loss_state_path: Optional[Path] = None,
 ):
     if not positions:
         return
 
+    stop_loss_state = _load_json_mapping(stop_loss_state_path or (REPORTS_DIR / 'stop_loss_state.json'))
     profit_taking_state = _load_json_mapping(profit_taking_state_path or (REPORTS_DIR / 'profit_taking_state.json'))
     fixed_stop_state = _load_json_mapping(fixed_stop_loss_state_path or (REPORTS_DIR / 'fixed_stop_loss_state.json'))
 
@@ -223,15 +225,29 @@ def _merge_runtime_stop_state(
             logger.warning(f"Could not initialize fixed stop config: {e}")
 
     for symbol, pos in positions.items():
+        stop_loss = stop_loss_state.get(symbol)
+        if isinstance(stop_loss, dict):
+            stop_loss_price = float(stop_loss.get('current_stop_price', 0.0) or 0.0)
+            if stop_loss_price > 0:
+                pos['current_stop'] = max(float(pos.get('current_stop', 0.0) or 0.0), stop_loss_price)
+
+            highest_price = float(stop_loss.get('highest_price', 0.0) or 0.0)
+            if highest_price > 0:
+                pos['highest_price'] = max(float(pos.get('highest_price', 0.0) or 0.0), highest_price)
+
+            stop_type = str(stop_loss.get('current_stop_type', '') or '').strip()
+            if stop_type:
+                pos['current_action'] = stop_type
+
         profit_state = profit_taking_state.get(symbol)
         if isinstance(profit_state, dict):
             current_stop = float(profit_state.get('current_stop', 0.0) or 0.0)
             if current_stop > 0:
-                pos['current_stop'] = current_stop
+                pos['current_stop'] = max(float(pos.get('current_stop', 0.0) or 0.0), current_stop)
 
             highest_price = float(profit_state.get('highest_price', 0.0) or 0.0)
             if highest_price > 0:
-                pos['highest_price'] = highest_price
+                pos['highest_price'] = max(float(pos.get('highest_price', 0.0) or 0.0), highest_price)
 
             current_action = str(profit_state.get('current_action', '') or '').strip()
             if current_action:
@@ -252,6 +268,7 @@ def _merge_runtime_stop_state(
 def _load_positions_snapshot(
     positions_db_path: Optional[Path] = None,
     portfolio_path: Optional[Path] = None,
+    stop_loss_state_path: Optional[Path] = None,
     profit_taking_state_path: Optional[Path] = None,
     fixed_stop_loss_state_path: Optional[Path] = None,
 ):
@@ -280,6 +297,7 @@ def _load_positions_snapshot(
         if positions:
             _merge_runtime_stop_state(
                 positions,
+                stop_loss_state_path=stop_loss_state_path,
                 profit_taking_state_path=profit_taking_state_path,
                 fixed_stop_loss_state_path=fixed_stop_loss_state_path,
             )
@@ -307,6 +325,7 @@ def _load_positions_snapshot(
             if positions:
                 _merge_runtime_stop_state(
                     positions,
+                    stop_loss_state_path=stop_loss_state_path,
                     profit_taking_state_path=profit_taking_state_path,
                     fixed_stop_loss_state_path=fixed_stop_loss_state_path,
                 )
@@ -340,6 +359,7 @@ def load_current_state(cfg=None, config_path: Path = None):
         positions, position_symbols, position_source = _load_positions_snapshot(
             positions_db_path=paths.positions_db,
             portfolio_path=paths.portfolio_path,
+            stop_loss_state_path=derive_runtime_named_json_path(paths.order_store_path, 'stop_loss_state').resolve(),
             profit_taking_state_path=derive_runtime_named_json_path(paths.order_store_path, 'profit_taking_state').resolve(),
             fixed_stop_loss_state_path=derive_runtime_named_json_path(paths.order_store_path, 'fixed_stop_loss_state').resolve(),
         )

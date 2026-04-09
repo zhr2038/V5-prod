@@ -175,6 +175,61 @@ def test_load_current_state_merges_runtime_profit_stop_state(tmp_path, monkeypat
     assert state["positions"]["ENJ/USDT"]["current_action"] == "breakeven"
 
 
+def test_load_current_state_prefers_tighter_runtime_stop_loss_state(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    (reports_dir / "regime.json").write_text(json.dumps({"regime": "TRENDING"}), encoding="utf-8")
+    (reports_dir / "profit_taking_state.json").write_text(
+        json.dumps(
+            {
+                "ENJ/USDT": {
+                    "symbol": "ENJ/USDT",
+                    "entry_price": 1.0,
+                    "entry_time": "2026-04-10T00:00:00",
+                    "highest_price": 1.18,
+                    "profit_high": 0.18,
+                    "current_stop": 1.06,
+                    "current_action": "breakeven",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "stop_loss_state.json").write_text(
+        json.dumps(
+            {
+                "ENJ/USDT": {
+                    "symbol": "ENJ/USDT",
+                    "entry_price": 1.0,
+                    "entry_time": "2026-04-10T00:00:00",
+                    "highest_price": 1.22,
+                    "current_stop_price": 1.09,
+                    "current_stop_type": "breakeven_plus_5pct",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    db_path = reports_dir / "positions.sqlite"
+    store = PositionStore(str(db_path))
+    store.upsert_buy("ENJ/USDT", qty=5.0, px=1.0, now_ts="2026-04-10T00:00:00Z")
+
+    import event_driven_check as mod
+    import src.execution.price_fetcher as price_fetcher
+
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(price_fetcher, "fetch_prices", lambda: {"ENJ/USDT": 1.07})
+
+    state = load_current_state(cfg={"symbols": ["ENJ/USDT"]})
+
+    assert state is not None
+    assert state["positions"]["ENJ/USDT"]["current_stop"] == 1.09
+    assert state["positions"]["ENJ/USDT"]["highest_price"] == 1.22
+    assert state["positions"]["ENJ/USDT"]["current_action"] == "breakeven"
+
+
 def test_load_current_state_sorts_selected_symbols_by_signal_rank(tmp_path, monkeypatch):
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir()
