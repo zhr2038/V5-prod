@@ -83,6 +83,35 @@ def test_event_close_override_does_not_duplicate_existing_close(tmp_path: Path, 
     assert len(merged) == 1
 
 
+def test_event_close_override_uses_runtime_actions_path(tmp_path: Path, monkeypatch) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    runtime_positions = reports_dir / "shadow_positions.sqlite"
+    store = PositionStore(str(runtime_positions))
+    store.upsert_buy("MON/USDT", qty=100.0, px=1.0, now_ts="2026-04-03T15:00:00Z")
+
+    persist_event_actions(
+        actions=[{"symbol": "MON/USDT", "action": "close", "reason": "take_profit_5%", "priority": 0}],
+        target_run_id="20260403_15",
+        order_store_path=reports_dir / "shadow_orders.sqlite",
+    )
+
+    merged = _merge_event_close_override_orders(
+        orders=[],
+        positions=store.list(),
+        prices={"MON/USDT": 1.2},
+        run_id="20260403_15",
+        order_store_path=reports_dir / "shadow_orders.sqlite",
+        audit=None,
+    )
+
+    assert len(merged) == 1
+    assert (reports_dir / "shadow_event_driven_actions.json").exists() is False
+    assert (reports_dir / "event_driven_actions.json").exists() is False
+
+
 def test_main_reaches_market_data_validation_after_fetch(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 

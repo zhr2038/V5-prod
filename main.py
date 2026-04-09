@@ -325,9 +325,10 @@ def _merge_event_close_override_orders(
     positions,
     prices: dict[str, float],
     run_id: str,
+    order_store_path: str | os.PathLike[str] | None = None,
     audit=None,
 ) -> list[Order]:
-    override_actions = consume_event_actions_for_run(run_id=run_id)
+    override_actions = consume_event_actions_for_run(run_id=run_id, order_store_path=order_store_path)
     if not override_actions:
         return list(orders or [])
 
@@ -864,6 +865,7 @@ def main() -> None:
         positions=store.list(),
         prices=prices,
         run_id=run_id,
+        order_store_path=str(getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite"),
         audit=audit,
     )
 

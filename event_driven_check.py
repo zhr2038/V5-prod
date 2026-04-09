@@ -1130,6 +1130,7 @@ def main():
                 persisted = persist_event_actions(
                     actions=result['actions'],
                     target_run_id=execution['current_target_run_id'],
+                    order_store_path=paths.order_store_path,
                 )
                 if persisted:
                     logger.info(

@@ -5,8 +5,21 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from src.execution.fill_store import derive_runtime_named_json_path
+
 
 DEFAULT_EVENT_ACTIONS_PATH = "reports/event_driven_actions.json"
+
+
+def _resolve_event_actions_path(
+    *,
+    path: str = DEFAULT_EVENT_ACTIONS_PATH,
+    order_store_path: str | Path | None = None,
+) -> Path:
+    raw_path = str(path or DEFAULT_EVENT_ACTIONS_PATH).strip() or DEFAULT_EVENT_ACTIONS_PATH
+    if order_store_path is not None and raw_path == DEFAULT_EVENT_ACTIONS_PATH:
+        return derive_runtime_named_json_path(order_store_path, "event_driven_actions")
+    return Path(raw_path)
 
 
 def _normalize_close_action(action: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -35,6 +48,7 @@ def persist_event_actions(
     actions: Iterable[Dict[str, Any]],
     target_run_id: str,
     path: str = DEFAULT_EVENT_ACTIONS_PATH,
+    order_store_path: str | Path | None = None,
     generated_at_ms: int | None = None,
 ) -> bool:
     normalized = [
@@ -51,7 +65,7 @@ def persist_event_actions(
         "generated_at_ms": int(generated_at_ms or int(time.time() * 1000)),
         "actions": normalized,
     }
-    out_path = Path(path)
+    out_path = _resolve_event_actions_path(path=path, order_store_path=order_store_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -63,9 +77,10 @@ def consume_event_actions_for_run(
     *,
     run_id: str,
     path: str = DEFAULT_EVENT_ACTIONS_PATH,
+    order_store_path: str | Path | None = None,
     max_age_minutes: int = 90,
 ) -> List[Dict[str, Any]]:
-    action_path = Path(path)
+    action_path = _resolve_event_actions_path(path=path, order_store_path=order_store_path)
     if not action_path.exists():
         return []
 
