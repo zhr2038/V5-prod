@@ -169,4 +169,57 @@ def test_live_preflight_once_uses_runtime_positions_db_from_order_store_path(mon
 
     assert captured["positions_db_path"] == (workspace / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
     assert captured["account_db_path"] == (workspace / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
-    assert Path(captured["kwargs"]["bills_db_path"]).resolve() == (workspace / "reports" / "bills.sqlite").resolve()
+    assert Path(captured["kwargs"]["bills_db_path"]).resolve() == (workspace / "reports" / "shadow_runtime" / "bills.sqlite").resolve()
+    assert Path(captured["kwargs"]["ledger_state_path"]).resolve() == (
+        workspace / "reports" / "shadow_runtime" / "ledger_state.json"
+    ).resolve()
+    assert Path(captured["kwargs"]["ledger_status_path"]).resolve() == (
+        workspace / "reports" / "shadow_runtime" / "ledger_status.json"
+    ).resolve()
+
+
+def test_live_preflight_once_keeps_explicit_bills_db_override(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+            reconcile_status_path="reports/custom_reconcile_status.json",
+            reconcile_failure_state_path="reports/custom_reconcile_failure_state.json",
+            kill_switch_path="reports/custom_kill_switch.json",
+        ),
+    )
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class DummyPreflight:
+        def __init__(self, execution_cfg, **kwargs) -> None:
+            captured["kwargs"] = kwargs
+
+        def run(self, *, max_pages: int, max_status_age_sec: int):
+            return SimpleNamespace(decision="ALLOW", reconcile_ok=True, ledger_ok=True, kill_switch_enabled=False)
+
+    monkeypatch.setattr(live_preflight_once, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(live_preflight_once, "PositionStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(live_preflight_once, "AccountStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(live_preflight_once, "OKXPrivateClient", DummyClient)
+    monkeypatch.setattr(live_preflight_once, "LivePreflight", DummyPreflight)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "live_preflight_once.py",
+            "--bills-db",
+            str(tmp_path / "custom_bills.sqlite"),
+        ],
+    )
+
+    live_preflight_once.main()
+
+    assert Path(captured["kwargs"]["bills_db_path"]).resolve() == (tmp_path / "custom_bills.sqlite").resolve()

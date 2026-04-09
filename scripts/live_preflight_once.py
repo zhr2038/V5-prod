@@ -7,7 +7,11 @@ import logging
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
-from src.execution.fill_store import derive_position_store_path
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
+)
 from src.execution.live_preflight import LivePreflight
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import PositionStore
@@ -18,7 +22,7 @@ def main() -> None:
     ap.add_argument("--config", default=None)
     ap.add_argument("--env", default=".env")
     ap.add_argument("--positions-db", default=None)
-    ap.add_argument("--bills-db", default="reports/bills.sqlite")
+    ap.add_argument("--bills-db", default=None)
     ap.add_argument("--max-pages", type=int, default=5)
     ap.add_argument("--max-status-age-sec", type=int, default=180)
     args = ap.parse_args()
@@ -28,15 +32,18 @@ def main() -> None:
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),
     )
+    order_store_path = resolve_runtime_path(
+        getattr(cfg.execution, "order_store_path", None),
+        default="reports/orders.sqlite",
+    )
     if args.positions_db:
         positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
     else:
-        order_store_path = resolve_runtime_path(
-            getattr(cfg.execution, "order_store_path", None),
-            default="reports/orders.sqlite",
-        )
         positions_db_path = derive_position_store_path(order_store_path)
-    bills_db_path = resolve_runtime_path(args.bills_db, default="reports/bills.sqlite")
+    if args.bills_db:
+        bills_db_path = resolve_runtime_path(args.bills_db, default="reports/bills.sqlite")
+    else:
+        bills_db_path = str(derive_runtime_named_artifact_path(order_store_path, "bills", ".sqlite"))
     reconcile_status_path = resolve_runtime_path(
         getattr(cfg.execution, "reconcile_status_path", None),
         default="reports/reconcile_status.json",
@@ -64,8 +71,8 @@ def main() -> None:
             position_store=ps,
             account_store=ac,
             bills_db_path=bills_db_path,
-            ledger_state_path=resolve_runtime_path(default="reports/ledger_state.json"),
-            ledger_status_path=resolve_runtime_path(default="reports/ledger_status.json"),
+            ledger_state_path=str(derive_runtime_named_json_path(order_store_path, "ledger_state")),
+            ledger_status_path=str(derive_runtime_named_json_path(order_store_path, "ledger_status")),
             reconcile_status_path=reconcile_status_path,
         )
         res = pf.run(max_pages=args.max_pages, max_status_age_sec=args.max_status_age_sec)
