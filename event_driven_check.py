@@ -13,6 +13,7 @@ import logging
 import subprocess
 import tempfile
 from pathlib import Path
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -34,10 +35,70 @@ try:
     from src.execution.event_types import MarketState, SignalState, top_selected_symbols
     from src.execution.event_driven_integration import create_event_driven_trader
     from src.execution.event_action_bridge import persist_event_actions
+    from src.execution.fill_store import (
+        derive_position_store_path,
+        derive_runtime_named_artifact_path,
+        derive_runtime_named_json_path,
+        derive_runtime_reports_dir,
+        derive_runtime_runs_dir,
+    )
+    from configs.runtime_config import resolve_runtime_path
     logger.info("✅ Event-driven modules loaded")
 except Exception as e:
     logger.error(f"❌ Failed to load event-driven modules: {e}")
     sys.exit(1)
+
+
+@dataclass(frozen=True)
+class EventDrivenPaths:
+    order_store_path: Path
+    reports_dir: Path
+    runs_dir: Path
+    positions_db: Path
+    portfolio_path: Path
+    regime_path: Path
+    alpha_snapshot_path: Path
+    equity_validation_path: Path
+    event_adaptive_state_path: Path
+    event_driven_signals_path: Path
+    event_candidates_path: Path
+    riskoff_shadow_plan_path: Path
+    event_param_scan_path: Path
+    event_driven_log_path: Path
+
+
+def build_paths(cfg=None) -> EventDrivenPaths:
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else getattr(cfg, "execution", None)
+    raw_order_store_path = (
+        execution_cfg.get("order_store_path")
+        if isinstance(execution_cfg, dict)
+        else getattr(execution_cfg, "order_store_path", None)
+    )
+    order_store_path = Path(
+        resolve_runtime_path(
+            raw_order_store_path,
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    reports_dir = derive_runtime_reports_dir(order_store_path).resolve()
+    runs_dir = derive_runtime_runs_dir(order_store_path).resolve()
+    return EventDrivenPaths(
+        order_store_path=order_store_path,
+        reports_dir=reports_dir,
+        runs_dir=runs_dir,
+        positions_db=derive_position_store_path(order_store_path).resolve(),
+        portfolio_path=(reports_dir / "portfolio.json").resolve(),
+        regime_path=(reports_dir / "regime.json").resolve(),
+        alpha_snapshot_path=(reports_dir / "alpha_snapshot.json").resolve(),
+        equity_validation_path=(reports_dir / "equity_validation.json").resolve(),
+        event_adaptive_state_path=derive_runtime_named_json_path(order_store_path, "event_adaptive_state").resolve(),
+        event_driven_signals_path=derive_runtime_named_json_path(order_store_path, "event_driven_signals").resolve(),
+        event_candidates_path=derive_runtime_named_json_path(order_store_path, "event_candidates").resolve(),
+        riskoff_shadow_plan_path=derive_runtime_named_json_path(order_store_path, "riskoff_shadow_plan").resolve(),
+        event_param_scan_path=derive_runtime_named_json_path(order_store_path, "event_param_scan").resolve(),
+        event_driven_log_path=derive_runtime_named_artifact_path(order_store_path, "event_driven_log", ".jsonl").resolve(),
+    )
 
 
 def resolve_config_path() -> Path:
@@ -175,8 +236,10 @@ def load_current_state(cfg=None, config_path: Path = None):
             cfg_path = config_path or resolve_config_path()
             cfg = load_config(str(cfg_path), env_path=str(PROJECT_ROOT / '.env'))
 
+        paths = build_paths(cfg)
+
         # Load regime
-        regime_path = REPORTS_DIR / 'regime.json'
+        regime_path = paths.regime_path
         regime = 'SIDEWAYS'
         if regime_path.exists():
             with open(regime_path) as f:
@@ -184,7 +247,10 @@ def load_current_state(cfg=None, config_path: Path = None):
                 regime = regime_data.get('regime', 'SIDEWAYS')
         
         # Load live positions from sqlite first; fallback to legacy portfolio.json only when needed
-        positions, position_symbols, position_source = _load_positions_snapshot()
+        positions, position_symbols, position_source = _load_positions_snapshot(
+            positions_db_path=paths.positions_db,
+            portfolio_path=paths.portfolio_path,
+        )
         logger.info(f"Loaded {len(positions)} positions from {position_source}")
         
         # Build tradeable symbol universe (only strategy-tradeable symbols)
@@ -227,7 +293,7 @@ def load_current_state(cfg=None, config_path: Path = None):
         signals = {}
         
         # 1. Try to load FUSED signals from strategy_signals.json (highest priority)
-        runs_dir = REPORTS_DIR / 'runs'
+        runs_dir = paths.runs_dir
         if runs_dir.exists():
             run_dirs = [d for d in runs_dir.iterdir() if d.is_dir()]
             logger.info(f"Found {len(run_dirs)} run directories")
@@ -278,7 +344,7 @@ def load_current_state(cfg=None, config_path: Path = None):
         
         # 2. Fallback to alpha snapshot if no fused signals
         if not signals:
-            alpha_path = REPORTS_DIR / 'alpha_snapshot.json'
+            alpha_path = paths.alpha_snapshot_path
             if alpha_path.exists():
                 with open(alpha_path) as f:
                     alpha = json.load(f)
@@ -361,10 +427,10 @@ def trigger_live_execution_service(service_unit: str):
         }
 
 
-def get_last_live_run_age_sec():
+def get_last_live_run_age_sec(runs_dir: Path | None = None):
     """Return (age_seconds, run_name) for latest run with decision_audit.json."""
     try:
-        runs_dir = REPORTS_DIR / 'runs'
+        runs_dir = runs_dir or (REPORTS_DIR / 'runs')
         if not runs_dir.exists():
             return None, None
         cands = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
@@ -540,9 +606,9 @@ def build_candidate_watchlist(state: dict, breakout_threshold_pct: float = 0.5, 
     return out[:max(1, int(top_n))]
 
 
-def estimate_live_equity() -> float:
+def estimate_live_equity(eq_file: Path | None = None) -> float:
     """Best-effort live equity for shadow sizing."""
-    eq_file = REPORTS_DIR / 'equity_validation.json'
+    eq_file = eq_file or (REPORTS_DIR / 'equity_validation.json')
     if eq_file.exists():
         try:
             obj = json.loads(eq_file.read_text(encoding='utf-8'))
@@ -554,13 +620,13 @@ def estimate_live_equity() -> float:
     return 0.0
 
 
-def build_riskoff_shadow_plan(state: dict, cfg: dict, watchlist: list):
+def build_riskoff_shadow_plan(state: dict, cfg: dict, watchlist: list, *, equity_file: Path | None = None):
     """Build shadow plan for Risk-Off probe scenarios (no execution)."""
     regime = str(state.get('regime', 'SIDEWAYS'))
     risk_cfg = (cfg or {}).get('risk', {}) or {}
     reg_cfg = (cfg or {}).get('regime', {}) or {}
 
-    equity = estimate_live_equity()
+    equity = estimate_live_equity(equity_file)
     max_single = float(risk_cfg.get('max_single_weight', 0.25) or 0.25)
     max_gross = float(risk_cfg.get('max_gross_exposure', 1.0) or 1.0)
     current_mult = float(reg_cfg.get('pos_mult_risk_off', 0.0) or 0.0)
@@ -641,7 +707,13 @@ def _read_recent_event_stats(log_path: Path, lookback: int = 12):
     return items
 
 
-def compute_adaptive_event_cfg(ev_cfg: dict, state: dict):
+def compute_adaptive_event_cfg(
+    ev_cfg: dict,
+    state: dict,
+    *,
+    log_path: Path | None = None,
+    adaptive_state_path: Path | None = None,
+):
     """Adaptive cooldown tuning for event-driven engine.
 
     Only adjusts cooldown/confirmation knobs, does not force trading.
@@ -669,7 +741,7 @@ def compute_adaptive_event_cfg(ev_cfg: dict, state: dict):
     confirm_min = int(acfg.get('confirm_min', 1) or 1)
     confirm_max = int(acfg.get('confirm_max', 4) or 4)
 
-    recent = _read_recent_event_stats(REPORTS_DIR / 'event_driven_log.jsonl', lookback=lookback)
+    recent = _read_recent_event_stats(log_path or (REPORTS_DIR / 'event_driven_log.jsonl'), lookback=lookback)
     processed = sum(int((x or {}).get('events_processed', 0) or 0) for x in recent)
     blocked = sum(int((x or {}).get('events_blocked', 0) or 0) for x in recent)
     block_ratio = (blocked / processed) if processed > 0 else 0.0
@@ -710,7 +782,7 @@ def compute_adaptive_event_cfg(ev_cfg: dict, state: dict):
     }
 
     try:
-        (REPORTS_DIR / 'event_adaptive_state.json').write_text(
+        (adaptive_state_path or (REPORTS_DIR / 'event_adaptive_state.json')).write_text(
             json.dumps({'timestamp': datetime.now().isoformat(), **meta}, ensure_ascii=False, indent=2),
             encoding='utf-8',
         )
@@ -860,10 +932,12 @@ def main():
     if not state:
         logger.error("Failed to load state, falling back to standard execution")
         return 0
+
+    paths = build_paths(cfg)
     
     # Load last signal history for comparison
     last_state = None
-    history_path = REPORTS_DIR / 'event_driven_signals.json'
+    history_path = paths.event_driven_signals_path
     if history_path.exists():
         try:
             with open(history_path) as f:
@@ -900,7 +974,7 @@ def main():
         breakout_threshold_pct=float(ev_cfg.get('breakout_threshold_pct', 0.5) or 0.5),
         top_n=10,
     )
-    (REPORTS_DIR / 'event_candidates.json').write_text(
+    paths.event_candidates_path.write_text(
         json.dumps(
             {
                 'timestamp': datetime.now().isoformat(),
@@ -914,20 +988,25 @@ def main():
         encoding='utf-8',
     )
 
-    shadow_plan = build_riskoff_shadow_plan(state, cfg, watchlist)
-    (REPORTS_DIR / 'riskoff_shadow_plan.json').write_text(
+    shadow_plan = build_riskoff_shadow_plan(state, cfg, watchlist, equity_file=paths.equity_validation_path)
+    paths.riskoff_shadow_plan_path.write_text(
         json.dumps(shadow_plan, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
 
     param_scan = run_event_param_scan(state, last_state, ev_cfg)
-    (REPORTS_DIR / 'event_param_scan.json').write_text(
+    paths.event_param_scan_path.write_text(
         json.dumps(param_scan, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
 
     # Build trader config from YAML (with adaptive cooldown)
-    adaptive_cd, adaptive_meta = compute_adaptive_event_cfg(ev_cfg, state)
+    adaptive_cd, adaptive_meta = compute_adaptive_event_cfg(
+        ev_cfg,
+        state,
+        log_path=paths.event_driven_log_path,
+        adaptive_state_path=paths.event_adaptive_state_path,
+    )
     logger.info(
         f"Adaptive cooldown: applied={adaptive_meta.get('applied')} reason={adaptive_meta.get('reason')} "
         f"p2={adaptive_cd.get('global_cooldown_p2_minutes')}m "
@@ -982,7 +1061,7 @@ def main():
     }
 
     if force_full_mode:
-        age_sec, last_run_id = get_last_live_run_age_sec()
+        age_sec, last_run_id = get_last_live_run_age_sec(paths.runs_dir)
         execution['last_run_age_sec'] = age_sec
         execution['last_run_id'] = last_run_id
 
@@ -1019,7 +1098,7 @@ def main():
     elif result['should_trade'] and result['actions']:
         logger.info("Event-driven trading triggered - actions generated")
         if active_mode:
-            age_sec, last_run_id = get_last_live_run_age_sec()
+            age_sec, last_run_id = get_last_live_run_age_sec(paths.runs_dir)
             execution['last_run_age_sec'] = age_sec
             execution['last_run_id'] = last_run_id
             bypass_throttle = should_bypass_live_trigger_throttle(result['actions'])
@@ -1091,14 +1170,14 @@ def main():
         'execution': execution,
     }
     
-    log_path = REPORTS_DIR / 'event_driven_log.jsonl'
+    log_path = paths.event_driven_log_path
     log_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(log_path, 'a') as f:
         f.write(json.dumps(log_entry) + '\n')
     
     # Save signal history for next comparison
-    history_path = REPORTS_DIR / 'event_driven_signals.json'
+    history_path = paths.event_driven_signals_path
     signal_history = {
         'timestamp': int(datetime.now().timestamp() * 1000),
         'signals': {sym: sig.to_dict() if hasattr(sig, 'to_dict') else sig 

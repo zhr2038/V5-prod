@@ -175,6 +175,52 @@ def test_load_current_state_sorts_selected_symbols_by_signal_rank(tmp_path, monk
     assert state["selected_symbols"][:4] == ["MON/USDT", "ETH/USDT", "SOL/USDT", "BTC/USDT"]
 
 
+def test_load_current_state_uses_runtime_reports_from_order_store_path(tmp_path, monkeypatch):
+    root_reports = tmp_path / "reports"
+    root_reports.mkdir()
+    runtime_reports = root_reports / "shadow_runtime"
+    runtime_reports.mkdir()
+
+    (root_reports / "regime.json").write_text(json.dumps({"regime": "SIDEWAYS"}), encoding="utf-8")
+    (runtime_reports / "regime.json").write_text(json.dumps({"regime": "TRENDING"}), encoding="utf-8")
+
+    (root_reports / "alpha_snapshot.json").write_text(
+        json.dumps({"scores": {"BTC/USDT": -0.4}}),
+        encoding="utf-8",
+    )
+    (runtime_reports / "alpha_snapshot.json").write_text(
+        json.dumps({"scores": {"ETH/USDT": 0.9}}),
+        encoding="utf-8",
+    )
+
+    runtime_db = runtime_reports / "positions.sqlite"
+    store = PositionStore(str(runtime_db))
+    store.upsert_buy("ETH/USDT", qty=3.0, px=2500.0, now_ts="2026-03-25T10:00:00Z")
+
+    import event_driven_check as mod
+    import src.execution.price_fetcher as price_fetcher
+
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "REPORTS_DIR", root_reports)
+    monkeypatch.setattr(
+        price_fetcher,
+        "fetch_prices",
+        lambda: {"BTC/USDT": 85000.0, "ETH/USDT": 2500.0},
+    )
+
+    state = load_current_state(
+        cfg={
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "symbols": ["BTC/USDT", "ETH/USDT"],
+        }
+    )
+
+    assert state is not None
+    assert state["regime"] == "TRENDING"
+    assert "ETH/USDT" in state["positions"]
+    assert state["selected_symbols"][0] == "ETH/USDT"
+
+
 def test_event_driven_trader_build_market_state_reorders_stale_selected_symbols():
     trader = create_event_driven_trader({"enabled": True})
     market_state = trader._build_market_state(
@@ -260,6 +306,69 @@ def test_run_event_param_scan_does_not_touch_live_state_files(tmp_path, monkeypa
     assert result["count"] == 72
     assert monitor_state.read_text(encoding="utf-8") == monitor_payload
     assert cooldown_state.read_text(encoding="utf-8") == cooldown_payload
+
+
+def test_main_writes_event_outputs_to_runtime_paths(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    config_path = config_dir / "live_prod.yaml"
+    config_path.write_text(
+        json.dumps(
+            {
+                "execution": {"order_store_path": "reports/shadow_orders.sqlite"},
+                "event_driven": {"enabled": True, "mode": "passive"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = {
+        "timestamp_ms": 2_000,
+        "regime": "TRENDING_UP",
+        "prices": {"BTC/USDT": 105.0},
+        "positions": {},
+        "signals": {
+            "BTC/USDT": {
+                "symbol": "BTC/USDT",
+                "direction": "buy",
+                "score": 0.9,
+                "rank": 1,
+                "timestamp_ms": 2_000,
+            }
+        },
+        "selected_symbols": ["BTC/USDT"],
+    }
+
+    class DummyTrader:
+        def should_trade(self, current_state, last_state):
+            return {
+                "should_trade": False,
+                "reason": "noop",
+                "actions": [],
+                "events_processed": 0,
+                "events_blocked": 0,
+            }
+
+    import event_driven_check as mod
+
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(mod, "resolve_config_path", lambda: config_path)
+    monkeypatch.setattr(mod, "load_current_state", lambda cfg, config_path=None: state)
+    monkeypatch.setattr(mod, "create_event_driven_trader", lambda cfg: DummyTrader())
+
+    assert mod.main() == 0
+
+    assert (reports_dir / "shadow_event_driven_signals.json").exists()
+    assert (reports_dir / "shadow_event_candidates.json").exists()
+    assert (reports_dir / "shadow_riskoff_shadow_plan.json").exists()
+    assert (reports_dir / "shadow_event_param_scan.json").exists()
+    assert (reports_dir / "shadow_event_adaptive_state.json").exists()
+    assert (reports_dir / "shadow_event_driven_log.jsonl").exists()
+    assert not (reports_dir / "event_driven_signals.json").exists()
+    assert not (reports_dir / "event_driven_log.jsonl").exists()
 
 
 def test_risk_close_actions_bypass_live_trigger_throttle():
