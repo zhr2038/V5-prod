@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import main as main_mod
-from main import _merge_event_close_override_orders
+from main import _merge_event_close_override_orders, _resolve_universe_cache_path
 from src.core.models import ExecutionReport
 from src.core.models import Order
 from src.execution.event_action_bridge import persist_event_actions
@@ -110,6 +110,15 @@ def test_event_close_override_uses_runtime_actions_path(tmp_path: Path, monkeypa
     assert len(merged) == 1
     assert (reports_dir / "shadow_event_driven_actions.json").exists() is False
     assert (reports_dir / "event_driven_actions.json").exists() is False
+
+
+def test_resolve_universe_cache_path_uses_runtime_reports_dir_when_default_path() -> None:
+    cfg = SimpleNamespace(
+        execution=SimpleNamespace(order_store_path="reports/shadow_runtime/orders.sqlite"),
+        universe=SimpleNamespace(cache_path="reports/universe_cache.json"),
+    )
+
+    assert _resolve_universe_cache_path(cfg) == Path("reports/shadow_runtime/universe_cache.json")
 
 
 def test_main_reaches_market_data_validation_after_fetch(tmp_path: Path, monkeypatch) -> None:

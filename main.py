@@ -90,6 +90,20 @@ def _resolve_dynamic_alpha_weights_path(cfg) -> Path:
     return derive_runtime_named_json_path(order_store_path, "alpha_dynamic_weights")
 
 
+def _resolve_universe_cache_path(cfg) -> Path:
+    order_store_path = str(
+        getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
+        or "reports/orders.sqlite"
+    )
+    raw_path = str(
+        getattr(getattr(cfg, "universe", None), "cache_path", "reports/universe_cache.json")
+        or ""
+    ).strip()
+    if not raw_path or raw_path == "reports/universe_cache.json":
+        return derive_runtime_reports_dir(order_store_path) / "universe_cache.json"
+    return Path(raw_path)
+
+
 def save_trend_cache(
     alpha_snapshot,
     regime_result,
@@ -480,7 +494,7 @@ def main() -> None:
             from src.data.universe.okx_universe import OKXUniverseProvider
 
             up = OKXUniverseProvider(
-                cache_path=cfg.universe.cache_path,
+                cache_path=str(_resolve_universe_cache_path(cfg)),
                 cache_ttl_sec=cfg.universe.cache_ttl_sec,
                 top_n=int(getattr(cfg.universe, "top_n_market_cap", 30) or 30),
                 min_24h_quote_volume_usdt=cfg.universe.min_24h_quote_volume_usdt,
