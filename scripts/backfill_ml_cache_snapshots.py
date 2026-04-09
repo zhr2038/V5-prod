@@ -11,6 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_reports_dir
 from src.execution.ml_data_collector import MLDataCollector
 
 
@@ -28,13 +30,56 @@ def _parse_timestamp_ms(raw: str) -> int:
     return int(dt.timestamp() * 1000)
 
 
-def _load_symbols(args: argparse.Namespace) -> list[str]:
+def _resolve_cli_or_default_path(raw_path: str, *, default_path: Path) -> Path:
+    text = str(raw_path or "").strip()
+    if not text:
+        return default_path.resolve()
+    path = Path(text)
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return path
+
+
+def _runtime_defaults(raw_config_path: str | None = None) -> tuple[Path, Path, Path]:
+    cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
+    execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+    universe_cfg = cfg.get("universe") if isinstance(cfg.get("universe"), dict) else {}
+
+    order_store_path = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+    )
+    reports_dir = derive_runtime_reports_dir(order_store_path).resolve()
+    default_db_path = reports_dir / "ml_training_data.db"
+    default_csv_path = reports_dir / "ml_training_data.csv"
+
+    universe_raw = ""
+    if isinstance(execution_cfg, dict):
+        universe_raw = str(execution_cfg.get("ml_research_universe_path") or "").strip()
+    if not universe_raw and isinstance(universe_cfg, dict):
+        universe_raw = str(universe_cfg.get("cache_path") or "").strip()
+
+    if universe_raw:
+        universe_path = Path(
+            resolve_runtime_path(
+                universe_raw,
+                default="reports/universe_cache.json",
+                project_root=PROJECT_ROOT,
+            )
+        ).resolve()
+    else:
+        universe_path = (reports_dir / "universe_cache.json").resolve()
+
+    return default_db_path, default_csv_path, universe_path
+
+
+def _load_symbols(args: argparse.Namespace, *, universe_path: Path) -> list[str]:
     if args.symbols:
         return [str(sym).strip() for sym in str(args.symbols).split(",") if str(sym).strip()]
 
-    universe_path = Path(args.universe_path)
-    if not universe_path.is_absolute():
-        universe_path = (PROJECT_ROOT / universe_path).resolve()
     if not universe_path.exists():
         raise FileNotFoundError(f"universe file not found: {universe_path}")
 
@@ -48,9 +93,10 @@ def _load_symbols(args: argparse.Namespace) -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Backfill ML feature snapshots from cache for a stable research universe")
-    parser.add_argument("--db-path", default="reports/ml_training_data.db", help="SQLite DB path")
-    parser.add_argument("--csv-path", default="reports/ml_training_data.csv", help="Exported training CSV path")
-    parser.add_argument("--universe-path", default="reports/universe_cache.json", help="JSON file containing {symbols:[...]}")
+    parser.add_argument("--config", default="", help="Optional config path used to resolve runtime defaults")
+    parser.add_argument("--db-path", default="", help="SQLite DB path (default: runtime ml_training_data.db)")
+    parser.add_argument("--csv-path", default="", help="Exported training CSV path (default: runtime ml_training_data.csv)")
+    parser.add_argument("--universe-path", default="", help="JSON file containing {symbols:[...]} (default: runtime stable universe)")
     parser.add_argument("--symbols", default="", help="Optional comma-separated symbol override")
     parser.add_argument("--start", required=True, help="Backfill start timestamp (ISO8601, seconds, or ms)")
     parser.add_argument("--end", default="", help="Backfill end timestamp (default: current UTC hour)")
@@ -65,12 +111,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    db_path = Path(args.db_path)
-    if not db_path.is_absolute():
-        db_path = (PROJECT_ROOT / db_path).resolve()
-    csv_path = Path(args.csv_path)
-    if not csv_path.is_absolute():
-        csv_path = (PROJECT_ROOT / csv_path).resolve()
+    default_db_path, default_csv_path, default_universe_path = _runtime_defaults(args.config or None)
+    db_path = _resolve_cli_or_default_path(args.db_path, default_path=default_db_path)
+    csv_path = _resolve_cli_or_default_path(args.csv_path, default_path=default_csv_path)
+    universe_path = _resolve_cli_or_default_path(args.universe_path, default_path=default_universe_path)
 
     start_ms = _parse_timestamp_ms(args.start)
     if args.end:
@@ -81,7 +125,7 @@ def main() -> int:
     if end_ms < start_ms:
         raise ValueError("end must be >= start")
 
-    symbols = _load_symbols(args)
+    symbols = _load_symbols(args, universe_path=universe_path)
 
     collector = MLDataCollector(db_path=str(db_path))
     stats = collector.backfill_feature_snapshots_from_cache(
