@@ -80,3 +80,43 @@ def test_rollup_spreads_main_defaults_to_repo_root(monkeypatch, tmp_path: Path) 
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["symbols"]["BTC/USDT"]["count"] == 1
     assert not (tmp_path / "reports" / "spread_stats" / f"daily_spread_stats_{day}.json").exists()
+
+
+def test_rollup_spreads_main_uses_runtime_dirs_from_active_config(monkeypatch, tmp_path: Path) -> None:
+    fake_root = tmp_path / "repo"
+    config_dir = fake_root / "configs"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "live_prod.yaml").write_text(
+        "execution:\n  order_store_path: reports/shadow_orders.sqlite\n",
+        encoding="utf-8",
+    )
+
+    snapshots_dir = fake_root / "reports" / "shadow_spread_snapshots"
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    day = "20231114"
+    (snapshots_dir / f"{day}.jsonl").write_text(
+        json.dumps(
+            {
+                "window_end_ts": 1700000000,
+                "symbols": [{"symbol": "BTC/USDT", "bid": 99.0, "ask": 101.0, "mid": 100.0, "spread_bps": 200.0}],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(rollup_spreads, "PROJECT_ROOT", fake_root)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["rollup_spreads.py", "--day", day, "--config", "configs/live_prod.yaml"],
+    )
+
+    rollup_spreads.main()
+
+    out_path = fake_root / "reports" / "shadow_spread_stats" / f"daily_spread_stats_{day}.json"
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["symbols"]["BTC/USDT"]["count"] == 1
+    assert not (fake_root / "reports" / "spread_stats" / f"daily_spread_stats_{day}.json").exists()

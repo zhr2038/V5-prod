@@ -102,7 +102,22 @@ def derive_runtime_cost_events_dir(order_store_path: Union[str, Path]) -> Path:
 
 def derive_runtime_spread_snapshots_dir(order_store_path: Union[str, Path]) -> Path:
     """Derive the matching spread_snapshots directory from the effective orders DB path."""
-    return derive_runtime_reports_dir(order_store_path) / "spread_snapshots"
+    path = Path(order_store_path)
+    if path.name == "orders.sqlite":
+        return path.parent / "spread_snapshots"
+    if "orders" in path.stem:
+        return path.with_name(path.stem.replace("orders", "spread_snapshots", 1))
+    return path.parent / "spread_snapshots"
+
+
+def derive_runtime_spread_stats_dir(order_store_path: Union[str, Path]) -> Path:
+    """Derive the matching spread_stats directory from the effective orders DB path."""
+    path = Path(order_store_path)
+    if path.name == "orders.sqlite":
+        return path.parent / "spread_stats"
+    if "orders" in path.stem:
+        return path.with_name(path.stem.replace("orders", "spread_stats", 1))
+    return path.parent / "spread_stats"
 
 
 def derive_runtime_auto_risk_eval_path(order_store_path: Union[str, Path]) -> Path:

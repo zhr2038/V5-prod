@@ -9,6 +9,8 @@ from src.execution.fill_store import (
     derive_fill_store_path,
     derive_runtime_cost_events_dir,
     derive_runtime_named_artifact_path,
+    derive_runtime_spread_snapshots_dir,
+    derive_runtime_spread_stats_dir,
     derive_position_store_path,
     parse_okx_fills,
 )
@@ -90,4 +92,23 @@ def test_derive_runtime_cost_events_dir_tracks_custom_order_store_names() -> Non
     assert derive_runtime_cost_events_dir("reports/orders_accelerated.sqlite") == Path("reports/cost_events_accelerated")
     assert derive_runtime_cost_events_dir("reports/shadow_tuned_xgboost/orders.sqlite") == Path(
         "reports/shadow_tuned_xgboost/cost_events"
+    )
+
+
+def test_derive_runtime_spread_dirs_track_custom_order_store_names() -> None:
+    assert derive_runtime_spread_snapshots_dir("reports/orders.sqlite") == Path("reports/spread_snapshots")
+    assert derive_runtime_spread_snapshots_dir("reports/shadow_orders.sqlite") == Path("reports/shadow_spread_snapshots")
+    assert derive_runtime_spread_snapshots_dir("reports/orders_accelerated.sqlite") == Path(
+        "reports/spread_snapshots_accelerated"
+    )
+    assert derive_runtime_spread_snapshots_dir("reports/shadow_tuned_xgboost/orders.sqlite") == Path(
+        "reports/shadow_tuned_xgboost/spread_snapshots"
+    )
+    assert derive_runtime_spread_stats_dir("reports/orders.sqlite") == Path("reports/spread_stats")
+    assert derive_runtime_spread_stats_dir("reports/shadow_orders.sqlite") == Path("reports/shadow_spread_stats")
+    assert derive_runtime_spread_stats_dir("reports/orders_accelerated.sqlite") == Path(
+        "reports/spread_stats_accelerated"
+    )
+    assert derive_runtime_spread_stats_dir("reports/shadow_tuned_xgboost/orders.sqlite") == Path(
+        "reports/shadow_tuned_xgboost/spread_stats"
     )

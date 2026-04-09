@@ -13,6 +13,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from src.reporting.spread_snapshots import compute_spread_stats
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import (
+    derive_runtime_spread_snapshots_dir,
+    derive_runtime_spread_stats_dir,
+)
 
 
 def _resolve_repo_path(value: str | Path | None, *, default: Path) -> Path:
@@ -20,6 +25,29 @@ def _resolve_repo_path(value: str | Path | None, *, default: Path) -> Path:
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return path.resolve()
+
+
+def _resolve_runtime_dirs(
+    *,
+    snapshots_dir: str | None,
+    out_dir: str | None,
+    config_path: str | None,
+) -> tuple[Path, Path]:
+    cfg = load_runtime_config(config_path, project_root=PROJECT_ROOT)
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    order_store_path = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    default_snapshots_dir = derive_runtime_spread_snapshots_dir(order_store_path)
+    default_out_dir = derive_runtime_spread_stats_dir(order_store_path)
+    return (
+        _resolve_repo_path(snapshots_dir, default=default_snapshots_dir),
+        _resolve_repo_path(out_dir, default=default_out_dir),
+    )
 
 
 def _utc_yyyymmdd_from_epoch_sec(ts: int) -> str:
@@ -63,6 +91,7 @@ def rollup_day(day_ymd: str, snapshots_dir: Path, out_dir: Path) -> Path:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", default=None, help="UTC day YYYYMMDD (default: today UTC)")
+    ap.add_argument("--config", default=None)
     ap.add_argument("--snapshots_dir", default=None)
     ap.add_argument("--out_dir", default=None)
     args = ap.parse_args()
@@ -71,8 +100,11 @@ def main() -> None:
     if not day:
         day = datetime.now(timezone.utc).strftime("%Y%m%d")
 
-    snapshots_dir = _resolve_repo_path(args.snapshots_dir, default=PROJECT_ROOT / "reports" / "spread_snapshots")
-    out_dir = _resolve_repo_path(args.out_dir, default=PROJECT_ROOT / "reports" / "spread_stats")
+    snapshots_dir, out_dir = _resolve_runtime_dirs(
+        snapshots_dir=args.snapshots_dir,
+        out_dir=args.out_dir,
+        config_path=args.config,
+    )
     out = rollup_day(day, snapshots_dir=snapshots_dir, out_dir=out_dir)
     print(f"wrote {out}")
 
