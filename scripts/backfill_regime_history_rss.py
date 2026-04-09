@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from src.regime.rss_vote_utils import rss_vote_confidence, rss_vote_state
 
 
@@ -165,20 +166,48 @@ def backfill_regime_history_rss(db_path: Path, cache_dir: Path, hours: int) -> d
     }
 
 
-def main() -> None:
+def _resolve_main_paths(
+    raw_config_path: str | None,
+    raw_db_path: str | None,
+    raw_cache_dir: str | None,
+) -> tuple[Path, Path]:
+    cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
+    regime_cfg = cfg.get("regime") if isinstance(cfg.get("regime"), dict) else {}
+    db_path = Path(
+        resolve_runtime_path(
+            raw_db_path,
+            default=str(regime_cfg.get("regime_history_db_path") if isinstance(regime_cfg, dict) else None or "reports/regime_history.db"),
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    cache_dir = Path(
+        resolve_runtime_path(
+            raw_cache_dir,
+            default="data/sentiment_cache",
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    return db_path, cache_dir
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="Backfill RSS confidence in regime_history.db")
-    parser.add_argument("--db-path", default="reports/regime_history.db")
-    parser.add_argument("--cache-dir", default="data/sentiment_cache")
+    parser.add_argument("--config", default=None)
+    parser.add_argument("--db-path", default=None)
+    parser.add_argument("--cache-dir", default=None)
     parser.add_argument("--hours", type=int, default=24)
     args = parser.parse_args()
 
+    db_path, cache_dir = _resolve_main_paths(args.config, args.db_path, args.cache_dir)
+
     result = backfill_regime_history_rss(
-        db_path=Path(args.db_path),
-        cache_dir=Path(args.cache_dir),
+        db_path=db_path,
+        cache_dir=cache_dir,
         hours=args.hours,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
