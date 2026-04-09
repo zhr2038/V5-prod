@@ -1183,3 +1183,51 @@ def test_main_cached_trend_uses_runtime_trend_cache(tmp_path: Path, monkeypatch)
 
     assert excinfo.value.cache_data["symbols"] == ["SHADOW/USDT"]
     assert excinfo.value.cache_data["regime"]["state"] == "BULL"
+
+
+def test_main_dynamic_alpha_weights_use_runtime_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("V5_DYNAMIC_ALPHA_WEIGHTS", "YES")
+
+    cfg = SimpleNamespace(
+        execution=SimpleNamespace(order_store_path="reports/shadow_runtime/orders.sqlite"),
+        alpha=SimpleNamespace(
+            weights=SimpleNamespace(
+                f1_mom_5d=0.25,
+                f2_mom_20d=0.25,
+                f3_vol_adj_ret_20d=0.20,
+                f4_volume_expansion=0.15,
+                f5_rsi_trend_confirm=0.15,
+            )
+        ),
+    )
+
+    root_weights = tmp_path / "reports" / "alpha_dynamic_weights.json"
+    runtime_weights = tmp_path / "reports" / "shadow_runtime" / "alpha_dynamic_weights.json"
+    root_weights.parent.mkdir(parents=True, exist_ok=True)
+    runtime_weights.parent.mkdir(parents=True, exist_ok=True)
+    root_weights.write_text(
+        json.dumps({"weights": {"f1_mom_5d": 0.91, "f2_mom_20d": 0.09}}),
+        encoding="utf-8",
+    )
+    runtime_weights.write_text(
+        json.dumps({"weights": {"f1_mom_5d": 0.61, "f2_mom_20d": 0.39}}),
+        encoding="utf-8",
+    )
+
+    class StopAfterWeights(RuntimeError):
+        pass
+
+    monkeypatch.setattr(main_mod, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(main_mod, "setup_logging", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        main_mod,
+        "_resolve_runtime_run_paths",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(StopAfterWeights("weights_loaded")),
+    )
+
+    with pytest.raises(StopAfterWeights, match="weights_loaded"):
+        main_mod.main()
+
+    assert cfg.alpha.weights.f1_mom_5d == pytest.approx(0.61)
+    assert cfg.alpha.weights.f2_mom_20d == pytest.approx(0.39)

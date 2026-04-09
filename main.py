@@ -82,6 +82,14 @@ def _resolve_order_state_machine_path(cfg) -> Path:
     return Path(raw_path)
 
 
+def _resolve_dynamic_alpha_weights_path(cfg) -> Path:
+    order_store_path = str(
+        getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
+        or "reports/orders.sqlite"
+    )
+    return derive_runtime_named_json_path(order_store_path, "alpha_dynamic_weights")
+
+
 def save_trend_cache(
     alpha_snapshot,
     regime_result,
@@ -416,7 +424,7 @@ def main() -> None:
     # Enable with env: V5_DYNAMIC_ALPHA_WEIGHTS=YES
     try:
         if str(os.getenv("V5_DYNAMIC_ALPHA_WEIGHTS") or "").upper() == "YES":
-            p = Path("reports/alpha_dynamic_weights.json")
+            p = _resolve_dynamic_alpha_weights_path(cfg)
             if p.exists():
                 obj = json.loads(p.read_text(encoding="utf-8"))
                 w = (obj.get("weights") or {}) if isinstance(obj, dict) else {}
