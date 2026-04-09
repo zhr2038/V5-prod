@@ -221,6 +221,55 @@ def test_load_current_state_uses_runtime_reports_from_order_store_path(tmp_path,
     assert state["selected_symbols"][0] == "ETH/USDT"
 
 
+def test_load_current_state_uses_runtime_universe_cache_from_order_store_path(tmp_path, monkeypatch):
+    root_reports = tmp_path / "reports"
+    root_reports.mkdir()
+    runtime_reports = root_reports / "shadow_runtime"
+    runtime_reports.mkdir()
+
+    (root_reports / "regime.json").write_text(json.dumps({"regime": "SIDEWAYS"}), encoding="utf-8")
+    (runtime_reports / "regime.json").write_text(json.dumps({"regime": "TRENDING"}), encoding="utf-8")
+    (root_reports / "universe_cache.json").write_text(
+        json.dumps({"symbols": ["BTC/USDT"]}),
+        encoding="utf-8",
+    )
+    (runtime_reports / "universe_cache.json").write_text(
+        json.dumps({"symbols": ["ETH/USDT"]}),
+        encoding="utf-8",
+    )
+    (runtime_reports / "alpha_snapshot.json").write_text(
+        json.dumps({"scores": {"BTC/USDT": -0.2, "ETH/USDT": 0.9}}),
+        encoding="utf-8",
+    )
+
+    import event_driven_check as mod
+    import src.execution.price_fetcher as price_fetcher
+
+    monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "REPORTS_DIR", root_reports)
+    monkeypatch.setattr(
+        price_fetcher,
+        "fetch_prices",
+        lambda: {"BTC/USDT": 85000.0, "ETH/USDT": 2500.0},
+    )
+
+    state = load_current_state(
+        cfg={
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "symbols": ["BTC/USDT", "ETH/USDT"],
+            "universe": {
+                "enabled": True,
+                "use_universe_symbols": True,
+            },
+        }
+    )
+
+    assert state is not None
+    assert set(state["prices"].keys()) == {"ETH/USDT"}
+    assert set(state["signals"].keys()) == {"ETH/USDT"}
+    assert state["selected_symbols"] == ["ETH/USDT"]
+
+
 def test_event_driven_trader_build_market_state_reorders_stale_selected_symbols():
     trader = create_event_driven_trader({"enabled": True})
     market_state = trader._build_market_state(

@@ -67,6 +67,25 @@ class EventDrivenPaths:
     event_driven_log_path: Path
 
 
+def _resolve_universe_cache_path(
+    uni_cfg,
+    *,
+    reports_dir: Path,
+) -> Path:
+    raw_cache_path = (
+        uni_cfg.get("cache_path")
+        if isinstance(uni_cfg, dict)
+        else getattr(uni_cfg, "cache_path", None)
+    )
+    if not raw_cache_path or Path(str(raw_cache_path)) == Path("reports/universe_cache.json"):
+        return (reports_dir / "universe_cache.json").resolve()
+
+    cache_path = Path(str(raw_cache_path))
+    if not cache_path.is_absolute():
+        cache_path = PROJECT_ROOT / cache_path
+    return cache_path.resolve()
+
+
 def build_paths(cfg=None) -> EventDrivenPaths:
     execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else getattr(cfg, "execution", None)
     raw_order_store_path = (
@@ -261,10 +280,10 @@ def load_current_state(cfg=None, config_path: Path = None):
             uni_enabled = uni_cfg.get('enabled', False) if isinstance(uni_cfg, dict) else bool(getattr(uni_cfg, 'enabled', False))
             uni_use = uni_cfg.get('use_universe_symbols', False) if isinstance(uni_cfg, dict) else bool(getattr(uni_cfg, 'use_universe_symbols', False))
             if uni_enabled and uni_use:
-                cache_rel = uni_cfg.get('cache_path', 'reports/universe_cache.json') if isinstance(uni_cfg, dict) else getattr(uni_cfg, 'cache_path', 'reports/universe_cache.json')
-                cache_path = Path(cache_rel)
-                if not cache_path.is_absolute():
-                    cache_path = PROJECT_ROOT / cache_path
+                cache_path = _resolve_universe_cache_path(
+                    uni_cfg,
+                    reports_dir=paths.reports_dir,
+                )
                 if cache_path.exists():
                     cache_obj = json.loads(cache_path.read_text(encoding='utf-8'))
                     tradeable_symbols = set(str(s) for s in (cache_obj.get('symbols') or []))
