@@ -56,14 +56,18 @@ def test_v5_web_dashboard_service_enables_live_okx_health_check():
 def test_v5_reconcile_service_targets_live_prod_config():
     text = Path("deploy/systemd/v5-reconcile.user.service").read_text(encoding="utf-8")
     assert "WorkingDirectory=/home/admin/clawd/v5-trading-bot" in text
-    assert "scripts/reconcile_guard_once.py --config configs/live_prod.yaml --env .env --out reports/reconcile_status.json" in text
+    assert "scripts/reconcile_guard_once.py --config configs/live_prod.yaml --env .env" in text
+    assert "--out reports/reconcile_status.json" not in text
 
 
 def test_v5_ledger_service_targets_live_prod_config():
     text = Path("deploy/systemd/v5-ledger.user.service").read_text(encoding="utf-8")
     assert "WorkingDirectory=/home/admin/clawd/v5-trading-bot" in text
-    assert "scripts/bills_sync.py --config configs/live_prod.yaml --env .env --db reports/bills.sqlite" in text
-    assert "scripts/ledger_once.py --config configs/live_prod.yaml --env .env --bills-db reports/bills.sqlite --out reports/ledger_status.json" in text
+    assert "scripts/bills_sync.py --config configs/live_prod.yaml --env .env" in text
+    assert "scripts/ledger_once.py --config configs/live_prod.yaml --env .env" in text
+    assert "--db reports/bills.sqlite" not in text
+    assert "--bills-db reports/bills.sqlite" not in text
+    assert "--out reports/ledger_status.json" not in text
 
 
 def test_install_systemd_production_only_disables_shadow_timers():
