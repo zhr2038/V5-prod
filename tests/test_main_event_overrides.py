@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -830,3 +832,218 @@ def test_main_live_preflight_uses_runtime_bills_ledger_and_status_paths(tmp_path
     assert Path(captured["ledger_state_path"]).resolve() == (runtime_dir / "ledger_state.json").resolve()
     assert Path(captured["ledger_status_path"]).resolve() == (runtime_dir / "ledger_status.json").resolve()
     assert Path(captured["reconcile_status_path"]).resolve() == (runtime_dir / "reconcile_status.json").resolve()
+
+
+def test_main_trend_update_only_writes_runtime_trend_cache(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("V5_TREND_UPDATE_ONLY", "1")
+    monkeypatch.delenv("V5_USE_CACHED_TREND", raising=False)
+
+    cfg = SimpleNamespace(
+        symbols=["BTC/USDT"],
+        timeframe_main="1H",
+        universe=SimpleNamespace(
+            enabled=False,
+            use_universe_symbols=False,
+            min_data_coverage_ratio=0.0,
+            require_btc_benchmark=True,
+        ),
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+            mode="dry_run",
+        ),
+    )
+
+    class FakeAudit:
+        def __init__(self, *args, **kwargs) -> None:
+            self.universe_config = {}
+
+        def add_note(self, *_args, **_kwargs) -> None:
+            pass
+
+        def reject(self, *_args, **_kwargs) -> None:
+            pass
+
+        def save(self, *_args, **_kwargs) -> None:
+            pass
+
+    class FakeProvider:
+        def fetch_ohlcv(self, symbols, timeframe, limit, end_ts_ms=None):
+            assert symbols == ["BTC/USDT"]
+            assert timeframe == "1H"
+            assert limit == 24 * 60
+            assert end_ts_ms is None
+            return {"BTC/USDT": SimpleNamespace(ts=[1], close=[100.0], high=[101.0])}
+
+    class FakePositionStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def list(self):
+            return []
+
+    class FakeAccountStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+    class FakePipeline:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.regime_engine = SimpleNamespace(
+                detect=lambda _btc: SimpleNamespace(
+                    state=SimpleNamespace(value="SIDEWAYS"),
+                    multiplier=1.0,
+                    atr_pct=0.0,
+                    ma20=0.0,
+                    ma60=0.0,
+                )
+            )
+            self.alpha_engine = SimpleNamespace(
+                set_regime_context=lambda *_args, **_kwargs: None,
+                compute_snapshot=lambda _market_data: SimpleNamespace(
+                    scores={"BTC/USDT": 1.23},
+                    ranks={"BTC/USDT": 1},
+                    raw={"BTC/USDT": 1.23},
+                ),
+            )
+
+    monkeypatch.setattr(main_mod, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(main_mod, "setup_logging", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_mod, "build_provider", lambda _cfg: FakeProvider())
+    monkeypatch.setattr(main_mod, "PositionStore", FakePositionStore)
+    monkeypatch.setattr(main_mod, "AccountStore", FakeAccountStore)
+    monkeypatch.setattr(main_mod, "_validate_market_data_snapshot", lambda **kwargs: (True, "ok", kwargs["market_data"]))
+    monkeypatch.setattr(main_mod, "ALPHA_HISTORY_ENABLED", False)
+
+    import src.core.pipeline as pipeline_mod
+    import src.reporting.decision_audit as decision_audit_mod
+
+    monkeypatch.setattr(decision_audit_mod, "DecisionAudit", FakeAudit)
+    monkeypatch.setattr(pipeline_mod, "V5Pipeline", FakePipeline)
+
+    main_mod.main()
+
+    runtime_cache = tmp_path / "reports" / "shadow_runtime" / "trend_cache.json"
+    root_cache = tmp_path / "reports" / "trend_cache.json"
+    assert runtime_cache.exists()
+    assert not root_cache.exists()
+
+    payload = json.loads(runtime_cache.read_text(encoding="utf-8"))
+    assert payload["symbols"] == ["BTC/USDT"]
+    assert payload["alpha"]["scores"] == {"BTC/USDT": 1.23}
+    assert payload["regime"]["state"] == "SIDEWAYS"
+
+
+def test_main_cached_trend_uses_runtime_trend_cache(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("V5_USE_CACHED_TREND", "1")
+    monkeypatch.delenv("V5_TREND_UPDATE_ONLY", raising=False)
+
+    cfg = SimpleNamespace(
+        symbols=["BTC/USDT"],
+        timeframe_main="1H",
+        universe=SimpleNamespace(
+            enabled=False,
+            use_universe_symbols=False,
+            min_data_coverage_ratio=0.0,
+            require_btc_benchmark=True,
+        ),
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+            mode="dry_run",
+        ),
+    )
+
+    class FakeAudit:
+        def __init__(self, *args, **kwargs) -> None:
+            self.universe_config = {}
+
+        def add_note(self, *_args, **_kwargs) -> None:
+            pass
+
+        def reject(self, *_args, **_kwargs) -> None:
+            pass
+
+        def save(self, *_args, **_kwargs) -> None:
+            pass
+
+    class FakeProvider:
+        def fetch_ohlcv(self, symbols, timeframe, limit, end_ts_ms=None):
+            assert symbols == ["BTC/USDT"]
+            assert timeframe == "1H"
+            assert limit == 24 * 60
+            assert end_ts_ms is None
+            return {"BTC/USDT": SimpleNamespace(ts=[1], close=[100.0], high=[101.0])}
+
+    class FakePositionStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def list(self):
+            return []
+
+    class FakeAccountStore:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+    class FakePipeline:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.regime_engine = SimpleNamespace(
+                detect=lambda _btc: SimpleNamespace(
+                    state=SimpleNamespace(value="SIDEWAYS"),
+                    multiplier=1.0,
+                    atr_pct=0.0,
+                    ma20=0.0,
+                    ma60=0.0,
+                )
+            )
+            self.alpha_engine = SimpleNamespace(
+                set_regime_context=lambda *_args, **_kwargs: None,
+                compute_snapshot=lambda _market_data: SimpleNamespace(
+                    scores={"BTC/USDT": 1.23},
+                    ranks={"BTC/USDT": 1},
+                    raw={"BTC/USDT": 1.23},
+                ),
+            )
+
+    now = time.time()
+    root_cache = tmp_path / "reports" / "trend_cache.json"
+    runtime_cache = tmp_path / "reports" / "shadow_runtime" / "trend_cache.json"
+    root_cache.parent.mkdir(parents=True, exist_ok=True)
+    runtime_cache.parent.mkdir(parents=True, exist_ok=True)
+    root_cache.write_text(
+        json.dumps({"timestamp": now, "symbols": ["ROOT/USDT"], "alpha": {"scores": {}}, "regime": {"state": "BEAR"}}),
+        encoding="utf-8",
+    )
+    runtime_cache.write_text(
+        json.dumps({"timestamp": now, "symbols": ["SHADOW/USDT"], "alpha": {"scores": {}}, "regime": {"state": "BULL"}}),
+        encoding="utf-8",
+    )
+
+    class LoadedCache(RuntimeError):
+        def __init__(self, cache_data: dict) -> None:
+            super().__init__("loaded runtime trend cache")
+            self.cache_data = cache_data
+
+    def _fake_trend_cache_alpha_snapshot(cache_data: dict):
+        raise LoadedCache(cache_data)
+
+    monkeypatch.setattr(main_mod, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(main_mod, "setup_logging", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_mod, "build_provider", lambda _cfg: FakeProvider())
+    monkeypatch.setattr(main_mod, "PositionStore", FakePositionStore)
+    monkeypatch.setattr(main_mod, "AccountStore", FakeAccountStore)
+    monkeypatch.setattr(main_mod, "_validate_market_data_snapshot", lambda **kwargs: (True, "ok", kwargs["market_data"]))
+    monkeypatch.setattr(main_mod, "ALPHA_HISTORY_ENABLED", False)
+    monkeypatch.setattr(main_mod, "TrendCacheAlphaSnapshot", _fake_trend_cache_alpha_snapshot)
+
+    import src.core.pipeline as pipeline_mod
+    import src.reporting.decision_audit as decision_audit_mod
+
+    monkeypatch.setattr(decision_audit_mod, "DecisionAudit", FakeAudit)
+    monkeypatch.setattr(pipeline_mod, "V5Pipeline", FakePipeline)
+
+    with pytest.raises(LoadedCache, match="loaded runtime trend cache") as excinfo:
+        main_mod.main()
+
+    assert excinfo.value.cache_data["symbols"] == ["SHADOW/USDT"]
+    assert excinfo.value.cache_data["regime"]["state"] == "BULL"

@@ -62,7 +62,20 @@ def setup_logging(level: str = "INFO") -> None:
 TREND_CACHE_PATH = Path("reports/trend_cache.json")
 
 
-def save_trend_cache(alpha_snapshot, regime_result, symbols: list, timestamp: float = None) -> None:
+def _resolve_trend_cache_path(order_store_path: str | os.PathLike[str] | None = None) -> Path:
+    if order_store_path is None:
+        return TREND_CACHE_PATH
+    return derive_runtime_named_json_path(str(order_store_path), "trend_cache")
+
+
+def save_trend_cache(
+    alpha_snapshot,
+    regime_result,
+    symbols: list,
+    timestamp: float = None,
+    *,
+    order_store_path: str | os.PathLike[str] | None = None,
+) -> None:
     """淇濆瓨瓒嬪娍璁＄畻缁撴灉鍒扮紦瀛樻枃浠?
 
     鐢ㄤ簬瓒嬪娍鏇存柊绋嬪簭鍦?:57 璁＄畻锛屼氦鏄撶▼搴忓湪 :00 璇诲彇
@@ -88,12 +101,17 @@ def save_trend_cache(alpha_snapshot, regime_result, symbols: list, timestamp: fl
         }
     }
 
-    TREND_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    TREND_CACHE_PATH.write_text(json.dumps(cache_data, indent=2, default=str), encoding="utf-8")
-    logging.getLogger("v5").info(f"[TrendCache] Saved to {TREND_CACHE_PATH}")
+    trend_cache_path = _resolve_trend_cache_path(order_store_path)
+    trend_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    trend_cache_path.write_text(json.dumps(cache_data, indent=2, default=str), encoding="utf-8")
+    logging.getLogger("v5").info(f"[TrendCache] Saved to {trend_cache_path}")
 
 
-def load_trend_cache(max_age_sec: int = 300) -> Optional[dict]:
+def load_trend_cache(
+    max_age_sec: int = 300,
+    *,
+    order_store_path: str | os.PathLike[str] | None = None,
+) -> Optional[dict]:
     """浠庣紦瀛樻枃浠惰鍙栬秼鍔胯绠楃粨鏋?
 
     Args:
@@ -102,11 +120,12 @@ def load_trend_cache(max_age_sec: int = 300) -> Optional[dict]:
     Returns:
         缂撳瓨鏁版嵁鎴朜one锛堝鏋滅紦瀛樹笉瀛樺湪鎴栧凡杩囨湡锛?
     """
-    if not TREND_CACHE_PATH.exists():
+    trend_cache_path = _resolve_trend_cache_path(order_store_path)
+    if not trend_cache_path.exists():
         return None
 
     try:
-        data = json.loads(TREND_CACHE_PATH.read_text(encoding="utf-8"))
+        data = json.loads(trend_cache_path.read_text(encoding="utf-8"))
         cache_time = data.get("timestamp", 0)
         age_sec = time.time() - cache_time
 
@@ -117,7 +136,7 @@ def load_trend_cache(max_age_sec: int = 300) -> Optional[dict]:
             return None
 
         logging.getLogger("v5").info(
-            f"[TrendCache] Loaded from {TREND_CACHE_PATH}, age={age_sec:.0f}s"
+            f"[TrendCache] Loaded from {trend_cache_path}, age={age_sec:.0f}s"
         )
         return data
     except Exception as e:
@@ -550,14 +569,22 @@ def main() -> None:
     # ========== 瓒嬪娍缂撳瓨锛氫繚瀛樻垨璇诲彇 ==========
     is_trend_update_only = str(os.getenv("V5_TREND_UPDATE_ONLY") or "").upper() == "1"
     use_cached_trend = str(os.getenv("V5_USE_CACHED_TREND") or "").upper() == "1"
+    trend_cache_order_store_path = str(
+        getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
+    )
 
     if is_trend_update_only:
-        save_trend_cache(alpha_snap, regime, scored_symbols)
+        save_trend_cache(
+            alpha_snap,
+            regime,
+            scored_symbols,
+            order_store_path=trend_cache_order_store_path,
+        )
         log.info("[TrendUpdate] Trend cache saved, exiting (V5_TREND_UPDATE_ONLY=1)")
         return
 
     if use_cached_trend:
-        cached = load_trend_cache(max_age_sec=300)
+        cached = load_trend_cache(max_age_sec=300, order_store_path=trend_cache_order_store_path)
         if cached:
             log.info("[TrendCache] Using cached trend data")
             alpha_snap = TrendCacheAlphaSnapshot(cached)
