@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,32 @@ def test_build_paths_anchors_reports_to_workspace(tmp_path: Path) -> None:
     assert paths.runs_dir == tmp_path / "reports" / "runs"
     assert paths.orders_db == tmp_path / "reports" / "orders.sqlite"
     assert paths.fills_db == tmp_path / "reports" / "fills.sqlite"
+
+
+def test_build_paths_uses_active_runtime_reports_and_dbs(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    configs_dir = tmp_path / "configs"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    paths = trading_report.build_paths(tmp_path)
+
+    assert paths.workspace == tmp_path.resolve()
+    assert paths.reports_dir == runtime_dir.resolve()
+    assert paths.runs_dir == (runtime_dir / "runs").resolve()
+    assert paths.orders_db == (runtime_dir / "orders.sqlite").resolve()
+    assert paths.fills_db == (runtime_dir / "fills.sqlite").resolve()
 
 
 def test_load_trade_data_prefers_fill_timestamps_over_order_created_ts(tmp_path: Path) -> None:
@@ -207,3 +234,78 @@ def test_generate_daily_report_uses_converted_fee_values(tmp_path: Path) -> None
     generator.generate_daily_report()
 
     assert any("手续费: $-50.2000" in message for message in messages)
+def test_trading_report_uses_active_runtime_runs_and_orders(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_runs = runtime_dir / "runs" / "20260409_010000"
+    root_runs = reports_dir / "runs" / "20260409_020000"
+    configs_dir = tmp_path / "configs"
+    runtime_runs.mkdir(parents=True, exist_ok=True)
+    root_runs.mkdir(parents=True, exist_ok=True)
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    root_orders = reports_dir / "orders.sqlite"
+    runtime_orders = runtime_dir / "orders.sqlite"
+    for db_path, inst_id in ((root_orders, "ROOT-USDT"), (runtime_orders, "BTC-USDT")):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE orders (
+                inst_id TEXT,
+                side TEXT,
+                state TEXT,
+                notional_usdt REAL,
+                fee TEXT,
+                avg_px TEXT,
+                created_ts INTEGER
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO orders(inst_id, side, state, notional_usdt, fee, avg_px, created_ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (inst_id, "buy", "FILLED", 100.0, "-0.1", "50000", int(datetime.now().timestamp() * 1000)),
+        )
+        conn.commit()
+        conn.close()
+
+    (root_runs / "decision_audit.json").write_text(
+        json.dumps({"regime": "RISK_OFF", "regime_multiplier": 0.3}),
+        encoding="utf-8",
+    )
+    (runtime_runs / "decision_audit.json").write_text(
+        json.dumps({"regime": "TRENDING", "regime_multiplier": 1.2}),
+        encoding="utf-8",
+    )
+    (root_runs / "equity.jsonl").write_text(
+        json.dumps({"ts": datetime.now().isoformat(), "equity": 10.0, "cash": 2.0, "positions_value": 8.0}) + "\n",
+        encoding="utf-8",
+    )
+    (runtime_runs / "equity.jsonl").write_text(
+        json.dumps({"ts": datetime.now().isoformat(), "equity": 20.0, "cash": 5.0, "positions_value": 15.0}) + "\n",
+        encoding="utf-8",
+    )
+
+    generator = trading_report.TradingReportGenerator(paths=trading_report.build_paths(tmp_path))
+
+    trades = generator.load_trade_data(days=7)
+    assert [trade["symbol"] for trade in trades] == ["BTC"]
+
+    regimes = generator.load_regime_history(days=7)
+    assert regimes[-1]["regime"] == "TRENDING"
+
+    equity = generator.load_equity_data(days=7)
+    assert equity[-1]["equity"] == 20.0

@@ -4,13 +4,24 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_runtime_reports_dir,
+    derive_runtime_runs_dir,
+)
 
 
 @dataclass(frozen=True)
@@ -24,13 +35,31 @@ class ReportPaths:
 
 def build_paths(workspace: Path | None = None) -> ReportPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    reports_dir = root / "reports"
+    try:
+        cfg = load_runtime_config(project_root=root)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=root,
+            )
+        ).resolve()
+        reports_dir = derive_runtime_reports_dir(orders_db).resolve()
+        runs_dir = derive_runtime_runs_dir(orders_db).resolve()
+        fills_db = derive_fill_store_path(orders_db).resolve()
+    except Exception:
+        reports_dir = (root / "reports").resolve()
+        runs_dir = (reports_dir / "runs").resolve()
+        orders_db = (reports_dir / "orders.sqlite").resolve()
+        fills_db = (reports_dir / "fills.sqlite").resolve()
+
     return ReportPaths(
         workspace=root,
         reports_dir=reports_dir,
-        runs_dir=reports_dir / "runs",
-        orders_db=reports_dir / "orders.sqlite",
-        fills_db=reports_dir / "fills.sqlite",
+        runs_dir=runs_dir,
+        orders_db=orders_db,
+        fills_db=fills_db,
     )
 
 
