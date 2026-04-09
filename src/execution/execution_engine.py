@@ -11,6 +11,7 @@ from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
 from src.execution.position_store import PositionStore
 from src.execution.account_store import AccountStore, AccountState
+from src.execution.fill_store import derive_runtime_cost_events_dir
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,10 @@ class ExecutionEngine:
         self.cfg = cfg
         self.db_path = Path(cfg.slippage_db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.cost_events_dir = derive_runtime_cost_events_dir(
+            str(getattr(cfg, "order_store_path", "reports/orders.sqlite"))
+        ).resolve()
+        self.cost_events_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.position_store = position_store
         self.account_store = account_store
@@ -221,7 +226,7 @@ class ExecutionEngine:
                     "deadband_pct": meta.get("deadband_pct"),
                     "drift": meta.get("drift"),
                 }
-                append_cost_event(event)
+                append_cost_event(event, base_dir=str(self.cost_events_dir))
             except Exception as e:
                 log.warning("Failed to append cost event: %s", e)
 

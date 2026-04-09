@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from configs.schema import ExecutionConfig
@@ -113,3 +115,38 @@ def test_rebalance_sell_caps_to_local_position_for_cash_and_fees(tmp_path) -> No
 
     assert pos_store.get("BTC/USDT") is None
     assert account.cash_usdt == pytest.approx(99.89)
+
+
+def test_execution_engine_writes_cost_events_to_runtime_dir(tmp_path) -> None:
+    trade_log = _TradeLogRecorder()
+    engine, _, _ = _build_engine(
+        tmp_path,
+        cfg_kwargs={
+            "order_store_path": str(tmp_path / "shadow_orders.sqlite"),
+            "fee_bps": 0.0,
+            "slippage_bps": 0.0,
+        },
+        trade_log=trade_log,
+        run_id="shadow-run",
+    )
+
+    engine.execute(
+        [
+            Order(
+                symbol="BTC/USDT",
+                side="buy",
+                intent="OPEN_LONG",
+                notional_usdt=50.0,
+                signal_price=100.0,
+                meta={"window_start_ts": 1700000000, "window_end_ts": 1700003600, "regime": "Trending"},
+            )
+        ]
+    )
+
+    runtime_dir = tmp_path / "shadow_cost_events"
+    files = list(runtime_dir.glob("*.jsonl"))
+    assert len(files) == 1
+    payload = json.loads(files[0].read_text(encoding="utf-8").splitlines()[0])
+    assert payload["run_id"] == "shadow-run"
+    assert payload["symbol"] == "BTC/USDT"
+    assert not (tmp_path / "cost_events").exists()

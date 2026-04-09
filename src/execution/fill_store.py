@@ -92,7 +92,12 @@ def derive_runtime_runs_dir(order_store_path: Union[str, Path]) -> Path:
 
 def derive_runtime_cost_events_dir(order_store_path: Union[str, Path]) -> Path:
     """Derive the matching cost_events directory from the effective orders DB path."""
-    return derive_runtime_reports_dir(order_store_path) / "cost_events"
+    path = Path(order_store_path)
+    if path.name == "orders.sqlite":
+        return path.parent / "cost_events"
+    if "orders" in path.stem:
+        return path.with_name(path.stem.replace("orders", "cost_events", 1))
+    return path.parent / "cost_events"
 
 
 def derive_runtime_spread_snapshots_dir(order_store_path: Union[str, Path]) -> Path:

@@ -7,6 +7,7 @@ from src.execution.fill_store import (
     FillRow,
     FillStore,
     derive_fill_store_path,
+    derive_runtime_cost_events_dir,
     derive_runtime_named_artifact_path,
     derive_position_store_path,
     parse_okx_fills,
@@ -81,3 +82,12 @@ def test_derive_runtime_named_artifact_path_tracks_custom_order_store_names() ->
         "ml_overlay_impact",
         ".json",
     ) == Path("reports/shadow_tuned_xgboost/ml_overlay_impact.json")
+
+
+def test_derive_runtime_cost_events_dir_tracks_custom_order_store_names() -> None:
+    assert derive_runtime_cost_events_dir("reports/orders.sqlite") == Path("reports/cost_events")
+    assert derive_runtime_cost_events_dir("reports/shadow_orders.sqlite") == Path("reports/shadow_cost_events")
+    assert derive_runtime_cost_events_dir("reports/orders_accelerated.sqlite") == Path("reports/cost_events_accelerated")
+    assert derive_runtime_cost_events_dir("reports/shadow_tuned_xgboost/orders.sqlite") == Path(
+        "reports/shadow_tuned_xgboost/cost_events"
+    )
