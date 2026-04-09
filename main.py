@@ -68,6 +68,20 @@ def _resolve_trend_cache_path(order_store_path: str | os.PathLike[str] | None = 
     return derive_runtime_named_json_path(str(order_store_path), "trend_cache")
 
 
+def _resolve_order_state_machine_path(cfg) -> Path:
+    order_store_path = str(
+        getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
+        or "reports/orders.sqlite"
+    )
+    raw_path = str(
+        getattr(getattr(cfg, "execution", None), "order_state_machine_path", "reports/order_state_machine.json")
+        or ""
+    ).strip()
+    if not raw_path or raw_path == "reports/order_state_machine.json":
+        return derive_runtime_named_json_path(order_store_path, "order_state_machine")
+    return Path(raw_path)
+
+
 def save_trend_cache(
     alpha_snapshot,
     regime_result,
@@ -851,7 +865,7 @@ def main() -> None:
         from src.execution.order_arbitrator import arbitrate_orders
 
         orders_before = len(orders or [])
-        sm_path = str(getattr(cfg.execution, "order_state_machine_path", "reports/order_state_machine.json") or "reports/order_state_machine.json")
+        sm_path = str(_resolve_order_state_machine_path(cfg))
         cooldown_min = int(_coalesce(getattr(cfg.execution, "open_long_cooldown_minutes", None), 10))
         orders, arb_decisions = arbitrate_orders(
             orders=(orders or []),
