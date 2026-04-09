@@ -10,10 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_reports_dir, derive_runtime_runs_dir
 
 
 @dataclass(frozen=True)
@@ -33,15 +35,43 @@ def resolve_workspace() -> Path:
     return PROJECT_ROOT
 
 
-def build_paths(workspace: str | Path | None = None) -> PromotionPaths:
+def build_paths(workspace: str | Path | None = None, raw_config_path: str | None = None) -> PromotionPaths:
     root = Path(workspace).expanduser().resolve() if workspace is not None else resolve_workspace()
+    cfg = load_runtime_config(raw_config_path, project_root=root)
+    execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+    alpha_cfg = cfg.get("alpha") if isinstance(cfg.get("alpha"), dict) else {}
+    ml_cfg = alpha_cfg.get("ml_factor") if isinstance(alpha_cfg.get("ml_factor"), dict) else {}
+    order_store_path = resolve_runtime_path(
+        execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+        default="reports/orders.sqlite",
+        project_root=root,
+    )
+    reports_dir = derive_runtime_reports_dir(order_store_path).resolve()
     return PromotionPaths(
         workspace=root,
-        history_path=(root / "reports" / "ml_training_history.json").resolve(),
-        decision_path=(root / "reports" / "model_promotion_decision.json").resolve(),
-        active_pointer_path=(root / "models" / "ml_factor_model_active.txt").resolve(),
-        model_path=(root / "models" / "ml_factor_model").resolve(),
-        runs_dir=(root / "reports" / "runs").resolve(),
+        history_path=(reports_dir / "ml_training_history.json").resolve(),
+        decision_path=Path(
+            resolve_runtime_path(
+                ml_cfg.get("promotion_decision_path") if isinstance(ml_cfg, dict) else None,
+                default="reports/model_promotion_decision.json",
+                project_root=root,
+            )
+        ).resolve(),
+        active_pointer_path=Path(
+            resolve_runtime_path(
+                ml_cfg.get("active_model_pointer_path") if isinstance(ml_cfg, dict) else None,
+                default="models/ml_factor_model_active.txt",
+                project_root=root,
+            )
+        ).resolve(),
+        model_path=Path(
+            resolve_runtime_path(
+                ml_cfg.get("model_path") if isinstance(ml_cfg, dict) else None,
+                default="models/ml_factor_model",
+                project_root=root,
+            )
+        ).resolve(),
+        runs_dir=derive_runtime_runs_dir(order_store_path).resolve(),
     )
 
 
