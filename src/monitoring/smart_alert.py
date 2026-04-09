@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
-from src.execution.fill_store import derive_fill_store_path
+from src.execution.fill_store import derive_fill_store_path, derive_runtime_named_json_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -41,6 +41,26 @@ def _load_active_config(*, workspace: Path) -> dict[str, Any]:
     return {}
 
 
+def _resolve_runtime_state_path(
+    raw_path: object,
+    *,
+    workspace: Path,
+    orders_db: Path,
+    base_name: str,
+    legacy_default: str,
+) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw or raw == legacy_default:
+        return derive_runtime_named_json_path(orders_db, base_name).resolve()
+    return Path(
+        resolve_runtime_path(
+            raw,
+            default=legacy_default,
+            project_root=workspace,
+        )
+    ).resolve()
+
+
 def _resolve_paths(*, workspace: Path) -> SmartAlertPaths:
     cfg = _load_active_config(workspace=workspace)
     execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
@@ -58,19 +78,19 @@ def _resolve_paths(*, workspace: Path) -> SmartAlertPaths:
         fills_db=derive_fill_store_path(orders_db),
         orders_db=orders_db,
         alerts_state_file=reports_dir / "alerts_state.json",
-        reconcile_file=Path(
-            resolve_runtime_path(
-                execution_cfg.get("reconcile_status_path"),
-                default="reports/reconcile_status.json",
-                project_root=workspace,
-            )
+        reconcile_file=_resolve_runtime_state_path(
+            execution_cfg.get("reconcile_status_path"),
+            workspace=workspace,
+            orders_db=orders_db,
+            base_name="reconcile_status",
+            legacy_default="reports/reconcile_status.json",
         ),
-        kill_switch_file=Path(
-            resolve_runtime_path(
-                execution_cfg.get("kill_switch_path"),
-                default="reports/kill_switch.json",
-                project_root=workspace,
-            )
+        kill_switch_file=_resolve_runtime_state_path(
+            execution_cfg.get("kill_switch_path"),
+            workspace=workspace,
+            orders_db=orders_db,
+            base_name="kill_switch",
+            legacy_default="reports/kill_switch.json",
         ),
         ic_file=reports_dir / "ic_diagnostics_30d_20u.json",
     )

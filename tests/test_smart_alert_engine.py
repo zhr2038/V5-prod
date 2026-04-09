@@ -286,3 +286,38 @@ def test_check_no_buy_in_market_uses_active_config_runtime_runs_and_orders(tmp_p
     engine = SmartAlertEngine(workspace=tmp_path)
 
     assert engine.check_no_buy_in_market() is None
+
+
+def test_engine_uses_runtime_default_state_files_when_only_order_store_path_is_configured(tmp_path: Path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    shadow_dir = tmp_path / "reports" / "shadow_runtime"
+    shadow_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "execution:\n  order_store_path: reports/shadow_runtime/orders.sqlite\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "reports").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "reports" / "kill_switch.json").write_text(
+        json.dumps({"enabled": True}),
+        encoding="utf-8",
+    )
+    (tmp_path / "reports" / "reconcile_status.json").write_text(
+        json.dumps({"ok": False, "local_snapshot": {"drawdown_pct": 0.25}}),
+        encoding="utf-8",
+    )
+    (shadow_dir / "kill_switch.json").write_text(
+        json.dumps({"enabled": False}),
+        encoding="utf-8",
+    )
+    (shadow_dir / "reconcile_status.json").write_text(
+        json.dumps({"ok": True, "local_snapshot": {"drawdown_pct": 0.01}}),
+        encoding="utf-8",
+    )
+
+    engine = SmartAlertEngine(workspace=tmp_path)
+
+    assert engine.paths.kill_switch_file == shadow_dir / "kill_switch.json"
+    assert engine.paths.reconcile_file == shadow_dir / "reconcile_status.json"
+    assert engine.check_kill_switch() is None
+    assert engine.check_drawdown() is None
