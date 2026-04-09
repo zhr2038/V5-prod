@@ -402,6 +402,7 @@ def main() -> None:
     runtime_reports_dir = runtime_paths["reports_dir"]
     runtime_run_dir = runtime_paths["run_dir"]
     runtime_spread_snapshots_dir = runtime_paths["spread_snapshots_dir"]
+    runtime_budget_state_dir = runtime_reports_dir / "budget_state"
     runtime_reports_dir.mkdir(parents=True, exist_ok=True)
 
     # 鍒涘缓DecisionAudit锛堥渶瑕佸厛瀹氫箟run_id锛?
@@ -590,7 +591,7 @@ def main() -> None:
         ts_for_day = window_end_ts or window_start_ts
         if ts_for_day is not None:
             ymd = _utc_yyyymmdd_from_epoch_sec(int(ts_for_day))
-            st = load_budget_state(f"reports/budget_state/{ymd}.json")
+            st = load_budget_state(str(runtime_budget_state_dir / f"{ymd}.json"))
             if st is not None:
                 audit.budget = {
                     "ymd_utc": ymd,
@@ -1133,6 +1134,7 @@ def main() -> None:
 
             ymd = derive_ymd_utc_from_summary(summ)
             st = update_daily_budget_state(
+                base_dir=str(runtime_budget_state_dir),
                 ymd_utc=ymd,
                 run_id=run_id,
                 turnover_inc=turnover_inc,
