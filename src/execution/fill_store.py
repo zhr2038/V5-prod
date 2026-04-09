@@ -51,6 +51,28 @@ def derive_runtime_reports_dir(order_store_path: Union[str, Path]) -> Path:
     return Path(order_store_path).parent
 
 
+def derive_runtime_named_artifact_path(
+    order_store_path: Union[str, Path],
+    base_name: str,
+    suffix: str = ".json",
+) -> Path:
+    """Derive a runtime-scoped artifact path from the effective orders DB path.
+
+    Examples:
+    - reports/orders.sqlite -> reports/<base_name><suffix>
+    - reports/shadow_orders.sqlite -> reports/shadow_<base_name><suffix>
+    - reports/orders_accelerated.sqlite -> reports/<base_name>_accelerated<suffix>
+    - reports/shadow_tuned_xgboost/orders.sqlite -> reports/shadow_tuned_xgboost/<base_name><suffix>
+    """
+    path = Path(order_store_path)
+    ext = suffix if str(suffix).startswith(".") or not suffix else f".{suffix}"
+    if path.name == "orders.sqlite":
+        return path.with_name(f"{base_name}{ext}")
+    if "orders" in path.stem:
+        return path.with_name(path.stem.replace("orders", base_name, 1) + ext)
+    return path.with_name(f"{base_name}{ext}")
+
+
 def derive_runtime_named_json_path(order_store_path: Union[str, Path], base_name: str) -> Path:
     """Derive a runtime-scoped JSON artifact path from the effective orders DB path.
 
@@ -60,12 +82,7 @@ def derive_runtime_named_json_path(order_store_path: Union[str, Path], base_name
     - reports/orders_accelerated.sqlite -> reports/<base_name>_accelerated.json
     - reports/shadow_tuned_xgboost/orders.sqlite -> reports/shadow_tuned_xgboost/<base_name>.json
     """
-    path = Path(order_store_path)
-    if path.name == "orders.sqlite":
-        return path.with_name(f"{base_name}.json")
-    if "orders" in path.stem:
-        return path.with_name(path.stem.replace("orders", base_name, 1) + ".json")
-    return path.with_name(f"{base_name}.json")
+    return derive_runtime_named_artifact_path(order_store_path, base_name, ".json")
 
 
 def derive_runtime_runs_dir(order_store_path: Union[str, Path]) -> Path:

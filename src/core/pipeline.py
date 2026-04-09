@@ -62,7 +62,7 @@ from configs.schema import AppConfig
 from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.execution.position_store import Position
-from src.execution.fill_store import derive_runtime_auto_risk_guard_path
+from src.execution.fill_store import derive_runtime_auto_risk_guard_path, derive_runtime_named_artifact_path
 from src.execution.position_builder import PositionBuilder  # Phase 2: 分批建仓
 from src.execution.multi_level_stop_loss import MultiLevelStopLoss, StopLossConfig  # Phase 2: 动态止损
 from src.portfolio.portfolio_engine import PortfolioEngine, PortfolioSnapshot
@@ -653,8 +653,20 @@ class V5Pipeline:
 
     def _resolve_ml_impact_path(self, attr_name: str, default_name: str) -> Path:
         ml_cfg = getattr(self.cfg.alpha, "ml_factor", None)
-        raw_path = getattr(ml_cfg, attr_name, default_name) if ml_cfg is not None else default_name
-        path = Path(str(raw_path or default_name))
+        raw_path = getattr(ml_cfg, attr_name, None) if ml_cfg is not None else None
+        raw = str(raw_path or "").strip()
+        if not raw or raw == default_name:
+            order_store_path = Path(
+                str(getattr(self.cfg.execution, "order_store_path", "reports/orders.sqlite"))
+            )
+            if not order_store_path.is_absolute():
+                order_store_path = (REPORTS_DIR.parent / order_store_path).resolve()
+            name = Path(default_name).name
+            suffix = ".jsonl" if name.endswith(".jsonl") else Path(name).suffix
+            base_name = name[: -len(suffix)] if suffix else name
+            return derive_runtime_named_artifact_path(order_store_path, base_name, suffix).resolve()
+
+        path = Path(raw)
         if not path.is_absolute():
             path = (REPORTS_DIR.parent / path).resolve()
         return path

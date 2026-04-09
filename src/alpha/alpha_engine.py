@@ -12,11 +12,13 @@ import json
 import numpy as np
 import pandas as pd
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from src.core.models import MarketSeries
 from src.utils.math import safe_pct_change, zscore_cross_section
 from configs.schema import AlphaConfig
 from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
 from src.alpha.qlib_factors import compute_alpha158_style_factors
+from src.execution.fill_store import derive_runtime_named_artifact_path
 
 # 多策略集成
 try:
@@ -523,6 +525,37 @@ class AlphaEngine:
             path = self.repo_root / path
         return path
 
+    def _runtime_project_root(self) -> Path:
+        raw = str(os.getenv("V5_WORKSPACE") or "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return self.repo_root
+
+    def _resolve_runtime_order_store_path(self) -> Path:
+        root = self._runtime_project_root()
+        cfg = load_runtime_config(project_root=root)
+        execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+        return Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=root,
+            )
+        ).resolve()
+
+    def _resolve_ml_report_path(self, raw_path: Optional[str], legacy_default: str) -> Path:
+        raw = str(raw_path or "").strip()
+        if not raw or raw == legacy_default:
+            name = Path(legacy_default).name
+            suffix = ".jsonl" if name.endswith(".jsonl") else Path(name).suffix
+            base_name = name[: -len(suffix)] if suffix else name
+            return derive_runtime_named_artifact_path(
+                self._resolve_runtime_order_store_path(),
+                base_name,
+                suffix,
+            ).resolve()
+        return self._resolve_repo_path(raw, legacy_default)
+
     @staticmethod
     def _normalize_ml_base_path(path: Path) -> Path:
         p = Path(path)
@@ -558,8 +591,8 @@ class AlphaEngine:
         if ml_cfg is None or not bool(getattr(ml_cfg, "enabled", False)):
             return
         try:
-            status_path = self._resolve_repo_path(
-                getattr(ml_cfg, "runtime_status_path", "reports/ml_runtime_status.json"),
+            status_path = self._resolve_ml_report_path(
+                getattr(ml_cfg, "runtime_status_path", None),
                 "reports/ml_runtime_status.json",
             )
             status_path.parent.mkdir(parents=True, exist_ok=True)
@@ -628,8 +661,8 @@ class AlphaEngine:
 
     def _resolve_ml_impact_path(self, attr_name: str, default_name: str) -> Path:
         ml_cfg = getattr(self.cfg, "ml_factor", None)
-        raw_path = getattr(ml_cfg, attr_name, default_name) if ml_cfg is not None else default_name
-        return self._resolve_repo_path(raw_path, default_name)
+        raw_path = getattr(ml_cfg, attr_name, None) if ml_cfg is not None else None
+        return self._resolve_ml_report_path(raw_path, default_name)
 
     def _summarize_ml_impact_rows(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         delta_vals = [
@@ -824,8 +857,8 @@ class AlphaEngine:
             getattr(ml_cfg, "active_model_pointer_path", "models/ml_factor_model_active.txt"),
             "models/ml_factor_model_active.txt",
         )
-        decision_path = self._resolve_repo_path(
-            getattr(ml_cfg, "promotion_decision_path", "reports/model_promotion_decision.json"),
+        decision_path = self._resolve_ml_report_path(
+            getattr(ml_cfg, "promotion_decision_path", None),
             "reports/model_promotion_decision.json",
         )
         model_base_path = self._normalize_ml_base_path(

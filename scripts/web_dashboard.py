@@ -35,6 +35,7 @@ from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
     derive_runtime_auto_risk_eval_path,
+    derive_runtime_named_artifact_path,
     derive_runtime_auto_risk_guard_path,
     derive_runtime_reports_dir,
     derive_runtime_runs_dir,
@@ -126,6 +127,20 @@ def _resolve_workspace_relative_path(raw_path: object, default: str) -> Path:
         else:
             path = WORKSPACE / path
     return path.resolve()
+
+
+def _resolve_dashboard_runtime_artifact_path(
+    orders_db: Path,
+    raw_path: object,
+    legacy_default: str,
+) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw or raw == legacy_default:
+        name = Path(legacy_default).name
+        suffix = ".jsonl" if name.endswith(".jsonl") else Path(name).suffix
+        base_name = name[: -len(suffix)] if suffix else name
+        return derive_runtime_named_artifact_path(orders_db, base_name, suffix).resolve()
+    return _resolve_workspace_relative_path(raw, legacy_default)
 
 app = Flask(
     __name__,
@@ -510,10 +525,32 @@ def _build_ml_signal_overview(
     preferred_symbols: Optional[List[str]] = None,
     limit: int = 3,
 ) -> Dict[str, Any]:
-    runtime = _load_json_payload(reports_dir / 'ml_runtime_status.json')
-    promotion = _load_json_payload(reports_dir / 'model_promotion_decision.json')
+    config = load_config()
+    runtime_paths = _resolve_dashboard_runtime_paths(config)
+    alpha_cfg = config.get('alpha', {}) if isinstance(config, dict) else {}
+    ml_cfg = alpha_cfg.get('ml_factor', {}) if isinstance(alpha_cfg, dict) else {}
+    runtime = _load_json_payload(
+        _resolve_dashboard_runtime_artifact_path(
+            runtime_paths.orders_db,
+            ml_cfg.get('runtime_status_path') if isinstance(ml_cfg, dict) else None,
+            'reports/ml_runtime_status.json',
+        )
+    )
+    promotion = _load_json_payload(
+        _resolve_dashboard_runtime_artifact_path(
+            runtime_paths.orders_db,
+            ml_cfg.get('promotion_decision_path') if isinstance(ml_cfg, dict) else None,
+            'reports/model_promotion_decision.json',
+        )
+    )
     snapshot = _load_json_payload(reports_dir / 'alpha_snapshot.json')
-    impact_summary = _load_json_payload(reports_dir / 'ml_overlay_impact.json')
+    impact_summary = _load_json_payload(
+        _resolve_dashboard_runtime_artifact_path(
+            runtime_paths.orders_db,
+            ml_cfg.get('impact_summary_path') if isinstance(ml_cfg, dict) else None,
+            'reports/ml_overlay_impact.json',
+        )
+    )
 
     raw_factors = snapshot.get('raw_factors', {})
     z_factors = snapshot.get('z_factors', {})
@@ -3790,7 +3827,9 @@ def _api_ml_training_v2():
         existing = [p for p in _model_artifact_candidates(base_path) if p.exists()]
         return max(existing, key=lambda p: p.stat().st_mtime) if existing else None
 
-    runtime_reports_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir
+    config = load_config()
+    runtime_paths = _resolve_dashboard_runtime_paths(config)
+    runtime_reports_dir = runtime_paths.reports_dir
     configured_enabled = False
     min_samples = 200
     model_base_path = WORKSPACE / 'models' / 'ml_factor_model'
@@ -3809,12 +3848,14 @@ def _api_ml_training_v2():
                 getattr(ml_cfg, 'active_model_pointer_path', 'models/ml_factor_model_active.txt'),
                 'models/ml_factor_model_active.txt',
             )
-            promotion_path = _resolve_workspace_path(
-                getattr(ml_cfg, 'promotion_decision_path', 'reports/model_promotion_decision.json'),
+            promotion_path = _resolve_dashboard_runtime_artifact_path(
+                runtime_paths.orders_db,
+                getattr(ml_cfg, 'promotion_decision_path', None),
                 'reports/model_promotion_decision.json',
             )
-            runtime_path = _resolve_workspace_path(
-                getattr(ml_cfg, 'runtime_status_path', 'reports/ml_runtime_status.json'),
+            runtime_path = _resolve_dashboard_runtime_artifact_path(
+                runtime_paths.orders_db,
+                getattr(ml_cfg, 'runtime_status_path', None),
                 'reports/ml_runtime_status.json',
             )
     except Exception:

@@ -7,6 +7,7 @@ from src.execution.fill_store import (
     FillRow,
     FillStore,
     derive_fill_store_path,
+    derive_runtime_named_artifact_path,
     derive_position_store_path,
     parse_okx_fills,
 )
@@ -61,3 +62,22 @@ def test_derive_position_store_path_tracks_custom_order_store_names() -> None:
     assert derive_position_store_path("reports/shadow_orders.sqlite") == Path("reports/shadow_positions.sqlite")
     assert derive_position_store_path("reports/orders_accelerated.sqlite") == Path("reports/positions_accelerated.sqlite")
     assert derive_position_store_path("reports/shadow_tuned_xgboost/orders.sqlite") == Path("reports/shadow_tuned_xgboost/positions.sqlite")
+
+
+def test_derive_runtime_named_artifact_path_tracks_custom_order_store_names() -> None:
+    assert derive_runtime_named_artifact_path("reports/orders.sqlite", "model_promotion_decision", ".json") == Path(
+        "reports/model_promotion_decision.json"
+    )
+    assert derive_runtime_named_artifact_path("reports/shadow_orders.sqlite", "ml_runtime_status", ".json") == Path(
+        "reports/shadow_ml_runtime_status.json"
+    )
+    assert derive_runtime_named_artifact_path(
+        "reports/orders_accelerated.sqlite",
+        "ml_overlay_impact_history",
+        ".jsonl",
+    ) == Path("reports/ml_overlay_impact_history_accelerated.jsonl")
+    assert derive_runtime_named_artifact_path(
+        "reports/shadow_tuned_xgboost/orders.sqlite",
+        "ml_overlay_impact",
+        ".json",
+    ) == Path("reports/shadow_tuned_xgboost/ml_overlay_impact.json")

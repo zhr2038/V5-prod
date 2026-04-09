@@ -15,7 +15,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
-from src.execution.fill_store import derive_runtime_reports_dir, derive_runtime_runs_dir
+from src.execution.fill_store import (
+    derive_runtime_named_artifact_path,
+    derive_runtime_reports_dir,
+    derive_runtime_runs_dir,
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,22 @@ def resolve_workspace() -> Path:
     return PROJECT_ROOT
 
 
+def _resolve_runtime_ml_artifact_path(
+    *,
+    root: Path,
+    order_store_path: str | Path,
+    raw_path: object,
+    legacy_default: str,
+) -> Path:
+    text = str(raw_path or "").strip()
+    if not text or text == legacy_default:
+        name = Path(legacy_default).name
+        suffix = ".jsonl" if name.endswith(".jsonl") else Path(name).suffix
+        base_name = name[: -len(suffix)] if suffix else name
+        return derive_runtime_named_artifact_path(order_store_path, base_name, suffix).resolve()
+    return Path(resolve_runtime_path(text, default=legacy_default, project_root=root)).resolve()
+
+
 def build_paths(workspace: str | Path | None = None, raw_config_path: str | None = None) -> PromotionPaths:
     root = Path(workspace).expanduser().resolve() if workspace is not None else resolve_workspace()
     cfg = load_runtime_config(raw_config_path, project_root=root)
@@ -50,13 +70,12 @@ def build_paths(workspace: str | Path | None = None, raw_config_path: str | None
     return PromotionPaths(
         workspace=root,
         history_path=(reports_dir / "ml_training_history.json").resolve(),
-        decision_path=Path(
-            resolve_runtime_path(
-                ml_cfg.get("promotion_decision_path") if isinstance(ml_cfg, dict) else None,
-                default="reports/model_promotion_decision.json",
-                project_root=root,
-            )
-        ).resolve(),
+        decision_path=_resolve_runtime_ml_artifact_path(
+            root=root,
+            order_store_path=order_store_path,
+            raw_path=ml_cfg.get("promotion_decision_path") if isinstance(ml_cfg, dict) else None,
+            legacy_default="reports/model_promotion_decision.json",
+        ),
         active_pointer_path=Path(
             resolve_runtime_path(
                 ml_cfg.get("active_model_pointer_path") if isinstance(ml_cfg, dict) else None,

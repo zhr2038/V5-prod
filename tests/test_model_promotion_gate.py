@@ -253,3 +253,49 @@ def test_model_promotion_gate_main_uses_runtime_history_and_configured_outputs(t
     assert decision["selected_model_path"] == str((workspace / "models" / "ml_factor_model_gpu_tuned").resolve())
     assert pointer_path.read_text(encoding="utf-8") == str((workspace / "models" / "ml_factor_model_gpu_tuned").resolve())
     assert not (workspace / "reports" / "model_promotion_decision.json").exists()
+
+
+def test_model_promotion_gate_main_uses_runtime_default_decision_path(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    elsewhere = tmp_path / "elsewhere"
+    config_path = workspace / "configs" / "shadow.yaml"
+    elsewhere.mkdir(parents=True, exist_ok=True)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    (workspace / "models").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("V5_WORKSPACE", str(workspace))
+    monkeypatch.setenv("V5_CONFIG", str(config_path))
+    monkeypatch.chdir(elsewhere)
+
+    config_path.write_text(
+        "execution:\n  order_store_path: reports/shadow_runtime/orders.sqlite\n",
+        encoding="utf-8",
+    )
+    runtime_reports = workspace / "reports" / "shadow_runtime"
+    runtime_reports.mkdir(parents=True, exist_ok=True)
+    (runtime_reports / "ml_training_history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "run_id": "r-shadow-default",
+                    "valid_ic": 0.12,
+                    "cv_mean_ic": 0.12,
+                    "cv_std_ic": 0.01,
+                    "train_ic": 0.15,
+                    "grouped_holdout": {"unique_groups": 10},
+                    "config": {
+                        "model_type": "ridge",
+                        "target_mode": "raw",
+                        "include_time_features": False,
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "models" / "ml_factor_model.pkl").write_bytes(b"model")
+
+    rc = model_promotion_gate.main()
+
+    assert rc == 0
+    assert (runtime_reports / "model_promotion_decision.json").exists()
+    assert not (workspace / "reports" / "model_promotion_decision.json").exists()

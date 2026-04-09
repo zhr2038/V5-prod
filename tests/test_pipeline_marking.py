@@ -669,6 +669,63 @@ def test_pipeline_ml_impact_uses_attribution_scores_in_shadow_mode(tmp_path, mon
     assert audit.ml_signal_overview["top_promoted"][0]["symbol"] == "BBB/USDT"
 
 
+def test_pipeline_ml_impact_uses_runtime_default_paths_from_order_store(tmp_path, monkeypatch):
+    reports_dir = tmp_path / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(pipeline_module, "REPORTS_DIR", reports_dir)
+
+    cfg = AppConfig(symbols=["AAA/USDT", "BBB/USDT", "CCC/USDT"])
+    cfg.execution.order_store_path = "reports/shadow_runtime/orders.sqlite"
+    cfg.alpha.ml_factor.enabled = True
+    pipe = V5Pipeline(cfg, clock=FixedClock(datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)))
+
+    md1 = {
+        "AAA/USDT": MarketSeries(symbol="AAA/USDT", timeframe="1h", ts=[0], open=[10.0], high=[10.0], low=[10.0], close=[10.0], volume=[1.0]),
+        "BBB/USDT": MarketSeries(symbol="BBB/USDT", timeframe="1h", ts=[0], open=[20.0], high=[20.0], low=[20.0], close=[20.0], volume=[1.0]),
+        "CCC/USDT": MarketSeries(symbol="CCC/USDT", timeframe="1h", ts=[0], open=[30.0], high=[30.0], low=[30.0], close=[30.0], volume=[1.0]),
+    }
+    alpha1 = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"AAA/USDT": 0.7, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        raw_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        telemetry_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        base_scores={"AAA/USDT": 0.65, "BBB/USDT": 0.55, "CCC/USDT": 0.1},
+        base_raw_scores={"AAA/USDT": 0.65, "BBB/USDT": 0.55, "CCC/USDT": 0.1},
+        ml_attribution_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.6, "CCC/USDT": 0.1},
+        ml_overlay_scores={"AAA/USDT": 0.2, "BBB/USDT": 0.9},
+        ml_overlay_raw_scores={"AAA/USDT": 0.3, "BBB/USDT": 1.2},
+        ml_runtime={"configured_enabled": True, "promotion_passed": True, "used_in_latest_snapshot": True},
+    )
+    pipe._update_ml_impact_monitor(alpha1, md1, snapshot_ts_ms=1_700_000_000_000)
+
+    md2 = {
+        "AAA/USDT": MarketSeries(symbol="AAA/USDT", timeframe="1h", ts=[0], open=[10.4], high=[10.4], low=[10.4], close=[10.4], volume=[1.0]),
+        "BBB/USDT": MarketSeries(symbol="BBB/USDT", timeframe="1h", ts=[0], open=[20.8], high=[20.8], low=[20.8], close=[20.8], volume=[1.0]),
+        "CCC/USDT": MarketSeries(symbol="CCC/USDT", timeframe="1h", ts=[0], open=[29.7], high=[29.7], low=[29.7], close=[29.7], volume=[1.0]),
+    }
+    alpha2 = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"BBB/USDT": 0.8, "AAA/USDT": 0.6, "CCC/USDT": 0.1},
+        raw_scores={"BBB/USDT": 0.8, "AAA/USDT": 0.6, "CCC/USDT": 0.1},
+        telemetry_scores={"BBB/USDT": 0.8, "AAA/USDT": 0.6, "CCC/USDT": 0.1},
+        base_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.55, "CCC/USDT": 0.1},
+        base_raw_scores={"AAA/USDT": 0.7, "BBB/USDT": 0.55, "CCC/USDT": 0.1},
+        ml_attribution_scores={"BBB/USDT": 0.8, "AAA/USDT": 0.6, "CCC/USDT": 0.1},
+        ml_overlay_scores={"AAA/USDT": 0.25, "BBB/USDT": 1.1},
+        ml_overlay_raw_scores={"AAA/USDT": 0.4, "BBB/USDT": 1.8},
+        ml_runtime={"configured_enabled": True, "promotion_passed": True, "used_in_latest_snapshot": True},
+    )
+    pipe._update_ml_impact_monitor(alpha2, md2, snapshot_ts_ms=1_700_003_600_000)
+
+    assert (runtime_dir / "ml_overlay_impact.json").exists()
+    assert (runtime_dir / "ml_overlay_impact_history.jsonl").exists()
+    assert (runtime_dir / "ml_overlay_impact_state.json").exists()
+    assert not (reports_dir / "ml_overlay_impact.json").exists()
+
+
 def test_pipeline_buy_sizing_respects_target_gap_when_target_gross_is_below_one():
     t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
     cfg = AppConfig(symbols=["AAA/USDT", "BBB/USDT"])

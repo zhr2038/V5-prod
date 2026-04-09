@@ -606,3 +606,93 @@ def test_alpha_engine_ml_overlay_rejects_string_false_promotion_pass(tmp_path, m
     assert runtime["promotion_fail_reasons"] == ["gate_failed"]
     assert runtime["model_path"] == str(promoted_model)
     assert snapshot.ml_overlay_scores == {}
+
+
+def test_alpha_engine_ml_overlay_uses_runtime_default_promotion_and_runtime_paths(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    models_dir = workspace / "models"
+    config_path = workspace / "configs" / "shadow.yaml"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    models_dir.mkdir(parents=True, exist_ok=True)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        "execution:\n  order_store_path: reports/shadow_runtime/orders.sqlite\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("V5_WORKSPACE", str(workspace))
+    monkeypatch.setenv("V5_CONFIG", str(config_path))
+
+    model_base = models_dir / "ml_factor_model"
+    model_base.with_suffix(".pkl").write_bytes(b"test")
+    (models_dir / "ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+
+    pointer_path = models_dir / "ml_factor_model_active.txt"
+    pointer_path.write_text("models/ml_factor_model", encoding="utf-8")
+
+    (reports_dir / "model_promotion_decision.json").write_text(
+        json.dumps({"passed": False, "fail_reasons": ["root"], "ts": "2026-03-10T00:40:00Z"}),
+        encoding="utf-8",
+    )
+    (runtime_dir / "model_promotion_decision.json").write_text(
+        json.dumps({"passed": True, "fail_reasons": [], "ts": "2026-03-10T12:40:00Z"}),
+        encoding="utf-8",
+    )
+
+    feature_cols = [
+        "returns_24h",
+        "momentum_5d",
+        "momentum_20d",
+        "volatility_24h",
+        "volatility_ratio",
+        "volume_ratio",
+        "obv",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "bb_position",
+        "price_position",
+    ]
+
+    def _fake_load_model(self, path: str) -> None:
+        self.feature_names = list(feature_cols)
+        self.is_trained = True
+
+    def _fake_predict_batch(self, features_df: pd.DataFrame) -> pd.Series:
+        return pd.Series(range(1, len(features_df) + 1), index=features_df.index, dtype=float)
+
+    monkeypatch.setattr("src.execution.ml_factor_model.MLFactorModel.load_model", _fake_load_model)
+    monkeypatch.setattr("src.execution.ml_factor_model.MLFactorModel.predict_batch", _fake_predict_batch)
+
+    engine = AlphaEngine(
+        AlphaConfig(
+            ml_factor=MLFactorLiveConfig(
+                enabled=True,
+                ml_weight=0.20,
+                require_promotion_passed=True,
+                model_path=str(model_base),
+                active_model_pointer_path=str(pointer_path),
+                min_symbols=3,
+            )
+        )
+    )
+    engine.use_multi_strategy = True
+    engine.multi_strategy_adapter = object()
+    engine._compute_multi_strategy_scores = lambda _: {"AAA/USDT": 0.40}
+
+    market_data = {
+        "AAA/USDT": _build_market_series("AAA/USDT", 10.0, 0.05),
+        "BBB/USDT": _build_market_series("BBB/USDT", 20.0, 0.03),
+        "CCC/USDT": _build_market_series("CCC/USDT", 30.0, 0.01),
+    }
+
+    snapshot = engine.compute_snapshot(market_data)
+
+    runtime_status_path = runtime_dir / "ml_runtime_status.json"
+    assert runtime_status_path.exists()
+    runtime = json.loads(runtime_status_path.read_text(encoding="utf-8"))
+    assert runtime["latest_decision_passed"] is True
+    assert runtime["promotion_passed"] is True
+    assert runtime["promotion_source"] == "latest_decision"
+    assert not (reports_dir / "ml_runtime_status.json").exists()
