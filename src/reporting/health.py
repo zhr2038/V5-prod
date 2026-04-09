@@ -16,6 +16,7 @@ from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
     derive_runtime_auto_risk_eval_path,
+    derive_runtime_named_json_path,
 )
 
 health_bp = Blueprint("health", __name__)
@@ -82,6 +83,19 @@ def _resolve_runtime_path(raw_path: object, default_rel_path: str) -> Path:
     return path.resolve()
 
 
+def _resolve_runtime_state_path(
+    raw_path: object,
+    *,
+    orders_db: Path,
+    base_name: str,
+    legacy_default: str,
+) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw or raw == legacy_default:
+        return derive_runtime_named_json_path(orders_db, base_name).resolve()
+    return _resolve_runtime_path(raw, legacy_default)
+
+
 def _resolve_health_paths() -> HealthPaths:
     cfg = _load_active_config()
     execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
@@ -90,8 +104,18 @@ def _resolve_health_paths() -> HealthPaths:
         orders_db=orders_db,
         fills_db=derive_fill_store_path(orders_db),
         positions_db=derive_position_store_path(orders_db),
-        kill_switch_path=_resolve_runtime_path(execution_cfg.get("kill_switch_path"), "reports/kill_switch.json"),
-        reconcile_status_path=_resolve_runtime_path(execution_cfg.get("reconcile_status_path"), "reports/reconcile_status.json"),
+        kill_switch_path=_resolve_runtime_state_path(
+            execution_cfg.get("kill_switch_path"),
+            orders_db=orders_db,
+            base_name="kill_switch",
+            legacy_default="reports/kill_switch.json",
+        ),
+        reconcile_status_path=_resolve_runtime_state_path(
+            execution_cfg.get("reconcile_status_path"),
+            orders_db=orders_db,
+            base_name="reconcile_status",
+            legacy_default="reports/reconcile_status.json",
+        ),
         auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
     )
 
@@ -102,6 +126,11 @@ def _to_bool(value: object) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _merge_health_status(current: str, candidate: str) -> str:
+    order = {"healthy": 0, "degraded": 1, "unhealthy": 2}
+    return candidate if order.get(candidate, 0) > order.get(current, 0) else current
 
 
 def _normalize_kill_switch(data: object) -> dict:
@@ -218,7 +247,7 @@ def health_check():
             "error": str(exc),
             "path": str(health_paths.positions_db),
         }
-        checks["status"] = "unhealthy"
+        checks["status"] = _merge_health_status(checks["status"], "unhealthy")
 
     try:
         kill_switch = _normalize_kill_switch(_load_json_safe(health_paths.kill_switch_path))
@@ -229,7 +258,7 @@ def health_check():
             "trigger": kill_switch.get("trigger", ""),
         }
         if kill_switch_enabled:
-            checks["status"] = "degraded"
+            checks["status"] = _merge_health_status(checks["status"], "degraded")
     except Exception as exc:
         checks["checks"]["kill_switch"] = {"status": "error", "error": str(exc)}
 
@@ -242,7 +271,7 @@ def health_check():
             "reason": reconcile.get("reason", ""),
         }
         if not reconcile_ok:
-            checks["status"] = "degraded"
+            checks["status"] = _merge_health_status(checks["status"], "degraded")
     except Exception as exc:
         checks["checks"]["reconcile"] = {"status": "error", "error": str(exc)}
 
@@ -256,7 +285,7 @@ def health_check():
                 "last_ts": last_trade_ts,
             }
             if age_min >= 120:
-                checks["status"] = "degraded"
+                checks["status"] = _merge_health_status(checks["status"], "degraded")
         else:
             checks["checks"]["last_trade"] = {"status": "warning", "message": "No trades yet"}
     except Exception as exc:

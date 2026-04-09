@@ -272,6 +272,65 @@ def test_health_uses_active_config_runtime_paths(monkeypatch, tmp_path: Path) ->
     assert payload["checks"]["last_trade"]["age_minutes"] == 1.0
 
 
+def test_health_derives_runtime_state_paths_when_config_uses_legacy_defaults(monkeypatch, tmp_path: Path) -> None:
+    fake_root = tmp_path / "repo"
+    reports_dir = fake_root / "reports"
+    reports_dir.mkdir(parents=True)
+    configs_dir = fake_root / "configs"
+    configs_dir.mkdir(parents=True)
+
+    _write_json(reports_dir / "kill_switch.json", {"enabled": False})
+    _write_json(reports_dir / "reconcile_status.json", {"ok": True, "reason": ""})
+    _write_json(
+        reports_dir / "auto_risk_eval.json",
+        {"current_level": "LOW", "metrics": {"dd_pct": 0.0}},
+    )
+
+    shadow_positions = reports_dir / "shadow_positions.sqlite"
+    shadow_positions_conn = sqlite3.connect(shadow_positions)
+    shadow_positions_conn.execute("CREATE TABLE positions (symbol TEXT)")
+    shadow_positions_conn.close()
+
+    _write_json(reports_dir / "shadow_kill_switch.json", {"enabled": True, "trigger": "manual"})
+    _write_json(reports_dir / "shadow_reconcile_status.json", {"ok": False, "reason": "shadow drift"})
+    _write_json(
+        reports_dir / "shadow_auto_risk_eval.json",
+        {"current_level": "PROTECT", "metrics": {"dd_pct": 0.33}},
+    )
+
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_orders.sqlite",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(reporting_health, "PROJECT_ROOT", fake_root)
+    monkeypatch.setattr(reporting_health, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(reporting_health, "CONFIGS_DIR", configs_dir)
+    monkeypatch.setattr(reporting_health.time, "time", lambda: 10_000.0)
+    app = Flask(__name__)
+    app.register_blueprint(reporting_health.health_bp)
+    client = app.test_client()
+
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    payload = response.get_json()
+    assert payload["status"] == "degraded"
+    assert payload["checks"]["database"]["path"] == str(shadow_positions)
+    assert payload["checks"]["kill_switch"]["enabled"] is True
+    assert payload["checks"]["kill_switch"]["trigger"] == "manual"
+    assert payload["checks"]["reconcile"]["ok"] is False
+    assert payload["checks"]["reconcile"]["reason"] == "shadow drift"
+    assert payload["checks"]["risk_guard"]["level"] == "PROTECT"
+    assert payload["checks"]["risk_guard"]["drawdown"] == 0.33
+
+
 def test_health_and_ready_use_runtime_positions_db(monkeypatch, tmp_path: Path) -> None:
     fake_root = tmp_path / "repo"
     reports_dir = fake_root / "reports"
