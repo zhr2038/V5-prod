@@ -272,3 +272,64 @@ def test_reconcile_guard_once_uses_runtime_positions_db_from_order_store_path(mo
     assert captured["position_store_path"] == (workspace / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
     assert captured["account_store_path"] == (workspace / "reports" / "shadow_runtime" / "positions.sqlite").resolve()
     assert captured["out_path"] == (workspace / "reports" / "custom_reconcile_status.json").resolve()
+
+
+def test_reconcile_guard_once_uses_runtime_status_and_guard_paths_from_order_store_path_defaults(monkeypatch) -> None:
+    captured = {}
+    workspace = Path(reconcile_guard_once.__file__).resolve().parents[1]
+
+    cfg = SimpleNamespace(
+        exchange=SimpleNamespace(),
+        symbols=["BTC/USDT"],
+        execution=SimpleNamespace(
+            order_store_path="reports/shadow_runtime/orders.sqlite",
+            reconcile_ccy_mode="universe_only",
+        ),
+    )
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class CapturingReconcileEngine:
+        def __init__(self, **kwargs) -> None:
+            captured["position_store_path"] = Path(kwargs["position_store"].path).resolve()
+
+        def reconcile(self, *, out_path: str, universe_bases, ccy_mode: str):
+            captured["out_path"] = Path(out_path).resolve()
+            return {"ts_ms": 1000, "ok": True, "reason": None}
+
+    class DummyGuard:
+        def __init__(self, cfg) -> None:
+            captured["guard_cfg"] = cfg
+
+        def apply(self):
+            return {
+                "ok": True,
+                "reason": "ok",
+                "category": "OK",
+                "failure_state": {"consecutive_hard": 0, "consecutive_soft": 0},
+                "kill_switch": {"enabled": False},
+            }
+
+    monkeypatch.setattr(reconcile_guard_once, "load_config", lambda *args, **kwargs: cfg)
+    monkeypatch.setattr(reconcile_guard_once, "OKXPrivateClient", DummyClient)
+    monkeypatch.setattr(reconcile_guard_once, "PositionStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(reconcile_guard_once, "AccountStore", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(reconcile_guard_once, "ReconcileEngine", CapturingReconcileEngine)
+    monkeypatch.setattr(reconcile_guard_once, "KillSwitchGuard", DummyGuard)
+    monkeypatch.setattr(sys, "argv", ["reconcile_guard_once.py"])
+
+    reconcile_guard_once.main()
+
+    runtime_dir = (workspace / "reports" / "shadow_runtime").resolve()
+    assert captured["position_store_path"] == (runtime_dir / "positions.sqlite").resolve()
+    assert captured["out_path"] == (runtime_dir / "reconcile_status.json").resolve()
+    assert Path(captured["guard_cfg"].reconcile_status_path).resolve() == (runtime_dir / "reconcile_status.json").resolve()
+    assert Path(captured["guard_cfg"].failure_state_path).resolve() == (
+        runtime_dir / "reconcile_failure_state.json"
+    ).resolve()
+    assert Path(captured["guard_cfg"].kill_switch_path).resolve() == (runtime_dir / "kill_switch.json").resolve()

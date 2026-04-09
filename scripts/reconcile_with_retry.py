@@ -16,7 +16,7 @@ from pathlib import Path
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
-from src.execution.fill_store import derive_position_store_path
+from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import PositionStore
 from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
@@ -24,6 +24,12 @@ from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
 
 def _coalesce(value, default):
     return default if value is None else value
+
+
+def _resolve_runtime_json_path(raw_path, *, order_store_path: str, base_name: str, legacy_default: str) -> str:
+    if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
+        return str(derive_runtime_named_json_path(order_store_path, base_name))
+    return resolve_runtime_path(raw_path, default=legacy_default)
 
 
 def _to_bool(value) -> bool:
@@ -132,22 +138,32 @@ def main() -> None:
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),
     )
-    out_path = resolve_runtime_path(
-        args.out if args.out is not None else getattr(cfg.execution, "reconcile_status_path", None),
-        default="reports/reconcile_status.json",
+    order_store_path = resolve_runtime_path(
+        getattr(cfg.execution, "order_store_path", None),
+        default="reports/orders.sqlite",
     )
+    if args.out is not None:
+        out_path = resolve_runtime_path(args.out, default="reports/reconcile_status.json")
+    else:
+        out_path = _resolve_runtime_json_path(
+            getattr(cfg.execution, "reconcile_status_path", None),
+            order_store_path=order_store_path,
+            base_name="reconcile_status",
+            legacy_default="reports/reconcile_status.json",
+        )
     if args.positions_db:
         positions_db_path = resolve_runtime_path(args.positions_db, default="reports/positions.sqlite")
     else:
-        order_store_path = resolve_runtime_path(
-            getattr(cfg.execution, "order_store_path", None),
-            default="reports/orders.sqlite",
-        )
         positions_db_path = derive_position_store_path(order_store_path)
-    kill_switch_path = resolve_runtime_path(
-        args.kill_switch_path if args.kill_switch_path is not None else getattr(cfg.execution, "kill_switch_path", None),
-        default="reports/kill_switch.json",
-    )
+    if args.kill_switch_path is not None:
+        kill_switch_path = resolve_runtime_path(args.kill_switch_path, default="reports/kill_switch.json")
+    else:
+        kill_switch_path = _resolve_runtime_json_path(
+            getattr(cfg.execution, "kill_switch_path", None),
+            order_store_path=order_store_path,
+            base_name="kill_switch",
+            legacy_default="reports/kill_switch.json",
+        )
 
     client = OKXPrivateClient(exchange=cfg.exchange)
     
