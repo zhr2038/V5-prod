@@ -167,6 +167,78 @@ def test_daily_ml_training_preserves_yaml_defaults_without_env_overrides(tmp_pat
     assert task_config["parallel"]["gpu_cv_workers"] == 2
 
 
+def test_daily_ml_training_defaults_runtime_paths_from_active_order_store(tmp_path, monkeypatch):
+    _clear_ml_env(monkeypatch)
+    fake_root = tmp_path / "repo"
+    runtime_dir = fake_root / "reports" / "shadow_runtime"
+    (fake_root / "configs").mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs" / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(daily_training, "PROJECT_ROOT", fake_root)
+
+    task_config = daily_training._build_task_config()
+
+    assert Path(task_config["paths"]["history_path"]).resolve() == (runtime_dir / "ml_training_history.json").resolve()
+    assert Path(task_config["paths"]["csv_path"]).resolve() == (runtime_dir / "ml_training_data.csv").resolve()
+    assert Path(task_config["paths"]["db_path"]).resolve() == (runtime_dir / "ml_training_data.db").resolve()
+    assert Path(task_config["paths"]["runs_dir"]).resolve() == (runtime_dir / "runs").resolve()
+
+
+def test_daily_ml_training_preserves_explicit_task_paths(tmp_path, monkeypatch):
+    _clear_ml_env(monkeypatch)
+    fake_root = tmp_path / "repo"
+    runtime_dir = fake_root / "reports" / "shadow_runtime"
+    custom_dir = tmp_path / "custom"
+    (fake_root / "configs").mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    custom_dir.mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs" / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config_path = tmp_path / "ml_training_paths.yaml"
+    history_path = (custom_dir / "history.json").as_posix()
+    csv_path = (custom_dir / "training.csv").as_posix()
+    db_path = (custom_dir / "training.sqlite").as_posix()
+    runs_dir = (custom_dir / "runs").as_posix()
+    config_path.write_text(
+        "\n".join(
+            [
+                "paths:",
+                f"  history_path: {history_path}",
+                f"  csv_path: {csv_path}",
+                f"  db_path: {db_path}",
+                f"  runs_dir: {runs_dir}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(daily_training, "PROJECT_ROOT", fake_root)
+    monkeypatch.setenv("V5_ML_TASK_CONFIG", str(config_path))
+
+    task_config = daily_training._build_task_config()
+
+    assert Path(task_config["paths"]["history_path"]).resolve() == (custom_dir / "history.json").resolve()
+    assert Path(task_config["paths"]["csv_path"]).resolve() == (custom_dir / "training.csv").resolve()
+    assert Path(task_config["paths"]["db_path"]).resolve() == (custom_dir / "training.sqlite").resolve()
+    assert Path(task_config["paths"]["runs_dir"]).resolve() == (custom_dir / "runs").resolve()
+
+
 def test_recency_weights_favor_latest_groups():
     groups = pd.Series([
         1_700_000_000_000,

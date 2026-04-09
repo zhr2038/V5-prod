@@ -11,7 +11,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from scripts.task_config_compat import load_task_config_with_compat as load_task_config_with_compat_legacy
+from src.execution.fill_store import derive_runtime_reports_dir
 from src.execution.ml_factor_model import LIGHTGBM_AVAILABLE, XGBOOST_AVAILABLE
 from src.research.processors import (
     align_cycle_samples as _align_cycle_samples_impl,
@@ -21,9 +23,12 @@ from src.research.processors import (
 from src.research.task_runner import load_task_config, run_ml_training_task
 
 
-HISTORY_PATH = PROJECT_ROOT / "reports/ml_training_history.json"
-CSV_PATH = PROJECT_ROOT / "reports/ml_training_data.csv"
-MODEL_PATH = PROJECT_ROOT / "models/ml_factor_model"
+DEFAULT_TASK_PATHS = {
+    "history_path": "reports/ml_training_history.json",
+    "csv_path": "reports/ml_training_data.csv",
+    "db_path": "reports/ml_training_data.db",
+    "runs_dir": "reports/runs",
+}
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -74,6 +79,22 @@ def _load_daily_task_config(raw_config_path: str) -> dict:
     return load_task_config_with_compat_legacy(PROJECT_ROOT, raw_config_path, load_task_config)
 
 
+def _runtime_reports_dir() -> Path:
+    cfg = load_runtime_config(project_root=PROJECT_ROOT)
+    execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+    order_store_path = resolve_runtime_path(
+        execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+        default="reports/orders.sqlite",
+        project_root=PROJECT_ROOT,
+    )
+    return derive_runtime_reports_dir(order_store_path).resolve()
+
+
+def _should_apply_runtime_default(raw_path: object, *, legacy_default: str) -> bool:
+    text = str(raw_path or "").strip().replace("\\", "/")
+    return not text or text == legacy_default
+
+
 def _build_task_config() -> dict:
     config_path = os.getenv("V5_ML_TASK_CONFIG", "configs/research/ml_training.yaml")
     task_config = _load_daily_task_config(config_path)
@@ -87,12 +108,26 @@ def _build_task_config() -> dict:
     gate = task_config.setdefault("gate", {})
     recency = task_config.setdefault("recency_weighting", {})
 
+    runtime_reports_dir = _runtime_reports_dir()
+
     task["name"] = str(task.get("name") or "ml_training")
-    paths["history_path"] = str(paths.get("history_path") or "reports/ml_training_history.json")
-    paths["csv_path"] = str(paths.get("csv_path") or "reports/ml_training_data.csv")
-    paths["db_path"] = str(paths.get("db_path") or "reports/ml_training_data.db")
+    if _should_apply_runtime_default(paths.get("history_path"), legacy_default=DEFAULT_TASK_PATHS["history_path"]):
+        paths["history_path"] = str((runtime_reports_dir / "ml_training_history.json").resolve())
+    else:
+        paths["history_path"] = str(paths["history_path"])
+    if _should_apply_runtime_default(paths.get("csv_path"), legacy_default=DEFAULT_TASK_PATHS["csv_path"]):
+        paths["csv_path"] = str((runtime_reports_dir / "ml_training_data.csv").resolve())
+    else:
+        paths["csv_path"] = str(paths["csv_path"])
+    if _should_apply_runtime_default(paths.get("db_path"), legacy_default=DEFAULT_TASK_PATHS["db_path"]):
+        paths["db_path"] = str((runtime_reports_dir / "ml_training_data.db").resolve())
+    else:
+        paths["db_path"] = str(paths["db_path"])
     paths["model_path"] = str(paths.get("model_path") or "models/ml_factor_model")
-    paths["runs_dir"] = str(paths.get("runs_dir") or "reports/runs")
+    if _should_apply_runtime_default(paths.get("runs_dir"), legacy_default=DEFAULT_TASK_PATHS["runs_dir"]):
+        paths["runs_dir"] = str((runtime_reports_dir / "runs").resolve())
+    else:
+        paths["runs_dir"] = str(paths["runs_dir"])
 
     feature_groups_raw = os.getenv("V5_ML_FEATURE_GROUPS", ",".join(dataset.get("feature_groups") or ["classic"]))
     dataset["feature_groups"] = [x.strip().lower() for x in feature_groups_raw.split(",") if x.strip()] or ["classic"]
