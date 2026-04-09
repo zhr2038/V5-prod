@@ -12,6 +12,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_named_artifact_path
 from src.execution.ml_data_collector import MLDataCollector
 
 
@@ -91,6 +93,28 @@ def _existing_rows(conn: sqlite3.Connection) -> dict[tuple[int, str], tuple[int,
         if current is None or int(label_filled) > current[1] or row_id > current[0]:
             out[key] = (int(row_id), int(label_filled))
     return out
+
+
+def _resolve_runtime_training_paths(raw_config_path: str | None = None) -> tuple[Path, Path]:
+    cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
+    execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+    order_store_path = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    return (
+        derive_runtime_named_artifact_path(order_store_path, "ml_training_data", ".csv").resolve(),
+        derive_runtime_named_artifact_path(order_store_path, "ml_training_data", ".db").resolve(),
+    )
+
+
+def _resolve_cli_path(raw_path: str | None, fallback: Path) -> Path:
+    if not raw_path:
+        return fallback.resolve()
+    return Path(resolve_runtime_path(raw_path, default=str(fallback), project_root=PROJECT_ROOT)).resolve()
 
 
 def backfill_from_csv(
@@ -200,13 +224,18 @@ def backfill_from_csv(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Backfill or relabel ml_training_data.db from training CSV")
     parser.add_argument(
+        "--config",
+        default=None,
+        help="Optional config path used to resolve runtime default CSV/DB paths",
+    )
+    parser.add_argument(
         "--csv-path",
-        default=str(PROJECT_ROOT / "reports/ml_training_data.csv"),
+        default=None,
         help="Path to labeled training CSV",
     )
     parser.add_argument(
         "--db-path",
-        default=str(PROJECT_ROOT / "reports/ml_training_data.db"),
+        default=None,
         help="Path to SQLite training DB",
     )
     parser.add_argument(
@@ -219,8 +248,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    csv_path = Path(args.csv_path)
-    db_path = Path(args.db_path)
+    default_csv_path, default_db_path = _resolve_runtime_training_paths(args.config)
+    csv_path = _resolve_cli_path(args.csv_path, default_csv_path)
+    db_path = _resolve_cli_path(args.db_path, default_db_path)
     if not csv_path.exists():
         print(f"csv not found: {csv_path}")
         return 1

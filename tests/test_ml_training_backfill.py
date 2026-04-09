@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+import scripts.backfill_ml_training_db as backfill_script
 from scripts.backfill_ml_training_db import backfill_from_csv
 from src.execution.ml_data_collector import MLDataCollector
 
@@ -503,3 +505,96 @@ def test_fill_all_labels_continues_after_partial_only_batch(tmp_path: Path, monk
     assert result == {"filled": 0, "batches": 2}
     assert partial == 1005
     assert untouched == 0
+
+
+def test_backfill_ml_training_db_main_uses_runtime_defaults_from_active_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_root = tmp_path / "repo"
+    runtime_dir = fake_root / "reports" / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs").mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs" / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    csv_path = runtime_dir / "ml_training_data.csv"
+    _sample_frame().to_csv(csv_path, index=False)
+
+    monkeypatch.setattr(backfill_script, "PROJECT_ROOT", fake_root)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backfill_ml_training_db.py",
+        ],
+    )
+
+    assert backfill_script.main() == 0
+
+    runtime_db = runtime_dir / "ml_training_data.db"
+    assert runtime_db.exists()
+    conn = sqlite3.connect(str(runtime_db))
+    try:
+        total = int(conn.execute("SELECT COUNT(*) FROM feature_snapshots").fetchone()[0])
+    finally:
+        conn.close()
+
+    assert total == 3
+    assert not (fake_root / "reports" / "ml_training_data.db").exists()
+
+
+def test_backfill_ml_training_db_main_respects_explicit_path_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_root = tmp_path / "repo"
+    runtime_dir = fake_root / "reports" / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs").mkdir(parents=True, exist_ok=True)
+    (fake_root / "configs" / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    explicit_dir = tmp_path / "custom"
+    explicit_dir.mkdir(parents=True, exist_ok=True)
+    explicit_csv = explicit_dir / "training.csv"
+    explicit_db = explicit_dir / "training.sqlite"
+    _sample_frame().to_csv(explicit_csv, index=False)
+
+    monkeypatch.setattr(backfill_script, "PROJECT_ROOT", fake_root)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backfill_ml_training_db.py",
+            "--csv-path",
+            str(explicit_csv),
+            "--db-path",
+            str(explicit_db),
+        ],
+    )
+
+    assert backfill_script.main() == 0
+
+    assert explicit_db.exists()
+    conn = sqlite3.connect(str(explicit_db))
+    try:
+        total = int(conn.execute("SELECT COUNT(*) FROM feature_snapshots").fetchone()[0])
+    finally:
+        conn.close()
+
+    assert total == 3
+    assert not (runtime_dir / "ml_training_data.db").exists()
