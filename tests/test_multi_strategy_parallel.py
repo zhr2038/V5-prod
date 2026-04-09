@@ -172,6 +172,55 @@ def test_alpha6_strategy_compresses_display_score_but_preserves_raw_strength(mon
     assert flow.metadata["relative_score_raw"] == pytest.approx(3.0)
 
 
+def test_alpha6_strategy_clips_extreme_volume_expansion_outliers(monkeypatch):
+    strategy = Alpha6FactorStrategy(
+        config={
+            "score_threshold": 0.30,
+            "use_sentiment": False,
+            "alpha158_enabled": False,
+        }
+    )
+
+    def _fake_calc_factors(_df, symbol):
+        if symbol == "ENJ/USDT":
+            return {
+                "f1_mom_5d": 0.54,
+                "f2_mom_20d": 0.20,
+                "f3_vol_adj_ret": 6.20,
+                "f4_volume_expansion": 17.64,
+                "f5_rsi_trend_confirm": 0.40,
+                "f6_sentiment": 0.0,
+            }
+        return {
+            "f1_mom_5d": 0.02,
+            "f2_mom_20d": 0.01,
+            "f3_vol_adj_ret": 0.10,
+            "f4_volume_expansion": 0.0,
+            "f5_rsi_trend_confirm": 0.02,
+            "f6_sentiment": 0.0,
+        }
+
+    monkeypatch.setattr(strategy, "_calculate_factors", _fake_calc_factors)
+
+    market_df = pd.DataFrame(
+        {
+            "symbol": ["ENJ/USDT"] * 60 + ["BTC/USDT"] * 60,
+            "close": [1.0] * 120,
+            "high": [1.0] * 120,
+            "low": [1.0] * 120,
+            "volume": [1.0] * 120,
+        }
+    )
+
+    signals = strategy.generate_signals(market_df)
+    enj = next(s for s in signals if s.symbol == "ENJ/USDT")
+    snapshot = strategy.get_latest_factor_snapshot()["ENJ/USDT"]
+
+    assert snapshot["raw_factors"]["f4_volume_expansion"] == pytest.approx(17.64)
+    assert snapshot["z_factors"]["f4_volume_expansion"] == pytest.approx(3.0)
+    assert enj.metadata["raw_score"] < 1.5
+
+
 def test_strategy_orchestrator_keeps_raw_score_metadata_for_same_side_fusion():
     orchestrator = StrategyOrchestrator(total_capital=Decimal("100"))
     now = datetime(2026, 3, 11)

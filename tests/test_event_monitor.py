@@ -58,3 +58,33 @@ def test_breakout_lookback_expires_stale_highs(tmp_path) -> None:
 
     assert len(breakout_up) == 1
     assert breakout_up[0].data["resistance"] == 99.0
+
+
+def test_risk_stop_loss_prefers_runtime_profit_taking_stop(tmp_path) -> None:
+    monitor = EventMonitor(
+        EventMonitorConfig(
+            state_path=str(tmp_path / "event_monitor_state.json"),
+        )
+    )
+
+    state = MarketState(
+        timestamp_ms=1_710_000_000_000,
+        regime="SIDEWAYS",
+        prices={"ENJ/USDT": 1.07},
+        positions={
+            "ENJ/USDT": {
+                "entry_price": 1.0,
+                "current_stop": 1.08,
+                "highest_price": 1.2,
+            }
+        },
+        signals={},
+        selected_symbols=[],
+    )
+
+    events = monitor.collect_events(state)
+    stop_events = [event for event in events if event.type == EventType.RISK_STOP_LOSS]
+
+    assert len(stop_events) == 1
+    assert stop_events[0].data["stop_price"] == 1.08
+    assert stop_events[0].data["stop_source"] == "profit_taking"

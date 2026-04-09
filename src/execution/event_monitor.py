@@ -103,10 +103,17 @@ class EventMonitor:
             if not current_px:
                 continue
             
-            # Fixed stop loss (5%)
-            entry_px = pos.get('entry_price', 0)
-            if entry_px > 0:
+            entry_px = float(pos.get('entry_price', 0.0) or 0.0)
+            stop_px = float(pos.get('current_stop', 0.0) or 0.0)
+            stop_source = 'profit_taking'
+            if stop_px <= 0:
+                stop_px = float(pos.get('fixed_stop_price', 0.0) or 0.0)
+                stop_source = 'fixed_stop'
+            if stop_px <= 0 and entry_px > 0:
                 stop_px = entry_px * 0.95
+                stop_source = 'fallback_fixed_pct'
+
+            if stop_px > 0:
                 if current_px <= stop_px:
                     events.append(TradingEvent(
                         type=EventType.RISK_STOP_LOSS,
@@ -115,6 +122,7 @@ class EventMonitor:
                             'current_price': current_px,
                             'entry_price': entry_px,
                             'stop_price': stop_px,
+                            'stop_source': stop_source,
                             'loss_pct': (current_px - entry_px) / entry_px * 100
                         },
                         timestamp_ms=now_ms

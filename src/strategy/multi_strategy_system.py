@@ -394,6 +394,21 @@ class Alpha6FactorStrategy(BaseStrategy):
                 'f11_imin_14': 0.05,
                 'f12_imxd_14': 0.35,
             },
+            'factor_zscore_caps': {
+                'f1_mom_5d': 6.0,
+                'f2_mom_20d': 6.0,
+                'f3_vol_adj_ret': 4.0,
+                'f4_volume_expansion': 3.0,
+                'f5_rsi_trend_confirm': 3.0,
+                'f6_sentiment': 3.0,
+                'f6_corr_pv_10': 4.0,
+                'f7_cord_10': 4.0,
+                'f8_rsqr_10': 4.0,
+                'f9_rank_20': 4.0,
+                'f10_imax_14': 4.0,
+                'f11_imin_14': 4.0,
+                'f12_imxd_14': 4.0,
+            },
             'position_size_pct': 0.25,
             'score_threshold': 0.3,  # 评分阈值，超过才产生信号
             'use_sentiment': True,
@@ -706,9 +721,15 @@ class Alpha6FactorStrategy(BaseStrategy):
             'f12_imxd_14': 0.30,
         }
         
+        factor_caps = self.config.get('factor_zscore_caps', {}) or {}
         z_factors = {}
         for name, value in factors.items():
-            z_factors[name] = value / typical_ranges.get(name, 1.0)
+            z_value = float(value) / float(typical_ranges.get(name, 1.0) or 1.0)
+            cap = factor_caps.get(name)
+            if cap is not None:
+                z_cap = abs(float(cap))
+                z_value = float(np.clip(z_value, -z_cap, z_cap))
+            z_factors[name] = z_value
         
         return z_factors
     

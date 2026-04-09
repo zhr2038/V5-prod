@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 # Setup logging
 logging.basicConfig(
@@ -190,9 +190,70 @@ def find_latest_fused_signals_file(runs_dir: Path, max_age_minutes: int = 90):
         return None, None
 
 
+def _load_json_mapping(path: Path) -> dict[str, Any]:
+    try:
+        if path.exists():
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception as e:
+        logger.warning(f"Could not load state mapping from {path}: {e}")
+    return {}
+
+
+def _merge_runtime_stop_state(
+    positions: dict[str, dict],
+    *,
+    profit_taking_state_path: Optional[Path] = None,
+    fixed_stop_loss_state_path: Optional[Path] = None,
+):
+    if not positions:
+        return
+
+    profit_taking_state = _load_json_mapping(profit_taking_state_path or (REPORTS_DIR / 'profit_taking_state.json'))
+    fixed_stop_state = _load_json_mapping(fixed_stop_loss_state_path or (REPORTS_DIR / 'fixed_stop_loss_state.json'))
+
+    fixed_stop_cfg = None
+    if fixed_stop_state:
+        try:
+            from src.risk.fixed_stop_loss import FixedStopLossConfig
+            fixed_stop_cfg = FixedStopLossConfig()
+        except Exception as e:
+            logger.warning(f"Could not initialize fixed stop config: {e}")
+
+    for symbol, pos in positions.items():
+        profit_state = profit_taking_state.get(symbol)
+        if isinstance(profit_state, dict):
+            current_stop = float(profit_state.get('current_stop', 0.0) or 0.0)
+            if current_stop > 0:
+                pos['current_stop'] = current_stop
+
+            highest_price = float(profit_state.get('highest_price', 0.0) or 0.0)
+            if highest_price > 0:
+                pos['highest_price'] = highest_price
+
+            current_action = str(profit_state.get('current_action', '') or '').strip()
+            if current_action:
+                pos['current_action'] = current_action
+
+        fixed_state = fixed_stop_state.get(symbol)
+        if isinstance(fixed_state, dict) and fixed_stop_cfg is not None:
+            entry_price = float(
+                fixed_state.get('entry_price', pos.get('entry_price', 0.0))
+                or pos.get('entry_price', 0.0)
+                or 0.0
+            )
+            if entry_price > 0:
+                stop_pct = float(fixed_stop_cfg.get_stop_pct(symbol))
+                pos['fixed_stop_price'] = entry_price * (1.0 - stop_pct)
+
+
 def _load_positions_snapshot(
     positions_db_path: Optional[Path] = None,
     portfolio_path: Optional[Path] = None,
+    profit_taking_state_path: Optional[Path] = None,
+    fixed_stop_loss_state_path: Optional[Path] = None,
 ):
     """Load live positions, preferring positions.sqlite over legacy portfolio.json."""
     positions: dict[str, dict] = {}
@@ -217,6 +278,11 @@ def _load_positions_snapshot(
             }
             position_symbols.add(sym)
         if positions:
+            _merge_runtime_stop_state(
+                positions,
+                profit_taking_state_path=profit_taking_state_path,
+                fixed_stop_loss_state_path=fixed_stop_loss_state_path,
+            )
             return positions, position_symbols, 'position_store'
     except Exception as e:
         logger.warning(f"Could not load positions from sqlite store: {e}")
@@ -239,6 +305,11 @@ def _load_positions_snapshot(
                 }
                 position_symbols.add(sym)
             if positions:
+                _merge_runtime_stop_state(
+                    positions,
+                    profit_taking_state_path=profit_taking_state_path,
+                    fixed_stop_loss_state_path=fixed_stop_loss_state_path,
+                )
                 source = 'portfolio_json'
         except Exception as e:
             logger.warning(f"Could not load legacy portfolio.json positions: {e}")
@@ -269,6 +340,8 @@ def load_current_state(cfg=None, config_path: Path = None):
         positions, position_symbols, position_source = _load_positions_snapshot(
             positions_db_path=paths.positions_db,
             portfolio_path=paths.portfolio_path,
+            profit_taking_state_path=derive_runtime_named_json_path(paths.order_store_path, 'profit_taking_state').resolve(),
+            fixed_stop_loss_state_path=derive_runtime_named_json_path(paths.order_store_path, 'fixed_stop_loss_state').resolve(),
         )
         logger.info(f"Loaded {len(positions)} positions from {position_source}")
         
