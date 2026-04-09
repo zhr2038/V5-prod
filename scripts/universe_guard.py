@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
 
 
 @dataclass(frozen=True)
@@ -21,14 +25,36 @@ class GuardPaths:
 
 def build_paths(workspace: Path | None = None) -> GuardPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    reports_dir = root / "reports"
-    configs_dir = root / "configs"
+    try:
+        cfg = load_runtime_config(project_root=root)
+        universe_cfg = cfg.get("universe", {}) if isinstance(cfg, dict) else {}
+        universe_path = Path(
+            resolve_runtime_path(
+                universe_cfg.get("cache_path") if isinstance(universe_cfg, dict) else None,
+                default="reports/universe_cache.json",
+                project_root=root,
+            )
+        ).resolve()
+        blacklist_path = Path(
+            resolve_runtime_path(
+                universe_cfg.get("blacklist_path") if isinstance(universe_cfg, dict) else None,
+                default="configs/blacklist.json",
+                project_root=root,
+            )
+        ).resolve()
+        reports_dir = universe_path.parent.resolve()
+        configs_dir = blacklist_path.parent.resolve()
+    except Exception:
+        reports_dir = (root / "reports").resolve()
+        configs_dir = (root / "configs").resolve()
+        universe_path = (reports_dir / "universe_cache.json").resolve()
+        blacklist_path = (configs_dir / "blacklist.json").resolve()
     return GuardPaths(
         workspace=root,
         reports_dir=reports_dir,
         configs_dir=configs_dir,
-        universe_path=reports_dir / "universe_cache.json",
-        blacklist_path=configs_dir / "blacklist.json",
+        universe_path=universe_path,
+        blacklist_path=blacklist_path,
     )
 
 
