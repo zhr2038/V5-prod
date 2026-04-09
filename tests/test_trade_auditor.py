@@ -47,6 +47,27 @@ def test_build_paths_follow_active_config_runtime_paths(tmp_path) -> None:
     assert paths.alert_file == tmp_path / "logs" / "trade_alert.json"
 
 
+def test_build_paths_derives_runtime_default_state_files_from_order_store(tmp_path) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    (configs_dir / "live_prod.yaml").write_text(
+        "\n".join(
+            [
+                "execution:",
+                "  order_store_path: reports/shadow_runtime/orders.sqlite",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    paths = trade_auditor.build_paths(tmp_path)
+
+    assert paths.orders_db == tmp_path / "reports" / "shadow_runtime" / "orders.sqlite"
+    assert paths.kill_switch_file == tmp_path / "reports" / "shadow_runtime" / "kill_switch.json"
+    assert paths.reconcile_file == tmp_path / "reports" / "shadow_runtime" / "reconcile_status.json"
+
+
 def test_get_latest_orders_reads_workspace_orders_db(tmp_path) -> None:
     reports_dir = tmp_path / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)

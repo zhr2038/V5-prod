@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_named_json_path
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,12 @@ def _load_active_config(*, project_root: Path) -> dict[str, Any]:
     return {}
 
 
+def _resolve_runtime_json_path(raw_path: Any, *, order_store_path: Path, project_root: Path, base_name: str, legacy_default: str) -> Path:
+    if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
+        return derive_runtime_named_json_path(order_store_path, base_name).resolve()
+    return Path(resolve_runtime_path(raw_path, default=legacy_default, project_root=project_root)).resolve()
+
+
 def build_paths(workspace: Path | None = None) -> AuditorPaths:
     root = (workspace or PROJECT_ROOT).resolve()
     cfg = _load_active_config(project_root=root)
@@ -65,19 +72,19 @@ def build_paths(workspace: Path | None = None) -> AuditorPaths:
         orders_db=orders_db,
         log_file=logs_dir / "trade_audit_v2.log",
         alert_file=logs_dir / "trade_alert_v2.json",
-        kill_switch_file=Path(
-            resolve_runtime_path(
-                execution_cfg.get("kill_switch_path"),
-                default="reports/kill_switch.json",
-                project_root=root,
-            )
+        kill_switch_file=_resolve_runtime_json_path(
+            execution_cfg.get("kill_switch_path"),
+            order_store_path=orders_db,
+            project_root=root,
+            base_name="kill_switch",
+            legacy_default="reports/kill_switch.json",
         ),
-        reconcile_file=Path(
-            resolve_runtime_path(
-                execution_cfg.get("reconcile_status_path"),
-                default="reports/reconcile_status.json",
-                project_root=root,
-            )
+        reconcile_file=_resolve_runtime_json_path(
+            execution_cfg.get("reconcile_status_path"),
+            order_store_path=orders_db,
+            project_root=root,
+            base_name="reconcile_status",
+            legacy_default="reports/reconcile_status.json",
         ),
     )
 
