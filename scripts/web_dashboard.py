@@ -3332,7 +3332,20 @@ def api_market_state():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        return _json_error_response(e)
+        return _json_internal_error_response(
+            e,
+            state='UNKNOWN',
+            position_multiplier=0.0,
+            description='market state unavailable',
+            method='error',
+            votes={},
+            alerts=[],
+            monitor={},
+            final_score=0.0,
+            price=0.0,
+            signal_health={},
+            history_24h=[],
+        )
 
 
 def _load_equity_points(limit: int = 800):
@@ -4711,7 +4724,7 @@ def api_smart_alerts():
             'status': 'alert' if alerts else 'normal'
         })
     except Exception as e:
-        return jsonify({'error': str(e), 'alerts': [], 'status': 'error'}), 500
+        return _json_internal_error_response(e, alerts=[], count=0, status='error')
 
 
 @app.route('/api/auto_risk_guard')
@@ -4751,7 +4764,15 @@ def api_auto_risk_guard():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            current_level='UNKNOWN',
+            config={},
+            history=[],
+            metrics={},
+            reason='',
+            last_update='',
+        )
 
 
 @app.route('/api/decision_audit')
@@ -5231,10 +5252,7 @@ def api_shadow_ml_overlay():
             payload['error'] = '旁路调优版 XGBoost 归因数据未就绪'
         return jsonify(payload)
     except Exception as e:
-        return jsonify({
-            'available': False,
-            'error': str(e),
-        })
+        return _json_internal_error_response(e, available=False)
 
 
 @app.route('/api/health')

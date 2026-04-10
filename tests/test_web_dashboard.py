@@ -2229,6 +2229,27 @@ def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     assert payload["ml_signal_overview"]["top_contributors"][0]["symbol"] == "OKB/USDT"
 
 
+def test_shadow_ml_overlay_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_shadow_workspace():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-shadow-tuned-xgboost/reports")
+
+    monkeypatch.setattr(module, "_resolve_shadow_workspace", raise_shadow_workspace)
+
+    response = client.get("/api/shadow_ml_overlay")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["available"] is False
+    assert "v5-shadow-tuned-xgboost" not in body
+    assert "/home/ubuntu/clawd" not in body
+    assert "Traceback" not in body
+
+
 def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -3379,6 +3400,30 @@ def test_auto_risk_guard_api_uses_active_runtime_eval_path(monkeypatch, tmp_path
     assert payload["metrics"]["dd_pct"] == 0.25
 
 
+def test_auto_risk_guard_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["current_level"] == "UNKNOWN"
+    assert payload["config"] == {}
+    assert payload["history"] == []
+    assert payload["metrics"] == {}
+    assert "live_prod.yaml" not in body
+    assert "/home/ubuntu/clawd/v5-prod" not in body
+    assert "Traceback" not in body
+
+
 def test_market_state_backfills_hmm_vote_from_regime_history(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -3573,6 +3618,31 @@ def test_api_market_state_uses_active_runtime_reports_dir(monkeypatch, tmp_path)
     payload = response.get_json()
     assert payload["state"] == "TRENDING"
     assert payload["history_24h"][0]["final"]["state"] == "TRENDING"
+
+
+def test_market_state_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError(r"C:\secret\reports\market_state.json")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/market_state")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["state"] == "UNKNOWN"
+    assert payload["position_multiplier"] == 0.0
+    assert payload["votes"] == {}
+    assert payload["alerts"] == []
+    assert payload["history_24h"] == []
+    assert "market_state.json" not in body
+    assert "C:\\secret" not in body
+    assert "Traceback" not in body
 
 
 def test_api_cost_calibration_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
