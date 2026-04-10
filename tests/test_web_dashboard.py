@@ -3664,6 +3664,38 @@ def test_api_positions_derives_runtime_reconcile_status_when_config_uses_legacy_
     assert payload["positions"][0]["value_usdt"] == 400.0
 
 
+def test_api_positions_prefers_fresh_local_price_cache_before_public_ticker(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+
+    db_path = tmp_path / "positions.sqlite"
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('ETH/USDT', 2.0, 100.0, 0.0)")
+    con.commit()
+    con.close()
+
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / "ETH_USDT_1H_20260410.csv"
+    cache_file.write_text("ts,open,high,low,close,volume\n1,100,101,99,123.45,10\n", encoding="utf-8")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("public ticker should not be called when fresh cache is present")
+
+    monkeypatch.setattr(module.requests, "get", fail_if_called)
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    assert payload["positions"][0]["symbol"] == "ETH"
+    assert payload["positions"][0]["last_price"] == 123.45
+    assert payload["positions"][0]["value_usdt"] == 246.9
+
+
 def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)

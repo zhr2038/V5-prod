@@ -2074,8 +2074,22 @@ def api_positions():
         authoritative_snapshot_seen = False
 
         def get_last_price_usdt(symbol: str) -> float:
-            """获取币种最新价格，优先OKX实时API"""
-            # 1) 优先OKX实时API
+            """获取币种最新价格，优先本地新鲜缓存以避免阻塞 dashboard"""
+            # 1) 优先本地缓存（15 分钟内）以避免 OKX 短时抖动拖慢整页
+            try:
+                import time
+                cache_dir = WORKSPACE / 'data' / 'cache'
+                files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
+                if files:
+                    file_mtime = files[-1].stat().st_mtime
+                    if time.time() - file_mtime < 900:  # 15 分钟内
+                        df = pd.read_csv(files[-1])
+                        if len(df) > 0 and 'close' in df.columns:
+                            return float(df.iloc[-1]['close'])
+            except Exception:
+                pass
+
+            # 2) 回退到 OKX 实时公共 ticker
             try:
                 r = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol}-USDT", timeout=5)
                 j = r.json()
@@ -2083,22 +2097,7 @@ def api_positions():
                     return float(j['data'][0].get('last') or 0)
             except Exception:
                 pass
-            
-            # 2) Fallback: 缓存文件（检查时间，超过15分钟废弃）
-            try:
-                import time
-                cache_dir = WORKSPACE / 'data' / 'cache'
-                files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
-                if files:
-                    # 检查文件修改时间
-                    file_mtime = files[-1].stat().st_mtime
-                    if time.time() - file_mtime < 900:  # 15分钟内
-                        df = pd.read_csv(files[-1])
-                        if len(df) > 0 and 'close' in df.columns:
-                            return float(df.iloc[-1]['close'])
-            except Exception:
-                pass
-            
+
             return 0.0
 
         def choose_spot_qty(detail: Dict[str, Any]) -> float:
