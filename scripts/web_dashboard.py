@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -76,6 +76,7 @@ if WORKSPACE_STR not in sys.path:
 WEB_DIR = WORKSPACE / 'web'
 REPORTS_DIR = WORKSPACE / 'reports'
 CACHE_DIR = WORKSPACE / 'data' / 'cache'
+CHINA_TZ = timezone(timedelta(hours=8))
 
 
 def _resolve_react_build_path() -> Path:
@@ -1641,6 +1642,14 @@ def _maybe_float(value: Any) -> Optional[float]:
         return None
 
 
+def _utc_datetime_from_epoch_seconds(seconds: float) -> datetime:
+    return datetime.fromtimestamp(float(seconds), timezone.utc)
+
+
+def _china_datetime_from_epoch_seconds(seconds: float) -> datetime:
+    return _utc_datetime_from_epoch_seconds(seconds).astimezone(CHINA_TZ)
+
+
 def _load_reconcile_cash_balance(runtime_paths: Optional[DashboardRuntimePaths] = None) -> tuple[bool, float]:
     reconcile_file = (runtime_paths or _resolve_dashboard_runtime_paths()).reconcile_status_path
     if not reconcile_file.exists():
@@ -2021,7 +2030,7 @@ def api_trades():
                             if (not inst) or (inst in EXCLUDED_SYMBOLS):
                                 continue
                             ts_ms = int(r.get('ts') or 0)
-                            t = datetime.utcfromtimestamp(ts_ms / 1000.0) + timedelta(hours=8)
+                            t = _china_datetime_from_epoch_seconds(ts_ms / 1000.0)
                             px = float(r.get('fillPx') or 0)
                             sz = float(r.get('fillSz') or 0)
                             amount = px * sz
@@ -2432,7 +2441,7 @@ def api_position_kline():
                 ts_value *= 1000
             candles.append({
                 'ts': ts_value,
-                'time': datetime.utcfromtimestamp(ts_value / 1000.0).strftime('%Y-%m-%d %H:%M'),
+                'time': _utc_datetime_from_epoch_seconds(ts_value / 1000.0).strftime('%Y-%m-%d %H:%M'),
                 'open': round(float(open_px), 8),
                 'high': round(float(high_px), 8),
                 'low': round(float(low_px), 8),
@@ -4298,7 +4307,7 @@ def api_decision_chain():
                     hour_diff = (run_hour - local_hour) % 24
                     if hour_diff >= 16:  # 相差16小时以上，说明是UTC命名的旧数据
                         # 旧数据：时间戳是UTC，显式转为CST，避免在UTC+8主机上重复偏移。
-                        run_time = (datetime.utcfromtimestamp(ts) + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
+                        run_time = _china_datetime_from_epoch_seconds(ts).strftime('%Y-%m-%d %H:%M:%S')
                     else:
                         # 新数据：时间戳已经是CST
                         run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
