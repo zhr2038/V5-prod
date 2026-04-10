@@ -500,6 +500,14 @@ def _market_state_audit_scan_limit() -> int:
     return max(1, min(raw_limit, 1000))
 
 
+def _decision_audit_scan_limit() -> int:
+    try:
+        raw_limit = int(os.getenv('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT', '96') or '96')
+    except Exception:
+        raw_limit = 96
+    return max(1, min(raw_limit, 1000))
+
+
 def _decision_note_text(audit: Dict[str, Any]) -> str:
     notes = audit.get('notes', [])
     if isinstance(notes, list):
@@ -4664,16 +4672,16 @@ def api_decision_audit():
         if not runs_dir.exists():
             return jsonify({'error': 'No runs directory'}), 404
 
-        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        if not run_dirs:
+        audit_entries = _iter_decision_audits(
+            runtime_reports_dir,
+            max_entries=_decision_audit_scan_limit(),
+        )
+        if not audit_entries:
             return jsonify({'error': 'No audit files found'}), 404
 
-        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-        latest_run_dir = run_dirs[0]
-        latest_audit_file = latest_run_dir / 'decision_audit.json'
-
-        with open(latest_audit_file, 'r') as f:
-            audit_data = json.load(f)
+        latest_entry = audit_entries[0]
+        latest_run_dir = latest_entry['run_dir']
+        audit_data = latest_entry['audit']
 
         # 默认时间戳：决策文件目录时间
         ts = latest_run_dir.stat().st_mtime
@@ -4757,13 +4765,9 @@ def api_decision_audit():
 
         # 回退：按时间倒序遍历，找到第一个可成功解析的 strategy_signals.json
         if not strategy_signals:
-            for stale_run_dir in run_dirs[1:]:
-                try:
-                    with open(stale_run_dir / 'decision_audit.json', 'r') as f:
-                        stale_audit = json.load(f)
-                except Exception:
-                    continue
-
+            for stale_entry in audit_entries[1:]:
+                stale_run_dir = stale_entry['run_dir']
+                stale_audit = stale_entry['audit']
                 fallback_signals, fallback_source, fallback_ts = _load_run_strategy_payload(stale_run_dir, stale_audit)
                 if not fallback_signals:
                     continue

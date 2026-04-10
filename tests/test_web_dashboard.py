@@ -1168,6 +1168,90 @@ def test_api_decision_audit_falls_back_to_previous_run_strategy_signals(monkeypa
     assert payload["fused_source_is_fallback"] is True
 
 
+def test_api_decision_audit_limits_recent_run_scan(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setenv("V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT", "4")
+
+    for hour in range(20):
+        run_dir = runs_dir / f"20260313_{hour:02d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps(
+                {
+                    "run_id": f"20260313_{hour:02d}",
+                    "regime": "TRENDING",
+                    "counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 0},
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        if hour == 16:
+            (run_dir / "strategy_signals.json").write_text(
+                json.dumps(
+                    {
+                        "strategies": [
+                            {
+                                "strategy": "WithinLimit",
+                                "allocation": 0.3,
+                                "total_signals": 1,
+                                "buy_signals": 1,
+                                "sell_signals": 0,
+                                "signals": [{"symbol": "ETH/USDT", "side": "buy", "score": 0.8}],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        if hour == 10:
+            (run_dir / "strategy_signals.json").write_text(
+                json.dumps(
+                    {
+                        "strategies": [
+                            {
+                                "strategy": "OutsideLimit",
+                                "allocation": 0.3,
+                                "total_signals": 1,
+                                "buy_signals": 1,
+                                "sell_signals": 0,
+                                "signals": [{"symbol": "BTC/USDT", "side": "buy", "score": 0.9}],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+    original_load_json_payload = module._load_json_payload
+    reads = {"decision_audit": 0}
+
+    def counting_load_json_payload(path):
+        if Path(path).name == "decision_audit.json":
+            reads["decision_audit"] += 1
+        return original_load_json_payload(path)
+
+    monkeypatch.setattr(module, "_load_json_payload", counting_load_json_payload)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["run_id"] == "20260313_19"
+    assert payload["strategy_run_id"] == "20260313_16"
+    assert payload["strategy_signal_source"] == "previous_run_strategy_file"
+    assert payload["strategy_signals"][0]["strategy"] == "WithinLimit"
+    assert reads["decision_audit"] <= 4
+
+
 def test_api_decision_audit_recent_fill_summary_prefers_fill_timestamps(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
