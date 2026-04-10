@@ -311,10 +311,11 @@ def test_prune_remote_files_honors_shadow_sync_items(tmp_path: Path) -> None:
         }
     )
 
-    pruned = _prune_remote_files(fake_sftp, tmp_path, "/remote", items=SHADOW_SYNC_ITEMS)
+    pruned = _prune_remote_files(fake_sftp, tmp_path, "/remote", items=SHADOW_SYNC_ITEMS, exact_items=True)
 
-    assert pruned == ["scripts/old_shadow_helper.py"]
-    assert fake_sftp.removed == ["/remote/scripts/old_shadow_helper.py"]
+    assert pruned == []
+    assert fake_sftp.removed == []
+    assert "/remote/scripts/old_shadow_helper.py" in fake_sftp.files
     assert "/remote/web/dashboard.js" in fake_sftp.files
 
 

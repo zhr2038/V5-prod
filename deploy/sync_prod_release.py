@@ -130,11 +130,13 @@ def _collect_remote_sync_files(
     remote_root: str,
     *,
     items=PRODUCTION_SYNC_ITEMS,
+    exact_items: bool = False,
 ) -> set[str]:
     remote_files: set[str] = set()
     normalized_root = remote_root.rstrip("/")
-    for root in production_sync_roots(items):
-        remote_path = _remote_join(normalized_root, Path(root))
+    rel_paths = [Path(item) for item in items] if exact_items else [Path(root) for root in production_sync_roots(items)]
+    for rel_path in rel_paths:
+        remote_path = _remote_join(normalized_root, rel_path)
         try:
             attr = sftp.stat(remote_path)
         except FileNotFoundError:
@@ -143,7 +145,7 @@ def _collect_remote_sync_files(
             for child in _iter_remote_files(sftp, remote_path):
                 remote_files.add(posixpath.relpath(child, normalized_root))
         else:
-            remote_files.add(root)
+            remote_files.add(rel_path.as_posix())
     return remote_files
 
 
@@ -153,9 +155,10 @@ def _prune_remote_files(
     remote_root: str,
     *,
     items=PRODUCTION_SYNC_ITEMS,
+    exact_items: bool = False,
 ) -> list[str]:
     expected = production_sync_relative_paths(workspace_root, items=items)
-    remote_files = _collect_remote_sync_files(sftp, remote_root, items=items)
+    remote_files = _collect_remote_sync_files(sftp, remote_root, items=items, exact_items=exact_items)
     stale = sorted(remote_files - expected)
     for rel_path in stale:
         sftp.remove(_remote_join(remote_root, Path(rel_path)))
@@ -350,7 +353,7 @@ def main() -> None:
                     items=SHADOW_SYNC_ITEMS,
                 )
                 shadow_pruned = (
-                    _prune_remote_files(sftp, snapshot_root, shadow_root, items=SHADOW_SYNC_ITEMS)
+                    _prune_remote_files(sftp, snapshot_root, shadow_root, items=SHADOW_SYNC_ITEMS, exact_items=True)
                     if args.prune_shadow
                     else []
                 )
