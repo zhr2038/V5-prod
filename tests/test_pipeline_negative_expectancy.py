@@ -467,6 +467,89 @@ def test_pipeline_demotes_negative_expectancy_blocked_symbol_before_ranking():
     assert any("NegativeExpectancy rank-guard: ROBO/USDT" in note for note in audit.notes)
 
 
+def test_pipeline_live_prod_negative_expectancy_tuning_keeps_three_cycle_candidate_tradeable():
+    cfg = AppConfig(symbols=["ZEC/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.negative_expectancy_score_penalty_enabled = True
+    cfg.execution.negative_expectancy_score_penalty_min_closed_cycles = 2
+    cfg.execution.negative_expectancy_score_penalty_floor_bps = 15.0
+    cfg.execution.negative_expectancy_score_penalty_per_bps = 0.01
+    cfg.execution.negative_expectancy_score_penalty_max = 0.35
+    cfg.execution.negative_expectancy_open_block_enabled = True
+    cfg.execution.negative_expectancy_open_block_min_closed_cycles = 4
+    cfg.execution.negative_expectancy_open_block_floor_bps = 25.0
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = True
+    cfg.execution.negative_expectancy_fast_fail_open_block_min_closed_cycles = 4
+    cfg.execution.negative_expectancy_fast_fail_open_block_floor_bps = 5.0
+    cfg.execution.negative_expectancy_cooldown_enabled = False
+    cfg.execution.cost_aware_entry_enabled = True
+    cfg.execution.cost_aware_min_score_floor = 0.18
+    cfg.execution.cost_aware_roundtrip_cost_bps = 22.0
+    cfg.execution.cost_aware_score_per_bps = 0.003
+    cfg.budget.min_trade_notional_base = 0.0
+    cfg.budget.exchange_min_notional_enabled = False
+
+    pipe = _build_pipe(cfg)
+    captured = {}
+
+    def _allocate(scores, market_data, regime_mult, audit=None):
+        captured.update(scores)
+        return SimpleNamespace(
+            target_weights={"ZEC/USDT": 0.25},
+            selected=["ZEC/USDT"],
+            entry_candidates=["ZEC/USDT"],
+            volatilities={},
+            notes="",
+        )
+
+    pipe.portfolio_engine.allocate = _allocate
+    pipe.negative_expectancy_cooldown.refresh = lambda force=False: {
+        "stats": {
+            "ZEC/USDT": {
+                "closed_cycles": 3,
+                "expectancy_bps": -107.5,
+                "pnl_sum_usdt": -0.36,
+                "closed_notional_usdt": 33.45,
+                "fast_fail_closed_cycles": 0,
+                "fast_fail_expectancy_bps": 0.0,
+            }
+        },
+        "symbols": {},
+    }
+    pipe.negative_expectancy_cooldown.get_symbol_stats = lambda symbol: {
+        "closed_cycles": 3,
+        "expectancy_bps": -107.5,
+        "fast_fail_closed_cycles": 0,
+        "fast_fail_expectancy_bps": 0.0,
+        "cooldown_active": False,
+    }
+
+    market_data = {"ZEC/USDT": _series("ZEC/USDT", 32.0)}
+    alpha = AlphaSnapshot(raw_factors={}, z_factors={}, scores={"ZEC/USDT": 0.9863524128822817})
+    audit = DecisionAudit(run_id="neg-live-prod-tuning")
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert captured["ZEC/USDT"] == pytest.approx(0.6363524128822818)
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "ZEC/USDT"
+    assert not any(
+        d.get("symbol") == "ZEC/USDT" and d.get("reason") in {
+            "negative_expectancy_open_block",
+            "negative_expectancy_fast_fail_open_block",
+        }
+        for d in audit.router_decisions
+    )
+
+
 def test_pipeline_low_price_entry_guard_raises_cost_floor():
     cfg = AppConfig(symbols=["PUMP/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False
