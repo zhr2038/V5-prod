@@ -4902,6 +4902,69 @@ def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path
     assert payload["realized_pnl"] == pytest.approx(-30.0)
 
 
+def test_api_account_prefers_live_okx_equsd_for_total_equity(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "load_config", lambda: {})
+    monkeypatch.setenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", "1")
+    monkeypatch.setenv("EXCHANGE_API_KEY", "k")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "s")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "p")
+    monkeypatch.setattr(module, "_load_reconcile_cash_balance", lambda *args, **kwargs: (True, 50.0))
+    monkeypatch.setattr(module, "_load_local_account_state", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_load_total_fees_from_orders", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": []}))
+    monkeypatch.setattr(module, "_load_okx_account_balance", lambda *_args: {
+        "code": "0",
+        "data": [{
+            "details": [
+                {"ccy": "USDT", "cashBal": "91.0", "eq": "91.0", "eqUsd": "91.2"},
+                {"ccy": "ZEC", "cashBal": "0.04", "eq": "0.04", "eqUsd": "16.3"},
+                {"ccy": "ETH", "cashBal": "0.0001", "eq": "0.0001", "eqUsd": "0.001"},
+                {"ccy": "PEPE", "cashBal": "1000", "eq": "1000", "eqUsd": "0.2"},
+            ]
+        }],
+    })
+
+    with module.app.app_context():
+        payload = module.api_account().get_json()
+
+    assert payload["cash_usdt"] == pytest.approx(91.0)
+    assert payload["positions_value_usdt"] == pytest.approx(16.3)
+    assert payload["total_equity_usdt"] == pytest.approx(107.701)
+    assert payload["equity_source"] == "okx_live"
+
+
+def test_api_account_uses_reconcile_equsd_total_when_live_unavailable(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "load_config", lambda: {})
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
+    monkeypatch.setattr(module, "_load_local_account_state", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_load_total_fees_from_orders", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": []}))
+    (tmp_path / "reconcile_status.json").write_text(
+        json.dumps({
+            "exchange_snapshot": {
+                "ccy_cashBal": {"USDT": "91.0", "ZEC": "0.04", "ETH": "0.0001"},
+                "ccy_eqUsd": {"USDT": "91.2", "ZEC": "16.3", "ETH": "0.001", "PEPE": "0.2"},
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    with module.app.app_context():
+        payload = module.api_account().get_json()
+
+    assert payload["cash_usdt"] == pytest.approx(91.0)
+    assert payload["positions_value_usdt"] == pytest.approx(16.3)
+    assert payload["total_equity_usdt"] == pytest.approx(107.701)
+    assert payload["equity_source"] == "reconcile"
+
+
 def test_api_trades_converts_live_base_fee_to_signed_usdt(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)

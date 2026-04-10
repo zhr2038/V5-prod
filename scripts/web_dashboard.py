@@ -1261,6 +1261,10 @@ def _pick_timer_name() -> str:
 
 # 排除测试/异常数据
 EXCLUDED_SYMBOLS = ['PEPE-USDT', 'MERL-USDT', 'SPACE-USDT']
+POSITION_HIDDEN_BASE_SYMBOLS = {
+    'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
+}
+MIN_VISIBLE_POSITION_VALUE_USD = 0.5
 
 
 def get_db_connection():
@@ -1776,6 +1780,94 @@ def _load_reconcile_cash_balance(runtime_paths: Optional[DashboardRuntimePaths] 
     return False, 0.0
 
 
+def _account_equity_from_balance_details(
+    details: Any,
+    *,
+    source: str,
+    hidden_symbols: Optional[set[str]] = None,
+    min_visible_position_value_usd: float = 0.0,
+) -> Dict[str, Any]:
+    if not isinstance(details, list):
+        return {}
+
+    hidden = set()
+    for raw_symbol in hidden_symbols or set():
+        symbol = str(raw_symbol or '').strip().upper()
+        if not symbol:
+            continue
+        hidden.add(symbol)
+        hidden.add(symbol.replace('/', '-').split('-')[0])
+    cash_usdt: Optional[float] = None
+    total_equity = 0.0
+    positions_value = 0.0
+    seen_equity = False
+
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        ccy = str(detail.get('ccy') or '').strip().upper()
+        if not ccy:
+            continue
+        eq_usd = _maybe_float(detail.get('eqUsd'))
+        cash_bal = _maybe_float(detail.get('cashBal'))
+        eq_qty = _maybe_float(detail.get('eq'))
+        if ccy == 'USDT':
+            cash_usdt = cash_bal if cash_bal is not None else (eq_qty if eq_qty is not None else eq_usd)
+        if eq_usd is None:
+            continue
+        total_equity += eq_usd
+        seen_equity = True
+        if eq_usd <= 0:
+            continue
+        if ccy != 'USDT' and ccy not in hidden and eq_usd >= min_visible_position_value_usd:
+            positions_value += eq_usd
+
+    payload: Dict[str, Any] = {'source': source}
+    if cash_usdt is not None:
+        payload['cash_usdt'] = cash_usdt
+    if seen_equity:
+        payload['total_equity_usdt'] = total_equity
+        payload['positions_value_usdt'] = positions_value
+    return payload
+
+
+def _load_reconcile_account_equity(runtime_paths: Optional[DashboardRuntimePaths] = None) -> Dict[str, Any]:
+    reconcile_file = (runtime_paths or _resolve_dashboard_runtime_paths()).reconcile_status_path
+    if not reconcile_file.exists():
+        return {}
+
+    try:
+        reconcile = json.loads(reconcile_file.read_text(encoding='utf-8', errors='ignore'))
+    except Exception:
+        return {}
+
+    exchange_snapshot = reconcile.get('exchange_snapshot') or {}
+    ccy_eq_usd = exchange_snapshot.get('ccy_eqUsd') or {}
+    ccy_cash_bal = exchange_snapshot.get('ccy_cashBal') or {}
+    if not isinstance(ccy_eq_usd, dict) and not isinstance(ccy_cash_bal, dict):
+        return {}
+
+    ccys = set()
+    if isinstance(ccy_eq_usd, dict):
+        ccys.update(str(ccy) for ccy in ccy_eq_usd)
+    if isinstance(ccy_cash_bal, dict):
+        ccys.update(str(ccy) for ccy in ccy_cash_bal)
+    details = [
+        {
+            'ccy': ccy,
+            'eqUsd': ccy_eq_usd.get(ccy) if isinstance(ccy_eq_usd, dict) else None,
+            'cashBal': ccy_cash_bal.get(ccy) if isinstance(ccy_cash_bal, dict) else None,
+        }
+        for ccy in sorted(ccys)
+    ]
+    return _account_equity_from_balance_details(
+        details,
+        source='reconcile',
+        hidden_symbols=set(EXCLUDED_SYMBOLS) | POSITION_HIDDEN_BASE_SYMBOLS,
+        min_visible_position_value_usd=MIN_VISIBLE_POSITION_VALUE_USD,
+    )
+
+
 def _env_flag_enabled(name: str) -> bool:
     value = str(os.getenv(name, '') or '').strip().lower()
     return value in {'1', 'true', 'yes', 'on'}
@@ -2038,17 +2130,39 @@ def api_account():
             local_account_state = _load_local_account_state(runtime_paths=runtime_paths)
         except TypeError:
             local_account_state = _load_local_account_state()
+        authoritative_equity: Optional[float] = None
+        authoritative_positions_value: Optional[float] = None
+        equity_source = 'local'
         try:
             key, sec, pp = _load_workspace_exchange_creds()
-            if (not has_reconcile_cash) and _dashboard_live_account_enabled() and key and sec and pp:
+            if _dashboard_live_account_enabled() and key and sec and pp:
                 data = _load_okx_account_balance(key, sec, pp)
                 if data.get('code') == '0' and data.get('data'):
-                    for d in data['data'][0].get('details', []):
-                        if d.get('ccy') == 'USDT':
-                            cash = float(d.get('eq', 0))
-                            break
+                    account_equity = _account_equity_from_balance_details(
+                        data['data'][0].get('details', []),
+                        source='okx_live',
+                        hidden_symbols=set(EXCLUDED_SYMBOLS) | POSITION_HIDDEN_BASE_SYMBOLS,
+                        min_visible_position_value_usd=MIN_VISIBLE_POSITION_VALUE_USD,
+                    )
+                    if 'cash_usdt' in account_equity:
+                        cash = float(account_equity['cash_usdt'] or 0.0)
+                        has_reconcile_cash = True
+                    if 'total_equity_usdt' in account_equity:
+                        authoritative_equity = float(account_equity['total_equity_usdt'] or 0.0)
+                        authoritative_positions_value = float(account_equity.get('positions_value_usdt') or 0.0)
+                        equity_source = str(account_equity.get('source') or 'okx_live')
         except Exception as e:
             print(f"[account] OKX API错误: {e}")
+
+        if authoritative_equity is None:
+            account_equity = _load_reconcile_account_equity(runtime_paths=runtime_paths)
+            if 'cash_usdt' in account_equity:
+                cash = float(account_equity['cash_usdt'] or 0.0)
+                has_reconcile_cash = True
+            if 'total_equity_usdt' in account_equity:
+                authoritative_equity = float(account_equity['total_equity_usdt'] or 0.0)
+                authoritative_positions_value = float(account_equity.get('positions_value_usdt') or 0.0)
+                equity_source = str(account_equity.get('source') or 'reconcile')
         
         # 如果OKX获取失败，回退到reconcile文件
         if (not has_reconcile_cash) and cash <= 0:
@@ -2106,7 +2220,9 @@ def api_account():
         except Exception:
             pass
 
-        total_equity = float(cash or 0) + positions_value
+        if authoritative_positions_value is not None:
+            positions_value = authoritative_positions_value
+        total_equity = authoritative_equity if authoritative_equity is not None else float(cash or 0) + positions_value
         initial_capital = 120.0
         equity_delta = total_equity - initial_capital
         total_pnl_pct = equity_delta / initial_capital if initial_capital > 0 else 0
@@ -2165,6 +2281,7 @@ def api_account():
             'total_sell': round(float(total_sell), 2),
             'total_fees': round(float(total_fees), 4),
             'realized_pnl': round(float(realized_pnl), 2),
+            'equity_source': equity_source,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
@@ -2342,9 +2459,7 @@ def api_positions():
     """持仓信息API（优先 positions.sqlite，回退最新 run 的 positions.jsonl）"""
     try:
         runtime_paths = _resolve_dashboard_runtime_paths(load_config())
-        hidden_symbols = {
-            'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
-        }
+        hidden_symbols = POSITION_HIDDEN_BASE_SYMBOLS
         authoritative_snapshot_seen = False
         price_cache: Dict[str, float] = {}
 
