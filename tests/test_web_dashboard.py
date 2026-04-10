@@ -3657,6 +3657,56 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["comparison"]["current"]["avg_rebalance_per_round"] == 2.0
     assert payload["ab_gate"]["window_runs"] == 1
     assert payload["ab_gate"]["decision"]["switch_recommended"] is True
+    assert payload["ab_gate_status"] == "fresh"
+
+
+def test_api_shadow_test_does_not_refresh_stale_ab_gate_in_request(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_run = runtime_dir / "runs" / "20260408_01"
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (runtime_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "counts": {"selected": 10, "orders_rebalance": 2, "orders_exit": 1},
+                "router_decisions": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    gate_path = runtime_dir / "ab_gate_status.json"
+    gate_path.write_text(
+        json.dumps({"window_runs": 1, "decision": {"switch_recommended": False}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    os.utime(gate_path, (1, 1))
+
+    def fail_if_refreshed(*args, **kwargs):
+        raise AssertionError("api/shadow_test must not refresh A/B gate synchronously")
+
+    monkeypatch.setattr(module.subprocess, "run", fail_if_refreshed)
+
+    response = client.get("/api/shadow_test")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ab_gate"]["window_runs"] == 1
+    assert payload["ab_gate_status"] == "stale"
+    assert payload["ab_gate_age_sec"] > 1800
 
 
 class _DummyResponse:

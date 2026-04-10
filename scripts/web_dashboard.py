@@ -4506,33 +4506,22 @@ def api_shadow_test():
         if deadband_skips:
             current_stats['avg_deadband_skip'] = round(sum(deadband_skips) / len(deadband_skips), 4)
         
-        # 读取/刷新 A/B gate 评估（建议是否切参）
+        # A/B gate generation is expensive; web requests should only read cached status.
         ab_gate = None
+        ab_gate_status = 'missing'
+        ab_gate_age_sec = None
+        ab_gate_error = None
         try:
             gate_path = runtime_reports_dir / 'ab_gate_status.json'
-            need_refresh = True
             if gate_path.exists():
-                age_sec = max(0, (datetime.now().timestamp() - gate_path.stat().st_mtime))
-                need_refresh = age_sec > 1800  # 30分钟
-            if need_refresh:
-                subprocess.run(
-                    [
-                        str(WORKSPACE / '.venv/bin/python'),
-                        str(WORKSPACE / 'scripts/ab_decision_gate.py'),
-                        '--reports-dir',
-                        str(runtime_reports_dir),
-                    ],
-                    cwd=str(WORKSPACE),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=12,
-                    check=False,
-                )
-            if gate_path.exists():
+                ab_gate_age_sec = max(0.0, (datetime.now().timestamp() - gate_path.stat().st_mtime))
                 with open(gate_path, 'r', encoding='utf-8') as f:
                     ab_gate = json.load(f)
-        except Exception:
+                ab_gate_status = 'stale' if ab_gate_age_sec > 1800 else 'fresh'
+        except Exception as e:
             ab_gate = None
+            ab_gate_status = 'error'
+            ab_gate_error = str(e)
 
         # 生成A/B对比报告
         ab_report = {
@@ -4582,6 +4571,9 @@ def api_shadow_test():
                 {'name': 'B3', 'params': {'pos_mult_sideways': 0.7}},
             ],
             'ab_gate': ab_gate,
+            'ab_gate_status': ab_gate_status,
+            'ab_gate_age_sec': round(ab_gate_age_sec, 1) if ab_gate_age_sec is not None else None,
+            'ab_gate_error': ab_gate_error,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
