@@ -4881,7 +4881,7 @@ def api_shadow_test():
                 'suggested_next_step': '将 deadband_sideways 从 0.04 调至 0.03，观察24小时' if simulated_stats['estimated_improvement'] > 5 else '保持当前参数'
             },
             'matrix': [
-                {'name': 'A(当前)', 'params': {'deadband_sideways': 0.03, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
+                {'name': 'A(当前)', 'params': {'deadband_sideways': 0.04, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
                 {'name': 'B1', 'params': {'deadband_sideways': 0.025}},
                 {'name': 'B2', 'params': {'min_trade_notional_base': 2.5}},
                 {'name': 'B3', 'params': {'pos_mult_sideways': 0.7}},

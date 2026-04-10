@@ -4456,6 +4456,10 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["ab_gate"]["window_runs"] == 1
     assert payload["ab_gate"]["decision"]["switch_recommended"] is True
     assert payload["ab_gate_status"] == "fresh"
+    assert payload["current_params"]["deadband_sideways"] == 0.04
+    assert payload["proposed_params"]["deadband_sideways"] == 0.03
+    assert payload["matrix"][0]["name"] == "A(当前)"
+    assert payload["matrix"][0]["params"]["deadband_sideways"] == payload["current_params"]["deadband_sideways"]
 
 
 def test_api_shadow_test_does_not_refresh_stale_ab_gate_in_request(monkeypatch, tmp_path):
