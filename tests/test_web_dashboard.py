@@ -620,6 +620,58 @@ def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypa
     assert payload["systemStatus"]["errors"] == ["positions: positions db locked"]
 
 
+def test_dashboard_api_sanitizes_child_error_messages(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "api_account", lambda: module.jsonify({
+        "cash_usdt": 100.0,
+        "positions_value_usdt": 0.0,
+        "total_equity_usdt": 100.0,
+        "initial_capital_usdt": 120.0,
+        "equity_delta_usdt": -20.0,
+        "total_pnl_pct": -0.1667,
+        "drawdown_pct": 0.1667,
+        "realized_pnl": 0.0,
+        "total_trades": 0,
+        "last_update": "2026-04-10 12:00:00",
+    }))
+    monkeypatch.setattr(
+        module,
+        "api_positions",
+        lambda: (module.jsonify({"error": r"C:\secret\positions.sqlite"}), 500),
+    )
+    monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": []}))
+    monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({
+        "timer_active": True,
+        "dry_run": False,
+        "timer_error": "/home/ubuntu/clawd/v5-prod/systemd.timer",
+    }))
+    monkeypatch.setattr(module, "api_equity_history", lambda: module.jsonify([]))
+    monkeypatch.setattr(module, "api_market_state", lambda: module.jsonify({"state": "TRENDING"}))
+    monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": []}))
+    monkeypatch.setattr(module, "api_cost_calibration", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ic_diagnostics", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ml_training", lambda: module.jsonify({"status": "idle"}))
+    monkeypatch.setattr(module, "api_reflection_reports", lambda: module.jsonify({"reports": []}))
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["positions"] == []
+    assert payload["systemStatus"]["errors"] == ["internal error", "positions: internal error"]
+    _assert_body_hides_internal_details(
+        body,
+        r"C:\secret\positions.sqlite",
+        "/home/ubuntu/clawd/v5-prod/systemd.timer",
+        "positions.sqlite",
+        "systemd.timer",
+    )
+
+
 def test_dashboard_api_degrades_when_child_endpoint_raises(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

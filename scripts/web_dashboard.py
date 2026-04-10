@@ -309,14 +309,14 @@ def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[
     except Exception as exc:
         _log_dashboard_exception(f'dashboard child {label}', exc)
         if errors is not None:
-            errors.append(f'{label}: {exc}')
+            errors.append(f'{label}: {_sanitize_public_error_text(exc)}')
         return default
 
     if status_code >= 400:
         message = None
         if isinstance(payload, dict):
             message = payload.get('error') or payload.get('message')
-        message = str(message or f'HTTP {status_code}')
+        message = _sanitize_public_error_text(message or f'HTTP {status_code}')
         if errors is not None:
             errors.append(f'{label}: {message}')
         return default
@@ -3738,7 +3738,7 @@ def api_dashboard():
         timer_error = status_data.get('timer_error')
         system_errors: List[str] = []
         if timer_error:
-            system_errors.append(str(timer_error))
+            system_errors.append(_sanitize_public_error_text(timer_error))
         system_errors.extend(dashboard_errors)
 
         dashboard_data = {
