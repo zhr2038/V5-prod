@@ -29,6 +29,7 @@ def main() -> None:
     ap.add_argument("--src-dir", required=True)
     ap.add_argument("--dst-dir", required=True)
     ap.add_argument("--root", required=True)
+    ap.add_argument("--user-mode", action="store_true")
     ap.add_argument("--copy-all", action="store_true")
     ap.add_argument("--mapping", action="append", default=[], help="source=dest")
     args = ap.parse_args()
@@ -54,7 +55,11 @@ def main() -> None:
         if not src_path.exists():
             raise FileNotFoundError(src_path)
         dest_path = dst_dir / dest_name
-        rendered = render_unit_text(src_path.read_text(encoding="utf-8"), args.root)
+        rendered = render_unit_text(
+            src_path.read_text(encoding="utf-8"),
+            args.root,
+            drop_user_directive=args.user_mode,
+        )
         dest_path.write_text(rendered, encoding="utf-8")
 
 

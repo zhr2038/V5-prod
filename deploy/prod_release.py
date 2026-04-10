@@ -130,12 +130,16 @@ def production_sync_roots(items: Iterable[str] = PRODUCTION_SYNC_ITEMS) -> tuple
     return tuple(roots)
 
 
-def render_unit_text(text: str, root: str) -> str:
+def render_unit_text(text: str, root: str, *, drop_user_directive: bool = False) -> str:
     rendered = text
     normalized_root = normalize_root(root)
     for known in KNOWN_DEPLOY_ROOTS:
         rendered = rendered.replace(known, normalized_root)
     rendered = rendered.replace("\r\n", "\n")
+    if drop_user_directive:
+        rendered = "\n".join(
+            line for line in rendered.splitlines() if not line.strip().startswith("User=")
+        )
     if not rendered.endswith("\n"):
         rendered += "\n"
     return rendered

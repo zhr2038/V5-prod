@@ -94,3 +94,8 @@ def test_install_systemd_production_only_enables_spread_rollup_timer():
     assert "--mapping v5-spread-rollup.user.service=v5-spread-rollup.service" in text
     assert "--mapping v5-spread-rollup.timer=v5-spread-rollup.timer" in text
     assert "systemctl --user enable --now v5-spread-rollup.timer" in text
+
+
+def test_install_systemd_user_render_strips_user_directives():
+    text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
+    assert 'render_args+=(--user-mode)' in text

@@ -143,6 +143,19 @@ def test_render_unit_text_rewrites_ubuntu_prod_root() -> None:
     assert rendered.count("/srv/v5-prod") == 2
 
 
+def test_render_unit_text_drops_user_directive_for_user_units() -> None:
+    source = (
+        "[Service]\n"
+        "User=admin\n"
+        "WorkingDirectory=/home/admin/clawd/v5-prod\n"
+        "ExecStart=/home/admin/clawd/v5-prod/.venv/bin/python main.py\n"
+    )
+    rendered = render_unit_text(source, "/srv/v5-prod", drop_user_directive=True)
+    assert "User=admin" not in rendered
+    assert "WorkingDirectory=/srv/v5-prod" in rendered
+    assert "ExecStart=/srv/v5-prod/.venv/bin/python main.py" in rendered
+
+
 def test_production_unit_mappings_include_sentiment_collect() -> None:
     mappings = dict(PRODUCTION_USER_UNIT_MAPPINGS)
     assert mappings["v5-sentiment-collect.service"] == "v5-sentiment-collect.service"
