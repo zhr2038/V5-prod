@@ -190,6 +190,19 @@ def _json_error_response(exc: BaseException, *, status_code: int = 500, **extra:
     return jsonify(payload), status_code
 
 
+def _json_internal_error_response(
+    exc: BaseException,
+    *,
+    status_code: int = 500,
+    error: str = 'internal server error',
+    **extra: Any,
+):
+    _log_dashboard_exception('api error', exc)
+    payload = dict(extra)
+    payload['error'] = error
+    return jsonify(payload), status_code
+
+
 def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
     response = result
     status_code = 200
@@ -2246,7 +2259,7 @@ def api_trades():
 
         return jsonify({'trades': trades[:100]})
     except Exception as e:
-        return jsonify({'error': str(e), 'trades': []}), 500
+        return _json_internal_error_response(e, trades=[])
 
 
 @app.route('/api/positions')
@@ -2511,7 +2524,7 @@ def api_positions():
         
         return jsonify({'positions': positions})
     except Exception as e:
-        return jsonify({'error': str(e), 'positions': []}), 500
+        return _json_internal_error_response(e, positions=[])
 
 
 @app.route('/api/position_kline')
@@ -2581,7 +2594,7 @@ def api_position_kline():
             },
         })
     except Exception as e:
-        return jsonify({'error': str(e), 'candles': []}), 500
+        return _json_internal_error_response(e, candles=[])
 
 
 @app.route('/api/scores')
@@ -5327,7 +5340,7 @@ def api_health():
         })
         
     except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+        return _json_internal_error_response(e, status='error', checks=[], warning_count=0, critical_count=0)
 
 
 if __name__ == '__main__':

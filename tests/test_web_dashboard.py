@@ -2845,6 +2845,27 @@ def test_account_api_error_response_does_not_expose_traceback(monkeypatch):
     assert "Traceback" not in body
 
 
+def test_positions_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError(r"C:\secret\configs\live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/positions")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["positions"] == []
+    assert "live_prod.yaml" not in body
+    assert "C:\\secret" not in body
+    assert "Traceback" not in body
+
+
 def test_account_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -3075,6 +3096,30 @@ def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path)
     payload = response.get_json()
     assert payload["status"] == "warning"
     assert any(check.get("name") == "OKX API" and check.get("status") == "warning" for check in payload["checks"])
+
+
+def test_health_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["status"] == "error"
+    assert payload["error"] == "internal server error"
+    assert payload["checks"] == []
+    assert payload["warning_count"] == 0
+    assert payload["critical_count"] == 0
+    assert "live_prod.yaml" not in body
+    assert "/home/ubuntu/clawd/v5-prod" not in body
+    assert "Traceback" not in body
 
 
 def test_sentiment_api_degrades_when_scores_endpoint_returns_error_tuple(monkeypatch, tmp_path):
