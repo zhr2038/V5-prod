@@ -396,12 +396,28 @@ def _legacy_display_score(score: float) -> float:
     return math.copysign(math.tanh(magnitude / scale), raw)
 
 
-def _iter_decision_audits(reports_dir: Path) -> List[Dict[str, Any]]:
+def _decision_audit_candidate_sort_epoch(run_dir: Path) -> float:
+    epoch = _run_id_epoch(run_dir.name)
+    if epoch is not None:
+        return epoch
+    audit_path = run_dir / 'decision_audit.json'
+    try:
+        return audit_path.stat().st_mtime
+    except OSError:
+        try:
+            return run_dir.stat().st_mtime
+        except OSError:
+            return 0.0
+
+
+def _iter_decision_audits(reports_dir: Path, max_entries: Optional[int] = None) -> List[Dict[str, Any]]:
     runs_dir = reports_dir / 'runs'
     if not runs_dir.exists():
         return []
 
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+    if max_entries is not None and max_entries > 0:
+        run_dirs = sorted(run_dirs, key=_decision_audit_candidate_sort_epoch, reverse=True)[:max_entries]
 
     audits: List[Dict[str, Any]] = []
     for run_dir in run_dirs:
@@ -441,6 +457,14 @@ def _normalize_top_scores(raw_scores: Any, limit: int = 20) -> List[Dict[str, An
         except Exception:
             continue
     return items
+
+
+def _score_audit_scan_limit() -> int:
+    try:
+        raw_limit = int(os.getenv('V5_DASHBOARD_SCORE_AUDIT_SCAN_LIMIT', '96') or '96')
+    except Exception:
+        raw_limit = 96
+    return max(2, min(raw_limit, 1000))
 
 
 def _decision_note_text(audit: Dict[str, Any]) -> str:
@@ -2431,7 +2455,7 @@ def api_scores():
         previous_scores: List[Dict[str, Any]] = []
 
         usable_runs: List[Dict[str, Any]] = []
-        for entry in _iter_decision_audits(runtime_reports_dir):
+        for entry in _iter_decision_audits(runtime_reports_dir, max_entries=_score_audit_scan_limit()):
             items = _normalize_top_scores(entry['audit'].get('top_scores', []))
             if not items:
                 continue
@@ -2440,6 +2464,8 @@ def api_scores():
                 'regime': str(entry['audit'].get('regime') or 'Unknown'),
                 'scores': items,
             })
+            if len(usable_runs) >= 2:
+                break
 
         if usable_runs:
             current_run_id = usable_runs[0]['run_id']

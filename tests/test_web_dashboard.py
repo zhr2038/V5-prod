@@ -677,6 +677,58 @@ def test_api_scores_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["scores"][0]["symbol"] == "ETH/USDT"
 
 
+def test_api_scores_limits_recent_decision_audit_scan(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setenv("V5_DASHBOARD_SCORE_AUDIT_SCAN_LIMIT", "4")
+
+    for hour in range(20):
+        run_dir = runs_dir / f"20260312_{hour:02d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps(
+                {
+                    "regime": "TRENDING",
+                    "top_scores": [
+                        {
+                            "symbol": f"COIN{hour}/USDT",
+                            "score": 0.5 + hour / 100,
+                            "display_score": 0.5 + hour / 100,
+                            "raw_score": 0.5 + hour / 100,
+                            "rank": 1,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    original_load_json_payload = module._load_json_payload
+    reads = {"decision_audit": 0}
+
+    def counting_load_json_payload(path):
+        if Path(path).name == "decision_audit.json":
+            reads["decision_audit"] += 1
+        return original_load_json_payload(path)
+
+    monkeypatch.setattr(module, "_load_json_payload", counting_load_json_payload)
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_run"] == "20260312_19"
+    assert payload["previous_run"] == "20260312_18"
+    assert payload["scores"][0]["symbol"] == "COIN19/USDT"
+    assert reads["decision_audit"] <= 4
+
+
 def test_api_scores_falls_back_to_active_runtime_alpha_snapshot(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
