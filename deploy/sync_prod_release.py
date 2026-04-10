@@ -165,9 +165,17 @@ def _resolve_service_user(raw_service_user: str, ssh_user: str) -> str:
     return ssh_user
 
 
+def _resolve_shadow_root(raw_shadow_root: str, remote_root: str) -> str:
+    value = str(raw_shadow_root or "").strip()
+    if value:
+        return value
+    return posixpath.join(posixpath.dirname(remote_root.rstrip("/")), "v5-shadow-tuned-xgboost")
+
+
 def _install_units(
     client: paramiko.SSHClient,
     remote_root: str,
+    shadow_root: str,
     service_user: str,
     enable_prod_timer: bool,
     enable_event_driven_timer: bool,
@@ -179,6 +187,8 @@ def _install_units(
         "--production-only",
         "--root",
         remote_root,
+        "--shadow-root",
+        shadow_root,
     ]
     if enable_prod_timer:
         cmd.append("--enable-prod-timer")
@@ -261,13 +271,17 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=22)
     ap.add_argument("--key-file", default="")
     ap.add_argument("--remote-root", default="")
+    ap.add_argument("--shadow-root", default="")
     ap.add_argument("--service-user", default="")
     ap.add_argument("--skip-install", action="store_true")
     ap.add_argument("--no-prune", action="store_true")
+    ap.add_argument("--skip-shadow-sync", action="store_true")
+    ap.add_argument("--prune-shadow", action="store_true")
     ap.add_argument("--enable-prod-timer", action="store_true")
     ap.add_argument("--enable-event-driven-timer", action="store_true")
     args = ap.parse_args()
     remote_root = _resolve_remote_root(args.remote_root, args.user)
+    shadow_root = _resolve_shadow_root(args.shadow_root, remote_root)
     service_user = _resolve_service_user(args.service_user, args.user)
 
     workspace_root = Path(__file__).resolve().parents[1]
@@ -294,11 +308,22 @@ def main() -> None:
         with production_snapshot(workspace_root) as snapshot_root:
             uploaded, skipped, rel_paths = _upload_files(sftp, snapshot_root, remote_root)
             pruned = [] if args.no_prune else _prune_remote_files(sftp, snapshot_root, remote_root)
+            shadow_uploaded = 0
+            shadow_skipped = 0
+            shadow_pruned: list[str] = []
+            if not args.skip_shadow_sync:
+                _ensure_remote_dir(sftp, shadow_root)
+                shadow_uploaded, shadow_skipped, _shadow_rel_paths = _upload_files(sftp, snapshot_root, shadow_root)
+                shadow_pruned = _prune_remote_files(sftp, snapshot_root, shadow_root) if args.prune_shadow else []
         sftp.close()
 
         print(f"uploaded_files={uploaded}")
         print(f"skipped_files={skipped}")
         print(f"pruned_files={len(pruned)}")
+        print(f"shadow_root={shadow_root}")
+        print(f"shadow_uploaded_files={shadow_uploaded}")
+        print(f"shadow_skipped_files={shadow_skipped}")
+        print(f"shadow_pruned_files={len(shadow_pruned)}")
         if rel_paths:
             print(f"first_file={rel_paths[0]}")
             print(f"last_file={rel_paths[-1]}")
@@ -307,6 +332,7 @@ def main() -> None:
             _install_units(
                 client,
                 remote_root=remote_root,
+                shadow_root=shadow_root,
                 service_user=service_user,
                 enable_prod_timer=args.enable_prod_timer,
                 enable_event_driven_timer=args.enable_event_driven_timer,

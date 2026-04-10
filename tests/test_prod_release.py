@@ -16,6 +16,7 @@ from deploy.sync_prod_release import (
     _prune_remote_files,
     _resolve_remote_root,
     _resolve_service_user,
+    _resolve_shadow_root,
     _user_bus_wrapped_command,
     _validate_units,
 )
@@ -342,9 +343,11 @@ def test_validate_units_skips_optional_live_timer_checks_when_not_enabled(monkey
 
 def test_sync_prod_release_defaults_follow_ssh_user() -> None:
     assert _resolve_remote_root("", "ubuntu") == "/home/ubuntu/clawd/v5-prod"
+    assert _resolve_shadow_root("", "/home/ubuntu/clawd/v5-prod") == "/home/ubuntu/clawd/v5-shadow-tuned-xgboost"
     assert _resolve_service_user("", "ubuntu") == "ubuntu"
 
 
 def test_sync_prod_release_respects_explicit_overrides() -> None:
     assert _resolve_remote_root("/srv/custom", "ubuntu") == "/srv/custom"
+    assert _resolve_shadow_root("/srv/shadow", "/srv/custom") == "/srv/shadow"
     assert _resolve_service_user("admin", "ubuntu") == "admin"
