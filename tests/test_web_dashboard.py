@@ -24,6 +24,13 @@ def load_web_dashboard_module():
     return module
 
 
+def _assert_internal_error_hidden(body: str, *fragments: str):
+    assert "internal server error" in body
+    assert "Traceback" not in body
+    for fragment in fragments:
+        assert fragment not in body
+
+
 def _find_headless_browser() -> str | None:
     candidates = [
         shutil.which("chrome"),
@@ -2652,6 +2659,35 @@ def test_ml_training_api_treats_legacy_default_ml_paths_as_runtime_paths(monkeyp
     assert payload["runtime_prediction_count"] == 7
 
 
+def test_ml_training_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_ml_training():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/reports/ml_training_data.db")
+
+    monkeypatch.setattr(module, "_api_ml_training_v2", raise_ml_training)
+
+    response = client.get("/api/ml_training")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["status"] == "error"
+    assert payload["phase"] == "error"
+    assert payload["configured_enabled"] is False
+    assert payload["stages"] == {
+        "sampling": False,
+        "trained": False,
+        "promoted": False,
+        "liveActive": False,
+    }
+    assert payload["runtime_prediction_count"] == 0
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/reports/ml_training_data.db", "ml_training_data.db")
+
+
 def test_api_reflection_reports_uses_active_runtime_reflection_dir(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -2711,6 +2747,27 @@ def test_api_reflection_reports_uses_active_runtime_reflection_dir(monkeypatch, 
     assert payload["reports"][0]["trade_count"] == 2
     assert payload["reports"][0]["high_priority"] == 0
     assert payload["reports"][0]["medium_priority"] == 1
+
+
+def test_reflection_reports_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/reflection_reports")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["reports"] == []
+    assert payload["total_reports"] == 0
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
 
 
 def test_api_ic_diagnostics_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
@@ -3886,6 +3943,57 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["rounds"][0]["run_id"] == "20260408_01"
     assert payload["rounds"][0]["strategy_signals"][0]["symbol"] == "ETH/USDT"
     assert payload["rounds"][0]["execution_result"]["orders_rebalance"] == 1
+
+
+def test_decision_chain_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/decision_chain")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["rounds"] == []
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
+
+
+def test_decision_chain_run_parse_error_is_sanitized(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_run = runtime_dir / "runs" / "20260408_01"
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (runtime_run / "decision_audit.json").write_text('{"regime": ', encoding="utf-8")
+
+    response = client.get("/api/decision_chain")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["rounds"][0]["run_id"] == "20260408_01"
+    assert payload["rounds"][0]["error"] == "internal parse error"
+    assert "JSONDecodeError" not in body
+    assert "Expecting value" not in body
 
 
 def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):

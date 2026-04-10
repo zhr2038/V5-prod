@@ -4274,7 +4274,39 @@ def _api_ml_training_v2():
 
 @app.route('/api/ml_training')
 def api_ml_training():
-    return _api_ml_training_v2()
+    try:
+        return _api_ml_training_v2()
+    except Exception as e:
+        return _json_internal_error_response(
+            e,
+            status='error',
+            phase='error',
+            display_status='ml training unavailable',
+            configured_enabled=False,
+            stages={
+                'sampling': False,
+                'trained': False,
+                'promoted': False,
+                'liveActive': False,
+            },
+            total_samples=0,
+            labeled_samples=0,
+            samples_needed=200,
+            progress_percent=0,
+            latest_model=None,
+            model_date=None,
+            last_ic=None,
+            last_training_ts=None,
+            last_training_gate_passed=False,
+            last_promotion_ts=None,
+            promotion_fail_reasons=[],
+            last_runtime_ts=None,
+            runtime_reason='',
+            runtime_prediction_count=0,
+            model_path=None,
+            active_model_path=None,
+            last_update='',
+        )
     """机器学习训练进度API（对齐当前项目文件结构）"""
     try:
         model_dir = WORKSPACE / 'models'
@@ -4398,7 +4430,12 @@ def api_reflection_reports():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            reports=[],
+            total_reports=0,
+            last_update='',
+        )
 
 
 @app.route('/api/decision_chain')
@@ -4535,7 +4572,7 @@ def api_decision_chain():
                     'execution_result': {'selected': 0, 'targets_pre_risk': 0, 'orders_rebalance': 0, 'orders_exit': 0},
                     'block_reasons': {'parse_error': 1},
                     'blocked_top': [],
-                    'error': str(e)
+                    'error': 'internal parse error'
                 })
                 continue
 
@@ -4544,7 +4581,11 @@ def api_decision_chain():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            rounds=[],
+            last_update='',
+        )
 
 
 @app.route('/api/shadow_test')
