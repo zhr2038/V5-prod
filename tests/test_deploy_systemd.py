@@ -70,10 +70,18 @@ def test_v5_ledger_service_targets_live_prod_config():
     assert "--out reports/ledger_status.json" not in text
 
 
-def test_install_systemd_production_only_disables_shadow_timers():
+def test_install_systemd_production_only_keeps_tuned_shadow_timer():
     text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
-    assert "disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service" in text
+    assert "disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service" not in text
     assert "disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service" in text
+
+
+def test_install_systemd_production_only_disables_legacy_runtime_timers():
+    text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
+    assert "v5-hourly.timer v5-hourly.service" in text
+    assert "v5-daily.timer v5-daily.service" in text
+    assert "v5-cost-rollup.timer v5-cost-rollup.service" in text
+    assert "v5-spread-rollup.timer v5-spread-rollup.service" not in text
 
 
 def test_install_systemd_production_only_enables_trade_monitor_timer():

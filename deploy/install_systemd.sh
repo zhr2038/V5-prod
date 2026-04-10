@@ -110,9 +110,14 @@ if [[ "$USER_MODE" == "1" ]]; then
   systemctl --user daemon-reload
 
   if [[ "$PRODUCTION_ONLY" == "1" ]]; then
-    # Production-only install must also disable stale shadow timers/services that may
-    # remain from previous experiments, otherwise they keep polluting reports/runs.
-    systemctl --user disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service >/dev/null 2>&1 || true
+    # Production-only installs must tear down the generic scheduler set first,
+    # otherwise old hourly/daily timers can keep firing alongside prod/event-driven.
+    systemctl --user disable --now \
+      v5-hourly.timer v5-hourly.service \
+      v5-daily.timer v5-daily.service \
+      v5-cost-rollup.timer v5-cost-rollup.service >/dev/null 2>&1 || true
+    # Keep the tuned shadow timer intact. It now writes into an isolated workspace
+    # and reports namespace, so production-only deploys should not tear it down.
     systemctl --user disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service >/dev/null 2>&1 || true
     systemctl --user enable --now v5-web-dashboard.service
     systemctl --user restart v5-web-dashboard.service
