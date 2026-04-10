@@ -3720,12 +3720,13 @@ def api_timer():
             timer_name = _pick_timer_name()
         except Exception:
             timer_name = 'v5-prod.user.timer'
-        return _json_error_response(
+        return _json_internal_error_response(
             e,
             timer_name=timer_name,
             next_run=None,
             countdown_seconds=0,
             interval_minutes=120,
+            last_check='',
         )
 
 
@@ -3758,7 +3759,11 @@ def api_timers():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        return _json_error_response(e)
+        return _json_internal_error_response(
+            e,
+            timers=[],
+            last_update='',
+        )
 
 
 @app.route('/api/cost_calibration')

@@ -255,6 +255,49 @@ def test_status_api_error_response_hides_internal_paths(monkeypatch):
     _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
 
 
+def test_timer_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_pick_timer():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "_pick_timer_name", raise_pick_timer)
+
+    response = client.get("/api/timer")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["timer_name"] == "v5-prod.user.timer"
+    assert payload["next_run"] is None
+    assert payload["countdown_seconds"] == 0
+    assert payload["interval_minutes"] == 120
+    assert payload["last_check"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
+
+
+def test_timers_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_runtime(_timer_name):
+        raise FileNotFoundError(r"C:\secret\systemd\timers.json")
+
+    monkeypatch.setattr(module, "_get_timer_runtime", raise_runtime)
+
+    response = client.get("/api/timers")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["timers"] == []
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, r"C:\secret\systemd\timers.json", "timers.json")
+
+
 def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
