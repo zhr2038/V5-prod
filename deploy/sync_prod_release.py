@@ -192,40 +192,57 @@ def _install_units(
         raise RuntimeError(f"install_systemd failed\nSTDOUT:\n{out}\nSTDERR:\n{err}")
 
 
-def _validate_units(client: paramiko.SSHClient, service_user: str) -> str:
-    inner = (
-        "systemctl --user is-enabled v5-web-dashboard.service "
-        "&& systemctl --user is-enabled v5-trade-monitor.timer "
-        "&& systemctl --user is-enabled v5-daily-ml-training.timer "
-        "&& systemctl --user is-enabled v5-model-promotion-gate.timer "
-        "&& systemctl --user is-enabled v5-sentiment-collect.timer "
-        "&& systemctl --user is-enabled v5-auto-risk-eval.timer "
-        "&& systemctl --user is-enabled v5-reconcile.timer "
-        "&& systemctl --user is-enabled v5-ledger.timer "
-        "&& systemctl --user is-enabled v5-cost-rollup-real.user.timer "
-        "&& systemctl --user is-enabled v5-spread-rollup.timer "
-        "&& test \"$(systemctl --user is-active v5-web-dashboard.service)\" = active "
-        "&& test \"$(systemctl --user is-active v5-trade-monitor.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-daily-ml-training.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-model-promotion-gate.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-sentiment-collect.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-auto-risk-eval.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-reconcile.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-ledger.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-cost-rollup-real.user.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-spread-rollup.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-prod.user.timer)\" = active "
-        "&& test \"$(systemctl --user is-active v5-event-driven.timer)\" = active "
-        "&& systemctl --user show v5-web-dashboard.service --property=UnitFileState,ActiveState "
-        "&& systemctl --user show v5-trade-monitor.timer --property=UnitFileState,ActiveState "
-        "&& systemctl --user show v5-daily-ml-training.timer --property=UnitFileState "
-        "&& systemctl --user show v5-model-promotion-gate.timer --property=UnitFileState "
-        "&& systemctl --user show v5-sentiment-collect.timer --property=UnitFileState "
-        "&& systemctl --user show v5-auto-risk-eval.timer --property=UnitFileState "
-        "&& systemctl --user show v5-spread-rollup.timer --property=UnitFileState "
-        "&& systemctl --user show v5-prod.user.timer --property=UnitFileState "
-        "&& systemctl --user show v5-event-driven.timer --property=UnitFileState"
-    )
+def _validate_units(
+    client: paramiko.SSHClient,
+    service_user: str,
+    *,
+    enable_prod_timer: bool,
+    enable_event_driven_timer: bool,
+) -> str:
+    checks: list[str] = [
+        "systemctl --user is-enabled v5-web-dashboard.service",
+        "systemctl --user is-enabled v5-trade-monitor.timer",
+        "systemctl --user is-enabled v5-daily-ml-training.timer",
+        "systemctl --user is-enabled v5-model-promotion-gate.timer",
+        "systemctl --user is-enabled v5-sentiment-collect.timer",
+        "systemctl --user is-enabled v5-auto-risk-eval.timer",
+        "systemctl --user is-enabled v5-reconcile.timer",
+        "systemctl --user is-enabled v5-ledger.timer",
+        "systemctl --user is-enabled v5-cost-rollup-real.user.timer",
+        "systemctl --user is-enabled v5-spread-rollup.timer",
+        "test \"$(systemctl --user is-active v5-web-dashboard.service)\" = active",
+        "test \"$(systemctl --user is-active v5-trade-monitor.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-daily-ml-training.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-model-promotion-gate.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-sentiment-collect.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-auto-risk-eval.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-reconcile.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-ledger.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-cost-rollup-real.user.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-spread-rollup.timer)\" = active",
+        "systemctl --user show v5-web-dashboard.service --property=UnitFileState,ActiveState",
+        "systemctl --user show v5-trade-monitor.timer --property=UnitFileState,ActiveState",
+        "systemctl --user show v5-daily-ml-training.timer --property=UnitFileState",
+        "systemctl --user show v5-model-promotion-gate.timer --property=UnitFileState",
+        "systemctl --user show v5-sentiment-collect.timer --property=UnitFileState",
+        "systemctl --user show v5-auto-risk-eval.timer --property=UnitFileState",
+        "systemctl --user show v5-spread-rollup.timer --property=UnitFileState",
+    ]
+    if enable_prod_timer:
+        checks.extend(
+            [
+                "test \"$(systemctl --user is-active v5-prod.user.timer)\" = active",
+                "systemctl --user show v5-prod.user.timer --property=UnitFileState",
+            ]
+        )
+    if enable_event_driven_timer:
+        checks.extend(
+            [
+                "test \"$(systemctl --user is-active v5-event-driven.timer)\" = active",
+                "systemctl --user show v5-event-driven.timer --property=UnitFileState",
+            ]
+        )
+    inner = " && ".join(checks)
     cmd = _user_bus_wrapped_command(service_user, inner)
     code, out, err = _run(client, cmd)
     if code != 0:
@@ -291,7 +308,14 @@ def main() -> None:
                 enable_prod_timer=args.enable_prod_timer,
                 enable_event_driven_timer=args.enable_event_driven_timer,
             )
-            print(_validate_units(client, service_user))
+            print(
+                _validate_units(
+                    client,
+                    service_user,
+                    enable_prod_timer=args.enable_prod_timer,
+                    enable_event_driven_timer=args.enable_event_driven_timer,
+                )
+            )
     finally:
         client.close()
 

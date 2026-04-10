@@ -269,7 +269,7 @@ def test_prune_remote_files_removes_stale_production_files_only(tmp_path: Path) 
     assert "/remote/data/cache.csv" in fake_sftp.files
 
 
-def test_validate_units_requires_active_dashboard_and_timers(monkeypatch) -> None:
+def test_validate_units_requires_active_dashboard_and_optional_live_timers(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
     def fake_run(_client, command: str):
@@ -278,7 +278,15 @@ def test_validate_units_requires_active_dashboard_and_timers(monkeypatch) -> Non
 
     monkeypatch.setattr("deploy.sync_prod_release._run", fake_run)
 
-    assert _validate_units(object(), "ubuntu") == "ok"
+    assert (
+        _validate_units(
+            object(),
+            "ubuntu",
+            enable_prod_timer=True,
+            enable_event_driven_timer=True,
+        )
+        == "ok"
+    )
     inner = captured["command"]
     assert "is-active v5-web-dashboard.service" in inner
     assert "is-enabled v5-trade-monitor.timer" in inner
@@ -287,6 +295,33 @@ def test_validate_units_requires_active_dashboard_and_timers(monkeypatch) -> Non
     assert "is-active v5-spread-rollup.timer" in inner
     assert "is-active v5-prod.user.timer" in inner
     assert "is-active v5-event-driven.timer" in inner
+
+
+def test_validate_units_skips_optional_live_timer_checks_when_not_enabled(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_run(_client, command: str):
+        captured["command"] = command
+        return 0, "ok", ""
+
+    monkeypatch.setattr("deploy.sync_prod_release._run", fake_run)
+
+    assert (
+        _validate_units(
+            object(),
+            "ubuntu",
+            enable_prod_timer=False,
+            enable_event_driven_timer=False,
+        )
+        == "ok"
+    )
+    inner = captured["command"]
+    assert "is-active v5-web-dashboard.service" in inner
+    assert "is-active v5-trade-monitor.timer" in inner
+    assert "is-active v5-prod.user.timer" not in inner
+    assert "is-active v5-event-driven.timer" not in inner
+    assert "show v5-prod.user.timer" not in inner
+    assert "show v5-event-driven.timer" not in inner
 
 
 def test_sync_prod_release_defaults_follow_ssh_user() -> None:
