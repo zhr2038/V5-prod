@@ -213,6 +213,53 @@ def _json_internal_error_list_response(
     return jsonify(list(items or [])), status_code
 
 
+def _sanitize_public_error_text(value: Any, *, default: str = 'internal error') -> str:
+    text = str(value or '').strip()
+    if not text:
+        return default
+    lowered = text.lower()
+    if 'traceback' in lowered:
+        return default
+    if re.search(r'[A-Za-z]:\\', text):
+        return default
+    if re.search(r'(^|[\s(])/(?:[^/\s]+/?)+', text):
+        return default
+    return text
+
+
+def _ml_training_unavailable_response(exc: BaseException):
+    return _json_internal_error_response(
+        exc,
+        status='error',
+        phase='error',
+        display_status='ml training unavailable',
+        configured_enabled=False,
+        stages={
+            'sampling': False,
+            'trained': False,
+            'promoted': False,
+            'liveActive': False,
+        },
+        total_samples=0,
+        labeled_samples=0,
+        samples_needed=200,
+        progress_percent=0,
+        latest_model=None,
+        model_date=None,
+        last_ic=None,
+        last_training_ts=None,
+        last_training_gate_passed=False,
+        last_promotion_ts=None,
+        promotion_fail_reasons=[],
+        last_runtime_ts=None,
+        runtime_reason='',
+        runtime_prediction_count=0,
+        model_path=None,
+        active_model_path=None,
+        last_update='',
+    )
+
+
 def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
     response = result
     status_code = 200
@@ -1138,7 +1185,7 @@ def _get_timer_state(timer_name: str) -> Dict[str, Any]:
         state['enabled'] = _timer_enabled(unit_file_state)
         state['active'] = active_state == 'active'
     except Exception as exc:
-        state['error'] = str(exc)
+        state['error'] = _sanitize_public_error_text(exc)
     return state
 
 
@@ -1167,7 +1214,7 @@ def _get_timer_runtime(timer_name: str) -> Dict[str, Any]:
             runtime['countdown_seconds'] = max(0, int((trigger_dt - datetime.now()).total_seconds()))
     except Exception as exc:
         if not runtime.get('error'):
-            runtime['error'] = str(exc)
+            runtime['error'] = _sanitize_public_error_text(exc)
 
     if runtime['next_run'] is not None:
         return runtime
@@ -1197,7 +1244,7 @@ def _get_timer_runtime(timer_name: str) -> Dict[str, Any]:
             break
     except Exception as exc:
         if not runtime.get('error'):
-            runtime['error'] = str(exc)
+            runtime['error'] = _sanitize_public_error_text(exc)
 
     return runtime
 
@@ -2121,7 +2168,25 @@ def api_account():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_error_response(e)
+        return _json_internal_error_response(
+            e,
+            cash_usdt=0.0,
+            positions_value_usdt=0.0,
+            total_equity_usdt=0.0,
+            initial_capital_usdt=120.0,
+            equity_delta_usdt=0.0,
+            total_pnl_pct=0.0,
+            drawdown_pct=0.0,
+            peak_equity_usdt=120.0,
+            budget_cap_usdt=None,
+            positions_count=0,
+            total_trades=0,
+            total_buy=0.0,
+            total_sell=0.0,
+            total_fees=0.0,
+            realized_pnl=0.0,
+            last_update='',
+        )
 
 
 @app.route('/api/trades')
@@ -2693,7 +2758,14 @@ def api_scores():
             'last_update': datetime.now().isoformat()
         })
     except Exception as e:
-        return jsonify({'regime': 'Error', 'scores': [], 'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            regime='Error',
+            current_run=None,
+            previous_run=None,
+            scores=[],
+            last_update='',
+        )
 
 
 @app.route('/api/sentiment')
@@ -2762,7 +2834,7 @@ def api_sentiment():
                     'cache_mtime': datetime.fromtimestamp(latest.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
                 }
             except Exception as e:
-                results[symbol] = {'error': str(e)}
+                results[symbol] = {'error': _sanitize_public_error_text(e, default='cache_error')}
 
         valid_scores = [r['sentiment'] for r in results.values() if 'sentiment' in r]
         valid_fg = [r['fear_greed'] for r in results.values() if 'fear_greed' in r]
@@ -2790,7 +2862,17 @@ def api_sentiment():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_error_response(e)
+        return _json_internal_error_response(
+            e,
+            overall={
+                'sentiment': 0.0,
+                'fear_greed': 50,
+                'mood': 'neutral',
+                'mood_color': '#64748b',
+            },
+            by_symbol={},
+            last_update='',
+        )
 
 
 @app.route('/api/status')
@@ -3698,7 +3780,41 @@ def api_dashboard():
         
         return jsonify(dashboard_data)
     except Exception as e:
-        return _json_error_response(e)
+        return _json_internal_error_response(
+            e,
+            account={
+                'totalEquity': 0.0,
+                'cash': 0.0,
+                'positionsValue': 0.0,
+                'initialCapital': 120.0,
+                'totalPnl': 0.0,
+                'realizedPnl': 0.0,
+                'totalPnlPercent': 0.0,
+                'todayPnl': 0.0,
+                'todayPnlPercent': 0.0,
+                'sharpeRatio': 0.0,
+                'maxDrawdown': 0.0,
+                'winRate': 0.0,
+                'totalTrades': 0,
+            },
+            positions=[],
+            trades=[],
+            alphaScores=[],
+            marketState={},
+            systemStatus={
+                'isRunning': False,
+                'mode': 'unknown',
+                'lastUpdate': '',
+                'killSwitch': False,
+                'errors': ['internal server error'],
+            },
+            equityCurve=[],
+            timers={'timers': [], 'last_update': ''},
+            costCalibration={'status': 'error'},
+            icDiagnostics={'status': 'error'},
+            mlTraining={'status': 'error'},
+            reflectionReports={'reports': []},
+        )
 
 
 @app.route('/api/timer')
@@ -3945,7 +4061,20 @@ def api_cost_calibration():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_error_response(e)
+        return _json_internal_error_response(
+            e,
+            status='error',
+            total_days=0,
+            avg_slippage_bps=0.0,
+            avg_fee_bps=0.0,
+            avg_total_cost_bps=0.0,
+            event_files=0,
+            total_trades=0,
+            daily_stats=[],
+            progress_percent=0,
+            data_source='error',
+            last_update='',
+        )
 
 
 @app.route('/api/ic_diagnostics')
@@ -4143,7 +4272,20 @@ def api_ic_diagnostics():
             'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_error_response(e)
+        return _json_internal_error_response(
+            e,
+            status='error',
+            overall_ic=None,
+            overall_ir=None,
+            sample_count=0,
+            timestamps_count=0,
+            lookback_days=0,
+            factors=[],
+            regimes=[],
+            source_file=None,
+            fallback_reason=None,
+            last_update='',
+        )
 
 
 def _api_ml_training_v2():
@@ -4314,36 +4456,7 @@ def api_ml_training():
     try:
         return _api_ml_training_v2()
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            status='error',
-            phase='error',
-            display_status='ml training unavailable',
-            configured_enabled=False,
-            stages={
-                'sampling': False,
-                'trained': False,
-                'promoted': False,
-                'liveActive': False,
-            },
-            total_samples=0,
-            labeled_samples=0,
-            samples_needed=200,
-            progress_percent=0,
-            latest_model=None,
-            model_date=None,
-            last_ic=None,
-            last_training_ts=None,
-            last_training_gate_passed=False,
-            last_promotion_ts=None,
-            promotion_fail_reasons=[],
-            last_runtime_ts=None,
-            runtime_reason='',
-            runtime_prediction_count=0,
-            model_path=None,
-            active_model_path=None,
-            last_update='',
-        )
+        return _ml_training_unavailable_response(e)
     """机器学习训练进度API（对齐当前项目文件结构）"""
     try:
         model_dir = WORKSPACE / 'models'
@@ -4412,7 +4525,7 @@ def api_ml_training():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _ml_training_unavailable_response(e)
 
 
 @app.route('/api/reflection_reports')
@@ -4724,7 +4837,7 @@ def api_shadow_test():
         except Exception as e:
             ab_gate = None
             ab_gate_status = 'error'
-            ab_gate_error = str(e)
+            ab_gate_error = _sanitize_public_error_text(e)
 
         # 生成A/B对比报告
         ab_report = {
@@ -4781,9 +4894,48 @@ def api_shadow_test():
         }
         
         return jsonify(ab_report)
-        
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            status='error',
+            window_days=7,
+            window_rounds=0,
+            current_params={
+                'deadband_sideways': 0.04,
+                'description': 'current params',
+            },
+            proposed_params={
+                'deadband_sideways': 0.03,
+                'description': 'proposed params',
+            },
+            comparison={
+                'current': {
+                    'avg_selected_per_round': 0,
+                    'avg_rebalance_per_round': 0,
+                    'conversion_rate': 0,
+                    'total_deadband_blocks': 0,
+                    'avg_drift_when_blocked': 0,
+                },
+                'estimated_with_proposed': {
+                    'avg_rebalance_per_round': 0,
+                    'estimated_conversion_rate': 0,
+                    'additional_trades': 0,
+                    'risk_note': '',
+                },
+            },
+            recommendation={
+                'action': 'observe',
+                'reason': 'shadow test unavailable',
+                'suggested_next_step': '',
+            },
+            matrix=[],
+            ab_gate=None,
+            ab_gate_status='error',
+            ab_gate_age_sec=None,
+            ab_gate_error='internal error',
+            last_update='',
+        )
 
 
 @app.route('/api/smart_alerts')
@@ -5312,7 +5464,41 @@ def api_decision_audit():
             'notes': audit_data.get('notes', [])[:12]
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            run_id=None,
+            strategy_run_id=None,
+            strategy_signal_source='missing',
+            strategy_signals_count=0,
+            timestamp=None,
+            regime=None,
+            regime_details={},
+            counts={},
+            rejects={},
+            top_scores=[],
+            selection_source='alpha',
+            target_rank=[],
+            fused_buy_rank=[],
+            fused_rank_source_run=None,
+            fused_source_is_fallback=False,
+            router_decisions=[],
+            router_reason_counts={},
+            selected_orders=[],
+            blocked_routes=[],
+            strategy_signals=[],
+            actionable_signals={
+                'held_symbols': [],
+                'buy_candidates': [],
+                'sell_candidates': [],
+            },
+            execution_summary={},
+            execution_scope={'type': 'none', 'run_id': None, 'note': ''},
+            ml_signal_overview={},
+            recent_fill_summary={},
+            latest_ordered_run_summary={},
+            run_orders=[],
+            notes=[],
+        )
 
 
 @app.route('/api/shadow_ml_overlay')
@@ -5347,7 +5533,7 @@ def api_health():
             timer_state = _get_timer_state(timer_name)
 
             if timer_state.get('error'):
-                checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(timer_state.get('error'))})
+                checks.append({'name': '定时任务', 'status': 'warning', 'detail': _sanitize_public_error_text(timer_state.get('error'), default='timer warning')})
                 if overall_status == 'healthy':
                     overall_status = 'warning'
             elif timer_state.get('active'):
@@ -5356,7 +5542,7 @@ def api_health():
                 checks.append({'name': '定时任务', 'status': 'critical', 'detail': f'{timer_name}未运行'})
                 overall_status = 'critical'
         except Exception as e:
-            checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(e)})
+            checks.append({'name': '定时任务', 'status': 'warning', 'detail': _sanitize_public_error_text(e, default='timer status unavailable')})
             overall_status = 'warning'
         
         # 2. 检查数据库
@@ -5373,7 +5559,7 @@ def api_health():
                 checks.append({'name': '数据库', 'status': 'critical', 'detail': 'orders.sqlite不存在'})
                 overall_status = 'critical'
         except Exception as e:
-            checks.append({'name': '数据库', 'status': 'warning', 'detail': str(e)})
+            checks.append({'name': '数据库', 'status': 'warning', 'detail': _sanitize_public_error_text(e, default='database status unavailable')})
         
         # 3. 检查OKX API
         try:
@@ -5396,7 +5582,7 @@ def api_health():
             else:
                 checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'API密钥未配置'})
         except Exception as e:
-            checks.append({'name': 'OKX API', 'status': 'warning', 'detail': str(e)})
+            checks.append({'name': 'OKX API', 'status': 'warning', 'detail': _sanitize_public_error_text(e, default='okx api unavailable')})
         
         # 4. 检查磁盘空间
         try:
@@ -5415,7 +5601,7 @@ def api_health():
             else:
                 checks.append({'name': '磁盘空间', 'status': 'healthy', 'detail': f'{free_gb:.1f}GB可用'})
         except Exception as e:
-            checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': str(e)})
+            checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': _sanitize_public_error_text(e, default='disk status unavailable')})
         
         warning_count = sum(1 for item in checks if item.get('status') == 'warning')
         critical_count = sum(1 for item in checks if item.get('status') == 'critical')

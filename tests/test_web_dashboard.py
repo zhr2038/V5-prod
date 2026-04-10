@@ -4,6 +4,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -296,6 +297,217 @@ def test_timers_api_error_response_hides_internal_paths(monkeypatch):
     assert payload["timers"] == []
     assert payload["last_update"] == ""
     _assert_internal_error_hidden(body, r"C:\secret\systemd\timers.json", "timers.json")
+
+
+def test_scores_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["regime"] == "Error"
+    assert payload["current_run"] is None
+    assert payload["previous_run"] is None
+    assert payload["scores"] == []
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
+
+
+def test_sentiment_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    class BrokenWorkspace:
+        def __truediv__(self, _other):
+            raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/data/sentiment_cache")
+
+    monkeypatch.setattr(module, "WORKSPACE", BrokenWorkspace())
+
+    response = client.get("/api/sentiment")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["overall"]["sentiment"] == 0.0
+    assert payload["overall"]["fear_greed"] == 50
+    assert payload["by_symbol"] == {}
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/data/sentiment_cache", "sentiment_cache")
+
+
+def test_sentiment_api_symbol_error_is_sanitized(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "rss_BTC-USDT_20260410_01.json").write_text("{}", encoding="utf-8")
+
+    def raise_json_load(_fh):
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/data/sentiment_cache/rss_BTC-USDT_20260410_01.json")
+
+    monkeypatch.setattr(module.json, "load", raise_json_load)
+
+    response = client.get("/api/sentiment")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["by_symbol"]["BTC-USDT"]["error"] == "cache_error"
+    _assert_body_hides_internal_details(body, "/home/ubuntu/clawd/v5-prod/data/sentiment_cache", "rss_BTC-USDT_20260410_01.json")
+
+
+def test_dashboard_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_dashboard_api(*_args, **_kwargs):
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "_call_dashboard_api", raise_dashboard_api)
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["account"]["totalEquity"] == 0.0
+    assert payload["positions"] == []
+    assert payload["trades"] == []
+    assert payload["systemStatus"]["errors"] == ["internal server error"]
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
+
+
+def test_cost_calibration_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/reports/cost_stats_real")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/cost_calibration")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["status"] == "error"
+    assert payload["daily_stats"] == []
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/reports/cost_stats_real", "cost_stats_real")
+
+
+def test_ic_diagnostics_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/reports/ic_diagnostics_20260410.json")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/ic_diagnostics")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["status"] == "error"
+    assert payload["factors"] == []
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/reports/ic_diagnostics_20260410.json", "ic_diagnostics_20260410.json")
+
+
+def test_shadow_test_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/reports/ab_gate_status.json")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/shadow_test")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["status"] == "error"
+    assert payload["window_rounds"] == 0
+    assert payload["ab_gate_status"] == "error"
+    assert payload["ab_gate_error"] == "internal error"
+    assert payload["matrix"] == []
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/reports/ab_gate_status.json", "ab_gate_status.json")
+
+
+def test_health_api_component_errors_hide_internal_paths(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    class FakeRuntimePaths:
+        def __init__(self, orders_db):
+            self.orders_db = orders_db
+
+    orders_db = tmp_path / "orders.sqlite"
+    orders_db.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "load_config", lambda: {})
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config: FakeRuntimePaths(orders_db))
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(
+        module,
+        "_get_timer_state",
+        lambda _name: {"error": r"C:\secret\systemd\timers.json", "active": False},
+    )
+    monkeypatch.setattr(
+        module.sqlite3,
+        "connect",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError("/home/ubuntu/clawd/v5-prod/orders.sqlite")),
+    )
+
+    def raise_creds():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "_load_workspace_exchange_creds", raise_creds)
+
+    class BrokenDisk:
+        @staticmethod
+        def disk_usage(_path):
+            raise FileNotFoundError("/home/ubuntu/clawd/v5-prod")
+
+    monkeypatch.setitem(sys.modules, "shutil", BrokenDisk)
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    details = {check["name"]: check["detail"] for check in payload["checks"]}
+    assert details["定时任务"] == "timer warning"
+    assert details["数据库"] == "database status unavailable"
+    assert details["OKX API"] == "okx api unavailable"
+    assert details["磁盘空间"] == "disk status unavailable"
+    _assert_body_hides_internal_details(
+        body,
+        r"C:\secret\systemd\timers.json",
+        "/home/ubuntu/clawd/v5-prod/orders.sqlite",
+        "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml",
+    )
 
 
 def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
@@ -2981,7 +3193,7 @@ def test_account_api_error_response_does_not_expose_traceback(monkeypatch):
     client = module.app.test_client()
 
     def raise_load_config():
-        raise RuntimeError("config exploded")
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
 
     monkeypatch.setattr(module, "load_config", raise_load_config)
 
@@ -2990,9 +3202,12 @@ def test_account_api_error_response_does_not_expose_traceback(monkeypatch):
     assert response.status_code == 500
     body = response.get_data(as_text=True)
     payload = response.get_json()
-    assert payload["error"] == "config exploded"
-    assert "traceback" not in payload
-    assert "Traceback" not in body
+    assert payload["error"] == "internal server error"
+    assert payload["cash_usdt"] == 0.0
+    assert payload["total_equity_usdt"] == 0.0
+    assert payload["initial_capital_usdt"] == 120.0
+    assert payload["last_update"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
 
 
 def test_positions_api_error_response_hides_internal_paths(monkeypatch):
