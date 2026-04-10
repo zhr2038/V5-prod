@@ -1162,20 +1162,12 @@ def test_main_cached_trend_uses_runtime_trend_cache(tmp_path: Path, monkeypatch)
     class FakePipeline:
         def __init__(self, *_args, **_kwargs) -> None:
             self.regime_engine = SimpleNamespace(
-                detect=lambda _btc: SimpleNamespace(
-                    state=SimpleNamespace(value="SIDEWAYS"),
-                    multiplier=1.0,
-                    atr_pct=0.0,
-                    ma20=0.0,
-                    ma60=0.0,
-                )
+                detect=lambda _btc: (_ for _ in ()).throw(AssertionError("cached trend should skip regime compute"))
             )
             self.alpha_engine = SimpleNamespace(
                 set_regime_context=lambda *_args, **_kwargs: None,
-                compute_snapshot=lambda _market_data: SimpleNamespace(
-                    scores={"BTC/USDT": 1.23},
-                    ranks={"BTC/USDT": 1},
-                    raw={"BTC/USDT": 1.23},
+                compute_snapshot=lambda _market_data: (_ for _ in ()).throw(
+                    AssertionError("cached trend should skip alpha compute")
                 ),
             )
 

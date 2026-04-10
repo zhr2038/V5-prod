@@ -27,6 +27,19 @@ export V5_LIVE_ARM="${V5_LIVE_ARM:-YES}"
 export V5_RUN_ID="$WIN_ID"
 export V5_WINDOW_START_TS="${START_EPOCH}"
 export V5_WINDOW_END_TS="${END_EPOCH}"
-export V5_USE_CACHED_TREND="1"
+
+TREND_CACHE_PATH="${V5_TREND_CACHE_PATH:-$ROOT/reports/trend_cache.json}"
+TREND_CACHE_MAX_AGE_SEC="${V5_TREND_CACHE_MAX_AGE_SEC:-300}"
+if [[ -f "$TREND_CACHE_PATH" ]]; then
+  cache_mtime="$(stat -c %Y "$TREND_CACHE_PATH" 2>/dev/null || stat -f %m "$TREND_CACHE_PATH" 2>/dev/null || echo 0)"
+  cache_age=$(( NOW_EPOCH - cache_mtime ))
+  if [[ "$cache_age" -ge 0 && "$cache_age" -le "$TREND_CACHE_MAX_AGE_SEC" ]]; then
+    export V5_USE_CACHED_TREND="1"
+  else
+    unset V5_USE_CACHED_TREND
+  fi
+else
+  unset V5_USE_CACHED_TREND
+fi
 
 "$PYTHON_BIN" main.py

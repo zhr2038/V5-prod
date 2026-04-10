@@ -597,18 +597,27 @@ def main() -> None:
             raise RuntimeError("BTC/USDT missing after market-data validation")
         btc = next(iter(alpha_market_data.values()))
 
-    regime = pipe.regime_engine.detect(btc)
-    pipe.alpha_engine.set_regime_context(
-        regime.state.value if hasattr(regime.state, "value") else regime.state
-    )
-    alpha_snap = pipe.alpha_engine.compute_snapshot(alpha_market_data)
-
     # ========== 瓒嬪娍缂撳瓨锛氫繚瀛樻垨璇诲彇 ==========
     is_trend_update_only = str(os.getenv("V5_TREND_UPDATE_ONLY") or "").upper() == "1"
     use_cached_trend = str(os.getenv("V5_USE_CACHED_TREND") or "").upper() == "1"
     trend_cache_order_store_path = str(
         getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
     )
+
+    cached = None
+    if use_cached_trend and not is_trend_update_only:
+        cached = load_trend_cache(max_age_sec=300, order_store_path=trend_cache_order_store_path)
+
+    if cached:
+        log.info("[TrendCache] Using cached trend data")
+        alpha_snap = TrendCacheAlphaSnapshot(cached)
+        regime = TrendCacheRegimeResult(cached, cfg)
+    else:
+        regime = pipe.regime_engine.detect(btc)
+        pipe.alpha_engine.set_regime_context(
+            regime.state.value if hasattr(regime.state, "value") else regime.state
+        )
+        alpha_snap = pipe.alpha_engine.compute_snapshot(alpha_market_data)
 
     if is_trend_update_only:
         save_trend_cache(
@@ -620,14 +629,8 @@ def main() -> None:
         log.info("[TrendUpdate] Trend cache saved, exiting (V5_TREND_UPDATE_ONLY=1)")
         return
 
-    if use_cached_trend:
-        cached = load_trend_cache(max_age_sec=300, order_store_path=trend_cache_order_store_path)
-        if cached:
-            log.info("[TrendCache] Using cached trend data")
-            alpha_snap = TrendCacheAlphaSnapshot(cached)
-            regime = TrendCacheRegimeResult(cached, cfg)
-        else:
-            log.warning("[TrendCache] No valid cache found, using freshly computed trend")
+    if use_cached_trend and not cached:
+        log.warning("[TrendCache] No valid cache found, using freshly computed trend")
     # ========== 瓒嬪娍缂撳瓨缁撴潫 ==========
 
     acc = acc_store.get()
