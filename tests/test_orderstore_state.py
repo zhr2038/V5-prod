@@ -94,6 +94,33 @@ def test_orderstore_unknown_can_recover_to_authoritative_state() -> None:
         assert row.ord_id == "1001"
 
 
+def test_orderstore_fill_updates_do_not_overwrite_original_order_size() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        st = OrderStore(path=f"{td}/orders.sqlite")
+        clid = "KEEP_SZ_1"
+
+        st.upsert_new(
+            cl_ord_id=clid,
+            run_id="r",
+            inst_id="SOL-USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            decision_hash="h3",
+            td_mode="cash",
+            ord_type="limit",
+            notional_usdt=30.0,
+            sz="0.300",
+        )
+        st.update_state(clid, new_state="PARTIAL", acc_fill_sz="0.100", avg_px="100")
+        st.update_state(clid, new_state="FILLED", acc_fill_sz="0.300", avg_px="101")
+
+        row = st.get(clid)
+        assert row is not None
+        assert row.state == "FILLED"
+        assert row.sz == "0.300"
+        assert row.acc_fill_sz == "0.300"
+
+
 def test_get_latest_filled_prefers_event_ts_when_updated_ts_missing() -> None:
     with tempfile.TemporaryDirectory() as td:
         st = OrderStore(path=f"{td}/orders.sqlite")
