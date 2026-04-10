@@ -64,6 +64,52 @@ def test_index_renders_monitor_template():
     assert 'src="/static/js/ml_status_panel.js?v=' in body
 
 
+def test_static_files_serves_assets_and_spa_fallback(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    build_root = tmp_path / "web" / "dist"
+    build_root.mkdir(parents=True)
+    (build_root / "app.js").write_text("APP", encoding="utf-8")
+    (build_root / "index.html").write_text("INDEX", encoding="utf-8")
+    monkeypatch.setattr(module, "REACT_BUILD_PATH", build_root)
+    client = module.app.test_client()
+
+    asset_response = client.get("/app.js")
+    fallback_response = client.get("/dashboard/settings")
+
+    assert asset_response.status_code == 200
+    assert asset_response.get_data(as_text=True) == "APP"
+    assert asset_response.headers["Content-Type"].startswith("application/javascript")
+    assert fallback_response.status_code == 200
+    assert fallback_response.get_data(as_text=True) == "INDEX"
+
+
+def test_static_files_rejects_encoded_path_traversal(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    build_root = tmp_path / "web" / "dist"
+    build_root.mkdir(parents=True)
+    (build_root / "index.html").write_text("INDEX", encoding="utf-8")
+    (tmp_path / "web" / "secret-web.txt").write_text("SECRET_WEB", encoding="utf-8")
+    (tmp_path / "secret-root.txt").write_text("SECRET_ROOT", encoding="utf-8")
+    monkeypatch.setattr(module, "REACT_BUILD_PATH", build_root)
+    client = module.app.test_client()
+
+    for url in (
+        "/%2e%2e/secret-web.txt",
+        "/..%2Fsecret-web.txt",
+        "/%2e%2e%2F%2e%2e%2Fsecret-root.txt",
+    ):
+        response = client.get(url)
+        body = response.get_data(as_text=True)
+        assert response.status_code == 404
+        assert "SECRET_WEB" not in body
+        assert "SECRET_ROOT" not in body
+
+    fallback_response = client.get("/not-a-real-route")
+
+    assert fallback_response.status_code == 200
+    assert fallback_response.get_data(as_text=True) == "INDEX"
+
+
 def test_monitor_v2_static_script_contains_expected_entrypoints():
     body = MONITOR_V2_JS_PATH.read_text(encoding="utf-8")
 

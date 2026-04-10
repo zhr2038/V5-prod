@@ -1820,7 +1820,12 @@ def simple_dashboard():
 @app.route('/<path:filename>')
 def static_files(filename):
     """提供React静态文件"""
-    file_path = REACT_BUILD_PATH / filename
+    try:
+        react_root = REACT_BUILD_PATH.resolve()
+        file_path = (react_root / filename).resolve()
+        file_path.relative_to(react_root)
+    except (OSError, ValueError):
+        return 'Not found', 404
     
     # 检查文件是否存在
     if file_path.exists() and file_path.is_file():
@@ -1841,7 +1846,7 @@ def static_files(filename):
             return f.read(), 200, {'Content-Type': content_type}
     
     # 如果文件不存在，返回index.html（支持React Router）
-    index_path = REACT_BUILD_PATH / 'index.html'
+    index_path = react_root / 'index.html'
     if index_path.exists():
         with open(index_path, 'r') as f:
             return f.read(), 200, {'Content-Type': 'text/html'}
