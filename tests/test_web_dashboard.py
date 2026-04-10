@@ -329,6 +329,49 @@ def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypa
     assert payload["systemStatus"]["errors"] == ["positions: positions db locked"]
 
 
+def test_dashboard_api_degrades_when_child_endpoint_raises(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "api_account", lambda: module.jsonify({
+        "cash_usdt": 100.0,
+        "positions_value_usdt": 0.0,
+        "total_equity_usdt": 100.0,
+        "initial_capital_usdt": 120.0,
+        "equity_delta_usdt": -20.0,
+        "total_pnl_pct": -0.1667,
+        "drawdown_pct": 0.1667,
+        "realized_pnl": 0.0,
+        "total_trades": 0,
+        "last_update": "2026-04-10 12:00:00",
+    }))
+
+    def raise_positions():
+        raise RuntimeError("positions exploded")
+
+    monkeypatch.setattr(module, "api_positions", raise_positions)
+    monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": []}))
+    monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({"timer_active": True, "dry_run": False}))
+    monkeypatch.setattr(module, "api_equity_history", lambda: module.jsonify([]))
+    monkeypatch.setattr(module, "api_market_state", lambda: module.jsonify({"state": "TRENDING"}))
+    monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": []}))
+    monkeypatch.setattr(module, "api_cost_calibration", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ic_diagnostics", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ml_training", lambda: module.jsonify({"status": "idle"}))
+    monkeypatch.setattr(module, "api_reflection_reports", lambda: module.jsonify({"reports": []}))
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert "traceback" not in payload
+    assert "Traceback" not in body
+    assert payload["positions"] == []
+    assert payload["systemStatus"]["errors"] == ["positions: positions exploded"]
+
+
 def test_dashboard_api_reuses_positions_endpoint_within_request(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -2697,6 +2740,25 @@ def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
     assert payload["total_equity_usdt"] == 127.1486
     assert payload["peak_equity_usdt"] == 127.15
     assert payload["drawdown_pct"] == 0.0
+
+
+def test_account_api_error_response_does_not_expose_traceback(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise RuntimeError("config exploded")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/account")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "config exploded"
+    assert "traceback" not in payload
+    assert "Traceback" not in body
 
 
 def test_account_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path):

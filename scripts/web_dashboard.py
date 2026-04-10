@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -173,6 +174,18 @@ def add_no_cache_headers(resp):
     return resp
 
 
+def _log_dashboard_exception(label: str, exc: BaseException) -> None:
+    print(f"[web_dashboard] {label}: {exc}", file=sys.stderr)
+    traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+
+def _json_error_response(exc: BaseException, *, status_code: int = 500, **extra: Any):
+    _log_dashboard_exception('api error', exc)
+    payload = dict(extra)
+    payload['error'] = str(exc)
+    return jsonify(payload), status_code
+
+
 def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
     response = result
     status_code = 200
@@ -205,19 +218,26 @@ def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
 
 
 def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[List[str]] = None) -> Any:
-    if has_app_context():
-        cache = getattr(g, '_dashboard_api_cache', None)
-        if cache is None:
-            cache = {}
-            g._dashboard_api_cache = cache
-        cache_key = api_func
-        cached = cache.get(cache_key, _DASHBOARD_API_CACHE_MISS)
-        if cached is _DASHBOARD_API_CACHE_MISS:
-            cached = _extract_endpoint_json(api_func())
-            cache[cache_key] = cached
-        payload, status_code = cached
-    else:
-        payload, status_code = _extract_endpoint_json(api_func())
+    try:
+        if has_app_context():
+            cache = getattr(g, '_dashboard_api_cache', None)
+            if cache is None:
+                cache = {}
+                g._dashboard_api_cache = cache
+            cache_key = api_func
+            cached = cache.get(cache_key, _DASHBOARD_API_CACHE_MISS)
+            if cached is _DASHBOARD_API_CACHE_MISS:
+                cached = _extract_endpoint_json(api_func())
+                cache[cache_key] = cached
+            payload, status_code = cached
+        else:
+            payload, status_code = _extract_endpoint_json(api_func())
+    except Exception as exc:
+        _log_dashboard_exception(f'dashboard child {label}', exc)
+        if errors is not None:
+            errors.append(f'{label}: {exc}')
+        return default
+
     if status_code >= 400:
         message = None
         if isinstance(payload, dict):
@@ -1999,8 +2019,7 @@ def api_account():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_error_response(e)
 
 
 @app.route('/api/trades')
@@ -2148,7 +2167,6 @@ def api_trades():
 
         return jsonify({'trades': trades[:100]})
     except Exception as e:
-        import traceback
         return jsonify({'error': str(e), 'trades': []}), 500
 
 
@@ -2271,9 +2289,7 @@ def api_positions():
                         except Exception:
                             continue
         except Exception as e:
-            import traceback
-            okx_error = f"{e}\n{traceback.format_exc()}"
-            print(f"[positions] OKX API错误: {okx_error}")
+            _log_dashboard_exception('positions OKX API error', e)
 
         # 1) 回退 positions.sqlite（仅当实时OKX不可用且positions为空）
         # 注意：如果OKX API成功调用但返回空持仓，说明真的没持仓，不应回退到缓存
@@ -2664,8 +2680,7 @@ def api_sentiment():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_error_response(e)
 
 
 @app.route('/api/status')
@@ -3217,8 +3232,7 @@ def api_market_state():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_error_response(e)
 
 
 def _load_equity_points(limit: int = 800):
@@ -3539,8 +3553,7 @@ def api_dashboard():
         
         return jsonify(dashboard_data)
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_error_response(e)
 
 
 @app.route('/api/timer')
@@ -3558,15 +3571,17 @@ def api_timer():
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        import traceback
-        return jsonify({
-            'timer_name': _pick_timer_name(),
-            'next_run': None,
-            'countdown_seconds': 0,
-            'interval_minutes': 120,
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
+        try:
+            timer_name = _pick_timer_name()
+        except Exception:
+            timer_name = 'v5-prod.user.timer'
+        return _json_error_response(
+            e,
+            timer_name=timer_name,
+            next_run=None,
+            countdown_seconds=0,
+            interval_minutes=120,
+        )
 
 
 @app.route('/api/timers')
@@ -3598,8 +3613,7 @@ def api_timers():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_error_response(e)
 
 
 @app.route('/api/cost_calibration')
@@ -3781,8 +3795,7 @@ def api_cost_calibration():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_error_response(e)
 
 
 @app.route('/api/ic_diagnostics')
@@ -3980,8 +3993,7 @@ def api_ic_diagnostics():
             'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_error_response(e)
 
 
 def _api_ml_training_v2():
