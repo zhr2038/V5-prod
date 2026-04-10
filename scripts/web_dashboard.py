@@ -155,6 +155,8 @@ app = Flask(
 _DASHBOARD_API_CACHE_MISS = object()
 _OKX_ACCOUNT_BALANCE_CACHE: Dict[tuple[str, str, str], tuple[float, Any]] = {}
 _OKX_ACCOUNT_BALANCE_CACHE_LOCK = threading.Lock()
+_OKX_HEALTH_CHECK_CACHE: Dict[tuple[str, str, str], tuple[float, Dict[str, Any]]] = {}
+_OKX_HEALTH_CHECK_CACHE_LOCK = threading.Lock()
 
 # 注册健康检查蓝图
 try:
@@ -1781,6 +1783,14 @@ def _okx_account_balance_cache_ttl_seconds() -> float:
     return max(0.0, min(ttl, 10.0))
 
 
+def _okx_health_check_cache_ttl_seconds() -> float:
+    try:
+        ttl = float(os.getenv('V5_DASHBOARD_HEALTH_OKX_CACHE_TTL_SECONDS', '30') or '30')
+    except Exception:
+        ttl = 30.0
+    return max(0.0, min(ttl, 300.0))
+
+
 def _load_okx_account_balance(key: str, sec: str, pp: str) -> Dict[str, Any]:
     ttl = _okx_account_balance_cache_ttl_seconds()
     cache_key = (key, sec, pp)
@@ -1809,6 +1819,33 @@ def _load_okx_account_balance(key: str, sec: str, pp: str) -> Dict[str, Any]:
         with _OKX_ACCOUNT_BALANCE_CACHE_LOCK:
             _OKX_ACCOUNT_BALANCE_CACHE[cache_key] = (time.time() + ttl, data)
     return data if isinstance(data, dict) else {}
+
+
+def _load_okx_health_check(key: str, sec: str, pp: str) -> Dict[str, Any]:
+    ttl = _okx_health_check_cache_ttl_seconds()
+    cache_key = (key, sec, pp)
+    now = time.time()
+    if ttl > 0:
+        with _OKX_HEALTH_CHECK_CACHE_LOCK:
+            cached = _OKX_HEALTH_CHECK_CACHE.get(cache_key)
+            if cached and cached[0] > now:
+                cached_payload = dict(cached[1]) if isinstance(cached[1], dict) else {}
+                cached_payload['cached'] = True
+                return cached_payload
+
+    start = time.time()
+    data = _load_okx_account_balance(key, sec, pp)
+    result = {
+        'data': data if isinstance(data, dict) else {},
+        'latency_ms': (time.time() - start) * 1000,
+        'cached': False,
+    }
+    if ttl > 0:
+        stored = dict(result)
+        stored.pop('cached', None)
+        with _OKX_HEALTH_CHECK_CACHE_LOCK:
+            _OKX_HEALTH_CHECK_CACHE[cache_key] = (time.time() + ttl, stored)
+    return result
 
 
 def _static_asset_version(filename: str) -> str:
@@ -5193,12 +5230,15 @@ def api_health():
             if not _dashboard_live_account_enabled():
                 checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'live检查未启用'})
             elif key and sec and pp:
-                start = time.time()
-                data = _load_okx_account_balance(key, sec, pp)
-                latency = (time.time() - start) * 1000
+                health_probe = _load_okx_health_check(key, sec, pp)
+                data = health_probe.get('data') if isinstance(health_probe, dict) else {}
+                latency = float(health_probe.get('latency_ms') or 0.0) if isinstance(health_probe, dict) else 0.0
+                detail = f'{latency:.0f}ms'
+                if isinstance(health_probe, dict) and health_probe.get('cached'):
+                    detail += ' (cached)'
                 
                 if data.get('code') == '0':
-                    checks.append({'name': 'OKX API', 'status': 'healthy', 'detail': f'{latency:.0f}ms'})
+                    checks.append({'name': 'OKX API', 'status': 'healthy', 'detail': detail})
                 else:
                     checks.append({'name': 'OKX API', 'status': 'critical', 'detail': 'API响应异常'})
                     overall_status = 'critical'

@@ -3186,6 +3186,53 @@ def test_health_api_uses_active_runtime_orders_db(monkeypatch, tmp_path):
     )
 
 
+def test_health_api_reuses_recent_okx_probe_result(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "SYSTEMCTL_BIN", None)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+    monkeypatch.setattr(module, "_dashboard_live_account_enabled", lambda: True)
+    monkeypatch.setattr(module, "_load_workspace_exchange_creds", lambda: ("key", "sec", "pp"))
+    monkeypatch.setenv("V5_DASHBOARD_HEALTH_OKX_CACHE_TTL_SECONDS", "60")
+    module._OKX_HEALTH_CHECK_CACHE.clear()
+
+    conn = sqlite3.connect(str(reports_dir / "orders.sqlite"))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE orders (inst_id TEXT)")
+    cur.execute("INSERT INTO orders(inst_id) VALUES ('BTC-USDT')")
+    conn.commit()
+    conn.close()
+
+    calls = {"count": 0}
+
+    def _fake_balance_loader(key, sec, pp):
+        calls["count"] += 1
+        return {"code": "0", "data": [{"details": []}]}
+
+    monkeypatch.setattr(module, "_load_okx_account_balance", _fake_balance_loader)
+
+    first = client.get("/api/health")
+    second = client.get("/api/health")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls["count"] == 1
+    second_payload = second.get_json()
+    assert any(
+        check.get("name") == "OKX API" and check.get("status") == "healthy" and "cached" in str(check.get("detail", ""))
+        for check in second_payload["checks"]
+    )
+
+
 def test_api_equity_history_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
