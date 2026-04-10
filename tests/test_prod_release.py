@@ -20,6 +20,7 @@ from deploy.sync_prod_release import (
     _resolve_service_user,
     _resolve_shadow_root,
     _should_upload,
+    _should_restart_web_dashboard,
     _user_bus_wrapped_command,
     _validate_units,
 )
@@ -292,6 +293,13 @@ def test_should_upload_detects_same_size_content_drift(tmp_path: Path) -> None:
     fake_sftp = _FakeSFTP({"/remote/main.py": b"print('old')\n"})
 
     assert _should_upload(fake_sftp, local, "/remote/main.py") is True
+
+
+def test_should_restart_web_dashboard_only_for_web_runtime_changes() -> None:
+    assert _should_restart_web_dashboard(["deploy/sync_prod_release.py"]) is False
+    assert _should_restart_web_dashboard(["scripts/web_dashboard.py"]) is True
+    assert _should_restart_web_dashboard(["web/static/app.js"]) is True
+    assert _should_restart_web_dashboard(["deploy/systemd/v5-web-dashboard.service"]) is True
 
 
 def test_prune_remote_files_removes_stale_production_files_only(tmp_path: Path) -> None:

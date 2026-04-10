@@ -7,6 +7,7 @@ PRODUCTION_ONLY=0
 ENABLE_PROD_TIMER=0
 ENABLE_EVENT_DRIVEN_TIMER=0
 SHADOW_ROOT=""
+RESTART_WEB_DASHBOARD=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,6 +33,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --enable-event-driven-timer)
       ENABLE_EVENT_DRIVEN_TIMER=1
+      shift
+      ;;
+    --restart-web-dashboard)
+      RESTART_WEB_DASHBOARD=1
       shift
       ;;
     *)
@@ -141,7 +146,9 @@ if [[ "$USER_MODE" == "1" ]]; then
     # and reports namespace, so production-only deploys should not tear it down.
     systemctl --user disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service >/dev/null 2>&1 || true
     systemctl --user enable --now v5-web-dashboard.service
-    systemctl --user restart v5-web-dashboard.service
+    if [[ "$RESTART_WEB_DASHBOARD" == "1" ]]; then
+      systemctl --user restart v5-web-dashboard.service
+    fi
     systemctl --user enable --now v5-trade-monitor.timer
     systemctl --user enable --now v5-sentiment-collect.timer
     systemctl --user enable --now v5-auto-risk-eval.timer

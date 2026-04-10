@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 import posixpath
 import shlex
 import stat
@@ -36,6 +37,18 @@ SHADOW_SYNC_ITEMS = (
     "scripts/run_shadow_tuned_xgboost.py",
     "scripts/run_shadow_tuned_xgboost_hourly.sh",
     "src",
+)
+
+WEB_DASHBOARD_RESTART_EXACT_PATHS = frozenset(
+    {
+        "deploy/render_systemd_units.py",
+        "deploy/systemd/v5-web-dashboard.service",
+        "scripts/web_dashboard.py",
+        "src/reporting/health.py",
+    }
+)
+WEB_DASHBOARD_RESTART_PREFIXES = (
+    "web/",
 )
 
 
@@ -98,6 +111,16 @@ def _should_upload(sftp: paramiko.SFTPClient, local_path: Path, remote_path: str
     if int(getattr(remote_stat, "st_mtime", -1)) == int(local_stat.st_mtime):
         return False
     return not _remote_file_matches(sftp, local_path, remote_path)
+
+
+def _should_restart_web_dashboard(changed_paths: Iterable[str]) -> bool:
+    for rel_path in changed_paths:
+        normalized = rel_path.replace("\\", "/").lstrip("/")
+        if normalized in WEB_DASHBOARD_RESTART_EXACT_PATHS:
+            return True
+        if any(normalized.startswith(prefix) for prefix in WEB_DASHBOARD_RESTART_PREFIXES):
+            return True
+    return False
 
 
 def _upload_files(
@@ -233,6 +256,7 @@ def _install_units(
     service_user: str,
     enable_prod_timer: bool,
     enable_event_driven_timer: bool,
+    restart_web_dashboard: bool,
 ) -> None:
     cmd = [
         "bash",
@@ -248,6 +272,8 @@ def _install_units(
         cmd.append("--enable-prod-timer")
     if enable_event_driven_timer:
         cmd.append("--enable-event-driven-timer")
+    if restart_web_dashboard:
+        cmd.append("--restart-web-dashboard")
 
     inner = f"cd {shlex.quote(remote_root)} && {' '.join(shlex.quote(part) for part in cmd)}"
     wrapped = _user_bus_wrapped_command(service_user, inner)
@@ -362,6 +388,7 @@ def main() -> None:
         with production_snapshot(workspace_root) as snapshot_root:
             uploaded, skipped, rel_paths = _upload_files(sftp, snapshot_root, remote_root)
             pruned = [] if args.no_prune else _prune_remote_files(sftp, snapshot_root, remote_root)
+            restart_web_dashboard = _should_restart_web_dashboard((*rel_paths, *pruned))
             shadow_uploaded = 0
             shadow_skipped = 0
             shadow_pruned: list[str] = []
@@ -383,6 +410,7 @@ def main() -> None:
         print(f"uploaded_files={uploaded}")
         print(f"skipped_files={skipped}")
         print(f"pruned_files={len(pruned)}")
+        print(f"restart_web_dashboard={int(restart_web_dashboard)}")
         print(f"shadow_root={shadow_root}")
         print(f"shadow_uploaded_files={shadow_uploaded}")
         print(f"shadow_skipped_files={shadow_skipped}")
@@ -399,6 +427,7 @@ def main() -> None:
                 service_user=service_user,
                 enable_prod_timer=args.enable_prod_timer,
                 enable_event_driven_timer=args.enable_event_driven_timer,
+                restart_web_dashboard=restart_web_dashboard,
             )
             print(
                 _validate_units(

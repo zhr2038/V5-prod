@@ -96,9 +96,12 @@ def test_install_systemd_production_only_enables_trade_monitor_timer():
     assert "systemctl --user enable --now v5-trade-monitor.timer" in text
 
 
-def test_install_systemd_production_only_restarts_web_dashboard_service():
+def test_install_systemd_production_only_restarts_web_dashboard_service_when_requested():
     text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
+    assert "RESTART_WEB_DASHBOARD=0" in text
+    assert "--restart-web-dashboard" in text
     assert "systemctl --user enable --now v5-web-dashboard.service" in text
+    assert 'if [[ "$RESTART_WEB_DASHBOARD" == "1" ]]; then' in text
     assert "systemctl --user restart v5-web-dashboard.service" in text
 
 
