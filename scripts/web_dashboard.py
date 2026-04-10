@@ -157,6 +157,8 @@ _OKX_ACCOUNT_BALANCE_CACHE: Dict[tuple[str, str, str], tuple[float, Any]] = {}
 _OKX_ACCOUNT_BALANCE_CACHE_LOCK = threading.Lock()
 _OKX_HEALTH_CHECK_CACHE: Dict[tuple[str, str, str], tuple[float, Dict[str, Any]]] = {}
 _OKX_HEALTH_CHECK_CACHE_LOCK = threading.Lock()
+_OKX_PUBLIC_TICKER_CACHE: Dict[str, tuple[float, float]] = {}
+_OKX_PUBLIC_TICKER_CACHE_LOCK = threading.Lock()
 
 # 注册健康检查蓝图
 try:
@@ -1791,6 +1793,14 @@ def _okx_health_check_cache_ttl_seconds() -> float:
     return max(0.0, min(ttl, 300.0))
 
 
+def _okx_public_ticker_cache_ttl_seconds() -> float:
+    try:
+        ttl = float(os.getenv('V5_DASHBOARD_PUBLIC_TICKER_CACHE_TTL_SECONDS', '10') or '10')
+    except Exception:
+        ttl = 10.0
+    return max(0.0, min(ttl, 60.0))
+
+
 def _load_okx_account_balance(key: str, sec: str, pp: str) -> Dict[str, Any]:
     ttl = _okx_account_balance_cache_ttl_seconds()
     cache_key = (key, sec, pp)
@@ -1846,6 +1856,30 @@ def _load_okx_health_check(key: str, sec: str, pp: str) -> Dict[str, Any]:
         with _OKX_HEALTH_CHECK_CACHE_LOCK:
             _OKX_HEALTH_CHECK_CACHE[cache_key] = (time.time() + ttl, stored)
     return result
+
+
+def _load_okx_public_ticker_last_price(symbol: str) -> float:
+    symbol_key = str(symbol or '').strip().upper()
+    if not symbol_key:
+        return 0.0
+
+    ttl = _okx_public_ticker_cache_ttl_seconds()
+    now = time.time()
+    if ttl > 0:
+        with _OKX_PUBLIC_TICKER_CACHE_LOCK:
+            cached = _OKX_PUBLIC_TICKER_CACHE.get(symbol_key)
+            if cached and cached[0] > now:
+                return float(cached[1] or 0.0)
+
+    response = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol_key}-USDT", timeout=5)
+    payload = response.json()
+    if payload.get('code') == '0' and payload.get('data'):
+        price = float(payload['data'][0].get('last') or 0)
+        if price > 0 and ttl > 0:
+            with _OKX_PUBLIC_TICKER_CACHE_LOCK:
+                _OKX_PUBLIC_TICKER_CACHE[symbol_key] = (time.time() + ttl, price)
+        return price
+    return 0.0
 
 
 def _static_asset_version(filename: str) -> str:
@@ -2224,8 +2258,14 @@ def api_positions():
             'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
         }
         authoritative_snapshot_seen = False
+        price_cache: Dict[str, float] = {}
 
         def get_last_price_usdt(symbol: str) -> float:
+            symbol = str(symbol or '').strip().upper()
+            if not symbol:
+                return 0.0
+            if symbol in price_cache:
+                return price_cache[symbol]
             """获取币种最新价格，优先本地新鲜缓存以避免阻塞 dashboard"""
             # 1) 优先本地缓存（15 分钟内）以避免 OKX 短时抖动拖慢整页
             try:
@@ -2237,19 +2277,21 @@ def api_positions():
                     if time.time() - file_mtime < 900:  # 15 分钟内
                         df = pd.read_csv(files[-1])
                         if len(df) > 0 and 'close' in df.columns:
-                            return float(df.iloc[-1]['close'])
+                            price = float(df.iloc[-1]['close'])
+                            price_cache[symbol] = price
+                            return price
             except Exception:
                 pass
 
             # 2) 回退到 OKX 实时公共 ticker
             try:
-                r = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol}-USDT", timeout=5)
-                j = r.json()
-                if j.get('code') == '0' and j.get('data'):
-                    return float(j['data'][0].get('last') or 0)
+                price = _load_okx_public_ticker_last_price(symbol)
+                price_cache[symbol] = price
+                return price
             except Exception:
                 pass
 
+            price_cache[symbol] = 0.0
             return 0.0
 
         def choose_spot_qty(detail: Dict[str, Any]) -> float:

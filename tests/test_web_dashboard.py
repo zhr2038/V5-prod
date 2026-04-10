@@ -4170,6 +4170,45 @@ def test_api_positions_prefers_fresh_local_price_cache_before_public_ticker(monk
     assert payload["positions"][0]["value_usdt"] == 246.9
 
 
+def test_api_positions_reuses_recent_public_ticker_cache(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setenv("V5_DASHBOARD_PUBLIC_TICKER_CACHE_TTL_SECONDS", "60")
+    module._OKX_PUBLIC_TICKER_CACHE.clear()
+
+    db_path = tmp_path / "positions.sqlite"
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('ETH/USDT', 2.0, 100.0, 0.0)")
+    con.commit()
+    con.close()
+
+    calls = {"count": 0}
+
+    class _Response:
+        def json(self):
+            return {"code": "0", "data": [{"last": "234.56"}]}
+
+    def fake_get(url, timeout=0, **kwargs):
+        assert "market/ticker" in url
+        calls["count"] += 1
+        return _Response()
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    with module.app.app_context():
+        first = module.api_positions().get_json()
+        second = module.api_positions().get_json()
+
+    assert calls["count"] == 1
+    assert first["positions"][0]["symbol"] == "ETH"
+    assert first["positions"][0]["last_price"] == 234.56
+    assert second["positions"][0]["last_price"] == 234.56
+
+
 def test_api_account_converts_json_fee_maps_to_signed_usdt(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
