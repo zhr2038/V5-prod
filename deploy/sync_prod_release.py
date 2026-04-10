@@ -210,6 +210,7 @@ def _validate_units(
         "systemctl --user is-enabled v5-ledger.timer",
         "systemctl --user is-enabled v5-cost-rollup-real.user.timer",
         "systemctl --user is-enabled v5-spread-rollup.timer",
+        "systemctl --user is-enabled v5-shadow-tuned-xgboost.user.timer",
         "test \"$(systemctl --user is-active v5-web-dashboard.service)\" = active",
         "test \"$(systemctl --user is-active v5-trade-monitor.timer)\" = active",
         "test \"$(systemctl --user is-active v5-daily-ml-training.timer)\" = active",
@@ -220,6 +221,7 @@ def _validate_units(
         "test \"$(systemctl --user is-active v5-ledger.timer)\" = active",
         "test \"$(systemctl --user is-active v5-cost-rollup-real.user.timer)\" = active",
         "test \"$(systemctl --user is-active v5-spread-rollup.timer)\" = active",
+        "test \"$(systemctl --user is-active v5-shadow-tuned-xgboost.user.timer)\" = active",
         "systemctl --user show v5-web-dashboard.service --property=UnitFileState,ActiveState",
         "systemctl --user show v5-trade-monitor.timer --property=UnitFileState,ActiveState",
         "systemctl --user show v5-daily-ml-training.timer --property=UnitFileState",
@@ -227,6 +229,7 @@ def _validate_units(
         "systemctl --user show v5-sentiment-collect.timer --property=UnitFileState",
         "systemctl --user show v5-auto-risk-eval.timer --property=UnitFileState",
         "systemctl --user show v5-spread-rollup.timer --property=UnitFileState",
+        "systemctl --user show v5-shadow-tuned-xgboost.user.timer --property=UnitFileState,ActiveState",
     ]
     if enable_prod_timer:
         checks.extend(

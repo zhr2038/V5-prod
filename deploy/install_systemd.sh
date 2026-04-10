@@ -6,6 +6,7 @@ USER_MODE=0
 PRODUCTION_ONLY=0
 ENABLE_PROD_TIMER=0
 ENABLE_EVENT_DRIVEN_TIMER=0
+SHADOW_ROOT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -15,6 +16,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --root)
       ROOT="$2"
+      shift 2
+      ;;
+    --shadow-root)
+      SHADOW_ROOT="$2"
       shift 2
       ;;
     --production-only)
@@ -58,11 +63,18 @@ fi
 render_units() {
   local dst="$1"
   shift
+  render_units_for_root "$ROOT" "$dst" "$@"
+}
+
+render_units_for_root() {
+  local root="$1"
+  local dst="$2"
+  shift 2
   local render_args=()
   if [[ "$USER_MODE" == "1" ]]; then
     render_args+=(--user-mode)
   fi
-  "$PYTHON_BIN" "$RENDERER" --src-dir "$SRC" --dst-dir "$dst" --root "$ROOT" "${render_args[@]}" "$@"
+  "$PYTHON_BIN" "$RENDERER" --src-dir "$SRC" --dst-dir "$dst" --root "$root" "${render_args[@]}" "$@"
 }
 
 if [[ "$USER_MODE" == "1" ]]; then
@@ -101,6 +113,15 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-cost-rollup-real.user.timer=v5-cost-rollup-real.user.timer \
       --mapping v5-spread-rollup.user.service=v5-spread-rollup.service \
       --mapping v5-spread-rollup.timer=v5-spread-rollup.timer
+
+    if [[ -n "$SHADOW_ROOT" ]]; then
+      shadow_root="$SHADOW_ROOT"
+    else
+      shadow_root="$(dirname "$ROOT")/v5-shadow-tuned-xgboost"
+    fi
+    render_units_for_root "$shadow_root" "$DST" \
+      --mapping v5-shadow-tuned-xgboost.user.service=v5-shadow-tuned-xgboost.user.service \
+      --mapping v5-shadow-tuned-xgboost.user.timer=v5-shadow-tuned-xgboost.user.timer
   else
     render_units "$DST" --copy-all \
       --mapping v5-reconcile.user.service=v5-reconcile.service \
@@ -130,13 +151,14 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user enable --now v5-ledger.timer
     systemctl --user enable --now v5-cost-rollup-real.user.timer
     systemctl --user enable --now v5-spread-rollup.timer
+    systemctl --user enable --now v5-shadow-tuned-xgboost.user.timer
     if [[ "$ENABLE_PROD_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-prod.user.timer
     fi
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|trade-monitor|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real|spread-rollup)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|trade-monitor|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real|spread-rollup|shadow-tuned-xgboost)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer

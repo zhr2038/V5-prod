@@ -74,6 +74,11 @@ def test_install_systemd_production_only_keeps_tuned_shadow_timer():
     text = Path("deploy/install_systemd.sh").read_text(encoding="utf-8")
     assert "disable --now v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service" not in text
     assert "disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service" in text
+    assert 'shadow_root="$(dirname "$ROOT")/v5-shadow-tuned-xgboost"' in text
+    assert "--mapping v5-shadow-tuned-xgboost.user.service=v5-shadow-tuned-xgboost.user.service" in text
+    assert "--mapping v5-shadow-tuned-xgboost.user.timer=v5-shadow-tuned-xgboost.user.timer" in text
+    assert "systemctl --user enable --now v5-shadow-tuned-xgboost.user.timer" in text
+    assert "shadow-tuned-xgboost" in text
 
 
 def test_install_systemd_production_only_disables_legacy_runtime_timers():
