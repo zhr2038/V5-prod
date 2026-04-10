@@ -7,12 +7,14 @@ import pytest
 def isolate_default_runtime_artifacts(monkeypatch, tmp_path):
     import src.core.pipeline as pipeline_module
     import src.data.okx_instruments as okx_instruments
+    import src.portfolio.portfolio_engine as portfolio_engine_module
 
     runtime_root = tmp_path / "runtime_repo"
     reports_dir = runtime_root / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(pipeline_module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(portfolio_engine_module, "RUNTIME_PROJECT_ROOT", runtime_root)
 
     original_init = okx_instruments.OKXSpotInstrumentsCache.__init__
 

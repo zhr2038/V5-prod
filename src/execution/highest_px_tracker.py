@@ -46,7 +46,10 @@ class HighestPriceTracker:
                 with open(self.state_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     for sym, rec in data.items():
-                        self.records[sym] = HighestPriceRecord(**rec)
+                        try:
+                            self.records[sym] = HighestPriceRecord(**rec)
+                        except Exception:
+                            continue
             except Exception as e:
                 print(f"[HighestPriceTracker] 加载失败: {e}")
     
@@ -62,6 +65,7 @@ class HighestPriceTracker:
     
     def update(self, symbol: str, highest_px: float, entry_px: float, source: str = "trade"):
         """更新峰值价格（默认取最大；new_position 时强制重置为入场价附近）"""
+        self._load()
         symbol = str(symbol)
         existing = self.records.get(symbol)
 
@@ -125,8 +129,21 @@ class HighestPriceTracker:
     
     def clear_symbol(self, symbol: str):
         """清除指定币种的记录（清仓后调用）"""
-        if str(symbol) in self.records:
-            del self.records[str(symbol)]
+        symbol = str(symbol)
+        try:
+            if self.state_path.exists():
+                data = json.loads(self.state_path.read_text(encoding='utf-8'))
+                if isinstance(data, dict) and symbol in data:
+                    data.pop(symbol, None)
+                    self.state_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+                    self.records.pop(symbol, None)
+                    return
+        except Exception:
+            pass
+
+        self._load()
+        if symbol in self.records:
+            del self.records[symbol]
             self._save()
     
     def list_all(self) -> Dict[str, HighestPriceRecord]:
@@ -136,13 +153,20 @@ class HighestPriceTracker:
 
 # 全局实例
 _tracker_instance: Optional[HighestPriceTracker] = None
+_tracker_instances_by_path: Dict[str, HighestPriceTracker] = {}
 
-def get_highest_price_tracker() -> HighestPriceTracker:
+def get_highest_price_tracker(state_path: Optional[str | Path] = None) -> HighestPriceTracker:
     """获取全局追踪器实例"""
     global _tracker_instance
-    if _tracker_instance is None:
-        _tracker_instance = HighestPriceTracker()
-    return _tracker_instance
+    if state_path is None:
+        if _tracker_instance is None:
+            _tracker_instance = HighestPriceTracker()
+        return _tracker_instance
+
+    resolved_path = str(Path(state_path).expanduser().resolve())
+    if resolved_path not in _tracker_instances_by_path:
+        _tracker_instances_by_path[resolved_path] = HighestPriceTracker(resolved_path)
+    return _tracker_instances_by_path[resolved_path]
 
 
 if __name__ == '__main__':

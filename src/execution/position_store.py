@@ -51,6 +51,15 @@ class PositionStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
+    def _highest_tracker_state_path(self) -> Path:
+        if self.path.name == "positions.sqlite":
+            return self.path.with_name("highest_px_state.json")
+        if "positions" in self.path.stem:
+            return self.path.with_name(
+                self.path.name.replace("positions", "highest_px_state", 1)
+            ).with_suffix(".json")
+        return self.path.with_name("highest_px_state.json")
+
     def _init_db(self) -> None:
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
@@ -163,7 +172,7 @@ class PositionStore:
         # Import here to avoid circular import
         try:
             from src.execution.highest_px_tracker import get_highest_price_tracker
-            tracker = get_highest_price_tracker()
+            tracker = get_highest_price_tracker(self._highest_tracker_state_path())
         except Exception:
             tracker = None
 
@@ -236,7 +245,7 @@ class PositionStore:
         # Sync with tracker
         try:
             from src.execution.highest_px_tracker import get_highest_price_tracker
-            tracker = get_highest_price_tracker()
+            tracker = get_highest_price_tracker(self._highest_tracker_state_path())
             # Check if tracker has higher value
             tracked_high = tracker.get_highest_px(symbol, hi)
             if tracked_high > hi:
@@ -366,7 +375,7 @@ class PositionStore:
             # Clear persisted highest tracker to avoid stale trailing state on next reopen
             try:
                 from src.execution.highest_px_tracker import get_highest_price_tracker
-                get_highest_price_tracker().clear_symbol(symbol)
+                get_highest_price_tracker(self._highest_tracker_state_path()).clear_symbol(symbol)
             except Exception:
                 pass
 

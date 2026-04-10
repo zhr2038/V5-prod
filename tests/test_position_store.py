@@ -20,3 +20,22 @@ def test_position_store_buy_close(tmp_path):
 
     ps.close_long("BTC/USDT")
     assert ps.get("BTC/USDT") is None
+
+
+def test_position_store_highest_tracker_follows_store_directory(tmp_path):
+    db = tmp_path / "runtime" / "positions.sqlite"
+    ps = PositionStore(path=str(db))
+
+    ps.upsert_buy("ETH/USDT", qty=1.0, px=100.0)
+
+    assert (db.parent / "highest_px_state.json").exists()
+
+
+def test_position_store_highest_tracker_preserves_shadow_prefix(tmp_path):
+    db = tmp_path / "runtime" / "shadow_positions.sqlite"
+    ps = PositionStore(path=str(db))
+
+    ps.upsert_buy("ETH/USDT", qty=1.0, px=100.0)
+
+    assert (db.parent / "shadow_highest_px_state.json").exists()
+    assert not (db.parent / "highest_px_state.json").exists()
