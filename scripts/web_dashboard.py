@@ -1838,7 +1838,7 @@ def api_account():
         positions_value = 0.0
         positions_rows = []
         try:
-            pos_payload = api_positions().get_json() or {}
+            pos_payload = _call_dashboard_api(api_positions, default={"positions": []}, label="positions") or {}
             if isinstance(pos_payload, dict):
                 positions_rows = pos_payload.get('positions', []) or []
             elif isinstance(pos_payload, list):
@@ -2500,7 +2500,8 @@ def api_sentiment():
         # 动态展示：主流币 + 当前评分Top币，避免TRX等未显示
         symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']
         try:
-            top_scores = api_scores().get_json().get('scores', [])[:8]
+            top_scores_payload = _call_dashboard_api(api_scores, default={'scores': []}, label='scores')
+            top_scores = (top_scores_payload.get('scores', []) if isinstance(top_scores_payload, dict) else [])[:8]
             for row in top_scores:
                 sym = str(row.get('symbol', '')).replace('/USDT', '-USDT')
                 if sym and sym not in symbols:

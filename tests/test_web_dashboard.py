@@ -2679,6 +2679,33 @@ def test_account_api_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["peak_equity_usdt"] == 170.0
 
 
+def test_account_api_degrades_when_positions_endpoint_returns_error_tuple(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "load_config", lambda: {})
+    monkeypatch.setattr(
+        module,
+        "api_positions",
+        lambda: (module.jsonify({"error": "positions unavailable"}), 500),
+    )
+
+    (tmp_path / "reconcile_status.json").write_text(
+        json.dumps({"exchange_snapshot": {"ccy_cashBal": {"USDT": 25.0}}}),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/account")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["cash_usdt"] == 25.0
+    assert payload["positions_value_usdt"] == 0.0
+    assert payload["total_equity_usdt"] == 25.0
+
+
 def test_trades_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -2746,6 +2773,40 @@ def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path)
     assert response.status_code == 200
     payload = response.get_json()
     assert any(check.get("name") == "OKX API" and check.get("status") == "warning" for check in payload["checks"])
+
+
+def test_sentiment_api_degrades_when_scores_endpoint_returns_error_tuple(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(
+        module,
+        "api_scores",
+        lambda: (module.jsonify({"error": "scores unavailable"}), 500),
+    )
+
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    sentiment_payload = {
+        "f6_sentiment": 0.3,
+        "f6_fear_greed_index": 61,
+        "f6_market_stage": "neutral",
+        "f6_sentiment_summary": "stable",
+        "f6_sentiment_source": "rss",
+    }
+    for symbol in ("BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT"):
+        (cache_dir / f"rss_{symbol}_20260410_13.json").write_text(
+            json.dumps(sentiment_payload),
+            encoding="utf-8",
+        )
+
+    response = client.get("/api/sentiment")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert set(payload["by_symbol"].keys()) == {"BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT"}
 
 
 def test_health_api_uses_active_runtime_orders_db(monkeypatch, tmp_path):
