@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, render_template, jsonify, request, send_from_directory
+from flask import Flask, g, has_app_context, jsonify, render_template, request, send_from_directory
 import pandas as pd
 import yaml
 import requests
@@ -148,6 +148,8 @@ app = Flask(
     static_folder=str(WEB_DIR / 'static'),
 )
 
+_DASHBOARD_API_CACHE_MISS = object()
+
 # 注册健康检查蓝图
 try:
     from src.reporting.health import health_bp
@@ -198,7 +200,19 @@ def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
 
 
 def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[List[str]] = None) -> Any:
-    payload, status_code = _extract_endpoint_json(api_func())
+    if has_app_context():
+        cache = getattr(g, '_dashboard_api_cache', None)
+        if cache is None:
+            cache = {}
+            g._dashboard_api_cache = cache
+        cache_key = api_func
+        cached = cache.get(cache_key, _DASHBOARD_API_CACHE_MISS)
+        if cached is _DASHBOARD_API_CACHE_MISS:
+            cached = _extract_endpoint_json(api_func())
+            cache[cache_key] = cached
+        payload, status_code = cached
+    else:
+        payload, status_code = _extract_endpoint_json(api_func())
     if status_code >= 400:
         message = None
         if isinstance(payload, dict):

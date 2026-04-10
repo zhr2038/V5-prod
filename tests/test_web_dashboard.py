@@ -283,6 +283,55 @@ def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypa
     assert payload["systemStatus"]["errors"] == ["positions: positions db locked"]
 
 
+def test_dashboard_api_reuses_positions_endpoint_within_request(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "load_config", lambda: {})
+    monkeypatch.setattr(module, "_load_reconcile_cash_balance", lambda *args, **kwargs: (True, 100.0))
+    monkeypatch.setattr(module, "_load_local_account_state", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_load_total_fees_from_orders", lambda *args, **kwargs: 0.0)
+
+    calls = {"positions": 0}
+
+    def fake_positions():
+        calls["positions"] += 1
+        return module.jsonify({
+            "positions": [{
+                "symbol": "ETH",
+                "qty": 2.0,
+                "avg_px": 10.0,
+                "last_price": 12.5,
+                "value_usdt": 25.0,
+                "pnl_value": 5.0,
+                "pnl_pct": 0.25,
+            }]
+        })
+
+    monkeypatch.setattr(module, "api_positions", fake_positions)
+    monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": []}))
+    monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({"timer_active": True, "dry_run": False}))
+    monkeypatch.setattr(module, "api_equity_history", lambda: module.jsonify([]))
+    monkeypatch.setattr(module, "api_market_state", lambda: module.jsonify({}))
+    monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": []}))
+    monkeypatch.setattr(module, "api_cost_calibration", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ic_diagnostics", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ml_training", lambda: module.jsonify({"status": "idle"}))
+    monkeypatch.setattr(module, "api_reflection_reports", lambda: module.jsonify({"reports": []}))
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert calls["positions"] == 1
+    assert payload["positions"][0]["symbol"] == "ETH"
+    assert payload["account"]["positionsValue"] == 25.0
+    assert payload["account"]["totalEquity"] == 125.0
+
+
 def test_dashboard_api_keeps_sub_one_percent_pnl_as_ratio(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
