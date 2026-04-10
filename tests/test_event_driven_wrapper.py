@@ -288,6 +288,8 @@ def test_load_current_state_uses_runtime_reports_from_order_store_path(tmp_path,
         encoding="utf-8",
     )
 
+    root_store = PositionStore(str(root_reports / "positions.sqlite"))
+    root_store.upsert_buy("BTC/USDT", qty=1.0, px=85000.0, now_ts="2026-03-25T10:00:00Z")
     runtime_db = runtime_reports / "positions.sqlite"
     store = PositionStore(str(runtime_db))
     store.upsert_buy("ETH/USDT", qty=3.0, px=2500.0, now_ts="2026-03-25T10:00:00Z")
@@ -312,7 +314,8 @@ def test_load_current_state_uses_runtime_reports_from_order_store_path(tmp_path,
 
     assert state is not None
     assert state["regime"] == "TRENDING"
-    assert "ETH/USDT" in state["positions"]
+    assert set(state["positions"].keys()) == {"ETH/USDT"}
+    assert set(state["signals"].keys()) == {"ETH/USDT"}
     assert state["selected_symbols"][0] == "ETH/USDT"
 
 
@@ -507,16 +510,24 @@ def test_main_writes_event_outputs_to_runtime_paths(tmp_path, monkeypatch):
                 "events_blocked": 0,
             }
 
+    captured_cfg = {}
+
     import event_driven_check as mod
 
     monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(mod, "REPORTS_DIR", reports_dir)
     monkeypatch.setattr(mod, "resolve_config_path", lambda: config_path)
     monkeypatch.setattr(mod, "load_current_state", lambda cfg, config_path=None: state)
-    monkeypatch.setattr(mod, "create_event_driven_trader", lambda cfg: DummyTrader())
+
+    def _fake_create_event_driven_trader(cfg):
+        captured_cfg["cfg"] = cfg
+        return DummyTrader()
+
+    monkeypatch.setattr(mod, "create_event_driven_trader", _fake_create_event_driven_trader)
 
     assert mod.main() == 0
 
+    assert str(captured_cfg["cfg"]["order_store_path"]).replace("\\", "/").endswith("reports/shadow_orders.sqlite")
     assert (reports_dir / "shadow_event_driven_signals.json").exists()
     assert (reports_dir / "shadow_event_candidates.json").exists()
     assert (reports_dir / "shadow_riskoff_shadow_plan.json").exists()
@@ -524,6 +535,9 @@ def test_main_writes_event_outputs_to_runtime_paths(tmp_path, monkeypatch):
     assert (reports_dir / "shadow_event_adaptive_state.json").exists()
     assert (reports_dir / "shadow_event_driven_log.jsonl").exists()
     assert not (reports_dir / "event_driven_signals.json").exists()
+    assert not (reports_dir / "event_candidates.json").exists()
+    assert not (reports_dir / "riskoff_shadow_plan.json").exists()
+    assert not (reports_dir / "event_param_scan.json").exists()
     assert not (reports_dir / "event_driven_log.jsonl").exists()
 
 
