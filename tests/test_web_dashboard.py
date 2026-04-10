@@ -3621,6 +3621,44 @@ class _DummyResponse:
         return self._payload
 
 
+def test_okx_account_balance_cache_reuses_recent_payload(monkeypatch):
+    module = load_web_dashboard_module()
+    monkeypatch.setenv("V5_DASHBOARD_OKX_BALANCE_CACHE_TTL_SECONDS", "2")
+
+    calls = {"get": 0}
+
+    def fake_get(url, *args, **kwargs):
+        calls["get"] += 1
+        assert url.endswith("/api/v5/account/balance")
+        return _DummyResponse({"code": "0", "data": [{"details": []}]})
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    first = module._load_okx_account_balance("k", "s", "p")
+    second = module._load_okx_account_balance("k", "s", "p")
+
+    assert first == second
+    assert calls["get"] == 1
+
+
+def test_okx_account_balance_cache_can_be_disabled(monkeypatch):
+    module = load_web_dashboard_module()
+    monkeypatch.setenv("V5_DASHBOARD_OKX_BALANCE_CACHE_TTL_SECONDS", "0")
+
+    calls = {"get": 0}
+
+    def fake_get(url, *args, **kwargs):
+        calls["get"] += 1
+        return _DummyResponse({"code": "0", "data": [{"details": []}], "call": calls["get"]})
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    module._load_okx_account_balance("k", "s", "p")
+    module._load_okx_account_balance("k", "s", "p")
+
+    assert calls["get"] == 2
+
+
 def test_api_positions_prefers_cash_balance_over_avail_balance(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)

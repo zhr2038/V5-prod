@@ -18,6 +18,8 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -149,6 +151,8 @@ app = Flask(
 )
 
 _DASHBOARD_API_CACHE_MISS = object()
+_OKX_ACCOUNT_BALANCE_CACHE: Dict[tuple[str, str, str], tuple[float, Any]] = {}
+_OKX_ACCOUNT_BALANCE_CACHE_LOCK = threading.Lock()
 
 # 注册健康检查蓝图
 try:
@@ -1732,6 +1736,44 @@ def _load_workspace_exchange_creds() -> tuple[str, str, str]:
     return key, sec, pp
 
 
+def _okx_account_balance_cache_ttl_seconds() -> float:
+    try:
+        ttl = float(os.getenv('V5_DASHBOARD_OKX_BALANCE_CACHE_TTL_SECONDS', '2') or '2')
+    except Exception:
+        ttl = 2.0
+    return max(0.0, min(ttl, 10.0))
+
+
+def _load_okx_account_balance(key: str, sec: str, pp: str) -> Dict[str, Any]:
+    ttl = _okx_account_balance_cache_ttl_seconds()
+    cache_key = (key, sec, pp)
+    now = time.time()
+    if ttl > 0:
+        with _OKX_ACCOUNT_BALANCE_CACHE_LOCK:
+            cached = _OKX_ACCOUNT_BALANCE_CACHE.get(cache_key)
+            if cached and cached[0] > now:
+                payload = cached[1]
+                return payload if isinstance(payload, dict) else {}
+
+    import hmac, hashlib, base64
+
+    ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+    path = '/api/v5/account/balance'
+    msg = ts + 'GET' + path
+    sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
+    headers = {
+        'OK-ACCESS-KEY': key,
+        'OK-ACCESS-SIGN': sig,
+        'OK-ACCESS-TIMESTAMP': ts,
+        'OK-ACCESS-PASSPHRASE': pp,
+    }
+    data = requests.get('https://www.okx.com' + path, headers=headers, timeout=8).json()
+    if ttl > 0:
+        with _OKX_ACCOUNT_BALANCE_CACHE_LOCK:
+            _OKX_ACCOUNT_BALANCE_CACHE[cache_key] = (time.time() + ttl, data)
+    return data if isinstance(data, dict) else {}
+
+
 def _static_asset_version(filename: str) -> str:
     asset_path = WEB_DIR / 'static' / Path(filename)
     try:
@@ -1814,22 +1856,9 @@ def api_account():
         except TypeError:
             local_account_state = _load_local_account_state()
         try:
-            import time, hmac, hashlib, base64
-
             key, sec, pp = _load_workspace_exchange_creds()
             if (not has_reconcile_cash) and _dashboard_live_account_enabled() and key and sec and pp:
-                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
-                path = '/api/v5/account/balance'
-                msg = ts + 'GET' + path
-                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
-                headers = {
-                    'OK-ACCESS-KEY': key,
-                    'OK-ACCESS-SIGN': sig,
-                    'OK-ACCESS-TIMESTAMP': ts,
-                    'OK-ACCESS-PASSPHRASE': pp,
-                }
-                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
-                data = resp.json()
+                data = _load_okx_account_balance(key, sec, pp)
                 if data.get('code') == '0' and data.get('data'):
                     for d in data['data'][0].get('details', []):
                         if d.get('ccy') == 'USDT':
@@ -1969,7 +1998,7 @@ def api_trades():
 
         # 0) 优先OKX实时成交
         try:
-            import time, hmac, hashlib, base64
+            import hmac, hashlib, base64
 
             key, sec, pp = _load_workspace_exchange_creds()
             if _dashboard_live_account_enabled() and key and sec and pp:
@@ -2212,22 +2241,9 @@ def api_positions():
         # 0) 优先实时OKX余额（与用户手动操作一致）
         okx_error = None
         try:
-            import time, hmac, hashlib, base64
-
             key, sec, pp = _load_workspace_exchange_creds()
             if _dashboard_live_account_enabled() and key and sec and pp:
-                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
-                path = '/api/v5/account/balance'
-                msg = ts + 'GET' + path
-                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
-                headers = {
-                    'OK-ACCESS-KEY': key,
-                    'OK-ACCESS-SIGN': sig,
-                    'OK-ACCESS-TIMESTAMP': ts,
-                    'OK-ACCESS-PASSPHRASE': pp,
-                }
-                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
-                data = resp.json()
+                data = _load_okx_account_balance(key, sec, pp)
                 if data.get('code') == '0' and data.get('data'):
                     live_okx_used = True
                     authoritative_snapshot_seen = True
@@ -5151,29 +5167,15 @@ def api_health():
         
         # 3. 检查OKX API
         try:
-            import time, hmac, hashlib, base64
-
             key, sec, pp = _load_workspace_exchange_creds()
             if not _dashboard_live_account_enabled():
                 checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'live检查未启用'})
             elif key and sec and pp:
                 start = time.time()
-                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
-                path = '/api/v5/account/balance'
-                msg = ts + 'GET' + path
-                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
-                
-                headers = {
-                    'OK-ACCESS-KEY': key,
-                    'OK-ACCESS-SIGN': sig,
-                    'OK-ACCESS-TIMESTAMP': ts,
-                    'OK-ACCESS-PASSPHRASE': pp,
-                }
-                
-                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
+                data = _load_okx_account_balance(key, sec, pp)
                 latency = (time.time() - start) * 1000
                 
-                if resp.status_code == 200 and resp.json().get('code') == '0':
+                if data.get('code') == '0':
                     checks.append({'name': 'OKX API', 'status': 'healthy', 'detail': f'{latency:.0f}ms'})
                 else:
                     checks.append({'name': 'OKX API', 'status': 'critical', 'detail': 'API响应异常'})
