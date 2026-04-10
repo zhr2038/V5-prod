@@ -203,6 +203,16 @@ def _json_internal_error_response(
     return jsonify(payload), status_code
 
 
+def _json_internal_error_list_response(
+    exc: BaseException,
+    *,
+    status_code: int = 500,
+    items: Optional[List[Any]] = None,
+):
+    _log_dashboard_exception('api error', exc)
+    return jsonify(list(items or [])), status_code
+
+
 def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
     response = result
     status_code = 200
@@ -2801,7 +2811,20 @@ def api_status():
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        try:
+            timer_name = _pick_timer_name()
+        except Exception:
+            timer_name = 'unknown'
+        return _json_internal_error_response(
+            e,
+            timer_active=False,
+            timer_name=timer_name,
+            timer_error='internal server error',
+            mode='unknown',
+            dry_run=True,
+            equity_cap=0,
+            last_check='',
+        )
 
 
 def calculate_market_indicators():
@@ -3396,7 +3419,7 @@ def api_equity_history():
         data = [{'timestamp': ts, 'value': round(eq, 4)} for ts, eq in points]
         return jsonify(data)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _json_internal_error_list_response(e, items=[])
 
 
 @app.route('/api/equity_curve')
@@ -3454,7 +3477,16 @@ def api_equity_curve():
             'days': int(days)
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            dates=[],
+            values=[],
+            pnl=[],
+            initial=0,
+            current=0,
+            total_return=0,
+            days=0,
+        )
 
 
 @app.route('/api/dashboard')

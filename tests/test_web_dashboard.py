@@ -31,6 +31,12 @@ def _assert_internal_error_hidden(body: str, *fragments: str):
         assert fragment not in body
 
 
+def _assert_body_hides_internal_details(body: str, *fragments: str):
+    assert "Traceback" not in body
+    for fragment in fragments:
+        assert fragment not in body
+
+
 def _find_headless_browser() -> str | None:
     candidates = [
         shutil.which("chrome"),
@@ -224,6 +230,29 @@ def test_timer_endpoints_degrade_without_systemctl(monkeypatch):
     assert "systemctl" in timer_payload["error"]
     assert timers_payload["timers"]
     assert all("error" in timer for timer in timers_payload["timers"])
+
+
+def test_status_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/status")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["timer_active"] is False
+    assert payload["mode"] == "unknown"
+    assert payload["dry_run"] is True
+    assert payload["equity_cap"] == 0
+    assert payload["last_check"] == ""
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
 
 
 def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
@@ -3390,6 +3419,49 @@ def test_api_equity_history_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload == [{"timestamp": "2026-04-08T11:00:00", "value": 123.0}]
+
+
+def test_equity_history_error_response_preserves_list_shape(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/equity_history")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload == []
+    _assert_body_hides_internal_details(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
+
+
+def test_equity_curve_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_load_config():
+        raise FileNotFoundError(r"C:\secret\configs\live_prod.yaml")
+
+    monkeypatch.setattr(module, "load_config", raise_load_config)
+
+    response = client.get("/api/equity_curve")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["dates"] == []
+    assert payload["values"] == []
+    assert payload["pnl"] == []
+    assert payload["initial"] == 0
+    assert payload["current"] == 0
+    assert payload["total_return"] == 0
+    assert payload["days"] == 0
+    _assert_internal_error_hidden(body, r"C:\secret\configs\live_prod.yaml", "live_prod.yaml")
 
 
 def test_auto_risk_guard_api_uses_auto_risk_eval_file(monkeypatch, tmp_path):
