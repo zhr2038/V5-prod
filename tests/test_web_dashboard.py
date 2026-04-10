@@ -1511,6 +1511,51 @@ def test_api_decision_audit_falls_back_to_previous_run_strategy_signals(monkeypa
     assert payload["fused_source_is_fallback"] is True
 
 
+def test_api_decision_audit_tolerates_non_numeric_selected_order_notional(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260313_15"
+    current_run.mkdir(parents=True, exist_ok=True)
+
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260313_15",
+                "regime": "TRENDING",
+                "counts": {"selected": 1, "orders_rebalance": 1, "orders_exit": 0},
+                "router_decisions": [
+                    {
+                        "action": "create",
+                        "symbol": "BTC/USDT",
+                        "side": "buy",
+                        "reason": "rebalance",
+                        "notional": "n/a",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_orders"] == [
+        {
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "reason": "rebalance",
+            "notional": 0.0,
+        }
+    ]
+
+
 def test_api_decision_audit_limits_recent_run_scan(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

@@ -5381,7 +5381,7 @@ def api_decision_audit():
                 'symbol': str(rd.get('symbol') or ''),
                 'side': str(rd.get('side') or ''),
                 'reason': str(rd.get('reason') or ''),
-                'notional': float(rd.get('notional') or 0.0),
+                'notional': _coerce_float(rd.get('notional'), 0.0),
             }
             for rd in router_decisions
             if str(rd.get('action') or '').lower() == 'create'
