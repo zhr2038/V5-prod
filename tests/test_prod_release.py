@@ -295,6 +295,29 @@ def test_prune_remote_files_removes_stale_production_files_only(tmp_path: Path) 
     assert "/remote/data/cache.csv" in fake_sftp.files
 
 
+def test_prune_remote_files_honors_shadow_sync_items(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("print('ok')", encoding="utf-8")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "run_shadow_tuned_xgboost.py").write_text("print('shadow')", encoding="utf-8")
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "dashboard.js").write_text("console.log('keep unmanaged')", encoding="utf-8")
+
+    fake_sftp = _FakeSFTP(
+        {
+            "/remote/main.py": b"ok",
+            "/remote/scripts/run_shadow_tuned_xgboost.py": b"shadow",
+            "/remote/scripts/old_shadow_helper.py": b"old",
+            "/remote/web/dashboard.js": b"dashboard",
+        }
+    )
+
+    pruned = _prune_remote_files(fake_sftp, tmp_path, "/remote", items=SHADOW_SYNC_ITEMS)
+
+    assert pruned == ["scripts/old_shadow_helper.py"]
+    assert fake_sftp.removed == ["/remote/scripts/old_shadow_helper.py"]
+    assert "/remote/web/dashboard.js" in fake_sftp.files
+
+
 def test_validate_units_requires_active_dashboard_and_optional_live_timers(monkeypatch) -> None:
     captured: dict[str, str] = {}
 

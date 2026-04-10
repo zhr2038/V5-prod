@@ -125,10 +125,15 @@ def _iter_remote_files(sftp: paramiko.SFTPClient, remote_dir: str) -> list[str]:
     return files
 
 
-def _collect_remote_sync_files(sftp: paramiko.SFTPClient, remote_root: str) -> set[str]:
+def _collect_remote_sync_files(
+    sftp: paramiko.SFTPClient,
+    remote_root: str,
+    *,
+    items=PRODUCTION_SYNC_ITEMS,
+) -> set[str]:
     remote_files: set[str] = set()
     normalized_root = remote_root.rstrip("/")
-    for root in production_sync_roots():
+    for root in production_sync_roots(items):
         remote_path = _remote_join(normalized_root, Path(root))
         try:
             attr = sftp.stat(remote_path)
@@ -142,9 +147,15 @@ def _collect_remote_sync_files(sftp: paramiko.SFTPClient, remote_root: str) -> s
     return remote_files
 
 
-def _prune_remote_files(sftp: paramiko.SFTPClient, workspace_root: Path, remote_root: str) -> list[str]:
-    expected = production_sync_relative_paths(workspace_root)
-    remote_files = _collect_remote_sync_files(sftp, remote_root)
+def _prune_remote_files(
+    sftp: paramiko.SFTPClient,
+    workspace_root: Path,
+    remote_root: str,
+    *,
+    items=PRODUCTION_SYNC_ITEMS,
+) -> list[str]:
+    expected = production_sync_relative_paths(workspace_root, items=items)
+    remote_files = _collect_remote_sync_files(sftp, remote_root, items=items)
     stale = sorted(remote_files - expected)
     for rel_path in stale:
         sftp.remove(_remote_join(remote_root, Path(rel_path)))
@@ -338,7 +349,11 @@ def main() -> None:
                     shadow_root,
                     items=SHADOW_SYNC_ITEMS,
                 )
-                shadow_pruned = _prune_remote_files(sftp, snapshot_root, shadow_root) if args.prune_shadow else []
+                shadow_pruned = (
+                    _prune_remote_files(sftp, snapshot_root, shadow_root, items=SHADOW_SYNC_ITEMS)
+                    if args.prune_shadow
+                    else []
+                )
         sftp.close()
 
         print(f"uploaded_files={uploaded}")
