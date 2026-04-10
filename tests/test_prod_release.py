@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import stat
 import subprocess
 from pathlib import Path
@@ -18,6 +19,7 @@ from deploy.sync_prod_release import (
     _resolve_remote_root,
     _resolve_service_user,
     _resolve_shadow_root,
+    _should_upload,
     _user_bus_wrapped_command,
     _validate_units,
 )
@@ -262,10 +264,34 @@ class _FakeSFTP:
             )
         return list(children.values())
 
+    def open(self, path: str, mode: str = "r"):
+        if mode != "rb":
+            raise NotImplementedError(mode)
+        normalized = self._norm(path)
+        if normalized not in self.files:
+            raise FileNotFoundError(normalized)
+        return io.BytesIO(self.files[normalized])
+
     def remove(self, path: str) -> None:
         normalized = self._norm(path)
         self.removed.append(normalized)
         self.files.pop(normalized, None)
+
+
+def test_should_upload_skips_same_content_when_archive_mtime_changed(tmp_path: Path) -> None:
+    local = tmp_path / "main.py"
+    local.write_bytes(b"print('same')\n")
+    fake_sftp = _FakeSFTP({"/remote/main.py": b"print('same')\n"})
+
+    assert _should_upload(fake_sftp, local, "/remote/main.py") is False
+
+
+def test_should_upload_detects_same_size_content_drift(tmp_path: Path) -> None:
+    local = tmp_path / "main.py"
+    local.write_bytes(b"print('new')\n")
+    fake_sftp = _FakeSFTP({"/remote/main.py": b"print('old')\n"})
+
+    assert _should_upload(fake_sftp, local, "/remote/main.py") is True
 
 
 def test_prune_remote_files_removes_stale_production_files_only(tmp_path: Path) -> None:

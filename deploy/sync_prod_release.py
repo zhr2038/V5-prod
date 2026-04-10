@@ -67,16 +67,37 @@ def _file_mode(path: Path) -> int:
     return 0o644
 
 
+def _remote_file_matches(
+    sftp: paramiko.SFTPClient,
+    local_path: Path,
+    remote_path: str,
+    *,
+    chunk_size: int = 1024 * 1024,
+) -> bool:
+    try:
+        with local_path.open("rb") as local_file, sftp.open(remote_path, "rb") as remote_file:
+            while True:
+                local_chunk = local_file.read(chunk_size)
+                remote_chunk = remote_file.read(chunk_size)
+                if local_chunk != remote_chunk:
+                    return False
+                if not local_chunk:
+                    return True
+    except OSError:
+        return False
+
+
 def _should_upload(sftp: paramiko.SFTPClient, local_path: Path, remote_path: str) -> bool:
     local_stat = local_path.stat()
     try:
         remote_stat = sftp.stat(remote_path)
     except FileNotFoundError:
         return True
-    return not (
-        int(remote_stat.st_size) == int(local_stat.st_size)
-        and int(getattr(remote_stat, "st_mtime", -1)) == int(local_stat.st_mtime)
-    )
+    if int(remote_stat.st_size) != int(local_stat.st_size):
+        return True
+    if int(getattr(remote_stat, "st_mtime", -1)) == int(local_stat.st_mtime):
+        return False
+    return not _remote_file_matches(sftp, local_path, remote_path)
 
 
 def _upload_files(
