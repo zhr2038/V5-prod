@@ -2756,12 +2756,20 @@ def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path)
     client = module.app.test_client()
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
-    monkeypatch.setattr(module, "SYSTEMCTL_BIN", None)
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
     monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
     monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
     monkeypatch.setenv("EXCHANGE_API_KEY", "ambient-key")
     monkeypatch.setenv("EXCHANGE_API_SECRET", "ambient-secret")
     monkeypatch.setenv("EXCHANGE_PASSPHRASE", "ambient-passphrase")
+
+    conn = sqlite3.connect(str(tmp_path / "orders.sqlite"))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE orders (inst_id TEXT)")
+    cur.execute("INSERT INTO orders(inst_id) VALUES ('BTC-USDT')")
+    conn.commit()
+    conn.close()
 
     def _unexpected_request(*args, **kwargs):
         raise AssertionError("api/health should not call live OKX without explicit enable flag")
@@ -2772,6 +2780,7 @@ def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path)
 
     assert response.status_code == 200
     payload = response.get_json()
+    assert payload["status"] == "warning"
     assert any(check.get("name") == "OKX API" and check.get("status") == "warning" for check in payload["checks"])
 
 
@@ -2807,6 +2816,39 @@ def test_sentiment_api_degrades_when_scores_endpoint_returns_error_tuple(monkeyp
     assert response.status_code == 200
     payload = response.get_json()
     assert set(payload["by_symbol"].keys()) == {"BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT"}
+
+
+def test_health_api_marks_warning_when_database_probe_errors(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "orders.sqlite").mkdir()
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+    monkeypatch.setattr(module, "_dashboard_live_account_enabled", lambda: False)
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "warning"
+    assert payload["warning_count"] >= 1
+    assert any(
+        check.get("status") == "warning" and "unable to open database file" in str(check.get("detail", ""))
+        for check in payload["checks"]
+    )
 
 
 def test_health_api_uses_active_runtime_orders_db(monkeypatch, tmp_path):
