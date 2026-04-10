@@ -7,22 +7,12 @@ sys.path.insert(0, str(ROOT))
 from src.execution.multi_level_stop_loss import MultiLevelStopLoss, StopLossConfig
 from src.execution.position_builder import PositionBuilder
 
-POSITION_STATE_FILE = ROOT / "reports" / "position_builder_state.json"
-STOP_LOSS_STATE_FILE = ROOT / "reports" / "stop_loss_state.json"
-
-
-def _unlink_if_exists(path: Path) -> None:
-    if path.exists():
-        path.unlink()
-
-
-def test_position_builder():
-    _unlink_if_exists(POSITION_STATE_FILE)
-
+def test_position_builder(tmp_path):
     builder = PositionBuilder(
         stages=[0.3, 0.3, 0.4],
         price_drop_threshold=0.02,
         trend_confirmation_bars=2,
+        state_path=str(tmp_path / "position_builder_state.json"),
     )
     builder.position_states = {}
 
@@ -73,15 +63,14 @@ def test_position_builder():
     assert summary["status"] == "completed"
 
 
-def test_multi_level_stop_loss():
-    _unlink_if_exists(STOP_LOSS_STATE_FILE)
-
+def test_multi_level_stop_loss(tmp_path):
     stop_loss = MultiLevelStopLoss(
         StopLossConfig(
             tight_pct=0.03,
             normal_pct=0.05,
             loose_pct=0.08,
-        )
+        ),
+        state_path=str(tmp_path / "stop_loss_state.json"),
     )
     stop_loss.positions = {}
 
@@ -117,9 +106,12 @@ def test_multi_level_stop_loss():
 
 
 def main() -> bool:
+    import tempfile
+
     try:
-        test_position_builder()
-        test_multi_level_stop_loss()
+        with tempfile.TemporaryDirectory() as td:
+            test_position_builder(Path(td))
+            test_multi_level_stop_loss(Path(td))
     except Exception as exc:
         print(exc)
         return False

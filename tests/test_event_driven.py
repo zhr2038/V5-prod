@@ -226,11 +226,20 @@ except Exception as e:
 # Test 6: Integration
 print("\n[6/5] 集成测试...")
 try:
+    import tempfile
+    import os
+
+    temp_monitor_state = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+    temp_monitor_state.close()
+    temp_cooldown_state = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+    temp_cooldown_state.close()
     cfg = {
         'enabled': True,
         'check_interval_minutes': 15,
         'global_cooldown_p2_minutes': 30,
-        'symbol_cooldown_minutes': 60
+        'symbol_cooldown_minutes': 60,
+        'monitor_state_path': temp_monitor_state.name,
+        'cooldown_state_path': temp_cooldown_state.name,
     }
     
     trader = create_event_driven_trader(cfg)
@@ -257,6 +266,8 @@ try:
     assert 'should_trade' in result
     assert 'actions' in result
     assert 'reason' in result
+    os.unlink(temp_monitor_state.name)
+    os.unlink(temp_cooldown_state.name)
     
     print("✅ 集成测试通过")
 except Exception as e:
