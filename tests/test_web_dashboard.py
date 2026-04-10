@@ -3395,6 +3395,52 @@ def test_market_state_snapshot_falls_back_to_regime_json_after_failed_run(tmp_pa
     assert snapshot["votes"]["hmm"]["state"] == "TRENDING"
 
 
+def test_market_state_snapshot_limits_recent_decision_audit_scan(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("V5_DASHBOARD_MARKET_AUDIT_SCAN_LIMIT", "4")
+
+    for hour in range(20):
+        run_dir = runs_dir / f"20260312_{hour:02d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps(
+                {
+                    "regime": "SIDEWAYS" if hour < 19 else "TRENDING",
+                    "regime_multiplier": 0.8 if hour < 19 else 1.2,
+                    "final_score": hour / 100,
+                    "regime_details": {
+                        "final_state": "SIDEWAYS" if hour < 19 else "TRENDING",
+                        "method": "decision_audit",
+                        "votes": {"hmm": {"state": "TRENDING", "confidence": 0.7}},
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    original_load_json_payload = module._load_json_payload
+    reads = {"decision_audit": 0}
+
+    def counting_load_json_payload(path):
+        if Path(path).name == "decision_audit.json":
+            reads["decision_audit"] += 1
+        return original_load_json_payload(path)
+
+    monkeypatch.setattr(module, "_load_json_payload", counting_load_json_payload)
+
+    snapshot = module._load_market_state_snapshot(reports_dir)
+
+    assert snapshot["state"] == "TRENDING"
+    assert snapshot["position_multiplier"] == 1.2
+    assert snapshot["final_score"] == pytest.approx(0.19)
+    assert reads["decision_audit"] <= 4
+
+
 def test_decision_chain_legacy_utc_run_time_is_not_double_shifted(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

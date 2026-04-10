@@ -467,6 +467,14 @@ def _score_audit_scan_limit() -> int:
     return max(2, min(raw_limit, 1000))
 
 
+def _market_state_audit_scan_limit() -> int:
+    try:
+        raw_limit = int(os.getenv('V5_DASHBOARD_MARKET_AUDIT_SCAN_LIMIT', '96') or '96')
+    except Exception:
+        raw_limit = 96
+    return max(1, min(raw_limit, 1000))
+
+
 def _decision_note_text(audit: Dict[str, Any]) -> str:
     notes = audit.get('notes', [])
     if isinstance(notes, list):
@@ -2992,7 +3000,7 @@ def _load_latest_regime_history_snapshot(reports_dir: Path) -> Dict[str, Any]:
 
 def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
     try:
-        audit_entries = _iter_decision_audits(reports_dir)
+        audit_entries = _iter_decision_audits(reports_dir, max_entries=_market_state_audit_scan_limit())
         regime_json_snapshot = _load_regime_json_snapshot(reports_dir)
         if audit_entries:
             if _is_failed_decision_audit(audit_entries[0]['audit']) and regime_json_snapshot:
