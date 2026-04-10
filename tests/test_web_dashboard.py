@@ -248,6 +248,41 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     assert payload["systemStatus"]["errors"] == ["systemctl is not available"]
 
 
+def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "api_account", lambda: module.jsonify({
+        "cash_usdt": 100.0,
+        "positions_value_usdt": 0.0,
+        "total_equity_usdt": 100.0,
+        "total_pnl_pct": 0.0,
+        "drawdown_pct": 0.0,
+        "realized_pnl": 0.0,
+        "total_trades": 0,
+        "last_update": "2026-04-10 12:00:00",
+    }))
+    monkeypatch.setattr(module, "api_positions", lambda: (module.jsonify({"error": "positions db locked"}), 500))
+    monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": []}))
+    monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({"timer_active": True, "dry_run": False}))
+    monkeypatch.setattr(module, "api_equity_history", lambda: module.jsonify([]))
+    monkeypatch.setattr(module, "api_market_state", lambda: module.jsonify({"state": "TRENDING"}))
+    monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": []}))
+    monkeypatch.setattr(module, "api_cost_calibration", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ic_diagnostics", lambda: module.jsonify({"status": "ok"}))
+    monkeypatch.setattr(module, "api_ml_training", lambda: module.jsonify({"status": "idle"}))
+    monkeypatch.setattr(module, "api_reflection_reports", lambda: module.jsonify({"reports": []}))
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["positions"] == []
+    assert payload["account"]["positionsValue"] == 0.0
+    assert payload["systemStatus"]["errors"] == ["positions: positions db locked"]
+
+
 def test_dashboard_api_keeps_sub_one_percent_pnl_as_ratio(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

@@ -165,6 +165,51 @@ def add_no_cache_headers(resp):
     resp.headers['Expires'] = '0'
     return resp
 
+
+def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
+    response = result
+    status_code = 200
+
+    if isinstance(result, tuple):
+        if not result:
+            return None, 500
+        response = result[0]
+        for item in result[1:]:
+            if isinstance(item, int):
+                status_code = item
+                break
+    else:
+        try:
+            status_code = int(getattr(response, 'status_code', 200) or 200)
+        except Exception:
+            status_code = 200
+
+    if hasattr(response, 'get_json'):
+        try:
+            payload = response.get_json(silent=True)
+        except TypeError:
+            payload = response.get_json()
+        return payload, status_code
+
+    if isinstance(response, (dict, list)):
+        return response, status_code
+
+    return None, status_code
+
+
+def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[List[str]] = None) -> Any:
+    payload, status_code = _extract_endpoint_json(api_func())
+    if status_code >= 400:
+        message = None
+        if isinstance(payload, dict):
+            message = payload.get('error') or payload.get('message')
+        message = str(message or f'HTTP {status_code}')
+        if errors is not None:
+            errors.append(f'{label}: {message}')
+        return default
+    return payload if payload is not None else default
+
+
 def _resolve_config_path() -> Path:
     """Resolve config path from env V5_CONFIG (supports relative path)."""
     raw = os.getenv('V5_CONFIG', 'configs/live_prod.yaml')
@@ -3212,37 +3257,57 @@ def api_dashboard():
     """Dashboard 完整数据API"""
     try:
         # 获取账户数据
-        account_data = api_account().get_json()
+        dashboard_errors: List[str] = []
+        account_data = _call_dashboard_api(api_account, default={}, label='account', errors=dashboard_errors)
+        if not isinstance(account_data, dict):
+            account_data = {}
         
         # 获取持仓
-        positions_data = api_positions().get_json()
+        positions_data = _call_dashboard_api(
+            api_positions,
+            default={'positions': []},
+            label='positions',
+            errors=dashboard_errors,
+        )
         if isinstance(positions_data, dict):
             positions_data = positions_data.get('positions', positions_data.get('data', []))
         if not isinstance(positions_data, list):
             positions_data = []
         
         # 获取交易
-        trades_data = api_trades().get_json()
+        trades_data = _call_dashboard_api(api_trades, default={'trades': []}, label='trades', errors=dashboard_errors)
         if isinstance(trades_data, dict):
             trades_data = trades_data.get('trades', trades_data.get('data', []))
         if not isinstance(trades_data, list):
             trades_data = []
         
         # 获取评分
-        scores_data = api_scores().get_json()
+        scores_data = _call_dashboard_api(api_scores, default={'scores': []}, label='scores', errors=dashboard_errors)
         if not isinstance(scores_data, dict):
             scores_data = {'scores': []}
         
         # 获取状态
-        status_data = api_status().get_json()
+        status_data = _call_dashboard_api(api_status, default={}, label='status', errors=dashboard_errors)
         if not isinstance(status_data, dict):
             status_data = {}
         
         # 获取权益曲线
-        equity_data = api_equity_history().get_json()
+        equity_data = _call_dashboard_api(
+            api_equity_history,
+            default=[],
+            label='equity_history',
+            errors=dashboard_errors,
+        )
         
         # 获取市场状态
-        market_state_data = api_market_state().get_json()
+        market_state_data = _call_dashboard_api(
+            api_market_state,
+            default={},
+            label='market_state',
+            errors=dashboard_errors,
+        )
+        if not isinstance(market_state_data, dict):
+            market_state_data = {}
         
         # 转换持仓格式
         positions = []
@@ -3315,6 +3380,48 @@ def api_dashboard():
         drawdown_pct = float(account_data.get('drawdown_pct', 0) or 0)
         realized_pnl = float(account_data.get('realized_pnl', 0) or 0)
 
+        timers_data = _call_dashboard_api(api_timers, default={'timers': []}, label='timers', errors=dashboard_errors)
+        if not isinstance(timers_data, dict):
+            timers_data = {'timers': []}
+        cost_calibration_data = _call_dashboard_api(
+            api_cost_calibration,
+            default={'status': 'unknown'},
+            label='cost_calibration',
+            errors=dashboard_errors,
+        )
+        if not isinstance(cost_calibration_data, dict):
+            cost_calibration_data = {'status': 'unknown'}
+        ic_diagnostics_data = _call_dashboard_api(
+            api_ic_diagnostics,
+            default={'status': 'no_data'},
+            label='ic_diagnostics',
+            errors=dashboard_errors,
+        )
+        if not isinstance(ic_diagnostics_data, dict):
+            ic_diagnostics_data = {'status': 'no_data'}
+        ml_training_data = _call_dashboard_api(
+            api_ml_training,
+            default={'status': 'unknown'},
+            label='ml_training',
+            errors=dashboard_errors,
+        )
+        if not isinstance(ml_training_data, dict):
+            ml_training_data = {'status': 'unknown'}
+        reflection_reports_data = _call_dashboard_api(
+            api_reflection_reports,
+            default={'reports': []},
+            label='reflection_reports',
+            errors=dashboard_errors,
+        )
+        if not isinstance(reflection_reports_data, dict):
+            reflection_reports_data = {'reports': []}
+
+        timer_error = status_data.get('timer_error')
+        system_errors: List[str] = []
+        if timer_error:
+            system_errors.append(str(timer_error))
+        system_errors.extend(dashboard_errors)
+
         dashboard_data = {
             'account': {
                 'totalEquity': round(total_equity, 4),
@@ -3341,15 +3448,15 @@ def api_dashboard():
                 'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',
                 'lastUpdate': account_data.get('last_update', ''),
                 'killSwitch': False,
-                'errors': [status_data['timer_error']] if status_data.get('timer_error') else []
+                'errors': system_errors
             },
             'equityCurve': equity_data if isinstance(equity_data, list) else [],
             # 新增：系统进度数据
-            'timers': api_timers().get_json() if hasattr(api_timers(), 'get_json') else {'timers': []},
-            'costCalibration': api_cost_calibration().get_json() if hasattr(api_cost_calibration(), 'get_json') else {'status': 'unknown'},
-            'icDiagnostics': api_ic_diagnostics().get_json() if hasattr(api_ic_diagnostics(), 'get_json') else {'status': 'no_data'},
-            'mlTraining': api_ml_training().get_json() if hasattr(api_ml_training(), 'get_json') else {'status': 'unknown'},
-            'reflectionReports': api_reflection_reports().get_json() if hasattr(api_reflection_reports(), 'get_json') else {'reports': []}
+            'timers': timers_data,
+            'costCalibration': cost_calibration_data,
+            'icDiagnostics': ic_diagnostics_data,
+            'mlTraining': ml_training_data,
+            'reflectionReports': reflection_reports_data
         }
         
         return jsonify(dashboard_data)
