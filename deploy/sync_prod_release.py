@@ -19,10 +19,23 @@ except ImportError as exc:  # pragma: no cover - exercised operationally
     raise SystemExit("missing dependency: paramiko") from exc
 
 from deploy.prod_release import (
+    PRODUCTION_SYNC_ITEMS,
     iter_production_files,
     production_snapshot,
     production_sync_relative_paths,
     production_sync_roots,
+)
+
+
+SHADOW_SYNC_ITEMS = (
+    "main.py",
+    "requirements.txt",
+    "pyproject.toml",
+    "models",
+    "configs",
+    "scripts/run_shadow_tuned_xgboost.py",
+    "scripts/run_shadow_tuned_xgboost_hourly.sh",
+    "src",
 )
 
 
@@ -66,11 +79,17 @@ def _should_upload(sftp: paramiko.SFTPClient, local_path: Path, remote_path: str
     )
 
 
-def _upload_files(sftp: paramiko.SFTPClient, workspace_root: Path, remote_root: str) -> tuple[int, int, list[str]]:
+def _upload_files(
+    sftp: paramiko.SFTPClient,
+    workspace_root: Path,
+    remote_root: str,
+    *,
+    items=PRODUCTION_SYNC_ITEMS,
+) -> tuple[int, int, list[str]]:
     uploaded = 0
     skipped = 0
     rel_paths: list[str] = []
-    for local_path in iter_production_files(workspace_root):
+    for local_path in iter_production_files(workspace_root, items=items):
         rel_path = local_path.relative_to(workspace_root)
         remote_path = _remote_join(remote_root, rel_path)
         parent = remote_path.rsplit("/", 1)[0]
@@ -313,7 +332,12 @@ def main() -> None:
             shadow_pruned: list[str] = []
             if not args.skip_shadow_sync:
                 _ensure_remote_dir(sftp, shadow_root)
-                shadow_uploaded, shadow_skipped, _shadow_rel_paths = _upload_files(sftp, snapshot_root, shadow_root)
+                shadow_uploaded, shadow_skipped, _shadow_rel_paths = _upload_files(
+                    sftp,
+                    snapshot_root,
+                    shadow_root,
+                    items=SHADOW_SYNC_ITEMS,
+                )
                 shadow_pruned = _prune_remote_files(sftp, snapshot_root, shadow_root) if args.prune_shadow else []
         sftp.close()
 

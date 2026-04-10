@@ -13,6 +13,7 @@ from deploy.prod_release import (
     render_unit_text,
 )
 from deploy.sync_prod_release import (
+    SHADOW_SYNC_ITEMS,
     _prune_remote_files,
     _resolve_remote_root,
     _resolve_service_user,
@@ -167,6 +168,17 @@ def test_production_unit_mappings_include_spread_rollup() -> None:
     mappings = dict(PRODUCTION_USER_UNIT_MAPPINGS)
     assert mappings["v5-spread-rollup.user.service"] == "v5-spread-rollup.service"
     assert mappings["v5-spread-rollup.timer"] == "v5-spread-rollup.timer"
+
+
+def test_shadow_sync_items_cover_shadow_runtime_without_dashboard_payload() -> None:
+    assert "main.py" in SHADOW_SYNC_ITEMS
+    assert "configs" in SHADOW_SYNC_ITEMS
+    assert "models" in SHADOW_SYNC_ITEMS
+    assert "src" in SHADOW_SYNC_ITEMS
+    assert "scripts/run_shadow_tuned_xgboost.py" in SHADOW_SYNC_ITEMS
+    assert "scripts/run_shadow_tuned_xgboost_hourly.sh" in SHADOW_SYNC_ITEMS
+    assert "web" not in SHADOW_SYNC_ITEMS
+    assert "docs/CURRENT_PRODUCTION_FLOW.md" not in SHADOW_SYNC_ITEMS
 
 
 def test_user_bus_wrapped_command_exports_user_bus() -> None:
