@@ -51,8 +51,8 @@ def _find_headless_browser() -> str | None:
     ]
 
     for candidate in candidates:
-        if candidate and Path(candidate).exists():
-            return str(Path(candidate))
+        if candidate and os.path.exists(candidate):
+            return candidate
     return None
 
 
