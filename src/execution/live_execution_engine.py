@@ -62,6 +62,15 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _derive_highest_tracker_state_path(position_store_path: str | Path) -> str:
+    path = Path(position_store_path)
+    if path.name == "positions.sqlite":
+        return str(path.with_name("highest_px_state.json"))
+    if "positions" in path.stem:
+        return str(path.with_name(path.name.replace("positions", "highest_px_state", 1)).with_suffix(".json"))
+    return str(path.with_name("highest_px_state.json"))
+
+
 def _resolve_runtime_json_path(cfg: ExecutionConfig, *, attr_name: str, base_name: str, legacy_default: str) -> str:
     raw_path = getattr(cfg, attr_name, None)
     if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
@@ -125,16 +134,22 @@ def _remove_symbol_from_state_file(path: str, symbol: str) -> bool:
         return False
 
 
-def clear_risk_state_on_full_close(symbol: str, state_files: Optional[List[str]] = None) -> None:
+def clear_risk_state_on_full_close(
+    symbol: str,
+    *,
+    state_files: Optional[List[str]] = None,
+    order_store_path: str = "reports/orders.sqlite",
+    position_store_path: str = "reports/positions.sqlite",
+) -> None:
     """Clear symbol state in stop/profit trackers after full close.
 
     This prevents stale stop-loss/profit state from contaminating a later re-entry.
     """
     files = state_files or [
-        "reports/stop_loss_state.json",
-        "reports/fixed_stop_loss_state.json",
-        "reports/profit_taking_state.json",
-        "reports/highest_px_state.json",
+        str(derive_runtime_named_json_path(order_store_path, "stop_loss_state")),
+        str(derive_runtime_named_json_path(order_store_path, "fixed_stop_loss_state")),
+        str(derive_runtime_named_json_path(order_store_path, "profit_taking_state")),
+        _derive_highest_tracker_state_path(position_store_path),
     ]
     removed = 0
     for f in files:
@@ -352,7 +367,7 @@ class LiveExecutionEngine:
             str(derive_runtime_named_json_path(effective_order_store_path, "stop_loss_state")),
             str(derive_runtime_named_json_path(effective_order_store_path, "fixed_stop_loss_state")),
             str(derive_runtime_named_json_path(effective_order_store_path, "profit_taking_state")),
-            str(derive_runtime_named_json_path(effective_order_store_path, "highest_px_state")),
+            _derive_highest_tracker_state_path(getattr(self.position_store, "path", derive_position_store_path(effective_order_store_path))),
         ]
         self.rank_exit_cooldown_state_path = str(
             derive_runtime_named_json_path(effective_order_store_path, "rank_exit_cooldown_state")

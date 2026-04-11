@@ -101,7 +101,11 @@ class FillReconciler:
             try:
                 from src.execution.live_execution_engine import clear_risk_state_on_full_close
 
-                clear_risk_state_on_full_close(symbol)
+                clear_risk_state_on_full_close(
+                    symbol,
+                    order_store_path=str(getattr(self.order_store, "path", "reports/orders.sqlite")),
+                    position_store_path=str(getattr(self.position_store, "path", "reports/positions.sqlite")),
+                )
             except Exception:
                 pass
         else:

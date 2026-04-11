@@ -300,6 +300,83 @@ def test_fill_reconciler_partial_sell_updates_position_store_idempotently() -> N
         assert pos.qty == pytest.approx(0.599)
 
 
+def test_fill_reconciler_full_close_clears_runtime_risk_state_without_touching_root(tmp_path) -> None:
+    shadow_dir = tmp_path / "reports" / "shadow_runtime"
+    shadow_dir.mkdir(parents=True, exist_ok=True)
+
+    fills = FillStore(path=str(shadow_dir / "fills.sqlite"))
+    orders = OrderStore(path=str(shadow_dir / "orders.sqlite"))
+    positions = PositionStore(path=str(shadow_dir / "positions.sqlite"))
+    positions.upsert_buy("BTC/USDT", qty=1.0, px=100.0)
+
+    clid = "SHADOW_FULL_CLOSE"
+    orders.upsert_new(
+        cl_ord_id=clid,
+        run_id="r",
+        inst_id="BTC-USDT",
+        side="sell",
+        intent="REBALANCE",
+        decision_hash="shadow-close",
+        td_mode="cash",
+        ord_type="market",
+        notional_usdt=100.0,
+        req={"clOrdId": clid},
+    )
+
+    runtime_files = {
+        shadow_dir / name: {"BTC/USDT": {"source": "runtime"}, "ETH/USDT": {"source": "runtime-keep"}}
+        for name in (
+            "stop_loss_state.json",
+            "fixed_stop_loss_state.json",
+            "profit_taking_state.json",
+            "highest_px_state.json",
+        )
+    }
+    root_files = {
+        tmp_path / "reports" / name: {"BTC/USDT": {"source": "root"}, "ETH/USDT": {"source": "root-keep"}}
+        for name in (
+            "stop_loss_state.json",
+            "fixed_stop_loss_state.json",
+            "profit_taking_state.json",
+            "highest_px_state.json",
+        )
+    }
+    for path, payload in {**runtime_files, **root_files}.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    fills.upsert_many(
+        [
+            FillRow(
+                inst_id="BTC-USDT",
+                trade_id="shadow-close-1",
+                ts_ms=1,
+                ord_id="OID-SHADOW-CLOSE",
+                cl_ord_id=clid,
+                side="sell",
+                fill_px="100",
+                fill_sz="1.0",
+                fee="0",
+                fee_ccy="BTC",
+            )
+        ]
+    )
+
+    rec = FillReconciler(fill_store=fills, order_store=orders, okx=None, position_store=positions)
+    out = rec.reconcile()
+
+    assert out["updated_orders"] == 1
+    assert positions.get("BTC/USDT") is None
+    for path in runtime_files:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert "BTC/USDT" not in payload
+        assert "ETH/USDT" in payload
+    for path in root_files:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["BTC/USDT"]["source"] == "root"
+
+
+
 def test_fill_reconciler_exports_into_custom_runtime_dirs(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 
