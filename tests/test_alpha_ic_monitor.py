@@ -1,5 +1,7 @@
 import json
+import warnings
 
+import pandas as pd
 import pytest
 
 from src.alpha.alpha_engine import AlphaSnapshot
@@ -129,3 +131,15 @@ def test_alpha6_dynamic_ic_weighting_respects_zero_min_abs_ic(tmp_path):
     weights = strategy._resolve_dynamic_weights(strategy.factor_weights)
 
     assert weights["f1_mom_5d"] > weights["f2_mom_20d"]
+
+
+def test_alpha_ic_monitor_corr_returns_zero_on_constant_inputs_without_warnings():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        value = AlphaICMonitor._corr(
+            pd.Series([1.0, 1.0, 1.0, 1.0]),
+            pd.Series([0.1, 0.2, 0.3, 0.4]),
+            method="pearson",
+        )
+
+    assert value == 0.0

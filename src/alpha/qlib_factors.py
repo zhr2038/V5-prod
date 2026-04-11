@@ -25,6 +25,33 @@ def _safe_series(xs: List[float]) -> pd.Series:
     return s
 
 
+def _safe_pair_corr(lhs: pd.Series, rhs: pd.Series, *, require_points: int) -> float:
+    pair = pd.DataFrame({"lhs": lhs, "rhs": rhs})
+    pair = pair.replace([np.inf, -np.inf], np.nan).dropna()
+    if len(pair) < max(2, int(require_points)):
+        return 0.0
+
+    x = pair["lhs"].to_numpy(dtype=float)
+    y = pair["rhs"].to_numpy(dtype=float)
+    if np.std(x) < 1e-12 or np.std(y) < 1e-12:
+        return 0.0
+
+    try:
+        corr = float(np.corrcoef(x, y)[0, 1])
+    except Exception:
+        return 0.0
+    return corr if np.isfinite(corr) else 0.0
+
+
+def _last_window_corr(lhs: pd.Series, rhs: pd.Series, window: int) -> float:
+    width = max(2, int(window))
+    lhs_window = lhs.tail(width)
+    rhs_window = rhs.tail(width)
+    if len(lhs_window) < width or len(rhs_window) < width:
+        return 0.0
+    return _safe_pair_corr(lhs_window, rhs_window, require_points=width)
+
+
 def _rsquare_roll(x: np.ndarray) -> float:
     """R-square of simple linear regression on window x."""
     try:
@@ -111,12 +138,12 @@ def compute_alpha158_style_factors(
 
     # CORR(close, log(volume+1))
     lv = np.log(v + 1.0)
-    corr = c.rolling(corr_w).corr(lv).iloc[-1]
+    corr = _last_window_corr(c, lv, corr_w)
 
     # CORD(c/Ref(c,1), log(v/Ref(v,1)+1))
     c_ret = c / c.shift(1)
     v_chg = np.log((v / v.shift(1)).replace([np.inf, -np.inf], np.nan) + 1.0)
-    cord = c_ret.rolling(corr_w).corr(v_chg).iloc[-1]
+    cord = _last_window_corr(c_ret, v_chg, corr_w)
 
     # RSQR
     rsqr = c.rolling(corr_w).apply(_rsquare_roll, raw=True).iloc[-1]

@@ -34,8 +34,21 @@ class AlphaICMonitor:
 
     @staticmethod
     def _corr(a: pd.Series, b: pd.Series, method: str = "pearson") -> float:
+        frame = pd.DataFrame({"a": pd.Series(a), "b": pd.Series(b)})
+        frame = frame.replace([np.inf, -np.inf], np.nan).dropna()
+        if len(frame) < 2:
+            return 0.0
+
+        lhs = frame["a"].astype(float)
+        rhs = frame["b"].astype(float)
+        if method == "spearman":
+            lhs = lhs.rank(method="average")
+            rhs = rhs.rank(method="average")
+
+        if float(lhs.std(ddof=0)) < 1e-12 or float(rhs.std(ddof=0)) < 1e-12:
+            return 0.0
         try:
-            x = float(a.corr(b, method=method))
+            x = float(np.corrcoef(lhs.to_numpy(dtype=float), rhs.to_numpy(dtype=float))[0, 1])
             if np.isfinite(x):
                 return x
         except Exception:
