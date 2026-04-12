@@ -29,6 +29,7 @@ class TaskLock:
         self.timeout = timeout
         self.lock_file = LOCK_DIR / f"{task_name}.lock"
         self.fd = None
+        self._locked = False
     
     def acquire(self):
         """获取锁"""
@@ -47,10 +48,13 @@ class TaskLock:
                 pass
         
         try:
-            self.fd = open(self.lock_file, 'w')
+            self.fd = open(self.lock_file, 'a+')
             fcntl.flock(self.fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._locked = True
             
             # 写入锁信息
+            self.fd.seek(0)
+            self.fd.truncate()
             self.fd.write(f"{os.getpid()}\n{datetime.now().isoformat()}\n")
             self.fd.flush()
             
@@ -59,13 +63,15 @@ class TaskLock:
             if self.fd:
                 self.fd.close()
                 self.fd = None
+            self._locked = False
             return False
     
     def release(self):
         """释放锁"""
         if self.fd:
             try:
-                fcntl.flock(self.fd.fileno(), fcntl.LOCK_UN)
+                if self._locked:
+                    fcntl.flock(self.fd.fileno(), fcntl.LOCK_UN)
                 self.fd.close()
             except:
                 pass
@@ -73,10 +79,12 @@ class TaskLock:
                 self.fd = None
         
         try:
-            if self.lock_file.exists():
+            if self._locked and self.lock_file.exists():
                 self.lock_file.unlink()
         except:
             pass
+        finally:
+            self._locked = False
     
     def __enter__(self):
         if not self.acquire():
