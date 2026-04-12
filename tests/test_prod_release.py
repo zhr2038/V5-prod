@@ -3,10 +3,14 @@ from __future__ import annotations
 import io
 import stat
 import subprocess
+import tarfile
+
+import pytest
 from pathlib import Path
 
 from deploy.prod_release import (
     PRODUCTION_USER_UNIT_MAPPINGS,
+    _extract_git_archive,
     iter_production_files,
     production_snapshot,
     production_sync_relative_paths,
@@ -24,6 +28,20 @@ from deploy.sync_prod_release import (
     _user_bus_wrapped_command,
     _validate_units,
 )
+
+
+
+
+def test_extract_git_archive_rejects_symlink_member(tmp_path: Path) -> None:
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w:") as archive:
+        info = tarfile.TarInfo("linked")
+        info.type = tarfile.SYMTYPE
+        info.linkname = "/etc/passwd"
+        archive.addfile(info)
+
+    with pytest.raises(RuntimeError, match="unsupported archive link member"):
+        _extract_git_archive(payload.getvalue(), tmp_path)
 
 
 def test_render_unit_text_rewrites_known_roots() -> None:

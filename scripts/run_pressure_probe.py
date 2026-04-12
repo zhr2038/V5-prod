@@ -42,13 +42,13 @@ def _loadavg() -> tuple[float, float, float]:
 
 def _top_processes(limit: int = 8) -> list[str]:
     result = subprocess.run(
-        "ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -n {limit}".format(limit=max(2, int(limit))),
-        shell=True,
+        ["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"],
         capture_output=True,
         text=True,
         check=False,
     )
-    return [line for line in result.stdout.splitlines() if line.strip()]
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    return lines[: max(2, int(limit))]
 
 
 def _write_json(path: Path, payload: Any) -> None:
