@@ -761,11 +761,6 @@ def run_window_diagnostic_task(
         workers = _resolve_workers(exp_cfg.get("workers", 1), len(evaluations))
 
         if not evaluations:
-            failure_summary = {
-                "reason": "no_window_evaluations",
-                "symbol_count": int(len(symbols)),
-            }
-            recorder.finalize_run(run, status="failed", summary=failure_summary)
             raise ValueError("window diagnostics requires at least one evaluation")
 
         ordered_results: dict[int, dict[str, Any]] = {}

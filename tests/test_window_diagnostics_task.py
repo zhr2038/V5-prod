@@ -28,6 +28,7 @@ def test_run_window_diagnostic_task_finalizes_failed_run_when_no_evaluations(mon
             return FakeRun()
 
         def finalize_run(self, run, *, status: str, summary):
+            finalized["finalize_calls"] = int(finalized.get("finalize_calls", 0)) + 1
             finalized["status"] = status
             finalized["summary"] = summary
             return run.run_dir / "meta.json"
@@ -47,6 +48,7 @@ def test_run_window_diagnostic_task_finalizes_failed_run_when_no_evaluations(mon
         wd.run_window_diagnostic_task(project_root=tmp_path, task_config_path="task.yaml")
 
     assert finalized["task_name"] == "window_diagnostics"
+    assert finalized["finalize_calls"] == 1
     assert finalized["status"] == "failed"
     assert finalized["summary"] == {
         "reason": "window_diagnostics_failed",
@@ -76,6 +78,7 @@ def test_run_window_diagnostic_task_finalizes_failed_run_when_job_raises(monkeyp
             return FakeRun()
 
         def finalize_run(self, run, *, status: str, summary):
+            finalized["finalize_calls"] = int(finalized.get("finalize_calls", 0)) + 1
             finalized["status"] = status
             finalized["summary"] = summary
             return run.run_dir / "meta.json"
@@ -100,6 +103,7 @@ def test_run_window_diagnostic_task_finalizes_failed_run_when_job_raises(monkeyp
         wd.run_window_diagnostic_task(project_root=tmp_path, task_config_path="task.yaml")
 
     assert finalized["task_name"] == "window_diagnostics"
+    assert finalized["finalize_calls"] == 1
     assert finalized["status"] == "failed"
     assert finalized["summary"] == {
         "reason": "window_diagnostics_failed",
