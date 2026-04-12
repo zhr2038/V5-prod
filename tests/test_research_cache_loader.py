@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from src.research.cache_loader import load_cached_market_data, summarize_market_data
 from src.research.task_runner import run_walk_forward_task
 
@@ -111,3 +113,51 @@ def test_run_walk_forward_task_supports_cache_provider(monkeypatch, tmp_path) ->
     assert result["exit_code"] == 0
     assert captured == {"symbols": ["BTC/USDT", "ETH/USDT"], "bars": 2, "provider": None}
     assert output["cost_assumption_meta"]["provider"] == "cache"
+
+
+def test_run_walk_forward_task_finalizes_failed_run(monkeypatch, tmp_path) -> None:
+    finalized: dict[str, object] = {}
+
+    class FakeRun:
+        def __init__(self):
+            self.run_dir = tmp_path / "run"
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            self.run_id = "run_123"
+
+        def write_json(self, relative_path: str, payload):
+            finalized.setdefault("writes", []).append((relative_path, payload))
+            return self.run_dir / relative_path
+
+    class FakeRecorder:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start_run(self, **kwargs):
+            finalized["task_name"] = kwargs["task_name"]
+            return FakeRun()
+
+        def finalize_run(self, run, *, status: str, summary):
+            finalized["status"] = status
+            finalized["summary"] = summary
+            return run.run_dir / "meta.json"
+
+    monkeypatch.setattr("src.research.task_runner.ResearchRecorder", FakeRecorder)
+    monkeypatch.setattr("configs.loader.load_config", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("walk data failed")))
+
+    with pytest.raises(RuntimeError, match="walk data failed"):
+        run_walk_forward_task(
+            project_root=tmp_path,
+            task_config={
+                "task": {"name": "walk_forward"},
+                "paths": {},
+                "walk_forward": {"provider": "mock"},
+            },
+        )
+
+    assert finalized["task_name"] == "walk_forward"
+    assert finalized["status"] == "failed"
+    assert finalized["summary"] == {
+        "reason": "walk_forward_failed",
+        "error_type": "RuntimeError",
+        "error": "walk data failed",
+    }

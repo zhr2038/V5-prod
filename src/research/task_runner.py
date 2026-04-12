@@ -772,60 +772,70 @@ def run_walk_forward_task(
     recorder = ResearchRecorder(base_dir=_project_path(project_root, paths_cfg.get("runs_dir", "reports/runs"), "reports/runs"))
     run = recorder.start_run(task_name=str(task_meta.get("name", "walk_forward")), task_config=task_config)
 
-    app_cfg_path = _project_path(project_root, walk_cfg.get("config_path", "configs/config.yaml"), "configs/config.yaml")
-    env_path = str(walk_cfg.get("env_path", ".env"))
-    provider_name = str(walk_cfg.get("provider", "mock")).strip().lower()
-    ohlcv_limit = int(walk_cfg.get("ohlcv_limit", 24 * 120))
-    output_report_path = _project_path(project_root, paths_cfg.get("output_report_path", "reports/walk_forward.json"), "reports/walk_forward.json")
+    try:
+        app_cfg_path = _project_path(project_root, walk_cfg.get("config_path", "configs/config.yaml"), "configs/config.yaml")
+        env_path = str(walk_cfg.get("env_path", ".env"))
+        provider_name = str(walk_cfg.get("provider", "mock")).strip().lower()
+        ohlcv_limit = int(walk_cfg.get("ohlcv_limit", 24 * 120))
+        output_report_path = _project_path(project_root, paths_cfg.get("output_report_path", "reports/walk_forward.json"), "reports/walk_forward.json")
 
-    cfg = load_config(str(app_cfg_path), env_path=env_path)
-    cfg.execution.collect_ml_training_data = bool(walk_cfg.get("collect_ml_training_data", False))
-    provider = None
-    dataset_meta: dict[str, object]
-    if provider_name == "okx":
-        provider = OKXCCXTProvider()
-        market_data = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=ohlcv_limit)
-        dataset_meta = summarize_market_data(market_data, source="okx")
-    elif provider_name == "mock":
-        provider = MockProvider(seed=int(walk_cfg.get("mock_seed", 7)))
-        market_data = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=ohlcv_limit)
-        dataset_meta = summarize_market_data(market_data, source="mock")
-    elif provider_name == "cache":
-        cache_dir = _project_path(project_root, walk_cfg.get("cache_dir", "data/cache"), "data/cache")
-        market_data = load_cached_market_data(cache_dir, cfg.symbols, cfg.timeframe_main, limit=ohlcv_limit)
-        dataset_meta = summarize_market_data(market_data, source="cache", source_path=str(cache_dir))
-    else:
-        raise ValueError(f"unsupported walk-forward provider: {provider_name}")
+        cfg = load_config(str(app_cfg_path), env_path=env_path)
+        cfg.execution.collect_ml_training_data = bool(walk_cfg.get("collect_ml_training_data", False))
+        provider = None
+        dataset_meta: dict[str, object]
+        if provider_name == "okx":
+            provider = OKXCCXTProvider()
+            market_data = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=ohlcv_limit)
+            dataset_meta = summarize_market_data(market_data, source="okx")
+        elif provider_name == "mock":
+            provider = MockProvider(seed=int(walk_cfg.get("mock_seed", 7)))
+            market_data = provider.fetch_ohlcv(cfg.symbols, timeframe=cfg.timeframe_main, limit=ohlcv_limit)
+            dataset_meta = summarize_market_data(market_data, source="mock")
+        elif provider_name == "cache":
+            cache_dir = _project_path(project_root, walk_cfg.get("cache_dir", "data/cache"), "data/cache")
+            market_data = load_cached_market_data(cache_dir, cfg.symbols, cfg.timeframe_main, limit=ohlcv_limit)
+            dataset_meta = summarize_market_data(market_data, source="cache", source_path=str(cache_dir))
+        else:
+            raise ValueError(f"unsupported walk-forward provider: {provider_name}")
 
-    folds = run_walk_forward(
-        market_data,
-        folds=int(walk_cfg.get("folds", getattr(cfg.backtest, "walk_forward_folds", 4))),
-        cfg=cfg,
-        data_provider=provider,
-    )
-    report = build_walk_forward_report(
-        folds,
-        cost_meta={
-            "mode": str(cfg.backtest.cost_model),
-            "fee_quantile": str(cfg.backtest.fee_quantile),
-            "slippage_quantile": str(cfg.backtest.slippage_quantile),
-            "min_fills_global": int(cfg.backtest.min_fills_global),
-            "min_fills_bucket": int(cfg.backtest.min_fills_bucket),
-            "max_stats_age_days": int(cfg.backtest.max_stats_age_days),
-            "cost_stats_dir": str(cfg.backtest.cost_stats_dir),
-            "provider": provider_name,
-        },
-    )
-    output_report_path.parent.mkdir(parents=True, exist_ok=True)
-    output_report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        folds = run_walk_forward(
+            market_data,
+            folds=int(walk_cfg.get("folds", getattr(cfg.backtest, "walk_forward_folds", 4))),
+            cfg=cfg,
+            data_provider=provider,
+        )
+        report = build_walk_forward_report(
+            folds,
+            cost_meta={
+                "mode": str(cfg.backtest.cost_model),
+                "fee_quantile": str(cfg.backtest.fee_quantile),
+                "slippage_quantile": str(cfg.backtest.slippage_quantile),
+                "min_fills_global": int(cfg.backtest.min_fills_global),
+                "min_fills_bucket": int(cfg.backtest.min_fills_bucket),
+                "max_stats_age_days": int(cfg.backtest.max_stats_age_days),
+                "cost_stats_dir": str(cfg.backtest.cost_stats_dir),
+                "provider": provider_name,
+            },
+        )
+        output_report_path.parent.mkdir(parents=True, exist_ok=True)
+        output_report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    summary = build_portfolio_analysis_record(report)
-    run.write_json("dataset_meta.json", dataset_meta)
-    run.write_json("metrics.json", summary)
-    run.write_json("report.json", report)
-    run.write_json("analysis/portfolio_analysis_record.json", summary)
-    recorder.finalize_run(run, status="completed", summary=summary)
-    return {"exit_code": 0, "run_id": run.run_id, "folds": len(report.get("folds") or [])}
+        summary = build_portfolio_analysis_record(report)
+        run.write_json("dataset_meta.json", dataset_meta)
+        run.write_json("metrics.json", summary)
+        run.write_json("report.json", report)
+        run.write_json("analysis/portfolio_analysis_record.json", summary)
+        recorder.finalize_run(run, status="completed", summary=summary)
+        return {"exit_code": 0, "run_id": run.run_id, "folds": len(report.get("folds") or [])}
+    except Exception as exc:
+        failure_summary = {
+            "reason": "walk_forward_failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        run.write_json("error.json", failure_summary)
+        recorder.finalize_run(run, status="failed", summary=failure_summary)
+        raise
 
 
 def run_walk_forward_optimizer_task(
