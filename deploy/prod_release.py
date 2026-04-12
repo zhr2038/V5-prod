@@ -44,6 +44,8 @@ PRODUCTION_SYNC_EXCLUDES = (
     "scripts/archive",
 )
 
+GIT_COMMAND_TIMEOUT = 30
+
 PRODUCTION_USER_UNIT_MAPPINGS = (
     ("v5-prod.user.service", "v5-prod.user.service"),
     ("v5-prod.user.timer", "v5-prod.user.timer"),
@@ -168,6 +170,7 @@ def _git_existing_items(root: Path, rev: str, items: Iterable[str]) -> tuple[str
         proc = subprocess.run(
             ["git", "-C", str(root), "ls-tree", "--name-only", rev, "--", item],
             capture_output=True,
+            timeout=GIT_COMMAND_TIMEOUT,
             check=False,
         )
         if proc.returncode != 0:
@@ -203,7 +206,12 @@ def production_snapshot(
             "--",
             *existing_items,
         ]
-        proc = subprocess.run(archive_cmd, capture_output=True, check=False)
+        proc = subprocess.run(
+            archive_cmd,
+            capture_output=True,
+            timeout=GIT_COMMAND_TIMEOUT,
+            check=False,
+        )
         if proc.returncode != 0:
             stderr = proc.stderr.decode("utf-8", errors="replace")
             raise RuntimeError(f"git archive failed for {rev}: {stderr.strip()}")

@@ -156,6 +156,36 @@ def test_production_snapshot_uses_head_not_dirty_worktree(tmp_path: Path) -> Non
         assert not (snapshot_root / "scripts" / "untracked.py").exists()
 
 
+
+
+def test_production_snapshot_git_commands_use_timeout(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("print('head')\n", encoding="utf-8")
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append({"cmd": cmd, **kwargs})
+        if cmd[3] == "ls-tree":
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"main.py\n", stderr=b"")
+        if cmd[3] == "archive":
+            payload = io.BytesIO()
+            with tarfile.open(fileobj=payload, mode="w:") as archive:
+                data = b"print('head')\n"
+                info = tarfile.TarInfo("main.py")
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=payload.getvalue(), stderr=b"")
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr("deploy.prod_release.subprocess.run", fake_run)
+
+    with production_snapshot(tmp_path, items=("main.py",)) as snapshot_root:
+        assert (snapshot_root / "main.py").read_text(encoding="utf-8") == "print('head')\n"
+
+    assert len(calls) == 2
+    assert all(call["timeout"] == 30 for call in calls)
+
+
 def test_render_unit_text_rewrites_ubuntu_prod_root() -> None:
     source = (
         "WorkingDirectory=/home/ubuntu/clawd/v5-prod\n"
