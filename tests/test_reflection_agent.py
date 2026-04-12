@@ -202,6 +202,59 @@ def test_reflection_agent_execution_quality_uses_unique_orders_for_fill_rate(tmp
     assert quality.fill_rate == 1.0
 
 
+
+
+def test_reflection_agent_runtime_db_derivation_does_not_rewrite_parent_directory_names(tmp_path: Path) -> None:
+    runtime_dir = tmp_path / "orders_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    orders_db = runtime_dir / "shadow_orders.sqlite"
+    fills_db = runtime_dir / "shadow_fills.sqlite"
+    positions_db = runtime_dir / "shadow_positions.sqlite"
+
+    agent = ReflectionAgentV2(
+        db_path=str(orders_db),
+        report_dir=str(tmp_path / "reflection"),
+        bills_db=str(tmp_path / "bills.sqlite"),
+    )
+
+    conn = sqlite3.connect(str(fills_db))
+    conn.execute(
+        """
+        CREATE TABLE fills (
+            ts_ms INTEGER,
+            ord_id TEXT,
+            cl_ord_id TEXT,
+            slippage_bps REAL,
+            fee REAL,
+            notional_usdt REAL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO fills(ts_ms, ord_id, cl_ord_id, slippage_bps, fee, notional_usdt) VALUES (?, ?, ?, ?, ?, ?)",
+        (2_000, "ord-1", "ord-1", 7.0, 0.2, 100.0),
+    )
+    conn.commit()
+    conn.close()
+
+    conn = sqlite3.connect(str(positions_db))
+    conn.execute("CREATE TABLE positions (value_usdt REAL)")
+    conn.execute("INSERT INTO positions(value_usdt) VALUES (60.0)")
+    conn.execute("INSERT INTO positions(value_usdt) VALUES (40.0)")
+    conn.commit()
+    conn.close()
+
+    trades = pd.DataFrame([{"inst_id": "BTC-USDT", "side": "buy", "notional_usdt": 100.0, "event_ts": 2_000}])
+
+    quality = agent._analyze_execution_quality(trades)
+    risk = agent._analyze_risk(trades)
+
+    assert quality.avg_slippage_bps == 7.0
+    assert quality.avg_fee_bps == 20.0
+    assert risk.max_position_pct == 0.6
+    assert risk.concentration_score == 0.52
+
 def test_reflection_agent_uses_active_runtime_paths_for_defaults(monkeypatch, tmp_path: Path) -> None:
     reports_dir = tmp_path / "reports"
     runtime_dir = reports_dir / "shadow_runtime"

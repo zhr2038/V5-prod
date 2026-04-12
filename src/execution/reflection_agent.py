@@ -21,7 +21,7 @@ import numpy as np
 from decimal import Decimal
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
-from src.execution.fill_store import derive_runtime_reports_dir
+from src.execution.fill_store import derive_fill_store_path, derive_position_store_path, derive_runtime_reports_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = PROJECT_ROOT / 'reports'
@@ -343,7 +343,7 @@ class ReflectionAgentV2:
         """分析执行质量"""
         # 从fills表获取详细成交数据
         try:
-            conn = sqlite3.connect(self.db_path.replace('orders', 'fills'))
+            conn = sqlite3.connect(str(derive_fill_store_path(self.db_path)))
             fills_df = pd.read_sql_query("SELECT * FROM fills", conn)
             conn.close()
             
@@ -442,7 +442,7 @@ class ReflectionAgentV2:
         """分析风险指标"""
         # 读取当前持仓
         try:
-            conn = sqlite3.connect(self.db_path.replace('orders', 'positions'))
+            conn = sqlite3.connect(str(derive_position_store_path(self.db_path)))
             positions_df = pd.read_sql_query("SELECT * FROM positions", conn)
             conn.close()
             
