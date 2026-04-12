@@ -101,58 +101,68 @@ def main() -> int:
     }
     run = recorder.start_run(task_name="core6_avax_shadow_cycle", task_config=task_config)
 
-    ab_result = _run_script("run_rolling_window_sweep.py", ab_config_path, cwd=PROJECT_ROOT)
-    shadow_result = _run_script("run_core6_window_diagnostics.py", shadow_config_path, cwd=PROJECT_ROOT)
-    run.write_text("artifacts/hotpath.stdout.txt", ab_result.stdout)
-    run.write_text("artifacts/hotpath.stderr.txt", ab_result.stderr)
-    run.write_text("artifacts/shadow.stdout.txt", shadow_result.stdout)
-    run.write_text("artifacts/shadow.stderr.txt", shadow_result.stderr)
+    try:
+        ab_result = _run_script("run_rolling_window_sweep.py", ab_config_path, cwd=PROJECT_ROOT)
+        shadow_result = _run_script("run_core6_window_diagnostics.py", shadow_config_path, cwd=PROJECT_ROOT)
+        run.write_text("artifacts/hotpath.stdout.txt", ab_result.stdout)
+        run.write_text("artifacts/hotpath.stderr.txt", ab_result.stderr)
+        run.write_text("artifacts/shadow.stdout.txt", shadow_result.stdout)
+        run.write_text("artifacts/shadow.stderr.txt", shadow_result.stderr)
 
-    hotpath_report_path = _report_path_from_config(ab_config_path)
-    shadow_report_path = _report_path_from_config(shadow_config_path)
-    hotpath_report = json.loads(hotpath_report_path.read_text(encoding="utf-8"))
-    shadow_report = json.loads(shadow_report_path.read_text(encoding="utf-8"))
+        hotpath_report_path = _report_path_from_config(ab_config_path)
+        shadow_report_path = _report_path_from_config(shadow_config_path)
+        hotpath_report = json.loads(hotpath_report_path.read_text(encoding="utf-8"))
+        shadow_report = json.loads(shadow_report_path.read_text(encoding="utf-8"))
 
-    summary = build_shadow_cycle_summary(
-        hotpath_report=hotpath_report,
-        shadow_report=shadow_report,
-        champion_name=str(args.champion_name),
-        baseline_name=str(args.baseline_name),
-    )
-    summary["inputs"] = {
-        "ab_config_path": str(ab_config_path),
-        "shadow_config_path": str(shadow_config_path),
-        "hotpath_report_path": str(hotpath_report_path),
-        "shadow_report_path": str(shadow_report_path),
-    }
-    markdown = build_shadow_cycle_markdown(
-        summary=summary,
-        hotpath_report_path=hotpath_report_path,
-        shadow_report_path=shadow_report_path,
-    )
+        summary = build_shadow_cycle_summary(
+            hotpath_report=hotpath_report,
+            shadow_report=shadow_report,
+            champion_name=str(args.champion_name),
+            baseline_name=str(args.baseline_name),
+        )
+        summary["inputs"] = {
+            "ab_config_path": str(ab_config_path),
+            "shadow_config_path": str(shadow_config_path),
+            "hotpath_report_path": str(hotpath_report_path),
+            "shadow_report_path": str(shadow_report_path),
+        }
+        markdown = build_shadow_cycle_markdown(
+            summary=summary,
+            hotpath_report_path=hotpath_report_path,
+            shadow_report_path=shadow_report_path,
+        )
 
-    output_json_path.parent.mkdir(parents=True, exist_ok=True)
-    output_md_path.parent.mkdir(parents=True, exist_ok=True)
-    output_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    output_md_path.write_text(markdown, encoding="utf-8")
-    run.write_json("result.json", summary)
-    run.write_text("summary.md", markdown)
-    recorder.finalize_run(
-        run,
-        status="completed",
-        summary={
-            "recommend_shadow": bool((summary.get("decision") or {}).get("recommend_shadow")),
-            "reason": (summary.get("decision") or {}).get("reason"),
-            "output_json_path": str(output_json_path),
-            "output_md_path": str(output_md_path),
-        },
-    )
+        output_json_path.parent.mkdir(parents=True, exist_ok=True)
+        output_md_path.parent.mkdir(parents=True, exist_ok=True)
+        output_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        output_md_path.write_text(markdown, encoding="utf-8")
+        run.write_json("result.json", summary)
+        run.write_text("summary.md", markdown)
+        recorder.finalize_run(
+            run,
+            status="completed",
+            summary={
+                "recommend_shadow": bool((summary.get("decision") or {}).get("recommend_shadow")),
+                "reason": (summary.get("decision") or {}).get("reason"),
+                "output_json_path": str(output_json_path),
+                "output_md_path": str(output_md_path),
+            },
+        )
 
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-    print(f"report_written={output_json_path}")
-    print(f"markdown_written={output_md_path}")
-    print(f"run_dir={run.run_dir}")
-    return 0
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        print(f"report_written={output_json_path}")
+        print(f"markdown_written={output_md_path}")
+        print(f"run_dir={run.run_dir}")
+        return 0
+    except Exception as exc:
+        failure_summary = {
+            "reason": "shadow_cycle_failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        run.write_json("error.json", failure_summary)
+        recorder.finalize_run(run, status="failed", summary=failure_summary)
+        raise
 
 
 if __name__ == "__main__":
