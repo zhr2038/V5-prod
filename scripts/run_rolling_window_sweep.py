@@ -339,138 +339,154 @@ def main() -> int:
         task_config=task_config,
     )
 
-    base_config_path = _project_path(PROJECT_ROOT, str(exp_cfg.get("base_config_path", "configs/live_prod.yaml")), "configs/live_prod.yaml")
-    env_path = str(exp_cfg.get("env_path", ".env"))
-    cache_dir = _project_path(PROJECT_ROOT, str(exp_cfg.get("cache_dir", "data/cache")), "data/cache")
-    available_bars = _available_bars(
-        base_config_path=str(base_config_path),
-        env_path=env_path,
-        cache_dir=str(cache_dir),
-        symbols=_probe_symbols(task_config, variants),
-    )
-    evaluations = _generated_evaluations(task_config, available_bars=available_bars)
-    if not evaluations:
-        print("no evaluations generated for sweep task")
-        return 1
-    parallel_granularity = str(exp_cfg.get("parallel_granularity", "variant")).strip().lower()
-    output_report_path = _project_path(
-        PROJECT_ROOT,
-        str(paths_cfg.get("output_report_path", "reports/research/liquid_core_combo_rolling720/latest.json")),
-        "reports/research/liquid_core_combo_rolling720/latest.json",
-    )
-    variants_root = run.run_dir / "variants"
-    variants_root.mkdir(parents=True, exist_ok=True)
-
-    ordered_results: dict[int, dict] = {}
-    if parallel_granularity == "job":
-        variant_windows: dict[int, list[dict]] = {idx: [] for idx in range(len(variants))}
-        job_specs: list[tuple[int, int, dict, dict]] = [
-            (variant_idx, evaluation_idx, variant, evaluation)
-            for variant_idx, variant in enumerate(variants)
-            for evaluation_idx, evaluation in enumerate(evaluations)
-        ]
-        workers = _resolve_workers(exp_cfg.get("workers", 1), len(job_specs))
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            future_map = {
-                executor.submit(
-                    _run_variant_window_job,
-                    variant=variant,
-                    evaluation=evaluation,
-                    base_config_path=str(base_config_path),
-                    env_path=env_path,
-                    cache_dir=str(cache_dir),
-                    project_root=str(PROJECT_ROOT),
-                    window_dir=str(
-                        variants_root
-                        / str(variant.get("name") or f"variant_{variant_idx}")
-                        / str(evaluation.get("name") or f"window_{evaluation_idx}")
-                    ),
-                ): (variant_idx, evaluation_idx)
-                for variant_idx, evaluation_idx, variant, evaluation in job_specs
+    try:
+        base_config_path = _project_path(PROJECT_ROOT, str(exp_cfg.get("base_config_path", "configs/live_prod.yaml")), "configs/live_prod.yaml")
+        env_path = str(exp_cfg.get("env_path", ".env"))
+        cache_dir = _project_path(PROJECT_ROOT, str(exp_cfg.get("cache_dir", "data/cache")), "data/cache")
+        available_bars = _available_bars(
+            base_config_path=str(base_config_path),
+            env_path=env_path,
+            cache_dir=str(cache_dir),
+            symbols=_probe_symbols(task_config, variants),
+        )
+        evaluations = _generated_evaluations(task_config, available_bars=available_bars)
+        if not evaluations:
+            failure_summary = {
+                "reason": "no_evaluations_generated",
+                "available_bars": int(available_bars),
+                "variant_count": int(len(variants)),
             }
-            for future in as_completed(future_map):
-                variant_idx, evaluation_idx = future_map[future]
-                payload = future.result()
-                variant_windows[int(variant_idx)].append((int(evaluation_idx), payload))
+            recorder.finalize_run(run, status="failed", summary=failure_summary)
+            print("no evaluations generated for sweep task")
+            return 1
+        parallel_granularity = str(exp_cfg.get("parallel_granularity", "variant")).strip().lower()
+        output_report_path = _project_path(
+            PROJECT_ROOT,
+            str(paths_cfg.get("output_report_path", "reports/research/liquid_core_combo_rolling720/latest.json")),
+            "reports/research/liquid_core_combo_rolling720/latest.json",
+        )
+        variants_root = run.run_dir / "variants"
+        variants_root.mkdir(parents=True, exist_ok=True)
 
-        for idx, variant in enumerate(variants):
-            windows = [
-                payload["window"]
-                for _, payload in sorted(variant_windows[idx], key=lambda item: item[0])
+        ordered_results: dict[int, dict] = {}
+        if parallel_granularity == "job":
+            variant_windows: dict[int, list[dict]] = {idx: [] for idx in range(len(variants))}
+            job_specs: list[tuple[int, int, dict, dict]] = [
+                (variant_idx, evaluation_idx, variant, evaluation)
+                for variant_idx, variant in enumerate(variants)
+                for evaluation_idx, evaluation in enumerate(evaluations)
             ]
-            result = {
-                "name": str(variant.get("name") or f"variant_{idx}"),
-                "symbols": [str(symbol) for symbol in (variant.get("symbols") or [])],
-                "overrides": dict(variant.get("overrides") or {}),
-                "windows": windows,
-            }
-            result["aggregate"] = _variant_aggregate(result)
-            ordered_results[idx] = result
-    else:
-        workers = _resolve_workers(exp_cfg.get("workers", 1), len(variants))
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            future_map = {
-                executor.submit(
-                    _run_variant_job,
-                    variant=variant,
-                    evaluations=evaluations,
-                    base_config_path=str(base_config_path),
-                    env_path=env_path,
-                    cache_dir=str(cache_dir),
-                    project_root=str(PROJECT_ROOT),
-                    run_dir=str(variants_root / str(variant.get("name") or f"variant_{idx}")),
-                ): idx
-                for idx, variant in enumerate(variants)
-            }
-            for future in as_completed(future_map):
-                ordered_results[int(future_map[future])] = future.result()
+            workers = _resolve_workers(exp_cfg.get("workers", 1), len(job_specs))
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                future_map = {
+                    executor.submit(
+                        _run_variant_window_job,
+                        variant=variant,
+                        evaluation=evaluation,
+                        base_config_path=str(base_config_path),
+                        env_path=env_path,
+                        cache_dir=str(cache_dir),
+                        project_root=str(PROJECT_ROOT),
+                        window_dir=str(
+                            variants_root
+                            / str(variant.get("name") or f"variant_{variant_idx}")
+                            / str(evaluation.get("name") or f"window_{evaluation_idx}")
+                        ),
+                    ): (variant_idx, evaluation_idx)
+                    for variant_idx, evaluation_idx, variant, evaluation in job_specs
+                }
+                for future in as_completed(future_map):
+                    variant_idx, evaluation_idx = future_map[future]
+                    payload = future.result()
+                    variant_windows[int(variant_idx)].append((int(evaluation_idx), payload))
 
-    results = [ordered_results[idx] for idx in range(len(variants))]
-    results.sort(
-        key=lambda item: (
-            int(((item.get("aggregate") or {}).get("positive_windows") or 0)),
-            float(((item.get("aggregate") or {}).get("mean_total_return") or 0.0)),
-            float(((item.get("aggregate") or {}).get("median_total_return") or 0.0)),
-            float(((item.get("aggregate") or {}).get("min_total_return") or 0.0)),
-            -float(((item.get("aggregate") or {}).get("max_max_dd") or 0.0)),
-        ),
-        reverse=True,
-    )
+            for idx, variant in enumerate(variants):
+                windows = [
+                    payload["window"]
+                    for _, payload in sorted(variant_windows[idx], key=lambda item: item[0])
+                ]
+                result = {
+                    "name": str(variant.get("name") or f"variant_{idx}"),
+                    "symbols": [str(symbol) for symbol in (variant.get("symbols") or [])],
+                    "overrides": dict(variant.get("overrides") or {}),
+                    "windows": windows,
+                }
+                result["aggregate"] = _variant_aggregate(result)
+                ordered_results[idx] = result
+        else:
+            workers = _resolve_workers(exp_cfg.get("workers", 1), len(variants))
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                future_map = {
+                    executor.submit(
+                        _run_variant_job,
+                        variant=variant,
+                        evaluations=evaluations,
+                        base_config_path=str(base_config_path),
+                        env_path=env_path,
+                        cache_dir=str(cache_dir),
+                        project_root=str(PROJECT_ROOT),
+                        run_dir=str(variants_root / str(variant.get("name") or f"variant_{idx}")),
+                    ): idx
+                    for idx, variant in enumerate(variants)
+                }
+                for future in as_completed(future_map):
+                    ordered_results[int(future_map[future])] = future.result()
 
-    result = {
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "task_config_path": str(PROJECT_ROOT / task_config_path),
-        "base_config_path": str(base_config_path),
-        "available_bars": int(available_bars),
-        "workers": int(workers),
-        "parallel_granularity": parallel_granularity,
-        "evaluations": evaluations,
-        "results": results,
-    }
-    output_report_path.parent.mkdir(parents=True, exist_ok=True)
-    output_report_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    run.write_json("result.json", result)
-    recorder.finalize_run(
-        run,
-        status="completed",
-        summary={
-            "output_report_path": str(output_report_path),
-            "top_variant": results[0]["name"] if results else None,
-        },
-    )
+        results = [ordered_results[idx] for idx in range(len(variants))]
+        results.sort(
+            key=lambda item: (
+                int(((item.get("aggregate") or {}).get("positive_windows") or 0)),
+                float(((item.get("aggregate") or {}).get("mean_total_return") or 0.0)),
+                float(((item.get("aggregate") or {}).get("median_total_return") or 0.0)),
+                float(((item.get("aggregate") or {}).get("min_total_return") or 0.0)),
+                -float(((item.get("aggregate") or {}).get("max_max_dd") or 0.0)),
+            ),
+            reverse=True,
+        )
 
-    preview = [
-        {
-            "name": item["name"],
-            "symbols": item["symbols"],
-            "aggregate": item["aggregate"],
-            "run_dir": str(variants_root / item["name"]),
+        result = {
+            "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "task_config_path": str(PROJECT_ROOT / task_config_path),
+            "base_config_path": str(base_config_path),
+            "available_bars": int(available_bars),
+            "workers": int(workers),
+            "parallel_granularity": parallel_granularity,
+            "evaluations": evaluations,
+            "results": results,
         }
-        for item in results[:12]
-    ]
-    print(json.dumps(preview, ensure_ascii=False, indent=2))
-    print(f"report_written={output_report_path}")
-    return 0
+        output_report_path.parent.mkdir(parents=True, exist_ok=True)
+        output_report_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        run.write_json("result.json", result)
+        recorder.finalize_run(
+            run,
+            status="completed",
+            summary={
+                "output_report_path": str(output_report_path),
+                "top_variant": results[0]["name"] if results else None,
+            },
+        )
+
+        preview = [
+            {
+                "name": item["name"],
+                "symbols": item["symbols"],
+                "aggregate": item["aggregate"],
+                "run_dir": str(variants_root / item["name"]),
+            }
+            for item in results[:12]
+        ]
+        print(json.dumps(preview, ensure_ascii=False, indent=2))
+        print(f"report_written={output_report_path}")
+        return 0
+    except Exception as exc:
+        failure_summary = {
+            "reason": "rolling_window_sweep_failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        run.write_json("error.json", failure_summary)
+        recorder.finalize_run(run, status="failed", summary=failure_summary)
+        raise
 
 
 if __name__ == "__main__":
