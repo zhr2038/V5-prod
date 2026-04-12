@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import tarfile
+import pytest
 
 import scripts.backup_manager as backup_manager
 
@@ -122,3 +124,23 @@ def test_backup_manager_derives_runtime_state_files_when_config_uses_legacy_defa
     assert "reports/shadow_reconcile_status.json" in names
     assert "reports/kill_switch.json" not in names
     assert "reports/reconcile_status.json" not in names
+
+
+def test_backup_manager_restore_rejects_path_traversal(tmp_path) -> None:
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = backup_dir / "evil.tar.gz"
+
+    payload = b"owned"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        info = tarfile.TarInfo(name="../escape.txt")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+
+    manager = backup_manager.BackupManager(workspace=tmp_path)
+
+    with pytest.raises(RuntimeError, match="unsafe backup member"):
+        manager.restore_backup("evil.tar.gz")
+
+    assert not (tmp_path / "escape.txt").exists()
+

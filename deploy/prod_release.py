@@ -146,13 +146,20 @@ def render_unit_text(text: str, root: str, *, drop_user_directive: bool = False)
 
 
 def _extract_git_archive(blob: bytes, destination: Path) -> None:
+    destination = destination.resolve()
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:") as archive:
-        for member in archive.getmembers():
+        members = archive.getmembers()
+        for member in members:
             member_path = destination / member.name
             resolved = member_path.resolve()
-            if destination.resolve() not in resolved.parents and resolved != destination.resolve():
+            if destination not in resolved.parents and resolved != destination:
                 raise RuntimeError(f"unsafe archive member: {member.name}")
-        archive.extractall(destination)
+            if member.issym() or member.islnk():
+                raise RuntimeError(f"unsupported archive link member: {member.name}")
+        try:
+            archive.extractall(destination, filter="data")
+        except TypeError:
+            archive.extractall(destination, members=members)
 
 
 def _git_existing_items(root: Path, rev: str, items: Iterable[str]) -> tuple[str, ...]:

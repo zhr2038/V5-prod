@@ -47,6 +47,23 @@ STATIC_BACKUP_ITEMS = [
 KEEP_BACKUPS = 7
 
 
+def _safe_extract_backup(archive: tarfile.TarFile, destination: Path) -> None:
+    destination = destination.resolve()
+    members = archive.getmembers()
+    for member in members:
+        member_path = destination / member.name
+        resolved = member_path.resolve()
+        if resolved != destination and destination not in resolved.parents:
+            raise RuntimeError(f"unsafe backup member: {member.name}")
+        if member.issym() or member.islnk():
+            raise RuntimeError(f"unsupported backup link member: {member.name}")
+
+    try:
+        archive.extractall(path=destination, filter="data")
+    except TypeError:
+        archive.extractall(path=destination, members=members)
+
+
 class BackupManager:
     """Create and retain workspace backups."""
 
@@ -205,7 +222,7 @@ class BackupManager:
         restore_dir.mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(backup_path, "r:gz") as tar:
-            tar.extractall(path=restore_dir)
+            _safe_extract_backup(tar, restore_dir)
 
         self.log(f"backup extracted to: {restore_dir}")
         self.log("please review restored files before replacing runtime data")
