@@ -34,7 +34,7 @@ try:
     import lightgbm as lgb
 
     LIGHTGBM_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     LIGHTGBM_AVAILABLE = False
     lgb = None
 
@@ -42,7 +42,7 @@ try:
     import xgboost as xgb
 
     XGBOOST_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     XGBOOST_AVAILABLE = False
     xgb = None
 
