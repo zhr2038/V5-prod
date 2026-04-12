@@ -161,10 +161,6 @@ def _build_task_config() -> dict:
     env_candidates = os.getenv("V5_ML_CANDIDATES")
     if env_candidates is None:
         configured = [str(x).strip().lower() for x in (model.get("candidates") or ["ridge"]) if str(x).strip()]
-        if not LIGHTGBM_AVAILABLE:
-            configured = [x for x in configured if x != "lightgbm"]
-        if not XGBOOST_AVAILABLE:
-            configured = [x for x in configured if x != "xgboost"]
         model["candidates"] = configured or ["ridge"]
     else:
         model["candidates"] = _candidate_models()
