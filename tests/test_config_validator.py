@@ -42,8 +42,10 @@ def test_check_env_variables_loads_root_dotenv(monkeypatch, tmp_path) -> None:
 def test_check_timers_uses_current_production_timer_names(monkeypatch) -> None:
     captured = {}
 
-    def _fake_run(cmd, capture_output=True, text=True):
+    def _fake_run(cmd, capture_output=True, text=True, timeout=None, check=None):
         captured["cmd"] = cmd
+        captured["timeout"] = timeout
+        captured["check"] = check
         return SimpleNamespace(
             stdout="\n".join(config_validator.CURRENT_PRODUCTION_TIMERS),
             stderr="",
@@ -56,6 +58,8 @@ def test_check_timers_uses_current_production_timer_names(monkeypatch) -> None:
     validator.check_timers()
 
     assert captured["cmd"] == ["systemctl", "--user", "list-timers", "--all", "--no-pager"]
+    assert captured["timeout"] == 10
+    assert captured["check"] is False
     assert validator.warnings == []
     assert validator.checks_passed == len(config_validator.CURRENT_PRODUCTION_TIMERS)
 
@@ -109,3 +113,16 @@ def test_check_database_uses_runtime_db_paths_from_active_config(monkeypatch, tm
     assert validator.errors == []
     assert validator.warnings == []
     assert validator.checks_passed >= 4
+def test_check_timers_warns_when_systemctl_call_fails(monkeypatch) -> None:
+    def _fake_run(*args, **kwargs):
+        raise TimeoutError('systemctl timed out')
+
+    monkeypatch.setattr(config_validator.sys.modules["subprocess"], "run", _fake_run)
+
+    validator = config_validator.ConfigValidator()
+    validator.check_timers()
+
+    assert validator.checks_passed == 0
+    assert validator.warnings == ["定时任务检查失败: systemctl timed out"]
+
+

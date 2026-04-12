@@ -190,10 +190,18 @@ class ConfigValidator:
         
         import subprocess
         
-        result = subprocess.run(
-            ['systemctl', '--user', 'list-timers', '--all', '--no-pager'],
-            capture_output=True, text=True
-        )
+        try:
+            result = subprocess.run(
+                ['systemctl', '--user', 'list-timers', '--all', '--no-pager'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception as exc:
+            self.warnings.append(f"定时任务检查失败: {exc}")
+            self.log(f"定时任务检查失败: {exc}", 'WARN')
+            return
         
         for timer in CURRENT_PRODUCTION_TIMERS:
             if timer in result.stdout:
