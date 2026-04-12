@@ -80,65 +80,75 @@ def main() -> int:
         },
     )
 
-    by_name = {str(item.get("name")): item for item in variants}
-    baseline_variant = by_name[baseline_name]
-    champion_variant = by_name[champion_name]
-    baseline_result = run_latest_signal_variant(
-        variant=baseline_variant,
-        base_config_path=base_config_path,
-        env_path=env_path,
-        cache_dir=cache_dir,
-        project_root=PROJECT_ROOT,
-        output_dir=run.run_dir / "variants" / baseline_name,
-        ohlcv_limit=ohlcv_limit,
-        initial_equity_usdt=initial_equity_usdt,
-        top_scores_limit=top_scores_limit,
-    )
-    champion_result = run_latest_signal_variant(
-        variant=champion_variant,
-        base_config_path=base_config_path,
-        env_path=env_path,
-        cache_dir=cache_dir,
-        project_root=PROJECT_ROOT,
-        output_dir=run.run_dir / "variants" / champion_name,
-        ohlcv_limit=ohlcv_limit,
-        initial_equity_usdt=initial_equity_usdt,
-        top_scores_limit=top_scores_limit,
-    )
+    try:
+        by_name = {str(item.get("name")): item for item in variants}
+        baseline_variant = by_name[baseline_name]
+        champion_variant = by_name[champion_name]
+        baseline_result = run_latest_signal_variant(
+            variant=baseline_variant,
+            base_config_path=base_config_path,
+            env_path=env_path,
+            cache_dir=cache_dir,
+            project_root=PROJECT_ROOT,
+            output_dir=run.run_dir / "variants" / baseline_name,
+            ohlcv_limit=ohlcv_limit,
+            initial_equity_usdt=initial_equity_usdt,
+            top_scores_limit=top_scores_limit,
+        )
+        champion_result = run_latest_signal_variant(
+            variant=champion_variant,
+            base_config_path=base_config_path,
+            env_path=env_path,
+            cache_dir=cache_dir,
+            project_root=PROJECT_ROOT,
+            output_dir=run.run_dir / "variants" / champion_name,
+            ohlcv_limit=ohlcv_limit,
+            initial_equity_usdt=initial_equity_usdt,
+            top_scores_limit=top_scores_limit,
+        )
 
-    generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    summary = build_latest_signal_summary(
-        generated_at=generated_at,
-        baseline=baseline_result,
-        champion=champion_result,
-        baseline_name=baseline_name,
-        champion_name=champion_name,
-    )
-    markdown = build_latest_signal_markdown(summary)
+        generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        summary = build_latest_signal_summary(
+            generated_at=generated_at,
+            baseline=baseline_result,
+            champion=champion_result,
+            baseline_name=baseline_name,
+            champion_name=champion_name,
+        )
+        markdown = build_latest_signal_markdown(summary)
 
-    output_json_path.parent.mkdir(parents=True, exist_ok=True)
-    output_md_path.parent.mkdir(parents=True, exist_ok=True)
-    output_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    output_md_path.write_text(markdown, encoding="utf-8")
-    run.write_json("result.json", summary)
-    run.write_text("summary.md", markdown)
-    recorder.finalize_run(
-        run,
-        status="completed",
-        summary={
-            "selection_changed": bool((summary.get("compare") or {}).get("selection_changed")),
-            "orders_changed": bool((summary.get("compare") or {}).get("orders_changed")),
-            "needs_review": bool((summary.get("compare") or {}).get("needs_review")),
-            "output_json_path": str(output_json_path),
-            "output_md_path": str(output_md_path),
-        },
-    )
+        output_json_path.parent.mkdir(parents=True, exist_ok=True)
+        output_md_path.parent.mkdir(parents=True, exist_ok=True)
+        output_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        output_md_path.write_text(markdown, encoding="utf-8")
+        run.write_json("result.json", summary)
+        run.write_text("summary.md", markdown)
+        recorder.finalize_run(
+            run,
+            status="completed",
+            summary={
+                "selection_changed": bool((summary.get("compare") or {}).get("selection_changed")),
+                "orders_changed": bool((summary.get("compare") or {}).get("orders_changed")),
+                "needs_review": bool((summary.get("compare") or {}).get("needs_review")),
+                "output_json_path": str(output_json_path),
+                "output_md_path": str(output_md_path),
+            },
+        )
 
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-    print(f"report_written={output_json_path}")
-    print(f"markdown_written={output_md_path}")
-    print(f"run_dir={run.run_dir}")
-    return 0
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        print(f"report_written={output_json_path}")
+        print(f"markdown_written={output_md_path}")
+        print(f"run_dir={run.run_dir}")
+        return 0
+    except Exception as exc:
+        failure_summary = {
+            "reason": "latest_signal_monitor_failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        run.write_json("error.json", failure_summary)
+        recorder.finalize_run(run, status="failed", summary=failure_summary)
+        raise
 
 
 if __name__ == "__main__":
