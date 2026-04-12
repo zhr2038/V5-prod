@@ -749,35 +749,30 @@ def run_window_diagnostic_task(
         task_config=task_config,
     )
 
-    base_config_path = _project_path(project_root, str(exp_cfg.get("base_config_path", "configs/live_prod.yaml")), "configs/live_prod.yaml")
-    env_path = str(exp_cfg.get("env_path", ".env"))
-    cache_dir = _project_path(project_root, str(exp_cfg.get("cache_dir", "data/cache")), "data/cache")
-    latest_report_path = _project_path(
-        project_root,
-        str(paths_cfg.get("output_report_path", "reports/research/core6_window_diagnostics/latest.json")),
-        "reports/research/core6_window_diagnostics/latest.json",
-    )
-    workers = _resolve_workers(exp_cfg.get("workers", 1), len(evaluations))
+    try:
+        base_config_path = _project_path(project_root, str(exp_cfg.get("base_config_path", "configs/live_prod.yaml")), "configs/live_prod.yaml")
+        env_path = str(exp_cfg.get("env_path", ".env"))
+        cache_dir = _project_path(project_root, str(exp_cfg.get("cache_dir", "data/cache")), "data/cache")
+        latest_report_path = _project_path(
+            project_root,
+            str(paths_cfg.get("output_report_path", "reports/research/core6_window_diagnostics/latest.json")),
+            "reports/research/core6_window_diagnostics/latest.json",
+        )
+        workers = _resolve_workers(exp_cfg.get("workers", 1), len(evaluations))
 
-    ordered_results: dict[int, dict[str, Any]] = {}
-    if workers <= 1:
-        for idx, evaluation in enumerate(evaluations):
-            window_name = str(evaluation.get("name") or "window")
-            ordered_results[idx] = _run_window_job(
-                project_root=str(project_root),
-                base_config_path=str(base_config_path),
-                env_path=env_path,
-                cache_dir=str(cache_dir),
-                symbols=symbols,
-                overrides=overrides,
-                evaluation=evaluation,
-                window_dir=str(run.run_dir / "windows" / window_name),
-            )
-    else:
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            future_map = {
-                executor.submit(
-                    _run_window_job,
+        if not evaluations:
+            failure_summary = {
+                "reason": "no_window_evaluations",
+                "symbol_count": int(len(symbols)),
+            }
+            recorder.finalize_run(run, status="failed", summary=failure_summary)
+            raise ValueError("window diagnostics requires at least one evaluation")
+
+        ordered_results: dict[int, dict[str, Any]] = {}
+        if workers <= 1:
+            for idx, evaluation in enumerate(evaluations):
+                window_name = str(evaluation.get("name") or "window")
+                ordered_results[idx] = _run_window_job(
                     project_root=str(project_root),
                     base_config_path=str(base_config_path),
                     env_path=env_path,
@@ -785,36 +780,59 @@ def run_window_diagnostic_task(
                     symbols=symbols,
                     overrides=overrides,
                     evaluation=evaluation,
-                    window_dir=str(run.run_dir / "windows" / str(evaluation.get("name") or f"window_{idx}")),
-                ): idx
-                for idx, evaluation in enumerate(evaluations)
-            }
-            for future in as_completed(future_map):
-                ordered_results[int(future_map[future])] = future.result()
-    window_results = [ordered_results[idx] for idx in range(len(evaluations))]
+                    window_dir=str(run.run_dir / "windows" / window_name),
+                )
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                future_map = {
+                    executor.submit(
+                        _run_window_job,
+                        project_root=str(project_root),
+                        base_config_path=str(base_config_path),
+                        env_path=env_path,
+                        cache_dir=str(cache_dir),
+                        symbols=symbols,
+                        overrides=overrides,
+                        evaluation=evaluation,
+                        window_dir=str(run.run_dir / "windows" / str(evaluation.get("name") or f"window_{idx}")),
+                    ): idx
+                    for idx, evaluation in enumerate(evaluations)
+                }
+                for future in as_completed(future_map):
+                    ordered_results[int(future_map[future])] = future.result()
+        window_results = [ordered_results[idx] for idx in range(len(evaluations))]
 
-    result = {
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "task_config_path": str(project_root / task_config_path),
-        "base_config_path": str(base_config_path),
-        "symbols": symbols,
-        "overrides": overrides,
-        "workers": int(workers),
-        "windows": window_results,
-    }
-    report_path = run.write_json("result.json", result)
-    _write_json(latest_report_path, result)
-    recorder.finalize_run(
-        run,
-        status="completed",
-        summary={
-            "output_report_path": str(latest_report_path),
-            "windows": [window["name"] for window in window_results],
-        },
-    )
-    return WindowDiagnosticTaskResult(
-        run_dir=run.run_dir,
-        report_path=report_path,
-        latest_report_path=latest_report_path,
-        result=result,
-    )
+        result = {
+            "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "task_config_path": str(project_root / task_config_path),
+            "base_config_path": str(base_config_path),
+            "symbols": symbols,
+            "overrides": overrides,
+            "workers": int(workers),
+            "windows": window_results,
+        }
+        report_path = run.write_json("result.json", result)
+        _write_json(latest_report_path, result)
+        recorder.finalize_run(
+            run,
+            status="completed",
+            summary={
+                "output_report_path": str(latest_report_path),
+                "windows": [window["name"] for window in window_results],
+            },
+        )
+        return WindowDiagnosticTaskResult(
+            run_dir=run.run_dir,
+            report_path=report_path,
+            latest_report_path=latest_report_path,
+            result=result,
+        )
+    except Exception as exc:
+        failure_summary = {
+            "reason": "window_diagnostics_failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        run.write_json("error.json", failure_summary)
+        recorder.finalize_run(run, status="failed", summary=failure_summary)
+        raise
