@@ -447,17 +447,26 @@ class ReflectionAgentV2:
             conn.close()
             
             if not positions_df.empty:
-                total_value = positions_df['value_usdt'].sum()
-                max_pos = positions_df['value_usdt'].max()
+                if 'value_usdt' in positions_df.columns:
+                    values = pd.to_numeric(positions_df['value_usdt'], errors='coerce').fillna(0.0).abs()
+                else:
+                    qty = pd.to_numeric(positions_df.get('qty'), errors='coerce').fillna(0.0).abs()
+                    last_mark = pd.to_numeric(positions_df.get('last_mark_px'), errors='coerce').fillna(0.0)
+                    avg_px = pd.to_numeric(positions_df.get('avg_px'), errors='coerce').fillna(0.0)
+                    mark_px = last_mark.where(last_mark > 0.0, avg_px)
+                    values = (qty * mark_px).fillna(0.0)
+
+                total_value = float(values.sum())
+                max_pos = float(values.max()) if not values.empty else 0.0
                 max_pct = max_pos / total_value if total_value > 0 else 0
                 
                 # 集中度评分 (HHI指数)
-                weights = positions_df['value_usdt'] / total_value if total_value > 0 else pd.Series([0])
-                concentration = (weights ** 2).sum()
+                weights = values / total_value if total_value > 0 else pd.Series([0.0])
+                concentration = float((weights ** 2).sum())
             else:
                 max_pct = 0
                 concentration = 0
-        except:
+        except Exception:
             max_pct = 0
             concentration = 0
         

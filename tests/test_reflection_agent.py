@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from src.execution import reflection_agent as reflection_module
 from src.execution.reflection_agent import ReflectionAgentV2
@@ -254,6 +255,37 @@ def test_reflection_agent_runtime_db_derivation_does_not_rewrite_parent_director
     assert quality.avg_fee_bps == 20.0
     assert risk.max_position_pct == 0.6
     assert risk.concentration_score == 0.52
+
+
+
+def test_reflection_agent_risk_uses_standard_position_store_columns_when_value_usdt_missing(tmp_path: Path) -> None:
+    agent = ReflectionAgentV2(
+        db_path=str(tmp_path / "orders.sqlite"),
+        report_dir=str(tmp_path / "reflection"),
+        bills_db=str(tmp_path / "bills.sqlite"),
+    )
+
+    positions_db = tmp_path / "positions.sqlite"
+    conn = sqlite3.connect(str(positions_db))
+    conn.execute(
+        """
+        CREATE TABLE positions (
+            symbol TEXT,
+            qty REAL,
+            avg_px REAL,
+            last_mark_px REAL
+        )
+        """
+    )
+    conn.execute("INSERT INTO positions(symbol, qty, avg_px, last_mark_px) VALUES (?, ?, ?, ?)", ("BTC-USDT", 2.0, 10.0, 15.0))
+    conn.execute("INSERT INTO positions(symbol, qty, avg_px, last_mark_px) VALUES (?, ?, ?, ?)", ("ETH-USDT", 1.0, 40.0, 0.0))
+    conn.commit()
+    conn.close()
+
+    risk = agent._analyze_risk(pd.DataFrame())
+
+    assert risk.max_position_pct == pytest.approx(40.0 / 70.0)
+    assert risk.concentration_score == pytest.approx((30.0 / 70.0) ** 2 + (40.0 / 70.0) ** 2)
 
 def test_reflection_agent_uses_active_runtime_paths_for_defaults(monkeypatch, tmp_path: Path) -> None:
     reports_dir = tmp_path / "reports"

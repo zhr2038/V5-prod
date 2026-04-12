@@ -1114,6 +1114,36 @@ def test_query_fill_after_partial_sell_does_not_double_reduce_position() -> None
         assert final_pos.qty == pytest.approx(1.0)
 
 
+
+
+def test_place_buy_ignores_instrument_spec_fetch_failure(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        cfg = ExecutionConfig(reconcile_status_path=f"{td}/reconcile_status.json", kill_switch_path=f"{td}/kill_switch.json")
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        monkeypatch.setattr(
+            "src.execution.live_execution_engine.OKXSpotInstrumentsCache.get_spec",
+            lambda self, inst_id: (_ for _ in ()).throw(RuntimeError("cache unavailable")),
+        )
+
+        placed = eng.place(
+            Order(
+                symbol="BTC/USDT",
+                side="buy",
+                intent="OPEN_LONG",
+                notional_usdt=100.0,
+                signal_price=100.0,
+                meta={"decision_hash": "spec-fetch-failure"},
+            )
+        )
+
+        assert placed.state == "OPEN"
+        assert okx.place_calls == 1
+
 def test_query_fill_after_multiple_partial_buys_uses_cumulative_reconciled_state() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()

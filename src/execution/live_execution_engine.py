@@ -62,6 +62,14 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _get_spot_spec_best_effort(inst_id: str):
+    try:
+        return OKXSpotInstrumentsCache().get_spec(inst_id)
+    except Exception as exc:
+        log.warning("OKX instrument spec unavailable for %s: %s", inst_id, exc)
+        return None
+
+
 def _derive_highest_tracker_state_path(position_store_path: str | Path) -> str:
     path = Path(position_store_path)
     if path.name == "positions.sqlite":
@@ -682,7 +690,7 @@ class LiveExecutionEngine:
                         )
 
             # Pre-check against minSz using signal price estimate to avoid predictable rejects.
-            specs = OKXSpotInstrumentsCache().get_spec(inst_id)
+            specs = _get_spot_spec_best_effort(inst_id)
             px_ref = float(getattr(o, "signal_price", 0.0) or 0.0)
             if specs is not None and float(specs.min_sz or 0.0) > 0 and px_ref > 0:
                 est_base_qty = float(notional) / float(px_ref)
