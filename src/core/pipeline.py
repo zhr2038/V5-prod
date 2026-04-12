@@ -62,6 +62,7 @@ from configs.schema import AppConfig
 from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.execution.position_store import Position
+from src.utils.time import utc_now_iso
 from src.execution.fill_store import (
     derive_position_store_path,
     derive_runtime_auto_risk_guard_path,
@@ -1074,7 +1075,7 @@ class V5Pipeline:
         rolling_48h = _rolling_stats(history_rows)
         ml_runtime = dict(getattr(alpha, "ml_runtime", {}) or {})
         summary = {
-            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "updated_at": utc_now_iso(),
             "last_step": step_summary,
             "rolling_24h": rolling_24h,
             "rolling_48h": rolling_48h,
@@ -2066,7 +2067,7 @@ class V5Pipeline:
                 # 记录价格无效告警
                 invalid_price_warnings.append({
                     "symbol": sym,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": utc_now_iso(),
                     "reason": "price_invalid_or_missing"
                 })
                 continue

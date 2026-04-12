@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from src.utils.time import utc_now_iso
+
 
 TRADE_COLUMNS = [
     "ts",
@@ -77,4 +79,4 @@ class TradeLogWriter:
 
 def iso_utc_now() -> str:
     """Iso utc now"""
-    return datetime.utcnow().isoformat() + "Z"
+    return utc_now_iso()

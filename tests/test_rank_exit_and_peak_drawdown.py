@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -82,7 +82,7 @@ def test_strict_rank_exit_ignores_target_weight_and_profit_rank_relaxation(tmp_p
     pipe.profit_taking.positions["OKB/USDT"] = PositionProfitState(
         symbol="OKB/USDT",
         entry_price=100.0,
-        entry_time=datetime.utcnow(),
+        entry_time=datetime.now(timezone.utc),
         highest_price=125.0,
         profit_high=0.25,
         current_stop=95.0,
@@ -298,7 +298,7 @@ def test_rank_exit_audit_does_not_mislead_for_in_rank_position(tmp_path):
     pipe.profit_taking.positions["XRP/USDT"] = PositionProfitState(
         symbol="XRP/USDT",
         entry_price=1.4,
-        entry_time=datetime.utcnow(),
+        entry_time=datetime.now(timezone.utc),
         highest_price=1.45,
         profit_high=0.03,
         current_stop=1.3,

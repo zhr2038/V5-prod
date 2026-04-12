@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from src.utils.time import utc_now_iso
+
 log = logging.getLogger(__name__)
 
 
@@ -159,7 +161,7 @@ class PositionStore:
         """
         qty = float(qty)
         px = float(px)
-        now = now_ts or (datetime.utcnow().isoformat() + "Z")
+        now = now_ts or utc_now_iso()
 
         cur_pos = self.get(symbol)
 
@@ -333,7 +335,7 @@ class PositionStore:
             self.close_long(symbol)
             return
 
-        now = now_ts or (datetime.utcnow().isoformat() + "Z")
+        now = now_ts or utc_now_iso()
         self.upsert_position(
             Position(
                 symbol=p.symbol,

@@ -7,13 +7,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+from src.utils.time import utc_now_iso, utc_now_timestamp
+
 
 @dataclass
 class DecisionAudit:
     """决策审计记录，用于解释'为什么0单/为什么被拒绝'"""
     
     run_id: str
-    now_ts: int = field(default_factory=lambda: int(datetime.utcnow().timestamp()))
+    now_ts: int = field(default_factory=utc_now_timestamp)
     window_start_ts: Optional[int] = None
     window_end_ts: Optional[int] = None
     
@@ -94,7 +96,7 @@ class DecisionAudit:
     
     def add_note(self, note: str) -> None:
         """添加备注"""
-        self.notes.append(f"{datetime.utcnow().isoformat()}: {note}")
+        self.notes.append(f"{utc_now_iso()}: {note}")
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

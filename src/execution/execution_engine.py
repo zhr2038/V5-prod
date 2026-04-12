@@ -12,6 +12,7 @@ from src.core.models import ExecutionReport, Order
 from src.execution.position_store import PositionStore
 from src.execution.account_store import AccountStore, AccountState
 from src.execution.fill_store import derive_runtime_cost_events_dir
+from src.utils.time import utc_now_iso, utc_now_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class ExecutionEngine:
 
     def execute(self, order_batch: List[Order]) -> ExecutionReport:
         """Execute"""
-        ts = datetime.utcnow().isoformat() + "Z"
+        ts = utc_now_iso()
 
         fee_bps_raw = getattr(self.cfg, 'fee_bps', 6.0)
         slp_bps_raw = getattr(self.cfg, 'slippage_bps', 5.0)
@@ -171,7 +172,7 @@ class ExecutionEngine:
                 window_end_ts = meta.get("window_end_ts")
                 
                 # 如果window时间戳缺失，使用合理的时间范围
-                current_ts = int(datetime.utcnow().timestamp())
+                current_ts = utc_now_timestamp()
                 if window_start_ts is None:
                     window_start_ts = current_ts - 3600  # 默认1小时前
                 if window_end_ts is None:
@@ -241,7 +242,7 @@ class ExecutionEngine:
             cur = con.cursor()
             cur.execute(
                 "INSERT INTO slippage(ts, symbol, side, signal_price, execution_price, slippage_bps) VALUES (?,?,?,?,?,?)",
-                (datetime.utcnow().isoformat() + "Z", symbol, side, sp, ep, float(bps)),
+                (utc_now_iso(), symbol, side, sp, ep, float(bps)),
             )
             con.commit()
             con.close()
