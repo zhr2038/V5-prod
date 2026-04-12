@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from configs.schema import AppConfig
 from src.core.models import MarketSeries
 from src.research.walk_forward_optimizer import (
@@ -92,3 +94,52 @@ def test_evaluate_walk_forward_candidate_returns_rankable_payload() -> None:
     assert "summary" in result
     assert "report" in result
     assert isinstance(result["score"], float)
+
+
+def test_run_walk_forward_optimizer_task_finalizes_failed_run(monkeypatch, tmp_path: Path) -> None:
+    finalized: dict[str, object] = {}
+
+    class FakeRun:
+        def __init__(self):
+            self.run_dir = tmp_path / "run"
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            self.run_id = "run_123"
+
+        def write_json(self, relative_path: str, payload):
+            finalized.setdefault("writes", []).append((relative_path, payload))
+            return self.run_dir / relative_path
+
+    class FakeRecorder:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start_run(self, **kwargs):
+            finalized["task_name"] = kwargs["task_name"]
+            return FakeRun()
+
+        def finalize_run(self, run, *, status: str, summary):
+            finalized["status"] = status
+            finalized["summary"] = summary
+            return run.run_dir / "meta.json"
+
+    monkeypatch.setattr("src.research.walk_forward_optimizer.ResearchRecorder", FakeRecorder)
+    monkeypatch.setattr(
+        "src.research.walk_forward_optimizer._load_market_data_for_task",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("optimizer data load failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="optimizer data load failed"):
+        from src.research.walk_forward_optimizer import run_walk_forward_optimizer_task
+
+        run_walk_forward_optimizer_task(
+            project_root=tmp_path,
+            task_config={"task": {"name": "walk_forward_optimizer"}, "paths": {}, "optimizer": {}},
+        )
+
+    assert finalized["task_name"] == "walk_forward_optimizer"
+    assert finalized["status"] == "failed"
+    assert finalized["summary"] == {
+        "reason": "walk_forward_optimizer_failed",
+        "error_type": "RuntimeError",
+        "error": "optimizer data load failed",
+    }

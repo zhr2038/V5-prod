@@ -309,111 +309,121 @@ def run_walk_forward_optimizer_task(
     recorder = ResearchRecorder(base_dir=_project_path(project_root, paths_cfg.get("runs_dir", "reports/runs"), "reports/runs"))
     run = recorder.start_run(task_name=str(task_meta.get("name", "walk_forward_optimizer")), task_config=task_config)
 
-    base_cfg, market_data, market_meta = _load_market_data_for_task(project_root=project_root, task_config=task_config)
-    context = market_meta["context"]
-    dataset_meta = market_meta["dataset"]
+    try:
+        base_cfg, market_data, market_meta = _load_market_data_for_task(project_root=project_root, task_config=task_config)
+        context = market_meta["context"]
+        dataset_meta = market_meta["dataset"]
 
-    max_candidates_cfg = optimizer_cfg.get("max_candidates")
-    max_candidates = int(max_candidates_cfg) if max_candidates_cfg is not None else None
-    candidates = build_parameter_candidates(
-        optimizer_cfg.get("parameter_grid") or {},
-        max_candidates=max_candidates,
-    )
-    if not candidates:
-        candidates = [{}]
+        max_candidates_cfg = optimizer_cfg.get("max_candidates")
+        max_candidates = int(max_candidates_cfg) if max_candidates_cfg is not None else None
+        candidates = build_parameter_candidates(
+            optimizer_cfg.get("parameter_grid") or {},
+            max_candidates=max_candidates,
+        )
+        if not candidates:
+            candidates = [{}]
 
-    metric_weights = {
-        str(key): float(value)
-        for key, value in (optimizer_cfg.get("objective_weights") or {}).items()
-    }
-    if not metric_weights:
         metric_weights = {
-            "metrics.sharpe.mean": 1.0,
-            "metrics.cagr.mean": 0.30,
-            "metrics.max_dd.mean": -1.20,
-            "metrics.turnover.mean": -0.10,
-            "metrics.sharpe.std": -0.20,
+            str(key): float(value)
+            for key, value in (optimizer_cfg.get("objective_weights") or {}).items()
+        }
+        if not metric_weights:
+            metric_weights = {
+                "metrics.sharpe.mean": 1.0,
+                "metrics.cagr.mean": 0.30,
+                "metrics.max_dd.mean": -1.20,
+                "metrics.turnover.mean": -0.10,
+                "metrics.sharpe.std": -0.20,
+            }
+
+        min_fold_count = int(optimizer_cfg.get("min_fold_count", 1))
+        cpu_total = os.cpu_count() or 1
+        requested_workers = int(optimizer_cfg.get("max_workers", 0) or 0)
+        worker_count = requested_workers if requested_workers > 0 else min(cpu_total, len(candidates))
+        worker_count = max(1, min(worker_count, len(candidates)))
+        executor_mode = _resolve_executor_mode(str(optimizer_cfg.get("executor", "process")), worker_count, len(candidates))
+
+        payloads = [
+            {
+                "candidate_id": f"cand_{idx + 1:04d}",
+                "base_cfg": base_cfg.model_dump(mode="python"),
+                "market_data": market_data,
+                "provider_name": context["provider_name"],
+                "folds": int(context["folds"]),
+                "overrides": candidate,
+                "metric_weights": metric_weights,
+                "min_fold_count": min_fold_count,
+            }
+            for idx, candidate in enumerate(candidates)
+        ]
+
+        results = _run_candidate_batch(payloads, executor_mode=executor_mode, worker_count=worker_count)
+        results.sort(key=lambda item: float(item.get("score", float("-inf"))), reverse=True)
+
+        leaderboard = [_sanitize_candidate(result) for result in results]
+        best = results[0] if results else None
+        best_summary = _sanitize_candidate(best) if best is not None else {}
+
+        optimizer_report = {
+            "run_id": run.run_id,
+            "status": "completed" if best is not None else "failed",
+            "dataset": dataset_meta,
+            "optimizer": {
+                "candidate_count": int(len(candidates)),
+                "executor": executor_mode,
+                "max_workers": int(worker_count),
+                "cpu_count": int(cpu_total),
+                "min_fold_count": int(min_fold_count),
+                "objective_weights": metric_weights,
+            },
+            "best_candidate": best_summary,
+            "leaderboard": leaderboard,
         }
 
-    min_fold_count = int(optimizer_cfg.get("min_fold_count", 1))
-    cpu_total = os.cpu_count() or 1
-    requested_workers = int(optimizer_cfg.get("max_workers", 0) or 0)
-    worker_count = requested_workers if requested_workers > 0 else min(cpu_total, len(candidates))
-    worker_count = max(1, min(worker_count, len(candidates)))
-    executor_mode = _resolve_executor_mode(str(optimizer_cfg.get("executor", "process")), worker_count, len(candidates))
+        run.write_json("dataset_meta.json", dataset_meta)
+        run.write_json("metrics.json", best_summary.get("summary") or {})
+        run.write_json("analysis/walk_forward_optimizer_record.json", optimizer_report)
+        run.write_json("leaderboard.json", leaderboard)
 
-    payloads = [
-        {
-            "candidate_id": f"cand_{idx + 1:04d}",
-            "base_cfg": base_cfg.model_dump(mode="python"),
-            "market_data": market_data,
-            "provider_name": context["provider_name"],
-            "folds": int(context["folds"]),
-            "overrides": candidate,
-            "metric_weights": metric_weights,
-            "min_fold_count": min_fold_count,
-        }
-        for idx, candidate in enumerate(candidates)
-    ]
+        if best is not None:
+            run.write_json("artifacts/best_overrides.json", best.get("overrides") or {})
+            run.write_json("artifacts/best_config.json", best.get("config") or {})
+            run.write_json("artifacts/best_walk_forward_report.json", best.get("report") or {})
 
-    results = _run_candidate_batch(payloads, executor_mode=executor_mode, worker_count=worker_count)
-    results.sort(key=lambda item: float(item.get("score", float("-inf"))), reverse=True)
+        output_report_path = _project_path(
+            project_root,
+            paths_cfg.get("output_report_path", "reports/walk_forward_optimizer.json"),
+            "reports/walk_forward_optimizer.json",
+        )
+        output_report_path.parent.mkdir(parents=True, exist_ok=True)
+        output_report_path.write_text(json.dumps(optimizer_report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    leaderboard = [_sanitize_candidate(result) for result in results]
-    best = results[0] if results else None
-    best_summary = _sanitize_candidate(best) if best is not None else {}
+        recorder.finalize_run(
+            run,
+            status="completed" if best is not None else "failed",
+            summary={
+                "candidate_count": int(len(candidates)),
+                "executor": executor_mode,
+                "max_workers": int(worker_count),
+                "best_score": float(best.get("score")) if best is not None else None,
+                "best_overrides": best.get("overrides") if best is not None else {},
+            },
+        )
 
-    optimizer_report = {
-        "run_id": run.run_id,
-        "status": "completed" if best is not None else "failed",
-        "dataset": dataset_meta,
-        "optimizer": {
+        return {
+            "exit_code": 0 if best is not None else 1,
+            "run_id": run.run_id,
             "candidate_count": int(len(candidates)),
-            "executor": executor_mode,
-            "max_workers": int(worker_count),
-            "cpu_count": int(cpu_total),
-            "min_fold_count": int(min_fold_count),
-            "objective_weights": metric_weights,
-        },
-        "best_candidate": best_summary,
-        "leaderboard": leaderboard,
-    }
-
-    run.write_json("dataset_meta.json", dataset_meta)
-    run.write_json("metrics.json", best_summary.get("summary") or {})
-    run.write_json("analysis/walk_forward_optimizer_record.json", optimizer_report)
-    run.write_json("leaderboard.json", leaderboard)
-
-    if best is not None:
-        run.write_json("artifacts/best_overrides.json", best.get("overrides") or {})
-        run.write_json("artifacts/best_config.json", best.get("config") or {})
-        run.write_json("artifacts/best_walk_forward_report.json", best.get("report") or {})
-
-    output_report_path = _project_path(
-        project_root,
-        paths_cfg.get("output_report_path", "reports/walk_forward_optimizer.json"),
-        "reports/walk_forward_optimizer.json",
-    )
-    output_report_path.parent.mkdir(parents=True, exist_ok=True)
-    output_report_path.write_text(json.dumps(optimizer_report, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    recorder.finalize_run(
-        run,
-        status="completed" if best is not None else "failed",
-        summary={
-            "candidate_count": int(len(candidates)),
-            "executor": executor_mode,
-            "max_workers": int(worker_count),
             "best_score": float(best.get("score")) if best is not None else None,
             "best_overrides": best.get("overrides") if best is not None else {},
-        },
-    )
-
-    return {
-        "exit_code": 0 if best is not None else 1,
-        "run_id": run.run_id,
-        "candidate_count": int(len(candidates)),
-        "best_score": float(best.get("score")) if best is not None else None,
-        "best_overrides": best.get("overrides") if best is not None else {},
-        "output_report_path": str(output_report_path),
-    }
+            "output_report_path": str(output_report_path),
+        }
+    except Exception as exc:
+        failure_summary = {
+            "reason": "walk_forward_optimizer_failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        run.write_json("error.json", failure_summary)
+        recorder.finalize_run(run, status="failed", summary=failure_summary)
+        raise
