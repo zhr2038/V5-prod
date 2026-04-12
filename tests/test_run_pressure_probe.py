@@ -23,6 +23,7 @@ def test_top_processes_uses_parameterized_ps_call(monkeypatch) -> None:
     assert captured["kwargs"]["check"] is False
     assert captured["kwargs"]["capture_output"] is True
     assert captured["kwargs"]["text"] is True
+    assert captured["kwargs"]["timeout"] == 5
     assert top == [
         "PID COMMAND %CPU %MEM",
         "1 python 50.0 1.0",

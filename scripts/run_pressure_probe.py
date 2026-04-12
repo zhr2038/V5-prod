@@ -45,6 +45,7 @@ def _top_processes(limit: int = 8) -> list[str]:
         ["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"],
         capture_output=True,
         text=True,
+        timeout=5,
         check=False,
     )
     lines = [line for line in result.stdout.splitlines() if line.strip()]

@@ -19,6 +19,9 @@ from src.research.shadow_ab_monitor import (
 from src.research.task_runner import load_task_config
 
 
+SCRIPT_TIMEOUT_SECONDS = 3600
+
+
 def _project_path(raw_path: str, fallback: str) -> Path:
     value = str(raw_path or fallback).strip() or fallback
     target = Path(value)
@@ -42,6 +45,7 @@ def _run_script(script_name: str, config_path: Path, *, cwd: Path) -> subprocess
         cwd=str(cwd),
         capture_output=True,
         text=True,
+        timeout=SCRIPT_TIMEOUT_SECONDS,
         check=True,
     )
 
