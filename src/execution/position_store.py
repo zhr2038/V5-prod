@@ -95,6 +95,29 @@ class PositionStore:
         except Exception:
             pass
 
+    def prune_orphan_risk_state(self) -> Dict[str, int]:
+        held_symbols = {str(p.symbol) for p in self.list() if float(getattr(p, "qty", 0.0) or 0.0) > 0}
+        removed_counts: Dict[str, int] = {}
+        for state_path in self._runtime_risk_state_paths():
+            try:
+                if not state_path.exists():
+                    continue
+                obj = json.loads(state_path.read_text(encoding="utf-8"))
+                if not isinstance(obj, dict):
+                    continue
+                stale_symbols = [sym for sym in list(obj.keys()) if str(sym) not in held_symbols]
+                if not stale_symbols:
+                    continue
+                for sym in stale_symbols:
+                    obj.pop(sym, None)
+                tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+                tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+                tmp.replace(state_path)
+                removed_counts[state_path.name] = len(stale_symbols)
+            except Exception as e:
+                log.warning("Failed to prune orphan risk state in %s: %s", state_path, e)
+        return removed_counts
+
     def _init_db(self) -> None:
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()

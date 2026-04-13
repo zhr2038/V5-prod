@@ -645,6 +645,13 @@ def main() -> None:
         store.mark_position(p.symbol, now_ts=now_ts, mark_px=float(s.close[-1]), high_px=float(s.high[-1]) if s.high else float(s.close[-1]))
 
     held = store.list()
+    try:
+        pruned = store.prune_orphan_risk_state()
+        if pruned:
+            log.info("PRUNED_ORPHAN_RISK_STATE: %s", pruned)
+            audit.add_note(f"Orphan risk state pruned: {pruned}")
+    except Exception as e:
+        log.warning("orphan risk state prune failed: %s", e)
 
     # Run unified pipeline with equity/drawdown scaling
     from src.core.run_logger import RunLogger
