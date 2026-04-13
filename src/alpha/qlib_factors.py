@@ -25,31 +25,20 @@ def _safe_series(xs: List[float]) -> pd.Series:
     return s
 
 
-def _safe_pair_corr(lhs: pd.Series, rhs: pd.Series, *, require_points: int) -> float:
-    pair = pd.DataFrame({"lhs": lhs, "rhs": rhs})
-    pair = pair.replace([np.inf, -np.inf], np.nan).dropna()
-    if len(pair) < max(2, int(require_points)):
-        return 0.0
-
-    x = pair["lhs"].to_numpy(dtype=float)
-    y = pair["rhs"].to_numpy(dtype=float)
-    if np.std(x) < 1e-12 or np.std(y) < 1e-12:
-        return 0.0
-
+def _safe_last_corr(a: pd.Series, b: pd.Series, window: int) -> float:
     try:
-        corr = float(np.corrcoef(x, y)[0, 1])
+        pair = pd.concat([a, b], axis=1)
+        pair = pair.replace([np.inf, -np.inf], np.nan).dropna()
+        if len(pair) < int(window):
+            return 0.0
+        lhs = pair.iloc[-int(window):, 0]
+        rhs = pair.iloc[-int(window):, 1]
+        if lhs.nunique(dropna=True) <= 1 or rhs.nunique(dropna=True) <= 1:
+            return 0.0
+        value = float(lhs.corr(rhs))
+        return value if np.isfinite(value) else 0.0
     except Exception:
         return 0.0
-    return corr if np.isfinite(corr) else 0.0
-
-
-def _last_window_corr(lhs: pd.Series, rhs: pd.Series, window: int) -> float:
-    width = max(2, int(window))
-    lhs_window = lhs.tail(width)
-    rhs_window = rhs.tail(width)
-    if len(lhs_window) < width or len(rhs_window) < width:
-        return 0.0
-    return _safe_pair_corr(lhs_window, rhs_window, require_points=width)
 
 
 def _rsquare_roll(x: np.ndarray) -> float:
@@ -138,12 +127,12 @@ def compute_alpha158_style_factors(
 
     # CORR(close, log(volume+1))
     lv = np.log(v + 1.0)
-    corr = _last_window_corr(c, lv, corr_w)
+    corr = _safe_last_corr(c, lv, corr_w)
 
     # CORD(c/Ref(c,1), log(v/Ref(v,1)+1))
     c_ret = c / c.shift(1)
     v_chg = np.log((v / v.shift(1)).replace([np.inf, -np.inf], np.nan) + 1.0)
-    cord = _last_window_corr(c_ret, v_chg, corr_w)
+    cord = _safe_last_corr(c_ret, v_chg, corr_w)
 
     # RSQR
     rsqr = c.rolling(corr_w).apply(_rsquare_roll, raw=True).iloc[-1]

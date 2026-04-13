@@ -18,15 +18,12 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import threading
-import time
-import traceback
-from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from dataclasses import asdict
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, g, has_app_context, jsonify, render_template, request, send_from_directory
+from flask import Flask, render_template, jsonify, request, send_from_directory
 import pandas as pd
 import yaml
 import requests
@@ -34,15 +31,6 @@ from configs.loader import load_config as load_app_config
 
 from src.core.models import MarketSeries
 from src.data.okx_ccxt_provider import OKXCCXTProvider
-from src.execution.fill_store import (
-    derive_fill_store_path,
-    derive_position_store_path,
-    derive_runtime_auto_risk_eval_path,
-    derive_runtime_named_artifact_path,
-    derive_runtime_auto_risk_guard_path,
-    derive_runtime_reports_dir,
-    derive_runtime_runs_dir,
-)
 from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
 from src.regime.rss_vote_utils import build_rss_vote
 from src.research.cache_loader import load_cached_market_data
@@ -77,7 +65,6 @@ if WORKSPACE_STR not in sys.path:
 WEB_DIR = WORKSPACE / 'web'
 REPORTS_DIR = WORKSPACE / 'reports'
 CACHE_DIR = WORKSPACE / 'data' / 'cache'
-CHINA_TZ = timezone(timedelta(hours=8))
 
 
 def _resolve_react_build_path() -> Path:
@@ -108,57 +95,11 @@ REACT_BUILD_PATH = _resolve_react_build_path()
 SYSTEMCTL_BIN = shutil.which('systemctl')
 TIMER_TS_RE = re.compile(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})')
 
-
-@dataclass(frozen=True)
-class DashboardRuntimePaths:
-    reports_dir: Path
-    orders_db: Path
-    fills_db: Path
-    positions_db: Path
-    reconcile_status_path: Path
-    auto_risk_eval_path: Path
-    runs_dir: Path
-
-
-def _resolve_workspace_relative_path(raw_path: object, default: str) -> Path:
-    raw = str(raw_path or default).strip()
-    path = Path(raw)
-    if not path.is_absolute():
-        parts = path.parts
-        if parts and parts[0] == 'reports':
-            remainder = Path(*parts[1:]) if len(parts) > 1 else Path()
-            path = REPORTS_DIR / remainder
-        else:
-            path = WORKSPACE / path
-    return path.resolve()
-
-
-def _resolve_dashboard_runtime_artifact_path(
-    orders_db: Path,
-    raw_path: object,
-    legacy_default: str,
-) -> Path:
-    raw = str(raw_path or "").strip()
-    if not raw or raw == legacy_default:
-        name = Path(legacy_default).name
-        suffix = ".jsonl" if name.endswith(".jsonl") else Path(name).suffix
-        base_name = name[: -len(suffix)] if suffix else name
-        return derive_runtime_named_artifact_path(orders_db, base_name, suffix).resolve()
-    return _resolve_workspace_relative_path(raw, legacy_default)
-
 app = Flask(
     __name__,
     template_folder=str(WEB_DIR / 'templates'),
     static_folder=str(WEB_DIR / 'static'),
 )
-
-_DASHBOARD_API_CACHE_MISS = object()
-_OKX_ACCOUNT_BALANCE_CACHE: Dict[tuple[str, str, str], tuple[float, Any]] = {}
-_OKX_ACCOUNT_BALANCE_CACHE_LOCK = threading.Lock()
-_OKX_HEALTH_CHECK_CACHE: Dict[tuple[str, str, str], tuple[float, Dict[str, Any]]] = {}
-_OKX_HEALTH_CHECK_CACHE_LOCK = threading.Lock()
-_OKX_PUBLIC_TICKER_CACHE: Dict[str, tuple[float, float]] = {}
-_OKX_PUBLIC_TICKER_CACHE_LOCK = threading.Lock()
 
 # 注册健康检查蓝图
 try:
@@ -177,152 +118,6 @@ def add_no_cache_headers(resp):
     resp.headers['Expires'] = '0'
     return resp
 
-
-def _log_dashboard_exception(label: str, exc: BaseException) -> None:
-    print(f"[web_dashboard] {label}: {exc}", file=sys.stderr)
-    traceback.print_exception(type(exc), exc, exc.__traceback__)
-
-
-def _json_error_response(exc: BaseException, *, status_code: int = 500, **extra: Any):
-    _log_dashboard_exception('api error', exc)
-    payload = dict(extra)
-    payload['error'] = str(exc)
-    return jsonify(payload), status_code
-
-
-def _json_internal_error_response(
-    exc: BaseException,
-    *,
-    status_code: int = 500,
-    error: str = 'internal server error',
-    **extra: Any,
-):
-    _log_dashboard_exception('api error', exc)
-    payload = dict(extra)
-    payload['error'] = error
-    return jsonify(payload), status_code
-
-
-def _json_internal_error_list_response(
-    exc: BaseException,
-    *,
-    status_code: int = 500,
-    items: Optional[List[Any]] = None,
-):
-    _log_dashboard_exception('api error', exc)
-    return jsonify(list(items or [])), status_code
-
-
-def _sanitize_public_error_text(value: Any, *, default: str = 'internal error') -> str:
-    text = str(value or '').strip()
-    if not text:
-        return default
-    lowered = text.lower()
-    if 'traceback' in lowered:
-        return default
-    if re.search(r'[A-Za-z]:\\', text):
-        return default
-    if re.search(r'(^|[\s(])/(?:[^/\s]+/?)+', text):
-        return default
-    return text
-
-
-def _ml_training_unavailable_response(exc: BaseException):
-    return _json_internal_error_response(
-        exc,
-        status='error',
-        phase='error',
-        display_status='ml training unavailable',
-        configured_enabled=False,
-        stages={
-            'sampling': False,
-            'trained': False,
-            'promoted': False,
-            'liveActive': False,
-        },
-        total_samples=0,
-        labeled_samples=0,
-        samples_needed=200,
-        progress_percent=0,
-        latest_model=None,
-        model_date=None,
-        last_ic=None,
-        last_training_ts=None,
-        last_training_gate_passed=False,
-        last_promotion_ts=None,
-        promotion_fail_reasons=[],
-        last_runtime_ts=None,
-        runtime_reason='',
-        runtime_prediction_count=0,
-        model_path=None,
-        active_model_path=None,
-        last_update='',
-    )
-
-
-def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
-    response = result
-    status_code = 200
-
-    if isinstance(result, tuple):
-        if not result:
-            return None, 500
-        response = result[0]
-        for item in result[1:]:
-            if isinstance(item, int):
-                status_code = item
-                break
-    else:
-        try:
-            status_code = int(getattr(response, 'status_code', 200) or 200)
-        except Exception:
-            status_code = 200
-
-    if hasattr(response, 'get_json'):
-        try:
-            payload = response.get_json(silent=True)
-        except TypeError:
-            payload = response.get_json()
-        return payload, status_code
-
-    if isinstance(response, (dict, list)):
-        return response, status_code
-
-    return None, status_code
-
-
-def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[List[str]] = None) -> Any:
-    try:
-        if has_app_context():
-            cache = getattr(g, '_dashboard_api_cache', None)
-            if cache is None:
-                cache = {}
-                g._dashboard_api_cache = cache
-            cache_key = api_func
-            cached = cache.get(cache_key, _DASHBOARD_API_CACHE_MISS)
-            if cached is _DASHBOARD_API_CACHE_MISS:
-                cached = _extract_endpoint_json(api_func())
-                cache[cache_key] = cached
-            payload, status_code = cached
-        else:
-            payload, status_code = _extract_endpoint_json(api_func())
-    except Exception as exc:
-        _log_dashboard_exception(f'dashboard child {label}', exc)
-        if errors is not None:
-            errors.append(f'{label}: {_sanitize_public_error_text(exc)}')
-        return default
-
-    if status_code >= 400:
-        message = None
-        if isinstance(payload, dict):
-            message = payload.get('error') or payload.get('message')
-        message = _sanitize_public_error_text(message or f'HTTP {status_code}')
-        if errors is not None:
-            errors.append(f'{label}: {message}')
-        return default
-    return payload if payload is not None else default
-
-
 def _resolve_config_path() -> Path:
     """Resolve config path from env V5_CONFIG (supports relative path)."""
     raw = os.getenv('V5_CONFIG', 'configs/live_prod.yaml')
@@ -340,6 +135,7 @@ POSITION_KLINE_TIMEFRAMES: Dict[str, Dict[str, Any]] = {
 }
 POSITION_KLINE_DEFAULT_LIMIT = 96
 _OKX_PUBLIC_PROVIDER: Optional[OKXCCXTProvider] = None
+_WORKSPACE_PYTHON_BIN: Optional[str] = None
 
 
 def _normalize_dashboard_symbol(symbol: str) -> str:
@@ -495,28 +291,12 @@ def _legacy_display_score(score: float) -> float:
     return math.copysign(math.tanh(magnitude / scale), raw)
 
 
-def _decision_audit_candidate_sort_epoch(run_dir: Path) -> float:
-    epoch = _run_id_epoch(run_dir.name)
-    if epoch is not None:
-        return epoch
-    audit_path = run_dir / 'decision_audit.json'
-    try:
-        return audit_path.stat().st_mtime
-    except OSError:
-        try:
-            return run_dir.stat().st_mtime
-        except OSError:
-            return 0.0
-
-
-def _iter_decision_audits(reports_dir: Path, max_entries: Optional[int] = None) -> List[Dict[str, Any]]:
+def _iter_decision_audits(reports_dir: Path) -> List[Dict[str, Any]]:
     runs_dir = reports_dir / 'runs'
     if not runs_dir.exists():
         return []
 
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-    if max_entries is not None and max_entries > 0:
-        run_dirs = sorted(run_dirs, key=_decision_audit_candidate_sort_epoch, reverse=True)[:max_entries]
 
     audits: List[Dict[str, Any]] = []
     for run_dir in run_dirs:
@@ -556,30 +336,6 @@ def _normalize_top_scores(raw_scores: Any, limit: int = 20) -> List[Dict[str, An
         except Exception:
             continue
     return items
-
-
-def _score_audit_scan_limit() -> int:
-    try:
-        raw_limit = int(os.getenv('V5_DASHBOARD_SCORE_AUDIT_SCAN_LIMIT', '96') or '96')
-    except Exception:
-        raw_limit = 96
-    return max(2, min(raw_limit, 1000))
-
-
-def _market_state_audit_scan_limit() -> int:
-    try:
-        raw_limit = int(os.getenv('V5_DASHBOARD_MARKET_AUDIT_SCAN_LIMIT', '96') or '96')
-    except Exception:
-        raw_limit = 96
-    return max(1, min(raw_limit, 1000))
-
-
-def _decision_audit_scan_limit() -> int:
-    try:
-        raw_limit = int(os.getenv('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT', '96') or '96')
-    except Exception:
-        raw_limit = 96
-    return max(1, min(raw_limit, 1000))
 
 
 def _decision_note_text(audit: Dict[str, Any]) -> str:
@@ -692,14 +448,6 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
-def _to_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _normalize_symbol_key(symbol: Any) -> str:
     return str(symbol or '').strip().upper().replace('-', '/')
 
@@ -723,32 +471,10 @@ def _build_ml_signal_overview(
     preferred_symbols: Optional[List[str]] = None,
     limit: int = 3,
 ) -> Dict[str, Any]:
-    config = load_config()
-    runtime_paths = _resolve_dashboard_runtime_paths(config)
-    alpha_cfg = config.get('alpha', {}) if isinstance(config, dict) else {}
-    ml_cfg = alpha_cfg.get('ml_factor', {}) if isinstance(alpha_cfg, dict) else {}
-    runtime = _load_json_payload(
-        _resolve_dashboard_runtime_artifact_path(
-            runtime_paths.orders_db,
-            ml_cfg.get('runtime_status_path') if isinstance(ml_cfg, dict) else None,
-            'reports/ml_runtime_status.json',
-        )
-    )
-    promotion = _load_json_payload(
-        _resolve_dashboard_runtime_artifact_path(
-            runtime_paths.orders_db,
-            ml_cfg.get('promotion_decision_path') if isinstance(ml_cfg, dict) else None,
-            'reports/model_promotion_decision.json',
-        )
-    )
+    runtime = _load_json_payload(reports_dir / 'ml_runtime_status.json')
+    promotion = _load_json_payload(reports_dir / 'model_promotion_decision.json')
     snapshot = _load_json_payload(reports_dir / 'alpha_snapshot.json')
-    impact_summary = _load_json_payload(
-        _resolve_dashboard_runtime_artifact_path(
-            runtime_paths.orders_db,
-            ml_cfg.get('impact_summary_path') if isinstance(ml_cfg, dict) else None,
-            'reports/ml_overlay_impact.json',
-        )
-    )
+    impact_summary = _load_json_payload(reports_dir / 'ml_overlay_impact.json')
 
     raw_factors = snapshot.get('raw_factors', {})
     z_factors = snapshot.get('z_factors', {})
@@ -860,9 +586,9 @@ def _build_ml_signal_overview(
     except Exception:
         prediction_count = 0
 
-    configured_enabled = _to_bool(runtime.get('configured_enabled', False))
-    promoted = _to_bool(runtime.get('promotion_passed', promotion.get('passed', False)))
-    live_active = _to_bool(runtime.get('used_in_latest_snapshot', False))
+    configured_enabled = bool(runtime.get('configured_enabled', False))
+    promoted = bool(runtime.get('promotion_passed', promotion.get('passed', False)))
+    live_active = bool(runtime.get('used_in_latest_snapshot', False))
     overlay_mode = str(runtime.get('overlay_mode') or impact_summary.get('overlay_mode') or 'disabled')
     coverage_count = prediction_count if prediction_count > 0 else len(nonzero_rows)
     reason = str(runtime.get('reason') or runtime.get('error') or '')
@@ -1010,9 +736,9 @@ def _load_shadow_ml_overlay_summary(shadow_workspace: Path) -> Dict[str, Any]:
             overview.update(stored)
 
     if isinstance(runtime, dict) and runtime:
-        overview['configured_enabled'] = _to_bool(runtime.get('configured_enabled', False))
-        overview['promoted'] = _to_bool(runtime.get('promotion_passed', False))
-        overview['live_active'] = _to_bool(runtime.get('used_in_latest_snapshot', False))
+        overview['configured_enabled'] = bool(runtime.get('configured_enabled', False))
+        overview['promoted'] = bool(runtime.get('promotion_passed', False))
+        overview['live_active'] = bool(runtime.get('used_in_latest_snapshot', False))
         overview['prediction_count'] = int(runtime.get('prediction_count', 0) or 0)
         active_symbols = int(runtime.get('prediction_count', 0) or 0)
         overview['active_symbols'] = active_symbols
@@ -1185,7 +911,7 @@ def _get_timer_state(timer_name: str) -> Dict[str, Any]:
         state['enabled'] = _timer_enabled(unit_file_state)
         state['active'] = active_state == 'active'
     except Exception as exc:
-        state['error'] = _sanitize_public_error_text(exc)
+        state['error'] = str(exc)
     return state
 
 
@@ -1214,7 +940,7 @@ def _get_timer_runtime(timer_name: str) -> Dict[str, Any]:
             runtime['countdown_seconds'] = max(0, int((trigger_dt - datetime.now()).total_seconds()))
     except Exception as exc:
         if not runtime.get('error'):
-            runtime['error'] = _sanitize_public_error_text(exc)
+            runtime['error'] = str(exc)
 
     if runtime['next_run'] is not None:
         return runtime
@@ -1244,7 +970,7 @@ def _get_timer_runtime(timer_name: str) -> Dict[str, Any]:
             break
     except Exception as exc:
         if not runtime.get('error'):
-            runtime['error'] = _sanitize_public_error_text(exc)
+            runtime['error'] = str(exc)
 
     return runtime
 
@@ -1261,10 +987,6 @@ def _pick_timer_name() -> str:
 
 # 排除测试/异常数据
 EXCLUDED_SYMBOLS = ['PEPE-USDT', 'MERL-USDT', 'SPACE-USDT']
-POSITION_HIDDEN_BASE_SYMBOLS = {
-    'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
-}
-MIN_VISIBLE_POSITION_VALUE_USD = 0.5
 
 
 def get_db_connection():
@@ -1273,310 +995,6 @@ def get_db_connection():
     if db_path.exists():
         return sqlite3.connect(db_path)
     return None
-
-
-def _load_recent_fill_summary(*, reports_dir: Optional[Path] = None, now_dt: Optional[datetime] = None, limit: int = 200) -> Dict[str, Any]:
-    reports_path = reports_dir or REPORTS_DIR
-    summary = {
-        'count_60m': 0,
-        'count_24h': 0,
-        'latest_fill': None,
-    }
-    now_ms = int((now_dt or datetime.now()).timestamp() * 1000)
-    fills_db = reports_path / 'fills.sqlite'
-    orders_db = reports_path / 'orders.sqlite'
-    fill_rows: List[Any] = []
-    order_rows: List[Any] = []
-    order_by_ord_id: Dict[str, Dict[str, Any]] = {}
-    order_by_cl_ord_id: Dict[str, Dict[str, Any]] = {}
-    recent_events: List[Dict[str, Any]] = []
-    fill_max_ts_by_ord: Dict[str, int] = {}
-    fill_max_ts_by_cl_ord: Dict[str, int] = {}
-
-    if fills_db.exists():
-        try:
-            conn = sqlite3.connect(str(fills_db))
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT ts_ms, ord_id, cl_ord_id, inst_id, side
-                FROM fills
-                ORDER BY ts_ms DESC, created_ts_ms DESC, trade_id DESC
-                LIMIT ?
-                """,
-                (int(limit),),
-            )
-            fill_rows = cur.fetchall()
-            conn.close()
-        except Exception:
-            fill_rows = []
-
-    if orders_db.exists():
-        if fill_rows:
-            ord_ids = sorted({str(r[1]) for r in fill_rows if r[1]})
-            cl_ord_ids = sorted({str(r[2]) for r in fill_rows if r[2]})
-            if ord_ids or cl_ord_ids:
-                clauses: List[str] = []
-                params: List[Any] = []
-                if ord_ids:
-                    placeholders = ','.join(['?' for _ in ord_ids])
-                    clauses.append(f"ord_id IN ({placeholders})")
-                    params.extend(ord_ids)
-                if cl_ord_ids:
-                    placeholders = ','.join(['?' for _ in cl_ord_ids])
-                    clauses.append(f"cl_ord_id IN ({placeholders})")
-                    params.extend(cl_ord_ids)
-
-                try:
-                    conn = sqlite3.connect(str(orders_db))
-                    cur = conn.cursor()
-                    cur.execute(
-                        f"""
-                        SELECT ord_id, cl_ord_id, run_id, intent, notional_usdt, updated_ts, created_ts
-                        FROM orders
-                        WHERE {' OR '.join(clauses)}
-                        """,
-                        tuple(params),
-                    )
-                    meta_rows = cur.fetchall()
-                    conn.close()
-                except Exception:
-                    meta_rows = []
-
-                for ord_id, cl_ord_id, run_id, intent, notional_usdt, updated_ts, created_ts in meta_rows:
-                    payload = {
-                        'run_id': str(run_id or ''),
-                        'intent': str(intent or ''),
-                        'notional_usdt': float(notional_usdt or 0.0),
-                        'sort_ts': int(updated_ts or created_ts or 0),
-                    }
-                    ord_id_key = str(ord_id or '')
-                    cl_ord_id_key = str(cl_ord_id or '')
-                    if ord_id_key and payload['sort_ts'] >= int(order_by_ord_id.get(ord_id_key, {}).get('sort_ts', -1)):
-                        order_by_ord_id[ord_id_key] = payload
-                    if cl_ord_id_key and payload['sort_ts'] >= int(order_by_cl_ord_id.get(cl_ord_id_key, {}).get('sort_ts', -1)):
-                        order_by_cl_ord_id[cl_ord_id_key] = payload
-
-        try:
-            conn = sqlite3.connect(str(orders_db))
-            cur = conn.cursor()
-            try:
-                cur.execute(
-                    """
-                    SELECT
-                        COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts,
-                        run_id,
-                        inst_id,
-                        side,
-                        intent,
-                        notional_usdt,
-                        ord_id,
-                        cl_ord_id
-                    FROM orders
-                    WHERE state = 'FILLED'
-                    ORDER BY event_ts DESC
-                    LIMIT ?
-                    """,
-                    (int(limit),),
-                )
-            except sqlite3.OperationalError:
-                try:
-                    cur.execute(
-                        """
-                        SELECT
-                            COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts,
-                            run_id,
-                            inst_id,
-                            side,
-                            intent,
-                            notional_usdt,
-                            ord_id,
-                            '' AS cl_ord_id
-                        FROM orders
-                        WHERE state = 'FILLED'
-                        ORDER BY event_ts DESC
-                        LIMIT ?
-                        """,
-                        (int(limit),),
-                    )
-                except sqlite3.OperationalError:
-                    cur.execute(
-                        """
-                        SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id, '' AS cl_ord_id
-                        FROM orders
-                        WHERE state = 'FILLED'
-                        ORDER BY created_ts DESC
-                        LIMIT ?
-                        """,
-                        (int(limit),),
-                    )
-            order_rows = cur.fetchall()
-            conn.close()
-        except Exception:
-            order_rows = []
-
-    for row in fill_rows:
-        ts_ms = int(row[0] or 0)
-        if ts_ms <= 0:
-            continue
-        ord_id = str(row[1] or '')
-        cl_ord_id = str(row[2] or '')
-        order_meta = order_by_ord_id.get(ord_id) or order_by_cl_ord_id.get(cl_ord_id) or {}
-        recent_events.append(
-            {
-                'created_ts': ts_ms,
-                'run_id': str(order_meta.get('run_id') or ''),
-                'inst_id': str(row[3] or ''),
-                'side': str(row[4] or ''),
-                'intent': str(order_meta.get('intent') or ''),
-                'notional_usdt': float(order_meta.get('notional_usdt') or 0.0),
-                'ord_id': ord_id,
-            }
-        )
-        if ord_id:
-            fill_max_ts_by_ord[ord_id] = max(ts_ms, int(fill_max_ts_by_ord.get(ord_id, 0)))
-        if cl_ord_id:
-            fill_max_ts_by_cl_ord[cl_ord_id] = max(ts_ms, int(fill_max_ts_by_cl_ord.get(cl_ord_id, 0)))
-
-    for row in order_rows:
-        ts_raw = int(row[0] or 0)
-        ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
-        if ts_ms <= 0:
-            continue
-        ord_id = str(row[6] or '')
-        cl_ord_id = str(row[7] or '')
-        latest_fill_ts = max(
-            int(fill_max_ts_by_ord.get(ord_id, 0)),
-            int(fill_max_ts_by_cl_ord.get(cl_ord_id, 0)),
-        )
-        if latest_fill_ts >= ts_ms:
-            continue
-        recent_events.append(
-            {
-                'created_ts': ts_raw,
-                'run_id': str(row[1] or ''),
-                'inst_id': str(row[2] or ''),
-                'side': str(row[3] or ''),
-                'intent': str(row[4] or ''),
-                'notional_usdt': float(row[5] or 0.0),
-                'ord_id': ord_id,
-            }
-        )
-
-    recent_events.sort(key=lambda item: int(item.get('created_ts') or 0), reverse=True)
-
-    for idx, event in enumerate(recent_events[: int(limit)]):
-        ts_raw = int(event.get('created_ts') or 0)
-        ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
-        age_ms = max(0, now_ms - ts_ms)
-        if age_ms <= 60 * 60 * 1000:
-            summary['count_60m'] += 1
-        if age_ms <= 24 * 60 * 60 * 1000:
-            summary['count_24h'] += 1
-        if idx == 0:
-            summary['latest_fill'] = {
-                'created_ts': ts_raw,
-                'run_id': str(event.get('run_id') or ''),
-                'inst_id': str(event.get('inst_id') or ''),
-                'side': str(event.get('side') or ''),
-                'intent': str(event.get('intent') or ''),
-                'notional_usdt': float(event.get('notional_usdt') or 0.0),
-                'ord_id': str(event.get('ord_id') or ''),
-            }
-    return summary
-
-
-def _split_inst_id_base_quote(inst_id: str) -> tuple[str, str]:
-    inst = str(inst_id or '').upper()
-    if '-' in inst:
-        return tuple(inst.split('-', 1))
-    if '/' in inst:
-        return tuple(inst.split('/', 1))
-    return inst, 'USDT'
-
-
-def _signed_fee_usdt_from_fee_fields(inst_id: str, px: Any, fee_amount: Any, fee_ccy: Any = None) -> float:
-    try:
-        fee_val = float(fee_amount or 0.0)
-    except Exception:
-        return 0.0
-
-    fee_ccy_norm = str(fee_ccy or '').strip().upper()
-    if not fee_ccy_norm:
-        return fee_val
-
-    base_ccy, quote_ccy = _split_inst_id_base_quote(inst_id)
-    if fee_ccy_norm == quote_ccy:
-        return fee_val
-    if fee_ccy_norm != base_ccy:
-        return 0.0
-
-    try:
-        px_val = float(px or 0.0)
-    except Exception:
-        return 0.0
-    if px_val <= 0:
-        return 0.0
-    return fee_val * px_val
-
-
-def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> float:
-    raw = str(raw_fee or '').strip()
-    if not raw:
-        return 0.0
-
-    try:
-        numeric_fee = float(raw)
-    except Exception:
-        numeric_fee = None
-    if numeric_fee is not None:
-        return _signed_fee_usdt_from_fee_fields(inst_id, avg_px, numeric_fee)
-
-    try:
-        fee_map = json.loads(raw)
-    except Exception:
-        return 0.0
-    if not isinstance(fee_map, dict):
-        return 0.0
-
-    px = float(avg_px or 0.0)
-    total_fee_usdt = 0.0
-    for ccy, value in fee_map.items():
-        total_fee_usdt += _signed_fee_usdt_from_fee_fields(inst_id, px, value, ccy)
-    return total_fee_usdt
-
-
-def _load_total_fees_from_orders(*, excluded_inst_ids: Optional[List[str]] = None, max_notional_usdt: float = 1000.0, reports_dir: Optional[Path] = None, orders_db: Optional[Path] = None) -> float:
-    if orders_db is None:
-        orders_db = (reports_dir or REPORTS_DIR) / 'orders.sqlite'
-    if not orders_db.exists():
-        return 0.0
-
-    excluded = [str(x) for x in (excluded_inst_ids or [])]
-    placeholders = ','.join(['?' for _ in excluded]) if excluded else ''
-    sql = """
-        SELECT inst_id, avg_px, fee
-        FROM orders
-        WHERE state='FILLED' AND notional_usdt < ?
-    """
-    params: List[Any] = [float(max_notional_usdt)]
-    if excluded:
-        sql += f" AND inst_id NOT IN ({placeholders})"
-        params.extend(excluded)
-
-    try:
-        conn = sqlite3.connect(str(orders_db))
-        cur = conn.cursor()
-        cur.execute(sql, tuple(params))
-        rows = cur.fetchall()
-        conn.close()
-    except Exception:
-        return 0.0
-
-    total = 0.0
-    for inst_id, avg_px, fee in rows:
-        total += _signed_fee_usdt_from_order_fee(str(inst_id or ''), avg_px, fee)
-    return total
 
 
 def _to_inst_id(symbol: str, quote_ccy: str = 'USDT') -> str:
@@ -1591,14 +1009,13 @@ def _to_inst_id(symbol: str, quote_ccy: str = 'USDT') -> str:
     return f'{raw}-{quote_ccy}'
 
 
-def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Optional[Path] = None, fills_db: Optional[Path] = None) -> Optional[float]:
+def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Optional[Path] = None) -> Optional[float]:
     if float(current_qty or 0.0) <= 0:
         return None
 
     base_symbol = str(symbol or '').split('/')[0].split('-')[0].upper()
     inst_id = _to_inst_id(base_symbol)
-    if fills_db is None:
-        fills_db = (reports_dir or REPORTS_DIR) / 'fills.sqlite'
+    fills_db = (reports_dir or REPORTS_DIR) / 'fills.sqlite'
     if not fills_db.exists() or not inst_id:
         return None
 
@@ -1701,29 +1118,6 @@ def load_config():
         return {}
 
 
-def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> DashboardRuntimePaths:
-    config = cfg if isinstance(cfg, dict) else load_config()
-    execution_cfg = config.get('execution', {}) if isinstance(config, dict) else {}
-    orders_db = _resolve_workspace_relative_path(
-        execution_cfg.get('order_store_path'),
-        'reports/orders.sqlite',
-    )
-    reports_dir = derive_runtime_reports_dir(orders_db)
-    return DashboardRuntimePaths(
-        reports_dir=reports_dir,
-        orders_db=orders_db,
-        fills_db=derive_fill_store_path(orders_db),
-        positions_db=derive_position_store_path(orders_db),
-        reconcile_status_path=_resolve_dashboard_runtime_artifact_path(
-            orders_db,
-            execution_cfg.get('reconcile_status_path'),
-            'reports/reconcile_status.json',
-        ),
-        auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
-        runs_dir=derive_runtime_runs_dir(orders_db),
-    )
-
-
 def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equity: float) -> float:
     total_equity = float(total_equity or 0.0)
     initial_capital = float(initial_capital or 0.0)
@@ -1748,16 +1142,8 @@ def _maybe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _utc_datetime_from_epoch_seconds(seconds: float) -> datetime:
-    return datetime.fromtimestamp(float(seconds), timezone.utc)
-
-
-def _china_datetime_from_epoch_seconds(seconds: float) -> datetime:
-    return _utc_datetime_from_epoch_seconds(seconds).astimezone(CHINA_TZ)
-
-
-def _load_reconcile_cash_balance(runtime_paths: Optional[DashboardRuntimePaths] = None) -> tuple[bool, float]:
-    reconcile_file = (runtime_paths or _resolve_dashboard_runtime_paths()).reconcile_status_path
+def _load_reconcile_cash_balance() -> tuple[bool, float]:
+    reconcile_file = REPORTS_DIR / 'reconcile_status.json'
     if not reconcile_file.exists():
         return False, 0.0
 
@@ -1780,268 +1166,162 @@ def _load_reconcile_cash_balance(runtime_paths: Optional[DashboardRuntimePaths] 
     return False, 0.0
 
 
-def _account_equity_from_balance_details(
-    details: Any,
-    *,
-    source: str,
-    hidden_symbols: Optional[set[str]] = None,
-    min_visible_position_value_usd: float = 0.0,
-) -> Dict[str, Any]:
-    if not isinstance(details, list):
-        return {}
-
-    hidden = set()
-    for raw_symbol in hidden_symbols or set():
-        symbol = str(raw_symbol or '').strip().upper()
-        if not symbol:
-            continue
-        hidden.add(symbol)
-        hidden.add(symbol.replace('/', '-').split('-')[0])
-    cash_usdt: Optional[float] = None
-    total_equity = 0.0
-    positions_value = 0.0
-    seen_equity = False
-
-    for detail in details:
-        if not isinstance(detail, dict):
-            continue
-        ccy = str(detail.get('ccy') or '').strip().upper()
-        if not ccy:
-            continue
-        eq_usd = _maybe_float(detail.get('eqUsd'))
-        cash_bal = _maybe_float(detail.get('cashBal'))
-        eq_qty = _maybe_float(detail.get('eq'))
-        if ccy == 'USDT':
-            cash_usdt = cash_bal if cash_bal is not None else (eq_qty if eq_qty is not None else eq_usd)
-        if eq_usd is None:
-            continue
-        total_equity += eq_usd
-        seen_equity = True
-        if eq_usd <= 0:
-            continue
-        if ccy != 'USDT' and ccy not in hidden and eq_usd >= min_visible_position_value_usd:
-            positions_value += eq_usd
-
-    payload: Dict[str, Any] = {'source': source}
-    if cash_usdt is not None:
-        payload['cash_usdt'] = cash_usdt
-    if seen_equity:
-        payload['total_equity_usdt'] = total_equity
-        payload['positions_value_usdt'] = positions_value
-    return payload
-
-
-def _load_reconcile_account_equity(runtime_paths: Optional[DashboardRuntimePaths] = None) -> Dict[str, Any]:
-    reconcile_file = (runtime_paths or _resolve_dashboard_runtime_paths()).reconcile_status_path
+def _load_reconcile_total_equity() -> tuple[bool, float]:
+    reconcile_file = REPORTS_DIR / 'reconcile_status.json'
     if not reconcile_file.exists():
-        return {}
+        return False, 0.0
 
     try:
-        reconcile = json.loads(reconcile_file.read_text(encoding='utf-8', errors='ignore'))
+        reconcile = json.loads(reconcile_file.read_text(encoding='utf-8'))
     except Exception:
-        return {}
+        return False, 0.0
 
-    exchange_snapshot = reconcile.get('exchange_snapshot') or {}
-    ccy_eq_usd = exchange_snapshot.get('ccy_eqUsd') or {}
-    ccy_cash_bal = exchange_snapshot.get('ccy_cashBal') or {}
-    if not isinstance(ccy_eq_usd, dict) and not isinstance(ccy_cash_bal, dict):
-        return {}
+    exchange_snapshot = reconcile.get('exchange_snapshot', {})
+    ccy_eq_usd = exchange_snapshot.get('ccy_eqUsd', {})
+    if isinstance(ccy_eq_usd, dict) and ccy_eq_usd:
+        total = 0.0
+        seen = False
+        for value in ccy_eq_usd.values():
+            eq_usd = _maybe_float(value)
+            if eq_usd is None:
+                continue
+            total += eq_usd
+            seen = True
+        if seen:
+            return True, total
 
-    ccys = set()
-    if isinstance(ccy_eq_usd, dict):
-        ccys.update(str(ccy) for ccy in ccy_eq_usd)
-    if isinstance(ccy_cash_bal, dict):
-        ccys.update(str(ccy) for ccy in ccy_cash_bal)
-    details = [
-        {
-            'ccy': ccy,
-            'eqUsd': ccy_eq_usd.get(ccy) if isinstance(ccy_eq_usd, dict) else None,
-            'cashBal': ccy_cash_bal.get(ccy) if isinstance(ccy_cash_bal, dict) else None,
-        }
-        for ccy in sorted(ccys)
-    ]
-    return _account_equity_from_balance_details(
-        details,
-        source='reconcile',
-        hidden_symbols=set(EXCLUDED_SYMBOLS) | POSITION_HIDDEN_BASE_SYMBOLS,
-        min_visible_position_value_usd=MIN_VISIBLE_POSITION_VALUE_USD,
-    )
+    local_total = _maybe_float(reconcile.get('local_snapshot', {}).get('total_equity_usdt'))
+    if local_total is not None:
+        return True, local_total
+
+    return False, 0.0
 
 
-def _env_flag_enabled(name: str) -> bool:
-    value = str(os.getenv(name, '') or '').strip().lower()
-    return value in {'1', 'true', 'yes', 'on'}
-
-
-def _dashboard_live_account_enabled() -> bool:
-    return _env_flag_enabled('V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT') or _env_flag_enabled('V5_DASHBOARD_ALLOW_LIVE_OKX')
-
-
-def _load_local_account_state(runtime_paths: Optional[DashboardRuntimePaths] = None) -> Dict[str, float]:
-    db_path = (runtime_paths or _resolve_dashboard_runtime_paths()).positions_db
-    if not db_path.exists():
-        return {}
-
+def _can_execute_python(candidate: str) -> bool:
     try:
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-        cursor.execute("SELECT cash_usdt, equity_peak_usdt FROM account_state WHERE k='default'")
-        row = cursor.fetchone()
-        conn.close()
+        result = subprocess.run(
+            [candidate, '-c', 'import sys'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+        return result.returncode == 0
     except Exception:
-        return {}
+        return False
 
-    if not row:
-        return {}
 
-    return {
-        'cash_usdt': float(row[0] or 0.0),
-        'equity_peak_usdt': float(row[1] or 0.0),
+def _resolve_workspace_python() -> str:
+    global _WORKSPACE_PYTHON_BIN
+    if _WORKSPACE_PYTHON_BIN:
+        return _WORKSPACE_PYTHON_BIN
+
+    candidates = []
+    env_python = os.getenv('V5_PYTHON_BIN')
+    if env_python:
+        candidates.append(env_python)
+    candidates.extend([
+        str(WORKSPACE / '.venv' / 'bin' / 'python'),
+        'python3',
+        'python',
+    ])
+
+    for candidate in candidates:
+        if _can_execute_python(candidate):
+            _WORKSPACE_PYTHON_BIN = candidate
+            return candidate
+
+    _WORKSPACE_PYTHON_BIN = 'python3'
+    return _WORKSPACE_PYTHON_BIN
+
+
+def _load_live_okx_balance_snapshot() -> Dict[str, Any]:
+    snapshot: Dict[str, Any] = {
+        'ok': False,
+        'cash_usdt': 0.0,
+        'total_equity_usdt': 0.0,
+        'error': '',
     }
-
-
-def _load_workspace_exchange_creds() -> tuple[str, str, str]:
-    key = str(os.getenv('EXCHANGE_API_KEY') or '')
-    sec = str(os.getenv('EXCHANGE_API_SECRET') or '')
-    pp = str(os.getenv('EXCHANGE_PASSPHRASE') or '')
-
     try:
+        import base64
+        import hashlib
+        import hmac
+        import time
         from dotenv import load_dotenv
 
         load_dotenv(str(WORKSPACE / '.env'))
-        key = key or str(os.getenv('EXCHANGE_API_KEY') or '')
-        sec = sec or str(os.getenv('EXCHANGE_API_SECRET') or '')
-        pp = pp or str(os.getenv('EXCHANGE_PASSPHRASE') or '')
-    except Exception:
-        pass
+        key = os.getenv('EXCHANGE_API_KEY')
+        sec = os.getenv('EXCHANGE_API_SECRET')
+        pp = os.getenv('EXCHANGE_PASSPHRASE')
+        if not (key and sec and pp):
+            envp = WORKSPACE / '.env'
+            if envp.exists():
+                for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
+                    if not ln or ln.strip().startswith('#') or '=' not in ln:
+                        continue
+                    k, v = ln.split('=', 1)
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k == 'EXCHANGE_API_KEY' and not key:
+                        key = v
+                    elif k == 'EXCHANGE_API_SECRET' and not sec:
+                        sec = v
+                    elif k == 'EXCHANGE_PASSPHRASE' and not pp:
+                        pp = v
 
-    if key and sec and pp:
-        return key, sec, pp
+        if not (key and sec and pp):
+            snapshot['error'] = 'missing_credentials'
+            return snapshot
 
-    envp = WORKSPACE / '.env'
-    if envp.exists():
-        try:
-            for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
-                if not ln or ln.strip().startswith('#') or '=' not in ln:
-                    continue
-                env_key, env_val = ln.split('=', 1)
-                env_key = env_key.strip()
-                env_val = env_val.strip().strip('"').strip("'")
-                if env_key == 'EXCHANGE_API_KEY' and not key:
-                    key = env_val
-                elif env_key == 'EXCHANGE_API_SECRET' and not sec:
-                    sec = env_val
-                elif env_key == 'EXCHANGE_PASSPHRASE' and not pp:
-                    pp = env_val
-        except Exception:
-            pass
+        ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+        path = '/api/v5/account/balance'
+        msg = ts + 'GET' + path
+        sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
+        headers = {
+            'OK-ACCESS-KEY': key,
+            'OK-ACCESS-SIGN': sig,
+            'OK-ACCESS-TIMESTAMP': ts,
+            'OK-ACCESS-PASSPHRASE': pp,
+        }
+        response = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
+        payload = response.json()
+        if payload.get('code') != '0' or not payload.get('data'):
+            snapshot['error'] = str(payload.get('msg') or payload.get('code') or 'balance_request_failed')
+            return snapshot
 
-    return key, sec, pp
+        account_payload = payload['data'][0] if payload.get('data') else {}
+        details = account_payload.get('details', [])
+        cash_usdt = 0.0
+        total_equity = 0.0
+        eq_usd_seen = False
+        for detail in details:
+            ccy = str(detail.get('ccy') or '')
+            if ccy == 'USDT':
+                usdt_eq = _maybe_float(detail.get('eq'))
+                if usdt_eq is not None:
+                    cash_usdt = usdt_eq
+            eq_usd = _maybe_float(detail.get('eqUsd'))
+            if eq_usd is not None:
+                total_equity += eq_usd
+                eq_usd_seen = True
 
+        if not eq_usd_seen:
+            total_equity = float(
+                _maybe_float(account_payload.get('totalEqUsd'))
+                or _maybe_float(account_payload.get('totalEq'))
+                or 0.0
+            )
 
-def _okx_account_balance_cache_ttl_seconds() -> float:
-    try:
-        ttl = float(os.getenv('V5_DASHBOARD_OKX_BALANCE_CACHE_TTL_SECONDS', '2') or '2')
-    except Exception:
-        ttl = 2.0
-    return max(0.0, min(ttl, 10.0))
-
-
-def _okx_health_check_cache_ttl_seconds() -> float:
-    try:
-        ttl = float(os.getenv('V5_DASHBOARD_HEALTH_OKX_CACHE_TTL_SECONDS', '30') or '30')
-    except Exception:
-        ttl = 30.0
-    return max(0.0, min(ttl, 300.0))
-
-
-def _okx_public_ticker_cache_ttl_seconds() -> float:
-    try:
-        ttl = float(os.getenv('V5_DASHBOARD_PUBLIC_TICKER_CACHE_TTL_SECONDS', '10') or '10')
-    except Exception:
-        ttl = 10.0
-    return max(0.0, min(ttl, 60.0))
-
-
-def _load_okx_account_balance(key: str, sec: str, pp: str) -> Dict[str, Any]:
-    ttl = _okx_account_balance_cache_ttl_seconds()
-    cache_key = (key, sec, pp)
-    now = time.time()
-    if ttl > 0:
-        with _OKX_ACCOUNT_BALANCE_CACHE_LOCK:
-            cached = _OKX_ACCOUNT_BALANCE_CACHE.get(cache_key)
-            if cached and cached[0] > now:
-                payload = cached[1]
-                return payload if isinstance(payload, dict) else {}
-
-    import hmac, hashlib, base64
-
-    ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
-    path = '/api/v5/account/balance'
-    msg = ts + 'GET' + path
-    sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
-    headers = {
-        'OK-ACCESS-KEY': key,
-        'OK-ACCESS-SIGN': sig,
-        'OK-ACCESS-TIMESTAMP': ts,
-        'OK-ACCESS-PASSPHRASE': pp,
-    }
-    data = requests.get('https://www.okx.com' + path, headers=headers, timeout=8).json()
-    if ttl > 0:
-        with _OKX_ACCOUNT_BALANCE_CACHE_LOCK:
-            _OKX_ACCOUNT_BALANCE_CACHE[cache_key] = (time.time() + ttl, data)
-    return data if isinstance(data, dict) else {}
-
-
-def _load_okx_health_check(key: str, sec: str, pp: str) -> Dict[str, Any]:
-    ttl = _okx_health_check_cache_ttl_seconds()
-    cache_key = (key, sec, pp)
-    now = time.time()
-    if ttl > 0:
-        with _OKX_HEALTH_CHECK_CACHE_LOCK:
-            cached = _OKX_HEALTH_CHECK_CACHE.get(cache_key)
-            if cached and cached[0] > now:
-                cached_payload = dict(cached[1]) if isinstance(cached[1], dict) else {}
-                cached_payload['cached'] = True
-                return cached_payload
-
-    start = time.time()
-    data = _load_okx_account_balance(key, sec, pp)
-    result = {
-        'data': data if isinstance(data, dict) else {},
-        'latency_ms': (time.time() - start) * 1000,
-        'cached': False,
-    }
-    if ttl > 0:
-        stored = dict(result)
-        stored.pop('cached', None)
-        with _OKX_HEALTH_CHECK_CACHE_LOCK:
-            _OKX_HEALTH_CHECK_CACHE[cache_key] = (time.time() + ttl, stored)
-    return result
-
-
-def _load_okx_public_ticker_last_price(symbol: str) -> float:
-    symbol_key = str(symbol or '').strip().upper()
-    if not symbol_key:
-        return 0.0
-
-    ttl = _okx_public_ticker_cache_ttl_seconds()
-    now = time.time()
-    if ttl > 0:
-        with _OKX_PUBLIC_TICKER_CACHE_LOCK:
-            cached = _OKX_PUBLIC_TICKER_CACHE.get(symbol_key)
-            if cached and cached[0] > now:
-                return float(cached[1] or 0.0)
-
-    response = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol_key}-USDT", timeout=5)
-    payload = response.json()
-    if payload.get('code') == '0' and payload.get('data'):
-        price = float(payload['data'][0].get('last') or 0)
-        if price > 0 and ttl > 0:
-            with _OKX_PUBLIC_TICKER_CACHE_LOCK:
-                _OKX_PUBLIC_TICKER_CACHE[symbol_key] = (time.time() + ttl, price)
-        return price
-    return 0.0
+        snapshot.update({
+            'ok': True,
+            'cash_usdt': float(cash_usdt),
+            'total_equity_usdt': float(total_equity),
+            'error': '',
+        })
+        return snapshot
+    except Exception as e:
+        snapshot['error'] = str(e)
+        return snapshot
 
 
 def _static_asset_version(filename: str) -> str:
@@ -2081,12 +1361,7 @@ def simple_dashboard():
 @app.route('/<path:filename>')
 def static_files(filename):
     """提供React静态文件"""
-    try:
-        react_root = REACT_BUILD_PATH.resolve()
-        file_path = (react_root / filename).resolve()
-        file_path.relative_to(react_root)
-    except (OSError, ValueError):
-        return 'Not found', 404
+    file_path = REACT_BUILD_PATH / filename
     
     # 检查文件是否存在
     if file_path.exists() and file_path.is_file():
@@ -2107,7 +1382,7 @@ def static_files(filename):
             return f.read(), 200, {'Content-Type': content_type}
     
     # 如果文件不存在，返回index.html（支持React Router）
-    index_path = react_root / 'index.html'
+    index_path = REACT_BUILD_PATH / 'index.html'
     if index_path.exists():
         with open(index_path, 'r') as f:
             return f.read(), 200, {'Content-Type': 'text/html'}
@@ -2119,156 +1394,105 @@ def static_files(filename):
 def api_account():
     """账户信息API - 优先OKX实时数据"""
     try:
-        # 优先从OKX获取实时余额
-        config = load_config()
-        runtime_paths = _resolve_dashboard_runtime_paths(config)
-        try:
-            has_reconcile_cash, cash = _load_reconcile_cash_balance(runtime_paths=runtime_paths)
-        except TypeError:
-            has_reconcile_cash, cash = _load_reconcile_cash_balance()
-        try:
-            local_account_state = _load_local_account_state(runtime_paths=runtime_paths)
-        except TypeError:
-            local_account_state = _load_local_account_state()
-        authoritative_equity: Optional[float] = None
-        authoritative_positions_value: Optional[float] = None
-        equity_source = 'local'
-        try:
-            key, sec, pp = _load_workspace_exchange_creds()
-            if _dashboard_live_account_enabled() and key and sec and pp:
-                data = _load_okx_account_balance(key, sec, pp)
-                if data.get('code') == '0' and data.get('data'):
-                    account_equity = _account_equity_from_balance_details(
-                        data['data'][0].get('details', []),
-                        source='okx_live',
-                        hidden_symbols=set(EXCLUDED_SYMBOLS) | POSITION_HIDDEN_BASE_SYMBOLS,
-                        min_visible_position_value_usd=MIN_VISIBLE_POSITION_VALUE_USD,
-                    )
-                    if 'cash_usdt' in account_equity:
-                        cash = float(account_equity['cash_usdt'] or 0.0)
-                        has_reconcile_cash = True
-                    if 'total_equity_usdt' in account_equity:
-                        authoritative_equity = float(account_equity['total_equity_usdt'] or 0.0)
-                        authoritative_positions_value = float(account_equity.get('positions_value_usdt') or 0.0)
-                        equity_source = str(account_equity.get('source') or 'okx_live')
-        except Exception as e:
-            print(f"[account] OKX API错误: {e}")
+        has_reconcile_cash, cash = _load_reconcile_cash_balance()
+        live_okx_snapshot = _load_live_okx_balance_snapshot()
+        if (not has_reconcile_cash) and live_okx_snapshot.get('ok'):
+            cash = float(live_okx_snapshot.get('cash_usdt') or 0.0)
 
-        if authoritative_equity is None:
-            account_equity = _load_reconcile_account_equity(runtime_paths=runtime_paths)
-            if 'cash_usdt' in account_equity:
-                cash = float(account_equity['cash_usdt'] or 0.0)
-                has_reconcile_cash = True
-            if 'total_equity_usdt' in account_equity:
-                authoritative_equity = float(account_equity['total_equity_usdt'] or 0.0)
-                authoritative_positions_value = float(account_equity.get('positions_value_usdt') or 0.0)
-                equity_source = str(account_equity.get('source') or 'reconcile')
-        
-        # 如果OKX获取失败，回退到reconcile文件
-        if (not has_reconcile_cash) and cash <= 0:
-            cash = float(local_account_state.get('cash_usdt') or 0.0)
-        
-        # 获取最新权益 - 排除异常数据
-        conn = None
-        if runtime_paths.orders_db.exists():
-            try:
-                conn = sqlite3.connect(str(runtime_paths.orders_db))
-            except Exception:
-                conn = None
+        if cash <= 0:
+            has_reconcile_cash, cash = _load_reconcile_cash_balance()
+
+        conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
-            # 使用参数化查询排除异常币种
             placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
             query = f"""
                 SELECT 
                     SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) as total_trades,
                     SUM(CASE WHEN side='buy' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_buy,
-                    SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell
+                    SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell,
+                    SUM(CASE WHEN state='FILLED' THEN fee ELSE 0 END) as total_fees
                 FROM orders
                 WHERE inst_id NOT IN ({placeholders})
-                AND notional_usdt < 1000  -- 排除异常大额
+                AND notional_usdt < 1000
             """
             cursor.execute(query, EXCLUDED_SYMBOLS)
             row = cursor.fetchone()
             conn.close()
-            
+
             total_trades = row[0] or 0
             total_buy = row[1] or 0
             total_sell = row[2] or 0
-            total_fees = _load_total_fees_from_orders(
-                excluded_inst_ids=EXCLUDED_SYMBOLS,
-                max_notional_usdt=1000.0,
-                orders_db=runtime_paths.orders_db,
-            )
-            
-            # 计算已实现盈亏
+            total_fees = row[3] or 0
             realized_pnl = float(total_sell) - float(total_buy) + float(total_fees)
         else:
             total_trades = total_buy = total_sell = total_fees = realized_pnl = 0
-        
-        # 持仓市值与 /api/positions 保持同口径
+
         positions_value = 0.0
         positions_rows = []
         try:
-            pos_payload = _call_dashboard_api(api_positions, default={"positions": []}, label="positions") or {}
+            pos_payload = api_positions().get_json() or {}
             if isinstance(pos_payload, dict):
                 positions_rows = pos_payload.get('positions', []) or []
             elif isinstance(pos_payload, list):
-                # 兼容旧格式
                 positions_rows = pos_payload
             positions_value = sum(float(x.get('value_usdt') or x.get('value') or 0.0) for x in positions_rows)
         except Exception:
             pass
 
-        if authoritative_positions_value is not None:
-            positions_value = authoritative_positions_value
-        total_equity = authoritative_equity if authoritative_equity is not None else float(cash or 0) + positions_value
+        total_equity = float(cash or 0) + positions_value
+        equity_source = 'cash_plus_positions'
+        if live_okx_snapshot.get('ok') and float(live_okx_snapshot.get('total_equity_usdt') or 0.0) > 0:
+            total_equity = float(live_okx_snapshot.get('total_equity_usdt') or 0.0)
+            equity_source = 'okx_live'
+        else:
+            has_reconcile_total, reconcile_total = _load_reconcile_total_equity()
+            if has_reconcile_total and reconcile_total > 0:
+                total_equity = float(reconcile_total)
+                equity_source = 'reconcile_fallback'
+
         initial_capital = 120.0
         equity_delta = total_equity - initial_capital
         total_pnl_pct = equity_delta / initial_capital if initial_capital > 0 else 0
-        
-        # 获取持仓数量
+
         positions_count = 0
         try:
             rows = positions_rows if isinstance(positions_rows, list) else []
             positions_count = len([p for p in rows if float(p.get('value_usdt') or p.get('value') or 0) > 1])
         except Exception:
             pass
-        
-        # 计算回撤（基于资金上限）
-        # 修复：小资金测试时，不应使用历史大资金峰值
+
+        config = load_config()
         budget_cap = float(config.get('budget', {}).get('live_equity_cap_usdt', 0) or 0)
         drawdown_pct = 0.0
-        peak_equity = initial_capital  # 默认使用初始资金作为峰值
+        peak_equity = initial_capital
 
         if budget_cap > 0:
-            # 如果设置了资金上限，使用上限作为峰值基准
             peak_equity = max(float(budget_cap), float(total_equity))
             drawdown_pct = (peak_equity - total_equity) / peak_equity if peak_equity > 0 else 0
-            # 如果当前权益超过峰值，回撤为0（不更新峰值，只是计算）
             if total_equity > peak_equity:
                 drawdown_pct = 0.0
         else:
-            # 未设置资金上限，使用传统计算方式
-            # 从数据库读取峰值
             try:
-                local_peak = float(local_account_state.get('equity_peak_usdt') or 0.0)
-                if local_peak > 0:
-                    peak_equity = _sanitize_peak_equity(total_equity, initial_capital, local_peak)
-                else:
-                    peak_equity = max(total_equity, initial_capital)
+                conn2 = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
+                cursor2 = conn2.cursor()
+                cursor2.execute("SELECT equity_peak_usdt FROM account_state WHERE k='default'")
+                row2 = cursor2.fetchone()
+                if row2 and row2[0]:
+                    peak_equity = _sanitize_peak_equity(total_equity, initial_capital, float(row2[0]))
+                conn2.close()
             except Exception:
                 peak_equity = max(total_equity, initial_capital)
-            
+
             drawdown_pct = (peak_equity - total_equity) / peak_equity if peak_equity > 0 else 0
-        
-        # 确保回撤在合理范围
+
         drawdown_pct = max(0.0, min(1.0, drawdown_pct))
 
         return jsonify({
             'cash_usdt': round(float(cash), 2),
             'positions_value_usdt': round(float(positions_value), 4),
             'total_equity_usdt': round(float(total_equity), 4),
+            'equity_source': equity_source,
             'initial_capital_usdt': round(float(initial_capital), 4),
             'equity_delta_usdt': round(float(equity_delta), 4),
             'total_pnl_pct': round(float(total_pnl_pct), 4),
@@ -2281,44 +1505,43 @@ def api_account():
             'total_sell': round(float(total_sell), 2),
             'total_fees': round(float(total_fees), 4),
             'realized_pnl': round(float(realized_pnl), 2),
-            'equity_source': equity_source,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            cash_usdt=0.0,
-            positions_value_usdt=0.0,
-            total_equity_usdt=0.0,
-            initial_capital_usdt=120.0,
-            equity_delta_usdt=0.0,
-            total_pnl_pct=0.0,
-            drawdown_pct=0.0,
-            peak_equity_usdt=120.0,
-            budget_cap_usdt=None,
-            positions_count=0,
-            total_trades=0,
-            total_buy=0.0,
-            total_sell=0.0,
-            total_fees=0.0,
-            realized_pnl=0.0,
-            last_update='',
-        )
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/trades')
 def api_trades():
     """交易历史API（优先OKX实时成交，回退DB，再回退runs/*/trades.csv）"""
     try:
-        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         trades = []
 
         # 0) 优先OKX实时成交
         try:
-            import hmac, hashlib, base64
+            import os, time, hmac, hashlib, base64
+            from dotenv import load_dotenv
+            load_dotenv(str(WORKSPACE / '.env'))
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
+            if not (key and sec and pp):
+                envp = WORKSPACE / '.env'
+                if envp.exists():
+                    for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
+                        if not ln or ln.strip().startswith('#') or '=' not in ln:
+                            continue
+                        k, v = ln.split('=', 1)
+                        k = k.strip(); v = v.strip().strip('"').strip("'")
+                        if k == 'EXCHANGE_API_KEY' and not key:
+                            key = v
+                        elif k == 'EXCHANGE_API_SECRET' and not sec:
+                            sec = v
+                        elif k == 'EXCHANGE_PASSPHRASE' and not pp:
+                            pp = v
 
-            key, sec, pp = _load_workspace_exchange_creds()
-            if _dashboard_live_account_enabled() and key and sec and pp:
+            if key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/trade/fills?limit=100'
                 msg = ts + 'GET' + path
@@ -2338,16 +1561,11 @@ def api_trades():
                             if (not inst) or (inst in EXCLUDED_SYMBOLS):
                                 continue
                             ts_ms = int(r.get('ts') or 0)
-                            t = _china_datetime_from_epoch_seconds(ts_ms / 1000.0)
+                            t = datetime.utcfromtimestamp(ts_ms / 1000.0) + timedelta(hours=8)
                             px = float(r.get('fillPx') or 0)
                             sz = float(r.get('fillSz') or 0)
                             amount = px * sz
-                            fee = _signed_fee_usdt_from_fee_fields(
-                                inst,
-                                px,
-                                r.get('fee'),
-                                r.get('feeCcy') or r.get('fillFeeCcy'),
-                            )
+                            fee = float(r.get('fee') or 0)
                             trades.append({
                                 'symbol': inst,
                                 'side': str(r.get('side', '')),
@@ -2363,45 +1581,21 @@ def api_trades():
 
         # 1) 回退订单库
         if not trades:
-            conn = None
-            if runtime_paths.orders_db.exists():
-                conn = sqlite3.connect(str(runtime_paths.orders_db))
+            conn = get_db_connection()
             if conn:
                 cursor = conn.cursor()
                 placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
-                try:
-                    cursor.execute(f"""
-                        SELECT
-                            inst_id,
-                            side,
-                            notional_usdt,
-                            fee,
-                            state,
-                            avg_px,
-                            datetime(
-                                COALESCE(NULLIF(updated_ts, 0), created_ts)/1000,
-                                'unixepoch',
-                                '+8 hours'
-                            ) as time
-                        FROM orders
-                        WHERE state='FILLED'
-                        AND inst_id NOT IN ({placeholders})
-                        AND notional_usdt < 1000
-                        ORDER BY COALESCE(NULLIF(updated_ts, 0), created_ts) DESC
-                        LIMIT 100
-                    """, EXCLUDED_SYMBOLS)
-                except sqlite3.OperationalError:
-                    cursor.execute(f"""
-                        SELECT
-                            inst_id, side, notional_usdt, fee, state, avg_px,
-                            datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
-                        FROM orders
-                        WHERE state='FILLED'
-                        AND inst_id NOT IN ({placeholders})
-                        AND notional_usdt < 1000
-                        ORDER BY created_ts DESC
-                        LIMIT 100
-                    """, EXCLUDED_SYMBOLS)
+                cursor.execute(f"""
+                    SELECT 
+                        inst_id, side, notional_usdt, fee, state,
+                        datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
+                    FROM orders 
+                    WHERE state='FILLED'
+                    AND inst_id NOT IN ({placeholders})
+                    AND notional_usdt < 1000
+                    ORDER BY created_ts DESC
+                    LIMIT 100
+                """, EXCLUDED_SYMBOLS)
 
                 for row in cursor.fetchall():
                     try:
@@ -2409,9 +1603,9 @@ def api_trades():
                             'symbol': str(row[0]),
                             'side': str(row[1]),
                             'amount': round(float(row[2]), 4),
-                            'fee': round(_signed_fee_usdt_from_order_fee(str(row[0]), row[5], row[3]), 6),
+                            'fee': round(float(row[3]), 6),
                             'state': str(row[4]),
-                            'time': str(row[6])
+                            'time': str(row[5])
                         })
                     except (TypeError, ValueError):
                         continue
@@ -2419,7 +1613,7 @@ def api_trades():
 
         # 2) 回退 runs/*/trades.csv
         if not trades:
-            runs_dir = runtime_paths.runs_dir
+            runs_dir = REPORTS_DIR / 'runs'
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
                 for run_dir in run_dirs[:24]:
@@ -2451,50 +1645,45 @@ def api_trades():
 
         return jsonify({'trades': trades[:100]})
     except Exception as e:
-        return _json_internal_error_response(e, trades=[])
+        import traceback
+        return jsonify({'error': str(e), 'trades': []}), 500
 
 
 @app.route('/api/positions')
 def api_positions():
     """持仓信息API（优先 positions.sqlite，回退最新 run 的 positions.jsonl）"""
     try:
-        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
-        hidden_symbols = POSITION_HIDDEN_BASE_SYMBOLS
+        hidden_symbols = {
+            'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
+        }
         authoritative_snapshot_seen = False
-        price_cache: Dict[str, float] = {}
 
         def get_last_price_usdt(symbol: str) -> float:
-            symbol = str(symbol or '').strip().upper()
-            if not symbol:
-                return 0.0
-            if symbol in price_cache:
-                return price_cache[symbol]
-            """获取币种最新价格，优先本地新鲜缓存以避免阻塞 dashboard"""
-            # 1) 优先本地缓存（15 分钟内）以避免 OKX 短时抖动拖慢整页
+            """获取币种最新价格，优先OKX实时API"""
+            # 1) 优先OKX实时API
+            try:
+                r = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol}-USDT", timeout=5)
+                j = r.json()
+                if j.get('code') == '0' and j.get('data'):
+                    return float(j['data'][0].get('last') or 0)
+            except Exception:
+                pass
+            
+            # 2) Fallback: 缓存文件（检查时间，超过15分钟废弃）
             try:
                 import time
                 cache_dir = WORKSPACE / 'data' / 'cache'
                 files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
                 if files:
+                    # 检查文件修改时间
                     file_mtime = files[-1].stat().st_mtime
-                    if time.time() - file_mtime < 900:  # 15 分钟内
+                    if time.time() - file_mtime < 900:  # 15分钟内
                         df = pd.read_csv(files[-1])
                         if len(df) > 0 and 'close' in df.columns:
-                            price = float(df.iloc[-1]['close'])
-                            price_cache[symbol] = price
-                            return price
+                            return float(df.iloc[-1]['close'])
             except Exception:
                 pass
-
-            # 2) 回退到 OKX 实时公共 ticker
-            try:
-                price = _load_okx_public_ticker_last_price(symbol)
-                price_cache[symbol] = price
-                return price
-            except Exception:
-                pass
-
-            price_cache[symbol] = 0.0
+            
             return 0.0
 
         def choose_spot_qty(detail: Dict[str, Any]) -> float:
@@ -2541,7 +1730,7 @@ def api_positions():
                 'value_usdt': round(eq_usd, 4)
             })
 
-        pos_db = runtime_paths.positions_db
+        pos_db = REPORTS_DIR / 'positions.sqlite'
         positions = []
         live_okx_used = False
         avg_price_hints: Dict[str, float] = {}
@@ -2563,9 +1752,43 @@ def api_positions():
         # 0) 优先实时OKX余额（与用户手动操作一致）
         okx_error = None
         try:
-            key, sec, pp = _load_workspace_exchange_creds()
-            if _dashboard_live_account_enabled() and key and sec and pp:
-                data = _load_okx_account_balance(key, sec, pp)
+            import os, time, hmac, hashlib, base64
+            from dotenv import load_dotenv
+            load_dotenv(str(WORKSPACE / '.env'))
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
+            # fallback: parse .env manually when process env not populated
+            if not (key and sec and pp):
+                try:
+                    envp = WORKSPACE / '.env'
+                    if envp.exists():
+                        for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
+                            if not ln or ln.strip().startswith('#') or '=' not in ln:
+                                continue
+                            k, v = ln.split('=', 1)
+                            k = k.strip(); v = v.strip().strip('"').strip("'")
+                            if k == 'EXCHANGE_API_KEY' and not key:
+                                key = v
+                            elif k == 'EXCHANGE_API_SECRET' and not sec:
+                                sec = v
+                            elif k == 'EXCHANGE_PASSPHRASE' and not pp:
+                                pp = v
+                except Exception as e:
+                    okx_error = f"env_parse_error: {e}"
+            if key and sec and pp:
+                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+                path = '/api/v5/account/balance'
+                msg = ts + 'GET' + path
+                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
+                headers = {
+                    'OK-ACCESS-KEY': key,
+                    'OK-ACCESS-SIGN': sig,
+                    'OK-ACCESS-TIMESTAMP': ts,
+                    'OK-ACCESS-PASSPHRASE': pp,
+                }
+                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
+                data = resp.json()
                 if data.get('code') == '0' and data.get('data'):
                     live_okx_used = True
                     authoritative_snapshot_seen = True
@@ -2579,11 +1802,13 @@ def api_positions():
                         except Exception:
                             continue
         except Exception as e:
-            _log_dashboard_exception('positions OKX API error', e)
+            import traceback
+            okx_error = f"{e}\n{traceback.format_exc()}"
+            print(f"[positions] OKX API错误: {okx_error}")
 
         # 1) 回退 positions.sqlite（仅当实时OKX不可用且positions为空）
         # 注意：如果OKX API成功调用但返回空持仓，说明真的没持仓，不应回退到缓存
-        reconcile_file = runtime_paths.reconcile_status_path
+        reconcile_file = REPORTS_DIR / 'reconcile_status.json'
         if not positions and reconcile_file.exists():
             try:
                 reconcile = json.loads(reconcile_file.read_text(encoding='utf-8', errors='ignore'))
@@ -2641,7 +1866,7 @@ def api_positions():
 
         # 2) 回退：DB为空且OKX不可用时读取最新 runs/*/positions.jsonl
         if not authoritative_snapshot_seen and not positions:
-            runs_dir = runtime_paths.runs_dir
+            runs_dir = REPORTS_DIR / 'runs'
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
                 for run_dir in run_dirs[:12]:
@@ -2689,11 +1914,7 @@ def api_positions():
             symbol = p.get('symbol', '')
             if not symbol:
                 continue
-            avg_cost = _load_avg_cost_from_fills(
-                symbol,
-                float(p.get('qty', 0) or 0.0),
-                fills_db=runtime_paths.fills_db,
-            )
+            avg_cost = _load_avg_cost_from_fills(symbol, float(p.get('qty', 0) or 0.0))
             if avg_cost and avg_cost > 0:
                 p['avg_px'] = round(avg_cost, 6)
 
@@ -2714,7 +1935,7 @@ def api_positions():
         
         return jsonify({'positions': positions})
     except Exception as e:
-        return _json_internal_error_response(e, positions=[])
+        return jsonify({'error': str(e), 'positions': []}), 500
 
 
 @app.route('/api/position_kline')
@@ -2752,7 +1973,7 @@ def api_position_kline():
                 ts_value *= 1000
             candles.append({
                 'ts': ts_value,
-                'time': _utc_datetime_from_epoch_seconds(ts_value / 1000.0).strftime('%Y-%m-%d %H:%M'),
+                'time': datetime.utcfromtimestamp(ts_value / 1000.0).strftime('%Y-%m-%d %H:%M'),
                 'open': round(float(open_px), 8),
                 'high': round(float(high_px), 8),
                 'low': round(float(low_px), 8),
@@ -2784,14 +2005,13 @@ def api_position_kline():
             },
         })
     except Exception as e:
-        return _json_internal_error_response(e, candles=[])
+        return jsonify({'error': str(e), 'candles': []}), 500
 
 
 @app.route('/api/scores')
 def api_scores():
     """币种评分API（当前run vs 上一个run 的排名变化）"""
     try:
-        runtime_reports_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir
         current_run_id: Optional[str] = None
         previous_run_id: Optional[str] = None
         current_regime = 'Unknown'
@@ -2799,7 +2019,7 @@ def api_scores():
         previous_scores: List[Dict[str, Any]] = []
 
         usable_runs: List[Dict[str, Any]] = []
-        for entry in _iter_decision_audits(runtime_reports_dir, max_entries=_score_audit_scan_limit()):
+        for entry in _iter_decision_audits(REPORTS_DIR):
             items = _normalize_top_scores(entry['audit'].get('top_scores', []))
             if not items:
                 continue
@@ -2808,8 +2028,6 @@ def api_scores():
                 'regime': str(entry['audit'].get('regime') or 'Unknown'),
                 'scores': items,
             })
-            if len(usable_runs) >= 2:
-                break
 
         if usable_runs:
             current_run_id = usable_runs[0]['run_id']
@@ -2819,7 +2037,7 @@ def api_scores():
                 previous_run_id = usable_runs[1]['run_id']
                 previous_scores = usable_runs[1]['scores']
         else:
-            alpha_snapshot = _load_alpha_snapshot_scores(runtime_reports_dir)
+            alpha_snapshot = _load_alpha_snapshot_scores(REPORTS_DIR)
             if alpha_snapshot:
                 current_run_id = str(alpha_snapshot.get('current_run') or 'alpha_snapshot')
                 current_regime = str(alpha_snapshot.get('regime') or 'Unknown')
@@ -2873,14 +2091,7 @@ def api_scores():
             'last_update': datetime.now().isoformat()
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            regime='Error',
-            current_run=None,
-            previous_run=None,
-            scores=[],
-            last_update='',
-        )
+        return jsonify({'regime': 'Error', 'scores': [], 'error': str(e)}), 500
 
 
 @app.route('/api/sentiment')
@@ -2890,8 +2101,7 @@ def api_sentiment():
         # 动态展示：主流币 + 当前评分Top币，避免TRX等未显示
         symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT']
         try:
-            top_scores_payload = _call_dashboard_api(api_scores, default={'scores': []}, label='scores')
-            top_scores = (top_scores_payload.get('scores', []) if isinstance(top_scores_payload, dict) else [])[:8]
+            top_scores = api_scores().get_json().get('scores', [])[:8]
             for row in top_scores:
                 sym = str(row.get('symbol', '')).replace('/USDT', '-USDT')
                 if sym and sym not in symbols:
@@ -2949,7 +2159,7 @@ def api_sentiment():
                     'cache_mtime': datetime.fromtimestamp(latest.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
                 }
             except Exception as e:
-                results[symbol] = {'error': _sanitize_public_error_text(e, default='cache_error')}
+                results[symbol] = {'error': str(e)}
 
         valid_scores = [r['sentiment'] for r in results.values() if 'sentiment' in r]
         valid_fg = [r['fear_greed'] for r in results.values() if 'fear_greed' in r]
@@ -2977,17 +2187,8 @@ def api_sentiment():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            overall={
-                'sentiment': 0.0,
-                'fear_greed': 50,
-                'mood': 'neutral',
-                'mood_color': '#64748b',
-            },
-            by_symbol={},
-            last_update='',
-        )
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/status')
@@ -3008,20 +2209,7 @@ def api_status():
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        try:
-            timer_name = _pick_timer_name()
-        except Exception:
-            timer_name = 'unknown'
-        return _json_internal_error_response(
-            e,
-            timer_active=False,
-            timer_name=timer_name,
-            timer_error='internal server error',
-            mode='unknown',
-            dry_run=True,
-            equity_cap=0,
-            last_check='',
-        )
+        return jsonify({'error': str(e)}), 500
 
 
 def calculate_market_indicators():
@@ -3365,7 +2553,7 @@ def _load_latest_regime_history_snapshot(reports_dir: Path) -> Dict[str, Any]:
 
 def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
     try:
-        audit_entries = _iter_decision_audits(reports_dir, max_entries=_market_state_audit_scan_limit())
+        audit_entries = _iter_decision_audits(reports_dir)
         regime_json_snapshot = _load_regime_json_snapshot(reports_dir)
         if audit_entries:
             if _is_failed_decision_audit(audit_entries[0]['audit']) and regime_json_snapshot:
@@ -3414,16 +2602,15 @@ def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
 def api_market_state():
     """市场状态 API，补齐投票详情和情绪缓存健康。"""
     try:
-        config = load_config()
-        runtime_reports_dir = _resolve_dashboard_runtime_paths(config).reports_dir
-        snapshot = _load_market_state_snapshot(runtime_reports_dir)
-        history_snapshot = _load_latest_regime_history_snapshot(runtime_reports_dir)
+        snapshot = _load_market_state_snapshot(REPORTS_DIR)
+        history_snapshot = _load_latest_regime_history_snapshot(REPORTS_DIR)
         regime = str(snapshot.get('state') or 'SIDEWAYS')
         votes = snapshot.get('votes', {}) if isinstance(snapshot.get('votes', {}), dict) else {}
         history_votes = history_snapshot.get('votes', {}) if isinstance(history_snapshot.get('votes', {}), dict) else {}
         alerts = snapshot.get('alerts', []) if isinstance(snapshot.get('alerts', []), list) else []
         monitor = snapshot.get('monitor', {}) if isinstance(snapshot.get('monitor', {}), dict) else {}
 
+        config = load_config()
         regime_cfg = config.get('regime', {}) if isinstance(config, dict) else {}
         cache_dir = WORKSPACE / 'data' / 'sentiment_cache'
         signal_health = {
@@ -3468,7 +2655,7 @@ def api_market_state():
                 configured_weights['rss'],
             ),
         }
-        history_24h = _load_market_vote_history(runtime_reports_dir, hours=24, max_points=24)
+        history_24h = _load_market_vote_history(REPORTS_DIR, hours=24, max_points=24)
         hmm_history_vote = history_votes.get('hmm', {}) if isinstance(history_votes.get('hmm', {}), dict) else {}
         hmm_vote = votes.get('hmm', {})
         if not isinstance(hmm_vote, dict):
@@ -3552,25 +2739,13 @@ def api_market_state():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            state='UNKNOWN',
-            position_multiplier=0.0,
-            description='market state unavailable',
-            method='error',
-            votes={},
-            alerts=[],
-            monitor={},
-            final_score=0.0,
-            price=0.0,
-            signal_health={},
-            history_24h=[],
-        )
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 def _load_equity_points(limit: int = 800):
     """从 reports/runs/*/equity.jsonl 聚合权益点（真实口径：cash+持仓市值）。"""
-    runs_dir = _resolve_dashboard_runtime_paths(load_config()).runs_dir
+    runs_dir = REPORTS_DIR / 'runs'
     points = []
     if not runs_dir.exists():
         return points
@@ -3616,7 +2791,7 @@ def api_equity_history():
         data = [{'timestamp': ts, 'value': round(eq, 4)} for ts, eq in points]
         return jsonify(data)
     except Exception as e:
-        return _json_internal_error_list_response(e, items=[])
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/equity_curve')
@@ -3674,16 +2849,7 @@ def api_equity_curve():
             'days': int(days)
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            dates=[],
-            values=[],
-            pnl=[],
-            initial=0,
-            current=0,
-            total_return=0,
-            days=0,
-        )
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/dashboard')
@@ -3691,57 +2857,37 @@ def api_dashboard():
     """Dashboard 完整数据API"""
     try:
         # 获取账户数据
-        dashboard_errors: List[str] = []
-        account_data = _call_dashboard_api(api_account, default={}, label='account', errors=dashboard_errors)
-        if not isinstance(account_data, dict):
-            account_data = {}
+        account_data = api_account().get_json()
         
         # 获取持仓
-        positions_data = _call_dashboard_api(
-            api_positions,
-            default={'positions': []},
-            label='positions',
-            errors=dashboard_errors,
-        )
+        positions_data = api_positions().get_json()
         if isinstance(positions_data, dict):
             positions_data = positions_data.get('positions', positions_data.get('data', []))
         if not isinstance(positions_data, list):
             positions_data = []
         
         # 获取交易
-        trades_data = _call_dashboard_api(api_trades, default={'trades': []}, label='trades', errors=dashboard_errors)
+        trades_data = api_trades().get_json()
         if isinstance(trades_data, dict):
             trades_data = trades_data.get('trades', trades_data.get('data', []))
         if not isinstance(trades_data, list):
             trades_data = []
         
         # 获取评分
-        scores_data = _call_dashboard_api(api_scores, default={'scores': []}, label='scores', errors=dashboard_errors)
+        scores_data = api_scores().get_json()
         if not isinstance(scores_data, dict):
             scores_data = {'scores': []}
         
         # 获取状态
-        status_data = _call_dashboard_api(api_status, default={}, label='status', errors=dashboard_errors)
+        status_data = api_status().get_json()
         if not isinstance(status_data, dict):
             status_data = {}
         
         # 获取权益曲线
-        equity_data = _call_dashboard_api(
-            api_equity_history,
-            default=[],
-            label='equity_history',
-            errors=dashboard_errors,
-        )
+        equity_data = api_equity_history().get_json()
         
         # 获取市场状态
-        market_state_data = _call_dashboard_api(
-            api_market_state,
-            default={},
-            label='market_state',
-            errors=dashboard_errors,
-        )
-        if not isinstance(market_state_data, dict):
-            market_state_data = {}
+        market_state_data = api_market_state().get_json()
         
         # 转换持仓格式
         positions = []
@@ -3814,48 +2960,6 @@ def api_dashboard():
         drawdown_pct = float(account_data.get('drawdown_pct', 0) or 0)
         realized_pnl = float(account_data.get('realized_pnl', 0) or 0)
 
-        timers_data = _call_dashboard_api(api_timers, default={'timers': []}, label='timers', errors=dashboard_errors)
-        if not isinstance(timers_data, dict):
-            timers_data = {'timers': []}
-        cost_calibration_data = _call_dashboard_api(
-            api_cost_calibration,
-            default={'status': 'unknown'},
-            label='cost_calibration',
-            errors=dashboard_errors,
-        )
-        if not isinstance(cost_calibration_data, dict):
-            cost_calibration_data = {'status': 'unknown'}
-        ic_diagnostics_data = _call_dashboard_api(
-            api_ic_diagnostics,
-            default={'status': 'no_data'},
-            label='ic_diagnostics',
-            errors=dashboard_errors,
-        )
-        if not isinstance(ic_diagnostics_data, dict):
-            ic_diagnostics_data = {'status': 'no_data'}
-        ml_training_data = _call_dashboard_api(
-            api_ml_training,
-            default={'status': 'unknown'},
-            label='ml_training',
-            errors=dashboard_errors,
-        )
-        if not isinstance(ml_training_data, dict):
-            ml_training_data = {'status': 'unknown'}
-        reflection_reports_data = _call_dashboard_api(
-            api_reflection_reports,
-            default={'reports': []},
-            label='reflection_reports',
-            errors=dashboard_errors,
-        )
-        if not isinstance(reflection_reports_data, dict):
-            reflection_reports_data = {'reports': []}
-
-        timer_error = status_data.get('timer_error')
-        system_errors: List[str] = []
-        if timer_error:
-            system_errors.append(_sanitize_public_error_text(timer_error))
-        system_errors.extend(dashboard_errors)
-
         dashboard_data = {
             'account': {
                 'totalEquity': round(total_equity, 4),
@@ -3882,54 +2986,21 @@ def api_dashboard():
                 'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',
                 'lastUpdate': account_data.get('last_update', ''),
                 'killSwitch': False,
-                'errors': system_errors
+                'errors': [status_data['timer_error']] if status_data.get('timer_error') else []
             },
             'equityCurve': equity_data if isinstance(equity_data, list) else [],
             # 新增：系统进度数据
-            'timers': timers_data,
-            'costCalibration': cost_calibration_data,
-            'icDiagnostics': ic_diagnostics_data,
-            'mlTraining': ml_training_data,
-            'reflectionReports': reflection_reports_data
+            'timers': api_timers().get_json() if hasattr(api_timers(), 'get_json') else {'timers': []},
+            'costCalibration': api_cost_calibration().get_json() if hasattr(api_cost_calibration(), 'get_json') else {'status': 'unknown'},
+            'icDiagnostics': api_ic_diagnostics().get_json() if hasattr(api_ic_diagnostics(), 'get_json') else {'status': 'no_data'},
+            'mlTraining': api_ml_training().get_json() if hasattr(api_ml_training(), 'get_json') else {'status': 'unknown'},
+            'reflectionReports': api_reflection_reports().get_json() if hasattr(api_reflection_reports(), 'get_json') else {'reports': []}
         }
         
         return jsonify(dashboard_data)
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            account={
-                'totalEquity': 0.0,
-                'cash': 0.0,
-                'positionsValue': 0.0,
-                'initialCapital': 120.0,
-                'totalPnl': 0.0,
-                'realizedPnl': 0.0,
-                'totalPnlPercent': 0.0,
-                'todayPnl': 0.0,
-                'todayPnlPercent': 0.0,
-                'sharpeRatio': 0.0,
-                'maxDrawdown': 0.0,
-                'winRate': 0.0,
-                'totalTrades': 0,
-            },
-            positions=[],
-            trades=[],
-            alphaScores=[],
-            marketState={},
-            systemStatus={
-                'isRunning': False,
-                'mode': 'unknown',
-                'lastUpdate': '',
-                'killSwitch': False,
-                'errors': ['internal server error'],
-            },
-            equityCurve=[],
-            timers={'timers': [], 'last_update': ''},
-            costCalibration={'status': 'error'},
-            icDiagnostics={'status': 'error'},
-            mlTraining={'status': 'error'},
-            reflectionReports={'reports': []},
-        )
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/timer')
@@ -3947,18 +3018,15 @@ def api_timer():
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        try:
-            timer_name = _pick_timer_name()
-        except Exception:
-            timer_name = 'v5-prod.user.timer'
-        return _json_internal_error_response(
-            e,
-            timer_name=timer_name,
-            next_run=None,
-            countdown_seconds=0,
-            interval_minutes=120,
-            last_check='',
-        )
+        import traceback
+        return jsonify({
+            'timer_name': _pick_timer_name(),
+            'next_run': None,
+            'countdown_seconds': 0,
+            'interval_minutes': 120,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 
 @app.route('/api/timers')
@@ -3990,11 +3058,8 @@ def api_timers():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            timers=[],
-            last_update='',
-        )
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/cost_calibration')
@@ -4002,14 +3067,10 @@ def api_cost_calibration():
     """F2成本校准进度API - 从定时任务生成的真实成本数据计算"""
     try:
         # 优先读取定时任务生成的真实成本数据 (cost_stats_real)
-        runtime_reports_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir
-        root_fallback_cost_dir = REPORTS_DIR / 'cost_stats'
-        cost_dir = runtime_reports_dir / 'cost_stats_real'
+        cost_dir = REPORTS_DIR / 'cost_stats_real'
         if not cost_dir.exists():
             cost_dir = REPORTS_DIR / 'cost_stats'  # 兼容旧路径
-        events_dir = runtime_reports_dir / 'cost_events'
-        if cost_dir == root_fallback_cost_dir:
-            cost_dir = runtime_reports_dir / 'cost_stats'
+        events_dir = REPORTS_DIR / 'cost_events'
         
         calibration_data = []
         total_days = 0
@@ -4176,20 +3237,8 @@ def api_cost_calibration():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            status='error',
-            total_days=0,
-            avg_slippage_bps=0.0,
-            avg_fee_bps=0.0,
-            avg_total_cost_bps=0.0,
-            event_files=0,
-            total_trades=0,
-            daily_stats=[],
-            progress_percent=0,
-            data_source='error',
-            last_update='',
-        )
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @app.route('/api/ic_diagnostics')
@@ -4197,8 +3246,7 @@ def api_ic_diagnostics():
     """IC诊断进度API"""
     try:
         # 查找IC诊断文件（按修改时间，避免文件名排序误判）
-        runtime_reports_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir
-        ic_files = list(runtime_reports_dir.glob('ic_diagnostics_*.json'))
+        ic_files = list(REPORTS_DIR.glob('ic_diagnostics_*.json'))
 
         if not ic_files:
             return jsonify({
@@ -4387,20 +3435,8 @@ def api_ic_diagnostics():
             'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            status='error',
-            overall_ic=None,
-            overall_ir=None,
-            sample_count=0,
-            timestamps_count=0,
-            lookback_days=0,
-            factors=[],
-            regimes=[],
-            source_file=None,
-            fallback_reason=None,
-            last_update='',
-        )
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 def _api_ml_training_v2():
@@ -4432,15 +3468,12 @@ def _api_ml_training_v2():
         existing = [p for p in _model_artifact_candidates(base_path) if p.exists()]
         return max(existing, key=lambda p: p.stat().st_mtime) if existing else None
 
-    config = load_config()
-    runtime_paths = _resolve_dashboard_runtime_paths(config)
-    runtime_reports_dir = runtime_paths.reports_dir
     configured_enabled = False
     min_samples = 200
     model_base_path = WORKSPACE / 'models' / 'ml_factor_model'
     pointer_path = WORKSPACE / 'models' / 'ml_factor_model_active.txt'
-    promotion_path = runtime_reports_dir / 'model_promotion_decision.json'
-    runtime_path = runtime_reports_dir / 'ml_runtime_status.json'
+    promotion_path = REPORTS_DIR / 'model_promotion_decision.json'
+    runtime_path = REPORTS_DIR / 'ml_runtime_status.json'
     try:
         cfg = load_app_config(str(CONFIG_PATH), env_path=None)
         ml_cfg = getattr(getattr(cfg, 'alpha', None), 'ml_factor', None)
@@ -4453,14 +3486,12 @@ def _api_ml_training_v2():
                 getattr(ml_cfg, 'active_model_pointer_path', 'models/ml_factor_model_active.txt'),
                 'models/ml_factor_model_active.txt',
             )
-            promotion_path = _resolve_dashboard_runtime_artifact_path(
-                runtime_paths.orders_db,
-                getattr(ml_cfg, 'promotion_decision_path', None),
+            promotion_path = _resolve_workspace_path(
+                getattr(ml_cfg, 'promotion_decision_path', 'reports/model_promotion_decision.json'),
                 'reports/model_promotion_decision.json',
             )
-            runtime_path = _resolve_dashboard_runtime_artifact_path(
-                runtime_paths.orders_db,
-                getattr(ml_cfg, 'runtime_status_path', None),
+            runtime_path = _resolve_workspace_path(
+                getattr(ml_cfg, 'runtime_status_path', 'reports/ml_runtime_status.json'),
                 'reports/ml_runtime_status.json',
             )
     except Exception:
@@ -4468,7 +3499,7 @@ def _api_ml_training_v2():
 
     total_samples = 0
     labeled_samples = 0
-    db_path = runtime_reports_dir / 'ml_training_data.db'
+    db_path = REPORTS_DIR / 'ml_training_data.db'
     if db_path.exists():
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()
@@ -4479,7 +3510,7 @@ def _api_ml_training_v2():
         conn.close()
 
     latest_history = {}
-    history_path = runtime_reports_dir / 'ml_training_history.json'
+    history_path = REPORTS_DIR / 'ml_training_history.json'
     if history_path.exists():
         try:
             hist_obj = json.loads(history_path.read_text(encoding='utf-8'))
@@ -4520,8 +3551,8 @@ def _api_ml_training_v2():
     stages = {
         'sampling': effective_samples > 0,
         'trained': _model_artifact_exists(model_base_path),
-        'promoted': _to_bool(decision.get('passed')) and pointer_path.exists() and _model_artifact_exists(active_model_base),
-        'liveActive': _to_bool(runtime.get('used_in_latest_snapshot')),
+        'promoted': bool(decision.get('passed')) and pointer_path.exists() and _model_artifact_exists(active_model_base),
+        'liveActive': bool(runtime.get('used_in_latest_snapshot')),
     }
     if stages['liveActive']:
         phase = 'live_active'
@@ -4554,7 +3585,7 @@ def _api_ml_training_v2():
         'model_date': model_time.strftime('%Y-%m-%d %H:%M') if model_time else None,
         'last_ic': round(float(latest_history.get('valid_ic')), 4) if latest_history.get('valid_ic') is not None else None,
         'last_training_ts': latest_history.get('timestamp'),
-        'last_training_gate_passed': _to_bool(((latest_history.get('gate') or {}).get('passed'))),
+        'last_training_gate_passed': bool(((latest_history.get('gate') or {}).get('passed'))),
         'last_promotion_ts': decision.get('ts'),
         'promotion_fail_reasons': [str(x) for x in (decision.get('fail_reasons') or [])],
         'last_runtime_ts': runtime.get('ts'),
@@ -4568,10 +3599,7 @@ def _api_ml_training_v2():
 
 @app.route('/api/ml_training')
 def api_ml_training():
-    try:
-        return _api_ml_training_v2()
-    except Exception as e:
-        return _ml_training_unavailable_response(e)
+    return _api_ml_training_v2()
     """机器学习训练进度API（对齐当前项目文件结构）"""
     try:
         model_dir = WORKSPACE / 'models'
@@ -4640,14 +3668,14 @@ def api_ml_training():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _ml_training_unavailable_response(e)
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/reflection_reports')
 def api_reflection_reports():
     """反思Agent报告列表API（兼容V1/V2结构）"""
     try:
-        reflection_dir = _resolve_dashboard_runtime_paths(load_config()).reports_dir / 'reflection'
+        reflection_dir = REPORTS_DIR / 'reflection'
 
         if not reflection_dir.exists():
             return jsonify({'reports': [], 'message': '暂无反思报告'})
@@ -4695,12 +3723,7 @@ def api_reflection_reports():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            reports=[],
-            total_reports=0,
-            last_update='',
-        )
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/decision_chain')
@@ -4708,7 +3731,7 @@ def api_decision_chain():
     """决策归因面板API - 展示策略信号到执行的完整链路"""
     try:
         # 获取最近5轮决策记录
-        runs_dir = _resolve_dashboard_runtime_paths(load_config()).runs_dir
+        runs_dir = REPORTS_DIR / 'runs'
         if not runs_dir.exists():
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
 
@@ -4739,7 +3762,7 @@ def api_decision_chain():
                     hour_diff = (run_hour - local_hour) % 24
                     if hour_diff >= 16:  # 相差16小时以上，说明是UTC命名的旧数据
                         # 旧数据：时间戳是UTC，显式转为CST，避免在UTC+8主机上重复偏移。
-                        run_time = _china_datetime_from_epoch_seconds(ts).strftime('%Y-%m-%d %H:%M:%S')
+                        run_time = (datetime.utcfromtimestamp(ts) + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
                     else:
                         # 新数据：时间戳已经是CST
                         run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
@@ -4837,7 +3860,7 @@ def api_decision_chain():
                     'execution_result': {'selected': 0, 'targets_pre_risk': 0, 'orders_rebalance': 0, 'orders_exit': 0},
                     'block_reasons': {'parse_error': 1},
                     'blocked_top': [],
-                    'error': 'internal parse error'
+                    'error': str(e)
                 })
                 continue
 
@@ -4846,11 +3869,7 @@ def api_decision_chain():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            rounds=[],
-            last_update='',
-        )
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/shadow_test')
@@ -4859,11 +3878,9 @@ def api_shadow_test():
     try:
         import sys
         sys.path.insert(0, str(WORKSPACE))
-        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
-        runtime_reports_dir = runtime_paths.orders_db.parent
         
         # 获取最近7天的运行数据用于对比
-        runs_dir = runtime_paths.runs_dir
+        runs_dir = REPORTS_DIR / 'runs'
         if not runs_dir.exists():
             return jsonify({'status': 'no_data', 'message': '暂无运行数据'})
         
@@ -4937,22 +3954,28 @@ def api_shadow_test():
         if deadband_skips:
             current_stats['avg_deadband_skip'] = round(sum(deadband_skips) / len(deadband_skips), 4)
         
-        # A/B gate generation is expensive; web requests should only read cached status.
+        # 读取/刷新 A/B gate 评估（建议是否切参）
         ab_gate = None
-        ab_gate_status = 'missing'
-        ab_gate_age_sec = None
-        ab_gate_error = None
         try:
-            gate_path = runtime_reports_dir / 'ab_gate_status.json'
+            gate_path = REPORTS_DIR / 'ab_gate_status.json'
+            need_refresh = True
             if gate_path.exists():
-                ab_gate_age_sec = max(0.0, (datetime.now().timestamp() - gate_path.stat().st_mtime))
+                age_sec = max(0, (datetime.now().timestamp() - gate_path.stat().st_mtime))
+                need_refresh = age_sec > 1800  # 30分钟
+            if need_refresh:
+                subprocess.run(
+                    [_resolve_workspace_python(), str(WORKSPACE / 'scripts/ab_decision_gate.py')],
+                    cwd=str(WORKSPACE),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=12,
+                    check=False,
+                )
+            if gate_path.exists():
                 with open(gate_path, 'r', encoding='utf-8') as f:
                     ab_gate = json.load(f)
-                ab_gate_status = 'stale' if ab_gate_age_sec > 1800 else 'fresh'
-        except Exception as e:
+        except Exception:
             ab_gate = None
-            ab_gate_status = 'error'
-            ab_gate_error = _sanitize_public_error_text(e)
 
         # 生成A/B对比报告
         ab_report = {
@@ -4996,61 +4019,19 @@ def api_shadow_test():
                 'suggested_next_step': '将 deadband_sideways 从 0.04 调至 0.03，观察24小时' if simulated_stats['estimated_improvement'] > 5 else '保持当前参数'
             },
             'matrix': [
-                {'name': 'A(当前)', 'params': {'deadband_sideways': 0.04, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
+                {'name': 'A(当前)', 'params': {'deadband_sideways': 0.03, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
                 {'name': 'B1', 'params': {'deadband_sideways': 0.025}},
                 {'name': 'B2', 'params': {'min_trade_notional_base': 2.5}},
                 {'name': 'B3', 'params': {'pos_mult_sideways': 0.7}},
             ],
             'ab_gate': ab_gate,
-            'ab_gate_status': ab_gate_status,
-            'ab_gate_age_sec': round(ab_gate_age_sec, 1) if ab_gate_age_sec is not None else None,
-            'ab_gate_error': ab_gate_error,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
         return jsonify(ab_report)
-
+        
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            status='error',
-            window_days=7,
-            window_rounds=0,
-            current_params={
-                'deadband_sideways': 0.04,
-                'description': 'current params',
-            },
-            proposed_params={
-                'deadband_sideways': 0.03,
-                'description': 'proposed params',
-            },
-            comparison={
-                'current': {
-                    'avg_selected_per_round': 0,
-                    'avg_rebalance_per_round': 0,
-                    'conversion_rate': 0,
-                    'total_deadband_blocks': 0,
-                    'avg_drift_when_blocked': 0,
-                },
-                'estimated_with_proposed': {
-                    'avg_rebalance_per_round': 0,
-                    'estimated_conversion_rate': 0,
-                    'additional_trades': 0,
-                    'risk_note': '',
-                },
-            },
-            recommendation={
-                'action': 'observe',
-                'reason': 'shadow test unavailable',
-                'suggested_next_step': '',
-            },
-            matrix=[],
-            ab_gate=None,
-            ab_gate_status='error',
-            ab_gate_age_sec=None,
-            ab_gate_error='internal error',
-            last_update='',
-        )
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/smart_alerts')
@@ -5069,7 +4050,7 @@ def api_smart_alerts():
             'status': 'alert' if alerts else 'normal'
         })
     except Exception as e:
-        return _json_internal_error_response(e, alerts=[], count=0, status='error')
+        return jsonify({'error': str(e), 'alerts': [], 'status': 'error'}), 500
 
 
 @app.route('/api/auto_risk_guard')
@@ -5078,8 +4059,7 @@ def api_auto_risk_guard():
     try:
         from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard
 
-        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
-        eval_path = runtime_paths.auto_risk_eval_path
+        eval_path = REPORTS_DIR / 'auto_risk_eval.json'
         if eval_path.exists():
             with open(eval_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -5099,7 +4079,7 @@ def api_auto_risk_guard():
                 'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             })
 
-        guard = get_auto_risk_guard(str(derive_runtime_auto_risk_guard_path(runtime_paths.orders_db)))
+        guard = get_auto_risk_guard()
         return jsonify({
             'current_level': guard.current_level,
             'config': guard.get_current_config(),
@@ -5109,37 +4089,27 @@ def api_auto_risk_guard():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            current_level='UNKNOWN',
-            config={},
-            history=[],
-            metrics={},
-            reason='',
-            last_update='',
-        )
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/decision_audit')
 def api_decision_audit():
     """获取最新决策审计数据（策略信号带回退，避免前端空白）"""
     try:
-        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
-        runtime_reports_dir = runtime_paths.orders_db.parent
-        runs_dir = runtime_paths.runs_dir
+        runs_dir = REPORTS_DIR / 'runs'
         if not runs_dir.exists():
             return jsonify({'error': 'No runs directory'}), 404
 
-        audit_entries = _iter_decision_audits(
-            runtime_reports_dir,
-            max_entries=_decision_audit_scan_limit(),
-        )
-        if not audit_entries:
+        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+        if not run_dirs:
             return jsonify({'error': 'No audit files found'}), 404
 
-        latest_entry = audit_entries[0]
-        latest_run_dir = latest_entry['run_dir']
-        audit_data = latest_entry['audit']
+        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        latest_run_dir = run_dirs[0]
+        latest_audit_file = latest_run_dir / 'decision_audit.json'
+
+        with open(latest_audit_file, 'r') as f:
+            audit_data = json.load(f)
 
         # 默认时间戳：决策文件目录时间
         ts = latest_run_dir.stat().st_mtime
@@ -5223,9 +4193,13 @@ def api_decision_audit():
 
         # 回退：按时间倒序遍历，找到第一个可成功解析的 strategy_signals.json
         if not strategy_signals:
-            for stale_entry in audit_entries[1:]:
-                stale_run_dir = stale_entry['run_dir']
-                stale_audit = stale_entry['audit']
+            for stale_run_dir in run_dirs[1:]:
+                try:
+                    with open(stale_run_dir / 'decision_audit.json', 'r') as f:
+                        stale_audit = json.load(f)
+                except Exception:
+                    continue
+
                 fallback_signals, fallback_source, fallback_ts = _load_run_strategy_payload(stale_run_dir, stale_audit)
                 if not fallback_signals:
                     continue
@@ -5239,7 +4213,7 @@ def api_decision_audit():
         # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.
         held_symbols = set()
         try:
-            con = sqlite3.connect(str(runtime_paths.positions_db))
+            con = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
             cur = con.cursor()
             cur.execute("SELECT symbol FROM positions WHERE qty > 0")
             held_symbols = {str(r[0]) for r in cur.fetchall()}
@@ -5291,43 +4265,21 @@ def api_decision_audit():
             'reject_reasons': {},
         }
         try:
-            conn = None
-            if runtime_paths.orders_db.exists():
-                conn = sqlite3.connect(str(runtime_paths.orders_db))
+            conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
-                try:
-                    cur.execute(
-                        """
-                        SELECT
-                            COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts,
-                            inst_id,
-                            side,
-                            intent,
-                            state,
-                            notional_usdt,
-                            last_error_code,
-                            last_error_msg,
-                            ord_id
-                        FROM orders
-                        WHERE run_id = ?
-                        ORDER BY event_ts DESC
-                        LIMIT 100
-                        """,
-                        (run_id,),
-                    )
-                except sqlite3.OperationalError:
-                    cur.execute(
-                        """
-                        SELECT created_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id
-                        FROM orders
-                        WHERE run_id = ?
-                        ORDER BY created_ts DESC
-                        LIMIT 100
-                        """,
-                        (run_id,),
-                    )
+                cur.execute(
+                    """
+                    SELECT created_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id
+                    FROM orders
+                    WHERE run_id = ?
+                    ORDER BY created_ts DESC
+                    LIMIT 100
+                    """,
+                    (run_id,),
+                )
                 rows = cur.fetchall()
+                conn.close()
 
                 for r in rows:
                     state = str(r[4] or 'UNKNOWN').upper()
@@ -5344,85 +4296,79 @@ def api_decision_audit():
                     }
                     run_orders.append(rec)
 
-                cur.execute(
-                    """
-                    SELECT
-                      COUNT(*) AS total,
-                      SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) AS filled,
-                      SUM(CASE WHEN state='REJECTED' THEN 1 ELSE 0 END) AS rejected,
-                      SUM(CASE WHEN state IN ('OPEN','PARTIAL','SENT','ACK','UNKNOWN') THEN 1 ELSE 0 END) AS open_like,
-                      SUM(CASE WHEN state IN ('CANCELED','CANCELLED') THEN 1 ELSE 0 END) AS cancelled
-                    FROM orders
-                    WHERE run_id = ?
-                    """,
-                    (run_id,),
-                )
-                summary_row = cur.fetchone() or (0, 0, 0, 0, 0)
-                execution_summary['total'] = int(summary_row[0] or 0)
-                execution_summary['filled'] = int(summary_row[1] or 0)
-                execution_summary['rejected'] = int(summary_row[2] or 0)
-                execution_summary['open_or_partial'] = int(summary_row[3] or 0)
-                execution_summary['cancelled'] = int(summary_row[4] or 0)
-                execution_summary['other'] = max(
-                    0,
-                    execution_summary['total']
-                    - execution_summary['filled']
-                    - execution_summary['rejected']
-                    - execution_summary['open_or_partial']
-                    - execution_summary['cancelled'],
-                )
-
-                cur.execute(
-                    """
-                    SELECT last_error_code, last_error_msg, COUNT(*)
-                    FROM orders
-                    WHERE run_id = ? AND state = 'REJECTED'
-                    GROUP BY last_error_code, last_error_msg
-                    """,
-                    (run_id,),
-                )
-                reject_rows = cur.fetchall()
-                for err_code, err_msg, cnt in reject_rows:
-                    rs = str(err_code or err_msg or 'unknown')
-                    execution_summary['reject_reasons'][rs] = int(cnt or 0)
-
-                conn.close()
+                execution_summary['total'] = len(run_orders)
+                for o in run_orders:
+                    st = str(o.get('state') or '').upper()
+                    if st == 'FILLED':
+                        execution_summary['filled'] += 1
+                    elif st == 'REJECTED':
+                        execution_summary['rejected'] += 1
+                        rs = str(o.get('last_error_code') or o.get('last_error_msg') or 'unknown')
+                        execution_summary['reject_reasons'][rs] = int(execution_summary['reject_reasons'].get(rs, 0)) + 1
+                    elif st in {'OPEN', 'PARTIAL', 'SENT', 'ACK', 'UNKNOWN'}:
+                        execution_summary['open_or_partial'] += 1
+                    elif st in {'CANCELED', 'CANCELLED'}:
+                        execution_summary['cancelled'] += 1
+                    else:
+                        execution_summary['other'] += 1
         except Exception:
             pass
 
         # Recent fill context + latest run with actual order attempts
-        recent_fill_summary = _load_recent_fill_summary(reports_dir=runtime_reports_dir)
+        recent_fill_summary = {
+            'count_60m': 0,
+            'count_24h': 0,
+            'latest_fill': None,
+        }
         latest_ordered_run_summary = None
         try:
-            conn = None
-            if runtime_paths.orders_db.exists():
-                conn = sqlite3.connect(str(runtime_paths.orders_db))
+            conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
 
+                # 1) Recent fills window
+                cur.execute(
+                    """
+                    SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
+                    FROM orders
+                    WHERE state = 'FILLED'
+                    ORDER BY created_ts DESC
+                    LIMIT 200
+                    """
+                )
+                fill_rows = cur.fetchall()
+
+                now_ms = int(datetime.now().timestamp() * 1000)
+                for i, r in enumerate(fill_rows):
+                    ts_raw = int(r[0] or 0)
+                    ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
+                    age_ms = max(0, now_ms - ts_ms)
+                    if age_ms <= 60 * 60 * 1000:
+                        recent_fill_summary['count_60m'] += 1
+                    if age_ms <= 24 * 60 * 60 * 1000:
+                        recent_fill_summary['count_24h'] += 1
+
+                    if i == 0:
+                        recent_fill_summary['latest_fill'] = {
+                            'created_ts': ts_raw,
+                            'run_id': str(r[1] or ''),
+                            'inst_id': str(r[2] or ''),
+                            'side': str(r[3] or ''),
+                            'intent': str(r[4] or ''),
+                            'notional_usdt': float(r[5] or 0.0),
+                            'ord_id': str(r[6] or ''),
+                        }
+
                 # 2) Latest run that has at least one order row (attempt)
-                try:
-                    cur.execute(
-                        """
-                        SELECT
-                            run_id,
-                            MAX(COALESCE(NULLIF(updated_ts, 0), created_ts)) AS last_ts
-                        FROM orders
-                        GROUP BY run_id
-                        ORDER BY last_ts DESC
-                        LIMIT 20
-                        """
-                    )
-                except sqlite3.OperationalError:
-                    cur.execute(
-                        """
-                        SELECT run_id, MAX(created_ts) AS last_ts
-                        FROM orders
-                        GROUP BY run_id
-                        ORDER BY last_ts DESC
-                        LIMIT 20
-                        """
-                    )
+                cur.execute(
+                    """
+                    SELECT run_id, MAX(created_ts) AS last_ts
+                    FROM orders
+                    GROUP BY run_id
+                    ORDER BY last_ts DESC
+                    LIMIT 20
+                    """
+                )
                 run_rows = cur.fetchall()
                 for rr in run_rows:
                     cand_run = str(rr[0] or '')
@@ -5496,7 +4442,7 @@ def api_decision_audit():
                 'symbol': str(rd.get('symbol') or ''),
                 'side': str(rd.get('side') or ''),
                 'reason': str(rd.get('reason') or ''),
-                'notional': _coerce_float(rd.get('notional'), 0.0),
+                'notional': float(rd.get('notional') or 0.0),
             }
             for rd in router_decisions
             if str(rd.get('action') or '').lower() == 'create'
@@ -5534,7 +4480,7 @@ def api_decision_audit():
             if isinstance(item, dict) and item.get('symbol'):
                 preferred_ml_symbols.append(str(item.get('symbol')))
         stored_ml_overview = audit_data.get('ml_signal_overview', {}) if isinstance(audit_data, dict) else {}
-        ml_signal_overview = _build_ml_signal_overview(runtime_reports_dir, preferred_symbols=preferred_ml_symbols)
+        ml_signal_overview = _build_ml_signal_overview(REPORTS_DIR, preferred_symbols=preferred_ml_symbols)
         if isinstance(stored_ml_overview, dict) and stored_ml_overview:
             merged_ml_overview = dict(stored_ml_overview)
             merged_ml_overview.update({k: v for k, v in ml_signal_overview.items() if v not in (None, {}, [], "")})
@@ -5579,41 +4525,7 @@ def api_decision_audit():
             'notes': audit_data.get('notes', [])[:12]
         })
     except Exception as e:
-        return _json_internal_error_response(
-            e,
-            run_id=None,
-            strategy_run_id=None,
-            strategy_signal_source='missing',
-            strategy_signals_count=0,
-            timestamp=None,
-            regime=None,
-            regime_details={},
-            counts={},
-            rejects={},
-            top_scores=[],
-            selection_source='alpha',
-            target_rank=[],
-            fused_buy_rank=[],
-            fused_rank_source_run=None,
-            fused_source_is_fallback=False,
-            router_decisions=[],
-            router_reason_counts={},
-            selected_orders=[],
-            blocked_routes=[],
-            strategy_signals=[],
-            actionable_signals={
-                'held_symbols': [],
-                'buy_candidates': [],
-                'sell_candidates': [],
-            },
-            execution_summary={},
-            execution_scope={'type': 'none', 'run_id': None, 'note': ''},
-            ml_signal_overview={},
-            recent_fill_summary={},
-            latest_ordered_run_summary={},
-            run_orders=[],
-            notes=[],
-        )
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/shadow_ml_overlay')
@@ -5631,14 +4543,16 @@ def api_shadow_ml_overlay():
             payload['error'] = '旁路调优版 XGBoost 归因数据未就绪'
         return jsonify(payload)
     except Exception as e:
-        return _json_internal_error_response(e, available=False)
+        return jsonify({
+            'available': False,
+            'error': str(e),
+        })
 
 
 @app.route('/api/health')
 def api_health():
     """系统健康检查API"""
     try:
-        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         checks = []
         overall_status = 'healthy'
         
@@ -5648,7 +4562,7 @@ def api_health():
             timer_state = _get_timer_state(timer_name)
 
             if timer_state.get('error'):
-                checks.append({'name': '定时任务', 'status': 'warning', 'detail': _sanitize_public_error_text(timer_state.get('error'), default='timer warning')})
+                checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(timer_state.get('error'))})
                 if overall_status == 'healthy':
                     overall_status = 'warning'
             elif timer_state.get('active'):
@@ -5657,12 +4571,12 @@ def api_health():
                 checks.append({'name': '定时任务', 'status': 'critical', 'detail': f'{timer_name}未运行'})
                 overall_status = 'critical'
         except Exception as e:
-            checks.append({'name': '定时任务', 'status': 'warning', 'detail': _sanitize_public_error_text(e, default='timer status unavailable')})
+            checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(e)})
             overall_status = 'warning'
         
         # 2. 检查数据库
         try:
-            orders_db = runtime_paths.orders_db
+            orders_db = REPORTS_DIR / 'orders.sqlite'
             if orders_db.exists():
                 conn = sqlite3.connect(str(orders_db))
                 cursor = conn.cursor()
@@ -5674,30 +4588,44 @@ def api_health():
                 checks.append({'name': '数据库', 'status': 'critical', 'detail': 'orders.sqlite不存在'})
                 overall_status = 'critical'
         except Exception as e:
-            checks.append({'name': '数据库', 'status': 'warning', 'detail': _sanitize_public_error_text(e, default='database status unavailable')})
+            checks.append({'name': '数据库', 'status': 'warning', 'detail': str(e)})
         
         # 3. 检查OKX API
         try:
-            key, sec, pp = _load_workspace_exchange_creds()
-            if not _dashboard_live_account_enabled():
-                checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'live检查未启用'})
-            elif key and sec and pp:
-                health_probe = _load_okx_health_check(key, sec, pp)
-                data = health_probe.get('data') if isinstance(health_probe, dict) else {}
-                latency = float(health_probe.get('latency_ms') or 0.0) if isinstance(health_probe, dict) else 0.0
-                detail = f'{latency:.0f}ms'
-                if isinstance(health_probe, dict) and health_probe.get('cached'):
-                    detail += ' (cached)'
+            import os, time, hmac, hashlib, base64, requests
+            from dotenv import load_dotenv
+            load_dotenv(str(WORKSPACE / '.env'))
+            
+            key = os.getenv('EXCHANGE_API_KEY')
+            sec = os.getenv('EXCHANGE_API_SECRET')
+            pp = os.getenv('EXCHANGE_PASSPHRASE')
+            
+            if key and sec and pp:
+                start = time.time()
+                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+                path = '/api/v5/account/balance'
+                msg = ts + 'GET' + path
+                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
                 
-                if data.get('code') == '0':
-                    checks.append({'name': 'OKX API', 'status': 'healthy', 'detail': detail})
+                headers = {
+                    'OK-ACCESS-KEY': key,
+                    'OK-ACCESS-SIGN': sig,
+                    'OK-ACCESS-TIMESTAMP': ts,
+                    'OK-ACCESS-PASSPHRASE': pp,
+                }
+                
+                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
+                latency = (time.time() - start) * 1000
+                
+                if resp.status_code == 200 and resp.json().get('code') == '0':
+                    checks.append({'name': 'OKX API', 'status': 'healthy', 'detail': f'{latency:.0f}ms'})
                 else:
                     checks.append({'name': 'OKX API', 'status': 'critical', 'detail': 'API响应异常'})
                     overall_status = 'critical'
             else:
                 checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'API密钥未配置'})
         except Exception as e:
-            checks.append({'name': 'OKX API', 'status': 'warning', 'detail': _sanitize_public_error_text(e, default='okx api unavailable')})
+            checks.append({'name': 'OKX API', 'status': 'warning', 'detail': str(e)})
         
         # 4. 检查磁盘空间
         try:
@@ -5716,16 +4644,10 @@ def api_health():
             else:
                 checks.append({'name': '磁盘空间', 'status': 'healthy', 'detail': f'{free_gb:.1f}GB可用'})
         except Exception as e:
-            checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': _sanitize_public_error_text(e, default='disk status unavailable')})
+            checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': str(e)})
         
         warning_count = sum(1 for item in checks if item.get('status') == 'warning')
         critical_count = sum(1 for item in checks if item.get('status') == 'critical')
-        if critical_count > 0:
-            overall_status = 'critical'
-        elif warning_count > 0:
-            overall_status = 'warning'
-        else:
-            overall_status = 'healthy'
         checked_at = datetime.now()
         return jsonify({
             'status': overall_status,
@@ -5737,7 +4659,7 @@ def api_health():
         })
         
     except Exception as e:
-        return _json_internal_error_response(e, status='error', checks=[], warning_count=0, critical_count=0)
+        return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
 if __name__ == '__main__':

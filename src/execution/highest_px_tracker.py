@@ -46,10 +46,7 @@ class HighestPriceTracker:
                 with open(self.state_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     for sym, rec in data.items():
-                        try:
-                            self.records[sym] = HighestPriceRecord(**rec)
-                        except Exception:
-                            continue
+                        self.records[sym] = HighestPriceRecord(**rec)
             except Exception as e:
                 print(f"[HighestPriceTracker] 加载失败: {e}")
     
@@ -65,7 +62,6 @@ class HighestPriceTracker:
     
     def update(self, symbol: str, highest_px: float, entry_px: float, source: str = "trade"):
         """更新峰值价格（默认取最大；new_position 时强制重置为入场价附近）"""
-        self._load()
         symbol = str(symbol)
         existing = self.records.get(symbol)
 
@@ -129,21 +125,8 @@ class HighestPriceTracker:
     
     def clear_symbol(self, symbol: str):
         """清除指定币种的记录（清仓后调用）"""
-        symbol = str(symbol)
-        try:
-            if self.state_path.exists():
-                data = json.loads(self.state_path.read_text(encoding='utf-8'))
-                if isinstance(data, dict) and symbol in data:
-                    data.pop(symbol, None)
-                    self.state_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
-                    self.records.pop(symbol, None)
-                    return
-        except Exception:
-            pass
-
-        self._load()
-        if symbol in self.records:
-            del self.records[symbol]
+        if str(symbol) in self.records:
+            del self.records[str(symbol)]
             self._save()
     
     def list_all(self) -> Dict[str, HighestPriceRecord]:
@@ -151,22 +134,32 @@ class HighestPriceTracker:
         return dict(self.records)
 
 
-# 全局实例
-_tracker_instance: Optional[HighestPriceTracker] = None
-_tracker_instances_by_path: Dict[str, HighestPriceTracker] = {}
+def derive_tracker_state_path(position_store_path: str | Path) -> Path:
+    """Derive a tracker file path from a positions DB path.
 
-def get_highest_price_tracker(state_path: Optional[str | Path] = None) -> HighestPriceTracker:
+    Keep the legacy default path for the primary positions DB, but isolate any
+    alternate stores such as shadow or test DBs so they do not share tracker
+    state accidentally.
+    """
+    db_path = Path(position_store_path)
+    stem = db_path.stem
+    if stem == "positions":
+        return db_path.with_name("highest_px_state.json")
+    return db_path.with_name(f"{stem}_highest_px_state.json")
+
+
+# 全局实例（按 state_path 隔离，避免 shadow/test 仓位库串到同一个 tracker）
+_tracker_instances: Dict[str, HighestPriceTracker] = {}
+
+
+def get_highest_price_tracker(state_path: str | Path = "reports/highest_px_state.json") -> HighestPriceTracker:
     """获取全局追踪器实例"""
-    global _tracker_instance
-    if state_path is None:
-        if _tracker_instance is None:
-            _tracker_instance = HighestPriceTracker()
-        return _tracker_instance
-
-    resolved_path = str(Path(state_path).expanduser().resolve())
-    if resolved_path not in _tracker_instances_by_path:
-        _tracker_instances_by_path[resolved_path] = HighestPriceTracker(resolved_path)
-    return _tracker_instances_by_path[resolved_path]
+    normalized = str(Path(state_path))
+    tracker = _tracker_instances.get(normalized)
+    if tracker is None:
+        tracker = HighestPriceTracker(normalized)
+        _tracker_instances[normalized] = tracker
+    return tracker
 
 
 if __name__ == '__main__':

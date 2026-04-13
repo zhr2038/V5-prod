@@ -6,8 +6,6 @@ USER_MODE=0
 PRODUCTION_ONLY=0
 ENABLE_PROD_TIMER=0
 ENABLE_EVENT_DRIVEN_TIMER=0
-SHADOW_ROOT=""
-RESTART_WEB_DASHBOARD=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -17,10 +15,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --root)
       ROOT="$2"
-      shift 2
-      ;;
-    --shadow-root)
-      SHADOW_ROOT="$2"
       shift 2
       ;;
     --production-only)
@@ -33,10 +27,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --enable-event-driven-timer)
       ENABLE_EVENT_DRIVEN_TIMER=1
-      shift
-      ;;
-    --restart-web-dashboard)
-      RESTART_WEB_DASHBOARD=1
       shift
       ;;
     *)
@@ -54,11 +44,24 @@ if [[ ! -d "$SRC" ]]; then
   exit 1
 fi
 
-if [[ -x "$ROOT/.venv/bin/python" ]]; then
+can_run_python() {
+  local candidate="$1"
+  if [[ -z "$candidate" ]]; then
+    return 1
+  fi
+  if [[ "$candidate" == */* ]]; then
+    [[ -x "$candidate" ]] || return 1
+  elif ! command -v "$candidate" >/dev/null 2>&1; then
+    return 1
+  fi
+  "$candidate" -c "import sys" >/dev/null 2>&1
+}
+
+if can_run_python "$ROOT/.venv/bin/python"; then
   PYTHON_BIN="$ROOT/.venv/bin/python"
-elif command -v python3 >/dev/null 2>&1; then
+elif can_run_python python3; then
   PYTHON_BIN="$(command -v python3)"
-elif command -v python >/dev/null 2>&1; then
+elif can_run_python python; then
   PYTHON_BIN="$(command -v python)"
 else
   echo "missing python interpreter" >&2
@@ -68,18 +71,7 @@ fi
 render_units() {
   local dst="$1"
   shift
-  render_units_for_root "$ROOT" "$dst" "$@"
-}
-
-render_units_for_root() {
-  local root="$1"
-  local dst="$2"
-  shift 2
-  local render_args=()
-  if [[ "$USER_MODE" == "1" ]]; then
-    render_args+=(--user-mode)
-  fi
-  "$PYTHON_BIN" "$RENDERER" --src-dir "$SRC" --dst-dir "$dst" --root "$root" "${render_args[@]}" "$@"
+  "$PYTHON_BIN" "$RENDERER" --src-dir "$SRC" --dst-dir "$dst" --root "$ROOT" "$@"
 }
 
 if [[ "$USER_MODE" == "1" ]]; then
@@ -100,8 +92,6 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-event-driven.service=v5-event-driven.service \
       --mapping v5-event-driven.timer=v5-event-driven.timer \
       --mapping v5-web-dashboard.service=v5-web-dashboard.service \
-      --mapping v5-trade-monitor.service=v5-trade-monitor.service \
-      --mapping v5-trade-monitor.timer=v5-trade-monitor.timer \
       --mapping v5-sentiment-collect.service=v5-sentiment-collect.service \
       --mapping v5-sentiment-collect.timer=v5-sentiment-collect.timer \
       --mapping v5-auto-risk-eval.service=v5-auto-risk-eval.service \
@@ -115,18 +105,7 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-ledger.user.service=v5-ledger.service \
       --mapping v5-ledger.timer=v5-ledger.timer \
       --mapping v5-cost-rollup-real.user.service=v5-cost-rollup-real.user.service \
-      --mapping v5-cost-rollup-real.user.timer=v5-cost-rollup-real.user.timer \
-      --mapping v5-spread-rollup.user.service=v5-spread-rollup.service \
-      --mapping v5-spread-rollup.timer=v5-spread-rollup.timer
-
-    if [[ -n "$SHADOW_ROOT" ]]; then
-      shadow_root="$SHADOW_ROOT"
-    else
-      shadow_root="$(dirname "$ROOT")/v5-shadow-tuned-xgboost"
-    fi
-    render_units_for_root "$shadow_root" "$DST" \
-      --mapping v5-shadow-tuned-xgboost.user.service=v5-shadow-tuned-xgboost.user.service \
-      --mapping v5-shadow-tuned-xgboost.user.timer=v5-shadow-tuned-xgboost.user.timer
+      --mapping v5-cost-rollup-real.user.timer=v5-cost-rollup-real.user.timer
   else
     render_units "$DST" --copy-all \
       --mapping v5-reconcile.user.service=v5-reconcile.service \
@@ -141,15 +120,12 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user disable --now \
       v5-hourly.timer v5-hourly.service \
       v5-daily.timer v5-daily.service \
-      v5-cost-rollup.timer v5-cost-rollup.service >/dev/null 2>&1 || true
+      v5-cost-rollup.timer v5-cost-rollup.service \
+      v5-spread-rollup.timer v5-spread-rollup.service >/dev/null 2>&1 || true
     # Keep the tuned shadow timer intact. It now writes into an isolated workspace
     # and reports namespace, so production-only deploys should not tear it down.
     systemctl --user disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service >/dev/null 2>&1 || true
     systemctl --user enable --now v5-web-dashboard.service
-    if [[ "$RESTART_WEB_DASHBOARD" == "1" ]]; then
-      systemctl --user restart v5-web-dashboard.service
-    fi
-    systemctl --user enable --now v5-trade-monitor.timer
     systemctl --user enable --now v5-sentiment-collect.timer
     systemctl --user enable --now v5-auto-risk-eval.timer
     systemctl --user enable --now v5-daily-ml-training.timer
@@ -157,15 +133,13 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user enable --now v5-reconcile.timer
     systemctl --user enable --now v5-ledger.timer
     systemctl --user enable --now v5-cost-rollup-real.user.timer
-    systemctl --user enable --now v5-spread-rollup.timer
-    systemctl --user enable --now v5-shadow-tuned-xgboost.user.timer
     if [[ "$ENABLE_PROD_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-prod.user.timer
     fi
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|trade-monitor|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real|spread-rollup|shadow-tuned-xgboost)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer
