@@ -9,6 +9,7 @@ from src.core.models import Order
 
 
 DEFAULT_STATE_PATH = "reports/order_state_machine.json"
+DEFAULT_TAKE_PROFIT_COOLDOWN_STATE_PATH = "reports/take_profit_cooldown_state.json"
 
 
 def _now_ms() -> int:
@@ -31,6 +32,17 @@ def _save_state(path: str, state: Dict[str, Any]) -> None:
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
+
+
+def _load_take_profit_cooldown_state(path: str) -> Dict[str, Any]:
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
 
 
 def _order_priority(o: Order) -> int:
@@ -70,6 +82,8 @@ def arbitrate_orders(
     run_id: str,
     cooldown_minutes: int = 10,
     state_path: str = DEFAULT_STATE_PATH,
+    take_profit_cooldown_minutes: int = 0,
+    take_profit_cooldown_state_path: str = DEFAULT_TAKE_PROFIT_COOLDOWN_STATE_PATH,
 ) -> Tuple[List[Order], List[Dict[str, Any]]]:
     """Arbitrate conflicting orders by symbol with deterministic priority + state machine.
 
@@ -79,6 +93,7 @@ def arbitrate_orders(
     """
     now_ms = _now_ms()
     state = _load_state(state_path)
+    take_profit_state = _load_take_profit_cooldown_state(take_profit_cooldown_state_path)
     decisions: List[Dict[str, Any]] = []
 
     held = {str(getattr(p, "symbol", "")) for p in (positions or []) if float(getattr(p, "qty", 0.0) or 0.0) > 1e-12}
@@ -119,6 +134,12 @@ def arbitrate_orders(
         st = _state_for_symbol(state, sym)
         machine_state = str(st.get("state") or "FLAT")
         cooldown_until = int(st.get("cooldown_until_ms") or 0)
+        take_profit_rec = take_profit_state.get(sym) if isinstance(take_profit_state, dict) else None
+        take_profit_until = 0
+        if isinstance(take_profit_rec, dict) and int(take_profit_cooldown_minutes or 0) > 0:
+            last_tp_ms = int(take_profit_rec.get("last_take_profit_ts_ms") or 0)
+            if last_tp_ms > 0:
+                take_profit_until = last_tp_ms + int(take_profit_cooldown_minutes) * 60 * 1000
 
         # Rule 1: if CLOSE_LONG exists, it dominates all buys for same symbol in this run
         close_sells = [o for o in os if str(o.side).lower() == "sell" and str(o.intent).upper() == "CLOSE_LONG"]
@@ -152,19 +173,29 @@ def arbitrate_orders(
         kept = []
         for o in os:
             is_buy = str(o.side).lower() == "buy" and str(o.intent).upper() in {"OPEN_LONG", "REBALANCE"}
-            if is_buy and (machine_state == "EXIT_PENDING" or (machine_state == "COOLDOWN" and cooldown_until > now_ms)):
+            take_profit_cooldown_active = take_profit_until > now_ms
+            if is_buy and (
+                machine_state == "EXIT_PENDING"
+                or (machine_state == "COOLDOWN" and cooldown_until > now_ms)
+                or take_profit_cooldown_active
+            ):
                 blocked_buys.append(o)
             else:
                 kept.append(o)
 
         for o in blocked_buys:
-            code = "ARB_BLOCKED_BY_EXIT_PENDING" if machine_state == "EXIT_PENDING" else "ARB_BLOCKED_BY_COOLDOWN"
+            if take_profit_until > now_ms:
+                code = "ARB_BLOCKED_BY_TAKE_PROFIT_COOLDOWN"
+                reason = f"take_profit_cooldown_until_ms={take_profit_until}"
+            else:
+                code = "ARB_BLOCKED_BY_EXIT_PENDING" if machine_state == "EXIT_PENDING" else "ARB_BLOCKED_BY_COOLDOWN"
+                reason = f"state={machine_state} cooldown_until_ms={cooldown_until}"
             decisions.append(
                 {
                     "symbol": sym,
                     "action": "blocked",
                     "code": code,
-                    "reason": f"state={machine_state} cooldown_until_ms={cooldown_until}",
+                    "reason": reason,
                     "blocked": {"side": o.side, "intent": o.intent, "notional_usdt": float(o.notional_usdt or 0.0)},
                 }
             )

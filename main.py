@@ -893,13 +893,24 @@ def main() -> None:
 
         orders_before = len(orders or [])
         sm_path = str(_resolve_order_state_machine_path(cfg))
+        runtime_order_store_path = str(
+            getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
+            or "reports/orders.sqlite"
+        )
         cooldown_min = int(_coalesce(getattr(cfg.execution, "open_long_cooldown_minutes", None), 10))
+        take_profit_cooldown_min = int(
+            _coalesce(getattr(cfg.execution, "take_profit_reentry_cooldown_minutes", None), 0)
+        )
         orders, arb_decisions = arbitrate_orders(
             orders=(orders or []),
             positions=store.list(),
             run_id=run_id,
             cooldown_minutes=cooldown_min,
             state_path=sm_path,
+            take_profit_cooldown_minutes=take_profit_cooldown_min,
+            take_profit_cooldown_state_path=str(
+                derive_runtime_named_json_path(runtime_order_store_path, "take_profit_cooldown_state")
+            ),
         )
         blocked_n = len([d for d in (arb_decisions or []) if d.get("action") == "blocked"])
         if blocked_n > 0:
