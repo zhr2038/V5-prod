@@ -2539,7 +2539,7 @@ def api_position_kline():
                 ts_value *= 1000
             candles.append({
                 'ts': ts_value,
-                'time': datetime.utcfromtimestamp(ts_value / 1000.0).strftime('%Y-%m-%d %H:%M'),
+                'time': datetime.fromtimestamp(ts_value / 1000.0, tz=timezone.utc).strftime('%Y-%m-%d %H:%M'),
                 'open': round(float(open_px), 8),
                 'high': round(float(high_px), 8),
                 'low': round(float(low_px), 8),
@@ -4460,7 +4460,7 @@ def api_decision_chain():
                     hour_diff = (run_hour - local_hour) % 24
                     if hour_diff >= 16:  # 相差16小时以上，说明是UTC命名的旧数据
                         # 旧数据：时间戳是UTC，显式转为CST，避免在UTC+8主机上重复偏移。
-                        run_time = (datetime.utcfromtimestamp(ts) + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
+                        run_time = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
                     else:
                         # 新数据：时间戳已经是CST
                         run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
