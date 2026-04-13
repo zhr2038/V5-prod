@@ -2570,8 +2570,8 @@ def api_position_kline():
                 'last_time': candles[-1]['time'],
             },
         })
-    except Exception as e:
-        return jsonify({'error': str(e), 'candles': []}), 500
+    except Exception as exc:
+        return _json_internal_error_response(exc, candles=[])
 
 
 @app.route('/api/scores')
@@ -4749,8 +4749,8 @@ def api_smart_alerts():
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'status': 'alert' if alerts else 'normal'
         })
-    except Exception as e:
-        return jsonify({'error': str(e), 'alerts': [], 'status': 'error'}), 500
+    except Exception as exc:
+        return _json_internal_error_response(exc, alerts=[], status='error')
 
 
 @app.route('/api/auto_risk_guard')

@@ -863,6 +863,25 @@ def test_position_kline_api_normalizes_second_timestamps(monkeypatch):
     assert payload["candles"][0]["time"] == "2024-03-12 00:00"
 
 
+def test_position_kline_api_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    def raise_series(*_args, **_kwargs):
+        raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/reports/position_cache.db")
+
+    monkeypatch.setattr(module, "_load_position_market_series", raise_series)
+
+    response = client.get("/api/position_kline?symbol=BTC&timeframe=1h")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["candles"] == []
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/reports/position_cache.db", "position_cache.db")
+
+
 def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -2636,6 +2655,29 @@ def test_shadow_ml_overlay_error_response_hides_internal_paths(monkeypatch):
     assert "v5-shadow-tuned-xgboost" not in body
     assert "/home/ubuntu/clawd" not in body
     assert "Traceback" not in body
+
+
+def test_smart_alerts_error_response_hides_internal_paths(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    class _BrokenEngine:
+        def run_all_checks(self):
+            raise FileNotFoundError("/home/ubuntu/clawd/v5-prod/reports/alert_rules.yaml")
+
+    fake_module = type(sys)("src.monitoring.smart_alert")
+    fake_module.SmartAlertEngine = _BrokenEngine
+    monkeypatch.setitem(sys.modules, "src.monitoring.smart_alert", fake_module)
+
+    response = client.get("/api/smart_alerts")
+
+    assert response.status_code == 500
+    body = response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["error"] == "internal server error"
+    assert payload["alerts"] == []
+    assert payload["status"] == "error"
+    _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/reports/alert_rules.yaml", "alert_rules.yaml")
 
 
 def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
