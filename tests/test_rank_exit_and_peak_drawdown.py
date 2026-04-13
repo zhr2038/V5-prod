@@ -197,6 +197,63 @@ def test_peak_drawdown_exit_generates_partial_sell_order(tmp_path):
     assert order.meta["reason"].startswith("profit_partial_peak_drawdown_8pct")
 
 
+def test_take_profit_sell_all_generates_close_long_order(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT", "OKB/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.take_profit_sell_all_pct = 0.10
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"OKB/USDT": 0.40},
+        selected=["OKB/USDT"],
+        volatilities={},
+        notes="",
+    )
+
+    market_data = {
+        "BTC/USDT": _series("BTC/USDT", 50000.0),
+        "OKB/USDT": _series("OKB/USDT", 110.0),
+    }
+    positions = [
+        Position(
+            symbol="OKB/USDT",
+            qty=1.0,
+            avg_px=100.0,
+            entry_ts="2026-03-09T00:00:00Z",
+            highest_px=110.0,
+            last_update_ts="2026-03-09T00:00:00Z",
+            last_mark_px=110.0,
+            unrealized_pnl_pct=0.10,
+        )
+    ]
+    alpha = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={
+            "BTC/USDT": 1.0,
+            "OKB/USDT": 0.95,
+        },
+    )
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=positions,
+        cash_usdt=100.0,
+        equity_peak_usdt=210.0,
+        audit=DecisionAudit(run_id="take-profit-sell-all"),
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    order = out.orders[0]
+    assert order.symbol == "OKB/USDT"
+    assert order.side == "sell"
+    assert order.intent == "CLOSE_LONG"
+    assert order.notional_usdt == pytest.approx(110.0)
+    assert order.meta["reason"] == "profit_taking_take_profit_10pct"
+
+
 def test_peak_drawdown_config_preserves_zero_values(tmp_path):
     cfg = AppConfig(symbols=["BTC/USDT"])
     cfg.execution.peak_drawdown_exit.enabled = True

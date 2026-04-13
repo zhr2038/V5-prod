@@ -238,6 +238,8 @@ execution:
   slippage_bps: 5
   
   open_long_cooldown_minutes: 120
+  take_profit_sell_all_pct: 0.10
+  take_profit_reentry_cooldown_minutes: 120
   # 排名退出防抖：需连续2轮跌出前3才触发rank_exit；且退出后1小时内禁止回补
   rank_exit_max_rank: 3
   rank_exit_confirm_rounds: 2

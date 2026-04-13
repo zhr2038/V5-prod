@@ -16,6 +16,7 @@ from src.execution.fill_store import FillRow, FillStore
 from src.execution.live_execution_engine import (
     LiveExecutionEngine,
     _record_rank_exit_fill,
+    _record_take_profit_fill,
     submit_gate_for_live,
 )
 from src.execution.order_store import OrderStore
@@ -388,6 +389,43 @@ def test_rank_exit_reentry_cooldown_uses_runtime_state_file() -> None:
                     notional_usdt=10.0,
                     signal_price=100.0,
                     meta={"decision_hash": "runtime-rank-exit"},
+                )
+            )
+
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
+
+
+def test_take_profit_reentry_cooldown_uses_runtime_state_file() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        cfg = ExecutionConfig(
+            order_store_path=f"{td}/shadow_orders.sqlite",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            take_profit_reentry_cooldown_minutes=10,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, run_id="r")
+
+        assert Path(eng.take_profit_cooldown_state_path) == Path(td) / "shadow_take_profit_cooldown_state.json"
+        (Path(td) / "take_profit_cooldown_state.json").write_text(
+            json.dumps({"BTC/USDT": {"last_take_profit_ts_ms": 1, "reason": "root-stale"}}),
+            encoding="utf-8",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("src.execution.live_execution_engine.time.time", lambda: 950.0)
+            mp.setattr("src.execution.live_execution_engine._public_mid_at_submit", lambda **kwargs: None)
+            _record_take_profit_fill("BTC/USDT", "profit_taking_take_profit_10pct", path=eng.take_profit_cooldown_state_path)
+            mp.setattr("src.execution.live_execution_engine.time.time", lambda: 1_000.0)
+            result = eng.place(
+                Order(
+                    symbol="BTC/USDT",
+                    side="buy",
+                    intent="OPEN_LONG",
+                    notional_usdt=10.0,
+                    signal_price=100.0,
+                    meta={"decision_hash": "runtime-take-profit"},
                 )
             )
 

@@ -62,6 +62,7 @@ class ProfitTakingManager:
         self,
         *,
         rank_exit_strict_mode: bool = False,
+        take_profit_sell_all_pct: float = 0.0,
         peak_drawdown_levels: Optional[List[PeakDrawdownLevel]] = None,
         state_path: str = "reports/profit_taking_state.json",
     ):
@@ -72,6 +73,7 @@ class ProfitTakingManager:
             ProfitLevel(profit_pct=0.50, action="partial_sell", stop_pct=0.35, sell_pct=0.50, trail_buffer=0.10),
         ]
         self.rank_exit_strict_mode = bool(rank_exit_strict_mode)
+        self.take_profit_sell_all_pct = max(0.0, float(take_profit_sell_all_pct or 0.0))
         self.peak_drawdown_levels = sorted(
             list(peak_drawdown_levels or []),
             key=lambda level: float(level.profit_pct),
@@ -90,6 +92,11 @@ class ProfitTakingManager:
 
     def _peak_drawdown_key(self, level: PeakDrawdownLevel) -> str:
         return f"peak_drawdown_{self._pct_token(level.profit_pct)}"
+
+    def _take_profit_sell_all_key(self) -> Optional[str]:
+        if self.take_profit_sell_all_pct <= 0:
+            return None
+        return f"take_profit_{self._pct_token(self.take_profit_sell_all_pct)}"
 
     def _legacy_partial_action_key(self) -> Optional[str]:
         for level in self.profit_levels:
@@ -210,6 +217,21 @@ class ProfitTakingManager:
             state.profit_high = profit_pct
             state.highest_price = current_price
             changed = True
+
+        take_profit_key = self._take_profit_sell_all_key()
+        if take_profit_key and (
+            take_profit_key in state.triggered_actions
+            or profit_pct + 1e-12 >= self.take_profit_sell_all_pct
+        ):
+            if take_profit_key not in state.triggered_actions:
+                state.triggered_actions.append(take_profit_key)
+                changed = True
+            if state.current_action != take_profit_key:
+                state.current_action = take_profit_key
+                changed = True
+            if changed:
+                self._save_state()
+            return "sell_all", current_price, take_profit_key
 
         if current_price <= state.current_stop:
             if changed:

@@ -235,6 +235,7 @@ class V5Pipeline:
             ]
         self.profit_taking = ProfitTakingManager(
             rank_exit_strict_mode=bool(getattr(cfg.execution, "rank_exit_strict_mode", False)),
+            take_profit_sell_all_pct=float(getattr(cfg.execution, "take_profit_sell_all_pct", 0.0) or 0.0),
             peak_drawdown_levels=peak_drawdown_levels,
             state_path=str(
                 derive_runtime_named_json_path(

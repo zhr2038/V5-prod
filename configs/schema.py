@@ -519,6 +519,18 @@ class ExecutionConfig(BaseModel):
         ge=0,
         description="Block new OPEN_LONG buy if same symbol had FILLED OPEN_LONG within this many minutes (0=disable)",
     )
+    take_profit_sell_all_pct: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=5.0,
+        description="Immediately CLOSE_LONG the full position once profit reaches this ratio (0=disable)",
+    )
+    take_profit_reentry_cooldown_minutes: int = Field(
+        default=0,
+        ge=0,
+        le=24 * 60,
+        description="After a FILLED profit-taking sell, block OPEN_LONG re-entry for this many minutes",
+    )
 
     # Rank-exit anti-churn controls.
     rank_exit_max_rank: int = Field(
