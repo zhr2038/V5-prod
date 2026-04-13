@@ -35,7 +35,7 @@ def test_dry_run_profit_partial_records_take_profit_cooldown() -> None:
             ]
         )
 
-        state_path = Path(td) / "take_profit_cooldown_state.json"
+        state_path = Path(td) / "shadow_take_profit_cooldown_state.json"
         assert state_path.exists()
         payload = json.loads(state_path.read_text(encoding="utf-8"))
         assert "BTC/USDT" in payload

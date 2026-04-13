@@ -11,7 +11,7 @@ from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
 from src.execution.position_store import PositionStore
 from src.execution.account_store import AccountStore, AccountState
-from src.execution.fill_store import derive_runtime_cost_events_dir
+from src.execution.fill_store import derive_runtime_cost_events_dir, derive_runtime_named_json_path
 from src.utils.time import utc_now_iso, utc_now_timestamp
 
 log = logging.getLogger(__name__)
@@ -144,17 +144,14 @@ class ExecutionEngine:
 
                     reason = str(((o.meta or {}).get("reason")) or "")
                     try:
+                        runtime_order_store_path = str(getattr(self.cfg, "order_store_path", "reports/orders.sqlite"))
                         if reason.startswith("rank_exit_"):
                             from src.execution.live_execution_engine import _record_rank_exit_fill
 
                             _record_rank_exit_fill(
                                 o.symbol,
                                 reason,
-                                path=str(
-                                    Path(str(getattr(self.cfg, "order_store_path", "reports/orders.sqlite"))).with_name(
-                                        "rank_exit_cooldown_state.json"
-                                    )
-                                ),
+                                path=str(derive_runtime_named_json_path(runtime_order_store_path, "rank_exit_cooldown_state")),
                             )
                         if reason.startswith("profit_taking_") or reason.startswith("profit_partial_"):
                             from src.execution.live_execution_engine import _record_take_profit_fill
@@ -162,11 +159,7 @@ class ExecutionEngine:
                             _record_take_profit_fill(
                                 o.symbol,
                                 reason,
-                                path=str(
-                                    Path(str(getattr(self.cfg, "order_store_path", "reports/orders.sqlite"))).with_name(
-                                        "take_profit_cooldown_state.json"
-                                    )
-                                ),
+                                path=str(derive_runtime_named_json_path(runtime_order_store_path, "take_profit_cooldown_state")),
                             )
                     except Exception as e:
                         log.warning("Failed to record dry-run cooldown state for %s: %s", o.symbol, e)
