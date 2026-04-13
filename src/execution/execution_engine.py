@@ -129,8 +129,47 @@ class ExecutionEngine:
                         new_qty = max(0.0, held_qty - close_qty)
                         if new_qty <= 0.0:
                             self.position_store.close_long(o.symbol)
+                            try:
+                                from src.execution.live_execution_engine import clear_risk_state_on_full_close
+
+                                clear_risk_state_on_full_close(
+                                    o.symbol,
+                                    order_store_path=str(getattr(self.cfg, "order_store_path", "reports/orders.sqlite")),
+                                    position_store_path=str(getattr(self.position_store, "path", "reports/positions.sqlite")),
+                                )
+                            except Exception as e:
+                                log.warning("Failed to clear dry-run risk state for %s: %s", o.symbol, e)
                         else:
                             self.position_store.set_qty(o.symbol, qty=new_qty)
+
+                    reason = str(((o.meta or {}).get("reason")) or "")
+                    try:
+                        if reason.startswith("rank_exit_"):
+                            from src.execution.live_execution_engine import _record_rank_exit_fill
+
+                            _record_rank_exit_fill(
+                                o.symbol,
+                                reason,
+                                path=str(
+                                    Path(str(getattr(self.cfg, "order_store_path", "reports/orders.sqlite"))).with_name(
+                                        "rank_exit_cooldown_state.json"
+                                    )
+                                ),
+                            )
+                        if reason.startswith("profit_taking_") or reason.startswith("profit_partial_"):
+                            from src.execution.live_execution_engine import _record_take_profit_fill
+
+                            _record_take_profit_fill(
+                                o.symbol,
+                                reason,
+                                path=str(
+                                    Path(str(getattr(self.cfg, "order_store_path", "reports/orders.sqlite"))).with_name(
+                                        "take_profit_cooldown_state.json"
+                                    )
+                                ),
+                            )
+                    except Exception as e:
+                        log.warning("Failed to record dry-run cooldown state for %s: %s", o.symbol, e)
 
             if acc is not None and self.account_store:
                 self.account_store.set(acc)
