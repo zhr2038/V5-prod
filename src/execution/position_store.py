@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from dataclasses import dataclass
@@ -7,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from src.execution.fill_store import derive_runtime_named_json_path
 from src.utils.time import utc_now_iso
 
 log = logging.getLogger(__name__)
@@ -61,6 +63,37 @@ class PositionStore:
                 self.path.name.replace("positions", "highest_px_state", 1)
             ).with_suffix(".json")
         return self.path.with_name("highest_px_state.json")
+
+    def _order_store_path(self) -> Path:
+        if self.path.name == "positions.sqlite":
+            return self.path.with_name("orders.sqlite")
+        if "positions" in self.path.stem:
+            return self.path.with_name(self.path.name.replace("positions", "orders", 1))
+        return self.path.with_name("orders.sqlite")
+
+    def _runtime_risk_state_paths(self) -> List[Path]:
+        order_store_path = self._order_store_path()
+        return [
+            derive_runtime_named_json_path(order_store_path, "stop_loss_state"),
+            derive_runtime_named_json_path(order_store_path, "fixed_stop_loss_state"),
+            derive_runtime_named_json_path(order_store_path, "profit_taking_state"),
+            self._highest_tracker_state_path(),
+        ]
+
+    @staticmethod
+    def _remove_symbol_from_state_file(path: Path, symbol: str) -> None:
+        try:
+            if not path.exists():
+                return
+            obj = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(obj, dict) or symbol not in obj:
+                return
+            del obj[symbol]
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(path)
+        except Exception:
+            pass
 
     def _init_db(self) -> None:
         con = sqlite3.connect(str(self.path))
@@ -374,12 +407,8 @@ class PositionStore:
             con.commit()
             con.close()
 
-            # Clear persisted highest tracker to avoid stale trailing state on next reopen
-            try:
-                from src.execution.highest_px_tracker import get_highest_price_tracker
-                get_highest_price_tracker(self._highest_tracker_state_path()).clear_symbol(symbol)
-            except Exception:
-                pass
+            for state_path in self._runtime_risk_state_paths():
+                self._remove_symbol_from_state_file(state_path, symbol)
 
             log.info("Position closed: %s", symbol)
             return True
