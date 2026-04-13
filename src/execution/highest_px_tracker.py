@@ -41,12 +41,20 @@ class HighestPriceTracker:
     
     def _load(self):
         """加载状态"""
+        self.records = {}
         if self.state_path.exists():
             try:
                 with open(self.state_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                    if not isinstance(data, dict):
+                        return
                     for sym, rec in data.items():
-                        self.records[sym] = HighestPriceRecord(**rec)
+                        if not isinstance(rec, dict):
+                            continue
+                        try:
+                            self.records[str(sym)] = HighestPriceRecord(**rec)
+                        except Exception:
+                            continue
             except Exception as e:
                 print(f"[HighestPriceTracker] 加载失败: {e}")
     
@@ -125,8 +133,10 @@ class HighestPriceTracker:
     
     def clear_symbol(self, symbol: str):
         """清除指定币种的记录（清仓后调用）"""
-        if str(symbol) in self.records:
-            del self.records[str(symbol)]
+        self._load()
+        symbol = str(symbol)
+        if symbol in self.records:
+            del self.records[symbol]
             self._save()
     
     def list_all(self) -> Dict[str, HighestPriceRecord]:
