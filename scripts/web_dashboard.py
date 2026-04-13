@@ -18,9 +18,11 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
+import time
 import traceback
-from dataclasses import asdict
-from datetime import datetime, timedelta
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +34,12 @@ from configs.loader import load_config as load_app_config
 
 from src.core.models import MarketSeries
 from src.data.okx_ccxt_provider import OKXCCXTProvider
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_position_store_path,
+    derive_runtime_reports_dir,
+    derive_runtime_runs_dir,
+)
 from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
 from src.regime.rss_vote_utils import build_rss_vote
 from src.research.cache_loader import load_cached_market_data
@@ -66,6 +74,7 @@ if WORKSPACE_STR not in sys.path:
 WEB_DIR = WORKSPACE / 'web'
 REPORTS_DIR = WORKSPACE / 'reports'
 CACHE_DIR = WORKSPACE / 'data' / 'cache'
+CHINA_TZ = timezone(timedelta(hours=8))
 
 
 def _resolve_react_build_path() -> Path:
@@ -101,6 +110,23 @@ app = Flask(
     template_folder=str(WEB_DIR / 'templates'),
     static_folder=str(WEB_DIR / 'static'),
 )
+
+
+@dataclass(frozen=True)
+class DashboardRuntimePaths:
+    reports_dir: Path
+    orders_db: Path
+    fills_db: Path
+    positions_db: Path
+    reconcile_status_path: Path
+    runs_dir: Path
+
+
+_DASHBOARD_API_CACHE_MISS = object()
+_OKX_ACCOUNT_BALANCE_CACHE: Dict[tuple[str, str, str], tuple[float, Any]] = {}
+_OKX_ACCOUNT_BALANCE_CACHE_LOCK = threading.Lock()
+_OKX_PUBLIC_TICKER_CACHE: Dict[str, tuple[float, float]] = {}
+_OKX_PUBLIC_TICKER_CACHE_LOCK = threading.Lock()
 
 # 注册健康检查蓝图
 try:
@@ -1083,11 +1109,40 @@ def _pick_timer_name() -> str:
 
 # 排除测试/异常数据
 EXCLUDED_SYMBOLS = ['PEPE-USDT', 'MERL-USDT', 'SPACE-USDT']
+POSITION_HIDDEN_BASE_SYMBOLS = {
+    'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
+}
+MIN_VISIBLE_POSITION_VALUE_USD = 0.5
+
+
+def _resolve_workspace_relative_path(raw_path: object, default: str) -> Path:
+    raw = str(raw_path or default).strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        parts = path.parts
+        if parts and parts[0] == 'reports':
+            remainder = Path(*parts[1:]) if len(parts) > 1 else Path()
+            path = REPORTS_DIR / remainder
+        else:
+            path = WORKSPACE / path
+    return path.resolve()
+
+
+def _resolve_dashboard_runtime_artifact_path(
+    orders_db: Path,
+    raw_path: object,
+    legacy_default: str,
+) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw or raw == legacy_default:
+        name = Path(legacy_default).name
+        return orders_db.with_name(name).resolve()
+    return _resolve_workspace_relative_path(raw, legacy_default)
 
 
 def get_db_connection():
     """获取数据库连接"""
-    db_path = REPORTS_DIR / 'orders.sqlite'
+    db_path = _resolve_dashboard_runtime_paths(load_config()).orders_db
     if db_path.exists():
         return sqlite3.connect(db_path)
     return None
@@ -1105,13 +1160,14 @@ def _to_inst_id(symbol: str, quote_ccy: str = 'USDT') -> str:
     return f'{raw}-{quote_ccy}'
 
 
-def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Optional[Path] = None) -> Optional[float]:
+def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Optional[Path] = None, fills_db: Optional[Path] = None) -> Optional[float]:
     if float(current_qty or 0.0) <= 0:
         return None
 
     base_symbol = str(symbol or '').split('/')[0].split('-')[0].upper()
     inst_id = _to_inst_id(base_symbol)
-    fills_db = (reports_dir or REPORTS_DIR) / 'fills.sqlite'
+    if fills_db is None:
+        fills_db = (reports_dir or REPORTS_DIR) / 'fills.sqlite'
     if not fills_db.exists() or not inst_id:
         return None
 
@@ -1229,14 +1285,6 @@ def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equi
     return peak_equity
 
 
-def _load_local_account_state() -> Dict[str, Any]:
-    return {}
-
-
-def _load_total_fees_from_orders() -> float:
-    return 0.0
-
-
 def _maybe_float(value: Any) -> Optional[float]:
     if value is None or value == '':
         return None
@@ -1246,8 +1294,8 @@ def _maybe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _load_reconcile_cash_balance() -> tuple[bool, float]:
-    reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+def _load_reconcile_cash_balance(runtime_paths: Optional[DashboardRuntimePaths] = None) -> tuple[bool, float]:
+    reconcile_file = (runtime_paths or _resolve_dashboard_runtime_paths()).reconcile_status_path
     if not reconcile_file.exists():
         return False, 0.0
 
@@ -1270,8 +1318,97 @@ def _load_reconcile_cash_balance() -> tuple[bool, float]:
     return False, 0.0
 
 
-def _load_reconcile_total_equity() -> tuple[bool, float]:
-    reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+def _account_equity_from_balance_details(
+    details: Any,
+    *,
+    source: str,
+    hidden_symbols: Optional[set[str]] = None,
+    min_visible_position_value_usd: float = 0.0,
+) -> Dict[str, Any]:
+    if not isinstance(details, list):
+        return {}
+
+    hidden = set()
+    for raw_symbol in hidden_symbols or set():
+        symbol = str(raw_symbol or '').strip().upper()
+        if not symbol:
+            continue
+        hidden.add(symbol)
+        hidden.add(symbol.replace('/', '-').split('-')[0])
+
+    cash_usdt: Optional[float] = None
+    total_equity = 0.0
+    positions_value = 0.0
+    seen_equity = False
+
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        ccy = str(detail.get('ccy') or '').strip().upper()
+        if not ccy:
+            continue
+        eq_usd = _maybe_float(detail.get('eqUsd'))
+        cash_bal = _maybe_float(detail.get('cashBal'))
+        eq_qty = _maybe_float(detail.get('eq'))
+        if ccy == 'USDT':
+            cash_usdt = cash_bal if cash_bal is not None else (eq_qty if eq_qty is not None else eq_usd)
+        if eq_usd is None:
+            continue
+        total_equity += eq_usd
+        seen_equity = True
+        if eq_usd <= 0:
+            continue
+        if ccy != 'USDT' and ccy not in hidden and eq_usd >= min_visible_position_value_usd:
+            positions_value += eq_usd
+
+    payload: Dict[str, Any] = {'source': source}
+    if cash_usdt is not None:
+        payload['cash_usdt'] = cash_usdt
+    if seen_equity:
+        payload['total_equity_usdt'] = total_equity
+        payload['positions_value_usdt'] = positions_value
+    return payload
+
+
+def _load_reconcile_account_equity(runtime_paths: Optional[DashboardRuntimePaths] = None) -> Dict[str, Any]:
+    reconcile_file = (runtime_paths or _resolve_dashboard_runtime_paths()).reconcile_status_path
+    if not reconcile_file.exists():
+        return {}
+
+    try:
+        reconcile = json.loads(reconcile_file.read_text(encoding='utf-8', errors='ignore'))
+    except Exception:
+        return {}
+
+    exchange_snapshot = reconcile.get('exchange_snapshot') or {}
+    ccy_eq_usd = exchange_snapshot.get('ccy_eqUsd') or {}
+    ccy_cash_bal = exchange_snapshot.get('ccy_cashBal') or {}
+    if not isinstance(ccy_eq_usd, dict) and not isinstance(ccy_cash_bal, dict):
+        return {}
+
+    ccys = set()
+    if isinstance(ccy_eq_usd, dict):
+        ccys.update(str(ccy) for ccy in ccy_eq_usd)
+    if isinstance(ccy_cash_bal, dict):
+        ccys.update(str(ccy) for ccy in ccy_cash_bal)
+    details = [
+        {
+            'ccy': ccy,
+            'eqUsd': ccy_eq_usd.get(ccy) if isinstance(ccy_eq_usd, dict) else None,
+            'cashBal': ccy_cash_bal.get(ccy) if isinstance(ccy_cash_bal, dict) else None,
+        }
+        for ccy in sorted(ccys)
+    ]
+    return _account_equity_from_balance_details(
+        details,
+        source='reconcile',
+        hidden_symbols=set(EXCLUDED_SYMBOLS) | POSITION_HIDDEN_BASE_SYMBOLS,
+        min_visible_position_value_usd=MIN_VISIBLE_POSITION_VALUE_USD,
+    )
+
+
+def _load_reconcile_total_equity(runtime_paths: Optional[DashboardRuntimePaths] = None) -> tuple[bool, float]:
+    reconcile_file = (runtime_paths or _resolve_dashboard_runtime_paths()).reconcile_status_path
     if not reconcile_file.exists():
         return False, 0.0
 
@@ -1299,6 +1436,260 @@ def _load_reconcile_total_equity() -> tuple[bool, float]:
         return True, local_total
 
     return False, 0.0
+
+
+def _env_flag_enabled(name: str) -> bool:
+    value = str(os.getenv(name, '') or '').strip().lower()
+    return value in {'1', 'true', 'yes', 'on'}
+
+
+def _dashboard_live_account_enabled() -> bool:
+    return _env_flag_enabled('V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT') or _env_flag_enabled('V5_DASHBOARD_ALLOW_LIVE_OKX')
+
+
+def _load_local_account_state(runtime_paths: Optional[DashboardRuntimePaths] = None) -> Dict[str, float]:
+    db_path = (runtime_paths or _resolve_dashboard_runtime_paths()).positions_db
+    if not db_path.exists():
+        return {}
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT cash_usdt, equity_peak_usdt FROM account_state WHERE k='default'")
+        row = cursor.fetchone()
+        conn.close()
+    except Exception:
+        return {}
+
+    if not row:
+        return {}
+
+    return {
+        'cash_usdt': float(row[0] or 0.0),
+        'equity_peak_usdt': float(row[1] or 0.0),
+    }
+
+
+def _split_inst_id_base_quote(inst_id: str) -> tuple[str, str]:
+    inst = str(inst_id or '').upper()
+    if '-' in inst:
+        return tuple(inst.split('-', 1))
+    if '/' in inst:
+        return tuple(inst.split('/', 1))
+    return inst, 'USDT'
+
+
+def _signed_fee_usdt_from_fee_fields(inst_id: str, px: Any, fee_amount: Any, fee_ccy: Any = None) -> float:
+    try:
+        fee_val = float(fee_amount or 0.0)
+    except Exception:
+        return 0.0
+
+    fee_ccy_norm = str(fee_ccy or '').strip().upper()
+    if not fee_ccy_norm:
+        return fee_val
+
+    base_ccy, quote_ccy = _split_inst_id_base_quote(inst_id)
+    if fee_ccy_norm == quote_ccy:
+        return fee_val
+    if fee_ccy_norm != base_ccy:
+        return 0.0
+
+    try:
+        px_val = float(px or 0.0)
+    except Exception:
+        return 0.0
+    if px_val <= 0:
+        return 0.0
+    return fee_val * px_val
+
+
+def _signed_fee_usdt_from_order_fee(inst_id: str, avg_px: Any, raw_fee: Any) -> float:
+    raw = str(raw_fee or '').strip()
+    if not raw:
+        return 0.0
+
+    try:
+        numeric_fee = float(raw)
+    except Exception:
+        numeric_fee = None
+    if numeric_fee is not None:
+        return _signed_fee_usdt_from_fee_fields(inst_id, avg_px, numeric_fee)
+
+    try:
+        fee_map = json.loads(raw)
+    except Exception:
+        return 0.0
+    if not isinstance(fee_map, dict):
+        return 0.0
+
+    px = float(avg_px or 0.0)
+    total_fee_usdt = 0.0
+    for ccy, value in fee_map.items():
+        total_fee_usdt += _signed_fee_usdt_from_fee_fields(inst_id, px, value, ccy)
+    return total_fee_usdt
+
+
+def _load_total_fees_from_orders(*, excluded_inst_ids: Optional[List[str]] = None, max_notional_usdt: float = 1000.0, reports_dir: Optional[Path] = None, orders_db: Optional[Path] = None) -> float:
+    if orders_db is None:
+        orders_db = (reports_dir or REPORTS_DIR) / 'orders.sqlite'
+    if not orders_db.exists():
+        return 0.0
+
+    excluded = [str(x) for x in (excluded_inst_ids or [])]
+    placeholders = ','.join(['?' for _ in excluded]) if excluded else ''
+    sql = """
+        SELECT inst_id, avg_px, fee
+        FROM orders
+        WHERE state='FILLED' AND notional_usdt < ?
+    """
+    params: List[Any] = [float(max_notional_usdt)]
+    if excluded:
+        sql += f" AND inst_id NOT IN ({placeholders})"
+        params.extend(excluded)
+
+    try:
+        conn = sqlite3.connect(str(orders_db))
+        cur = conn.cursor()
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return 0.0
+
+    total = 0.0
+    for inst_id, avg_px, fee in rows:
+        total += _signed_fee_usdt_from_order_fee(str(inst_id or ''), avg_px, fee)
+    return total
+
+
+def _load_workspace_exchange_creds() -> tuple[str, str, str]:
+    key = str(os.getenv('EXCHANGE_API_KEY') or '')
+    sec = str(os.getenv('EXCHANGE_API_SECRET') or '')
+    pp = str(os.getenv('EXCHANGE_PASSPHRASE') or '')
+
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(str(WORKSPACE / '.env'))
+        key = key or str(os.getenv('EXCHANGE_API_KEY') or '')
+        sec = sec or str(os.getenv('EXCHANGE_API_SECRET') or '')
+        pp = pp or str(os.getenv('EXCHANGE_PASSPHRASE') or '')
+    except Exception:
+        pass
+
+    if key and sec and pp:
+        return key, sec, pp
+
+    envp = WORKSPACE / '.env'
+    if envp.exists():
+        try:
+            for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
+                if not ln or ln.strip().startswith('#') or '=' not in ln:
+                    continue
+                env_key, env_val = ln.split('=', 1)
+                env_key = env_key.strip()
+                env_val = env_val.strip().strip('"').strip("'")
+                if env_key == 'EXCHANGE_API_KEY' and not key:
+                    key = env_val
+                elif env_key == 'EXCHANGE_API_SECRET' and not sec:
+                    sec = env_val
+                elif env_key == 'EXCHANGE_PASSPHRASE' and not pp:
+                    pp = env_val
+        except Exception:
+            pass
+    return key, sec, pp
+
+
+def _okx_account_balance_cache_ttl_seconds() -> float:
+    try:
+        ttl = float(os.getenv('V5_DASHBOARD_OKX_BALANCE_CACHE_TTL_SECONDS', '2') or '2')
+    except Exception:
+        ttl = 2.0
+    return max(0.0, min(ttl, 10.0))
+
+
+def _okx_public_ticker_cache_ttl_seconds() -> float:
+    try:
+        ttl = float(os.getenv('V5_DASHBOARD_PUBLIC_TICKER_CACHE_TTL_SECONDS', '10') or '10')
+    except Exception:
+        ttl = 10.0
+    return max(0.0, min(ttl, 60.0))
+
+
+def _load_okx_account_balance(key: str, sec: str, pp: str) -> Dict[str, Any]:
+    ttl = _okx_account_balance_cache_ttl_seconds()
+    cache_key = (key, sec, pp)
+    now = time.time()
+    if ttl > 0:
+        with _OKX_ACCOUNT_BALANCE_CACHE_LOCK:
+            cached = _OKX_ACCOUNT_BALANCE_CACHE.get(cache_key)
+            if cached and cached[0] > now:
+                payload = cached[1]
+                return payload if isinstance(payload, dict) else {}
+
+    import hmac, hashlib, base64
+
+    ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
+    path = '/api/v5/account/balance'
+    msg = ts + 'GET' + path
+    sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
+    headers = {
+        'OK-ACCESS-KEY': key,
+        'OK-ACCESS-SIGN': sig,
+        'OK-ACCESS-TIMESTAMP': ts,
+        'OK-ACCESS-PASSPHRASE': pp,
+    }
+    data = requests.get('https://www.okx.com' + path, headers=headers, timeout=8).json()
+    if ttl > 0:
+        with _OKX_ACCOUNT_BALANCE_CACHE_LOCK:
+            _OKX_ACCOUNT_BALANCE_CACHE[cache_key] = (time.time() + ttl, data)
+    return data if isinstance(data, dict) else {}
+
+
+def _load_okx_public_ticker_last_price(symbol: str) -> float:
+    symbol_key = str(symbol or '').strip().upper()
+    if not symbol_key:
+        return 0.0
+
+    ttl = _okx_public_ticker_cache_ttl_seconds()
+    now = time.time()
+    if ttl > 0:
+        with _OKX_PUBLIC_TICKER_CACHE_LOCK:
+            cached = _OKX_PUBLIC_TICKER_CACHE.get(symbol_key)
+            if cached and cached[0] > now:
+                return float(cached[1] or 0.0)
+
+    response = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol_key}-USDT", timeout=5)
+    payload = response.json()
+    if payload.get('code') == '0' and payload.get('data'):
+        price = float(payload['data'][0].get('last') or 0)
+        if price > 0 and ttl > 0:
+            with _OKX_PUBLIC_TICKER_CACHE_LOCK:
+                _OKX_PUBLIC_TICKER_CACHE[symbol_key] = (time.time() + ttl, price)
+        return price
+    return 0.0
+
+
+def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> DashboardRuntimePaths:
+    config = cfg if isinstance(cfg, dict) else load_config()
+    execution_cfg = config.get('execution', {}) if isinstance(config, dict) else {}
+    orders_db = _resolve_workspace_relative_path(
+        execution_cfg.get('order_store_path'),
+        'reports/orders.sqlite',
+    )
+    reports_dir = derive_runtime_reports_dir(orders_db)
+    return DashboardRuntimePaths(
+        reports_dir=reports_dir,
+        orders_db=orders_db,
+        fills_db=derive_fill_store_path(orders_db),
+        positions_db=derive_position_store_path(orders_db),
+        reconcile_status_path=_resolve_dashboard_runtime_artifact_path(
+            orders_db,
+            execution_cfg.get('reconcile_status_path'),
+            'reports/reconcile_status.json',
+        ),
+        runs_dir=derive_runtime_runs_dir(orders_db),
+    )
 
 
 def _can_execute_python(candidate: str) -> bool:
@@ -1508,15 +1899,60 @@ def static_files(filename):
 def api_account():
     """账户信息API - 优先OKX实时数据"""
     try:
-        has_reconcile_cash, cash = _load_reconcile_cash_balance()
-        live_okx_snapshot = _load_live_okx_balance_snapshot()
-        if (not has_reconcile_cash) and live_okx_snapshot.get('ok'):
-            cash = float(live_okx_snapshot.get('cash_usdt') or 0.0)
-
-        if cash <= 0:
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
+        try:
+            has_reconcile_cash, cash = _load_reconcile_cash_balance(runtime_paths=runtime_paths)
+        except TypeError:
             has_reconcile_cash, cash = _load_reconcile_cash_balance()
+        try:
+            local_account_state = _load_local_account_state(runtime_paths=runtime_paths)
+        except TypeError:
+            local_account_state = _load_local_account_state()
 
-        conn = get_db_connection()
+        authoritative_equity: Optional[float] = None
+        authoritative_positions_value: Optional[float] = None
+        equity_source = 'local'
+        try:
+            key, sec, pp = _load_workspace_exchange_creds()
+            if _dashboard_live_account_enabled() and key and sec and pp:
+                data = _load_okx_account_balance(key, sec, pp)
+                if data.get('code') == '0' and data.get('data'):
+                    account_equity = _account_equity_from_balance_details(
+                        data['data'][0].get('details', []),
+                        source='okx_live',
+                        hidden_symbols=set(EXCLUDED_SYMBOLS) | POSITION_HIDDEN_BASE_SYMBOLS,
+                        min_visible_position_value_usd=MIN_VISIBLE_POSITION_VALUE_USD,
+                    )
+                    if 'cash_usdt' in account_equity:
+                        cash = float(account_equity['cash_usdt'] or 0.0)
+                        has_reconcile_cash = True
+                    if 'total_equity_usdt' in account_equity:
+                        authoritative_equity = float(account_equity['total_equity_usdt'] or 0.0)
+                        authoritative_positions_value = float(account_equity.get('positions_value_usdt') or 0.0)
+                        equity_source = str(account_equity.get('source') or 'okx_live')
+        except Exception:
+            pass
+
+        if authoritative_equity is None:
+            account_equity = _load_reconcile_account_equity(runtime_paths=runtime_paths)
+            if 'cash_usdt' in account_equity:
+                cash = float(account_equity['cash_usdt'] or 0.0)
+                has_reconcile_cash = True
+            if 'total_equity_usdt' in account_equity:
+                authoritative_equity = float(account_equity['total_equity_usdt'] or 0.0)
+                authoritative_positions_value = float(account_equity.get('positions_value_usdt') or 0.0)
+                equity_source = str(account_equity.get('source') or 'reconcile')
+
+        if (not has_reconcile_cash) and cash <= 0:
+            cash = float(local_account_state.get('cash_usdt') or 0.0)
+
+        conn = None
+        if runtime_paths.orders_db.exists():
+            try:
+                conn = sqlite3.connect(str(runtime_paths.orders_db))
+            except Exception:
+                conn = None
         if conn:
             cursor = conn.cursor()
             placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
@@ -1524,8 +1960,7 @@ def api_account():
                 SELECT 
                     SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) as total_trades,
                     SUM(CASE WHEN side='buy' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_buy,
-                    SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell,
-                    SUM(CASE WHEN state='FILLED' THEN fee ELSE 0 END) as total_fees
+                    SUM(CASE WHEN side='sell' AND state='FILLED' THEN notional_usdt ELSE 0 END) as total_sell
                 FROM orders
                 WHERE inst_id NOT IN ({placeholders})
                 AND notional_usdt < 1000
@@ -1537,38 +1972,27 @@ def api_account():
             total_trades = row[0] or 0
             total_buy = row[1] or 0
             total_sell = row[2] or 0
-            total_fees = row[3] or 0
+            total_fees = _load_total_fees_from_orders(
+                excluded_inst_ids=EXCLUDED_SYMBOLS,
+                max_notional_usdt=1000.0,
+                orders_db=runtime_paths.orders_db,
+            )
             realized_pnl = float(total_sell) - float(total_buy) + float(total_fees)
         else:
             total_trades = total_buy = total_sell = total_fees = realized_pnl = 0
 
         positions_value = 0.0
         positions_rows = []
-        try:
-            pos_payload = _call_dashboard_api(
-                api_positions,
-                default={'positions': []},
-                label='positions_for_account',
-            ) or {}
-            if isinstance(pos_payload, dict):
-                positions_rows = pos_payload.get('positions', []) or []
-            elif isinstance(pos_payload, list):
-                positions_rows = pos_payload
-            positions_value = sum(float(x.get('value_usdt') or x.get('value') or 0.0) for x in positions_rows)
-        except Exception:
-            pass
+        pos_payload = _call_dashboard_api(api_positions, default={"positions": []}, label="positions_for_account") or {}
+        if isinstance(pos_payload, dict):
+            positions_rows = pos_payload.get('positions', []) or []
+        elif isinstance(pos_payload, list):
+            positions_rows = pos_payload
+        positions_value = sum(float(x.get('value_usdt') or x.get('value') or 0.0) for x in positions_rows)
 
-        total_equity = float(cash or 0) + positions_value
-        equity_source = 'cash_plus_positions'
-        if live_okx_snapshot.get('ok') and float(live_okx_snapshot.get('total_equity_usdt') or 0.0) > 0:
-            total_equity = float(live_okx_snapshot.get('total_equity_usdt') or 0.0)
-            equity_source = 'okx_live'
-        else:
-            has_reconcile_total, reconcile_total = _load_reconcile_total_equity()
-            if has_reconcile_total and reconcile_total > 0:
-                total_equity = float(reconcile_total)
-                equity_source = 'reconcile_fallback'
-
+        if authoritative_positions_value is not None:
+            positions_value = authoritative_positions_value
+        total_equity = authoritative_equity if authoritative_equity is not None else float(cash or 0) + positions_value
         initial_capital = 120.0
         equity_delta = total_equity - initial_capital
         total_pnl_pct = equity_delta / initial_capital if initial_capital > 0 else 0
@@ -1580,7 +2004,6 @@ def api_account():
         except Exception:
             pass
 
-        config = load_config()
         budget_cap = float(config.get('budget', {}).get('live_equity_cap_usdt', 0) or 0)
         drawdown_pct = 0.0
         peak_equity = initial_capital
@@ -1592,13 +2015,11 @@ def api_account():
                 drawdown_pct = 0.0
         else:
             try:
-                conn2 = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
-                cursor2 = conn2.cursor()
-                cursor2.execute("SELECT equity_peak_usdt FROM account_state WHERE k='default'")
-                row2 = cursor2.fetchone()
-                if row2 and row2[0]:
-                    peak_equity = _sanitize_peak_equity(total_equity, initial_capital, float(row2[0]))
-                conn2.close()
+                local_peak = float(local_account_state.get('equity_peak_usdt') or 0.0)
+                if local_peak > 0:
+                    peak_equity = _sanitize_peak_equity(total_equity, initial_capital, local_peak)
+                else:
+                    peak_equity = max(total_equity, initial_capital)
             except Exception:
                 peak_equity = max(total_equity, initial_capital)
 
@@ -1626,40 +2047,40 @@ def api_account():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_internal_error_response(
+            e,
+            cash_usdt=0.0,
+            positions_value_usdt=0.0,
+            total_equity_usdt=0.0,
+            initial_capital_usdt=120.0,
+            equity_delta_usdt=0.0,
+            total_pnl_pct=0.0,
+            drawdown_pct=0.0,
+            peak_equity_usdt=120.0,
+            budget_cap_usdt=None,
+            positions_count=0,
+            total_trades=0,
+            total_buy=0.0,
+            total_sell=0.0,
+            total_fees=0.0,
+            realized_pnl=0.0,
+            last_update='',
+        )
 
 
 @app.route('/api/trades')
 def api_trades():
     """交易历史API（优先OKX实时成交，回退DB，再回退runs/*/trades.csv）"""
     try:
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         trades = []
 
         # 0) 优先OKX实时成交
         try:
-            import os, time, hmac, hashlib, base64
-            from dotenv import load_dotenv
-            load_dotenv(str(WORKSPACE / '.env'))
-            key = os.getenv('EXCHANGE_API_KEY')
-            sec = os.getenv('EXCHANGE_API_SECRET')
-            pp = os.getenv('EXCHANGE_PASSPHRASE')
-            if not (key and sec and pp):
-                envp = WORKSPACE / '.env'
-                if envp.exists():
-                    for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
-                        if not ln or ln.strip().startswith('#') or '=' not in ln:
-                            continue
-                        k, v = ln.split('=', 1)
-                        k = k.strip(); v = v.strip().strip('"').strip("'")
-                        if k == 'EXCHANGE_API_KEY' and not key:
-                            key = v
-                        elif k == 'EXCHANGE_API_SECRET' and not sec:
-                            sec = v
-                        elif k == 'EXCHANGE_PASSPHRASE' and not pp:
-                            pp = v
+            import hmac, hashlib, base64
 
-            if key and sec and pp:
+            key, sec, pp = _load_workspace_exchange_creds()
+            if _dashboard_live_account_enabled() and key and sec and pp:
                 ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
                 path = '/api/v5/trade/fills?limit=100'
                 msg = ts + 'GET' + path
@@ -1679,11 +2100,16 @@ def api_trades():
                             if (not inst) or (inst in EXCLUDED_SYMBOLS):
                                 continue
                             ts_ms = int(r.get('ts') or 0)
-                            t = datetime.utcfromtimestamp(ts_ms / 1000.0) + timedelta(hours=8)
+                            t = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(CHINA_TZ)
                             px = float(r.get('fillPx') or 0)
                             sz = float(r.get('fillSz') or 0)
                             amount = px * sz
-                            fee = float(r.get('fee') or 0)
+                            fee = _signed_fee_usdt_from_fee_fields(
+                                inst,
+                                px,
+                                r.get('fee'),
+                                r.get('feeCcy') or r.get('fillFeeCcy'),
+                            )
                             trades.append({
                                 'symbol': inst,
                                 'side': str(r.get('side', '')),
@@ -1699,21 +2125,36 @@ def api_trades():
 
         # 1) 回退订单库
         if not trades:
-            conn = get_db_connection()
+            conn = None
+            if runtime_paths.orders_db.exists():
+                conn = sqlite3.connect(str(runtime_paths.orders_db))
             if conn:
                 cursor = conn.cursor()
                 placeholders = ','.join(['?' for _ in EXCLUDED_SYMBOLS])
-                cursor.execute(f"""
-                    SELECT 
-                        inst_id, side, notional_usdt, fee, state,
-                        datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
-                    FROM orders 
-                    WHERE state='FILLED'
-                    AND inst_id NOT IN ({placeholders})
-                    AND notional_usdt < 1000
-                    ORDER BY created_ts DESC
-                    LIMIT 100
-                """, EXCLUDED_SYMBOLS)
+                try:
+                    cursor.execute(f"""
+                        SELECT 
+                            inst_id, side, notional_usdt, fee, state, avg_px,
+                            datetime(COALESCE(NULLIF(updated_ts, 0), created_ts)/1000, 'unixepoch', '+8 hours') as time
+                        FROM orders 
+                        WHERE state='FILLED'
+                        AND inst_id NOT IN ({placeholders})
+                        AND notional_usdt < 1000
+                        ORDER BY COALESCE(NULLIF(updated_ts, 0), created_ts) DESC
+                        LIMIT 100
+                    """, EXCLUDED_SYMBOLS)
+                except sqlite3.OperationalError:
+                    cursor.execute(f"""
+                        SELECT 
+                            inst_id, side, notional_usdt, fee, state, avg_px,
+                            datetime(created_ts/1000, 'unixepoch', '+8 hours') as time
+                        FROM orders 
+                        WHERE state='FILLED'
+                        AND inst_id NOT IN ({placeholders})
+                        AND notional_usdt < 1000
+                        ORDER BY created_ts DESC
+                        LIMIT 100
+                    """, EXCLUDED_SYMBOLS)
 
                 for row in cursor.fetchall():
                     try:
@@ -1721,9 +2162,9 @@ def api_trades():
                             'symbol': str(row[0]),
                             'side': str(row[1]),
                             'amount': round(float(row[2]), 4),
-                            'fee': round(float(row[3]), 6),
+                            'fee': round(_signed_fee_usdt_from_order_fee(str(row[0]), row[5], row[3]), 6),
                             'state': str(row[4]),
-                            'time': str(row[5])
+                            'time': str(row[6])
                         })
                     except (TypeError, ValueError):
                         continue
@@ -1731,7 +2172,7 @@ def api_trades():
 
         # 2) 回退 runs/*/trades.csv
         if not trades:
-            runs_dir = REPORTS_DIR / 'runs'
+            runs_dir = runtime_paths.runs_dir
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
                 for run_dir in run_dirs[:24]:
@@ -1763,45 +2204,46 @@ def api_trades():
 
         return jsonify({'trades': trades[:100]})
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'trades': []}), 500
+        return _json_internal_error_response(e, trades=[])
 
 
 @app.route('/api/positions')
 def api_positions():
     """持仓信息API（优先 positions.sqlite，回退最新 run 的 positions.jsonl）"""
     try:
-        hidden_symbols = {
-            'PROMPT', 'XAUT', 'WLFI', 'SPACE', 'KITE', 'AGLD', 'MERL', 'USDG', 'J', 'PEPE'
-        }
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
+        hidden_symbols = POSITION_HIDDEN_BASE_SYMBOLS
         authoritative_snapshot_seen = False
+        price_cache: Dict[str, float] = {}
 
         def get_last_price_usdt(symbol: str) -> float:
-            """获取币种最新价格，优先OKX实时API"""
-            # 1) 优先OKX实时API
+            symbol = str(symbol or '').strip().upper()
+            if not symbol:
+                return 0.0
+            if symbol in price_cache:
+                return price_cache[symbol]
             try:
-                r = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={symbol}-USDT", timeout=5)
-                j = r.json()
-                if j.get('code') == '0' and j.get('data'):
-                    return float(j['data'][0].get('last') or 0)
-            except Exception:
-                pass
-            
-            # 2) Fallback: 缓存文件（检查时间，超过15分钟废弃）
-            try:
-                import time
                 cache_dir = WORKSPACE / 'data' / 'cache'
                 files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
                 if files:
-                    # 检查文件修改时间
                     file_mtime = files[-1].stat().st_mtime
                     if time.time() - file_mtime < 900:  # 15分钟内
                         df = pd.read_csv(files[-1])
                         if len(df) > 0 and 'close' in df.columns:
-                            return float(df.iloc[-1]['close'])
+                            price = float(df.iloc[-1]['close'])
+                            price_cache[symbol] = price
+                            return price
             except Exception:
                 pass
-            
+
+            try:
+                price = _load_okx_public_ticker_last_price(symbol)
+                price_cache[symbol] = price
+                return price
+            except Exception:
+                pass
+
+            price_cache[symbol] = 0.0
             return 0.0
 
         def choose_spot_qty(detail: Dict[str, Any]) -> float:
@@ -1848,9 +2290,8 @@ def api_positions():
                 'value_usdt': round(eq_usd, 4)
             })
 
-        pos_db = REPORTS_DIR / 'positions.sqlite'
+        pos_db = runtime_paths.positions_db
         positions = []
-        live_okx_used = False
         avg_price_hints: Dict[str, float] = {}
 
         if pos_db.exists():
@@ -1868,47 +2309,11 @@ def api_positions():
                 avg_price_hints = {}
 
         # 0) 优先实时OKX余额（与用户手动操作一致）
-        okx_error = None
         try:
-            import os, time, hmac, hashlib, base64
-            from dotenv import load_dotenv
-            load_dotenv(str(WORKSPACE / '.env'))
-            key = os.getenv('EXCHANGE_API_KEY')
-            sec = os.getenv('EXCHANGE_API_SECRET')
-            pp = os.getenv('EXCHANGE_PASSPHRASE')
-            # fallback: parse .env manually when process env not populated
-            if not (key and sec and pp):
-                try:
-                    envp = WORKSPACE / '.env'
-                    if envp.exists():
-                        for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
-                            if not ln or ln.strip().startswith('#') or '=' not in ln:
-                                continue
-                            k, v = ln.split('=', 1)
-                            k = k.strip(); v = v.strip().strip('"').strip("'")
-                            if k == 'EXCHANGE_API_KEY' and not key:
-                                key = v
-                            elif k == 'EXCHANGE_API_SECRET' and not sec:
-                                sec = v
-                            elif k == 'EXCHANGE_PASSPHRASE' and not pp:
-                                pp = v
-                except Exception as e:
-                    okx_error = f"env_parse_error: {e}"
-            if key and sec and pp:
-                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
-                path = '/api/v5/account/balance'
-                msg = ts + 'GET' + path
-                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
-                headers = {
-                    'OK-ACCESS-KEY': key,
-                    'OK-ACCESS-SIGN': sig,
-                    'OK-ACCESS-TIMESTAMP': ts,
-                    'OK-ACCESS-PASSPHRASE': pp,
-                }
-                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
-                data = resp.json()
+            key, sec, pp = _load_workspace_exchange_creds()
+            if _dashboard_live_account_enabled() and key and sec and pp:
+                data = _load_okx_account_balance(key, sec, pp)
                 if data.get('code') == '0' and data.get('data'):
-                    live_okx_used = True
                     authoritative_snapshot_seen = True
                     details = data['data'][0].get('details', [])
                     for d in details:
@@ -1919,14 +2324,12 @@ def api_positions():
                             append_position(ccy, qty, eq_usd)
                         except Exception:
                             continue
-        except Exception as e:
-            import traceback
-            okx_error = f"{e}\n{traceback.format_exc()}"
-            print(f"[positions] OKX API错误: {okx_error}")
+        except Exception:
+            pass
 
         # 1) 回退 positions.sqlite（仅当实时OKX不可用且positions为空）
         # 注意：如果OKX API成功调用但返回空持仓，说明真的没持仓，不应回退到缓存
-        reconcile_file = REPORTS_DIR / 'reconcile_status.json'
+        reconcile_file = runtime_paths.reconcile_status_path
         if not positions and reconcile_file.exists():
             try:
                 reconcile = json.loads(reconcile_file.read_text(encoding='utf-8', errors='ignore'))
@@ -1984,7 +2387,7 @@ def api_positions():
 
         # 2) 回退：DB为空且OKX不可用时读取最新 runs/*/positions.jsonl
         if not authoritative_snapshot_seen and not positions:
-            runs_dir = REPORTS_DIR / 'runs'
+            runs_dir = runtime_paths.runs_dir
             if runs_dir.exists():
                 run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
                 for run_dir in run_dirs[:12]:
@@ -2032,7 +2435,11 @@ def api_positions():
             symbol = p.get('symbol', '')
             if not symbol:
                 continue
-            avg_cost = _load_avg_cost_from_fills(symbol, float(p.get('qty', 0) or 0.0))
+            avg_cost = _load_avg_cost_from_fills(
+                symbol,
+                float(p.get('qty', 0) or 0.0),
+                fills_db=runtime_paths.fills_db,
+            )
             if avg_cost and avg_cost > 0:
                 p['avg_px'] = round(avg_cost, 6)
 
@@ -2053,7 +2460,7 @@ def api_positions():
         
         return jsonify({'positions': positions})
     except Exception as e:
-        return jsonify({'error': str(e), 'positions': []}), 500
+        return _json_internal_error_response(e, positions=[])
 
 
 @app.route('/api/position_kline')
