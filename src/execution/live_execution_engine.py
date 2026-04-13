@@ -674,7 +674,8 @@ class LiveExecutionEngine:
             buy_budget_reserve = 0.0
 
             # Rank-exit re-entry cooldown: after FILLED rank_exit sell, delay OPEN_LONG re-entry.
-            if str(o.intent or "").upper() == "OPEN_LONG":
+            buy_intent = str(o.intent or "").upper()
+            if buy_intent == "OPEN_LONG":
                 cooldown_min = int(getattr(self.cfg, "rank_exit_reentry_cooldown_minutes", 0) or 0)
                 if cooldown_min > 0:
                     remain_ms = _rank_exit_cooldown_remaining_ms(
@@ -687,6 +688,9 @@ class LiveExecutionEngine:
                         raise ValueError(
                             f"RANK_EXIT_REENTRY_COOLDOWN: {o.symbol} remain={remain_sec:.1f}s (<{cooldown_min}m)"
                         )
+            # Profit-taking cooldown should block any subsequent buy, including
+            # REBALANCE top-ups after a partial trim.
+            if buy_intent in {"OPEN_LONG", "REBALANCE"}:
                 take_profit_cooldown_min = int(getattr(self.cfg, "take_profit_reentry_cooldown_minutes", 0) or 0)
                 if take_profit_cooldown_min > 0:
                     remain_ms = _take_profit_cooldown_remaining_ms(
@@ -1198,7 +1202,10 @@ class LiveExecutionEngine:
                         reason = str((o.meta or {}).get("reason", "") or "")
                         if str(o.side).lower() == "sell" and reason.startswith("rank_exit_"):
                             _record_rank_exit_fill(o.symbol, reason, path=self.rank_exit_cooldown_state_path)
-                        if str(o.side).lower() == "sell" and reason.startswith("profit_taking_"):
+                        if str(o.side).lower() == "sell" and (
+                            reason.startswith("profit_taking_")
+                            or reason.startswith("profit_partial_")
+                        ):
                             _record_take_profit_fill(o.symbol, reason, path=self.take_profit_cooldown_state_path)
                     except Exception:
                         pass

@@ -433,6 +433,41 @@ def test_take_profit_reentry_cooldown_uses_runtime_state_file() -> None:
         assert okx.place_calls == 0
 
 
+def test_take_profit_reentry_cooldown_blocks_rebalance_buy() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        cfg = ExecutionConfig(
+            order_store_path=f"{td}/shadow_orders.sqlite",
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            take_profit_reentry_cooldown_minutes=10,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, run_id="r")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("src.execution.live_execution_engine.time.time", lambda: 950.0)
+            mp.setattr("src.execution.live_execution_engine._public_mid_at_submit", lambda **kwargs: None)
+            _record_take_profit_fill(
+                "BTC/USDT",
+                "profit_partial_peak_drawdown_8pct_retrace_2_5pct",
+                path=eng.take_profit_cooldown_state_path,
+            )
+            mp.setattr("src.execution.live_execution_engine.time.time", lambda: 1_000.0)
+            result = eng.place(
+                Order(
+                    symbol="BTC/USDT",
+                    side="buy",
+                    intent="REBALANCE",
+                    notional_usdt=10.0,
+                    signal_price=100.0,
+                    meta={"decision_hash": "runtime-take-profit-rebalance"},
+                )
+            )
+
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
+
+
 def test_sell_market_uses_position_qty() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
