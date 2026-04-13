@@ -115,6 +115,7 @@ class EventMonitor:
 
             if stop_px > 0:
                 if current_px <= stop_px:
+                    loss_pct = ((current_px - entry_px) / entry_px * 100) if entry_px > 0 else 0.0
                     events.append(TradingEvent(
                         type=EventType.RISK_STOP_LOSS,
                         symbol=symbol,
@@ -123,7 +124,7 @@ class EventMonitor:
                             'entry_price': entry_px,
                             'stop_price': stop_px,
                             'stop_source': stop_source,
-                            'loss_pct': (current_px - entry_px) / entry_px * 100
+                            'loss_pct': loss_pct
                         },
                         timestamp_ms=now_ms
                     ))
