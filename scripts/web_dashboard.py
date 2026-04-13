@@ -120,6 +120,7 @@ class DashboardRuntimePaths:
     positions_db: Path
     reconcile_status_path: Path
     runs_dir: Path
+    auto_risk_eval_path: Path
 
 
 _DASHBOARD_API_CACHE_MISS = object()
@@ -127,6 +128,8 @@ _OKX_ACCOUNT_BALANCE_CACHE: Dict[tuple[str, str, str], tuple[float, Any]] = {}
 _OKX_ACCOUNT_BALANCE_CACHE_LOCK = threading.Lock()
 _OKX_PUBLIC_TICKER_CACHE: Dict[str, tuple[float, float]] = {}
 _OKX_PUBLIC_TICKER_CACHE_LOCK = threading.Lock()
+_OKX_HEALTH_CHECK_CACHE: Dict[tuple[str, str, str], tuple[float, Any, float]] = {}
+_OKX_HEALTH_CHECK_CACHE_LOCK = threading.Lock()
 
 # 注册健康检查蓝图
 try:
@@ -413,12 +416,26 @@ def _legacy_display_score(score: float) -> float:
     return math.copysign(math.tanh(magnitude / scale), raw)
 
 
-def _iter_decision_audits(reports_dir: Path) -> List[Dict[str, Any]]:
+def _load_recent_scan_limit(env_name: str) -> Optional[int]:
+    raw = str(os.getenv(env_name, '') or '').strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _iter_decision_audits(reports_dir: Path, scan_limit: Optional[int] = None) -> List[Dict[str, Any]]:
     runs_dir = reports_dir / 'runs'
     if not runs_dir.exists():
         return []
 
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+    run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    if scan_limit is not None:
+        run_dirs = run_dirs[:scan_limit]
 
     audits: List[Dict[str, Any]] = []
     for run_dir in run_dirs:
@@ -570,6 +587,23 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    if not text:
+        return bool(default)
+    if text in {'1', 'true', 'yes', 'on'}:
+        return True
+    if text in {'0', 'false', 'no', 'off', 'none', 'null'}:
+        return False
+    return bool(default)
+
+
 def _normalize_symbol_key(symbol: Any) -> str:
     return str(symbol or '').strip().upper().replace('-', '/')
 
@@ -708,9 +742,9 @@ def _build_ml_signal_overview(
     except Exception:
         prediction_count = 0
 
-    configured_enabled = bool(runtime.get('configured_enabled', False))
-    promoted = bool(runtime.get('promotion_passed', promotion.get('passed', False)))
-    live_active = bool(runtime.get('used_in_latest_snapshot', False))
+    configured_enabled = _coerce_bool(runtime.get('configured_enabled', False))
+    promoted = _coerce_bool(runtime.get('promotion_passed', promotion.get('passed', False)))
+    live_active = _coerce_bool(runtime.get('used_in_latest_snapshot', False))
     overlay_mode = str(runtime.get('overlay_mode') or impact_summary.get('overlay_mode') or 'disabled')
     coverage_count = prediction_count if prediction_count > 0 else len(nonzero_rows)
     reason = str(runtime.get('reason') or runtime.get('error') or '')
@@ -858,9 +892,9 @@ def _load_shadow_ml_overlay_summary(shadow_workspace: Path) -> Dict[str, Any]:
             overview.update(stored)
 
     if isinstance(runtime, dict) and runtime:
-        overview['configured_enabled'] = bool(runtime.get('configured_enabled', False))
-        overview['promoted'] = bool(runtime.get('promotion_passed', False))
-        overview['live_active'] = bool(runtime.get('used_in_latest_snapshot', False))
+        overview['configured_enabled'] = _coerce_bool(runtime.get('configured_enabled', False))
+        overview['promoted'] = _coerce_bool(runtime.get('promotion_passed', False))
+        overview['live_active'] = _coerce_bool(runtime.get('used_in_latest_snapshot', False))
         overview['prediction_count'] = int(runtime.get('prediction_count', 0) or 0)
         active_symbols = int(runtime.get('prediction_count', 0) or 0)
         overview['active_symbols'] = active_symbols
@@ -1689,6 +1723,7 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
             'reports/reconcile_status.json',
         ),
         runs_dir=derive_runtime_runs_dir(orders_db),
+        auto_risk_eval_path=reports_dir / 'auto_risk_eval.json',
     )
 
 
@@ -1857,6 +1892,12 @@ def _resolve_safe_react_asset(filename: str) -> Optional[Path]:
     return candidate
 
 
+def _send_react_asset(path: str):
+    if str(path).lower().endswith('.js'):
+        return send_from_directory(str(REACT_BUILD_PATH), path, mimetype='application/javascript')
+    return send_from_directory(str(REACT_BUILD_PATH), path)
+
+
 @app.route('/')
 def index():
     """主页面 - 新版监控面板"""
@@ -1885,12 +1926,12 @@ def static_files(filename):
     # 检查文件是否存在
     if file_path.exists() and file_path.is_file():
         rel_path = file_path.relative_to(REACT_BUILD_PATH.resolve()).as_posix()
-        return send_from_directory(str(REACT_BUILD_PATH), rel_path)
+        return _send_react_asset(rel_path)
     
     # 如果文件不存在，返回index.html（支持React Router）
     index_path = REACT_BUILD_PATH / 'index.html'
     if index_path.exists():
-        return send_from_directory(str(REACT_BUILD_PATH), 'index.html')
+        return _send_react_asset('index.html')
     
     return 'Not found', 404
 
@@ -2537,7 +2578,8 @@ def api_position_kline():
 def api_scores():
     """币种评分API（当前run vs 上一个run 的排名变化）"""
     try:
-        load_config()
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
         current_run_id: Optional[str] = None
         previous_run_id: Optional[str] = None
         current_regime = 'Unknown'
@@ -2545,7 +2587,10 @@ def api_scores():
         previous_scores: List[Dict[str, Any]] = []
 
         usable_runs: List[Dict[str, Any]] = []
-        for entry in _iter_decision_audits(REPORTS_DIR):
+        for entry in _iter_decision_audits(
+            runtime_paths.reports_dir,
+            scan_limit=_load_recent_scan_limit('V5_DASHBOARD_SCORE_AUDIT_SCAN_LIMIT'),
+        ):
             items = _normalize_top_scores(entry['audit'].get('top_scores', []))
             if not items:
                 continue
@@ -2563,7 +2608,7 @@ def api_scores():
                 previous_run_id = usable_runs[1]['run_id']
                 previous_scores = usable_runs[1]['scores']
         else:
-            alpha_snapshot = _load_alpha_snapshot_scores(REPORTS_DIR)
+            alpha_snapshot = _load_alpha_snapshot_scores(runtime_paths.reports_dir)
             if alpha_snapshot:
                 current_run_id = str(alpha_snapshot.get('current_run') or 'alpha_snapshot')
                 current_regime = str(alpha_snapshot.get('regime') or 'Unknown')
@@ -3104,7 +3149,10 @@ def _load_latest_regime_history_snapshot(reports_dir: Path) -> Dict[str, Any]:
 
 def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
     try:
-        audit_entries = _iter_decision_audits(reports_dir)
+        audit_entries = _iter_decision_audits(
+            reports_dir,
+            scan_limit=_load_recent_scan_limit('V5_DASHBOARD_MARKET_AUDIT_SCAN_LIMIT'),
+        )
         regime_json_snapshot = _load_regime_json_snapshot(reports_dir)
         if audit_entries:
             if _is_failed_decision_audit(audit_entries[0]['audit']) and regime_json_snapshot:
@@ -3153,15 +3201,16 @@ def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
 def api_market_state():
     """市场状态 API，补齐投票详情和情绪缓存健康。"""
     try:
-        snapshot = _load_market_state_snapshot(REPORTS_DIR)
-        history_snapshot = _load_latest_regime_history_snapshot(REPORTS_DIR)
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
+        snapshot = _load_market_state_snapshot(runtime_paths.reports_dir)
+        history_snapshot = _load_latest_regime_history_snapshot(runtime_paths.reports_dir)
         regime = str(snapshot.get('state') or 'SIDEWAYS')
         votes = snapshot.get('votes', {}) if isinstance(snapshot.get('votes', {}), dict) else {}
         history_votes = history_snapshot.get('votes', {}) if isinstance(history_snapshot.get('votes', {}), dict) else {}
         alerts = snapshot.get('alerts', []) if isinstance(snapshot.get('alerts', []), list) else []
         monitor = snapshot.get('monitor', {}) if isinstance(snapshot.get('monitor', {}), dict) else {}
 
-        config = load_config()
         regime_cfg = config.get('regime', {}) if isinstance(config, dict) else {}
         cache_dir = WORKSPACE / 'data' / 'sentiment_cache'
         signal_health = {
@@ -3206,7 +3255,7 @@ def api_market_state():
                 configured_weights['rss'],
             ),
         }
-        history_24h = _load_market_vote_history(REPORTS_DIR, hours=24, max_points=24)
+        history_24h = _load_market_vote_history(runtime_paths.reports_dir, hours=24, max_points=24)
         hmm_history_vote = history_votes.get('hmm', {}) if isinstance(history_votes.get('hmm', {}), dict) else {}
         hmm_vote = votes.get('hmm', {})
         if not isinstance(hmm_vote, dict):
@@ -3289,14 +3338,20 @@ def api_market_state():
             'history_24h': history_24h,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
-    except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            state='UNKNOWN',
+            position_multiplier=0.0,
+            votes={},
+            alerts=[],
+            history_24h=[],
+        )
 
 
-def _load_equity_points(limit: int = 800):
+def _load_equity_points(limit: int = 800, runtime_paths: Optional[DashboardRuntimePaths] = None):
     """从 reports/runs/*/equity.jsonl 聚合权益点（真实口径：cash+持仓市值）。"""
-    runs_dir = REPORTS_DIR / 'runs'
+    runs_dir = (runtime_paths or _resolve_dashboard_runtime_paths()).runs_dir
     points = []
     if not runs_dir.exists():
         return points
@@ -3338,18 +3393,19 @@ def _load_equity_points(limit: int = 800):
 def api_equity_history():
     """权益曲线历史（基于运行时equity快照）"""
     try:
-        points = _load_equity_points()
+        points = _load_equity_points(runtime_paths=_resolve_dashboard_runtime_paths(load_config()))
         data = [{'timestamp': ts, 'value': round(eq, 4)} for ts, eq in points]
         return jsonify(data)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as exc:
+        _log_dashboard_exception('equity_history error', exc)
+        return jsonify([]), 500
 
 
 @app.route('/api/equity_curve')
 def api_equity_curve():
     """权益曲线 - 新版格式（基于运行时equity快照，默认展示最近48小时并做时间分桶）"""
     try:
-        points = _load_equity_points()
+        points = _load_equity_points(runtime_paths=_resolve_dashboard_runtime_paths(load_config()))
         if not points:
             return jsonify({'dates': [], 'values': [], 'pnl': [], 'initial': 0, 'current': 0, 'total_return': 0, 'days': 0})
 
@@ -3399,8 +3455,17 @@ def api_equity_curve():
             'total_return': round(total_return, 2),
             'days': int(days)
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            dates=[],
+            values=[],
+            pnl=[],
+            initial=0,
+            current=0,
+            total_return=0,
+            days=0,
+        )
 
 
 @app.route('/api/dashboard')
@@ -3654,11 +3719,14 @@ def api_timers():
 def api_cost_calibration():
     """F2成本校准进度API - 从定时任务生成的真实成本数据计算"""
     try:
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
+
         # 优先读取定时任务生成的真实成本数据 (cost_stats_real)
-        cost_dir = REPORTS_DIR / 'cost_stats_real'
+        cost_dir = runtime_paths.reports_dir / 'cost_stats_real'
         if not cost_dir.exists():
-            cost_dir = REPORTS_DIR / 'cost_stats'  # 兼容旧路径
-        events_dir = REPORTS_DIR / 'cost_events'
+            cost_dir = runtime_paths.reports_dir / 'cost_stats'  # 兼容旧路径
+        events_dir = runtime_paths.reports_dir / 'cost_events'
         
         calibration_data = []
         total_days = 0
@@ -3824,17 +3892,24 @@ def api_cost_calibration():
             'data_source': data_source,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
-    except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            status='error',
+            daily_stats=[],
+            last_update='',
+        )
 
 
 @app.route('/api/ic_diagnostics')
 def api_ic_diagnostics():
     """IC诊断进度API"""
     try:
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
+
         # 查找IC诊断文件（按修改时间，避免文件名排序误判）
-        ic_files = list(REPORTS_DIR.glob('ic_diagnostics_*.json'))
+        ic_files = list(runtime_paths.reports_dir.glob('ic_diagnostics_*.json'))
 
         if not ic_files:
             return jsonify({
@@ -4022,12 +4097,20 @@ def api_ic_diagnostics():
             'fallback_reason': fallback_reason,
             'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
         })
-    except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            status='error',
+            factors=[],
+            regimes=[],
+            last_update='',
+        )
 
 
 def _api_ml_training_v2():
+    config = load_config()
+    runtime_paths = _resolve_dashboard_runtime_paths(config)
+
     def _resolve_workspace_path(raw_path: str | None, default: str) -> Path:
         p = Path(str(raw_path or default))
         if not p.is_absolute():
@@ -4060,13 +4143,13 @@ def _api_ml_training_v2():
     min_samples = 200
     model_base_path = WORKSPACE / 'models' / 'ml_factor_model'
     pointer_path = WORKSPACE / 'models' / 'ml_factor_model_active.txt'
-    promotion_path = REPORTS_DIR / 'model_promotion_decision.json'
-    runtime_path = REPORTS_DIR / 'ml_runtime_status.json'
+    promotion_path = runtime_paths.reports_dir / 'model_promotion_decision.json'
+    runtime_path = runtime_paths.reports_dir / 'ml_runtime_status.json'
     try:
         cfg = load_app_config(str(CONFIG_PATH), env_path=None)
         ml_cfg = getattr(getattr(cfg, 'alpha', None), 'ml_factor', None)
         if ml_cfg is not None:
-            configured_enabled = bool(getattr(ml_cfg, 'enabled', False))
+            configured_enabled = _coerce_bool(getattr(ml_cfg, 'enabled', False))
             model_base_path = _normalize_model_base_path(
                 _resolve_workspace_path(getattr(ml_cfg, 'model_path', 'models/ml_factor_model'), 'models/ml_factor_model')
             )
@@ -4074,11 +4157,13 @@ def _api_ml_training_v2():
                 getattr(ml_cfg, 'active_model_pointer_path', 'models/ml_factor_model_active.txt'),
                 'models/ml_factor_model_active.txt',
             )
-            promotion_path = _resolve_workspace_path(
+            promotion_path = _resolve_dashboard_runtime_artifact_path(
+                runtime_paths.orders_db,
                 getattr(ml_cfg, 'promotion_decision_path', 'reports/model_promotion_decision.json'),
                 'reports/model_promotion_decision.json',
             )
-            runtime_path = _resolve_workspace_path(
+            runtime_path = _resolve_dashboard_runtime_artifact_path(
+                runtime_paths.orders_db,
                 getattr(ml_cfg, 'runtime_status_path', 'reports/ml_runtime_status.json'),
                 'reports/ml_runtime_status.json',
             )
@@ -4087,7 +4172,7 @@ def _api_ml_training_v2():
 
     total_samples = 0
     labeled_samples = 0
-    db_path = REPORTS_DIR / 'ml_training_data.db'
+    db_path = runtime_paths.reports_dir / 'ml_training_data.db'
     if db_path.exists():
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()
@@ -4098,7 +4183,7 @@ def _api_ml_training_v2():
         conn.close()
 
     latest_history = {}
-    history_path = REPORTS_DIR / 'ml_training_history.json'
+    history_path = runtime_paths.reports_dir / 'ml_training_history.json'
     if history_path.exists():
         try:
             hist_obj = json.loads(history_path.read_text(encoding='utf-8'))
@@ -4139,8 +4224,8 @@ def _api_ml_training_v2():
     stages = {
         'sampling': effective_samples > 0,
         'trained': _model_artifact_exists(model_base_path),
-        'promoted': bool(decision.get('passed')) and pointer_path.exists() and _model_artifact_exists(active_model_base),
-        'liveActive': bool(runtime.get('used_in_latest_snapshot')),
+        'promoted': _coerce_bool(decision.get('passed')) and pointer_path.exists() and _model_artifact_exists(active_model_base),
+        'liveActive': _coerce_bool(runtime.get('used_in_latest_snapshot')),
     }
     if stages['liveActive']:
         phase = 'live_active'
@@ -4173,7 +4258,7 @@ def _api_ml_training_v2():
         'model_date': model_time.strftime('%Y-%m-%d %H:%M') if model_time else None,
         'last_ic': round(float(latest_history.get('valid_ic')), 4) if latest_history.get('valid_ic') is not None else None,
         'last_training_ts': latest_history.get('timestamp'),
-        'last_training_gate_passed': bool(((latest_history.get('gate') or {}).get('passed'))),
+        'last_training_gate_passed': _coerce_bool((latest_history.get('gate') or {}).get('passed')),
         'last_promotion_ts': decision.get('ts'),
         'promotion_fail_reasons': [str(x) for x in (decision.get('fail_reasons') or [])],
         'last_runtime_ts': runtime.get('ts'),
@@ -4187,7 +4272,23 @@ def _api_ml_training_v2():
 
 @app.route('/api/ml_training')
 def api_ml_training():
-    return _api_ml_training_v2()
+    try:
+        return _api_ml_training_v2()
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            status='error',
+            phase='error',
+            configured_enabled=False,
+            stages={
+                'sampling': False,
+                'trained': False,
+                'promoted': False,
+                'liveActive': False,
+            },
+            runtime_prediction_count=0,
+            last_update='',
+        )
     """机器学习训练进度API（对齐当前项目文件结构）"""
     try:
         model_dir = WORKSPACE / 'models'
@@ -4263,7 +4364,9 @@ def api_ml_training():
 def api_reflection_reports():
     """反思Agent报告列表API（兼容V1/V2结构）"""
     try:
-        reflection_dir = REPORTS_DIR / 'reflection'
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
+        reflection_dir = runtime_paths.reports_dir / 'reflection'
 
         if not reflection_dir.exists():
             return jsonify({'reports': [], 'message': '暂无反思报告'})
@@ -4310,16 +4413,23 @@ def api_reflection_reports():
             'total_reports': len(report_files),
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            reports=[],
+            total_reports=0,
+            last_update='',
+        )
 
 
 @app.route('/api/decision_chain')
 def api_decision_chain():
     """决策归因面板API - 展示策略信号到执行的完整链路"""
     try:
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
         # 获取最近5轮决策记录
-        runs_dir = REPORTS_DIR / 'runs'
+        runs_dir = runtime_paths.runs_dir
         if not runs_dir.exists():
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
 
@@ -4448,7 +4558,7 @@ def api_decision_chain():
                     'execution_result': {'selected': 0, 'targets_pre_risk': 0, 'orders_rebalance': 0, 'orders_exit': 0},
                     'block_reasons': {'parse_error': 1},
                     'blocked_top': [],
-                    'error': str(e)
+                    'error': 'internal parse error'
                 })
                 continue
 
@@ -4456,19 +4566,21 @@ def api_decision_chain():
             'rounds': rounds,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as exc:
+        return _json_internal_error_response(exc, rounds=[], last_update='')
 
 
 @app.route('/api/shadow_test')
 def api_shadow_test():
     """参数A/B影子测试API - 对比当前参数与候选参数的历史表现"""
     try:
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
         import sys
         sys.path.insert(0, str(WORKSPACE))
         
         # 获取最近7天的运行数据用于对比
-        runs_dir = REPORTS_DIR / 'runs'
+        runs_dir = runtime_paths.runs_dir
         if not runs_dir.exists():
             return jsonify({'status': 'no_data', 'message': '暂无运行数据'})
         
@@ -4542,24 +4654,15 @@ def api_shadow_test():
         if deadband_skips:
             current_stats['avg_deadband_skip'] = round(sum(deadband_skips) / len(deadband_skips), 4)
         
-        # 读取/刷新 A/B gate 评估（建议是否切参）
+        # 只读取 A/B gate 评估；请求内不做同步刷新，避免阻塞页面并污染测试/生产时序
         ab_gate = None
+        ab_gate_status = 'missing'
+        ab_gate_age_sec = None
         try:
-            gate_path = REPORTS_DIR / 'ab_gate_status.json'
-            need_refresh = True
+            gate_path = runtime_paths.reports_dir / 'ab_gate_status.json'
             if gate_path.exists():
-                age_sec = max(0, (datetime.now().timestamp() - gate_path.stat().st_mtime))
-                need_refresh = age_sec > 1800  # 30分钟
-            if need_refresh:
-                subprocess.run(
-                    [_resolve_workspace_python(), str(WORKSPACE / 'scripts/ab_decision_gate.py')],
-                    cwd=str(WORKSPACE),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=12,
-                    check=False,
-                )
-            if gate_path.exists():
+                ab_gate_age_sec = max(0, int(datetime.now().timestamp() - gate_path.stat().st_mtime))
+                ab_gate_status = 'stale' if ab_gate_age_sec > 1800 else 'fresh'
                 with open(gate_path, 'r', encoding='utf-8') as f:
                     ab_gate = json.load(f)
         except Exception:
@@ -4607,19 +4710,28 @@ def api_shadow_test():
                 'suggested_next_step': '将 deadband_sideways 从 0.04 调至 0.03，观察24小时' if simulated_stats['estimated_improvement'] > 5 else '保持当前参数'
             },
             'matrix': [
-                {'name': 'A(当前)', 'params': {'deadband_sideways': 0.03, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
+                {'name': 'A(当前)', 'params': {'deadband_sideways': 0.04, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
                 {'name': 'B1', 'params': {'deadband_sideways': 0.025}},
                 {'name': 'B2', 'params': {'min_trade_notional_base': 2.5}},
                 {'name': 'B3', 'params': {'pos_mult_sideways': 0.7}},
             ],
             'ab_gate': ab_gate,
+            'ab_gate_status': ab_gate_status,
+            'ab_gate_age_sec': ab_gate_age_sec,
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
         return jsonify(ab_report)
         
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            status='error',
+            window_rounds=0,
+            ab_gate_status='error',
+            ab_gate_error='internal error',
+            matrix=[],
+        )
 
 
 @app.route('/api/smart_alerts')
@@ -4646,8 +4758,10 @@ def api_auto_risk_guard():
     """自动风险档位API - 显示当前风险档位和配置"""
     try:
         from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
 
-        eval_path = REPORTS_DIR / 'auto_risk_eval.json'
+        eval_path = runtime_paths.auto_risk_eval_path or (runtime_paths.reports_dir / 'auto_risk_eval.json')
         if eval_path.exists():
             with open(eval_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -4676,15 +4790,25 @@ def api_auto_risk_guard():
             'reason': '',
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            current_level='UNKNOWN',
+            config={},
+            history=[],
+            metrics={},
+            reason='',
+            last_update='',
+        )
 
 
 @app.route('/api/decision_audit')
 def api_decision_audit():
     """获取最新决策审计数据（策略信号带回退，避免前端空白）"""
     try:
-        runs_dir = REPORTS_DIR / 'runs'
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
+        runs_dir = runtime_paths.runs_dir
         if not runs_dir.exists():
             return jsonify({'error': 'No runs directory'}), 404
 
@@ -4693,6 +4817,9 @@ def api_decision_audit():
             return jsonify({'error': 'No audit files found'}), 404
 
         run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        decision_audit_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT')
+        if decision_audit_scan_limit is not None:
+            run_dirs = run_dirs[:decision_audit_scan_limit]
         latest_run_dir = run_dirs[0]
         latest_audit_file = latest_run_dir / 'decision_audit.json'
 
@@ -4801,7 +4928,7 @@ def api_decision_audit():
         # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.
         held_symbols = set()
         try:
-            con = sqlite3.connect(str(REPORTS_DIR / 'positions.sqlite'))
+            con = sqlite3.connect(str(runtime_paths.positions_db))
             cur = con.cursor()
             cur.execute("SELECT symbol FROM positions WHERE qty > 0")
             held_symbols = {str(r[0]) for r in cur.fetchall()}
@@ -4843,6 +4970,18 @@ def api_decision_audit():
 
         # Execution outcomes (from orders.sqlite in this run_id)
         run_orders = []
+        def _normalize_db_ts(raw_value: Any) -> int:
+            try:
+                value = int(raw_value or 0)
+            except Exception:
+                return 0
+            if 0 < value < 10_000_000_000:
+                return value * 1000
+            return value
+
+        def _effective_order_ts(created_ts: Any, updated_ts: Any) -> int:
+            return max(_normalize_db_ts(created_ts), _normalize_db_ts(updated_ts))
+
         execution_summary = {
             'total': 0,
             'filled': 0,
@@ -4856,49 +4995,102 @@ def api_decision_audit():
             conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT created_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id
-                    FROM orders
-                    WHERE run_id = ?
-                    ORDER BY created_ts DESC
-                    LIMIT 100
-                    """,
-                    (run_id,),
-                )
-                rows = cur.fetchall()
-                conn.close()
+                try:
+                    cur.execute(
+                        """
+                        SELECT
+                          COUNT(*) AS total,
+                          SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) AS filled,
+                          SUM(CASE WHEN state='REJECTED' THEN 1 ELSE 0 END) AS rejected,
+                          SUM(CASE WHEN state IN ('OPEN','PARTIAL','SENT','ACK','UNKNOWN') THEN 1 ELSE 0 END) AS open_like,
+                          SUM(CASE WHEN state IN ('CANCELED','CANCELLED') THEN 1 ELSE 0 END) AS cancelled
+                        FROM orders
+                        WHERE run_id = ?
+                        """,
+                        (run_id,),
+                    )
+                    summary_row = cur.fetchone() or (0, 0, 0, 0, 0)
+                    execution_summary.update({
+                        'total': int(summary_row[0] or 0),
+                        'filled': int(summary_row[1] or 0),
+                        'rejected': int(summary_row[2] or 0),
+                        'open_or_partial': int(summary_row[3] or 0),
+                        'cancelled': int(summary_row[4] or 0),
+                    })
+                    execution_summary['other'] = max(
+                        0,
+                        execution_summary['total']
+                        - execution_summary['filled']
+                        - execution_summary['rejected']
+                        - execution_summary['open_or_partial']
+                        - execution_summary['cancelled'],
+                    )
+                except Exception:
+                    pass
 
-                for r in rows:
-                    state = str(r[4] or 'UNKNOWN').upper()
-                    rec = {
-                        'created_ts': int(r[0] or 0),
-                        'inst_id': str(r[1] or ''),
-                        'side': str(r[2] or ''),
-                        'intent': str(r[3] or ''),
-                        'state': state,
-                        'notional_usdt': float(r[5] or 0.0),
-                        'last_error_code': str(r[6] or ''),
-                        'last_error_msg': str(r[7] or ''),
-                        'ord_id': str(r[8] or ''),
+                try:
+                    cur.execute(
+                        """
+                        SELECT COALESCE(NULLIF(last_error_code, ''), NULLIF(last_error_msg, ''), 'unknown') AS reason, COUNT(*)
+                        FROM orders
+                        WHERE run_id = ? AND state = 'REJECTED'
+                        GROUP BY reason
+                        """,
+                        (run_id,),
+                    )
+                    execution_summary['reject_reasons'] = {
+                        str(reason or 'unknown'): int(count or 0)
+                        for reason, count in cur.fetchall()
                     }
-                    run_orders.append(rec)
+                except Exception:
+                    execution_summary['reject_reasons'] = {}
 
-                execution_summary['total'] = len(run_orders)
-                for o in run_orders:
-                    st = str(o.get('state') or '').upper()
-                    if st == 'FILLED':
-                        execution_summary['filled'] += 1
-                    elif st == 'REJECTED':
-                        execution_summary['rejected'] += 1
-                        rs = str(o.get('last_error_code') or o.get('last_error_msg') or 'unknown')
-                        execution_summary['reject_reasons'][rs] = int(execution_summary['reject_reasons'].get(rs, 0)) + 1
-                    elif st in {'OPEN', 'PARTIAL', 'SENT', 'ACK', 'UNKNOWN'}:
-                        execution_summary['open_or_partial'] += 1
-                    elif st in {'CANCELED', 'CANCELLED'}:
-                        execution_summary['cancelled'] += 1
+                try:
+                    cur.execute(
+                        """
+                        SELECT created_ts, updated_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id
+                        FROM orders
+                        WHERE run_id = ?
+                        ORDER BY CASE WHEN COALESCE(updated_ts, 0) > 0 THEN updated_ts ELSE created_ts END DESC
+                        LIMIT 100
+                        """,
+                        (run_id,),
+                    )
+                    preview_rows = cur.fetchall()
+                    preview_has_updated_ts = True
+                except Exception:
+                    cur.execute(
+                        """
+                        SELECT created_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id
+                        FROM orders
+                        WHERE run_id = ?
+                        ORDER BY created_ts DESC
+                        LIMIT 100
+                        """,
+                        (run_id,),
+                    )
+                    preview_rows = cur.fetchall()
+                    preview_has_updated_ts = False
+
+                for r in preview_rows:
+                    if preview_has_updated_ts:
+                        created_ts, updated_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id = r
                     else:
-                        execution_summary['other'] += 1
+                        created_ts, inst_id, side, intent, state, notional_usdt, last_error_code, last_error_msg, ord_id = r
+                        updated_ts = created_ts
+                    run_orders.append({
+                        'created_ts': _effective_order_ts(created_ts, updated_ts),
+                        'inst_id': str(inst_id or ''),
+                        'side': str(side or ''),
+                        'intent': str(intent or ''),
+                        'state': str(state or 'UNKNOWN').upper(),
+                        'notional_usdt': _coerce_float(notional_usdt, 0.0),
+                        'last_error_code': str(last_error_code or ''),
+                        'last_error_msg': str(last_error_msg or ''),
+                        'ord_id': str(ord_id or ''),
+                    })
+
+                conn.close()
         except Exception:
             pass
 
@@ -4913,82 +5105,224 @@ def api_decision_audit():
             conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
+                fill_ts_by_ord_id: Dict[str, int] = {}
+                fill_ts_by_cl_ord_id: Dict[str, int] = {}
+                fill_events: List[Dict[str, Any]] = []
+                try:
+                    if runtime_paths.fills_db.exists():
+                        fills_conn = sqlite3.connect(str(runtime_paths.fills_db))
+                        fills_cur = fills_conn.cursor()
+                        try:
+                            fills_cur.execute(
+                                """
+                                SELECT ts_ms, created_ts_ms, ord_id, cl_ord_id
+                                FROM fills
+                                """
+                            )
+                            fill_rows_raw = fills_cur.fetchall()
+                        except Exception:
+                            fill_rows_raw = []
+                        finally:
+                            fills_conn.close()
+
+                        for fill_row in fill_rows_raw:
+                            ts_ms, created_ts_ms, ord_id, cl_ord_id = fill_row
+                            fill_ts = max(_normalize_db_ts(ts_ms), _normalize_db_ts(created_ts_ms))
+                            if fill_ts <= 0:
+                                continue
+                            ord_key = str(ord_id or '')
+                            cl_key = str(cl_ord_id or '')
+                            fill_events.append({
+                                'ts': fill_ts,
+                                'ord_id': ord_key,
+                                'cl_ord_id': cl_key,
+                            })
+                            if ord_key:
+                                fill_ts_by_ord_id[ord_key] = max(fill_ts_by_ord_id.get(ord_key, 0), fill_ts)
+                            if cl_key:
+                                fill_ts_by_cl_ord_id[cl_key] = max(fill_ts_by_cl_ord_id.get(cl_key, 0), fill_ts)
+                except Exception:
+                    fill_ts_by_ord_id = {}
+                    fill_ts_by_cl_ord_id = {}
+                    fill_events = []
 
                 # 1) Recent fills window
-                cur.execute(
-                    """
-                    SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
-                    FROM orders
-                    WHERE state = 'FILLED'
-                    ORDER BY created_ts DESC
-                    LIMIT 200
-                    """
-                )
-                fill_rows = cur.fetchall()
+                try:
+                    cur.execute(
+                        """
+                        SELECT created_ts, updated_ts, run_id, inst_id, side, intent, notional_usdt, ord_id, cl_ord_id
+                        FROM orders
+                        WHERE state = 'FILLED'
+                        ORDER BY CASE WHEN COALESCE(updated_ts, 0) > 0 THEN updated_ts ELSE created_ts END DESC
+                        LIMIT 200
+                        """
+                    )
+                    fill_rows = cur.fetchall()
+                    fill_rows_have_updated_ts = True
+                except Exception:
+                    try:
+                        cur.execute(
+                            """
+                            SELECT created_ts, updated_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
+                            FROM orders
+                            WHERE state = 'FILLED'
+                            ORDER BY CASE WHEN COALESCE(updated_ts, 0) > 0 THEN updated_ts ELSE created_ts END DESC
+                            LIMIT 200
+                            """
+                        )
+                        fill_rows = cur.fetchall()
+                        fill_rows_have_updated_ts = 'no_cl_ord_id'
+                    except Exception:
+                        cur.execute(
+                            """
+                            SELECT created_ts, run_id, inst_id, side, intent, notional_usdt, ord_id
+                            FROM orders
+                            WHERE state = 'FILLED'
+                            ORDER BY created_ts DESC
+                            LIMIT 200
+                            """
+                        )
+                        fill_rows = cur.fetchall()
+                        fill_rows_have_updated_ts = False
 
                 now_ms = int(datetime.now().timestamp() * 1000)
-                for i, r in enumerate(fill_rows):
-                    ts_raw = int(r[0] or 0)
-                    ts_ms = ts_raw if ts_raw > 10_000_000_000 else ts_raw * 1000
-                    age_ms = max(0, now_ms - ts_ms)
-                    if age_ms <= 60 * 60 * 1000:
+                latest_fill_ts = 0
+                order_event_ts_by_ord_id: Dict[str, int] = {}
+                order_event_ts_by_cl_ord_id: Dict[str, int] = {}
+                order_meta_by_ord_id: Dict[str, Dict[str, Any]] = {}
+                order_meta_by_cl_ord_id: Dict[str, Dict[str, Any]] = {}
+                for r in fill_rows:
+                    if fill_rows_have_updated_ts is True:
+                        created_ts, updated_ts, order_run_id, inst_id, side, intent, notional_usdt, ord_id, cl_ord_id = r
+                    elif fill_rows_have_updated_ts == 'no_cl_ord_id':
+                        created_ts, updated_ts, order_run_id, inst_id, side, intent, notional_usdt, ord_id = r
+                        cl_ord_id = ''
+                    else:
+                        created_ts, order_run_id, inst_id, side, intent, notional_usdt, ord_id = r
+                        updated_ts = created_ts
+                        cl_ord_id = ''
+
+                    order_event_ts = _effective_order_ts(created_ts, updated_ts)
+                    ord_key = str(ord_id or '')
+                    cl_key = str(cl_ord_id or '')
+                    if ord_key:
+                        order_event_ts_by_ord_id[ord_key] = order_event_ts
+                    if cl_key:
+                        order_event_ts_by_cl_ord_id[cl_key] = order_event_ts
+
+                    order_meta = {
+                        'run_id': str(order_run_id or ''),
+                        'inst_id': str(inst_id or ''),
+                        'side': str(side or ''),
+                        'intent': str(intent or ''),
+                        'notional_usdt': _coerce_float(notional_usdt, 0.0),
+                        'ord_id': ord_key,
+                    }
+                    if ord_key:
+                        order_meta_by_ord_id[ord_key] = order_meta
+                    if cl_key:
+                        order_meta_by_cl_ord_id[cl_key] = order_meta
+
+                    order_age_ms = max(0, now_ms - order_event_ts)
+                    if order_age_ms <= 60 * 60 * 1000:
                         recent_fill_summary['count_60m'] += 1
-                    if age_ms <= 24 * 60 * 60 * 1000:
+                    if order_age_ms <= 24 * 60 * 60 * 1000:
                         recent_fill_summary['count_24h'] += 1
 
-                    if i == 0:
+                    fill_event_ts = max(
+                        fill_ts_by_ord_id.get(ord_key, 0),
+                        fill_ts_by_cl_ord_id.get(cl_key, 0),
+                    )
+                    latest_event_ts = max(order_event_ts, fill_event_ts)
+                    if latest_event_ts >= latest_fill_ts:
+                        latest_fill_ts = latest_event_ts
                         recent_fill_summary['latest_fill'] = {
-                            'created_ts': ts_raw,
-                            'run_id': str(r[1] or ''),
-                            'inst_id': str(r[2] or ''),
-                            'side': str(r[3] or ''),
-                            'intent': str(r[4] or ''),
-                            'notional_usdt': float(r[5] or 0.0),
-                            'ord_id': str(r[6] or ''),
+                            'created_ts': latest_event_ts,
+                            'run_id': str(order_run_id or ''),
+                            'inst_id': str(inst_id or ''),
+                            'side': str(side or ''),
+                            'intent': str(intent or ''),
+                            'notional_usdt': _coerce_float(notional_usdt, 0.0),
+                            'ord_id': ord_key,
+                        }
+
+                for fill_event in fill_events:
+                    fill_ts = int(fill_event.get('ts') or 0)
+                    ord_key = str(fill_event.get('ord_id') or '')
+                    cl_key = str(fill_event.get('cl_ord_id') or '')
+                    matched_order_ts = max(
+                        order_event_ts_by_ord_id.get(ord_key, 0),
+                        order_event_ts_by_cl_ord_id.get(cl_key, 0),
+                    )
+                    if matched_order_ts and matched_order_ts == fill_ts:
+                        continue
+
+                    fill_age_ms = max(0, now_ms - fill_ts)
+                    if fill_age_ms <= 60 * 60 * 1000:
+                        recent_fill_summary['count_60m'] += 1
+                    if fill_age_ms <= 24 * 60 * 60 * 1000:
+                        recent_fill_summary['count_24h'] += 1
+
+                    if fill_ts >= latest_fill_ts:
+                        latest_fill_ts = fill_ts
+                        order_meta = order_meta_by_ord_id.get(ord_key) or order_meta_by_cl_ord_id.get(cl_key) or {}
+                        recent_fill_summary['latest_fill'] = {
+                            'created_ts': fill_ts,
+                            'run_id': str(order_meta.get('run_id') or ''),
+                            'inst_id': str(order_meta.get('inst_id') or ''),
+                            'side': str(order_meta.get('side') or ''),
+                            'intent': str(order_meta.get('intent') or ''),
+                            'notional_usdt': _coerce_float(order_meta.get('notional_usdt'), 0.0),
+                            'ord_id': str(order_meta.get('ord_id') or ord_key),
                         }
 
                 # 2) Latest run that has at least one order row (attempt)
-                cur.execute(
-                    """
-                    SELECT run_id, MAX(created_ts) AS last_ts
-                    FROM orders
-                    GROUP BY run_id
-                    ORDER BY last_ts DESC
-                    LIMIT 20
-                    """
-                )
-                run_rows = cur.fetchall()
-                for rr in run_rows:
-                    cand_run = str(rr[0] or '')
-                    if not cand_run:
-                        continue
+                try:
                     cur.execute(
                         """
                         SELECT
+                          run_id,
+                          MAX(CASE WHEN COALESCE(updated_ts, 0) > 0 THEN updated_ts ELSE created_ts END) AS last_ts,
                           COUNT(*) AS total,
                           SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) AS filled,
                           SUM(CASE WHEN state='REJECTED' THEN 1 ELSE 0 END) AS rejected,
                           SUM(CASE WHEN state IN ('OPEN','PARTIAL','SENT','ACK','UNKNOWN') THEN 1 ELSE 0 END) AS open_like,
                           SUM(CASE WHEN state IN ('CANCELED','CANCELLED') THEN 1 ELSE 0 END) AS cancelled
                         FROM orders
-                        WHERE run_id = ?
-                        """,
-                        (cand_run,),
+                        GROUP BY run_id
+                        ORDER BY last_ts DESC
+                        LIMIT 20
+                        """
                     )
-                    s = cur.fetchone() or (0, 0, 0, 0, 0)
-                    total = int(s[0] or 0)
-                    if total <= 0:
-                        continue
+                except Exception:
+                    cur.execute(
+                        """
+                        SELECT
+                          run_id,
+                          MAX(created_ts) AS last_ts,
+                          COUNT(*) AS total,
+                          SUM(CASE WHEN state='FILLED' THEN 1 ELSE 0 END) AS filled,
+                          SUM(CASE WHEN state='REJECTED' THEN 1 ELSE 0 END) AS rejected,
+                          SUM(CASE WHEN state IN ('OPEN','PARTIAL','SENT','ACK','UNKNOWN') THEN 1 ELSE 0 END) AS open_like,
+                          SUM(CASE WHEN state IN ('CANCELED','CANCELLED') THEN 1 ELSE 0 END) AS cancelled
+                        FROM orders
+                        GROUP BY run_id
+                        ORDER BY last_ts DESC
+                        LIMIT 20
+                        """
+                    )
+                run_rows = cur.fetchall()
+                if run_rows:
+                    rr = run_rows[0]
                     latest_ordered_run_summary = {
-                        'run_id': cand_run,
-                        'total': total,
-                        'filled': int(s[1] or 0),
-                        'rejected': int(s[2] or 0),
-                        'open_or_partial': int(s[3] or 0),
-                        'cancelled': int(s[4] or 0),
-                        'last_ts': int(rr[1] or 0),
+                        'run_id': str(rr[0] or ''),
+                        'last_ts': _normalize_db_ts(rr[1]),
+                        'total': int(rr[2] or 0),
+                        'filled': int(rr[3] or 0),
+                        'rejected': int(rr[4] or 0),
+                        'open_or_partial': int(rr[5] or 0),
+                        'cancelled': int(rr[6] or 0),
                     }
-                    break
 
                 conn.close()
         except Exception:
@@ -5030,7 +5364,7 @@ def api_decision_audit():
                 'symbol': str(rd.get('symbol') or ''),
                 'side': str(rd.get('side') or ''),
                 'reason': str(rd.get('reason') or ''),
-                'notional': float(rd.get('notional') or 0.0),
+                'notional': _coerce_float(rd.get('notional'), 0.0),
             }
             for rd in router_decisions
             if str(rd.get('action') or '').lower() == 'create'
@@ -5068,7 +5402,7 @@ def api_decision_audit():
             if isinstance(item, dict) and item.get('symbol'):
                 preferred_ml_symbols.append(str(item.get('symbol')))
         stored_ml_overview = audit_data.get('ml_signal_overview', {}) if isinstance(audit_data, dict) else {}
-        ml_signal_overview = _build_ml_signal_overview(REPORTS_DIR, preferred_symbols=preferred_ml_symbols)
+        ml_signal_overview = _build_ml_signal_overview(runtime_paths.reports_dir, preferred_symbols=preferred_ml_symbols)
         if isinstance(stored_ml_overview, dict) and stored_ml_overview:
             merged_ml_overview = dict(stored_ml_overview)
             merged_ml_overview.update({k: v for k, v in ml_signal_overview.items() if v not in (None, {}, [], "")})
@@ -5112,8 +5446,8 @@ def api_decision_audit():
             'run_orders': run_orders[:30],
             'notes': audit_data.get('notes', [])[:12]
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as exc:
+        return _json_internal_error_response(exc)
 
 
 @app.route('/api/shadow_ml_overlay')
@@ -5130,17 +5464,15 @@ def api_shadow_ml_overlay():
         if not payload.get('available'):
             payload['error'] = '旁路调优版 XGBoost 归因数据未就绪'
         return jsonify(payload)
-    except Exception as e:
-        return jsonify({
-            'available': False,
-            'error': str(e),
-        })
+    except Exception as exc:
+        return _json_internal_error_response(exc, available=False)
 
 
 @app.route('/api/health')
 def api_health():
     """系统健康检查API"""
     try:
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         checks = []
         overall_status = 'healthy'
         
@@ -5150,7 +5482,7 @@ def api_health():
             timer_state = _get_timer_state(timer_name)
 
             if timer_state.get('error'):
-                checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(timer_state.get('error'))})
+                checks.append({'name': '定时任务', 'status': 'warning', 'detail': 'timer warning'})
                 if overall_status == 'healthy':
                     overall_status = 'warning'
             elif timer_state.get('active'):
@@ -5158,13 +5490,13 @@ def api_health():
             else:
                 checks.append({'name': '定时任务', 'status': 'critical', 'detail': f'{timer_name}未运行'})
                 overall_status = 'critical'
-        except Exception as e:
-            checks.append({'name': '定时任务', 'status': 'warning', 'detail': str(e)})
+        except Exception:
+            checks.append({'name': '定时任务', 'status': 'warning', 'detail': 'timer warning'})
             overall_status = 'warning'
         
         # 2. 检查数据库
         try:
-            orders_db = REPORTS_DIR / 'orders.sqlite'
+            orders_db = runtime_paths.orders_db
             if orders_db.exists():
                 conn = sqlite3.connect(str(orders_db))
                 cursor = conn.cursor()
@@ -5175,45 +5507,62 @@ def api_health():
             else:
                 checks.append({'name': '数据库', 'status': 'critical', 'detail': 'orders.sqlite不存在'})
                 overall_status = 'critical'
-        except Exception as e:
-            checks.append({'name': '数据库', 'status': 'warning', 'detail': str(e)})
+        except Exception as exc:
+            checks.append({
+                'name': '数据库',
+                'status': 'warning',
+                'detail': _sanitize_public_error_text(exc, default='database status unavailable'),
+            })
         
         # 3. 检查OKX API
         try:
-            import os, time, hmac, hashlib, base64, requests
-            from dotenv import load_dotenv
-            load_dotenv(str(WORKSPACE / '.env'))
-            
-            key = os.getenv('EXCHANGE_API_KEY')
-            sec = os.getenv('EXCHANGE_API_SECRET')
-            pp = os.getenv('EXCHANGE_PASSPHRASE')
-            
-            if key and sec and pp:
-                start = time.time()
-                ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
-                path = '/api/v5/account/balance'
-                msg = ts + 'GET' + path
-                sig = base64.b64encode(hmac.new(sec.encode(), msg.encode(), hashlib.sha256).digest()).decode()
-                
-                headers = {
-                    'OK-ACCESS-KEY': key,
-                    'OK-ACCESS-SIGN': sig,
-                    'OK-ACCESS-TIMESTAMP': ts,
-                    'OK-ACCESS-PASSPHRASE': pp,
-                }
-                
-                resp = requests.get('https://www.okx.com' + path, headers=headers, timeout=8)
-                latency = (time.time() - start) * 1000
-                
-                if resp.status_code == 200 and resp.json().get('code') == '0':
-                    checks.append({'name': 'OKX API', 'status': 'healthy', 'detail': f'{latency:.0f}ms'})
-                else:
-                    checks.append({'name': 'OKX API', 'status': 'critical', 'detail': 'API响应异常'})
-                    overall_status = 'critical'
+            import time
+
+            key, sec, pp = _load_workspace_exchange_creds()
+            if not _dashboard_live_account_enabled():
+                checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'live probe disabled'})
+                if overall_status == 'healthy':
+                    overall_status = 'warning'
             else:
-                checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'API密钥未配置'})
-        except Exception as e:
-            checks.append({'name': 'OKX API', 'status': 'warning', 'detail': str(e)})
+                if key and sec and pp:
+                    now = time.time()
+                    ttl = max(0, int(str(os.getenv('V5_DASHBOARD_HEALTH_OKX_CACHE_TTL_SECONDS', '30') or '30')))
+                    cache_key = (key, sec, pp)
+                    cached_payload = None
+                    cached_latency = 0.0
+                    cache_hit = False
+                    if ttl > 0:
+                        with _OKX_HEALTH_CHECK_CACHE_LOCK:
+                            cached = _OKX_HEALTH_CHECK_CACHE.get(cache_key)
+                        if cached and cached[0] > now:
+                            cached_payload = cached[1]
+                            cached_latency = float(cached[2] or 0.0)
+                            cache_hit = True
+
+                    if cached_payload is None:
+                        start = time.time()
+                        cached_payload = _load_okx_account_balance(key, sec, pp)
+                        cached_latency = (time.time() - start) * 1000
+                        if ttl > 0:
+                            with _OKX_HEALTH_CHECK_CACHE_LOCK:
+                                _OKX_HEALTH_CHECK_CACHE[cache_key] = (now + ttl, cached_payload, cached_latency)
+
+                    if isinstance(cached_payload, dict) and cached_payload.get('code') == '0':
+                        detail = f'{cached_latency:.0f}ms'
+                        if cache_hit:
+                            detail += ' cached'
+                        checks.append({'name': 'OKX API', 'status': 'healthy', 'detail': detail})
+                    else:
+                        checks.append({'name': 'OKX API', 'status': 'critical', 'detail': 'API响应异常'})
+                        overall_status = 'critical'
+                else:
+                    checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'API密钥未配置'})
+                    if overall_status == 'healthy':
+                        overall_status = 'warning'
+        except Exception:
+            checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'okx api unavailable'})
+            if overall_status == 'healthy':
+                overall_status = 'warning'
         
         # 4. 检查磁盘空间
         try:
@@ -5231,8 +5580,8 @@ def api_health():
                     overall_status = 'warning'
             else:
                 checks.append({'name': '磁盘空间', 'status': 'healthy', 'detail': f'{free_gb:.1f}GB可用'})
-        except Exception as e:
-            checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': str(e)})
+        except Exception:
+            checks.append({'name': '磁盘空间', 'status': 'warning', 'detail': 'disk status unavailable'})
         
         warning_count = sum(1 for item in checks if item.get('status') == 'warning')
         critical_count = sum(1 for item in checks if item.get('status') == 'critical')
@@ -5246,8 +5595,14 @@ def api_health():
             'critical_count': critical_count,
         })
         
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+    except Exception as exc:
+        return _json_internal_error_response(
+            exc,
+            status='error',
+            checks=[],
+            warning_count=0,
+            critical_count=0,
+        )
 
 
 if __name__ == '__main__':
