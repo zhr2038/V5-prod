@@ -1575,11 +1575,18 @@ class V5Pipeline:
             px = float(prices.get(p.symbol, 0.0) or 0.0)
             if px <= 0:
                 continue
+            series = market_data_1h.get(p.symbol)
+            candle_high = float(series.high[-1]) if series and getattr(series, "high", None) else px
             entry_ref = float(p.avg_px) if float(getattr(p, 'avg_px', 0.0) or 0.0) > 0 else px
             if p.symbol not in self.fixed_stop_loss.entry_prices:
                 self.fixed_stop_loss.register_position(p.symbol, entry_ref)
             # profit_taking 自带“入场价漂移>1%自动重置”逻辑，需每轮同步一次
-            self.profit_taking.register_position(p.symbol, entry_ref, current_price=px)
+            self.profit_taking.register_position(
+                p.symbol,
+                entry_ref,
+                current_price=px,
+                highest_price_hint=max(float(getattr(p, 'highest_px', 0.0) or 0.0), candle_high),
+            )
 
         # 4.5 Profit-first exit priority (profit-taking > fixed stop > rank exit)
         profit_orders = []
@@ -1591,9 +1598,20 @@ class V5Pipeline:
             if not s or not s.close:
                 continue
             current_price = float(s.close[-1])
+            observed_low_price = float(s.low[-1]) if getattr(s, "low", None) else current_price
+            observed_high_price = max(
+                current_price,
+                float(s.high[-1]) if getattr(s, "high", None) else current_price,
+                float(getattr(p, 'highest_px', 0.0) or 0.0),
+            )
             
             # 1st priority: 程序化利润管理（利润回撤锁盈）
-            action, value, reason = self.profit_taking.evaluate(p.symbol, current_price)
+            action, value, reason = self.profit_taking.evaluate(
+                p.symbol,
+                current_price,
+                observed_low_price=observed_low_price,
+                observed_high_price=observed_high_price,
+            )
             
             if action in {'sell_all', 'sell_partial'} and float(p.qty) > 0:
                 sell_fraction = 1.0 if action == 'sell_all' else max(0.0, min(float(value or 0.0), 1.0))

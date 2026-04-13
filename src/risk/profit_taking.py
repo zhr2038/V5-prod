@@ -162,7 +162,13 @@ class ProfitTakingManager:
         except Exception as e:
             print(f"[ProfitTaking] failed to save state: {e}")
 
-    def register_position(self, symbol: str, entry_price: float, current_price: float = None):
+    def register_position(
+        self,
+        symbol: str,
+        entry_price: float,
+        current_price: float = None,
+        highest_price_hint: float | None = None,
+    ):
         if symbol in self.positions:
             old_entry = float(self.positions[symbol].entry_price or 0.0)
             price_diff_pct = 1.0 if old_entry <= 0 else abs(entry_price - old_entry) / old_entry
@@ -184,15 +190,44 @@ class ProfitTakingManager:
                 state.rank_exit_streak = 0
                 state.last_rank = None
                 state.last_rank_exit_time = None
+                if highest_price_hint is not None:
+                    state.highest_price = max(float(highest_price_hint), state.highest_price)
+                    if state.entry_price > 0:
+                        state.profit_high = max(
+                            float(state.profit_high or 0.0),
+                            (float(state.highest_price) - float(state.entry_price)) / float(state.entry_price),
+                        )
                 self._save_state()
+            else:
+                state = self.positions[symbol]
+                changed = False
+                if highest_price_hint is not None:
+                    synced_high = max(float(state.highest_price or 0.0), float(highest_price_hint or 0.0))
+                    if synced_high > float(state.highest_price or 0.0):
+                        state.highest_price = synced_high
+                        changed = True
+                elif current_price is not None and float(current_price or 0.0) > float(state.highest_price or 0.0):
+                    state.highest_price = float(current_price or 0.0)
+                    changed = True
+                if float(state.entry_price or 0.0) > 0:
+                    synced_profit_high = (float(state.highest_price or 0.0) - float(state.entry_price)) / float(state.entry_price)
+                    if synced_profit_high > float(state.profit_high or 0.0):
+                        state.profit_high = synced_profit_high
+                        changed = True
+                if changed:
+                    self._save_state()
             return
 
+        highest_seed = current_price or entry_price
+        if highest_price_hint is not None:
+            highest_seed = max(float(highest_seed or entry_price), float(highest_price_hint))
         self.positions[symbol] = PositionProfitState(
             symbol=symbol,
             entry_price=entry_price,
             entry_time=datetime.now(),
-            highest_price=current_price or entry_price,
+            highest_price=highest_seed,
             current_stop=entry_price * 0.95,
+            profit_high=max(0.0, (float(highest_seed) - float(entry_price)) / float(entry_price)) if float(entry_price or 0.0) > 0 else 0.0,
             triggered_actions=[],
         )
         self._save_state()
@@ -201,7 +236,14 @@ class ProfitTakingManager:
             f"initial stop {self.positions[symbol].current_stop:.4f}"
         )
 
-    def evaluate(self, symbol: str, current_price: float) -> Tuple[str, float, str]:
+    def evaluate(
+        self,
+        symbol: str,
+        current_price: float,
+        *,
+        observed_low_price: float | None = None,
+        observed_high_price: float | None = None,
+    ) -> Tuple[str, float, str]:
         if symbol not in self.positions:
             return "hold", 0, "not_registered"
 
@@ -211,18 +253,23 @@ class ProfitTakingManager:
             return "hold", 0, "invalid_entry"
 
         changed = False
-        profit_pct = (current_price - entry) / entry
+        eval_price = float(current_price)
+        if observed_low_price is not None:
+            eval_price = min(eval_price, float(observed_low_price))
+        observed_peak_price = float(current_price)
+        if observed_high_price is not None:
+            observed_peak_price = max(observed_peak_price, float(observed_high_price))
 
-        if profit_pct > state.profit_high:
+        if observed_peak_price > float(state.highest_price or 0.0):
+            state.highest_price = observed_peak_price
+            changed = True
+        profit_pct = (float(state.highest_price or observed_peak_price) - entry) / entry
+        if profit_pct > float(state.profit_high or 0.0):
             state.profit_high = profit_pct
-            state.highest_price = current_price
             changed = True
 
         take_profit_key = self._take_profit_sell_all_key()
-        if take_profit_key and (
-            take_profit_key in state.triggered_actions
-            or profit_pct + 1e-12 >= self.take_profit_sell_all_pct
-        ):
+        if take_profit_key and float(state.profit_high or 0.0) + 1e-12 >= self.take_profit_sell_all_pct:
             if take_profit_key not in state.triggered_actions:
                 state.triggered_actions.append(take_profit_key)
                 changed = True
@@ -233,13 +280,13 @@ class ProfitTakingManager:
                 self._save_state()
             return "sell_all", current_price, take_profit_key
 
-        if current_price <= state.current_stop:
+        if eval_price <= state.current_stop:
             if changed:
                 self._save_state()
             return "sell_all", current_price, f"stop_loss_hit_{state.current_action}"
 
         if self.peak_drawdown_levels and state.highest_price > 0:
-            retrace_from_peak = max(0.0, (state.highest_price - current_price) / state.highest_price)
+            retrace_from_peak = max(0.0, (state.highest_price - eval_price) / state.highest_price)
             for level in reversed(self.peak_drawdown_levels):
                 action_key = self._peak_drawdown_key(level)
                 if action_key in state.triggered_actions:
