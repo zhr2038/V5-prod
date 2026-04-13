@@ -18,12 +18,13 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import traceback
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, render_template, jsonify, request, send_from_directory
+from flask import Flask, g, has_app_context, render_template, jsonify, request, send_from_directory
 import pandas as pd
 import yaml
 import requests
@@ -117,6 +118,101 @@ def add_no_cache_headers(resp):
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
     return resp
+
+
+def _log_dashboard_exception(label: str, exc: BaseException) -> None:
+    print(f"[web_dashboard] {label}: {exc}", file=sys.stderr)
+    traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+
+def _sanitize_public_error_text(value: Any, *, default: str = 'internal error') -> str:
+    text = str(value or '').strip()
+    if not text:
+        return default
+    lowered = text.lower()
+    if 'traceback' in lowered:
+        return default
+    if re.search(r'[A-Za-z]:\\', text):
+        return default
+    if re.search(r'(^|[\s(])/(?:[^/\s]+/?)+', text):
+        return default
+    return text
+
+
+def _json_internal_error_response(
+    exc: BaseException,
+    *,
+    status_code: int = 500,
+    error: str = 'internal server error',
+    **extra: Any,
+):
+    _log_dashboard_exception('api error', exc)
+    payload = dict(extra)
+    payload['error'] = error
+    return jsonify(payload), status_code
+
+
+def _extract_endpoint_json(result: Any) -> tuple[Any, int]:
+    response = result
+    status_code = 200
+
+    if isinstance(result, tuple):
+        if not result:
+            return None, 500
+        response = result[0]
+        for item in result[1:]:
+            if isinstance(item, int):
+                status_code = item
+                break
+    else:
+        try:
+            status_code = int(getattr(response, 'status_code', 200) or 200)
+        except Exception:
+            status_code = 200
+
+    if hasattr(response, 'get_json'):
+        try:
+            payload = response.get_json(silent=True)
+        except TypeError:
+            payload = response.get_json()
+        return payload, status_code
+
+    if isinstance(response, (dict, list)):
+        return response, status_code
+
+    return None, status_code
+
+
+def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[List[str]] = None) -> Any:
+    try:
+        if has_app_context():
+            cache = getattr(g, '_dashboard_api_cache', None)
+            if cache is None:
+                cache = {}
+                g._dashboard_api_cache = cache
+            cached = cache.get(api_func)
+            if cached is None:
+                cached = _extract_endpoint_json(api_func())
+                cache[api_func] = cached
+            payload, status_code = cached
+        else:
+            payload, status_code = _extract_endpoint_json(api_func())
+    except Exception as exc:
+        _log_dashboard_exception(f'dashboard child {label}', exc)
+        if errors is not None:
+            errors.append(f'{label}: {_sanitize_public_error_text(exc, default=str(exc))}')
+        return default
+
+    if status_code >= 400:
+        message = None
+        if isinstance(payload, dict):
+            message = payload.get('error') or payload.get('message')
+        message = _sanitize_public_error_text(message, default='internal error')
+        if errors is not None:
+            errors.append(f'{label}: {message}')
+        return default
+
+    return payload if payload is not None else default
 
 def _resolve_config_path() -> Path:
     """Resolve config path from env V5_CONFIG (supports relative path)."""
@@ -1133,6 +1229,14 @@ def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equi
     return peak_equity
 
 
+def _load_local_account_state() -> Dict[str, Any]:
+    return {}
+
+
+def _load_total_fees_from_orders() -> float:
+    return 0.0
+
+
 def _maybe_float(value: Any) -> Optional[float]:
     if value is None or value == '':
         return None
@@ -1441,7 +1545,11 @@ def api_account():
         positions_value = 0.0
         positions_rows = []
         try:
-            pos_payload = api_positions().get_json() or {}
+            pos_payload = _call_dashboard_api(
+                api_positions,
+                default={'positions': []},
+                label='positions_for_account',
+            ) or {}
             if isinstance(pos_payload, dict):
                 positions_rows = pos_payload.get('positions', []) or []
             elif isinstance(pos_payload, list):
@@ -2022,6 +2130,7 @@ def api_position_kline():
 def api_scores():
     """币种评分API（当前run vs 上一个run 的排名变化）"""
     try:
+        load_config()
         current_run_id: Optional[str] = None
         previous_run_id: Optional[str] = None
         current_regime = 'Unknown'
@@ -2101,7 +2210,14 @@ def api_scores():
             'last_update': datetime.now().isoformat()
         })
     except Exception as e:
-        return jsonify({'regime': 'Error', 'scores': [], 'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            regime='Error',
+            current_run=None,
+            previous_run=None,
+            scores=[],
+            last_update='',
+        )
 
 
 @app.route('/api/sentiment')
@@ -2169,7 +2285,7 @@ def api_sentiment():
                     'cache_mtime': datetime.fromtimestamp(latest.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
                 }
             except Exception as e:
-                results[symbol] = {'error': str(e)}
+                results[symbol] = {'error': 'cache_error'}
 
         valid_scores = [r['sentiment'] for r in results.values() if 'sentiment' in r]
         valid_fg = [r['fear_greed'] for r in results.values() if 'fear_greed' in r]
@@ -2197,8 +2313,17 @@ def api_sentiment():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_internal_error_response(
+            e,
+            overall={
+                'sentiment': 0.0,
+                'fear_greed': 50,
+                'mood': '中性',
+                'mood_color': '#64748b',
+            },
+            by_symbol={},
+            last_update='',
+        )
 
 
 @app.route('/api/status')
@@ -2219,7 +2344,16 @@ def api_status():
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _json_internal_error_response(
+            e,
+            timer_active=False,
+            timer_name='v5-prod.user.timer',
+            timer_error=None,
+            mode='unknown',
+            dry_run=True,
+            equity_cap=0,
+            last_check='',
+        )
 
 
 def calculate_market_indicators():
@@ -2866,38 +3000,35 @@ def api_equity_curve():
 def api_dashboard():
     """Dashboard 完整数据API"""
     try:
-        # 获取账户数据
-        account_data = api_account().get_json()
-        
-        # 获取持仓
-        positions_data = api_positions().get_json()
-        if isinstance(positions_data, dict):
-            positions_data = positions_data.get('positions', positions_data.get('data', []))
+        errors: List[str] = []
+        account_data = _call_dashboard_api(api_account, default={}, label='account', errors=errors)
+        positions_payload = _call_dashboard_api(api_positions, default={'positions': []}, label='positions', errors=errors)
+        trades_payload = _call_dashboard_api(api_trades, default={'trades': []}, label='trades', errors=errors)
+        scores_data = _call_dashboard_api(api_scores, default={'scores': []}, label='scores', errors=errors)
+        status_data = _call_dashboard_api(api_status, default={}, label='status', errors=errors)
+        equity_data = _call_dashboard_api(api_equity_history, default=[], label='equity_history', errors=errors)
+        market_state_data = _call_dashboard_api(api_market_state, default={}, label='market_state', errors=errors)
+        timers_data = _call_dashboard_api(api_timers, default={'timers': []}, label='timers', errors=errors)
+        cost_calibration = _call_dashboard_api(api_cost_calibration, default={'status': 'unknown'}, label='cost_calibration', errors=errors)
+        ic_diagnostics = _call_dashboard_api(api_ic_diagnostics, default={'status': 'no_data'}, label='ic_diagnostics', errors=errors)
+        ml_training = _call_dashboard_api(api_ml_training, default={'status': 'unknown'}, label='ml_training', errors=errors)
+        reflection_reports = _call_dashboard_api(api_reflection_reports, default={'reports': []}, label='reflection_reports', errors=errors)
+
+        positions_data = positions_payload
+        if isinstance(positions_payload, dict):
+            positions_data = positions_payload.get('positions', positions_payload.get('data', []))
         if not isinstance(positions_data, list):
             positions_data = []
-        
-        # 获取交易
-        trades_data = api_trades().get_json()
-        if isinstance(trades_data, dict):
-            trades_data = trades_data.get('trades', trades_data.get('data', []))
+
+        trades_data = trades_payload
+        if isinstance(trades_payload, dict):
+            trades_data = trades_payload.get('trades', trades_payload.get('data', []))
         if not isinstance(trades_data, list):
             trades_data = []
-        
-        # 获取评分
-        scores_data = api_scores().get_json()
         if not isinstance(scores_data, dict):
             scores_data = {'scores': []}
-        
-        # 获取状态
-        status_data = api_status().get_json()
         if not isinstance(status_data, dict):
             status_data = {}
-        
-        # 获取权益曲线
-        equity_data = api_equity_history().get_json()
-        
-        # 获取市场状态
-        market_state_data = api_market_state().get_json()
         
         # 转换持仓格式
         positions = []
@@ -2996,21 +3127,59 @@ def api_dashboard():
                 'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',
                 'lastUpdate': account_data.get('last_update', ''),
                 'killSwitch': False,
-                'errors': [status_data['timer_error']] if status_data.get('timer_error') else []
+                'errors': (
+                    ([
+                        _sanitize_public_error_text(status_data['timer_error'], default='internal error')
+                    ] if status_data.get('timer_error') else [])
+                    + errors
+                ),
             },
             'equityCurve': equity_data if isinstance(equity_data, list) else [],
             # 新增：系统进度数据
-            'timers': api_timers().get_json() if hasattr(api_timers(), 'get_json') else {'timers': []},
-            'costCalibration': api_cost_calibration().get_json() if hasattr(api_cost_calibration(), 'get_json') else {'status': 'unknown'},
-            'icDiagnostics': api_ic_diagnostics().get_json() if hasattr(api_ic_diagnostics(), 'get_json') else {'status': 'no_data'},
-            'mlTraining': api_ml_training().get_json() if hasattr(api_ml_training(), 'get_json') else {'status': 'unknown'},
-            'reflectionReports': api_reflection_reports().get_json() if hasattr(api_reflection_reports(), 'get_json') else {'reports': []}
+            'timers': timers_data,
+            'costCalibration': cost_calibration,
+            'icDiagnostics': ic_diagnostics,
+            'mlTraining': ml_training,
+            'reflectionReports': reflection_reports,
         }
         
         return jsonify(dashboard_data)
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_internal_error_response(
+            e,
+            account={
+                'totalEquity': 0.0,
+                'cash': 0.0,
+                'positionsValue': 0.0,
+                'initialCapital': 0.0,
+                'totalPnl': 0.0,
+                'realizedPnl': 0.0,
+                'totalPnlPercent': 0.0,
+                'todayPnl': 0.0,
+                'todayPnlPercent': 0.0,
+                'sharpeRatio': 0.0,
+                'maxDrawdown': 0.0,
+                'winRate': 0.0,
+                'totalTrades': 0,
+            },
+            positions=[],
+            trades=[],
+            alphaScores=[],
+            marketState={},
+            systemStatus={
+                'isRunning': False,
+                'mode': 'dry_run',
+                'lastUpdate': '',
+                'killSwitch': False,
+                'errors': ['internal server error'],
+            },
+            equityCurve=[],
+            timers={'timers': []},
+            costCalibration={'status': 'unknown'},
+            icDiagnostics={'status': 'no_data'},
+            mlTraining={'status': 'unknown'},
+            reflectionReports={'reports': []},
+        )
 
 
 @app.route('/api/timer')
@@ -3028,15 +3197,14 @@ def api_timer():
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        import traceback
-        return jsonify({
-            'timer_name': _pick_timer_name(),
-            'next_run': None,
-            'countdown_seconds': 0,
-            'interval_minutes': 120,
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
+        return _json_internal_error_response(
+            e,
+            timer_name='v5-prod.user.timer',
+            next_run=None,
+            countdown_seconds=0,
+            interval_minutes=120,
+            last_check='',
+        )
 
 
 @app.route('/api/timers')
@@ -3068,8 +3236,11 @@ def api_timers():
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return _json_internal_error_response(
+            e,
+            timers=[],
+            last_update='',
+        )
 
 
 @app.route('/api/cost_calibration')
