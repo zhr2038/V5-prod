@@ -1333,11 +1333,33 @@ def _static_asset_version(filename: str) -> str:
 
 
 def _render_monitor_v2():
-    return render_template(
-        'monitor_v2.html',
-        monitor_v2_js_version=_static_asset_version('js/monitor_v2.js'),
-        ml_status_panel_js_version=_static_asset_version('js/ml_status_panel.js'),
-    )
+    template_path = WEB_DIR / 'templates' / 'monitor_v2.html'
+    if template_path.exists():
+        return render_template(
+            'monitor_v2.html',
+            monitor_v2_js_version=_static_asset_version('js/monitor_v2.js'),
+            ml_status_panel_js_version=_static_asset_version('js/ml_status_panel.js'),
+        )
+
+    index_path = REACT_BUILD_PATH / 'index.html'
+    if index_path.exists():
+        return send_from_directory(str(REACT_BUILD_PATH), 'index.html')
+
+    return 'Not found', 404
+
+
+def _resolve_safe_react_asset(filename: str) -> Optional[Path]:
+    raw = str(filename or '').strip()
+    if not raw:
+        return None
+
+    candidate = (REACT_BUILD_PATH / raw).resolve()
+    build_root = REACT_BUILD_PATH.resolve()
+    if candidate == build_root:
+        return None
+    if build_root not in candidate.parents:
+        return None
+    return candidate
 
 
 @app.route('/')
@@ -1361,31 +1383,19 @@ def simple_dashboard():
 @app.route('/<path:filename>')
 def static_files(filename):
     """提供React静态文件"""
-    file_path = REACT_BUILD_PATH / filename
+    file_path = _resolve_safe_react_asset(filename)
+    if file_path is None:
+        return 'Not found', 404
     
     # 检查文件是否存在
     if file_path.exists() and file_path.is_file():
-        # 根据扩展名设置Content-Type
-        content_types = {
-            '.js': 'application/javascript',
-            '.css': 'text/css',
-            '.html': 'text/html',
-            '.json': 'application/json',
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.svg': 'image/svg+xml',
-        }
-        ext = file_path.suffix
-        content_type = content_types.get(ext, 'application/octet-stream')
-        
-        with open(file_path, 'rb') as f:
-            return f.read(), 200, {'Content-Type': content_type}
+        rel_path = file_path.relative_to(REACT_BUILD_PATH.resolve()).as_posix()
+        return send_from_directory(str(REACT_BUILD_PATH), rel_path)
     
     # 如果文件不存在，返回index.html（支持React Router）
     index_path = REACT_BUILD_PATH / 'index.html'
     if index_path.exists():
-        with open(index_path, 'r') as f:
-            return f.read(), 200, {'Content-Type': 'text/html'}
+        return send_from_directory(str(REACT_BUILD_PATH), 'index.html')
     
     return 'Not found', 404
 
