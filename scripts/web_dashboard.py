@@ -4147,8 +4147,16 @@ def _api_ml_training_v2():
     min_samples = 200
     model_base_path = WORKSPACE / 'models' / 'ml_factor_model'
     pointer_path = WORKSPACE / 'models' / 'ml_factor_model_active.txt'
-    promotion_path = runtime_paths.reports_dir / 'model_promotion_decision.json'
-    runtime_path = runtime_paths.reports_dir / 'ml_runtime_status.json'
+    promotion_path = derive_runtime_named_artifact_path(
+        runtime_paths.orders_db,
+        'model_promotion_decision',
+        '.json',
+    )
+    runtime_path = derive_runtime_named_artifact_path(
+        runtime_paths.orders_db,
+        'ml_runtime_status',
+        '.json',
+    )
     try:
         cfg = load_app_config(str(CONFIG_PATH), env_path=None)
         ml_cfg = getattr(getattr(cfg, 'alpha', None), 'ml_factor', None)
@@ -4176,7 +4184,11 @@ def _api_ml_training_v2():
 
     total_samples = 0
     labeled_samples = 0
-    db_path = runtime_paths.reports_dir / 'ml_training_data.db'
+    db_path = derive_runtime_named_artifact_path(
+        runtime_paths.orders_db,
+        'ml_training_data',
+        '.db',
+    )
     if db_path.exists():
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()
@@ -4187,7 +4199,11 @@ def _api_ml_training_v2():
         conn.close()
 
     latest_history = {}
-    history_path = runtime_paths.reports_dir / 'ml_training_history.json'
+    history_path = derive_runtime_named_artifact_path(
+        runtime_paths.orders_db,
+        'ml_training_history',
+        '.json',
+    )
     if history_path.exists():
         try:
             hist_obj = json.loads(history_path.read_text(encoding='utf-8'))

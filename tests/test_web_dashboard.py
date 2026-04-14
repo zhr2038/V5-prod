@@ -3145,6 +3145,131 @@ def test_ml_training_error_response_hides_internal_paths(monkeypatch):
     _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/reports/ml_training_data.db", "ml_training_data.db")
 
 
+def test_ml_training_api_uses_prefixed_runtime_artifacts(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    models_dir = module.WORKSPACE / "models"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime_db_path = reports_dir / "ml_training_data_prefixed.db"
+    conn = sqlite3.connect(str(runtime_db_path))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE feature_snapshots(id INTEGER PRIMARY KEY, label_filled INTEGER NOT NULL)")
+    cur.executemany("INSERT INTO feature_snapshots(label_filled) VALUES (?)", [(1,), (0,), (1,)])
+    conn.commit()
+    conn.close()
+
+    (reports_dir / "shadow_ml_training_data.db").write_bytes(runtime_db_path.read_bytes())
+    runtime_db_path.unlink()
+
+    (reports_dir / "shadow_ml_training_history.json").write_text(
+        json.dumps(
+            [{"timestamp": "2026-03-11T08:00:00Z", "valid_ic": 0.21, "gate": {"passed": True}}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "shadow_model_promotion_decision.json").write_text(
+        json.dumps({"ts": "2026-03-11T08:30:00Z", "passed": True, "fail_reasons": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "shadow_ml_runtime_status.json").write_text(
+        json.dumps(
+            {"ts": "2026-03-11T09:00:00Z", "used_in_latest_snapshot": True, "reason": "shadow-runtime", "prediction_count": 9},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (models_dir / "ml_factor_model.pkl").write_bytes(b"test")
+    (models_dir / "ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+    (models_dir / "ml_factor_model_active.txt").write_text("models/ml_factor_model", encoding="utf-8")
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+    monkeypatch.setattr(module, "load_app_config", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("skip")))
+
+    response = client.get("/api/ml_training")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total_samples"] == 3
+    assert payload["labeled_samples"] == 2
+    assert payload["last_training_ts"] == "2026-03-11T08:00:00Z"
+    assert payload["last_promotion_ts"] == "2026-03-11T08:30:00Z"
+    assert payload["runtime_reason"] == "shadow-runtime"
+    assert payload["runtime_prediction_count"] == 9
+
+
+def test_ml_training_api_uses_suffixed_runtime_artifacts(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    models_dir = module.WORKSPACE / "models"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime_db_path = reports_dir / "ml_training_data_accelerated.db"
+    conn = sqlite3.connect(str(runtime_db_path))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE feature_snapshots(id INTEGER PRIMARY KEY, label_filled INTEGER NOT NULL)")
+    cur.executemany("INSERT INTO feature_snapshots(label_filled) VALUES (?)", [(1,), (1,), (1,), (0,)])
+    conn.commit()
+    conn.close()
+
+    (reports_dir / "ml_training_history_accelerated.json").write_text(
+        json.dumps(
+            [{"timestamp": "2026-03-12T10:00:00Z", "valid_ic": 0.33, "gate": {"passed": True}}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "model_promotion_decision_accelerated.json").write_text(
+        json.dumps({"ts": "2026-03-12T10:20:00Z", "passed": True, "fail_reasons": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_runtime_status_accelerated.json").write_text(
+        json.dumps(
+            {"ts": "2026-03-12T10:40:00Z", "used_in_latest_snapshot": True, "reason": "accelerated-runtime", "prediction_count": 13},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (models_dir / "ml_factor_model.pkl").write_bytes(b"test")
+    (models_dir / "ml_factor_model_config.json").write_text("{}", encoding="utf-8")
+    (models_dir / "ml_factor_model_active.txt").write_text("models/ml_factor_model", encoding="utf-8")
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}},
+    )
+    monkeypatch.setattr(module, "load_app_config", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("skip")))
+
+    response = client.get("/api/ml_training")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total_samples"] == 4
+    assert payload["labeled_samples"] == 3
+    assert payload["last_training_ts"] == "2026-03-12T10:00:00Z"
+    assert payload["last_promotion_ts"] == "2026-03-12T10:20:00Z"
+    assert payload["runtime_reason"] == "accelerated-runtime"
+    assert payload["runtime_prediction_count"] == 13
+
+
 def test_api_reflection_reports_uses_active_runtime_reflection_dir(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
