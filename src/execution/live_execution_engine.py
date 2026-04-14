@@ -180,11 +180,20 @@ def _write_rank_exit_cooldown_state(data: Dict[str, Any], path: str = "reports/r
     tmp.replace(p)
 
 
-def _record_rank_exit_fill(symbol: str, reason: str, path: str = "reports/rank_exit_cooldown_state.json") -> None:
+def _record_rank_exit_fill(
+    symbol: str,
+    reason: str,
+    path: str = "reports/rank_exit_cooldown_state.json",
+    *,
+    ts_ms: Optional[int] = None,
+) -> None:
     try:
         st = _read_rank_exit_cooldown_state(path)
+        event_ts_ms = int(ts_ms or _now_ms())
+        prev = st.get(str(symbol)) if isinstance(st, dict) else None
+        prev_ts_ms = int((prev or {}).get("last_rank_exit_ts_ms") or 0) if isinstance(prev, dict) else 0
         st[str(symbol)] = {
-            "last_rank_exit_ts_ms": _now_ms(),
+            "last_rank_exit_ts_ms": max(prev_ts_ms, event_ts_ms),
             "reason": str(reason or "rank_exit"),
         }
         _write_rank_exit_cooldown_state(st, path)
@@ -224,11 +233,20 @@ def _write_take_profit_cooldown_state(data: Dict[str, Any], path: str = "reports
     tmp.replace(p)
 
 
-def _record_take_profit_fill(symbol: str, reason: str, path: str = "reports/take_profit_cooldown_state.json") -> None:
+def _record_take_profit_fill(
+    symbol: str,
+    reason: str,
+    path: str = "reports/take_profit_cooldown_state.json",
+    *,
+    ts_ms: Optional[int] = None,
+) -> None:
     try:
         st = _read_take_profit_cooldown_state(path)
+        event_ts_ms = int(ts_ms or _now_ms())
+        prev = st.get(str(symbol)) if isinstance(st, dict) else None
+        prev_ts_ms = int((prev or {}).get("last_take_profit_ts_ms") or 0) if isinstance(prev, dict) else 0
         st[str(symbol)] = {
-            "last_take_profit_ts_ms": _now_ms(),
+            "last_take_profit_ts_ms": max(prev_ts_ms, event_ts_ms),
             "reason": str(reason or "take_profit"),
         }
         _write_take_profit_cooldown_state(st, path)

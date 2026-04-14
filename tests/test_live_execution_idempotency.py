@@ -1232,6 +1232,7 @@ def test_fill_reconciler_records_take_profit_cooldown_from_persisted_reason() ->
         assert cooldown_path.exists()
         payload = json.loads(cooldown_path.read_text(encoding="utf-8"))
         assert payload["BTC/USDT"]["reason"] == "profit_partial_peak_drawdown_8pct_retrace_2_5pct"
+        assert payload["BTC/USDT"]["last_take_profit_ts_ms"] == 1
 
 
 def test_fill_reconciler_records_take_profit_cooldown_for_already_filled_order() -> None:
@@ -1277,6 +1278,7 @@ def test_fill_reconciler_records_take_profit_cooldown_for_already_filled_order()
         assert cooldown_path.exists()
         payload = json.loads(cooldown_path.read_text(encoding="utf-8"))
         assert payload["BTC/USDT"]["reason"] == "profit_partial_peak_drawdown_8pct_retrace_2_5pct"
+        assert payload["BTC/USDT"]["last_take_profit_ts_ms"] == 1
 
 
 

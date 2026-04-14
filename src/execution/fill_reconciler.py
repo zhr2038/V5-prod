@@ -33,6 +33,7 @@ class FillAgg:
     acc_fill_sz: Decimal
     vwap_px: Optional[Decimal]
     fees_by_ccy: Dict[str, Decimal]
+    max_ts_ms: int
 
 
 class FillReconciler:
@@ -124,7 +125,7 @@ class FillReconciler:
         else:
             self.position_store.set_qty(symbol, qty=new_qty)
 
-    def _record_reentry_cooldowns(self, row) -> None:
+    def _record_reentry_cooldowns(self, row, agg: FillAgg) -> None:
         side = str(getattr(row, "side", "") or "").lower()
         if side != "sell":
             return
@@ -145,9 +146,19 @@ class FillReconciler:
             from src.execution.live_execution_engine import _record_rank_exit_fill, _record_take_profit_fill
 
             if reason.startswith("rank_exit_"):
-                _record_rank_exit_fill(symbol, reason, path=rank_exit_cooldown_path)
+                _record_rank_exit_fill(
+                    symbol,
+                    reason,
+                    path=rank_exit_cooldown_path,
+                    ts_ms=int(getattr(agg, "max_ts_ms", 0) or 0),
+                )
             if reason.startswith("profit_taking_") or reason.startswith("profit_partial_"):
-                _record_take_profit_fill(symbol, reason, path=take_profit_cooldown_path)
+                _record_take_profit_fill(
+                    symbol,
+                    reason,
+                    path=take_profit_cooldown_path,
+                    ts_ms=int(getattr(agg, "max_ts_ms", 0) or 0),
+                )
         except Exception:
             pass
 
@@ -180,6 +191,7 @@ class FillReconciler:
                     fees[str(ccy)] = fees.get(str(ccy), Decimal("0")) + _dec(str(fee))
 
             vwap = (sum_px_sz / sum_sz) if sum_sz > 0 else None
+            max_ts_ms = max(int(it.get("ts_ms") or 0) for it in xs) if xs else 0
             aggs.append(
                 FillAgg(
                     inst_id=inst_id,
@@ -188,6 +200,7 @@ class FillReconciler:
                     acc_fill_sz=sum_sz,
                     vwap_px=vwap,
                     fees_by_ccy=fees,
+                    max_ts_ms=max_ts_ms,
                 )
             )
 
@@ -226,6 +239,7 @@ class FillReconciler:
             acc_fill_sz=sum_sz,
             vwap_px=vwap,
             fees_by_ccy=fees,
+            max_ts_ms=max(int(it.get("ts_ms") or 0) for it in fills) if fills else int(getattr(delta, "max_ts_ms", 0) or 0),
         )
 
     def reconcile(self, *, limit: int = 2000, max_get_order_per_run: int = 20) -> Dict[str, Any]:
@@ -269,7 +283,7 @@ class FillReconciler:
             )
             if row_state_before != "FILLED":
                 self._apply_position_delta(row, a)
-            self._record_reentry_cooldowns(row)
+            self._record_reentry_cooldowns(row, total)
             updated += 1
 
             # Confirm terminal state via get_order when possible
