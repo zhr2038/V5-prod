@@ -86,13 +86,37 @@ def _resolve_default_paths(project_root: Path | None = None) -> DustCleanerPaths
         )
 
 
+def _resolve_manual_reports_dir_paths(reports_dir: Path) -> DustCleanerPaths:
+    resolved_reports_dir = Path(reports_dir).resolve()
+    default_orders = (resolved_reports_dir / "orders.sqlite").resolve()
+    orders_db = default_orders
+    if not default_orders.exists():
+        candidates = sorted(
+            {
+                candidate.resolve()
+                for candidate in resolved_reports_dir.glob("*orders*.sqlite")
+                if candidate.is_file()
+            }
+        )
+        if len(candidates) == 1:
+            orders_db = candidates[0]
+
+    return DustCleanerPaths(
+        reports_dir=resolved_reports_dir,
+        orders_db=orders_db,
+        positions_db=derive_position_store_path(orders_db).resolve(),
+        dust_config_path=derive_runtime_named_json_path(orders_db, "dust_config").resolve(),
+    )
+
+
 class DustCleaner:
     def __init__(self, reports_dir: Path | None = None):
         if reports_dir is not None:
-            self.reports_dir = Path(reports_dir).resolve()
-            self.positions_db = (self.reports_dir / "positions.sqlite").resolve()
-            self.orders_db = (self.reports_dir / "orders.sqlite").resolve()
-            self.dust_config_path = (self.reports_dir / "dust_config.json").resolve()
+            runtime_paths = _resolve_manual_reports_dir_paths(reports_dir)
+            self.reports_dir = runtime_paths.reports_dir
+            self.positions_db = runtime_paths.positions_db
+            self.orders_db = runtime_paths.orders_db
+            self.dust_config_path = runtime_paths.dust_config_path
         else:
             runtime_paths = _resolve_default_paths()
             self.reports_dir = runtime_paths.reports_dir
