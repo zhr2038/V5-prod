@@ -60,3 +60,37 @@ def test_load_backtest_config_falls_back_to_suffixed_runtime_cost_stats_dir(tmp_
 
     assert payload is not None
     assert payload["avg_cost_bps"] == 7.25
+
+
+def test_generate_report_uses_prefixed_runtime_filename(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    checker = BacktestLiveConsistencyChecker(workspace=tmp_path)
+    checker.paths = ConsistencyPaths(
+        workspace=tmp_path,
+        reports_dir=reports_dir,
+        orders_db=reports_dir / "shadow_orders.sqlite",
+    )
+
+    checker.generate_report()
+
+    files = list(reports_dir.glob("shadow_consistency_check_*.json"))
+    assert len(files) == 1
+
+
+def test_generate_report_uses_suffixed_runtime_filename(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    checker = BacktestLiveConsistencyChecker(workspace=tmp_path)
+    checker.paths = ConsistencyPaths(
+        workspace=tmp_path,
+        reports_dir=reports_dir,
+        orders_db=reports_dir / "orders_accelerated.sqlite",
+    )
+
+    checker.generate_report()
+
+    files = list(reports_dir.glob("consistency_check_*_accelerated.json"))
+    assert len(files) == 1

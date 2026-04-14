@@ -18,7 +18,12 @@ from typing import Any, Dict, Optional
 WORKSPACE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKSPACE))
 
-from src.execution.fill_store import derive_fill_store_path, derive_runtime_named_json_path, derive_runtime_runs_dir
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
+    derive_runtime_runs_dir,
+)
 
 REPORTS_DIR = WORKSPACE / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
@@ -286,13 +291,22 @@ def generate_report() -> str:
     )
 
 
+def _resolve_report_output_path(paths: StatusPaths, timestamp: str) -> Path:
+    return derive_runtime_named_artifact_path(
+        paths.orders_db,
+        f"status_report_{timestamp}",
+        ".txt",
+    ).resolve()
+
+
 def main() -> int:
     cfg = load_config()
-    reports_dir = _resolve_status_paths(cfg).orders_db.parent
+    paths = _resolve_status_paths(cfg)
+    reports_dir = paths.orders_db.parent
     reports_dir.mkdir(parents=True, exist_ok=True)
     report = generate_report()
     print(report)
-    output = reports_dir / f"status_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+    output = _resolve_report_output_path(paths, datetime.now().strftime('%Y%m%d_%H%M'))
     output.write_text(report, encoding="utf-8")
     return 0
 

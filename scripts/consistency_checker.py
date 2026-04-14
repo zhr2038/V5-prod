@@ -320,7 +320,11 @@ class BacktestLiveConsistencyChecker:
         else:
             print("\nBacktest vs live consistency looks good.")
 
-        report_file = self.paths.reports_dir / f"consistency_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        report_file = derive_runtime_named_artifact_path(
+            self.paths.orders_db,
+            f"consistency_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            ".json",
+        ).resolve()
         report_file.parent.mkdir(parents=True, exist_ok=True)
         with open(report_file, "w", encoding="utf-8") as f:
             json.dump(

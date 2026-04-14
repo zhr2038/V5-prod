@@ -45,3 +45,31 @@ def test_resolve_status_paths_uses_suffixed_runtime_auto_blacklist(tmp_path: Pat
         status_report.WORKSPACE = original_workspace
         status_report.REPORTS_DIR = original_reports
         status_report.ORDERS_DB = original_orders
+
+
+def test_resolve_report_output_path_uses_prefixed_runtime_name(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    paths = status_report.StatusPaths(
+        orders_db=(reports_dir / "shadow_orders.sqlite").resolve(),
+        fills_db=(reports_dir / "shadow_fills.sqlite").resolve(),
+        auto_blacklist_path=(reports_dir / "shadow_auto_blacklist.json").resolve(),
+        runs_dir=(reports_dir / "runs").resolve(),
+    )
+
+    path = status_report._resolve_report_output_path(paths, "20260414_1930")
+
+    assert path == (reports_dir / "shadow_status_report_20260414_1930.txt").resolve()
+
+
+def test_resolve_report_output_path_uses_suffixed_runtime_name(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    paths = status_report.StatusPaths(
+        orders_db=(reports_dir / "orders_accelerated.sqlite").resolve(),
+        fills_db=(reports_dir / "fills_accelerated.sqlite").resolve(),
+        auto_blacklist_path=(reports_dir / "auto_blacklist_accelerated.json").resolve(),
+        runs_dir=(reports_dir / "runs").resolve(),
+    )
+
+    path = status_report._resolve_report_output_path(paths, "20260414_1930")
+
+    assert path == (reports_dir / "status_report_20260414_1930_accelerated.txt").resolve()
