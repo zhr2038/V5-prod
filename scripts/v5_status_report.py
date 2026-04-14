@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 WORKSPACE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKSPACE))
 
-from src.execution.fill_store import derive_fill_store_path, derive_runtime_runs_dir
+from src.execution.fill_store import derive_fill_store_path, derive_runtime_named_json_path, derive_runtime_runs_dir
 
 REPORTS_DIR = WORKSPACE / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
@@ -81,7 +81,7 @@ def _resolve_status_paths(cfg: Optional[Dict[str, Any]] = None) -> StatusPaths:
     return StatusPaths(
         orders_db=orders_db,
         fills_db=derive_fill_store_path(orders_db),
-        auto_blacklist_path=orders_db.parent / "auto_blacklist.json",
+        auto_blacklist_path=derive_runtime_named_json_path(orders_db, "auto_blacklist"),
         runs_dir=derive_runtime_runs_dir(orders_db),
     )
 
