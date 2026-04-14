@@ -24,7 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
-from src.execution.fill_store import derive_fill_store_path
+from src.execution.fill_store import derive_fill_store_path, derive_runtime_named_artifact_path
 
 
 TELEGRAM_CHAT_ID = "5065024131"
@@ -88,7 +88,7 @@ def build_paths(project_root: Path | None = None) -> MonitorPaths:
         fills_db_path=fills_db_path,
         orders_db_path=orders_db_path,
         env_path=env_path,
-        alert_file=reports_dir / "monitor_alert.txt",
+        alert_file=derive_runtime_named_artifact_path(orders_db_path, "monitor_alert", ".txt").resolve(),
     )
 
 
