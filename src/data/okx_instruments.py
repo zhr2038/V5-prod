@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,9 +42,20 @@ class OKXSpotInstrumentsCache:
         timeout_sec: float = 10.0,
     ):
         self.base_url = str(base_url).rstrip("/")
-        self.cache_path = Path(cache_path)
+        self.cache_path = self._resolve_cache_path(cache_path)
         self.ttl_sec = int(ttl_sec)
         self.timeout_sec = float(timeout_sec)
+
+    @staticmethod
+    def _resolve_cache_path(cache_path: str) -> Path:
+        path = Path(cache_path)
+        if (
+            str(path).replace("\\", "/") == "reports/okx_spot_instruments.json"
+            and os.getenv("PYTEST_CURRENT_TEST")
+            and not path.is_absolute()
+        ):
+            return Path(tempfile.gettempdir()) / "v5-test-cache" / "okx_spot_instruments.json"
+        return path
 
     def _read_cache(self) -> Optional[Dict[str, Any]]:
         try:
