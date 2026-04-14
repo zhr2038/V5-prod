@@ -43,28 +43,49 @@ class OKXSpotInstrumentsCache:
     ):
         self.base_url = str(base_url).rstrip("/")
         self.cache_path = self._resolve_cache_path(cache_path)
+        self.seed_cache_path = self._resolve_seed_cache_path(cache_path, self.cache_path)
         self.ttl_sec = int(ttl_sec)
         self.timeout_sec = float(timeout_sec)
 
     @staticmethod
-    def _resolve_cache_path(cache_path: str) -> Path:
+    def _is_default_cache_path(path: str | Path) -> bool:
+        return str(Path(path)).replace("\\", "/") == "reports/okx_spot_instruments.json"
+
+    @classmethod
+    def _repo_default_cache_path(cls) -> Path:
+        return Path(__file__).resolve().parents[2] / "reports" / "okx_spot_instruments.json"
+
+    @classmethod
+    def _resolve_cache_path(cls, cache_path: str) -> Path:
         path = Path(cache_path)
-        if (
-            str(path).replace("\\", "/") == "reports/okx_spot_instruments.json"
-            and os.getenv("PYTEST_CURRENT_TEST")
-            and not path.is_absolute()
-        ):
+        if cls._is_default_cache_path(path) and os.getenv("PYTEST_CURRENT_TEST") and not path.is_absolute():
             return Path(tempfile.gettempdir()) / "v5-test-cache" / "okx_spot_instruments.json"
         return path
 
+    @classmethod
+    def _resolve_seed_cache_path(cls, cache_path: str, resolved_path: Path) -> Optional[Path]:
+        if cls._is_default_cache_path(cache_path) and os.getenv("PYTEST_CURRENT_TEST"):
+            repo_cache_path = cls._repo_default_cache_path()
+            if repo_cache_path != resolved_path:
+                return repo_cache_path
+        return None
+
+    @staticmethod
+    def _read_cache_file(path: Path) -> Optional[Dict[str, Any]]:
+        if not path.exists():
+            return None
+        obj = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(obj, dict):
+            return None
+        return obj
+
     def _read_cache(self) -> Optional[Dict[str, Any]]:
         try:
-            if not self.cache_path.exists():
-                return None
-            obj = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if not isinstance(obj, dict):
-                return None
-            return obj
+            obj = self._read_cache_file(self.cache_path)
+            if obj is not None:
+                return obj
+            if self.seed_cache_path is not None:
+                return self._read_cache_file(self.seed_cache_path)
         except Exception:
             return None
         return None
@@ -107,13 +128,16 @@ class OKXSpotInstrumentsCache:
         obj = self._load_cache()
         if obj is None:
             stale_obj = self._load_cache(allow_stale=True)
-            try:
-                obj = self._fetch()
-                self._save_cache(obj)
-            except Exception:
-                if stale_obj is None:
-                    raise
+            if stale_obj is not None and os.getenv("PYTEST_CURRENT_TEST"):
                 obj = stale_obj
+            else:
+                try:
+                    obj = self._fetch()
+                    self._save_cache(obj)
+                except Exception:
+                    if stale_obj is None:
+                        raise
+                    obj = stale_obj
 
         rows = obj.get("data") or []
         if not isinstance(rows, list):

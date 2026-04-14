@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import json
 import os
+import tempfile
 import time
 
 import numpy as np
@@ -61,6 +62,8 @@ class PortfolioEngine:
         raw = str(os.getenv("V5_WORKSPACE") or "").strip()
         if raw:
             return Path(raw).expanduser().resolve()
+        if os.getenv("PYTEST_CURRENT_TEST"):
+            return (Path(tempfile.gettempdir()) / "v5-test-runtime").resolve()
         return RUNTIME_PROJECT_ROOT.resolve()
 
     def _resolve_runtime_order_store_path(self) -> Path:
