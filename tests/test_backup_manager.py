@@ -53,6 +53,14 @@ def test_backup_manager_includes_active_config_runtime_state_files(tmp_path) -> 
     (shadow_dir / "bills.sqlite").write_text("shadow-bills", encoding="utf-8")
     (shadow_dir / "ledger_state.json").write_text("{}", encoding="utf-8")
     (shadow_dir / "ledger_status.json").write_text("{}", encoding="utf-8")
+    (shadow_dir / "stop_loss_state.json").write_text("{}", encoding="utf-8")
+    (shadow_dir / "fixed_stop_loss_state.json").write_text("{}", encoding="utf-8")
+    (shadow_dir / "profit_taking_state.json").write_text("{}", encoding="utf-8")
+    (shadow_dir / "highest_px_state.json").write_text("{}", encoding="utf-8")
+    (shadow_dir / "rank_exit_cooldown_state.json").write_text("{}", encoding="utf-8")
+    (shadow_dir / "take_profit_cooldown_state.json").write_text("{}", encoding="utf-8")
+    (shadow_dir / "order_state_machine.json").write_text("{}", encoding="utf-8")
+    (shadow_dir / "negative_expectancy_cooldown.json").write_text("{}", encoding="utf-8")
     (shadow_dir / "kill_switch_shadow.json").write_text("{}", encoding="utf-8")
     (shadow_dir / "reconcile_shadow.json").write_text("{}", encoding="utf-8")
     root_positions = tmp_path / "reports" / "positions.sqlite"
@@ -73,6 +81,14 @@ def test_backup_manager_includes_active_config_runtime_state_files(tmp_path) -> 
     assert "reports/shadow_runtime/bills.sqlite" in names
     assert "reports/shadow_runtime/ledger_state.json" in names
     assert "reports/shadow_runtime/ledger_status.json" in names
+    assert "reports/shadow_runtime/stop_loss_state.json" in names
+    assert "reports/shadow_runtime/fixed_stop_loss_state.json" in names
+    assert "reports/shadow_runtime/profit_taking_state.json" in names
+    assert "reports/shadow_runtime/highest_px_state.json" in names
+    assert "reports/shadow_runtime/rank_exit_cooldown_state.json" in names
+    assert "reports/shadow_runtime/take_profit_cooldown_state.json" in names
+    assert "reports/shadow_runtime/order_state_machine.json" in names
+    assert "reports/shadow_runtime/negative_expectancy_cooldown.json" in names
     assert "reports/shadow_runtime/kill_switch_shadow.json" in names
     assert "reports/shadow_runtime/reconcile_shadow.json" in names
     assert "reports/positions.sqlite" not in names
@@ -105,6 +121,14 @@ def test_backup_manager_derives_runtime_state_files_when_config_uses_legacy_defa
     (reports_dir / "shadow_bills.sqlite").write_text("shadow-bills", encoding="utf-8")
     (reports_dir / "shadow_ledger_state.json").write_text("{}", encoding="utf-8")
     (reports_dir / "shadow_ledger_status.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_stop_loss_state.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_fixed_stop_loss_state.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_profit_taking_state.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_highest_px_state.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_rank_exit_cooldown_state.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_take_profit_cooldown_state.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_order_state_machine.json").write_text("{}", encoding="utf-8")
+    (reports_dir / "shadow_negative_expectancy_cooldown.json").write_text("{}", encoding="utf-8")
     (reports_dir / "shadow_kill_switch.json").write_text("{}", encoding="utf-8")
     (reports_dir / "shadow_reconcile_status.json").write_text("{}", encoding="utf-8")
 
@@ -120,6 +144,14 @@ def test_backup_manager_derives_runtime_state_files_when_config_uses_legacy_defa
     assert "reports/shadow_bills.sqlite" in names
     assert "reports/shadow_ledger_state.json" in names
     assert "reports/shadow_ledger_status.json" in names
+    assert "reports/shadow_stop_loss_state.json" in names
+    assert "reports/shadow_fixed_stop_loss_state.json" in names
+    assert "reports/shadow_profit_taking_state.json" in names
+    assert "reports/shadow_highest_px_state.json" in names
+    assert "reports/shadow_rank_exit_cooldown_state.json" in names
+    assert "reports/shadow_take_profit_cooldown_state.json" in names
+    assert "reports/shadow_order_state_machine.json" in names
+    assert "reports/shadow_negative_expectancy_cooldown.json" in names
     assert "reports/shadow_kill_switch.json" in names
     assert "reports/shadow_reconcile_status.json" in names
     assert "reports/kill_switch.json" not in names
@@ -143,4 +175,3 @@ def test_backup_manager_restore_rejects_path_traversal(tmp_path) -> None:
         manager.restore_backup("evil.tar.gz")
 
     assert not (tmp_path / "escape.txt").exists()
-

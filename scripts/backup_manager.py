@@ -109,6 +109,19 @@ class BackupManager:
         bills_db = derive_runtime_named_artifact_path(orders_db, "bills", ".sqlite").resolve()
         ledger_state = derive_runtime_named_json_path(orders_db, "ledger_state").resolve()
         ledger_status = derive_runtime_named_json_path(orders_db, "ledger_status").resolve()
+        stop_loss_state = derive_runtime_named_json_path(orders_db, "stop_loss_state").resolve()
+        fixed_stop_loss_state = derive_runtime_named_json_path(orders_db, "fixed_stop_loss_state").resolve()
+        profit_taking_state = derive_runtime_named_json_path(orders_db, "profit_taking_state").resolve()
+        highest_px_state = derive_runtime_named_json_path(orders_db, "highest_px_state").resolve()
+        rank_exit_cooldown_state = derive_runtime_named_json_path(orders_db, "rank_exit_cooldown_state").resolve()
+        take_profit_cooldown_state = derive_runtime_named_json_path(orders_db, "take_profit_cooldown_state").resolve()
+        order_state_machine = derive_runtime_named_json_path(orders_db, "order_state_machine").resolve()
+        negative_expectancy_state = self._resolve_runtime_json_path(
+            execution_cfg.get("negative_expectancy_state_path"),
+            orders_db=orders_db,
+            base_name="negative_expectancy_cooldown",
+            legacy_default="reports/negative_expectancy_cooldown.json",
+        )
         kill_switch = self._resolve_runtime_json_path(
             execution_cfg.get("kill_switch_path"),
             orders_db=orders_db,
@@ -121,7 +134,24 @@ class BackupManager:
             base_name="reconcile_status",
             legacy_default="reports/reconcile_status.json",
         )
-        return [orders_db, fills_db, positions_db, bills_db, ledger_state, ledger_status, kill_switch, reconcile_status]
+        return [
+            orders_db,
+            fills_db,
+            positions_db,
+            bills_db,
+            ledger_state,
+            ledger_status,
+            stop_loss_state,
+            fixed_stop_loss_state,
+            profit_taking_state,
+            highest_px_state,
+            rank_exit_cooldown_state,
+            take_profit_cooldown_state,
+            order_state_machine,
+            negative_expectancy_state,
+            kill_switch,
+            reconcile_status,
+        ]
 
     def _iter_backup_items(self):
         seen: set[Path] = set()
