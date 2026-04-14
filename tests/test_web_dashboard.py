@@ -3960,6 +3960,70 @@ def test_auto_risk_guard_api_uses_active_runtime_eval_path(monkeypatch, tmp_path
     assert payload["metrics"]["dd_pct"] == 0.25
 
 
+def test_auto_risk_guard_api_uses_prefixed_runtime_eval_path(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+
+    (reports_dir / "auto_risk_eval.json").write_text(
+        json.dumps({"current_level": "ATTACK", "metrics": {"dd_pct": 0.01}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "shadow_auto_risk_eval.json").write_text(
+        json.dumps({"current_level": "PROTECT", "metrics": {"dd_pct": 0.33}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_level"] == "PROTECT"
+    assert payload["metrics"]["dd_pct"] == 0.33
+
+
+def test_auto_risk_guard_api_uses_suffixed_runtime_eval_path(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}},
+    )
+
+    (reports_dir / "auto_risk_eval.json").write_text(
+        json.dumps({"current_level": "ATTACK", "metrics": {"dd_pct": 0.01}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "auto_risk_eval_accelerated.json").write_text(
+        json.dumps({"current_level": "DEFENSE", "metrics": {"dd_pct": 0.41}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_level"] == "DEFENSE"
+    assert payload["metrics"]["dd_pct"] == 0.41
+
+
 def test_auto_risk_guard_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

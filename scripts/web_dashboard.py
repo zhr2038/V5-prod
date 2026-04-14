@@ -37,6 +37,7 @@ from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
+    derive_runtime_auto_risk_eval_path,
     derive_runtime_named_artifact_path,
     derive_runtime_reports_dir,
     derive_runtime_runs_dir,
@@ -1726,7 +1727,7 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
             'reports/reconcile_status.json',
         ),
         runs_dir=derive_runtime_runs_dir(orders_db),
-        auto_risk_eval_path=reports_dir / 'auto_risk_eval.json',
+        auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
     )
 
 
