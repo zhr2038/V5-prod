@@ -132,22 +132,26 @@ class TradeAuditorV3:
             }
 
             resp = requests.get("https://www.okx.com" + path, headers=headers, timeout=8)
+            resp.raise_for_status()
             data = resp.json()
 
             if data.get("code") == "0" and data.get("data"):
-                details = data["data"][0].get("details", [])
+                account = data["data"][0] if isinstance(data["data"][0], dict) else {}
+                details = account.get("details", [])
                 usdt_eq = 0.0
+                total_eq = float(account.get("totalEq") or 0.0)
                 positions: list[str] = []
                 for detail in details:
                     ccy = str(detail.get("ccy") or "")
                     eq = float(detail.get("eq") or 0.0)
+                    eq_usd = float(detail.get("eqUsd") or 0.0)
                     if ccy == "USDT":
                         usdt_eq = eq
-                    elif eq > 0.5:
-                        positions.append(f"{ccy}: {eq:.2f}")
-                return {"usdt": usdt_eq, "positions": positions}
+                    elif eq_usd > 1.0:
+                        positions.append(f"{ccy}: {eq:.2f} (${eq_usd:.2f})")
+                return {"usdt": usdt_eq, "total_eq_usdt": total_eq or usdt_eq, "positions": positions}
         except Exception as exc:
-            return {"error": str(exc)}
+            return {"error": "api unavailable", "detail": type(exc).__name__}
         return None
 
     def get_recent_orders(self, hours: int = 2) -> list[tuple[Any, ...]]:
@@ -240,7 +244,8 @@ class TradeAuditorV3:
         if isinstance(okx, dict) and "error" in okx:
             lines.append(f"OKX API错误: {okx['error']}")
         elif okx:
-            lines.append(f"账户权益: {okx.get('usdt', 0):.2f} USDT")
+            lines.append(f"账户权益: {okx.get('total_eq_usdt', okx.get('usdt', 0)):.2f} USDT")
+            lines.append(f"USDT余额: {okx.get('usdt', 0):.2f} USDT")
             if okx.get("positions"):
                 lines.append(f"持仓: {', '.join(okx['positions'][:3])}")
 
