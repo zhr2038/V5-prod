@@ -23,7 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
-from src.execution.fill_store import derive_fill_store_path, derive_position_store_path
+from src.execution.fill_store import derive_fill_store_path, derive_position_store_path, derive_runtime_named_json_path
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 REPORTS_DIR = WORKSPACE / "reports"
@@ -99,6 +99,22 @@ def _resolve_health_database_paths() -> list[tuple[Path, str]]:
             (REPORTS_DIR / "positions.sqlite", "positions"),
             (REPORTS_DIR / "fills.sqlite", "fills"),
         ]
+
+
+def _resolve_health_output_path() -> Path:
+    try:
+        cfg = load_runtime_config(project_root=WORKSPACE)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=WORKSPACE,
+            )
+        ).resolve()
+        return derive_runtime_named_json_path(orders_db, "health_status").resolve()
+    except Exception:
+        return HEALTH_FILE.resolve()
 
 
 class HealthChecker:
@@ -346,7 +362,9 @@ def main() -> int:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     checker = HealthChecker()
     result = checker.print_report()
-    HEALTH_FILE.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    output_path = _resolve_health_output_path()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return 1 if result["overall_status"] == "critical" else 0
 
 
