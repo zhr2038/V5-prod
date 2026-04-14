@@ -3082,6 +3082,40 @@ def test_ml_training_api_treats_legacy_default_ml_paths_as_runtime_paths(monkeyp
     assert payload["runtime_prediction_count"] == 7
 
 
+def test_resolve_dashboard_runtime_artifact_path_uses_prefixed_runtime_name(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    orders_db = module.REPORTS_DIR / "shadow_orders.sqlite"
+
+    path = module._resolve_dashboard_runtime_artifact_path(
+        orders_db,
+        None,
+        "reports/model_promotion_decision.json",
+    )
+
+    assert path == module.REPORTS_DIR / "shadow_model_promotion_decision.json"
+
+
+def test_resolve_dashboard_runtime_artifact_path_uses_suffixed_runtime_name(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    orders_db = module.REPORTS_DIR / "orders_accelerated.sqlite"
+
+    path = module._resolve_dashboard_runtime_artifact_path(
+        orders_db,
+        None,
+        "reports/ml_runtime_status.json",
+    )
+
+    assert path == module.REPORTS_DIR / "ml_runtime_status_accelerated.json"
+
+
 def test_ml_training_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

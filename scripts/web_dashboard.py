@@ -37,6 +37,7 @@ from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
+    derive_runtime_named_artifact_path,
     derive_runtime_reports_dir,
     derive_runtime_runs_dir,
 )
@@ -1170,7 +1171,9 @@ def _resolve_dashboard_runtime_artifact_path(
     raw = str(raw_path or "").strip()
     if not raw or raw == legacy_default:
         name = Path(legacy_default).name
-        return orders_db.with_name(name).resolve()
+        suffix = ".jsonl" if name.endswith(".jsonl") else Path(name).suffix
+        base_name = name[: -len(suffix)] if suffix else name
+        return derive_runtime_named_artifact_path(orders_db, base_name, suffix).resolve()
     return _resolve_workspace_relative_path(raw, legacy_default)
 
 
