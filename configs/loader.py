@@ -8,6 +8,8 @@ from typing import Any, Dict, Optional
 import yaml
 from dotenv import load_dotenv
 
+from src.utils.auto_blacklist import resolve_auto_blacklist_path
+
 from .schema import AppConfig
 
 
@@ -55,7 +57,7 @@ def load_config(path: str = "configs/config.yaml", env_path: Optional[str] = ".e
 def load_blacklist(path: str) -> Dict[str, Any]:
     """Load blacklist from configs + optional dynamic auto blacklist.
 
-    Auto blacklist lives at reports/auto_blacklist.json and is merged if present.
+    Auto blacklist lives at the active runtime's auto_blacklist.json and is merged if present.
     Format:
       {"symbols": ["PEPE/USDT", ...]}
     Auto format:
@@ -78,7 +80,7 @@ def load_blacklist(path: str) -> Dict[str, Any]:
 
     # dynamic
     try:
-        ap = (PROJECT_ROOT / "reports" / "auto_blacklist.json").resolve()
+        ap = resolve_auto_blacklist_path(project_root=PROJECT_ROOT)
         if ap.exists():
             obj = json.loads(ap.read_text(encoding="utf-8"))
             if isinstance(obj, dict) and isinstance(obj.get("symbols"), list):

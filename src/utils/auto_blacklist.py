@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_named_json_path
+
 
 DEFAULT_PATH = "reports/auto_blacklist.json"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,11 +28,29 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _resolve_path(path: str) -> Path:
+def resolve_auto_blacklist_path(path: str = DEFAULT_PATH, *, project_root: Path = PROJECT_ROOT) -> Path:
     p = Path(path)
+    if not p.is_absolute() and str(p).replace("\\", "/") == DEFAULT_PATH:
+        try:
+            cfg = load_runtime_config(project_root=project_root)
+            execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+            orders_db = Path(
+                resolve_runtime_path(
+                    execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                    default="reports/orders.sqlite",
+                    project_root=project_root,
+                )
+            ).resolve()
+            return derive_runtime_named_json_path(orders_db, "auto_blacklist").resolve()
+        except Exception:
+            pass
     if not p.is_absolute():
-        p = (PROJECT_ROOT / p).resolve()
+        p = (project_root / p).resolve()
     return p
+
+
+def _resolve_path(path: str) -> Path:
+    return resolve_auto_blacklist_path(path, project_root=PROJECT_ROOT)
 
 
 def _read(path: str) -> Dict[str, Any]:
