@@ -1409,6 +1409,144 @@ def test_api_decision_audit_ml_signal_overview_treats_string_false_as_false(monk
     assert ml["live_active"] is False
 
 
+def test_api_decision_audit_uses_prefixed_runtime_ml_signal_overview(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260312_03"
+    current_run.mkdir(parents=True, exist_ok=True)
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260312_03",
+                "regime": "TRENDING",
+                "counts": {"selected": 1, "orders_rebalance": 1, "orders_exit": 0},
+                "top_scores": [{"symbol": "BTC/USDT", "score": 0.91, "display_score": 0.91, "raw_score": 1.21, "rank": 1}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "alpha_snapshot.json").write_text(
+        json.dumps(
+            {
+                "raw_factors": {"BTC/USDT": {"ml_pred_raw": 0.071, "ml_overlay_score": 0.44, "ml_base_score": 0.77}},
+                "z_factors": {"BTC/USDT": {"ml_pred_zscore": 0.93, "ml_overlay_score": 0.44}},
+                "base_scores": {"BTC/USDT": 0.77},
+                "scores": {"BTC/USDT": 0.91},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "shadow_ml_runtime_status.json").write_text(
+        json.dumps(
+            {
+                "configured_enabled": True,
+                "promotion_passed": True,
+                "used_in_latest_snapshot": True,
+                "prediction_count": 5,
+                "reason": "shadow-runtime",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "shadow_model_promotion_decision.json").write_text(
+        json.dumps({"passed": True}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "shadow_ml_overlay_impact.json").write_text(
+        json.dumps({"rolling_24h": {"topn_delta_mean_bps": 6.5, "status": "positive"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}})
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    ml = response.get_json()["ml_signal_overview"]
+    assert ml["configured_enabled"] is True
+    assert ml["promoted"] is True
+    assert ml["live_active"] is True
+    assert ml["prediction_count"] == 5
+    assert ml["reason"] == "shadow-runtime"
+    assert ml["rolling_24h"]["topn_delta_mean_bps"] == 6.5
+    assert ml["top_contributors"][0]["symbol"] == "BTC/USDT"
+
+
+def test_api_decision_audit_uses_suffixed_runtime_ml_signal_overview(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260312_04"
+    current_run.mkdir(parents=True, exist_ok=True)
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260312_04",
+                "regime": "TRENDING",
+                "counts": {"selected": 1, "orders_rebalance": 1, "orders_exit": 0},
+                "top_scores": [{"symbol": "ETH/USDT", "score": 0.89, "display_score": 0.89, "raw_score": 1.11, "rank": 1}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "alpha_snapshot.json").write_text(
+        json.dumps(
+            {
+                "raw_factors": {"ETH/USDT": {"ml_pred_raw": -0.022, "ml_overlay_score": -0.19, "ml_base_score": 0.95}},
+                "z_factors": {"ETH/USDT": {"ml_pred_zscore": -0.37, "ml_overlay_score": -0.19}},
+                "base_scores": {"ETH/USDT": 0.95},
+                "scores": {"ETH/USDT": 0.89},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_runtime_status_accelerated.json").write_text(
+        json.dumps(
+            {
+                "configured_enabled": True,
+                "promotion_passed": False,
+                "used_in_latest_snapshot": False,
+                "prediction_count": 4,
+                "reason": "accelerated-runtime",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "model_promotion_decision_accelerated.json").write_text(
+        json.dumps({"passed": False}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_overlay_impact_accelerated.json").write_text(
+        json.dumps({"rolling_24h": {"topn_delta_mean_bps": -2.4, "status": "mixed"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}})
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    ml = response.get_json()["ml_signal_overview"]
+    assert ml["configured_enabled"] is True
+    assert ml["promoted"] is False
+    assert ml["live_active"] is False
+    assert ml["prediction_count"] == 4
+    assert ml["reason"] == "accelerated-runtime"
+    assert ml["rolling_24h"]["topn_delta_mean_bps"] == -2.4
+    assert ml["top_contributors"][0]["symbol"] == "ETH/USDT"
+
+
 def test_api_decision_audit_prefers_current_run_embedded_strategy_signals(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

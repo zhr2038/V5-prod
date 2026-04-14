@@ -626,13 +626,20 @@ def _score_rank_map(scores: Any) -> Dict[str, int]:
 
 def _build_ml_signal_overview(
     reports_dir: Path,
+    orders_db: Optional[Path] = None,
     preferred_symbols: Optional[List[str]] = None,
     limit: int = 3,
 ) -> Dict[str, Any]:
-    runtime = _load_json_payload(reports_dir / 'ml_runtime_status.json')
-    promotion = _load_json_payload(reports_dir / 'model_promotion_decision.json')
+    runtime = _load_json_payload(
+        derive_runtime_named_artifact_path(orders_db or (reports_dir / 'orders.sqlite'), 'ml_runtime_status', '.json')
+    )
+    promotion = _load_json_payload(
+        derive_runtime_named_artifact_path(orders_db or (reports_dir / 'orders.sqlite'), 'model_promotion_decision', '.json')
+    )
     snapshot = _load_json_payload(reports_dir / 'alpha_snapshot.json')
-    impact_summary = _load_json_payload(reports_dir / 'ml_overlay_impact.json')
+    impact_summary = _load_json_payload(
+        derive_runtime_named_artifact_path(orders_db or (reports_dir / 'orders.sqlite'), 'ml_overlay_impact', '.json')
+    )
 
     raw_factors = snapshot.get('raw_factors', {})
     z_factors = snapshot.get('z_factors', {})
@@ -5353,7 +5360,11 @@ def api_decision_audit():
             if isinstance(item, dict) and item.get('symbol'):
                 preferred_ml_symbols.append(str(item.get('symbol')))
         stored_ml_overview = audit_data.get('ml_signal_overview', {}) if isinstance(audit_data, dict) else {}
-        ml_signal_overview = _build_ml_signal_overview(runtime_paths.reports_dir, preferred_symbols=preferred_ml_symbols)
+        ml_signal_overview = _build_ml_signal_overview(
+            runtime_paths.reports_dir,
+            orders_db=runtime_paths.orders_db,
+            preferred_symbols=preferred_ml_symbols,
+        )
         if isinstance(stored_ml_overview, dict) and stored_ml_overview:
             merged_ml_overview = dict(stored_ml_overview)
             merged_ml_overview.update({k: v for k, v in ml_signal_overview.items() if v not in (None, {}, [], "")})
