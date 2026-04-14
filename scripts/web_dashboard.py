@@ -1739,6 +1739,14 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
     )
 
 
+def _runtime_ic_diagnostic_pattern(orders_db: Path) -> str:
+    if orders_db.name == "orders.sqlite":
+        return "ic_diagnostics_*.json"
+    if "orders" in orders_db.stem:
+        return orders_db.stem.replace("orders", "ic_diagnostics_*", 1) + ".json"
+    return "ic_diagnostics_*.json"
+
+
 def _can_execute_python(candidate: str) -> bool:
     try:
         result = subprocess.run(
@@ -3929,7 +3937,7 @@ def api_ic_diagnostics():
         runtime_paths = _resolve_dashboard_runtime_paths(config)
 
         # 查找IC诊断文件（按修改时间，避免文件名排序误判）
-        ic_files = list(runtime_paths.reports_dir.glob('ic_diagnostics_*.json'))
+        ic_files = list(runtime_paths.reports_dir.glob(_runtime_ic_diagnostic_pattern(runtime_paths.orders_db)))
 
         if not ic_files:
             return jsonify({

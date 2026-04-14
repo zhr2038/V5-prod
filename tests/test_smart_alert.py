@@ -23,6 +23,7 @@ def test_resolve_paths_uses_prefixed_runtime_alert_state(monkeypatch, tmp_path: 
 
     assert paths.orders_db == (tmp_path / "reports" / "shadow_orders.sqlite")
     assert paths.alerts_state_file == (tmp_path / "reports" / "shadow_alerts_state.json").resolve()
+    assert paths.ic_file == (tmp_path / "reports" / "shadow_ic_diagnostics_30d_20u.json").resolve()
 
 
 def test_resolve_paths_uses_suffixed_runtime_alert_state(monkeypatch, tmp_path: Path) -> None:
@@ -43,3 +44,4 @@ def test_resolve_paths_uses_suffixed_runtime_alert_state(monkeypatch, tmp_path: 
 
     assert paths.orders_db == (tmp_path / "reports" / "orders_accelerated.sqlite")
     assert paths.alerts_state_file == (tmp_path / "reports" / "alerts_state_accelerated.json").resolve()
+    assert paths.ic_file == (tmp_path / "reports" / "ic_diagnostics_30d_20u_accelerated.json").resolve()

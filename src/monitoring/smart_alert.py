@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
-from src.execution.fill_store import derive_fill_store_path, derive_runtime_named_json_path
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -92,7 +96,7 @@ def _resolve_paths(*, workspace: Path) -> SmartAlertPaths:
             base_name="kill_switch",
             legacy_default="reports/kill_switch.json",
         ),
-        ic_file=reports_dir / "ic_diagnostics_30d_20u.json",
+        ic_file=derive_runtime_named_artifact_path(orders_db, "ic_diagnostics_30d_20u", ".json").resolve(),
     )
 
 

@@ -369,6 +369,7 @@ def test_reflection_agent_uses_prefixed_runtime_defaults(monkeypatch, tmp_path: 
     assert agent.db_path == str((reports_dir / "shadow_orders.sqlite").resolve())
     assert agent.report_dir == (reports_dir / "shadow_reflection").resolve()
     assert agent.bills_db == str((reports_dir / "shadow_bills.sqlite").resolve())
+    assert agent.ic_file == (reports_dir / "shadow_ic_diagnostics_30d_20u.json").resolve()
 
 
 def test_reflection_agent_uses_suffixed_runtime_defaults(monkeypatch, tmp_path: Path) -> None:
@@ -395,3 +396,4 @@ def test_reflection_agent_uses_suffixed_runtime_defaults(monkeypatch, tmp_path: 
     assert agent.db_path == str((reports_dir / "orders_accelerated.sqlite").resolve())
     assert agent.report_dir == (reports_dir / "reflection_accelerated").resolve()
     assert agent.bills_db == str((reports_dir / "bills_accelerated.sqlite").resolve())
+    assert agent.ic_file == (reports_dir / "ic_diagnostics_30d_20u_accelerated.json").resolve()

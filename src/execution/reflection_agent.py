@@ -127,7 +127,11 @@ class ReflectionAgentV2:
             if bills_db
             else str(derive_runtime_named_artifact_path(runtime_orders_db, 'bills', '.sqlite').resolve())
         )
-        self.ic_file = Path(ic_file).resolve() if ic_file else (runtime_reports_dir / 'ic_diagnostics_30d_20u.json').resolve()
+        self.ic_file = (
+            Path(ic_file).resolve()
+            if ic_file
+            else derive_runtime_named_artifact_path(runtime_orders_db, 'ic_diagnostics_30d_20u', '.json').resolve()
+        )
         
         self.analysis_period_days = 7
         self.insights: List[TradeInsight] = []

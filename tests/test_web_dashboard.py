@@ -3645,6 +3645,150 @@ def test_api_ic_diagnostics_uses_active_runtime_reports_dir(monkeypatch, tmp_pat
     assert payload["factors"][0]["name"] == "factor_runtime"
 
 
+def test_api_ic_diagnostics_uses_prefixed_runtime_file(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime_file = reports_dir / "shadow_ic_diagnostics_20260408.json"
+    root_file = reports_dir / "ic_diagnostics_20260409.json"
+    runtime_file.write_text(
+        json.dumps(
+            {
+                "overall_tradable": {
+                    "ic": {
+                        "factor_prefixed": {
+                            "mean": 0.14,
+                            "p50": 0.12,
+                            "p75": 0.2,
+                            "p25": 0.0,
+                            "count": 8,
+                        }
+                    },
+                    "used_points": 8,
+                    "used_timestamps": 4,
+                },
+                "by_regime": {},
+                "lookback_days": 30,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    root_file.write_text(
+        json.dumps(
+            {
+                "overall_tradable": {
+                    "ic": {
+                        "factor_root": {
+                            "mean": -0.3,
+                            "p50": -0.2,
+                            "p75": -0.1,
+                            "p25": -0.4,
+                            "count": 12,
+                        }
+                    },
+                    "used_points": 12,
+                    "used_timestamps": 6,
+                },
+                "by_regime": {},
+                "lookback_days": 30,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+
+    response = client.get("/api/ic_diagnostics")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["source_file"] == "shadow_ic_diagnostics_20260408.json"
+    assert payload["overall_ic"] == 0.14
+    assert payload["sample_count"] == 8
+    assert payload["factors"][0]["name"] == "factor_prefixed"
+
+
+def test_api_ic_diagnostics_uses_suffixed_runtime_file(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime_file = reports_dir / "ic_diagnostics_20260408_accelerated.json"
+    root_file = reports_dir / "ic_diagnostics_20260409.json"
+    runtime_file.write_text(
+        json.dumps(
+            {
+                "overall_tradable": {
+                    "ic": {
+                        "factor_accelerated": {
+                            "mean": 0.19,
+                            "p50": 0.17,
+                            "p75": 0.25,
+                            "p25": 0.1,
+                            "count": 6,
+                        }
+                    },
+                    "used_points": 6,
+                    "used_timestamps": 3,
+                },
+                "by_regime": {},
+                "lookback_days": 30,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    root_file.write_text(
+        json.dumps(
+            {
+                "overall_tradable": {
+                    "ic": {
+                        "factor_root": {
+                            "mean": -0.2,
+                            "p50": -0.1,
+                            "p75": 0.0,
+                            "p25": -0.3,
+                            "count": 12,
+                        }
+                    },
+                    "used_points": 12,
+                    "used_timestamps": 6,
+                },
+                "by_regime": {},
+                "lookback_days": 30,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}},
+    )
+
+    response = client.get("/api/ic_diagnostics")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["source_file"] == "ic_diagnostics_20260408_accelerated.json"
+    assert payload["overall_ic"] == 0.19
+    assert payload["sample_count"] == 6
+    assert payload["factors"][0]["name"] == "factor_accelerated"
+
+
 def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
