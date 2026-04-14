@@ -38,6 +38,7 @@ from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
     derive_runtime_auto_risk_eval_path,
+    derive_runtime_cost_events_dir,
     derive_runtime_named_artifact_path,
     derive_runtime_reports_dir,
     derive_runtime_runs_dir,
@@ -3734,10 +3735,18 @@ def api_cost_calibration():
         runtime_paths = _resolve_dashboard_runtime_paths(config)
 
         # 优先读取定时任务生成的真实成本数据 (cost_stats_real)
-        cost_dir = runtime_paths.reports_dir / 'cost_stats_real'
+        cost_dir = derive_runtime_named_artifact_path(
+            runtime_paths.orders_db,
+            'cost_stats_real',
+            '',
+        )
         if not cost_dir.exists():
-            cost_dir = runtime_paths.reports_dir / 'cost_stats'  # 兼容旧路径
-        events_dir = runtime_paths.reports_dir / 'cost_events'
+            cost_dir = derive_runtime_named_artifact_path(
+                runtime_paths.orders_db,
+                'cost_stats',
+                '',
+            )  # 兼容旧路径
+        events_dir = derive_runtime_cost_events_dir(runtime_paths.orders_db)
         
         calibration_data = []
         total_days = 0
