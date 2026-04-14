@@ -52,6 +52,19 @@ def _resolve_runtime_json_path(raw_path: Any, *, order_store_path: Path, project
     return Path(resolve_runtime_path(raw_path, default=legacy_default, project_root=project_root)).resolve()
 
 
+def _derive_runtime_log_path(logs_dir: Path, order_store_path: Path, base_name: str, suffix: str) -> Path:
+    logs_dir = Path(logs_dir).resolve()
+    path = Path(order_store_path)
+    ext = suffix if suffix.startswith(".") or not suffix else f".{suffix}"
+    if path.name == "orders.sqlite":
+        runtime_name = path.parent.name
+        filename = f"{runtime_name}_{base_name}{ext}" if runtime_name != "reports" else f"{base_name}{ext}"
+        return logs_dir / filename
+    if "orders" in path.stem:
+        return logs_dir / (path.stem.replace("orders", base_name, 1) + ext)
+    return logs_dir / f"{base_name}{ext}"
+
+
 def build_paths(workspace: Path | None = None) -> AuditorPaths:
     root = (workspace or PROJECT_ROOT).resolve()
     cfg = _load_active_config(project_root=root)
@@ -70,8 +83,8 @@ def build_paths(workspace: Path | None = None) -> AuditorPaths:
         reports_dir=reports_dir,
         runs_dir=reports_dir / "runs",
         orders_db=orders_db,
-        log_file=logs_dir / "trade_audit_v2.log",
-        alert_file=logs_dir / "trade_alert_v2.json",
+        log_file=_derive_runtime_log_path(logs_dir, orders_db, "trade_audit_v2", ".log"),
+        alert_file=_derive_runtime_log_path(logs_dir, orders_db, "trade_alert_v2", ".json"),
         kill_switch_file=_resolve_runtime_json_path(
             execution_cfg.get("kill_switch_path"),
             order_store_path=orders_db,
