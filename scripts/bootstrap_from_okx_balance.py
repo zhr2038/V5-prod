@@ -16,7 +16,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
-from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path, derive_runtime_reports_dir
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_named_json_path,
+    derive_runtime_spread_snapshots_dir,
+)
 from src.execution.highest_px_tracker import HighestPriceTracker
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import Position, PositionStore
@@ -40,9 +44,8 @@ def _derive_runtime_artifact_paths(positions_db_path: str | Path) -> tuple[Path,
         )
     else:
         order_store_path = positions_path.with_name("orders.sqlite")
-    reports_dir = derive_runtime_reports_dir(order_store_path)
     highest_state_path = derive_runtime_named_json_path(order_store_path, "highest_px_state")
-    return reports_dir / "spread_snapshots", highest_state_path
+    return derive_runtime_spread_snapshots_dir(order_store_path), highest_state_path
 
 
 def _mid_px(symbol: str, ts_ms: int, *, spread_store: SpreadSnapshotStore) -> float:
