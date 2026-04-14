@@ -34,6 +34,7 @@ from pathlib import Path
 import os
 
 import yaml
+from src.execution.fill_store import derive_runtime_named_json_path
 
 root = Path(os.environ["V5_PROJECT_ROOT"])
 cfg_path = root / "configs" / "shadow_tuned_xgboost_overrides.yaml"
@@ -47,13 +48,7 @@ try:
 except Exception:
     pass
 
-path = Path(order_store_path)
-if path.name == "orders.sqlite":
-    trend_path = path.with_name("trend_cache.json")
-elif "orders" in path.stem:
-    trend_path = path.with_name(path.stem.replace("orders", "trend_cache", 1) + ".json")
-else:
-    trend_path = path.with_name("trend_cache.json")
+trend_path = derive_runtime_named_json_path(order_store_path, "trend_cache")
 
 if not trend_path.is_absolute():
     trend_path = root / trend_path

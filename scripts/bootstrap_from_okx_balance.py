@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.account_store import AccountStore
-from src.execution.fill_store import derive_position_store_path
+from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path, derive_runtime_reports_dir
 from src.execution.highest_px_tracker import HighestPriceTracker
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import Position, PositionStore
@@ -32,15 +32,16 @@ def _iso_utc_now() -> str:
 
 def _derive_runtime_artifact_paths(positions_db_path: str | Path) -> tuple[Path, Path]:
     positions_path = Path(positions_db_path).resolve()
-    reports_dir = positions_path.parent
     if positions_path.name == "positions.sqlite":
-        highest_state_path = reports_dir / "highest_px_state.json"
+        order_store_path = positions_path.with_name("orders.sqlite")
     elif "positions" in positions_path.stem:
-        highest_state_path = positions_path.with_name(
-            positions_path.name.replace("positions", "highest_px_state", 1)
-        ).with_suffix(".json")
+        order_store_path = positions_path.with_name(
+            positions_path.name.replace("positions", "orders", 1)
+        )
     else:
-        highest_state_path = reports_dir / "highest_px_state.json"
+        order_store_path = positions_path.with_name("orders.sqlite")
+    reports_dir = derive_runtime_reports_dir(order_store_path)
+    highest_state_path = derive_runtime_named_json_path(order_store_path, "highest_px_state")
     return reports_dir / "spread_snapshots", highest_state_path
 
 
