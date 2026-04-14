@@ -86,10 +86,6 @@ class FillReconciler:
             return
 
         symbol = str(row.inst_id).replace("-", "/")
-        reason = self._order_reason(row)
-        order_store_path = str(getattr(self.order_store, "path", "reports/orders.sqlite"))
-        rank_exit_cooldown_path = str(derive_runtime_named_json_path(order_store_path, "rank_exit_cooldown_state"))
-        take_profit_cooldown_path = str(derive_runtime_named_json_path(order_store_path, "take_profit_cooldown_state"))
         base_ccy = str(row.inst_id).split("-")[0].upper()
         base_fee = agg.fees_by_ccy.get(base_ccy, Decimal("0"))
 
@@ -116,32 +112,44 @@ class FillReconciler:
         if new_qty <= 0:
             self.position_store.close_long(symbol)
             try:
-                from src.execution.live_execution_engine import (
-                    _record_rank_exit_fill,
-                    _record_take_profit_fill,
-                    clear_risk_state_on_full_close,
-                )
+                from src.execution.live_execution_engine import clear_risk_state_on_full_close
 
                 clear_risk_state_on_full_close(
                     symbol,
-                    order_store_path=order_store_path,
+                    order_store_path=str(getattr(self.order_store, "path", "reports/orders.sqlite")),
                     position_store_path=str(getattr(self.position_store, "path", "reports/positions.sqlite")),
                 )
-                if reason.startswith("rank_exit_"):
-                    _record_rank_exit_fill(symbol, reason, path=rank_exit_cooldown_path)
-                if reason.startswith("profit_taking_") or reason.startswith("profit_partial_"):
-                    _record_take_profit_fill(symbol, reason, path=take_profit_cooldown_path)
             except Exception:
                 pass
         else:
             self.position_store.set_qty(symbol, qty=new_qty)
-            try:
-                from src.execution.live_execution_engine import _record_take_profit_fill
 
-                if reason.startswith("profit_taking_") or reason.startswith("profit_partial_"):
-                    _record_take_profit_fill(symbol, reason, path=take_profit_cooldown_path)
-            except Exception:
-                pass
+    def _record_reentry_cooldowns(self, row) -> None:
+        side = str(getattr(row, "side", "") or "").lower()
+        if side != "sell":
+            return
+
+        symbol = str(getattr(row, "inst_id", "") or "").replace("-", "/")
+        if not symbol:
+            return
+
+        reason = self._order_reason(row)
+        if not reason:
+            return
+
+        order_store_path = str(getattr(self.order_store, "path", "reports/orders.sqlite"))
+        rank_exit_cooldown_path = str(derive_runtime_named_json_path(order_store_path, "rank_exit_cooldown_state"))
+        take_profit_cooldown_path = str(derive_runtime_named_json_path(order_store_path, "take_profit_cooldown_state"))
+
+        try:
+            from src.execution.live_execution_engine import _record_rank_exit_fill, _record_take_profit_fill
+
+            if reason.startswith("rank_exit_"):
+                _record_rank_exit_fill(symbol, reason, path=rank_exit_cooldown_path)
+            if reason.startswith("profit_taking_") or reason.startswith("profit_partial_"):
+                _record_take_profit_fill(symbol, reason, path=take_profit_cooldown_path)
+        except Exception:
+            pass
 
     def _load_unprocessed_fills(self, limit: int = 2000) -> List[Dict[str, Any]]:
         return self.fill_store.list_unprocessed(limit=limit)
@@ -261,6 +269,7 @@ class FillReconciler:
             )
             if row_state_before != "FILLED":
                 self._apply_position_delta(row, a)
+            self._record_reentry_cooldowns(row)
             updated += 1
 
             # Confirm terminal state via get_order when possible

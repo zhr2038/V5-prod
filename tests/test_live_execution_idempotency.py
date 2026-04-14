@@ -1234,6 +1234,51 @@ def test_fill_reconciler_records_take_profit_cooldown_from_persisted_reason() ->
         assert payload["BTC/USDT"]["reason"] == "profit_partial_peak_drawdown_8pct_retrace_2_5pct"
 
 
+def test_fill_reconciler_records_take_profit_cooldown_for_already_filled_order() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        store = OrderStore(path=f"{td}/shadow_orders.sqlite")
+        fills = FillStore(path=f"{td}/shadow_fills.sqlite")
+
+        store.upsert_new(
+            cl_ord_id="TP2",
+            run_id="r",
+            inst_id="BTC-USDT",
+            side="sell",
+            intent="REBALANCE",
+            decision_hash="tp2-h",
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=100.0,
+            req={"_v5_reason": "profit_partial_peak_drawdown_8pct_retrace_2_5pct"},
+        )
+        store.update_state("TP2", new_state="FILLED", ord_id="2002")
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="BTC-USDT",
+                    trade_id="tp-fill-2",
+                    ts_ms=1,
+                    ord_id="2002",
+                    cl_ord_id="TP2",
+                    side="sell",
+                    fill_px="100",
+                    fill_sz="0.4",
+                    fee="0",
+                    fee_ccy="BTC",
+                ),
+            ]
+        )
+
+        rec = FillReconciler(fill_store=fills, order_store=store, okx=None, position_store=None)
+        rec.reconcile()
+
+        cooldown_path = Path(td) / "shadow_take_profit_cooldown_state.json"
+        assert cooldown_path.exists()
+        payload = json.loads(cooldown_path.read_text(encoding="utf-8"))
+        assert payload["BTC/USDT"]["reason"] == "profit_partial_peak_drawdown_8pct_retrace_2_5pct"
+
+
 
 
 def test_place_buy_ignores_instrument_spec_fetch_failure(monkeypatch) -> None:
