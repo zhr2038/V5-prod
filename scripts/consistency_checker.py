@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
-from src.execution.fill_store import derive_runtime_reports_dir
+from src.execution.fill_store import derive_runtime_named_artifact_path, derive_runtime_reports_dir
 
 
 @dataclass(frozen=True)
@@ -233,7 +233,10 @@ class BacktestLiveConsistencyChecker:
         return slippages
 
     def load_backtest_config(self):
-        cost_files = list(self.paths.reports_dir.glob("cost_stats_real/*.json"))
+        cost_dir = derive_runtime_named_artifact_path(self.paths.orders_db, "cost_stats_real", "")
+        if not cost_dir.exists():
+            cost_dir = derive_runtime_named_artifact_path(self.paths.orders_db, "cost_stats", "")
+        cost_files = list(cost_dir.glob("*.json"))
         if not cost_files:
             return None
 
