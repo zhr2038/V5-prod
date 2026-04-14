@@ -77,7 +77,7 @@ def _resolve_paths(*, workspace: Path) -> SmartAlertPaths:
         runs_dir=reports_dir / "runs",
         fills_db=derive_fill_store_path(orders_db),
         orders_db=orders_db,
-        alerts_state_file=reports_dir / "alerts_state.json",
+        alerts_state_file=derive_runtime_named_json_path(orders_db, "alerts_state").resolve(),
         reconcile_file=_resolve_runtime_state_path(
             execution_cfg.get("reconcile_status_path"),
             workspace=workspace,
