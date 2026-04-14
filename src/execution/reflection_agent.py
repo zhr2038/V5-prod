@@ -21,7 +21,12 @@ import numpy as np
 from decimal import Decimal
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
-from src.execution.fill_store import derive_fill_store_path, derive_position_store_path, derive_runtime_reports_dir
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_position_store_path,
+    derive_runtime_named_artifact_path,
+    derive_runtime_reports_dir,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = PROJECT_ROOT / 'reports'
@@ -111,9 +116,17 @@ class ReflectionAgentV2:
         runtime_orders_db, runtime_reports_dir = _resolve_reflection_runtime_paths()
         self.db_path = str(Path(db_path).resolve()) if db_path else str(runtime_orders_db)
         self.reports_dir = runtime_reports_dir
-        self.report_dir = Path(report_dir).resolve() if report_dir else (runtime_reports_dir / 'reflection').resolve()
+        self.report_dir = (
+            Path(report_dir).resolve()
+            if report_dir
+            else derive_runtime_named_artifact_path(runtime_orders_db, 'reflection', '').resolve()
+        )
         self.report_dir.mkdir(parents=True, exist_ok=True)
-        self.bills_db = str(Path(bills_db).resolve()) if bills_db else str((runtime_reports_dir / 'bills.sqlite').resolve())
+        self.bills_db = (
+            str(Path(bills_db).resolve())
+            if bills_db
+            else str(derive_runtime_named_artifact_path(runtime_orders_db, 'bills', '.sqlite').resolve())
+        )
         self.ic_file = Path(ic_file).resolve() if ic_file else (runtime_reports_dir / 'ic_diagnostics_30d_20u.json').resolve()
         
         self.analysis_period_days = 7

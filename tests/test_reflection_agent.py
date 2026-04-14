@@ -343,3 +343,55 @@ def test_reflection_agent_uses_active_runtime_paths_for_defaults(monkeypatch, tm
     factors = agent._analyze_factor_effectiveness()
     assert factors[0].ic == 0.06
     assert factors[0].status == "effective"
+
+
+def test_reflection_agent_uses_prefixed_runtime_defaults(monkeypatch, tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(reflection_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(reflection_module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        reflection_module,
+        "load_runtime_config",
+        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+    monkeypatch.setattr(
+        reflection_module,
+        "resolve_runtime_path",
+        lambda raw_path=None, default="reports/orders.sqlite", project_root=None: str(
+            (tmp_path / (raw_path or default)).resolve()
+        ),
+    )
+
+    agent = reflection_module.ReflectionAgentV2()
+
+    assert agent.db_path == str((reports_dir / "shadow_orders.sqlite").resolve())
+    assert agent.report_dir == (reports_dir / "shadow_reflection").resolve()
+    assert agent.bills_db == str((reports_dir / "shadow_bills.sqlite").resolve())
+
+
+def test_reflection_agent_uses_suffixed_runtime_defaults(monkeypatch, tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(reflection_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(reflection_module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        reflection_module,
+        "load_runtime_config",
+        lambda project_root=None: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}},
+    )
+    monkeypatch.setattr(
+        reflection_module,
+        "resolve_runtime_path",
+        lambda raw_path=None, default="reports/orders.sqlite", project_root=None: str(
+            (tmp_path / (raw_path or default)).resolve()
+        ),
+    )
+
+    agent = reflection_module.ReflectionAgentV2()
+
+    assert agent.db_path == str((reports_dir / "orders_accelerated.sqlite").resolve())
+    assert agent.report_dir == (reports_dir / "reflection_accelerated").resolve()
+    assert agent.bills_db == str((reports_dir / "bills_accelerated.sqlite").resolve())

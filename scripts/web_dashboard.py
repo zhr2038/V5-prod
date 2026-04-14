@@ -4333,7 +4333,7 @@ def api_reflection_reports():
     try:
         config = load_config()
         runtime_paths = _resolve_dashboard_runtime_paths(config)
-        reflection_dir = runtime_paths.reports_dir / 'reflection'
+        reflection_dir = derive_runtime_named_artifact_path(runtime_paths.orders_db, 'reflection', '')
 
         if not reflection_dir.exists():
             return jsonify({'reports': [], 'message': '暂无反思报告'})

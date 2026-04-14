@@ -3469,6 +3469,82 @@ def test_api_reflection_reports_uses_active_runtime_reflection_dir(monkeypatch, 
     assert payload["reports"][0]["medium_priority"] == 1
 
 
+def test_api_reflection_reports_uses_prefixed_runtime_reflection_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    root_reflection_dir = reports_dir / "reflection"
+    runtime_reflection_dir = reports_dir / "shadow_reflection"
+    root_reflection_dir.mkdir(parents=True, exist_ok=True)
+    runtime_reflection_dir.mkdir(parents=True, exist_ok=True)
+
+    (root_reflection_dir / "reflection_20260408_010000.json").write_text(
+        json.dumps({"summary": {"total_realized_pnl": -50.0, "total_trades": 9, "total_symbols": 4}, "alerts": [{"level": "critical"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (runtime_reflection_dir / "reflection_20260408_020000.json").write_text(
+        json.dumps({"summary": {"total_realized_pnl": 8.76, "total_trades": 3, "total_symbols": 2}, "alerts": [{"level": "warning"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+
+    response = client.get("/api/reflection_reports")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total_reports"] == 1
+    assert payload["reports"][0]["filename"] == "reflection_20260408_020000.json"
+    assert payload["reports"][0]["total_pnl"] == 8.76
+    assert payload["reports"][0]["trade_count"] == 3
+
+
+def test_api_reflection_reports_uses_suffixed_runtime_reflection_dir(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    root_reflection_dir = reports_dir / "reflection"
+    runtime_reflection_dir = reports_dir / "reflection_accelerated"
+    root_reflection_dir.mkdir(parents=True, exist_ok=True)
+    runtime_reflection_dir.mkdir(parents=True, exist_ok=True)
+
+    (root_reflection_dir / "reflection_20260408_010000.json").write_text(
+        json.dumps({"summary": {"total_realized_pnl": -50.0, "total_trades": 9, "total_symbols": 4}, "alerts": [{"level": "critical"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (runtime_reflection_dir / "reflection_20260408_020000.json").write_text(
+        json.dumps({"summary": {"total_realized_pnl": 6.54, "total_trades": 4, "total_symbols": 1}, "alerts": [{"level": "warning"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}},
+    )
+
+    response = client.get("/api/reflection_reports")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total_reports"] == 1
+    assert payload["reports"][0]["filename"] == "reflection_20260408_020000.json"
+    assert payload["reports"][0]["total_pnl"] == 6.54
+    assert payload["reports"][0]["trade_count"] == 4
+
+
 def test_reflection_reports_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
