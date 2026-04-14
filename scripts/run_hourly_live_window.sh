@@ -63,6 +63,8 @@ try:
 except Exception:
     yaml = None
 
+from src.execution.fill_store import derive_runtime_named_json_path
+
 root = Path(os.environ["V5_PROJECT_ROOT"])
 cfg_path = Path(os.environ.get("V5_CONFIG", "configs/live_prod.yaml"))
 if not cfg_path.is_absolute():
@@ -82,7 +84,7 @@ if yaml is not None and cfg_path.exists():
 order_store = Path(order_store_path)
 if not order_store.is_absolute():
     order_store = root / order_store
-print(order_store.with_name("trend_cache.json"))
+print(derive_runtime_named_json_path(order_store, "trend_cache"))
 PY
 }
 
