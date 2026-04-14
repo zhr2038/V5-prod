@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.execution.fill_store import FillStore, derive_runtime_runs_dir
+from src.execution.fill_store import FillStore, derive_runtime_named_json_path, derive_runtime_runs_dir
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
@@ -62,6 +62,19 @@ class FillReconciler:
         self.okx = okx
         self.position_store = position_store
 
+    @staticmethod
+    def _order_reason(row) -> str:
+        try:
+            raw = getattr(row, "req_json", None)
+            if not raw:
+                return ""
+            obj = json.loads(raw)
+            if not isinstance(obj, dict):
+                return ""
+            return str(obj.get("_v5_reason") or "")
+        except Exception:
+            return ""
+
     def _apply_position_delta(self, row, agg: FillAgg) -> None:
         if self.position_store is None:
             return
@@ -73,6 +86,10 @@ class FillReconciler:
             return
 
         symbol = str(row.inst_id).replace("-", "/")
+        reason = self._order_reason(row)
+        order_store_path = str(getattr(self.order_store, "path", "reports/orders.sqlite"))
+        rank_exit_cooldown_path = str(derive_runtime_named_json_path(order_store_path, "rank_exit_cooldown_state"))
+        take_profit_cooldown_path = str(derive_runtime_named_json_path(order_store_path, "take_profit_cooldown_state"))
         base_ccy = str(row.inst_id).split("-")[0].upper()
         base_fee = agg.fees_by_ccy.get(base_ccy, Decimal("0"))
 
@@ -99,17 +116,32 @@ class FillReconciler:
         if new_qty <= 0:
             self.position_store.close_long(symbol)
             try:
-                from src.execution.live_execution_engine import clear_risk_state_on_full_close
+                from src.execution.live_execution_engine import (
+                    _record_rank_exit_fill,
+                    _record_take_profit_fill,
+                    clear_risk_state_on_full_close,
+                )
 
                 clear_risk_state_on_full_close(
                     symbol,
-                    order_store_path=str(getattr(self.order_store, "path", "reports/orders.sqlite")),
+                    order_store_path=order_store_path,
                     position_store_path=str(getattr(self.position_store, "path", "reports/positions.sqlite")),
                 )
+                if reason.startswith("rank_exit_"):
+                    _record_rank_exit_fill(symbol, reason, path=rank_exit_cooldown_path)
+                if reason.startswith("profit_taking_") or reason.startswith("profit_partial_"):
+                    _record_take_profit_fill(symbol, reason, path=take_profit_cooldown_path)
             except Exception:
                 pass
         else:
             self.position_store.set_qty(symbol, qty=new_qty)
+            try:
+                from src.execution.live_execution_engine import _record_take_profit_fill
+
+                if reason.startswith("profit_taking_") or reason.startswith("profit_partial_"):
+                    _record_take_profit_fill(symbol, reason, path=take_profit_cooldown_path)
+            except Exception:
+                pass
 
     def _load_unprocessed_fills(self, limit: int = 2000) -> List[Dict[str, Any]]:
         return self.fill_store.list_unprocessed(limit=limit)
