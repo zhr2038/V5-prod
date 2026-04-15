@@ -10,13 +10,22 @@ from src.execution.account_store import AccountStore
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import PositionStore
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
+
 def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -21,14 +21,23 @@ from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
 from src.utils.auto_blacklist import add_symbol as auto_blacklist_add
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
+
 def _read_json(path: str) -> Optional[Dict[str, Any]]:
     try:
-        p = Path(path)
+        p = _resolve_path(path)
         if not p.exists():
             return None
         return json.loads(p.read_text(encoding="utf-8"))
@@ -37,7 +46,7 @@ def _read_json(path: str) -> Optional[Dict[str, Any]]:
 
 
 def _write_json(path: str, obj: Dict[str, Any]) -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -66,8 +75,8 @@ def _resolve_runtime_artifact_path(
     suffix: str,
 ) -> str:
     if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
-        return str(derive_runtime_named_artifact_path(order_store_path, base_name, suffix))
-    return str(raw_path)
+        return str(_resolve_path(derive_runtime_named_artifact_path(order_store_path, base_name, suffix)))
+    return str(_resolve_path(raw_path))
 
 
 def _resolve_runtime_json_path(
@@ -78,8 +87,8 @@ def _resolve_runtime_json_path(
     legacy_default: str,
 ) -> str:
     if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
-        return str(derive_runtime_named_json_path(order_store_path, base_name))
-    return str(raw_path)
+        return str(_resolve_path(derive_runtime_named_json_path(order_store_path, base_name)))
+    return str(_resolve_path(raw_path))
 
 
 def _normalize_kill_switch(data: Any) -> Dict[str, Any]:
@@ -169,7 +178,9 @@ class LivePreflight:
         self.okx = okx
         self.position_store = position_store
         self.account_store = account_store
-        self.order_store_path = str(getattr(cfg, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite")
+        self.order_store_path = str(
+            _resolve_path(getattr(cfg, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite")
+        )
         self.bills_db_path = _resolve_runtime_artifact_path(
             bills_db_path,
             order_store_path=self.order_store_path,

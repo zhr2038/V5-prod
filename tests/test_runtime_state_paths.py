@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.execution import account_store, bills_store, bootstrap_patch, cooldown_manager, event_monitor, fill_store, highest_px_tracker, ledger_engine, live_execution_engine, multi_level_stop_loss, order_store, position_builder, position_store
+from configs.schema import ExecutionConfig
+from src.execution import account_store, bills_store, bootstrap_patch, cooldown_manager, event_monitor, fill_store, highest_px_tracker, ledger_engine, live_execution_engine, live_preflight, multi_level_stop_loss, order_store, position_builder, position_store, reconcile_engine
 from src.risk import auto_risk_guard, fixed_stop_loss, negative_expectancy_cooldown, profit_taking
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 import src.execution.order_arbitrator as order_arbitrator
@@ -146,3 +147,27 @@ def test_order_arbitrator_resolves_default_state_paths_from_project_root(monkeyp
     assert order_arbitrator._load_take_profit_cooldown_state("reports/take_profit_cooldown_state.json") == {
         "BTC/USDT": {"last_take_profit_ts_ms": 1}
     }
+
+
+def test_reconcile_engine_resolves_default_output_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(reconcile_engine, "PROJECT_ROOT", tmp_path)
+    reconcile_engine._atomic_write_json("reports/reconcile_status.json", {"ok": True})
+    assert (tmp_path / "reports" / "reconcile_status.json").exists()
+
+
+def test_live_preflight_resolves_runtime_paths_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(live_preflight, "PROJECT_ROOT", tmp_path)
+    cfg = ExecutionConfig(order_store_path="reports/orders.sqlite")
+    preflight = live_preflight.LivePreflight(
+        cfg,
+        okx=None,
+        position_store=None,
+        account_store=None,
+    )
+    assert preflight.order_store_path == str((tmp_path / "reports" / "orders.sqlite").resolve())
+    assert preflight.bills_db_path == str((tmp_path / "reports" / "bills.sqlite").resolve())
+    assert preflight.ledger_state_path == str((tmp_path / "reports" / "ledger_state.json").resolve())
+    assert preflight.ledger_status_path == str((tmp_path / "reports" / "ledger_status.json").resolve())
+    assert preflight.reconcile_status_path == str((tmp_path / "reports" / "reconcile_status.json").resolve())
+    assert preflight.reconcile_failure_state_path == str((tmp_path / "reports" / "reconcile_failure_state.json").resolve())
+    assert preflight.kill_switch_path == str((tmp_path / "reports" / "kill_switch.json").resolve())
