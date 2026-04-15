@@ -9,6 +9,14 @@ from src.execution.fill_store import derive_runtime_named_json_path
 
 
 DEFAULT_EVENT_ACTIONS_PATH = "reports/event_driven_actions.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
 
 
 def _resolve_event_actions_path(
@@ -18,8 +26,8 @@ def _resolve_event_actions_path(
 ) -> Path:
     raw_path = str(path or DEFAULT_EVENT_ACTIONS_PATH).strip() or DEFAULT_EVENT_ACTIONS_PATH
     if order_store_path is not None and raw_path == DEFAULT_EVENT_ACTIONS_PATH:
-        return derive_runtime_named_json_path(order_store_path, "event_driven_actions")
-    return Path(raw_path)
+        return _resolve_path(derive_runtime_named_json_path(order_store_path, "event_driven_actions"))
+    return _resolve_path(raw_path)
 
 
 def _normalize_close_action(action: Dict[str, Any]) -> Dict[str, Any] | None:
