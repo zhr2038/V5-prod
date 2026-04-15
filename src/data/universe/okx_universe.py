@@ -18,6 +18,7 @@ except Exception:  # pragma: no cover
 
 
 OKX_PUBLIC = "https://www.okx.com"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 @dataclass
@@ -57,7 +58,7 @@ class OKXUniverseProvider:
         refine_single_ticker_sleep_sec: float = 0.02,
     ):
         self.base_url = base_url.rstrip("/")
-        self.cache_path = Path(cache_path)
+        self.cache_path = self._resolve_cache_path(cache_path)
         self.cache_ttl_sec = int(cache_ttl_sec)
         self.top_n = int(top_n)
         self.min_24h_quote_volume_usdt = float(min_24h_quote_volume_usdt)
@@ -69,6 +70,13 @@ class OKXUniverseProvider:
         self.refine_with_single_ticker = bool(refine_with_single_ticker)
         self.refine_single_ticker_max_candidates = int(refine_single_ticker_max_candidates)
         self.refine_single_ticker_sleep_sec = float(refine_single_ticker_sleep_sec)
+
+    @staticmethod
+    def _resolve_cache_path(cache_path: str | Path) -> Path:
+        path = Path(cache_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return path
 
     def get_universe(self, now_ts: Optional[float] = None) -> List[str]:
         """Get universe"""
