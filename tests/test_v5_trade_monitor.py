@@ -88,3 +88,22 @@ def test_shell_wrapper_delegates_to_python_monitor(tmp_path: Path) -> None:
     args = args_log.read_text(encoding="utf-8").splitlines()
     assert args[0] == str(project_root / "scripts" / "v5_trade_monitor.py")
     assert args[1] == "--silent"
+
+
+def test_send_telegram_alert_reports_runtime_alert_path(monkeypatch, tmp_path: Path, capsys) -> None:
+    paths = trade_monitor.MonitorPaths(
+        project_root=tmp_path,
+        reports_dir=(tmp_path / "reports").resolve(),
+        logs_dir=(tmp_path / "logs").resolve(),
+        fills_db_path=(tmp_path / "reports" / "fills.sqlite").resolve(),
+        orders_db_path=(tmp_path / "reports" / "shadow_orders.sqlite").resolve(),
+        env_path=(tmp_path / ".env").resolve(),
+        alert_file=(tmp_path / "reports" / "shadow_monitor_alert.txt").resolve(),
+    )
+
+    monkeypatch.setattr(trade_monitor, "_load_telegram_settings", lambda paths: (None, None))
+
+    assert trade_monitor.send_telegram_alert("test-message", paths=paths) is True
+
+    output = capsys.readouterr().out
+    assert str(paths.alert_file) in output

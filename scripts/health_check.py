@@ -282,7 +282,7 @@ class HealthChecker:
             return {
                 "name": "okx_api",
                 "status": "warning",
-                "details": "API credentials missing in root .env",
+                "details": f"API credentials missing in runtime env file: {_resolve_health_env_path().name}",
             }
 
         started = time.time()

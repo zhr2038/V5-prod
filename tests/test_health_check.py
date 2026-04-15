@@ -61,3 +61,23 @@ def test_resolve_health_env_path_uses_runtime_env_helper(monkeypatch, tmp_path: 
     path = health_check._resolve_health_env_path()
 
     assert path == expected
+
+
+def test_check_okx_api_warns_with_runtime_env_filename(monkeypatch, tmp_path: Path) -> None:
+    expected = (tmp_path / "configs" / "live.env").resolve()
+    monkeypatch.setattr(
+        health_check,
+        "_resolve_health_env_path",
+        lambda: expected,
+    )
+    monkeypatch.delenv("EXCHANGE_API_KEY", raising=False)
+    monkeypatch.delenv("OKX_API_KEY", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_SECRET", raising=False)
+    monkeypatch.delenv("OKX_API_SECRET", raising=False)
+    monkeypatch.delenv("EXCHANGE_PASSPHRASE", raising=False)
+    monkeypatch.delenv("OKX_API_PASSPHRASE", raising=False)
+
+    result = health_check.HealthChecker().check_okx_api()
+
+    assert result["status"] == "warning"
+    assert result["details"] == "API credentials missing in runtime env file: live.env"

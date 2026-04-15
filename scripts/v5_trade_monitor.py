@@ -357,7 +357,7 @@ def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPa
     try:
         paths.alert_file.parent.mkdir(parents=True, exist_ok=True)
         paths.alert_file.write_text(full_message, encoding="utf-8")
-        print("[INFO] alert written to monitor_alert.txt")
+        print(f"[INFO] alert written to {paths.alert_file}")
         return True
     except Exception as exc:
         print(f"[ERROR] failed to persist alert: {exc}")
