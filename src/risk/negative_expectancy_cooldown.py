@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass
 class NegativeExpectancyConfig:
@@ -24,8 +26,17 @@ class NegativeExpectancyCooldown:
 
     def __init__(self, cfg: NegativeExpectancyConfig):
         self.cfg = cfg
+        self.cfg.state_path = str(self._resolve_path(self.cfg.state_path))
+        self.cfg.orders_db_path = str(self._resolve_path(self.cfg.orders_db_path))
         self._last_refresh_ms = 0
         self._cache: Dict[str, Any] = self._load_state()
+
+    @staticmethod
+    def _resolve_path(path: str | Path) -> Path:
+        resolved = Path(path)
+        if not resolved.is_absolute():
+            resolved = (PROJECT_ROOT / resolved).resolve()
+        return resolved
 
     @staticmethod
     def _norm_symbol(inst_id: str) -> str:

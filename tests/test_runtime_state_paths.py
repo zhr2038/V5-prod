@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.execution import cooldown_manager, event_monitor, highest_px_tracker, multi_level_stop_loss, position_builder
-from src.risk import auto_risk_guard, fixed_stop_loss, profit_taking
+from src.risk import auto_risk_guard, fixed_stop_loss, negative_expectancy_cooldown, profit_taking
 
 
 def test_profit_taking_manager_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
@@ -60,3 +60,11 @@ def test_event_monitor_resolves_default_state_path_from_project_root(monkeypatch
     monkeypatch.setattr(event_monitor, "PROJECT_ROOT", tmp_path)
     monitor = event_monitor.EventMonitor()
     assert Path(monitor.config.state_path) == (tmp_path / "reports" / "event_monitor_state.json").resolve()
+
+
+def test_negative_expectancy_cooldown_resolves_default_paths_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(negative_expectancy_cooldown, "PROJECT_ROOT", tmp_path)
+    cfg = negative_expectancy_cooldown.NegativeExpectancyConfig()
+    cooldown = negative_expectancy_cooldown.NegativeExpectancyCooldown(cfg)
+    assert Path(cooldown.cfg.state_path) == (tmp_path / "reports" / "negative_expectancy_cooldown.json").resolve()
+    assert Path(cooldown.cfg.orders_db_path) == (tmp_path / "reports" / "orders.sqlite").resolve()
