@@ -15,7 +15,7 @@ from src.core.pipeline import V5Pipeline
 from src.execution.position_store import Position
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
-from src.risk.profit_taking import PositionProfitState
+from src.risk.profit_taking import PositionProfitState, ProfitTakingManager
 import src.core.pipeline as pipeline_module
 
 
@@ -65,15 +65,16 @@ def _build_pipe(cfg: AppConfig, tmp_path: Path) -> V5Pipeline:
     return pipe
 
 
-def test_strict_rank_exit_ignores_target_weight_and_profit_rank_relaxation(tmp_path):
+def test_rank_exit_does_not_close_when_target_still_positive_even_in_strict_mode(tmp_path):
     cfg = AppConfig(symbols=["BTC/USDT", "OKB/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False
     cfg.execution.rank_exit_strict_mode = True
+    cfg.execution.rank_exit_require_zero_target = True
     cfg.execution.min_hold_minutes_before_rank_exit = 0
 
     pipe = _build_pipe(cfg, tmp_path)
     pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
-        target_weights={"OKB/USDT": 0.75},
+        target_weights={"OKB/USDT": 0.50},
         selected=["OKB/USDT"],
         volatilities={},
         notes="",
@@ -116,23 +117,61 @@ def test_strict_rank_exit_ignores_target_weight_and_profit_rank_relaxation(tmp_p
             "OKB/USDT": 0.7,
         },
     )
+    audit = DecisionAudit(run_id="strict-rank-exit-positive-target")
 
     out = pipe.run(
         market_data_1h=market_data,
         positions=positions,
         cash_usdt=100.0,
         equity_peak_usdt=200.0,
-        audit=DecisionAudit(run_id="strict-rank-exit"),
+        audit=audit,
         precomputed_alpha=alpha,
         precomputed_regime=_regime(),
     )
 
-    assert len(out.orders) == 1
-    order = out.orders[0]
-    assert order.symbol == "OKB/USDT"
-    assert order.side == "sell"
-    assert order.intent == "CLOSE_LONG"
-    assert order.meta["reason"].startswith("rank_exit_")
+    assert len(out.orders) == 0
+    notes = [str(n) for n in audit.notes]
+    assert any("rank_exit_target_still_positive: OKB/USDT" in n for n in notes)
+
+
+def test_rank_exit_buffer_positions_delays_streak_start(tmp_path):
+    pm = ProfitTakingManager(
+        rank_exit_strict_mode=False,
+        rank_exit_buffer_positions=2,
+        state_path=str(tmp_path / "profit_taking_state.json"),
+    )
+    pm.positions["DOT/USDT"] = PositionProfitState(
+        symbol="DOT/USDT",
+        entry_price=10.0,
+        entry_time=datetime.now(timezone.utc),
+        highest_price=10.0,
+        profit_high=0.0,
+        current_stop=9.0,
+        rank_exit_streak=0,
+        last_rank=3,
+    )
+
+    should_exit, reason = pm.should_exit_by_rank(
+        "DOT/USDT",
+        current_rank=5,
+        max_rank=3,
+        confirm_rounds=2,
+        buffer_positions=2,
+    )
+    assert should_exit is False
+    assert reason.startswith("rank_exit_buffered")
+    assert pm.positions["DOT/USDT"].rank_exit_streak == 0
+
+    should_exit, reason = pm.should_exit_by_rank(
+        "DOT/USDT",
+        current_rank=6,
+        max_rank=3,
+        confirm_rounds=2,
+        buffer_positions=2,
+    )
+    assert should_exit is False
+    assert reason == "rank_exit_pending_1/2"
+    assert pm.positions["DOT/USDT"].rank_exit_streak == 1
 
 
 def test_peak_drawdown_exit_generates_partial_sell_order(tmp_path):

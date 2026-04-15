@@ -64,6 +64,7 @@ class ProfitTakingManager:
         self,
         *,
         rank_exit_strict_mode: bool = False,
+        rank_exit_buffer_positions: int = 0,
         take_profit_sell_all_pct: float = 0.0,
         peak_drawdown_levels: Optional[List[PeakDrawdownLevel]] = None,
         state_path: str = "reports/profit_taking_state.json",
@@ -75,6 +76,7 @@ class ProfitTakingManager:
             ProfitLevel(profit_pct=0.50, action="partial_sell", stop_pct=0.35, sell_pct=0.50, trail_buffer=0.10),
         ]
         self.rank_exit_strict_mode = bool(rank_exit_strict_mode)
+        self.rank_exit_buffer_positions = max(0, int(rank_exit_buffer_positions or 0))
         self.take_profit_sell_all_pct = max(0.0, float(take_profit_sell_all_pct or 0.0))
         self.peak_drawdown_levels = sorted(
             list(peak_drawdown_levels or []),
@@ -366,6 +368,7 @@ class ProfitTakingManager:
         current_rank: int,
         max_rank: int = 3,
         confirm_rounds: int = 2,
+        buffer_positions: Optional[int] = None,
     ) -> Tuple[bool, str]:
         if symbol not in self.positions:
             return False, "not_in_positions"
@@ -373,12 +376,24 @@ class ProfitTakingManager:
         state = self.positions[symbol]
         current_rank_i = int(current_rank if current_rank is not None else 999)
         confirm_rounds_i = max(1, int(confirm_rounds or 1))
+        buffer_i = max(0, int(self.rank_exit_buffer_positions if buffer_positions is None else buffer_positions))
         effective_max_rank = int(max_rank)
         if not self.rank_exit_strict_mode and state.profit_high > 0.20:
             effective_max_rank = 5
+        trigger_rank = effective_max_rank + buffer_i
+
+        if current_rank_i > effective_max_rank and current_rank_i <= trigger_rank:
+            changed = False
+            if int(state.rank_exit_streak or 0) != 0 or state.last_rank != current_rank_i:
+                state.rank_exit_streak = 0
+                state.last_rank = current_rank_i
+                changed = True
+            if changed:
+                self._save_state()
+            return False, f"rank_exit_buffered_rank_{current_rank_i}_within_{trigger_rank}"
 
         changed = False
-        if current_rank_i > effective_max_rank:
+        if current_rank_i > trigger_rank:
             state.rank_exit_streak = int(state.rank_exit_streak or 0) + 1
             state.last_rank = current_rank_i
             changed = True
@@ -387,8 +402,8 @@ class ProfitTakingManager:
                 state.last_rank_exit_time = datetime.now()
                 self._save_state()
                 if state.profit_high > 0.20 and not self.rank_exit_strict_mode:
-                    return True, f"rank_{current_rank_i}_exceeds_{effective_max_rank}_with_profit_streak_{state.rank_exit_streak}"
-                return True, f"rank_{current_rank_i}_exceeds_{effective_max_rank}_streak_{state.rank_exit_streak}"
+                    return True, f"rank_{current_rank_i}_exceeds_{trigger_rank}_with_profit_streak_{state.rank_exit_streak}"
+                return True, f"rank_{current_rank_i}_exceeds_{trigger_rank}_streak_{state.rank_exit_streak}"
 
             if changed:
                 self._save_state()

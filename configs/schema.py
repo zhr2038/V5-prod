@@ -708,6 +708,16 @@ class ExecutionConfig(BaseModel):
         default=False,
         description="Ignore positive target weight and profit-based max-rank relaxation when rank-exit confirms",
     )
+    rank_exit_require_zero_target: bool = Field(
+        default=True,
+        description="Only allow rank-exit once target weight is effectively zero; prevents same-cycle long-target vs CLOSE_LONG conflicts",
+    )
+    rank_exit_buffer_positions: int = Field(
+        default=0,
+        ge=0,
+        le=20,
+        description="Additional rank buffer above rank_exit_max_rank before rank-exit streak starts accumulating",
+    )
     rank_exit_reentry_cooldown_minutes: int = Field(
         default=60,
         ge=0,

@@ -235,6 +235,7 @@ class V5Pipeline:
             ]
         self.profit_taking = ProfitTakingManager(
             rank_exit_strict_mode=bool(getattr(cfg.execution, "rank_exit_strict_mode", False)),
+            rank_exit_buffer_positions=int(getattr(cfg.execution, "rank_exit_buffer_positions", 0) or 0),
             take_profit_sell_all_pct=float(getattr(cfg.execution, "take_profit_sell_all_pct", 0.0) or 0.0),
             peak_drawdown_levels=peak_drawdown_levels,
             state_path=str(
@@ -1723,10 +1724,18 @@ class V5Pipeline:
             rank_exit_max_rank = int(getattr(self.cfg.execution, 'rank_exit_max_rank', 3) or 3)
             rank_exit_confirm_rounds = int(getattr(self.cfg.execution, 'rank_exit_confirm_rounds', 2) or 2)
             rank_exit_strict_mode = bool(getattr(self.cfg.execution, 'rank_exit_strict_mode', False))
+            rank_exit_require_zero_target = bool(
+                getattr(self.cfg.execution, 'rank_exit_require_zero_target', True)
+            )
+            rank_exit_buffer_positions = int(
+                getattr(self.cfg.execution, 'rank_exit_buffer_positions', 0) or 0
+            )
 
             if audit:
                 audit.add_note(
-                    f"Rank exit source: {rank_source}, candidates={len(symbol_ranks)}, max_rank={rank_exit_max_rank}, confirm_rounds={rank_exit_confirm_rounds}"
+                    f"Rank exit source: {rank_source}, candidates={len(symbol_ranks)}, max_rank={rank_exit_max_rank}, "
+                    f"confirm_rounds={rank_exit_confirm_rounds}, require_zero_target={rank_exit_require_zero_target}, "
+                    f"buffer_positions={rank_exit_buffer_positions}"
                 )
 
             for p in positions:
@@ -1734,20 +1743,33 @@ class V5Pipeline:
                     continue  # Skip if already handled by profit-taking or stop loss
 
                 current_rank = symbol_ranks.get(p.symbol, 999)
+                tw = float(target.get(p.symbol, 0.0) or 0.0)
+                if rank_exit_require_zero_target and tw > target_hold_eps:
+                    if audit:
+                        audit.add_note(
+                            f"rank_exit_target_still_positive: {p.symbol} target_w={tw:.4f} > eps={target_hold_eps:.4f}, "
+                            f"rank={current_rank}, source={rank_source}"
+                        )
+                    continue
+
                 should_exit, reason = self.profit_taking.should_exit_by_rank(
                     p.symbol,
                     current_rank,
                     max_rank=rank_exit_max_rank,
                     confirm_rounds=rank_exit_confirm_rounds,
+                    buffer_positions=rank_exit_buffer_positions,
                 )
                 if not should_exit:
                     if audit and str(reason).startswith("rank_exit_pending"):
                         audit.add_note(
                             f"Rank exit pending: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
                         )
+                    elif audit and str(reason).startswith("rank_exit_buffered"):
+                        audit.add_note(
+                            f"Rank exit buffered: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
+                        )
                     continue
 
-                tw = float(target.get(p.symbol, 0.0) or 0.0)
                 if not rank_exit_strict_mode and tw > target_hold_eps:
                     if audit:
                         audit.add_note(
@@ -1788,6 +1810,7 @@ class V5Pipeline:
                                 "target_w": tw,
                                 "confirm_rounds": rank_exit_confirm_rounds,
                                 "max_rank": rank_exit_max_rank,
+                                "buffer_positions": rank_exit_buffer_positions,
                             },
                         )
                     )

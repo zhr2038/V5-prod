@@ -244,6 +244,8 @@ execution:
   rank_exit_max_rank: 5
   rank_exit_confirm_rounds: 3
   rank_exit_strict_mode: false
+  rank_exit_require_zero_target: true
+  rank_exit_buffer_positions: 2
   rank_exit_reentry_cooldown_minutes: 60
 
   peak_drawdown_exit:
