@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -17,8 +18,17 @@ def _load_walk_forward_task_config(raw_config_path: str) -> dict:
     return load_task_config_with_compat_legacy(PROJECT_ROOT, raw_config_path, load_task_config)
 
 
-def main() -> int:
-    config_path = os.getenv("V5_RESEARCH_TASK_CONFIG", "configs/research/walk_forward.yaml")
+def _resolve_task_config_path(argv: list[str] | None = None) -> str:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("task_config_path", nargs="?", default=None)
+    args = parser.parse_args(argv)
+    if args.task_config_path:
+        return str(args.task_config_path)
+    return os.getenv("V5_RESEARCH_TASK_CONFIG", "configs/research/walk_forward.yaml")
+
+
+def main(argv: list[str] | None = None) -> int:
+    config_path = _resolve_task_config_path(argv)
     task_config = _load_walk_forward_task_config(config_path)
     if not task_config:
         print(f"unable to load walk-forward task config: {config_path}")
