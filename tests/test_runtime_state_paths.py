@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.execution import bootstrap_patch, cooldown_manager, event_monitor, highest_px_tracker, ledger_engine, multi_level_stop_loss, position_builder
+from src.execution import account_store, bills_store, bootstrap_patch, cooldown_manager, event_monitor, fill_store, highest_px_tracker, ledger_engine, multi_level_stop_loss, order_store, position_builder, position_store
 from src.risk import auto_risk_guard, fixed_stop_loss, negative_expectancy_cooldown, profit_taking
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 
@@ -91,3 +91,33 @@ def test_bootstrap_patch_resolves_relative_state_path_from_project_root(monkeypa
     monkeypatch.setattr(bootstrap_patch, "PROJECT_ROOT", tmp_path)
     resolved = bootstrap_patch._resolve_path("reports/bootstrap_patch_state.json")
     assert resolved == (tmp_path / "reports" / "bootstrap_patch_state.json").resolve()
+
+
+def test_bills_store_resolves_default_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(bills_store, "PROJECT_ROOT", tmp_path)
+    store = bills_store.BillsStore()
+    assert store.path == (tmp_path / "reports" / "bills.sqlite").resolve()
+
+
+def test_account_store_resolves_default_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(account_store, "PROJECT_ROOT", tmp_path)
+    store = account_store.AccountStore()
+    assert store.path == (tmp_path / "reports" / "positions.sqlite").resolve()
+
+
+def test_order_store_resolves_default_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(order_store, "PROJECT_ROOT", tmp_path)
+    store = order_store.OrderStore()
+    assert store.path == (tmp_path / "reports" / "orders.sqlite").resolve()
+
+
+def test_position_store_resolves_default_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(position_store, "PROJECT_ROOT", tmp_path)
+    store = position_store.PositionStore()
+    assert store.path == (tmp_path / "reports" / "positions.sqlite").resolve()
+
+
+def test_fill_store_resolves_default_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(fill_store, "PROJECT_ROOT", tmp_path)
+    store = fill_store.FillStore()
+    assert store.path == (tmp_path / "reports" / "fills.sqlite").resolve()

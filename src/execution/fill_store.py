@@ -7,9 +7,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
 
 
 def derive_fill_store_path(order_store_path: Union[str, Path]) -> Path:
@@ -163,7 +171,7 @@ class FillStore:
     """
 
     def __init__(self, path: str = "reports/fills.sqlite"):
-        self.path = Path(path)
+        self.path = _resolve_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 

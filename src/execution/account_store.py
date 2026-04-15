@@ -5,6 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
 
 @dataclass
 class AccountState:
@@ -17,7 +26,7 @@ class AccountState:
 class AccountStore:
     """AccountStore类 - 支持资金规模历史记录"""
     def __init__(self, path: str = "reports/positions.sqlite"):
-        self.path = Path(path)
+        self.path = _resolve_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 

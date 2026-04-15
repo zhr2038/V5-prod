@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 # Local monotonic state ranking: never move backward.
 _STATE_RANK = {
@@ -26,6 +28,13 @@ _STATE_RANK = {
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
 
 
 def _rank(state: str) -> int:
@@ -110,7 +119,7 @@ class OrderStore:
         Args:
             path: 数据库文件路径
         """
-        self.path = Path(path)
+        self.path = _resolve_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 

@@ -12,6 +12,14 @@ from src.execution.fill_store import derive_runtime_named_json_path
 from src.utils.time import utc_now_iso
 
 log = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
 
 
 @dataclass
@@ -51,7 +59,7 @@ class PositionStore:
     """
 
     def __init__(self, path: str = "reports/positions.sqlite"):
-        self.path = Path(path)
+        self.path = _resolve_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
