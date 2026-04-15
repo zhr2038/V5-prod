@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import resolve_runtime_config_path
 from main import main as run_main
 
 
@@ -151,6 +152,10 @@ def _build_shadow_config(base_cfg_path: Path, overrides_path: Path, output_path:
     return output_path
 
 
+def _resolve_shadow_base_config_path(raw_base_config_path: str | None = None) -> Path:
+    return Path(resolve_runtime_config_path(raw_base_config_path, project_root=PROJECT_ROOT)).resolve()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run tuned XGBoost in paper/shadow mode using live_prod as the base config."
@@ -162,6 +167,11 @@ def main() -> int:
         help="market data provider to use for the shadow run",
     )
     parser.add_argument(
+        "--base-config",
+        default=None,
+        help="base config to merge with shadow_tuned_xgboost_overrides.yaml; defaults to the active runtime config",
+    )
+    parser.add_argument(
         "--keep-toplevel-artifacts",
         action="store_true",
         help="allow top-level reports/alpha_snapshot.json style artifacts to be overwritten",
@@ -170,7 +180,7 @@ def main() -> int:
 
     shadow_root = PROJECT_ROOT / "reports" / "shadow_tuned_xgboost"
     merged_cfg_path = shadow_root / "generated_config.yaml"
-    base_cfg_path = PROJECT_ROOT / "configs" / "live_prod.yaml"
+    base_cfg_path = _resolve_shadow_base_config_path(args.base_config)
     overrides_path = PROJECT_ROOT / "configs" / "shadow_tuned_xgboost_overrides.yaml"
 
     _prepare_shadow_reports_namespace(PROJECT_ROOT)
