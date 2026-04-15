@@ -18,8 +18,8 @@ exchange:
   testnet: false
 
 universe:
-  enabled: true
-  use_universe_symbols: true
+  enabled: false
+  use_universe_symbols: false
   cache_path: reports/universe_cache.json
   cache_ttl_sec: 3600
 
@@ -50,8 +50,8 @@ universe:
     - TRX/USDT
 
 alpha:
-  long_top_pct: 0.25  # 选前25%
-  min_score_threshold: 0.05
+  long_top_pct: 0.50  # 选前50%
+  min_score_threshold: 0.10
   use_fused_score_for_weighting: true  # 融合分不仅选币，也用于定仓，避免选币/仓位错配
 
   # Qlib-inspired 轻量组合优化（降低仓位抖动）
@@ -120,7 +120,7 @@ alpha:
     sell_score_multiplier: 1.00
 
   alpha158_overlay:
-    enabled: true
+    enabled: false
     blend_weight: 0.35
     weights:
       f6_corr_pv_10: 0.15
@@ -234,16 +234,16 @@ execution:
   split_interval_sec: 3.0
   max_hourly_volume_pct: 0.05
   slippage_db_path: reports/slippage.sqlite
-  fee_bps: 6
+  fee_bps: 10
   slippage_bps: 5
   
   open_long_cooldown_minutes: 120
   take_profit_sell_all_pct: 0.10
   take_profit_reentry_cooldown_minutes: 120
-  # 排名退出防抖：需连续2轮跌出前3才触发rank_exit；且退出后1小时内禁止回补
-  rank_exit_max_rank: 3
-  rank_exit_confirm_rounds: 2
-  rank_exit_strict_mode: true
+  # 排名退出防抖：需连续3轮跌出前5才触发rank_exit；允许边界条件下更宽松地保留持仓，且退出后1小时内禁止回补
+  rank_exit_max_rank: 5
+  rank_exit_confirm_rounds: 3
+  rank_exit_strict_mode: false
   rank_exit_reentry_cooldown_minutes: 60
 
   peak_drawdown_exit:
@@ -259,17 +259,17 @@ execution:
     tier3_sell_pct: 1.0
 
   # qlib经验迁移：最短持仓门槛（先控超短抖动）
-  min_hold_minutes_before_rank_exit: 30
-  min_hold_minutes_before_regime_exit: 45
+  min_hold_minutes_before_rank_exit: 180
+  min_hold_minutes_before_regime_exit: 240
 
   # qlib经验迁移：每轮最大换手（只作用于rebalance单，不拦截止损/强平）
-  max_rebalance_turnover_per_cycle: 0.30
+  max_rebalance_turnover_per_cycle: 0.15
 
   # qlib经验迁移：成本感知开仓（score代理edge）
   cost_aware_entry_enabled: true
   cost_aware_score_per_bps: 0.0030
   cost_aware_min_score_floor: 0.18
-  cost_aware_roundtrip_cost_bps: null
+  cost_aware_roundtrip_cost_bps: 30
   low_price_entry_guard_enabled: true
   low_price_entry_threshold_usdt: 0.20
   low_price_entry_extra_score_floor: 0.12
