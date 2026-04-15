@@ -9,6 +9,15 @@ from typing import Dict, List, Any, Optional
 
 from src.utils.time import utc_now_iso, utc_now_timestamp
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_run_dir(run_dir: str | Path) -> Path:
+    resolved = Path(run_dir)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
 
 @dataclass
 class DecisionAudit:
@@ -104,7 +113,7 @@ class DecisionAudit:
     
     def save(self, run_dir: str) -> None:
         """保存到文件"""
-        path = Path(run_dir) / "decision_audit.json"
+        path = _resolve_run_dir(run_dir) / "decision_audit.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         
         data = self.to_dict()
@@ -118,7 +127,7 @@ class DecisionAudit:
 
 def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     """从文件加载DecisionAudit"""
-    path = Path(run_dir) / "decision_audit.json"
+    path = _resolve_run_dir(run_dir) / "decision_audit.json"
     if not path.exists():
         return None
     

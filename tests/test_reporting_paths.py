@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 
-from src.reporting import metrics, reporting, summary_writer, trade_log
+from src.core import run_logger
+from src.reporting import decision_audit, metrics, reporting, summary_writer, trade_log
 
 
 def test_trade_log_writer_resolves_relative_run_dir_from_project_root(monkeypatch, tmp_path):
@@ -42,3 +43,21 @@ def test_reporting_write_json_resolves_relative_path_from_project_root(monkeypat
     monkeypatch.setattr(reporting, "PROJECT_ROOT", tmp_path)
     reporting.write_json("reports/example.json", {"ok": True})
     assert ((tmp_path / "reports" / "example.json").resolve()).exists()
+
+
+def test_decision_audit_resolves_relative_run_dir_from_project_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(decision_audit, "PROJECT_ROOT", tmp_path)
+    audit = decision_audit.DecisionAudit(run_id="test_run")
+    audit.save("reports/runs/test_run")
+    loaded = decision_audit.load_decision_audit("reports/runs/test_run")
+    assert loaded is not None
+    assert loaded.run_id == "test_run"
+
+
+def test_run_logger_resolves_relative_run_dir_from_project_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(run_logger, "PROJECT_ROOT", tmp_path)
+    logger = run_logger.RunLogger("reports/runs/test_run_logger")
+    logger.log_equity({"equity": 100.0})
+    logger.log_position({"symbol": "BTC/USDT", "qty": 1.0})
+    assert (tmp_path / "reports" / "runs" / "test_run_logger" / "equity.jsonl").exists()
+    assert (tmp_path / "reports" / "runs" / "test_run_logger" / "positions.jsonl").exists()

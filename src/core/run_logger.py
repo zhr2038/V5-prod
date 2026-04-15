@@ -4,6 +4,15 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_run_dir(run_dir: str | Path) -> Path:
+    resolved = Path(run_dir)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
 
 class RunLogger:
     """运行日志记录器
@@ -17,7 +26,7 @@ class RunLogger:
         Args:
             run_dir: 运行日志目录路径
         """
-        self.run_dir = Path(run_dir)
+        self.run_dir = _resolve_run_dir(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / "equity.jsonl").touch(exist_ok=True)
         (self.run_dir / "positions.jsonl").touch(exist_ok=True)
