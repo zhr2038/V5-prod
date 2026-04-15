@@ -31,7 +31,7 @@ import pandas as pd
 import yaml
 import requests
 from configs.loader import load_config as load_app_config
-from configs.runtime_config import resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 
 from src.core.models import MarketSeries
 from src.data.okx_ccxt_provider import OKXCCXTProvider
@@ -248,12 +248,8 @@ def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[
     return payload if payload is not None else default
 
 def _resolve_config_path() -> Path:
-    """Resolve config path from env V5_CONFIG (supports relative path)."""
-    raw = os.getenv('V5_CONFIG', 'configs/live_prod.yaml')
-    p = Path(raw)
-    if not p.is_absolute():
-        p = WORKSPACE / p
-    return p
+    """Resolve config path via the shared runtime config helper."""
+    return Path(resolve_runtime_config_path(project_root=WORKSPACE)).resolve()
 
 
 CONFIG_PATH = _resolve_config_path()

@@ -25,6 +25,18 @@ def load_web_dashboard_module():
     return module
 
 
+def test_resolve_config_path_uses_runtime_helper(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(
+        module,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str((tmp_path / "configs" / "runtime.yaml").resolve()),
+    )
+
+    assert module._resolve_config_path() == (tmp_path / "configs" / "runtime.yaml").resolve()
+
+
 def _assert_internal_error_hidden(body: str, *fragments: str):
     assert "internal server error" in body
     assert "Traceback" not in body
