@@ -37,6 +37,42 @@ def test_resolve_config_path_uses_runtime_helper(monkeypatch, tmp_path):
     assert module._resolve_config_path() == (tmp_path / "configs" / "runtime.yaml").resolve()
 
 
+def test_load_config_uses_runtime_helper_dynamically(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    cfg_path = tmp_path / "configs" / "runtime.yaml"
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text("alpha:\n  long_top_pct: 0.42\n", encoding="utf-8")
+    monkeypatch.setattr(
+        module,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(cfg_path.resolve()),
+    )
+
+    payload = module.load_config()
+
+    assert payload["alpha"]["long_top_pct"] == 0.42
+
+
+def test_multi_strategy_score_transform_uses_dynamic_runtime_config(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    cfg_path = tmp_path / "configs" / "runtime.yaml"
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(
+        "alpha:\n  multi_strategy_score_transform: clip\n  multi_strategy_score_transform_scale: 2.5\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        module,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(cfg_path.resolve()),
+    )
+
+    mode, scale = module._load_multi_strategy_score_transform()
+
+    assert mode == "clip"
+    assert scale == 2.5
+
+
 def _assert_internal_error_hidden(body: str, *fragments: str):
     assert "internal server error" in body
     assert "Traceback" not in body

@@ -391,7 +391,7 @@ def _load_multi_strategy_score_transform() -> tuple[str, float]:
     mode = "tanh"
     scale = 1.0
     try:
-        cfg = load_app_config(str(CONFIG_PATH), env_path=None)
+        cfg = load_app_config(str(_resolve_config_path()), env_path=None)
         alpha_cfg = getattr(cfg, "alpha", None)
         if alpha_cfg is not None:
             mode = str(getattr(alpha_cfg, "multi_strategy_score_transform", mode) or mode).strip().lower()
@@ -1307,7 +1307,7 @@ def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Opti
 def load_config():
     """加载配置"""
     try:
-        with open(CONFIG_PATH, 'r') as f:
+        with open(_resolve_config_path(), 'r') as f:
             return yaml.safe_load(f)
     except:
         return {}
@@ -4179,7 +4179,7 @@ def _api_ml_training_v2():
         '.json',
     )
     try:
-        cfg = load_app_config(str(CONFIG_PATH), env_path=None)
+        cfg = load_app_config(str(_resolve_config_path()), env_path=None)
         ml_cfg = getattr(getattr(cfg, 'alpha', None), 'ml_factor', None)
         if ml_cfg is not None:
             configured_enabled = _coerce_bool(getattr(ml_cfg, 'enabled', False))
