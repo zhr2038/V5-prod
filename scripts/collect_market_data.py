@@ -6,20 +6,44 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import sqlite3
+import sys
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Dict, Any
 import pandas as pd
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
 from src.data.okx_ccxt_provider import OKXCCXTProvider
+
+
+DEFAULT_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "ADA/USDT"]
+
+
+def _resolve_runtime_inputs(
+    config_path: str | None = None,
+    env_path: str = ".env",
+    db_path: str | None = None,
+) -> tuple[str, str, str]:
+    return (
+        resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT),
+        resolve_runtime_env_path(env_path, project_root=PROJECT_ROOT),
+        resolve_runtime_path(db_path, default="reports/alpha_history.db", project_root=PROJECT_ROOT),
+    )
 
 
 def create_market_data_tables(db_path: str):
     """创建市场数据表"""
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -112,7 +136,37 @@ def calculate_forward_returns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def main():
+def _load_seed_symbols(db_path: str) -> list[str]:
+    symbols: list[str] = []
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT snapshot_json FROM alpha_snapshots
+            ORDER BY timestamp DESC LIMIT 1
+            """
+        )
+        row = cursor.fetchone()
+        if row:
+            snapshot = json.loads(row[0])
+            symbols = list((snapshot or {}).get("scores", {}).keys())[:10]
+    except sqlite3.OperationalError:
+        symbols = []
+    except Exception:
+        symbols = []
+    finally:
+        conn.close()
+    return symbols or list(DEFAULT_SYMBOLS)
+
+
+def main(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=None)
+    parser.add_argument("--env", default=".env")
+    parser.add_argument("--db-path", default=None)
+    args = parser.parse_args(argv)
+
     print("📊 市场数据收集")
     print("=" * 50)
     
@@ -122,7 +176,12 @@ def main():
         return
     
     # 加载配置
-    cfg = load_config("configs/live_small.yaml", env_path=".env")
+    resolved_config_path, resolved_env_path, db_path = _resolve_runtime_inputs(
+        args.config,
+        args.env,
+        args.db_path,
+    )
+    _cfg = load_config(resolved_config_path, env_path=resolved_env_path)
     
     # 初始化数据提供者
     # 注意：cfg.data 可能不存在，使用默认配置
@@ -133,32 +192,11 @@ def main():
         'timeframe_aux': '4h'
     })
     
-    # 数据库路径
-    db_path = "reports/alpha_history.db"
-    
     # 创建表
     create_market_data_tables(db_path)
     
-    # 获取关注的币种（从最近的运行中提取）
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # 获取最近运行的 selected symbols
-    cursor.execute("""
-    SELECT snapshot_json FROM alpha_snapshots 
-    ORDER BY timestamp DESC LIMIT 1
-    """)
-    row = cursor.fetchone()
-    
-    symbols = []
-    if row:
-        import json
-        snapshot = json.loads(row[0])
-        symbols = list(snapshot.get('scores', {}).keys())[:10]  # 取前10个
-    
-    if not symbols:
-        # 默认币种
-        symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "ADA/USDT"]
+    # 获取关注的币种（从最近的运行中提取；若没有 alpha_snapshots 表则回退默认币种）
+    symbols = _load_seed_symbols(db_path)
     
     print(f"收集 {len(symbols)} 个币种的数据: {symbols[:5]}...")
     
@@ -222,8 +260,6 @@ def main():
         conn.commit()
         total_bars += len(data)
         print(f"  保存 {len(data)} 条K线数据")
-    
-    conn.close()
     
     print(f"\n✅ 数据收集完成")
     print(f"   币种数量: {len(symbols)}")
