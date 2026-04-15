@@ -10,14 +10,22 @@ from src.core.models import Order
 
 DEFAULT_STATE_PATH = "reports/order_state_machine.json"
 DEFAULT_TAKE_PROFIT_COOLDOWN_STATE_PATH = "reports/take_profit_cooldown_state.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
+
 def _load_state(path: str) -> Dict[str, Any]:
-    p = Path(path)
+    p = _resolve_path(path)
     if not p.exists():
         return {"version": 1, "symbols": {}}
     try:
@@ -27,7 +35,7 @@ def _load_state(path: str) -> Dict[str, Any]:
 
 
 def _save_state(path: str, state: Dict[str, Any]) -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -35,7 +43,7 @@ def _save_state(path: str, state: Dict[str, Any]) -> None:
 
 
 def _load_take_profit_cooldown_state(path: str) -> Dict[str, Any]:
-    p = Path(path)
+    p = _resolve_path(path)
     if not p.exists():
         return {}
     try:

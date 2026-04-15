@@ -22,6 +22,7 @@ from src.data.okx_instruments import OKXSpotInstrumentsCache, round_down_to_lot
 
 
 log = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Treat sub-threshold notional as dust (local-state hygiene, not exchange accounting).
 DUST_NOTIONAL_USDT = 0.5
@@ -35,10 +36,17 @@ def symbol_to_inst_id(symbol: str) -> str:
     return str(symbol).replace("/", "-")
 
 
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
+
 def _load_json(path: str) -> Optional[Dict[str, Any]]:
     """加载JSON文件"""
     try:
-        p = Path(path)
+        p = _resolve_path(path)
         if not p.exists():
             return None
         return json.loads(p.read_text(encoding="utf-8"))
@@ -71,7 +79,7 @@ def _get_spot_spec_best_effort(inst_id: str):
 
 
 def _derive_highest_tracker_state_path(position_store_path: str | Path) -> str:
-    path = Path(position_store_path)
+    path = _resolve_path(position_store_path)
     if path.name == "positions.sqlite":
         return str(path.with_name("highest_px_state.json"))
     if "positions" in path.stem:
@@ -83,8 +91,8 @@ def _resolve_runtime_json_path(cfg: ExecutionConfig, *, attr_name: str, base_nam
     raw_path = getattr(cfg, attr_name, None)
     if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
         order_store_path = str(getattr(cfg, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite")
-        return str(derive_runtime_named_json_path(order_store_path, base_name))
-    return str(raw_path)
+        return str(_resolve_path(derive_runtime_named_json_path(order_store_path, base_name)))
+    return str(_resolve_path(raw_path))
 
 
 def load_kill_switch_enabled(path: str) -> bool:
@@ -125,7 +133,7 @@ def _remove_symbol_from_state_file(path: str, symbol: str) -> bool:
     Returns True if file was modified.
     """
     try:
-        p = Path(path)
+        p = _resolve_path(path)
         if not p.exists():
             return False
         obj = json.loads(p.read_text(encoding="utf-8"))
@@ -173,7 +181,7 @@ def _read_rank_exit_cooldown_state(path: str = "reports/rank_exit_cooldown_state
 
 
 def _write_rank_exit_cooldown_state(data: Dict[str, Any], path: str = "reports/rank_exit_cooldown_state.json") -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(data or {}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -226,7 +234,7 @@ def _read_take_profit_cooldown_state(path: str = "reports/take_profit_cooldown_s
 
 
 def _write_take_profit_cooldown_state(data: Dict[str, Any], path: str = "reports/take_profit_cooldown_state.json") -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(data or {}, ensure_ascii=False, indent=2), encoding="utf-8")

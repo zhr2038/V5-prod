@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from src.execution import account_store, bills_store, bootstrap_patch, cooldown_manager, event_monitor, fill_store, highest_px_tracker, ledger_engine, multi_level_stop_loss, order_store, position_builder, position_store
+from src.execution import account_store, bills_store, bootstrap_patch, cooldown_manager, event_monitor, fill_store, highest_px_tracker, ledger_engine, live_execution_engine, multi_level_stop_loss, order_store, position_builder, position_store
 from src.risk import auto_risk_guard, fixed_stop_loss, negative_expectancy_cooldown, profit_taking
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
+import src.execution.order_arbitrator as order_arbitrator
 
 
 def test_profit_taking_manager_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
@@ -121,3 +123,26 @@ def test_fill_store_resolves_default_path_from_project_root(monkeypatch, tmp_pat
     monkeypatch.setattr(fill_store, "PROJECT_ROOT", tmp_path)
     store = fill_store.FillStore()
     assert store.path == (tmp_path / "reports" / "fills.sqlite").resolve()
+
+
+def test_live_execution_engine_resolves_default_cooldown_paths_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(live_execution_engine, "PROJECT_ROOT", tmp_path)
+    live_execution_engine._write_rank_exit_cooldown_state({}, "reports/rank_exit_cooldown_state.json")
+    live_execution_engine._write_take_profit_cooldown_state({}, "reports/take_profit_cooldown_state.json")
+    assert (tmp_path / "reports" / "rank_exit_cooldown_state.json").exists()
+    assert (tmp_path / "reports" / "take_profit_cooldown_state.json").exists()
+    assert live_execution_engine._derive_highest_tracker_state_path("reports/positions.sqlite") == str(
+        (tmp_path / "reports" / "highest_px_state.json").resolve()
+    )
+
+
+def test_order_arbitrator_resolves_default_state_paths_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(order_arbitrator, "PROJECT_ROOT", tmp_path)
+    order_arbitrator._save_state("reports/order_state_machine.json", {"version": 1, "symbols": {}})
+    tp_path = tmp_path / "reports" / "take_profit_cooldown_state.json"
+    tp_path.parent.mkdir(parents=True, exist_ok=True)
+    tp_path.write_text(json.dumps({"BTC/USDT": {"last_take_profit_ts_ms": 1}}), encoding="utf-8")
+    assert (tmp_path / "reports" / "order_state_machine.json").exists()
+    assert order_arbitrator._load_take_profit_cooldown_state("reports/take_profit_cooldown_state.json") == {
+        "BTC/USDT": {"last_take_profit_ts_ms": 1}
+    }
