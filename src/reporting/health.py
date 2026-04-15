@@ -12,6 +12,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify
 
+from configs.runtime_config import resolve_runtime_config_path
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
@@ -37,21 +38,7 @@ class HealthPaths:
 
 
 def _resolve_active_config_path() -> Path:
-    import os
-
-    env_cfg = (os.getenv("V5_CONFIG") or "").strip()
-    if env_cfg:
-        path = Path(env_cfg)
-        if not path.is_absolute():
-            path = PROJECT_ROOT / path
-        return path
-
-    for candidate in ("live_prod.yaml", "live_20u_real.yaml", "config.yaml"):
-        path = CONFIGS_DIR / candidate
-        if path.exists():
-            return path
-
-    return CONFIGS_DIR / "live_prod.yaml"
+    return Path(resolve_runtime_config_path(project_root=PROJECT_ROOT))
 
 
 def _load_json_safe(path: Path) -> dict:
