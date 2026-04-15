@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from configs.runtime_config import resolve_runtime_env_path
 from src.execution.ml_feature_optimizer import optimize_features_for_training
 from src.research.dataset_builder import DatasetBuildConfig, ResearchDatasetBuilder
 from src.research.processors import (
@@ -784,7 +785,7 @@ def run_walk_forward_task(
 
     try:
         app_cfg_path = _project_path(project_root, walk_cfg.get("config_path", "configs/config.yaml"), "configs/config.yaml")
-        env_path = str(walk_cfg.get("env_path", ".env"))
+        env_path = resolve_runtime_env_path(str(walk_cfg.get("env_path", ".env")), project_root=project_root)
         provider_name = str(walk_cfg.get("provider", "mock")).strip().lower()
         ohlcv_limit = int(walk_cfg.get("ohlcv_limit", 24 * 120))
         output_report_path = _project_path(project_root, paths_cfg.get("output_report_path", "reports/walk_forward.json"), "reports/walk_forward.json")

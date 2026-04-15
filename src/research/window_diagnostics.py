@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import numpy as np
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_env_path
 from src.backtest.cost_factory import make_cost_model_from_cfg
 from src.core.models import MarketSeries
 import src.core.pipeline as pipeline_module
@@ -751,7 +752,7 @@ def run_window_diagnostic_task(
 
     try:
         base_config_path = _project_path(project_root, str(exp_cfg.get("base_config_path", "configs/live_prod.yaml")), "configs/live_prod.yaml")
-        env_path = str(exp_cfg.get("env_path", ".env"))
+        env_path = resolve_runtime_env_path(str(exp_cfg.get("env_path", ".env")), project_root=project_root)
         cache_dir = _project_path(project_root, str(exp_cfg.get("cache_dir", "data/cache")), "data/cache")
         latest_report_path = _project_path(
             project_root,

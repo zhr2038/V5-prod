@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_env_path
 from src.core.models import Order
 from src.core.pipeline import V5Pipeline
 from src.core.run_logger import RunLogger
@@ -106,7 +107,8 @@ def run_latest_signal_variant(
     symbols = [str(symbol) for symbol in (variant.get("symbols") or [])]
     overrides = dict(variant.get("overrides") or {})
 
-    base_cfg = _load_base_config_cached(base_config_path, env_path)
+    resolved_env_path = resolve_runtime_env_path(env_path, project_root=project_root)
+    base_cfg = _load_base_config_cached(base_config_path, resolved_env_path)
     cfg = build_baseline_config(base_cfg, project_root=project_root, research_symbols=symbols)
     _apply_overrides(cfg, overrides)
     cfg.backtest.initial_equity_usdt = float(initial_equity_usdt)
@@ -302,4 +304,3 @@ def build_latest_signal_markdown(summary: dict[str, Any]) -> str:
             continue
         lines.append(f"| {symbol} | {c_weight:.6f} | {b_weight:.6f} | {delta:.6f} |")
     return "\n".join(lines) + "\n"
-
