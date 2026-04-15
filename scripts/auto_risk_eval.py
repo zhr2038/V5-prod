@@ -9,11 +9,12 @@ logic.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -21,7 +22,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.fill_store import (
     derive_position_store_path,
     derive_runtime_auto_risk_eval_path,
@@ -45,17 +46,22 @@ class AutoRiskEvalPaths:
         auto_risk_eval_path: Path,
         positions_db: Path,
         auto_risk_guard_path: Path,
+        env_path: Path,
     ) -> None:
         self.reports_dir = reports_dir
         self.runs_dir = runs_dir
         self.auto_risk_eval_path = auto_risk_eval_path
         self.positions_db = positions_db
         self.auto_risk_guard_path = auto_risk_guard_path
+        self.env_path = env_path
 
 
-def _resolve_runtime_paths() -> AutoRiskEvalPaths:
+def _resolve_runtime_paths(
+    raw_config_path: str | None = None,
+    raw_env_path: str | None = None,
+) -> AutoRiskEvalPaths:
     try:
-        cfg = load_runtime_config(project_root=PROJECT_ROOT)
+        cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
         execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
         orders_db = Path(
             resolve_runtime_path(
@@ -71,6 +77,7 @@ def _resolve_runtime_paths() -> AutoRiskEvalPaths:
             auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
             positions_db=derive_position_store_path(orders_db),
             auto_risk_guard_path=derive_runtime_auto_risk_guard_path(orders_db),
+            env_path=Path(resolve_runtime_env_path(raw_env_path, project_root=PROJECT_ROOT)),
         )
     except Exception:
         return AutoRiskEvalPaths(
@@ -79,6 +86,7 @@ def _resolve_runtime_paths() -> AutoRiskEvalPaths:
             auto_risk_eval_path=AUTO_RISK_EVAL_PATH,
             positions_db=REPORTS_DIR / "positions.sqlite",
             auto_risk_guard_path=REPORTS_DIR / "auto_risk_guard.json",
+            env_path=Path(resolve_runtime_env_path(raw_env_path, project_root=PROJECT_ROOT)),
         )
 
 
@@ -97,10 +105,10 @@ def _sanitize_peak_equity(live_equity: float, peak_equity: float, initial_capita
     return peak_equity
 
 
-def load_recent_runs(hours: int = 24) -> List[Dict]:
+def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPaths] = None) -> List[Dict]:
     runs: List[Dict] = []
     cutoff = datetime.now() - timedelta(hours=hours)
-    runs_dir = _resolve_runtime_paths().runs_dir
+    runs_dir = (runtime_paths or _resolve_runtime_paths()).runs_dir
 
     if not runs_dir.exists():
         return runs
@@ -128,7 +136,7 @@ def load_recent_runs(hours: int = 24) -> List[Dict]:
     return runs
 
 
-def calculate_metrics(runs: List[Dict]) -> Dict:
+def calculate_metrics(runs: List[Dict], *, runtime_paths: Optional[AutoRiskEvalPaths] = None) -> Dict:
     if not runs:
         return {
             "dd_pct": 0.0,
@@ -189,8 +197,12 @@ def calculate_metrics(runs: List[Dict]) -> Dict:
 
         from src.risk.live_equity_fetcher import get_live_equity_from_okx
 
-        eq_live = get_live_equity_from_okx()
-        acc_db = _resolve_runtime_paths().positions_db
+        runtime = runtime_paths or _resolve_runtime_paths()
+        eq_live = get_live_equity_from_okx(
+            env_path=str(runtime.env_path),
+            project_root=PROJECT_ROOT,
+        )
+        acc_db = runtime.positions_db
         peak = 0.0
         if acc_db.exists():
             con = sqlite3.connect(str(acc_db))
@@ -235,8 +247,8 @@ def calculate_metrics(runs: List[Dict]) -> Dict:
     }
 
 
-def _write_eval_snapshot(guard, metrics: Dict, reason: str) -> None:
-    eval_path = _resolve_runtime_paths().auto_risk_eval_path
+def _write_eval_snapshot(guard, metrics: Dict, reason: str, *, runtime_paths: AutoRiskEvalPaths | None = None) -> None:
+    eval_path = (runtime_paths or _resolve_runtime_paths()).auto_risk_eval_path
     eval_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "ts": datetime.now().isoformat(),
@@ -250,19 +262,23 @@ def _write_eval_snapshot(guard, metrics: Dict, reason: str) -> None:
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
-def evaluate_and_switch() -> None:
-    runtime_paths = _resolve_runtime_paths()
+def evaluate_and_switch(
+    *,
+    config_path: str | None = None,
+    env_path: str | None = None,
+) -> None:
+    runtime_paths = _resolve_runtime_paths(config_path, env_path)
     try:
         guard = get_auto_risk_guard(str(runtime_paths.auto_risk_guard_path))
     except TypeError:
         guard = get_auto_risk_guard()
-    runs = load_recent_runs(hours=12)
-    metrics = calculate_metrics(runs)
+    runs = load_recent_runs(hours=12, runtime_paths=runtime_paths)
+    metrics = calculate_metrics(runs, runtime_paths=runtime_paths)
 
     if len(runs) < 3:
         reason = f"样本不足 ({len(runs)}轮)，维持当前档位"
         print(f"[AutoRiskEval] {reason}: {guard.current_level}")
-        _write_eval_snapshot(guard, metrics, reason)
+        _write_eval_snapshot(guard, metrics, reason, runtime_paths=runtime_paths)
         return
 
     print(
@@ -281,14 +297,18 @@ def evaluate_and_switch() -> None:
     )
 
     print(f"[AutoRiskEval] 结果: {guard.current_level} | 原因: {reason}")
-    _write_eval_snapshot(guard, metrics, reason)
+    _write_eval_snapshot(guard, metrics, reason, runtime_paths=runtime_paths)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=None)
+    parser.add_argument("--env", default=".env")
+    args = parser.parse_args(argv)
     print("=" * 60)
     print("V5 自动风险评估")
     print("=" * 60)
-    evaluate_and_switch()
+    evaluate_and_switch(config_path=args.config, env_path=args.env)
     print("=" * 60)
 
 
