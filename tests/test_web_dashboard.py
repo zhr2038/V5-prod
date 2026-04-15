@@ -5267,6 +5267,82 @@ def test_api_shadow_test_does_not_refresh_stale_ab_gate_in_request(monkeypatch, 
     assert payload["ab_gate_age_sec"] > 1800
 
 
+def test_api_shadow_test_uses_prefixed_runtime_ab_gate_file(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    run_dir = runs_dir / "20260408_01"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+
+    (run_dir / "decision_audit.json").write_text(
+        json.dumps({"counts": {"selected": 8, "orders_rebalance": 1, "orders_exit": 0}, "router_decisions": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "shadow_ab_gate_status.json").write_text(
+        json.dumps({"window_runs": 3, "decision": {"switch_recommended": True}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "ab_gate_status.json").write_text(
+        json.dumps({"window_runs": 99, "decision": {"switch_recommended": False}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/shadow_test")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ab_gate"]["window_runs"] == 3
+    assert payload["ab_gate"]["decision"]["switch_recommended"] is True
+
+
+def test_api_shadow_test_uses_suffixed_runtime_ab_gate_file(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    run_dir = runs_dir / "20260408_01"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}},
+    )
+
+    (run_dir / "decision_audit.json").write_text(
+        json.dumps({"counts": {"selected": 8, "orders_rebalance": 1, "orders_exit": 0}, "router_decisions": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "ab_gate_status_20260407.json").write_text(
+        json.dumps({"window_runs": 99, "decision": {"switch_recommended": False}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "ab_gate_status_accelerated.json").write_text(
+        json.dumps({"window_runs": 4, "decision": {"switch_recommended": True}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/shadow_test")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ab_gate"]["window_runs"] == 4
+    assert payload["ab_gate"]["decision"]["switch_recommended"] is True
+
+
 class _DummyResponse:
     def __init__(self, payload):
         self._payload = payload

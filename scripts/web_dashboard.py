@@ -4634,7 +4634,7 @@ def api_shadow_test():
         ab_gate_status = 'missing'
         ab_gate_age_sec = None
         try:
-            gate_path = runtime_paths.reports_dir / 'ab_gate_status.json'
+            gate_path = derive_runtime_named_artifact_path(runtime_paths.orders_db, 'ab_gate_status', '.json')
             if gate_path.exists():
                 ab_gate_age_sec = max(0, int(datetime.now().timestamp() - gate_path.stat().st_mtime))
                 ab_gate_status = 'stale' if ab_gate_age_sec > 1800 else 'fresh'
