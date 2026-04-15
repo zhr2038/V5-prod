@@ -5,9 +5,6 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
-from src.execution.fill_store import derive_runtime_reports_dir
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -20,19 +17,7 @@ class QualityCheckPaths:
 
 def build_paths(workspace: Path | None = None) -> QualityCheckPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    try:
-        cfg = load_runtime_config(project_root=root)
-        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-        orders_db = Path(
-            resolve_runtime_path(
-                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                default="reports/orders.sqlite",
-                project_root=root,
-            )
-        ).resolve()
-        reports_dir = derive_runtime_reports_dir(orders_db).resolve()
-    except Exception:
-        reports_dir = (root / "reports").resolve()
+    reports_dir = (root / "reports").resolve()
     return QualityCheckPaths(
         workspace=root,
         reports_dir=reports_dir,
