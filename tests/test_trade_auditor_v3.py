@@ -62,3 +62,61 @@ def test_get_okx_balance_sanitizes_request_errors(monkeypatch, tmp_path: Path) -
     result = auditor.get_okx_balance()
 
     assert result == {"error": "api unavailable", "detail": "RuntimeError"}
+
+
+def test_trade_auditor_v3_main_passes_cli_paths(monkeypatch, tmp_path: Path) -> None:
+    expected_cfg = (tmp_path / "configs" / "auditor.yaml").resolve()
+    expected_env = (tmp_path / "configs" / "auditor.env").resolve()
+    seen: dict[str, str] = {}
+
+    monkeypatch.setattr(auditor_mod, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        auditor_mod,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(expected_cfg),
+    )
+    monkeypatch.setattr(
+        auditor_mod,
+        "resolve_runtime_env_path",
+        lambda raw_env_path=None, project_root=None: str(expected_env),
+    )
+
+    original_init = auditor_mod.TradeAuditorV3.__init__
+
+    def fake_init(self, workspace=None, *, config_path=None, env_path=None):
+        seen["config"] = config_path
+        seen["env"] = env_path
+        self.paths = SimpleNamespace()
+        self.issues = []
+        self.warnings = []
+        self.info = []
+
+    monkeypatch.setattr(auditor_mod.TradeAuditorV3, "__init__", fake_init)
+    monkeypatch.setattr(auditor_mod.TradeAuditorV3, "run", lambda self: "ok")
+
+    try:
+        auditor_mod.main(["--config", "configs/x.yaml", "--env", "configs/x.env"])
+    finally:
+        monkeypatch.setattr(auditor_mod.TradeAuditorV3, "__init__", original_init)
+
+    assert seen == {"config": "configs/x.yaml", "env": "configs/x.env"}
+
+
+def test_build_paths_uses_runtime_entry_helpers(monkeypatch, tmp_path: Path) -> None:
+    expected_cfg = (tmp_path / "configs" / "auditor.yaml").resolve()
+    expected_env = (tmp_path / "configs" / "auditor.env").resolve()
+
+    monkeypatch.setattr(
+        auditor_mod,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(expected_cfg),
+    )
+    monkeypatch.setattr(
+        auditor_mod,
+        "resolve_runtime_env_path",
+        lambda raw_env_path=None, project_root=None: str(expected_env),
+    )
+
+    paths = auditor_mod.build_paths(tmp_path, config_path="configs/x.yaml", env_path="configs/x.env")
+
+    assert paths.env_path == expected_env

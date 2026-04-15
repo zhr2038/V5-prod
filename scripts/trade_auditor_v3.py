@@ -5,6 +5,7 @@ Trade auditor V3 for the active V5 workspace.
 
 from __future__ import annotations
 
+import argparse
 import base64
 import hashlib
 import hmac
@@ -42,8 +43,21 @@ class AuditorPaths:
     env_path: Path
 
 
-def _load_active_config(*, project_root: Path) -> dict[str, Any]:
-    config_path = Path(resolve_runtime_config_path(project_root=project_root))
+def _resolve_runtime_entry_paths(
+    *,
+    project_root: Path,
+    config_path: str | None = None,
+    env_path: str | None = None,
+) -> tuple[Path, Path]:
+    return (
+        Path(resolve_runtime_config_path(config_path, project_root=project_root)),
+        Path(resolve_runtime_env_path(env_path, project_root=project_root)),
+    )
+
+
+def _load_active_config(*, project_root: Path, config_path: str | None = None) -> dict[str, Any]:
+    resolved_config_path, _ = _resolve_runtime_entry_paths(project_root=project_root, config_path=config_path)
+    config_path = resolved_config_path
     try:
         import yaml
 
@@ -54,9 +68,13 @@ def _load_active_config(*, project_root: Path) -> dict[str, Any]:
     return {}
 
 
-def build_paths(workspace: Path | None = None) -> AuditorPaths:
+def build_paths(
+    workspace: Path | None = None,
+    config_path: str | None = None,
+    env_path: str | None = None,
+) -> AuditorPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    cfg = _load_active_config(project_root=root)
+    cfg = _load_active_config(project_root=root, config_path=config_path)
     execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
     orders_db = Path(
         resolve_runtime_path(
@@ -66,13 +84,13 @@ def build_paths(workspace: Path | None = None) -> AuditorPaths:
         )
     )
     reports_dir = orders_db.parent.resolve()
-    env_path = Path(resolve_runtime_env_path(project_root=root))
+    _, resolved_env_path = _resolve_runtime_entry_paths(project_root=root, env_path=env_path)
     return AuditorPaths(
         workspace=root,
         reports_dir=reports_dir,
         runs_dir=reports_dir / "runs",
         orders_db=orders_db,
-        env_path=env_path,
+        env_path=resolved_env_path,
     )
 
 
@@ -103,8 +121,14 @@ def load_exchange_credentials(paths: AuditorPaths = DEFAULT_PATHS) -> tuple[str 
 
 
 class TradeAuditorV3:
-    def __init__(self, workspace: Path | None = None) -> None:
-        self.paths = build_paths(workspace)
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        *,
+        config_path: str | None = None,
+        env_path: str | None = None,
+    ) -> None:
+        self.paths = build_paths(workspace, config_path=config_path, env_path=env_path)
         self.issues: list[str] = []
         self.warnings: list[str] = []
         self.info: list[str] = []
@@ -275,8 +299,13 @@ class TradeAuditorV3:
         return report
 
 
-def main() -> int:
-    TradeAuditorV3().run()
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the V5 trade auditor against the active runtime.")
+    parser.add_argument("--config", default=None)
+    parser.add_argument("--env", default=None)
+    args = parser.parse_args(argv)
+
+    TradeAuditorV3(config_path=args.config, env_path=args.env).run()
     return 0
 
 
