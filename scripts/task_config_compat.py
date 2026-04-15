@@ -111,7 +111,6 @@ LEGACY_TASK_CONFIGS: dict[str, dict[str, Any]] = {
             "output_report_path": "reports/walk_forward.json",
         },
         "walk_forward": {
-            "config_path": "configs/config.yaml",
             "env_path": ".env",
             "provider": "mock",
             "mock_seed": 7,
@@ -127,7 +126,6 @@ LEGACY_TASK_CONFIGS: dict[str, dict[str, Any]] = {
             "output_report_path": "reports/research/walk_forward/prod_cache_live_prod.json",
         },
         "walk_forward": {
-            "config_path": "configs/live_prod.yaml",
             "env_path": ".env",
             "provider": "cache",
             "cache_dir": "data/cache",
