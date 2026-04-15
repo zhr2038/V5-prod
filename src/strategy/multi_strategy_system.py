@@ -20,13 +20,17 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from configs.schema import (
+    ALPHA158_OVERLAY_FACTOR_KEYS,
+    ALPHA_BASE_FACTOR_INPUT_TO_RUNTIME,
+    normalize_alpha_base_factor_mapping,
+    normalize_alpha158_overlay_factor_mapping,
+)
 from src.alpha.qlib_factors import compute_alpha158_style_factors
 
 
 def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
-
-
 class StrategyType(Enum):
     """策略类型"""
     TREND_FOLLOWING = "trend"           # 趋势跟踪
@@ -377,6 +381,19 @@ class Alpha6FactorStrategy(BaseStrategy):
     """
     
     def __init__(self, config: Dict = None):
+        default_overlay = {
+            'enabled': True,
+            'blend_weight': 0.35,
+            'weights': {
+                'f6_corr_pv_10': 0.15,
+                'f7_cord_10': 0.15,
+                'f8_rsqr_10': 0.20,
+                'f9_rank_20': 0.15,
+                'f10_imax_14': -0.05,
+                'f11_imin_14': 0.05,
+                'f12_imxd_14': 0.35,
+            },
+        }
         default_config = {
             'weights': {
                 'f1_mom_5d': 0.15,
@@ -385,14 +402,7 @@ class Alpha6FactorStrategy(BaseStrategy):
                 'f4_volume_expansion': 0.15,
                 'f5_rsi_trend_confirm': 0.15,
                 'f6_sentiment': 0.15,
-                # Alpha158 overlay
-                'f6_corr_pv_10': 0.15,
-                'f7_cord_10': 0.15,
-                'f8_rsqr_10': 0.20,
-                'f9_rank_20': 0.15,
-                'f10_imax_14': -0.05,
-                'f11_imin_14': 0.05,
-                'f12_imxd_14': 0.35,
+                **default_overlay['weights'],
             },
             'factor_zscore_caps': {
                 'f1_mom_5d': 6.0,
@@ -410,10 +420,11 @@ class Alpha6FactorStrategy(BaseStrategy):
                 'f12_imxd_14': 4.0,
             },
             'position_size_pct': 0.25,
-            'score_threshold': 0.3,  # 评分阈值，超过才产生信号
+            'score_threshold': 0.3,
             'use_sentiment': True,
             'alpha158_enabled': True,
             'alpha158_blend_weight': 0.35,
+            'alpha158_overlay': deepcopy(default_overlay),
             'dynamic_ic_weighting': {
                 'enabled': False,
                 'ic_monitor_path': 'reports/alpha_ic_monitor.json',
@@ -421,19 +432,123 @@ class Alpha6FactorStrategy(BaseStrategy):
                 'fallback_to_static': True,
             },
         }
-        if config:
-            default_config.update(config)
-        
+        user_config = dict(config or {})
+        merged_config = deepcopy(default_config)
+        for key, value in user_config.items():
+            if key in {'weights', 'alpha158_overlay'}:
+                continue
+            merged_config[key] = value
+
+        overlay_cfg = self._resolve_alpha158_overlay_settings(user_config, default_overlay)
+        merged_weights = dict(default_config['weights'])
+        if isinstance(user_config.get('weights'), dict):
+            merged_weights.update(
+                self._normalize_runtime_factor_weights(
+                    user_config.get('weights'),
+                    context='Alpha6FactorStrategy weights',
+                )
+            )
+        merged_weights.update(overlay_cfg.get('weights') or {})
+
+        merged_config['weights'] = merged_weights
+        merged_config['alpha158_overlay'] = deepcopy(overlay_cfg)
+        merged_config['alpha158_enabled'] = bool(overlay_cfg.get('enabled', True))
+        merged_config['alpha158_blend_weight'] = float(overlay_cfg.get('blend_weight', 0.35))
+
         super().__init__(
             name="Alpha6Factor",
             strategy_type=StrategyType.ALPHA_6FACTOR,
-            config=default_config
+            config=merged_config,
         )
-        
-        self.factor_weights = self.config['weights']
+
+        self.factor_weights = dict(self.config['weights'])
         self.sentiment_cache_dir = Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache'
         self.last_factor_snapshot: Dict[str, Dict[str, Any]] = {}
         self.last_resolved_weights: Dict[str, float] = dict(self.factor_weights)
+
+    @staticmethod
+    def _normalize_runtime_factor_weights(weights: Dict[str, Any], *, context: str) -> Dict[str, float]:
+        if not isinstance(weights, dict):
+            return {}
+
+        allowed_keys = set(ALPHA_BASE_FACTOR_INPUT_TO_RUNTIME.keys()) | set(ALPHA158_OVERLAY_FACTOR_KEYS) | {'f6_sentiment'}
+        unknown = sorted(str(key) for key in weights.keys() if str(key) not in allowed_keys)
+        if unknown:
+            raise ValueError(
+                f"Unknown {context} keys: {unknown}. Allowed keys: {sorted(allowed_keys)}"
+            )
+
+        base_weights = normalize_alpha_base_factor_mapping(
+            {k: v for k, v in weights.items() if str(k) in ALPHA_BASE_FACTOR_INPUT_TO_RUNTIME},
+            context=context,
+            output='runtime',
+        )
+        overlay_weights = normalize_alpha158_overlay_factor_mapping(
+            {k: v for k, v in weights.items() if str(k) in ALPHA158_OVERLAY_FACTOR_KEYS},
+            context=f"{context} alpha158_overlay",
+            output='runtime',
+        )
+        resolved: Dict[str, float] = {
+            str(key): float(value) for key, value in base_weights.items()
+        }
+        resolved.update({str(key): float(value) for key, value in overlay_weights.items()})
+        if 'f6_sentiment' in weights:
+            resolved['f6_sentiment'] = float(weights['f6_sentiment'])
+        return resolved
+
+    @classmethod
+    def _resolve_alpha158_overlay_settings(
+        cls,
+        config: Dict[str, Any],
+        default_overlay: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        overlay_cfg = deepcopy(default_overlay)
+        nested_cfg = config.get('alpha158_overlay') if isinstance(config, dict) else None
+
+        if isinstance(nested_cfg, dict):
+            if 'enabled' in nested_cfg:
+                overlay_cfg['enabled'] = bool(nested_cfg.get('enabled'))
+            if 'blend_weight' in nested_cfg:
+                overlay_cfg['blend_weight'] = float(nested_cfg.get('blend_weight'))
+            if isinstance(nested_cfg.get('weights'), dict):
+                overlay_cfg['weights'].update(
+                    {
+                        str(key): float(value)
+                        for key, value in normalize_alpha158_overlay_factor_mapping(
+                            nested_cfg.get('weights'),
+                            context='Alpha6FactorStrategy alpha158_overlay.weights',
+                            output='runtime',
+                        ).items()
+                    }
+                )
+
+        if 'alpha158_enabled' in config and not (isinstance(nested_cfg, dict) and 'enabled' in nested_cfg):
+            overlay_cfg['enabled'] = bool(config.get('alpha158_enabled'))
+        if 'alpha158_blend_weight' in config and not (isinstance(nested_cfg, dict) and 'blend_weight' in nested_cfg):
+            overlay_cfg['blend_weight'] = float(config.get('alpha158_blend_weight'))
+
+        overlay_cfg['blend_weight'] = float(max(0.0, min(1.0, overlay_cfg.get('blend_weight', 0.35))))
+        overlay_cfg['weights'] = {
+            str(key): float(value)
+            for key, value in (overlay_cfg.get('weights') or {}).items()
+            if str(key) in ALPHA158_OVERLAY_FACTOR_KEYS
+        }
+        return overlay_cfg
+
+    def _alpha158_settings(self) -> Dict[str, Any]:
+        nested_cfg = self.config.get('alpha158_overlay') or {}
+        enabled = bool(_coalesce(nested_cfg.get('enabled'), self.config.get('alpha158_enabled', True)))
+        blend_weight = float(_coalesce(nested_cfg.get('blend_weight'), self.config.get('alpha158_blend_weight', 0.35)))
+        weights = {
+            str(key): float(value)
+            for key, value in ((nested_cfg.get('weights') or {}).items())
+            if str(key) in ALPHA158_OVERLAY_FACTOR_KEYS
+        }
+        return {
+            'enabled': enabled,
+            'blend_weight': float(max(0.0, min(1.0, blend_weight))),
+            'weights': weights,
+        }
 
     def _compress_signal_score(self, raw_score: float) -> float:
         """Compress raw cross-sectional strength into a stable display/routing scale."""
@@ -448,7 +563,12 @@ class Alpha6FactorStrategy(BaseStrategy):
 
     def set_factor_weights(self, weights: Dict[str, float]) -> None:
         merged = dict(self.config.get('weights') or {})
-        merged.update({k: float(v) for k, v in (weights or {}).items()})
+        merged.update(
+            self._normalize_runtime_factor_weights(
+                weights or {},
+                context='Alpha6FactorStrategy weights',
+            )
+        )
         self.config['weights'] = merged
         self.factor_weights = merged
 
@@ -691,7 +811,7 @@ class Alpha6FactorStrategy(BaseStrategy):
         }
 
         # Alpha158 overlay factors
-        if bool(self.config.get('alpha158_enabled', True)):
+        if self._alpha158_settings().get('enabled', True):
             try:
                 qf = compute_alpha158_style_factors(
                     close.tolist(), high.tolist(), low.tolist(), volume.tolist()
@@ -757,12 +877,12 @@ class Alpha6FactorStrategy(BaseStrategy):
         for k in base_keys:
             base_score += float(resolved_weights.get(k, 0.0)) * float(z_factors.get(k, 0.0))
 
-        if bool(self.config.get('alpha158_enabled', True)):
+        alpha158_cfg = self._alpha158_settings()
+        if alpha158_cfg.get('enabled', True):
             ov_score = 0.0
             for k in ov_keys:
                 ov_score += float(resolved_weights.get(k, 0.0)) * float(z_factors.get(k, 0.0))
-            blend = float(_coalesce(self.config.get('alpha158_blend_weight', 0.35), 0.35))
-            blend = float(max(0.0, min(1.0, blend)))
+            blend = float(alpha158_cfg.get('blend_weight', 0.35))
             return (1.0 - blend) * base_score + blend * ov_score
 
         return base_score

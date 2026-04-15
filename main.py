@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from configs.loader import load_config
-from configs.schema import AppConfig
+from configs.schema import AppConfig, normalize_alpha_base_factor_mapping
 from src.data.mock_provider import MockProvider
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.account_store import AccountStore
@@ -444,10 +444,17 @@ def main() -> None:
                 obj = json.loads(p.read_text(encoding="utf-8"))
                 w = (obj.get("weights") or {}) if isinstance(obj, dict) else {}
                 if isinstance(w, dict) and w:
-                    for k, v in w.items():
+                    normalized_w = normalize_alpha_base_factor_mapping(
+                        w,
+                        context=f"dynamic alpha weights override ({p.name})",
+                        output="schema",
+                    )
+                    for k, v in normalized_w.items():
                         if hasattr(cfg.alpha.weights, k):
                             setattr(cfg.alpha.weights, k, float(v))
-                    log.info(f"Dynamic alpha weights loaded: {w}")
+                    log.info(f"Dynamic alpha weights loaded: {normalized_w}")
+    except ValueError:
+        raise
     except Exception as e:
         log.warning(f"Dynamic alpha weights load failed: {e}")
 

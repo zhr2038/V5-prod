@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -14,6 +15,7 @@ from .schema import AppConfig
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+logger = logging.getLogger(__name__)
 
 
 def load_config(path: str = "configs/config.yaml", env_path: Optional[str] = ".env") -> AppConfig:
@@ -51,7 +53,11 @@ def load_config(path: str = "configs/config.yaml", env_path: Optional[str] = ".e
         return x
 
     raw = _resolve(raw)
-    return AppConfig.model_validate(raw)
+    try:
+        return AppConfig.model_validate(raw)
+    except Exception:
+        logger.exception("Config validation failed: %s", p)
+        raise
 
 
 def load_blacklist(path: str) -> Dict[str, Any]:

@@ -1,9 +1,121 @@
 from __future__ import annotations
 
+import logging
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+logger = logging.getLogger(__name__)
+
+
+ALPHA_BASE_FACTOR_INPUT_TO_RUNTIME = {
+    "f1_mom_5d": "f1_mom_5d",
+    "f2_mom_20d": "f2_mom_20d",
+    "f3_vol_adj_ret_20d": "f3_vol_adj_ret",
+    "f3_vol_adj_ret": "f3_vol_adj_ret",
+    "f4_volume_expansion": "f4_volume_expansion",
+    "f5_rsi_trend_confirm": "f5_rsi_trend_confirm",
+}
+ALPHA_BASE_FACTOR_RUNTIME_TO_SCHEMA = {
+    "f1_mom_5d": "f1_mom_5d",
+    "f2_mom_20d": "f2_mom_20d",
+    "f3_vol_adj_ret": "f3_vol_adj_ret_20d",
+    "f4_volume_expansion": "f4_volume_expansion",
+    "f5_rsi_trend_confirm": "f5_rsi_trend_confirm",
+}
+ALPHA158_OVERLAY_FACTOR_KEYS = (
+    "f6_corr_pv_10",
+    "f7_cord_10",
+    "f8_rsqr_10",
+    "f9_rank_20",
+    "f10_imax_14",
+    "f11_imin_14",
+    "f12_imxd_14",
+)
+ALPHA158_OVERLAY_INPUT_TO_RUNTIME = {
+    key: key for key in ALPHA158_OVERLAY_FACTOR_KEYS
+}
+ALPHA158_OVERLAY_RUNTIME_TO_SCHEMA = {
+    key: key for key in ALPHA158_OVERLAY_FACTOR_KEYS
+}
+
+
+def _normalize_factor_mapping(
+    data: Any,
+    *,
+    context: str,
+    input_to_runtime: Dict[str, str],
+    runtime_to_schema: Dict[str, str],
+    output: str,
+    log_alias: bool = True,
+) -> Any:
+    if not isinstance(data, dict):
+        return data
+
+    allowed_input_keys = sorted(input_to_runtime.keys())
+    unknown = sorted(str(key) for key in data.keys() if str(key) not in input_to_runtime)
+    if unknown:
+        raise ValueError(
+            f"Unknown {context} keys: {unknown}. Allowed keys: {allowed_input_keys}"
+        )
+
+    normalized_runtime: Dict[str, Any] = {}
+    normalized_sources: Dict[str, str] = {}
+    for raw_key, raw_value in data.items():
+        key = str(raw_key)
+        runtime_key = input_to_runtime[key]
+        previous_source = normalized_sources.get(runtime_key)
+        if previous_source is not None:
+            raise ValueError(
+                f"Conflicting {context} keys map to runtime key '{runtime_key}': "
+                f"{sorted([previous_source, key])}. Allowed keys: {allowed_input_keys}"
+            )
+        normalized_sources[runtime_key] = key
+        normalized_runtime[runtime_key] = raw_value
+        if log_alias and key != runtime_key:
+            logger.warning("%s alias mapped: %s -> %s", context, key, runtime_key)
+
+    if output == "runtime":
+        return normalized_runtime
+    if output == "schema":
+        return {runtime_to_schema[key]: value for key, value in normalized_runtime.items()}
+    raise ValueError(f"unsupported normalize output mode: {output}")
+
+
+def normalize_alpha_base_factor_mapping(
+    data: Any,
+    *,
+    context: str,
+    output: str = "schema",
+    log_alias: bool = True,
+) -> Any:
+    return _normalize_factor_mapping(
+        data,
+        context=context,
+        input_to_runtime=ALPHA_BASE_FACTOR_INPUT_TO_RUNTIME,
+        runtime_to_schema=ALPHA_BASE_FACTOR_RUNTIME_TO_SCHEMA,
+        output=output,
+        log_alias=log_alias,
+    )
+
+
+def normalize_alpha158_overlay_factor_mapping(
+    data: Any,
+    *,
+    context: str,
+    output: str = "schema",
+    log_alias: bool = True,
+) -> Any:
+    return _normalize_factor_mapping(
+        data,
+        context=context,
+        input_to_runtime=ALPHA158_OVERLAY_INPUT_TO_RUNTIME,
+        runtime_to_schema=ALPHA158_OVERLAY_RUNTIME_TO_SCHEMA,
+        output=output,
+        log_alias=log_alias,
+    )
 
 
 class RegimeState(str, Enum):
@@ -51,6 +163,15 @@ class AlphaWeights(BaseModel):
     f4_volume_expansion: float = 0.15
     f5_rsi_trend_confirm: float = 0.15
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_factor_keys(cls, data: object) -> object:
+        return normalize_alpha_base_factor_mapping(
+            data,
+            context="alpha.weights",
+            output="schema",
+        )
+
     @field_validator("f1_mom_5d", "f2_mom_20d", "f3_vol_adj_ret_20d", "f4_volume_expansion", "f5_rsi_trend_confirm")
     @classmethod
     def _finite(cls, v: float) -> float:
@@ -77,6 +198,17 @@ class AlphaWeights(BaseModel):
             )
         return self
 
+    def to_runtime_weights(self) -> Dict[str, float]:
+        return {
+            str(key): float(value)
+            for key, value in normalize_alpha_base_factor_mapping(
+                self.model_dump(),
+                context="alpha.weights",
+                output="runtime",
+                log_alias=False,
+            ).items()
+        }
+
 
 class Alpha158OverlayWeights(BaseModel):
     # Qlib Alpha158 风格补充因子权重（用于 overlay score）
@@ -88,11 +220,38 @@ class Alpha158OverlayWeights(BaseModel):
     f11_imin_14: float = 0.05
     f12_imxd_14: float = 0.35
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_factor_keys(cls, data: object) -> object:
+        return normalize_alpha158_overlay_factor_mapping(
+            data,
+            context="alpha.alpha158_overlay.weights",
+            output="schema",
+        )
+
+    def to_runtime_weights(self) -> Dict[str, float]:
+        return {
+            str(key): float(value)
+            for key, value in normalize_alpha158_overlay_factor_mapping(
+                self.model_dump(),
+                context="alpha.alpha158_overlay.weights",
+                output="runtime",
+                log_alias=False,
+            ).items()
+        }
+
 
 class Alpha158OverlayConfig(BaseModel):
     enabled: bool = Field(default=True, description="Enable Alpha158-style factor overlay")
     blend_weight: float = Field(default=0.35, ge=0, le=1, description="Blend ratio of overlay score into final score")
     weights: Alpha158OverlayWeights = Field(default_factory=Alpha158OverlayWeights)
+
+    def to_runtime_config(self) -> Dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "blend_weight": float(self.blend_weight),
+            "weights": self.weights.to_runtime_weights(),
+        }
 
 
 class TopkDropoutConfig(BaseModel):

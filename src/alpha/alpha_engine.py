@@ -15,7 +15,7 @@ import pandas as pd
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from src.core.models import MarketSeries
 from src.utils.math import safe_pct_change, zscore_cross_section
-from configs.schema import AlphaConfig
+from configs.schema import AlphaConfig, normalize_alpha_base_factor_mapping
 from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
 from src.alpha.qlib_factors import compute_alpha158_style_factors
 from src.execution.fill_store import derive_runtime_named_artifact_path, derive_runtime_reports_dir
@@ -151,7 +151,14 @@ class AlphaEngine:
             weights = (((data.get("regimes") or {}).get(regime_key) or {}).get("weights"))
             if not isinstance(weights, dict):
                 return {}
-            return {str(k): float(v) for k, v in weights.items()}
+            normalized = normalize_alpha_base_factor_mapping(
+                weights,
+                context=f"alpha.dynamic_weights_by_regime[{regime_key}]",
+                output="schema",
+            )
+            return {str(k): float(v) for k, v in normalized.items()}
+        except ValueError:
+            raise
         except Exception:
             return {}
 
@@ -433,31 +440,22 @@ class AlphaEngine:
         # 注册6因子Alpha策略 (55%资金，主策略)
         # 根治：不再硬编码权重，统一读取 live 配置，避免“改了配置但策略不生效”
         cfg_weights = getattr(self.cfg, 'weights', None)
-        alpha_weights = {
-            'f1_mom_5d': float(getattr(cfg_weights, 'f1_mom_5d', 0.15)) if cfg_weights else 0.15,
-            'f2_mom_20d': float(getattr(cfg_weights, 'f2_mom_20d', 0.25)) if cfg_weights else 0.25,
-            'f3_vol_adj_ret': float(getattr(cfg_weights, 'f3_vol_adj_ret_20d', 0.15)) if cfg_weights else 0.15,
-            'f4_volume_expansion': float(getattr(cfg_weights, 'f4_volume_expansion', 0.15)) if cfg_weights else 0.15,
-            'f5_rsi_trend_confirm': float(getattr(cfg_weights, 'f5_rsi_trend_confirm', 0.15)) if cfg_weights else 0.15,
-            'f6_sentiment': 0.15,
+        alpha_weights = cfg_weights.to_runtime_weights() if cfg_weights else {
+            'f1_mom_5d': 0.15,
+            'f2_mom_20d': 0.25,
+            'f3_vol_adj_ret': 0.15,
+            'f4_volume_expansion': 0.15,
+            'f5_rsi_trend_confirm': 0.15,
         }
+        alpha_weights['f6_sentiment'] = 0.15
 
-        # Qlib Alpha158 overlay 权重并入 Alpha6 策略
-        ov = getattr(self.cfg, 'alpha158_overlay', None)
-        if ov and bool(getattr(ov, 'enabled', False)):
-            ow = getattr(ov, 'weights', None)
-            if ow is not None:
-                alpha_weights.update(
-                    {
-                        'f6_corr_pv_10': float(getattr(ow, 'f6_corr_pv_10', 0.15)),
-                        'f7_cord_10': float(getattr(ow, 'f7_cord_10', 0.15)),
-                        'f8_rsqr_10': float(getattr(ow, 'f8_rsqr_10', 0.20)),
-                        'f9_rank_20': float(getattr(ow, 'f9_rank_20', 0.15)),
-                        'f10_imax_14': float(getattr(ow, 'f10_imax_14', -0.05)),
-                        'f11_imin_14': float(getattr(ow, 'f11_imin_14', 0.05)),
-                        'f12_imxd_14': float(getattr(ow, 'f12_imxd_14', 0.35)),
-                    }
-                )
+        overlay_runtime_cfg = (
+            self.cfg.alpha158_overlay.to_runtime_config()
+            if getattr(self.cfg, 'alpha158_overlay', None) is not None
+            else {'enabled': False, 'blend_weight': 0.35, 'weights': {}}
+        )
+        if overlay_runtime_cfg.get('enabled'):
+            alpha_weights.update(overlay_runtime_cfg.get('weights') or {})
 
         alpha6_strategy = Alpha6FactorStrategy(config={
             'weights': alpha_weights,
@@ -466,10 +464,9 @@ class AlphaEngine:
             'score_threshold': float(max(0.03, min(0.10, getattr(self.cfg, 'min_score_threshold', 0.05)))),
             'score_transform': str(getattr(self.cfg, 'multi_strategy_score_transform', 'tanh') or 'tanh'),
             'score_transform_scale': float(getattr(self.cfg, 'multi_strategy_score_transform_scale', 1.0) or 1.0),
-            'alpha158_enabled': bool(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'enabled', False)),
-            'alpha158_blend_weight': float(
-                _coalesce(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'blend_weight', None), 0.35)
-            ),
+            'alpha158_enabled': bool(overlay_runtime_cfg.get('enabled', False)),
+            'alpha158_blend_weight': float(overlay_runtime_cfg.get('blend_weight', 0.35)),
+            'alpha158_overlay': overlay_runtime_cfg,
             'dynamic_ic_weighting': {
                 'enabled': bool(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'enabled', False)),
                 'ic_monitor_path': str(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'ic_monitor_path', 'reports/alpha_ic_monitor.json')),
@@ -1259,6 +1256,8 @@ class AlphaEngine:
             "f11_imin_14",
             "f12_imxd_14",
         ]
+        ov_cfg = getattr(self.cfg, "alpha158_overlay", None)
+        ov_enabled = bool(getattr(ov_cfg, "enabled", False))
         ov_vals: Dict[str, Dict[str, float]] = {k: {} for k in ov_names}
 
         for sym, s in (market_data or {}).items():
@@ -1300,9 +1299,10 @@ class AlphaEngine:
             f5[sym] = float(rsi_trend)
 
             # Alpha158 overlay
-            qf = compute_alpha158_style_factors(c, h, l, v)
-            for k in ov_names:
-                ov_vals[k][sym] = float(qf.get(k, 0.0))
+            if ov_enabled:
+                qf = compute_alpha158_style_factors(c, h, l, v)
+                for k in ov_names:
+                    ov_vals[k][sym] = float(qf.get(k, 0.0))
 
         # z-score
         if use_robust_zscore:
@@ -1335,8 +1335,6 @@ class AlphaEngine:
         }
         base_w = self._resolve_classic_base_weights(static_base_w)
 
-        ov_cfg = getattr(self.cfg, "alpha158_overlay", None)
-        ov_enabled = bool(getattr(ov_cfg, "enabled", False))
         ov_blend = float(_coalesce(getattr(ov_cfg, "blend_weight", None), 0.35))
 
         static_ov_w: Dict[str, float] = {}
