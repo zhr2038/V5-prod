@@ -6,8 +6,24 @@ import ccxt
 from pathlib import Path
 from typing import Dict, Optional
 
+from configs.runtime_config import resolve_runtime_env_path
 
-def get_live_equity_from_okx() -> Optional[float]:
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_runtime_env(*, env_path: str | None = None, project_root: Path | None = None) -> Path:
+    resolved_env = Path(resolve_runtime_env_path(env_path, project_root=project_root or PROJECT_ROOT)).resolve()
+    if resolved_env.exists():
+        with resolved_env.open(encoding="utf-8") as f:
+            for line in f:
+                if "=" in line and not line.startswith("#"):
+                    key, val = line.strip().split("=", 1)
+                    val = val.strip('"').strip("'")
+                    os.environ[key] = val
+    return resolved_env
+
+
+def get_live_equity_from_okx(*, env_path: str | None = None, project_root: Path | None = None) -> Optional[float]:
     """
     从OKX交易账户获取实时权益
     
@@ -15,15 +31,8 @@ def get_live_equity_from_okx() -> Optional[float]:
         总权益（USDT），失败返回None
     """
     try:
-        # 加载API密钥
-        env_path = Path(__file__).resolve().parents[2] / ".env"
-        if env_path.exists():
-            with env_path.open(encoding="utf-8") as f:
-                for line in f:
-                    if '=' in line and not line.startswith('#'):
-                        key, val = line.strip().split('=', 1)
-                        val = val.strip('"').strip("'")
-                        os.environ[key] = val
+        # 加载 runtime 环境变量
+        _load_runtime_env(env_path=env_path, project_root=project_root)
         
         # 连接OKX
         exchange = ccxt.okx({
@@ -61,7 +70,12 @@ def get_live_equity_from_okx() -> Optional[float]:
         return None
 
 
-def check_budget_limit(equity_cap: float = 20.0) -> Dict:
+def check_budget_limit(
+    equity_cap: float = 20.0,
+    *,
+    env_path: str | None = None,
+    project_root: Path | None = None,
+) -> Dict:
     """
     检查是否超过预算限制
     
@@ -73,7 +87,7 @@ def check_budget_limit(equity_cap: float = 20.0) -> Dict:
             'utilization': float  # 使用率(%)
         }
     """
-    equity = get_live_equity_from_okx()
+    equity = get_live_equity_from_okx(env_path=env_path, project_root=project_root)
     
     if equity is None:
         return {
