@@ -15,6 +15,8 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 class ICBasedWeightCalculator:
     """
@@ -22,9 +24,16 @@ class ICBasedWeightCalculator:
     """
     
     def __init__(self, ic_file_path: str = 'reports/ic_diagnostics_30d_20u.json'):
-        self.ic_file = Path(ic_file_path)
+        self.ic_file = self._resolve_ic_file_path(ic_file_path)
         self.factors = {}
         self.load_ic_data()
+
+    @staticmethod
+    def _resolve_ic_file_path(ic_file_path: str | Path) -> Path:
+        path = Path(ic_file_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return path
     
     def load_ic_data(self):
         """加载IC诊断数据"""
