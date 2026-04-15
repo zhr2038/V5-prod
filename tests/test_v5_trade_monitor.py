@@ -49,3 +49,42 @@ def test_build_paths_uses_suffixed_runtime_alert_file(monkeypatch, tmp_path: Pat
 
     assert paths.orders_db_path == (tmp_path / "reports" / "orders_accelerated.sqlite").resolve()
     assert paths.alert_file == (tmp_path / "reports" / "monitor_alert_accelerated.txt").resolve()
+
+
+def test_shell_wrapper_delegates_to_python_monitor(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    project_root = tmp_path
+    scripts_dir = project_root / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    wrapper_src = Path(__file__).resolve().parents[1] / "scripts" / "v5_trade_monitor.sh"
+    wrapper_dst = scripts_dir / "v5_trade_monitor.sh"
+    wrapper_dst.write_text(wrapper_src.read_text(encoding="utf-8"), encoding="utf-8")
+    wrapper_dst.chmod(0o755)
+
+    fake_python = project_root / "fake_python.sh"
+    args_log = project_root / "args.log"
+    fake_python.write_text(
+        "#!/bin/bash\n"
+        "printf '%s\\n' \"$@\" > \"$ARGS_LOG\"\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "V5_PYTHON_BIN": str(fake_python),
+        "ARGS_LOG": str(args_log),
+    }
+    subprocess.run(
+        ["/bin/bash", str(wrapper_dst)],
+        cwd=project_root,
+        env=env,
+        check=True,
+    )
+
+    args = args_log.read_text(encoding="utf-8").splitlines()
+    assert args[0] == str(project_root / "scripts" / "v5_trade_monitor.py")
+    assert args[1] == "--silent"
