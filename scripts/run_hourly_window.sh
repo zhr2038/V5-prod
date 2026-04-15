@@ -50,8 +50,44 @@ export V5_RUN_ID="$WIN_ID"
 export V5_WINDOW_START_TS="${START_EPOCH}"
 export V5_WINDOW_END_TS="${END_EPOCH}"
 
+resolve_v4_reports_dir() {
+  local requested="${V4_REPORTS_DIR:-}"
+  local candidate
+
+  if [[ -n "$requested" ]]; then
+    if [[ "$requested" == /* ]]; then
+      printf '%s\n' "$requested"
+    else
+      printf '%s\n' "$ROOT/$requested"
+    fi
+    return 0
+  fi
+
+  for candidate in "$ROOT/v4_export" "$ROOT/reports/compare/v4_export"; do
+    if [[ -d "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 "$PYTHON_BIN" main.py
-"$PYTHON_BIN" scripts/compare_runs.py \
-  --v4_reports_dir /home/admin/clawd/v4-trading-bot/reports \
-  --v5_summary "reports/runs/${WIN_ID}/summary.json" \
-  --out "reports/compare/hourly/compare_${WIN_ID}.md"
+
+V5_SUMMARY="reports/runs/${WIN_ID}/summary.json"
+COMPARE_OUT="reports/compare/hourly/compare_${WIN_ID}.md"
+
+if [[ ! -f "$V5_SUMMARY" ]]; then
+  echo "[V5] skip compare_runs: missing $V5_SUMMARY"
+  exit 0
+fi
+
+if V4_DIR="$(resolve_v4_reports_dir 2>/dev/null)" && [[ -d "$V4_DIR" ]]; then
+  "$PYTHON_BIN" scripts/compare_runs.py \
+    --v4_reports_dir "$V4_DIR" \
+    --v5_summary "$V5_SUMMARY" \
+    --out "$COMPARE_OUT"
+else
+  echo "[V5] skip compare_runs: V4 reports dir unavailable"
+fi
