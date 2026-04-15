@@ -5,6 +5,7 @@ V5 RSS情报收集器 + DeepSeek情绪分析
 抓取加密货币RSS源，提取文章内容，使用DeepSeek分析情绪
 """
 
+import argparse
 import os
 import sys
 import json
@@ -19,11 +20,12 @@ from html.parser import HTMLParser
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+from configs.runtime_config import resolve_runtime_env_path
 from src.factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
 
 
-def get_cache_dir() -> Path:
-    return PROJECT_ROOT / "data" / "sentiment_cache"
+def get_cache_dir(project_root: Path | None = None) -> Path:
+    return (project_root or PROJECT_ROOT).resolve() / "data" / "sentiment_cache"
 
 
 class MLStripper(HTMLParser):
@@ -126,8 +128,10 @@ def parse_rss_feed(url: str, max_items: int = 5) -> list:
     return articles
 
 
-def collect_rss_sentiment():
+def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None = None):
     """收集RSS情报并进行情绪分析"""
+    root = (project_root or PROJECT_ROOT).resolve()
+    resolved_env_path = resolve_runtime_env_path(env_path, project_root=root)
     
     # RSS源配置
     rss_sources = [
@@ -148,7 +152,7 @@ def collect_rss_sentiment():
         }
     ]
     
-    cache_dir = get_cache_dir()
+    cache_dir = get_cache_dir(root)
     cache_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp = datetime.now().strftime('%Y%m%d_%H')
@@ -195,7 +199,11 @@ def collect_rss_sentiment():
     
     # 使用DeepSeek分析情绪
     try:
-        factor = DeepSeekSentimentFactor(cache_dir=str(cache_dir))
+        factor = DeepSeekSentimentFactor(
+            cache_dir=str(cache_dir),
+            env_path=resolved_env_path,
+            project_root=root,
+        )
         combined_text = "\n\n".join(texts)
         
         print(f"[RSS] 发送 {len(texts)} 篇文章到DeepSeek分析...")
@@ -243,5 +251,12 @@ def collect_rss_sentiment():
         traceback.print_exc()
 
 
+def main(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", default=".env")
+    args = parser.parse_args(argv)
+    collect_rss_sentiment(env_path=args.env)
+
+
 if __name__ == '__main__':
-    collect_rss_sentiment()
+    main()
