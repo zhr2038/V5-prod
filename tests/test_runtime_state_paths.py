@@ -5,6 +5,7 @@ from pathlib import Path
 
 from configs.schema import ExecutionConfig
 from src.execution import account_store, bills_store, bootstrap_patch, cooldown_manager, event_action_bridge, event_monitor, fill_store, highest_px_tracker, ledger_engine, live_execution_engine, live_preflight, multi_level_stop_loss, order_store, position_builder, position_store, reconcile_engine
+from src.reporting import budget_state, cost_events
 from src.risk import auto_risk_guard, fixed_stop_loss, negative_expectancy_cooldown, profit_taking
 from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
 import src.execution.order_arbitrator as order_arbitrator
@@ -199,3 +200,26 @@ def test_event_action_bridge_resolves_runtime_path_from_project_root(monkeypatch
     monkeypatch.setattr(event_action_bridge, "PROJECT_ROOT", tmp_path)
     resolved = event_action_bridge._resolve_event_actions_path(order_store_path="reports/shadow_orders.sqlite")
     assert resolved == (tmp_path / "reports" / "shadow_event_driven_actions.json").resolve()
+
+
+def test_append_cost_event_resolves_default_base_dir_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(cost_events, "PROJECT_ROOT", tmp_path)
+    out = cost_events.append_cost_event({"window_start_ts": 1_700_000_000, "foo": "bar"})
+    assert out.parent == (tmp_path / "reports" / "cost_events").resolve()
+
+
+def test_update_budget_state_resolves_default_base_dir_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(budget_state, "PROJECT_ROOT", tmp_path)
+    state = budget_state.update_daily_budget_state(
+        ymd_utc="20260415",
+        run_id="r1",
+        turnover_inc=10.0,
+        cost_inc_usdt=1.0,
+        fills_count_inc=1,
+        notionals_inc=[10.0],
+        avg_equity=100.0,
+        turnover_budget_per_day=1000.0,
+        cost_budget_bps_per_day=100.0,
+    )
+    assert state.ymd_utc == "20260415"
+    assert ((tmp_path / "reports" / "budget_state" / "20260415.json").resolve()).exists()

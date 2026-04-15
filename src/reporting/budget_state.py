@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _utc_yyyymmdd_from_epoch_sec(ts: int) -> str:
     dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
@@ -17,6 +19,13 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return float(x)
     except Exception:
         return float(default)
+
+
+def _resolve_budget_state_dir(base_dir: str | Path = "reports/budget_state") -> Path:
+    path = Path(base_dir)
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return path
 
 
 @dataclass
@@ -78,6 +87,8 @@ class BudgetState:
 
 def load_budget_state(path: str) -> Optional[BudgetState]:
     p = Path(path)
+    if not p.is_absolute():
+        p = (PROJECT_ROOT / p).resolve()
     if not p.exists():
         return None
     data = json.loads(p.read_text(encoding="utf-8"))
@@ -112,7 +123,7 @@ def update_daily_budget_state(
     cost_budget_bps_per_day: Optional[float],
     small_trade_notional_cutoff: Optional[float] = None,
 ) -> BudgetState:
-    out_dir = Path(base_dir)
+    out_dir = _resolve_budget_state_dir(base_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{ymd_utc}.json"
 

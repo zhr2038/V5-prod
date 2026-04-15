@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _utc_yyyymmdd_from_epoch_sec(ts: int) -> str:
     """Convert epoch seconds to YYYYMMDD string, handling invalid timestamps."""
@@ -31,6 +33,13 @@ def _utc_yyyymmdd_from_epoch_sec(ts: int) -> str:
         return datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
+def _resolve_cost_events_dir(base_dir: str | Path = "reports/cost_events") -> Path:
+    path = Path(base_dir)
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return path
+
+
 def append_cost_event(event: Dict[str, Any], base_dir: str = "reports/cost_events") -> Path:
     """Append one NDJSON line. File name is based on window_start_ts's UTC date.
 
@@ -43,7 +52,7 @@ def append_cost_event(event: Dict[str, Any], base_dir: str = "reports/cost_event
         raise ValueError("cost_event.window_start_ts is required")
 
     ymd = _utc_yyyymmdd_from_epoch_sec(int(ws))
-    out_dir = Path(base_dir)
+    out_dir = _resolve_cost_events_dir(base_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{ymd}.jsonl"
 
