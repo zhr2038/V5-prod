@@ -47,3 +47,17 @@ def test_resolve_health_output_path_uses_suffixed_runtime_file(monkeypatch, tmp_
     path = health_check._resolve_health_output_path()
 
     assert path == (tmp_path / "reports" / "health_status_accelerated.json").resolve()
+
+
+def test_resolve_health_env_path_uses_runtime_env_helper(monkeypatch, tmp_path: Path) -> None:
+    expected = (tmp_path / "configs" / "live.env").resolve()
+    monkeypatch.setattr(
+        health_check,
+        "resolve_runtime_env_path",
+        lambda project_root=None: str(expected),
+    )
+    monkeypatch.setattr(health_check, "WORKSPACE", tmp_path)
+
+    path = health_check._resolve_health_env_path()
+
+    assert path == expected

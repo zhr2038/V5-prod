@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_env_path, resolve_runtime_path
 from src.execution.fill_store import derive_fill_store_path, derive_position_store_path, derive_runtime_named_json_path
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -115,6 +115,13 @@ def _resolve_health_output_path() -> Path:
         return derive_runtime_named_json_path(orders_db, "health_status").resolve()
     except Exception:
         return HEALTH_FILE.resolve()
+
+
+def _resolve_health_env_path() -> Path:
+    try:
+        return Path(resolve_runtime_env_path(project_root=WORKSPACE)).resolve()
+    except Exception:
+        return (WORKSPACE / ".env").resolve()
 
 
 class HealthChecker:
@@ -266,7 +273,7 @@ class HealthChecker:
         return {"name": "database", "status": status, "details": checks}
 
     def check_okx_api(self) -> Dict[str, Any]:
-        load_env_file(WORKSPACE / ".env")
+        load_env_file(_resolve_health_env_path())
         key = os.getenv("EXCHANGE_API_KEY") or os.getenv("OKX_API_KEY")
         secret = os.getenv("EXCHANGE_API_SECRET") or os.getenv("OKX_API_SECRET")
         passphrase = os.getenv("EXCHANGE_PASSPHRASE") or os.getenv("OKX_API_PASSPHRASE")
