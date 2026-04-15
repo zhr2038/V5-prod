@@ -7,8 +7,12 @@
 import sys
 from pathlib import Path
 
-def create_real_trading_config():
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def create_real_trading_config(*, project_root: Path | None = None):
     """创建实盘交易配置"""
+    root = (project_root or PROJECT_ROOT).resolve()
     
     print("🔄 创建实盘交易配置")
     print("-" * 40)
@@ -107,7 +111,8 @@ real_data_collection:
   cost_validation: true    # 成本验证
 """
     
-    config_path = Path("configs/live_20u_real_data.yaml")
+    config_path = root / "configs" / "live_20u_real_data.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(real_config, encoding="utf-8")
     
     print(f"✅ 创建实盘配置: {config_path}")
@@ -141,8 +146,9 @@ def check_prerequisites():
     
     return all_ok
 
-def create_monitoring_script():
+def create_monitoring_script(*, project_root: Path | None = None):
     """创建实盘数据监控脚本"""
+    root = (project_root or PROJECT_ROOT).resolve()
     
     print("\n📊 创建实盘数据监控脚本")
     print("-" * 40)
@@ -150,7 +156,8 @@ def create_monitoring_script():
     monitor_script = """#!/usr/bin/env python3
 """
     
-    monitor_path = Path("scripts/monitor_real_data.py")
+    monitor_path = root / "scripts" / "monitor_real_data.py"
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
     # 简化的监控脚本
     monitor_script = """#!/usr/bin/env python3
 """
@@ -172,7 +179,7 @@ def main():
     print("=" * 60)
     
     # 1. 创建配置
-    config_path = create_real_trading_config()
+    config_path = create_real_trading_config(project_root=PROJECT_ROOT)
     
     # 2. 检查前提条件
     print("\n" + "=" * 60)
@@ -191,7 +198,7 @@ def main():
     print("2. 备份现有数据")
     print("3. 设置环境变量")
     print("4. 启动实盘交易:")
-    print("   python3 src/main.py --config configs/live_20u_real_data.yaml --start")
+    print("   python3 main.py --config configs/live_20u_real_data.yaml --start")
     print("5. 监控数据积累")
     print("6. 达到目标后停止")
     
@@ -235,7 +242,7 @@ def main():
     print("4. 定期验证校准模型")
     
     print("\n⚠️ 下一步:")
-    print("确认后执行: python3 src/main.py --config configs/live_20u_real_data.yaml --start")
+    print("确认后执行: python3 main.py --config configs/live_20u_real_data.yaml --start")
 
 if __name__ == "__main__":
     main()
