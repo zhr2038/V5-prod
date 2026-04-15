@@ -14,6 +14,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass
 class RiskLevel:
@@ -100,10 +102,8 @@ class AutoRiskGuard:
     
     def __init__(self, state_path: str = None):
         if state_path is None:
-            # 使用绝对路径，避免工作目录问题
-            base_dir = Path(__file__).parent.parent.parent
-            state_path = base_dir / "reports" / "auto_risk_guard.json"
-        self.state_path = Path(state_path)
+            state_path = PROJECT_ROOT / "reports" / "auto_risk_guard.json"
+        self.state_path = self._resolve_state_path(state_path)
         self.current_level = 'NEUTRAL'
         self.history: List[Dict] = []
         self.metrics = {
@@ -113,6 +113,13 @@ class AutoRiskGuard:
             'last_conversion_rate': 0.0,
         }
         self._load_state()
+
+    @staticmethod
+    def _resolve_state_path(state_path: str | Path) -> Path:
+        path = Path(state_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return path
     
     def _load_state(self):
         """加载状态"""
@@ -239,9 +246,9 @@ _guard_instances: Dict[str, AutoRiskGuard] = {}
 def get_auto_risk_guard(state_path: str | None = None) -> AutoRiskGuard:
     """获取全局风险守卫实例"""
     if state_path is None:
-        state_path = str((Path(__file__).parent.parent.parent / "reports" / "auto_risk_guard.json").resolve())
+        state_path = str((PROJECT_ROOT / "reports" / "auto_risk_guard.json").resolve())
     else:
-        state_path = str(Path(state_path).resolve())
+        state_path = str(AutoRiskGuard._resolve_state_path(state_path))
 
     guard = _guard_instances.get(state_path)
     if guard is None:

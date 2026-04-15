@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.execution import highest_px_tracker, multi_level_stop_loss, position_builder
-from src.risk import fixed_stop_loss, profit_taking
+from src.execution import cooldown_manager, event_monitor, highest_px_tracker, multi_level_stop_loss, position_builder
+from src.risk import auto_risk_guard, fixed_stop_loss, profit_taking
 
 
 def test_profit_taking_manager_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
@@ -34,3 +34,29 @@ def test_highest_price_tracker_resolves_default_state_path_from_project_root(mon
     monkeypatch.setattr(highest_px_tracker, "PROJECT_ROOT", tmp_path)
     tracker = highest_px_tracker.HighestPriceTracker()
     assert tracker.state_path == (tmp_path / "reports" / "highest_px_state.json").resolve()
+
+
+def test_auto_risk_guard_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(auto_risk_guard, "PROJECT_ROOT", tmp_path)
+    guard = auto_risk_guard.AutoRiskGuard()
+    assert guard.state_path == (tmp_path / "reports" / "auto_risk_guard.json").resolve()
+
+
+def test_get_auto_risk_guard_resolves_relative_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(auto_risk_guard, "PROJECT_ROOT", tmp_path)
+    auto_risk_guard._guard_instances.clear()
+    guard = auto_risk_guard.get_auto_risk_guard("reports/custom_guard.json")
+    assert guard.state_path == (tmp_path / "reports" / "custom_guard.json").resolve()
+    auto_risk_guard._guard_instances.clear()
+
+
+def test_cooldown_manager_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(cooldown_manager, "PROJECT_ROOT", tmp_path)
+    manager = cooldown_manager.CooldownManager()
+    assert Path(manager.config.state_path) == (tmp_path / "reports" / "cooldown_state.json").resolve()
+
+
+def test_event_monitor_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(event_monitor, "PROJECT_ROOT", tmp_path)
+    monitor = event_monitor.EventMonitor()
+    assert Path(monitor.config.state_path) == (tmp_path / "reports" / "event_monitor_state.json").resolve()

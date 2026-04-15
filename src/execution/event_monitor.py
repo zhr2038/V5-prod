@@ -15,6 +15,7 @@ from src.execution.event_types import (
 )
 
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -50,12 +51,20 @@ class EventMonitor:
     
     def __init__(self, config: Optional[EventMonitorConfig] = None):
         self.config = config or EventMonitorConfig()
+        self.config.state_path = str(self._resolve_state_path(self.config.state_path))
         self.last_state: Optional[MarketState] = None
         self.price_high_24h: Dict[str, float] = {}
         self.price_low_24h: Dict[str, float] = {}
         self.price_history: Dict[str, List[Dict[str, float]]] = {}
         self.last_trade_time_ms: int = 0
         self._load_state()
+
+    @staticmethod
+    def _resolve_state_path(state_path: str | Path) -> Path:
+        path = Path(state_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return path
     
     def collect_events(self, current_state: MarketState) -> List[TradingEvent]:
         """

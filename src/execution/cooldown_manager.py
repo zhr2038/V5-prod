@@ -14,6 +14,7 @@ from dataclasses import dataclass, asdict
 from src.execution.event_types import EventPriority, TradingEvent
 
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -41,10 +42,18 @@ class CooldownManager:
     
     def __init__(self, config: Optional[CooldownConfig] = None):
         self.config = config or CooldownConfig()
+        self.config.state_path = str(self._resolve_state_path(self.config.state_path))
         self.last_global_trade_ms: int = 0
         self.last_symbol_trade_ms: Dict[str, int] = {}
         self.pending_signals: Dict[str, Dict] = {}  # For confirmation
         self._load_state()
+
+    @staticmethod
+    def _resolve_state_path(state_path: str | Path) -> Path:
+        path = Path(state_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return path
     
     def can_trade(self, symbol: Optional[str] = None, 
                   priority: EventPriority = EventPriority.P2_SIGNAL) -> bool:
