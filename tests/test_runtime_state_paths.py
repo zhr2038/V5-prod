@@ -89,6 +89,7 @@ def test_negative_expectancy_cooldown_resolves_default_paths_from_project_root(m
     cooldown = negative_expectancy_cooldown.NegativeExpectancyCooldown(cfg)
     assert Path(cooldown.cfg.state_path) == (tmp_path / "reports" / "negative_expectancy_cooldown.json").resolve()
     assert Path(cooldown.cfg.orders_db_path) == (tmp_path / "reports" / "orders.sqlite").resolve()
+    assert Path(cooldown.cfg.fills_db_path) == (tmp_path / "reports" / "fills.sqlite").resolve()
 
 
 def test_ledger_engine_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:

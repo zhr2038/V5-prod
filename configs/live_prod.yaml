@@ -281,9 +281,12 @@ execution:
   negative_expectancy_cooldown_enabled: true
   negative_expectancy_lookback_hours: 72
   negative_expectancy_min_closed_cycles: 4
+  negative_expectancy_threshold_bps: 0.0
   negative_expectancy_threshold_usdt: 0.0
   negative_expectancy_cooldown_hours: 48
   negative_expectancy_state_path: reports/negative_expectancy_cooldown.json
+  fills_db_path: reports/fills.sqlite
+  prefer_net_from_fills: true
   negative_expectancy_score_penalty_enabled: true
   negative_expectancy_score_penalty_min_closed_cycles: 2
   negative_expectancy_score_penalty_floor_bps: 15.0

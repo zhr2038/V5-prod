@@ -793,9 +793,12 @@ class ExecutionConfig(BaseModel):
     negative_expectancy_cooldown_enabled: bool = Field(default=True)
     negative_expectancy_lookback_hours: int = Field(default=24, ge=1, le=24 * 30)
     negative_expectancy_min_closed_cycles: int = Field(default=4, ge=1, le=200)
+    negative_expectancy_threshold_bps: Optional[float] = Field(default=None, ge=-10000, le=10000)
     negative_expectancy_threshold_usdt: float = Field(default=0.0, ge=-1000, le=1000)
     negative_expectancy_cooldown_hours: int = Field(default=24, ge=1, le=24 * 30)
     negative_expectancy_state_path: str = Field(default="reports/negative_expectancy_cooldown.json")
+    fills_db_path: str = Field(default="reports/fills.sqlite")
+    prefer_net_from_fills: bool = Field(default=True)
     negative_expectancy_score_penalty_enabled: bool = Field(default=True)
     negative_expectancy_score_penalty_min_closed_cycles: int = Field(default=2, ge=1, le=200)
     negative_expectancy_score_penalty_floor_bps: float = Field(

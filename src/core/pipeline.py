@@ -64,6 +64,7 @@ from src.core.models import MarketSeries, Order
 from src.execution.position_store import Position
 from src.utils.time import utc_now_iso
 from src.execution.fill_store import (
+    derive_fill_store_path,
     derive_position_store_path,
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_artifact_path,
@@ -265,6 +266,10 @@ class V5Pipeline:
             getattr(cfg.execution, "negative_expectancy_state_path", "reports/negative_expectancy_cooldown.json")
             or ""
         ).strip()
+        raw_negexp_fills_path = str(
+            getattr(cfg.execution, "fills_db_path", "reports/fills.sqlite")
+            or ""
+        ).strip()
         if not raw_negexp_state_path or raw_negexp_state_path == "reports/negative_expectancy_cooldown.json":
             negexp_state_path = derive_runtime_named_json_path(
                 runtime_order_store_path,
@@ -275,15 +280,29 @@ class V5Pipeline:
             if not negexp_state_path.is_absolute():
                 negexp_state_path = (REPORTS_DIR.parent / negexp_state_path).resolve()
 
+        if not raw_negexp_fills_path or raw_negexp_fills_path == "reports/fills.sqlite":
+            negexp_fills_path = derive_fill_store_path(runtime_order_store_path).resolve()
+        else:
+            negexp_fills_path = Path(raw_negexp_fills_path)
+            if not negexp_fills_path.is_absolute():
+                negexp_fills_path = (REPORTS_DIR.parent / negexp_fills_path).resolve()
+
         self.negative_expectancy_cooldown = NegativeExpectancyCooldown(
             NegativeExpectancyConfig(
                 enabled=neg_feedback_enabled,
                 lookback_hours=int(getattr(cfg.execution, 'negative_expectancy_lookback_hours', 24) or 24),
                 min_closed_cycles=int(getattr(cfg.execution, 'negative_expectancy_min_closed_cycles', 4) or 4),
+                expectancy_threshold_bps=(
+                    float(getattr(cfg.execution, 'negative_expectancy_threshold_bps'))
+                    if getattr(cfg.execution, 'negative_expectancy_threshold_bps', None) is not None
+                    else None
+                ),
                 expectancy_threshold_usdt=float(getattr(cfg.execution, 'negative_expectancy_threshold_usdt', 0.0) or 0.0),
                 cooldown_hours=int(getattr(cfg.execution, 'negative_expectancy_cooldown_hours', 24) or 24),
                 state_path=str(negexp_state_path),
                 orders_db_path=str(runtime_order_store_path),
+                fills_db_path=str(negexp_fills_path),
+                prefer_net_from_fills=bool(getattr(cfg.execution, 'prefer_net_from_fills', True)),
                 fast_fail_max_hold_minutes=int(
                     getattr(cfg.execution, 'negative_expectancy_fast_fail_max_hold_minutes', 120) or 120
                 ),
@@ -478,6 +497,35 @@ class V5Pipeline:
                 audit.add_note(f"NegativeExpectancy refresh error: {e}")
             return {}
 
+    @staticmethod
+    def _negative_expectancy_bps(stat: Dict[str, Any], *, fast_fail: bool = False) -> float:
+        if not isinstance(stat, dict):
+            return 0.0
+        keys = (
+            ("fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps", "fast_fail_gross_expectancy_bps")
+            if fast_fail
+            else ("net_expectancy_bps", "expectancy_bps", "gross_expectancy_bps")
+        )
+        for key in keys:
+            if key in stat and stat.get(key) is not None:
+                try:
+                    return float(stat.get(key) or 0.0)
+                except Exception:
+                    continue
+        return 0.0
+
+    @staticmethod
+    def _negative_expectancy_usdt(stat: Dict[str, Any]) -> float:
+        if not isinstance(stat, dict):
+            return 0.0
+        for key in ("net_expectancy_usdt", "expectancy_usdt", "gross_expectancy_usdt"):
+            if key in stat and stat.get(key) is not None:
+                try:
+                    return float(stat.get(key) or 0.0)
+                except Exception:
+                    continue
+        return 0.0
+
     def _apply_negative_expectancy_score_penalty(
         self,
         alpha: AlphaSnapshot,
@@ -518,13 +566,13 @@ class V5Pipeline:
             if not isinstance(stat, dict):
                 continue
             closed_cycles = int(stat.get('closed_cycles') or 0)
-            expectancy_bps = float(stat.get('expectancy_bps') or 0.0)
+            expectancy_bps = self._negative_expectancy_bps(stat)
             shortfall_bps = 0.0
             if closed_cycles >= min_cycles:
                 shortfall_bps = max(0.0, float(floor_bps) - expectancy_bps)
 
             ff_closed_cycles = int(stat.get("fast_fail_closed_cycles") or 0)
-            ff_expectancy_bps = float(stat.get("fast_fail_expectancy_bps") or 0.0)
+            ff_expectancy_bps = self._negative_expectancy_bps(stat, fast_fail=True)
             ff_shortfall_bps = 0.0
             if ff_closed_cycles >= ff_min_cycles:
                 ff_shortfall_bps = max(0.0, float(ff_floor_bps) - ff_expectancy_bps)
@@ -550,8 +598,16 @@ class V5Pipeline:
             )
 
             raw_bucket = alpha.raw_factors.setdefault(sym, {})
+            raw_bucket["negative_expectancy_gross_bps"] = float(stat.get("gross_expectancy_bps", stat.get("expectancy_bps") or 0.0))
+            raw_bucket["negative_expectancy_net_bps"] = float(stat.get("net_expectancy_bps", expectancy_bps))
             raw_bucket["negative_expectancy_bps"] = expectancy_bps
             raw_bucket["negative_expectancy_closed_cycles"] = float(closed_cycles)
+            raw_bucket["negative_expectancy_fast_fail_gross_bps"] = float(
+                stat.get("fast_fail_gross_expectancy_bps", stat.get("fast_fail_expectancy_bps") or 0.0)
+            )
+            raw_bucket["negative_expectancy_fast_fail_net_bps"] = float(
+                stat.get("fast_fail_net_expectancy_bps", ff_expectancy_bps)
+            )
             raw_bucket["negative_expectancy_fast_fail_bps"] = ff_expectancy_bps
             raw_bucket["negative_expectancy_fast_fail_closed_cycles"] = float(ff_closed_cycles)
             z_bucket = alpha.z_factors.setdefault(sym, {})
@@ -630,7 +686,7 @@ class V5Pipeline:
                         _coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0)
                     )
                     closed_cycles = int((stat or {}).get("closed_cycles") or 0)
-                    expectancy_bps = float((stat or {}).get("expectancy_bps") or 0.0)
+                    expectancy_bps = self._negative_expectancy_bps(stat or {})
                     if closed_cycles >= min_cycles and expectancy_bps < floor_bps:
                         reason = "negative_expectancy_open_block"
                 if reason is None and ff_block_enabled:
@@ -641,7 +697,7 @@ class V5Pipeline:
                         getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0) or 0.0
                     )
                     ff_closed_cycles = int((stat or {}).get("fast_fail_closed_cycles") or 0)
-                    ff_expectancy_bps = float((stat or {}).get("fast_fail_expectancy_bps") or 0.0)
+                    ff_expectancy_bps = self._negative_expectancy_bps(stat or {}, fast_fail=True)
                     if ff_closed_cycles >= ff_min_cycles and ff_expectancy_bps < ff_floor_bps:
                         reason = "negative_expectancy_fast_fail_open_block"
 
@@ -2187,7 +2243,8 @@ class V5Pipeline:
                                 "symbol": sym,
                                 "action": "skip",
                                 "reason": "negative_expectancy_cooldown",
-                                "expectancy_usdt": float(blocked.get("expectancy_usdt") or 0.0),
+                                "expectancy_usdt": self._negative_expectancy_usdt(blocked),
+                                "net_expectancy_bps": self._negative_expectancy_bps(blocked),
                                 "closed_cycles": int(blocked.get("closed_cycles") or 0),
                                 "remain_seconds": float(blocked.get("remain_seconds") or 0.0),
                             }
@@ -2207,7 +2264,7 @@ class V5Pipeline:
                     _coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0)
                 )
                 closed_cycles = int((neg_stats or {}).get("closed_cycles") or 0)
-                expectancy_bps = float((neg_stats or {}).get("expectancy_bps") or 0.0)
+                expectancy_bps = self._negative_expectancy_bps(neg_stats or {})
                 if closed_cycles >= min_cycles and expectancy_bps < floor_bps:
                     if audit:
                         audit.reject("negative_expectancy_open_block")
@@ -2254,7 +2311,7 @@ class V5Pipeline:
                     or 120
                 )
                 ff_closed_cycles = int((neg_stats or {}).get("fast_fail_closed_cycles") or 0)
-                ff_expectancy_bps = float((neg_stats or {}).get("fast_fail_expectancy_bps") or 0.0)
+                ff_expectancy_bps = self._negative_expectancy_bps(neg_stats or {}, fast_fail=True)
                 ff_avg_hold_minutes = float((neg_stats or {}).get("fast_fail_avg_hold_minutes") or 0.0)
                 if ff_closed_cycles >= ff_min_cycles and ff_expectancy_bps < ff_floor_bps:
                     if audit:
