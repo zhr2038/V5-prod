@@ -3944,6 +3944,38 @@ def test_account_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path
     assert response.get_json()["cash_usdt"] == 11.48
 
 
+def test_load_workspace_exchange_creds_uses_runtime_env_path(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "resolve_runtime_env_path", lambda raw_env_path=None, project_root=None: str(tmp_path / ".env.runtime"))
+    monkeypatch.delenv("EXCHANGE_API_KEY", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_SECRET", raising=False)
+    monkeypatch.delenv("EXCHANGE_PASSPHRASE", raising=False)
+
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "EXCHANGE_API_KEY=root-key",
+                "EXCHANGE_API_SECRET=root-secret",
+                "EXCHANGE_PASSPHRASE=root-pass",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / ".env.runtime").write_text(
+        "\n".join(
+            [
+                "EXCHANGE_API_KEY=runtime-key",
+                "EXCHANGE_API_SECRET=runtime-secret",
+                "EXCHANGE_PASSPHRASE=runtime-pass",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert module._load_workspace_exchange_creds() == ("runtime-key", "runtime-secret", "runtime-pass")
+
+
 def test_account_api_uses_active_runtime_paths(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

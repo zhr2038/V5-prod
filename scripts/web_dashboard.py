@@ -31,6 +31,7 @@ import pandas as pd
 import yaml
 import requests
 from configs.loader import load_config as load_app_config
+from configs.runtime_config import resolve_runtime_env_path
 
 from src.core.models import MarketSeries
 from src.data.okx_ccxt_provider import OKXCCXTProvider
@@ -78,6 +79,10 @@ WEB_DIR = WORKSPACE / 'web'
 REPORTS_DIR = WORKSPACE / 'reports'
 CACHE_DIR = WORKSPACE / 'data' / 'cache'
 CHINA_TZ = timezone(timedelta(hours=8))
+
+
+def _resolve_workspace_env_path() -> Path:
+    return Path(resolve_runtime_env_path(project_root=WORKSPACE)).resolve()
 
 
 def _resolve_react_build_path() -> Path:
@@ -1609,10 +1614,11 @@ def _load_workspace_exchange_creds() -> tuple[str, str, str]:
     key = str(os.getenv('EXCHANGE_API_KEY') or '')
     sec = str(os.getenv('EXCHANGE_API_SECRET') or '')
     pp = str(os.getenv('EXCHANGE_PASSPHRASE') or '')
+    envp = _resolve_workspace_env_path()
 
     try:
         from dotenv import load_dotenv
-        load_dotenv(str(WORKSPACE / '.env'))
+        load_dotenv(str(envp))
         key = key or str(os.getenv('EXCHANGE_API_KEY') or '')
         sec = sec or str(os.getenv('EXCHANGE_API_SECRET') or '')
         pp = pp or str(os.getenv('EXCHANGE_PASSPHRASE') or '')
@@ -1622,7 +1628,6 @@ def _load_workspace_exchange_creds() -> tuple[str, str, str]:
     if key and sec and pp:
         return key, sec, pp
 
-    envp = WORKSPACE / '.env'
     if envp.exists():
         try:
             for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
@@ -1795,12 +1800,12 @@ def _load_live_okx_balance_snapshot() -> Dict[str, Any]:
         import time
         from dotenv import load_dotenv
 
-        load_dotenv(str(WORKSPACE / '.env'))
+        envp = _resolve_workspace_env_path()
+        load_dotenv(str(envp))
         key = os.getenv('EXCHANGE_API_KEY')
         sec = os.getenv('EXCHANGE_API_SECRET')
         pp = os.getenv('EXCHANGE_PASSPHRASE')
         if not (key and sec and pp):
-            envp = WORKSPACE / '.env'
             if envp.exists():
                 for ln in envp.read_text(encoding='utf-8', errors='ignore').splitlines():
                     if not ln or ln.strip().startswith('#') or '=' not in ln:
