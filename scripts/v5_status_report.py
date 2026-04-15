@@ -6,7 +6,6 @@ Generate a concise production status report for the V5 workspace.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import subprocess
 import sys
@@ -18,6 +17,7 @@ from typing import Any, Dict, Optional
 WORKSPACE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKSPACE))
 
+from configs.runtime_config import resolve_runtime_config_path
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_runtime_named_artifact_path,
@@ -36,19 +36,7 @@ LIVE_UNITS = (
 
 
 def resolve_config_path() -> Path:
-    env_cfg = (os.getenv("V5_CONFIG") or "").strip()
-    if env_cfg:
-        path = Path(env_cfg)
-        if not path.is_absolute():
-            path = WORKSPACE / path
-        return path
-
-    for candidate in ("configs/live_prod.yaml", "configs/live_20u_real.yaml", "configs/config.yaml"):
-        path = WORKSPACE / candidate
-        if path.exists():
-            return path
-
-    return WORKSPACE / "configs/live_prod.yaml"
+    return Path(resolve_runtime_config_path(project_root=WORKSPACE))
 
 
 CONFIG_PATH = resolve_config_path()

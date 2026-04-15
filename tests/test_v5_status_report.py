@@ -26,6 +26,20 @@ def test_resolve_status_paths_uses_prefixed_runtime_auto_blacklist(tmp_path: Pat
         status_report.ORDERS_DB = original_orders
 
 
+def test_resolve_config_path_uses_runtime_config_helper(monkeypatch, tmp_path: Path) -> None:
+    expected = (tmp_path / "configs" / "custom_live.yaml").resolve()
+    monkeypatch.setattr(
+        status_report,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(expected),
+    )
+    monkeypatch.setattr(status_report, "WORKSPACE", tmp_path)
+
+    path = status_report.resolve_config_path()
+
+    assert path == expected
+
+
 def test_resolve_status_paths_uses_suffixed_runtime_auto_blacklist(tmp_path: Path) -> None:
     cfg = {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}}
 
