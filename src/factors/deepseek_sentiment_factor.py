@@ -42,6 +42,15 @@ def _load_env_file(env_path: Path):
         pass
 
 
+def _resolve_cache_dir(cache_dir: str | None, *, project_root: Path) -> Path:
+    if not cache_dir:
+        return (project_root / "data" / "sentiment_cache").resolve()
+    path = Path(cache_dir)
+    if not path.is_absolute():
+        path = (project_root / path).resolve()
+    return path
+
+
 class DeepSeekSentimentFactor:
     """
     DeepSeek情绪分析因子
@@ -57,7 +66,7 @@ class DeepSeekSentimentFactor:
                  env_path: str | None = None,
                  project_root: Path | None = None):
         repo_root = Path(project_root or PROJECT_ROOT).resolve()
-        self.cache_dir = Path(cache_dir) if cache_dir else repo_root / "data" / "sentiment_cache"
+        self.cache_dir = _resolve_cache_dir(cache_dir, project_root=repo_root)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # 自动加载 runtime .env，避免不同启动方式下环境变量缺失

@@ -29,3 +29,16 @@ def test_deepseek_sentiment_factor_explicit_api_key_wins(monkeypatch, tmp_path):
     )
 
     assert factor.api_key == "explicit-key"
+
+
+def test_deepseek_sentiment_factor_resolves_relative_cache_dir_from_project_root(monkeypatch, tmp_path):
+    (tmp_path / ".env.runtime").write_text("DEEPSEEK_API_KEY=runtime-key\n", encoding="utf-8")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    factor = DeepSeekSentimentFactor(
+        cache_dir="data/custom_sentiment_cache",
+        env_path=".env.runtime",
+        project_root=tmp_path,
+    )
+
+    assert factor.cache_dir == (tmp_path / "data" / "custom_sentiment_cache").resolve()
