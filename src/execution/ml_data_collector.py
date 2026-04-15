@@ -13,6 +13,7 @@ import pandas as pd
 
 
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class MLDataCollectorError(Exception):
@@ -55,11 +56,18 @@ class MLDataCollector:
     ONE_HOUR_MS = 3600 * 1000
 
     def __init__(self, db_path: str = "reports/ml_training_data.db", data_provider=None):
-        self.db_path = str(db_path)
+        self.db_path = str(self._resolve_path(db_path))
         self._data_provider = data_provider
         self._conn: sqlite3.Connection | None = None
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_database()
+
+    @staticmethod
+    def _resolve_path(path: str | Path) -> Path:
+        resolved = Path(path)
+        if not resolved.is_absolute():
+            resolved = (PROJECT_ROOT / resolved).resolve()
+        return resolved
 
     def _get_connection(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -844,9 +852,10 @@ class MLDataCollector:
                 logger.warning("Insufficient samples: %d < %d", len(df), int(min_samples))
                 return False
 
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(output_path, index=False)
-            logger.info("Exported %d samples to %s", len(df), output_path)
+            resolved_output_path = self._resolve_path(output_path)
+            resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(resolved_output_path, index=False)
+            logger.info("Exported %d samples to %s", len(df), resolved_output_path)
             logger.info("Training data symbols=%d range=%s..%s", df["symbol"].nunique(), df["timestamp"].min(), df["timestamp"].max())
             if align_meta["duplicates_removed"] > 0:
                 logger.info(
