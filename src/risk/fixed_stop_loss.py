@@ -11,6 +11,8 @@ import json
 from typing import Dict, Optional
 from datetime import datetime
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass
 class FixedStopLossConfig:
@@ -47,8 +49,15 @@ class FixedStopLossManager:
         self.config = config or FixedStopLossConfig()
         self.entry_prices: Dict[str, float] = {}  # symbol -> entry_price
         self.entry_times: Dict[str, datetime] = {}  # symbol -> entry_time
-        self.state_file = Path(state_path)
+        self.state_file = self._resolve_state_path(state_path)
         self._load_state()
+
+    @staticmethod
+    def _resolve_state_path(state_path: str | Path) -> Path:
+        path = Path(state_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return path
     
     def _load_state(self):
         """加载状态"""

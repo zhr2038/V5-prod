@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass
 class HighestPriceRecord:
@@ -35,9 +37,16 @@ class HighestPriceTracker:
     """
     
     def __init__(self, state_path: str = "reports/highest_px_state.json"):
-        self.state_path = Path(state_path)
+        self.state_path = self._resolve_state_path(state_path)
         self.records: Dict[str, HighestPriceRecord] = {}
         self._load()
+
+    @staticmethod
+    def _resolve_state_path(state_path: str | Path) -> Path:
+        path = Path(state_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return path
     
     def _load(self):
         """加载状态"""

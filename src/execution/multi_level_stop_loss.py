@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 class StopLevel(Enum):
     """止损级别"""
     TIGHT = "tight"      # 3% - 快速止损
@@ -65,8 +67,15 @@ class MultiLevelStopLoss:
     def __init__(self, config: StopLossConfig = None, state_path: str = "reports/stop_loss_state.json"):
         self.config = config or StopLossConfig()
         self.positions: Dict[str, PositionStopState] = {}
-        self.state_file = Path(state_path)
+        self.state_file = self._resolve_state_path(state_path)
         self._load_state()
+
+    @staticmethod
+    def _resolve_state_path(state_path: str | Path) -> Path:
+        path = Path(state_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return path
     
     def _load_state(self):
         """加载止损状态"""
