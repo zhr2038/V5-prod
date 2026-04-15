@@ -40,6 +40,22 @@ def test_highest_price_tracker_resolves_default_state_path_from_project_root(mon
     assert tracker.state_path == (tmp_path / "reports" / "highest_px_state.json").resolve()
 
 
+def test_get_highest_price_tracker_uses_resolved_singleton_key(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(highest_px_tracker, "PROJECT_ROOT", tmp_path)
+    highest_px_tracker._tracker_instances.clear()
+    tracker_a = highest_px_tracker.get_highest_price_tracker("reports/highest_px_state.json")
+    tracker_b = highest_px_tracker.get_highest_price_tracker(tmp_path / "reports" / "highest_px_state.json")
+    assert tracker_a is tracker_b
+    highest_px_tracker._tracker_instances.clear()
+
+
+def test_derive_tracker_state_path_resolves_relative_positions_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(highest_px_tracker, "PROJECT_ROOT", tmp_path)
+    assert highest_px_tracker.derive_tracker_state_path("reports/positions.sqlite") == (
+        tmp_path / "reports" / "highest_px_state.json"
+    ).resolve()
+
+
 def test_auto_risk_guard_resolves_default_state_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(auto_risk_guard, "PROJECT_ROOT", tmp_path)
     guard = auto_risk_guard.AutoRiskGuard()

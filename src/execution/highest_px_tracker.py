@@ -160,7 +160,7 @@ def derive_tracker_state_path(position_store_path: str | Path) -> Path:
     alternate stores such as shadow or test DBs so they do not share tracker
     state accidentally.
     """
-    db_path = Path(position_store_path)
+    db_path = HighestPriceTracker._resolve_state_path(position_store_path)
     stem = db_path.stem
     if stem == "positions":
         return db_path.with_name("highest_px_state.json")
@@ -173,7 +173,7 @@ _tracker_instances: Dict[str, HighestPriceTracker] = {}
 
 def get_highest_price_tracker(state_path: str | Path = "reports/highest_px_state.json") -> HighestPriceTracker:
     """获取全局追踪器实例"""
-    normalized = str(Path(state_path))
+    normalized = str(HighestPriceTracker._resolve_state_path(state_path))
     tracker = _tracker_instances.get(normalized)
     if tracker is None:
         tracker = HighestPriceTracker(normalized)
