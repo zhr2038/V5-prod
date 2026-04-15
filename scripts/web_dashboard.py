@@ -26,6 +26,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Ensure repo-local imports work even when the script is launched outside the repo root.
+_BOOTSTRAP_WORKSPACE = Path(__file__).resolve().parents[1]
+_BOOTSTRAP_WORKSPACE_STR = str(_BOOTSTRAP_WORKSPACE)
+if _BOOTSTRAP_WORKSPACE_STR not in sys.path:
+    sys.path.insert(0, _BOOTSTRAP_WORKSPACE_STR)
+
 from flask import Flask, g, has_app_context, render_template, jsonify, request, send_from_directory
 import pandas as pd
 import yaml
