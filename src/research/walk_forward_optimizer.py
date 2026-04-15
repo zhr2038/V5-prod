@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_env_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from configs.schema import AppConfig
 from src.backtest.walk_forward import (
     build_portfolio_analysis_record,
@@ -37,7 +37,12 @@ def _load_market_data_for_task(
 ) -> tuple[AppConfig, dict[str, Any], dict[str, Any]]:
     walk_cfg = task_config.get("walk_forward") or {}
 
-    app_cfg_path = _project_path(project_root, walk_cfg.get("config_path", "configs/config.yaml"), "configs/config.yaml")
+    app_cfg_path = Path(
+        resolve_runtime_config_path(
+            str(walk_cfg.get("config_path", "")).strip() or None,
+            project_root=project_root,
+        )
+    )
     env_path = resolve_runtime_env_path(str(walk_cfg.get("env_path", ".env")), project_root=project_root)
     provider_name = str(walk_cfg.get("provider", "mock")).strip().lower()
     ohlcv_limit = int(walk_cfg.get("ohlcv_limit", 24 * 120))

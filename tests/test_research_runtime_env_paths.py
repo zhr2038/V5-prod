@@ -50,6 +50,11 @@ def test_window_diagnostics_resolves_env_path_from_project_root(monkeypatch, tmp
     monkeypatch.setattr(window_diagnostics, "ResearchRecorder", FakeRecorder)
     monkeypatch.setattr(
         window_diagnostics,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str((tmp_path / "configs" / "runtime.yaml").resolve()),
+    )
+    monkeypatch.setattr(
+        window_diagnostics,
         "resolve_runtime_env_path",
         lambda raw_env_path=None, project_root=None: str((tmp_path / ".env.runtime").resolve()),
     )
@@ -61,6 +66,7 @@ def test_window_diagnostics_resolves_env_path_from_project_root(monkeypatch, tmp
 
     window_diagnostics.run_window_diagnostic_task(project_root=tmp_path, task_config_path="task.yaml")
 
+    assert captured["base_config_path"] == str((tmp_path / "configs" / "runtime.yaml").resolve())
     assert captured["env_path"] == str((tmp_path / ".env.runtime").resolve())
 
 
@@ -108,6 +114,11 @@ def test_walk_forward_optimizer_resolves_env_path_from_project_root(monkeypatch,
 
     monkeypatch.setattr(
         walk_forward_optimizer,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str((tmp_path / "configs" / "runtime.yaml").resolve()),
+    )
+    monkeypatch.setattr(
+        walk_forward_optimizer,
         "resolve_runtime_env_path",
         lambda raw_env_path=None, project_root=None: str((tmp_path / ".env.runtime").resolve()),
     )
@@ -123,6 +134,7 @@ def test_walk_forward_optimizer_resolves_env_path_from_project_root(monkeypatch,
         task_config={"walk_forward": {"env_path": ".env.runtime", "provider": "mock"}},
     )
 
+    assert captured["config_path"] == str((tmp_path / "configs" / "runtime.yaml").resolve())
     assert captured["env_path"] == str((tmp_path / ".env.runtime").resolve())
 
 
@@ -155,6 +167,11 @@ def test_task_runner_walk_forward_resolves_env_path_from_project_root(monkeypatc
 
     monkeypatch.setattr(
         task_runner,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str((tmp_path / "configs" / "runtime.yaml").resolve()),
+    )
+    monkeypatch.setattr(
+        task_runner,
         "resolve_runtime_env_path",
         lambda raw_env_path=None, project_root=None: str((tmp_path / ".env.runtime").resolve()),
     )
@@ -175,4 +192,5 @@ def test_task_runner_walk_forward_resolves_env_path_from_project_root(monkeypatc
         task_config={"task": {"name": "walk"}, "paths": {}, "walk_forward": {"env_path": ".env.runtime", "provider": "mock"}},
     )
 
+    assert captured["config_path"] == str((tmp_path / "configs" / "runtime.yaml").resolve())
     assert captured["env_path"] == str((tmp_path / ".env.runtime").resolve())
