@@ -8,6 +8,15 @@ from typing import Any, Dict, Optional
 
 from src.utils.time import utc_now_iso
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_run_dir(run_dir: str | Path) -> Path:
+    resolved = Path(run_dir)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
 
 TRADE_COLUMNS = [
     "ts",
@@ -62,7 +71,7 @@ class Fill:
 class TradeLogWriter:
     """TradeLogWriter类"""
     def __init__(self, run_dir: str, filename: str = "trades.csv"):
-        self.run_dir = Path(run_dir)
+        self.run_dir = _resolve_run_dir(run_dir)
         self.path = self.run_dir / filename
         self.run_dir.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():

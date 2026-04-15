@@ -9,10 +9,19 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
 
 def read_equity_jsonl(path: str) -> List[Dict[str, Any]]:
     """Read equity jsonl"""
-    p = Path(path)
+    p = _resolve_path(path)
     if not p.exists():
         return []
     out = []
@@ -67,7 +76,7 @@ def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float 
 
 def read_trades_csv(path: str) -> List[Dict[str, Any]]:
     """Read trades csv"""
-    p = Path(path)
+    p = _resolve_path(path)
     if not p.exists():
         return []
     with p.open("r", encoding="utf-8") as f:

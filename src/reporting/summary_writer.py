@@ -11,13 +11,22 @@ from src.reporting.metrics import (
     read_trades_csv,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_run_dir(run_dir: str | Path) -> Path:
+    resolved = Path(run_dir)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
 
 def write_summary(
     run_dir: str,
     window_start_ts: int | None = None,
     window_end_ts: int | None = None,
 ) -> Dict[str, Any]:
-    rd = Path(run_dir)
+    rd = _resolve_run_dir(run_dir)
     eq_rows = read_equity_jsonl(str(rd / "equity.jsonl"))
     trades = read_trades_csv(str(rd / "trades.csv"))
 
@@ -63,7 +72,7 @@ def refresh_summary_metrics(run_dir: str) -> Dict[str, Any]:
     This function patches summary.json in-place while preserving unrelated fields (e.g. budget).
     """
 
-    rd = Path(run_dir)
+    rd = _resolve_run_dir(run_dir)
     p = rd / "summary.json"
     if not p.exists():
         # create from scratch
@@ -93,7 +102,7 @@ def refresh_summary_metrics(run_dir: str) -> Dict[str, Any]:
 
 def attach_budget(run_dir: str, budget: Dict[str, Any]) -> Dict[str, Any]:
     """Patch run_dir/summary.json with a top-level 'budget' field."""
-    rd = Path(run_dir)
+    rd = _resolve_run_dir(run_dir)
     p = rd / "summary.json"
     if not p.exists():
         raise FileNotFoundError(str(p))
@@ -105,7 +114,7 @@ def attach_budget(run_dir: str, budget: Dict[str, Any]) -> Dict[str, Any]:
 
 def attach_exit_signals(run_dir: str, exit_signals: list[dict[str, Any]]) -> Dict[str, Any]:
     """Patch run_dir/summary.json with a top-level 'exit_signals' field."""
-    rd = Path(run_dir)
+    rd = _resolve_run_dir(run_dir)
     p = rd / "summary.json"
     if not p.exists():
         raise FileNotFoundError(str(p))

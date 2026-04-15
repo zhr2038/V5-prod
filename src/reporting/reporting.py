@@ -10,10 +10,19 @@ from src.core.models import ExecutionReport
 from src.regime.regime_engine import RegimeResult
 from src.portfolio.portfolio_engine import PortfolioSnapshot
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
 
 def write_json(path: str, obj: Any) -> None:
     """Write json"""
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -33,6 +42,7 @@ def dump_run_artifacts(
     if str(os.getenv("V5_DISABLE_TOPLEVEL_ARTIFACTS", "0")).strip() in {"1", "true", "TRUE", "yes", "YES"}:
         return
 
+    reports_dir = str(_resolve_path(reports_dir))
     Path(reports_dir).mkdir(parents=True, exist_ok=True)
     write_json(f"{reports_dir}/alpha_snapshot.json", {
         "raw_factors": alpha.raw_factors,
