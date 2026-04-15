@@ -1,12 +1,19 @@
 ﻿from __future__ import annotations
 
 import logging
+import sys
 import time
 import os
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
+
+# Ensure repo-local imports work even when the entrypoint is launched outside the repo root.
+PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT_STR = str(PROJECT_ROOT)
+if PROJECT_ROOT_STR not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_STR)
 
 from configs.loader import load_config
 from configs.schema import AppConfig, normalize_alpha_base_factor_mapping
