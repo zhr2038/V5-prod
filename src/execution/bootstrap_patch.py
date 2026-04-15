@@ -11,13 +11,22 @@ from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.position_store import Position, PositionStore
 from src.reporting.spread_snapshot_store import SpreadSnapshotStore
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
+
 def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -26,7 +35,7 @@ def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
 
 def _read_json(path: str) -> Optional[Dict[str, Any]]:
     try:
-        p = Path(path)
+        p = _resolve_path(path)
         if not p.exists():
             return None
         return json.loads(p.read_text(encoding="utf-8"))
@@ -96,8 +105,9 @@ def controlled_patch_from_okx_balance(
     - Rate-limited via state_path.
     """
 
+    resolved_state_path = str(_resolve_path(state_path))
     now_ms = _now_ms()
-    st = _read_json(state_path) or {}
+    st = _read_json(resolved_state_path) or {}
     last_ms = int(st.get("last_patch_ts_ms") or 0)
     if min_interval_sec > 0 and last_ms > 0 and (now_ms - last_ms) < int(min_interval_sec) * 1000:
         return PatchResult(False, "rate_limited", 0.0, float(account_store.get().cash_usdt), 0)
@@ -169,7 +179,7 @@ def controlled_patch_from_okx_balance(
             updated += 1
 
     _atomic_write_json(
-        state_path,
+        resolved_state_path,
         {
             "schema_version": 1,
             "last_patch_ts_ms": int(now_ms),

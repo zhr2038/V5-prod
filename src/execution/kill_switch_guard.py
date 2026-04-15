@@ -11,13 +11,22 @@ log = logging.getLogger(__name__)
 
 from src.execution.reconcile_reason import FailureContext, classify_reconcile_failure
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
+
 def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -25,7 +34,7 @@ def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
 
 
 def _read_json(path: str) -> Optional[Dict[str, Any]]:
-    p = Path(path)
+    p = _resolve_path(path)
     if not p.exists():
         return None
     try:
@@ -144,6 +153,9 @@ class KillSwitchGuard:
 
     def __init__(self, cfg: Optional[GuardConfig] = None):
         self.cfg = cfg or GuardConfig()
+        self.cfg.reconcile_status_path = str(_resolve_path(self.cfg.reconcile_status_path))
+        self.cfg.failure_state_path = str(_resolve_path(self.cfg.failure_state_path))
+        self.cfg.kill_switch_path = str(_resolve_path(self.cfg.kill_switch_path))
 
     def _load_failure_state(self) -> Dict[str, Any]:
         st = _read_json(self.cfg.failure_state_path) or {}

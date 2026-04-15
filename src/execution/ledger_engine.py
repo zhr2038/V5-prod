@@ -10,13 +10,22 @@ from typing import Any, Dict, Optional, Tuple
 from src.execution.bills_store import BillsStore
 from src.execution.okx_private_client import OKXPrivateClient
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _resolve_path(path: str | Path) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (PROJECT_ROOT / resolved).resolve()
+    return resolved
+
+
 def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
-    p = Path(path)
+    p = _resolve_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -24,7 +33,7 @@ def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
 
 
 def _read_json(path: str) -> Optional[Dict[str, Any]]:
-    p = Path(path)
+    p = _resolve_path(path)
     if not p.exists():
         return None
     try:
@@ -69,7 +78,7 @@ class LedgerEngine:
         self.okx = okx
         self.bills_store = bills_store
         self.thresholds = thresholds or LedgerThresholds()
-        self.state_path = str(state_path)
+        self.state_path = str(_resolve_path(state_path))
 
     def _fetch_balance_cash(self) -> Tuple[Dict[str, str], Dict[str, Any]]:
         r = self.okx.get_balance(ccy=None)
@@ -109,6 +118,7 @@ class LedgerEngine:
 
     def run(self, *, out_path: str = "reports/ledger_status.json") -> Dict[str, Any]:
         """Run"""
+        out_path = str(_resolve_path(out_path))
         now = _now_ms()
 
         baseline = self._load_baseline()
