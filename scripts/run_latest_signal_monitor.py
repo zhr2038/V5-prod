@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from src.research.latest_signal_monitor import (
     build_latest_signal_markdown,
     build_latest_signal_summary,
@@ -44,8 +45,14 @@ def main() -> int:
     if len(variants) < 2:
         raise SystemExit("latest signal monitor needs at least 2 variants")
 
-    base_config_path = str(_project_path(str(exp_cfg.get("base_config_path", "configs/live_prod.yaml")), "configs/live_prod.yaml"))
-    env_path = str(_project_path(str(exp_cfg.get("env_path", ".env")), ".env"))
+    base_config_path = resolve_runtime_config_path(
+        str(exp_cfg.get("base_config_path", "")).strip() or None,
+        project_root=PROJECT_ROOT,
+    )
+    env_path = resolve_runtime_env_path(
+        str(exp_cfg.get("env_path", ".env")),
+        project_root=PROJECT_ROOT,
+    )
     cache_dir = str(_project_path(str(exp_cfg.get("cache_dir", "data/cache")), "data/cache"))
     runs_dir = _project_path(str(paths_cfg.get("runs_dir", "reports/runs")), "reports/runs")
     output_json_path = _project_path(str(paths_cfg.get("output_report_path", "reports/research/core6_avax_latest_signal_monitor/latest.json")), "reports/research/core6_avax_latest_signal_monitor/latest.json")
