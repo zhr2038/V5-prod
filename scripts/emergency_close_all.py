@@ -26,7 +26,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_named_json_path
 
 
 def _build_exchange() -> Any:
@@ -38,6 +39,19 @@ def _build_exchange() -> Any:
             "enableRateLimit": True,
         }
     )
+
+
+def _resolve_report_path(config_path: str | None = None) -> Path:
+    cfg = load_runtime_config(config_path, project_root=PROJECT_ROOT)
+    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    return derive_runtime_named_json_path(orders_db, "emergency_close_report").resolve()
 
 
 def emergency_close_all(
@@ -115,8 +129,10 @@ def emergency_close_all(
             "errors": errors,
             "final_usdt": usdt_total,
         }
-        REPORT_PATH.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-        print(f"Report saved to {REPORT_PATH}")
+        report_path = _resolve_report_path(config_path)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+        print(f"Report saved to {report_path}")
         return report
     finally:
         close_fn = getattr(exchange, "close", None)
