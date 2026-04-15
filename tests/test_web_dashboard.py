@@ -124,6 +124,25 @@ def test_static_files_rejects_encoded_path_traversal(monkeypatch, tmp_path):
     assert fallback_response.get_data(as_text=True) == "INDEX"
 
 
+def test_resolve_react_build_path_ignores_legacy_admin_dist(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.delenv("V5_DASHBOARD_DIST", raising=False)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+
+    original_exists = module.Path.exists
+
+    def fake_exists(path_obj):
+        if str(path_obj).replace("\\", "/") == "/home/admin/v5-trading-dashboard/dist":
+            return True
+        return original_exists(path_obj)
+
+    monkeypatch.setattr(module.Path, "exists", fake_exists)
+
+    resolved = module._resolve_react_build_path()
+
+    assert resolved == (tmp_path / "web" / "dist")
+
+
 def test_monitor_v2_static_script_contains_expected_entrypoints():
     body = MONITOR_V2_JS_PATH.read_text(encoding="utf-8")
 

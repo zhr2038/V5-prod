@@ -93,10 +93,6 @@ def _resolve_react_build_path() -> Path:
         WORKSPACE / 'frontend' / 'dist',
     ])
 
-    legacy_dist = Path('/home/admin/v5-trading-dashboard/dist')
-    if legacy_dist.exists():
-        candidates.append(legacy_dist)
-
     for candidate in candidates:
         if candidate.exists():
             return candidate
