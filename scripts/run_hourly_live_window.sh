@@ -44,10 +44,22 @@ resolve_python_bin() {
 
 PYTHON_BIN="$(resolve_python_bin)"
 
+resolve_config_path() {
+  "$PYTHON_BIN" - <<'PY'
+from pathlib import Path
+import os
+
+from configs.runtime_config import resolve_runtime_config_path
+
+root = Path(os.environ["V5_PROJECT_ROOT"])
+print(resolve_runtime_config_path(project_root=root))
+PY
+}
+
 export V5_PROJECT_ROOT="$ROOT"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export V5_DATA_PROVIDER="${V5_DATA_PROVIDER:-okx}"
-export V5_CONFIG="${V5_CONFIG:-configs/live_prod.yaml}"
+export V5_CONFIG="${V5_CONFIG:-$(resolve_config_path)}"
 export V5_LIVE_ARM="${V5_LIVE_ARM:-YES}"
 export V5_RUN_ID="$WIN_ID"
 export V5_WINDOW_START_TS="${START_EPOCH}"
@@ -66,7 +78,7 @@ except Exception:
 from src.execution.fill_store import derive_runtime_named_json_path
 
 root = Path(os.environ["V5_PROJECT_ROOT"])
-cfg_path = Path(os.environ.get("V5_CONFIG", "configs/live_prod.yaml"))
+cfg_path = Path(os.environ["V5_CONFIG"])
 if not cfg_path.is_absolute():
     cfg_path = root / cfg_path
 
