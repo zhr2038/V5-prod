@@ -18,6 +18,11 @@ from typing import Dict, List
 from pathlib import Path
 import requests
 
+from configs.runtime_config import resolve_runtime_env_path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _load_env_file(env_path: Path):
     """轻量加载 .env（避免依赖python-dotenv）"""
@@ -48,13 +53,15 @@ class DeepSeekSentimentFactor:
     def __init__(self, 
                  cache_dir: str = None,
                  api_key: str = None,
-                 model: str = "deepseek-chat"):
-        repo_root = Path(__file__).resolve().parents[2]
+                 model: str = "deepseek-chat",
+                 env_path: str | None = None,
+                 project_root: Path | None = None):
+        repo_root = Path(project_root or PROJECT_ROOT).resolve()
         self.cache_dir = Path(cache_dir) if cache_dir else repo_root / "data" / "sentiment_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # 自动加载项目 .env，避免不同启动方式下环境变量缺失
-        _load_env_file(repo_root / ".env")
+        # 自动加载 runtime .env，避免不同启动方式下环境变量缺失
+        _load_env_file(Path(resolve_runtime_env_path(env_path, project_root=repo_root)).resolve())
 
         self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
         self.base_url = "https://api.deepseek.com/v1"
