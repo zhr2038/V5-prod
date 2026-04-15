@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.loader import load_config
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
 from src.research.cache_loader import load_cached_market_data
 from src.research.recorder import ResearchRecorder
 from src.research.task_runner import load_task_config
@@ -340,8 +341,16 @@ def main() -> int:
     )
 
     try:
-        base_config_path = _project_path(PROJECT_ROOT, str(exp_cfg.get("base_config_path", "configs/live_prod.yaml")), "configs/live_prod.yaml")
-        env_path = str(exp_cfg.get("env_path", ".env"))
+        base_config_path = Path(
+            resolve_runtime_config_path(
+                str(exp_cfg.get("base_config_path", "")).strip() or None,
+                project_root=PROJECT_ROOT,
+            )
+        )
+        env_path = resolve_runtime_env_path(
+            str(exp_cfg.get("env_path", ".env")),
+            project_root=PROJECT_ROOT,
+        )
         cache_dir = _project_path(PROJECT_ROOT, str(exp_cfg.get("cache_dir", "data/cache")), "data/cache")
         available_bars = _available_bars(
             base_config_path=str(base_config_path),
