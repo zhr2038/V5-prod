@@ -92,9 +92,14 @@ def _resolve_path(value: str | Path | None, *, default: Path) -> Path:
     return (PROJECT_ROOT / path).resolve()
 
 
-def check_universe(universe_path: str | Path | None = None) -> bool:
+def check_universe(
+    universe_path: str | Path | None = None,
+    blacklist_path: str | Path | None = None,
+) -> bool:
     """检查币池，标记可疑币种。"""
-    path = _resolve_path(universe_path, default=build_paths().universe_path)
+    defaults = build_paths()
+    path = _resolve_path(universe_path, default=defaults.universe_path)
+    resolved_blacklist_path = _resolve_path(blacklist_path, default=defaults.blacklist_path)
     if not path.exists():
         print(f"未找到币池文件: {path}")
         return False
@@ -125,7 +130,7 @@ def check_universe(universe_path: str | Path | None = None) -> bool:
             print(f"  - {sym} (匹配: {reason})")
         print()
         print("建议操作:")
-        print("  1. 将这些币加入 configs/blacklist.json")
+        print(f"  1. 将这些币加入 {resolved_blacklist_path}")
         print("  2. 重新生成币池")
         return False
 
@@ -196,7 +201,7 @@ def main() -> None:
         )
         return
 
-    ok = check_universe(universe_path=args.universe_path)
+    ok = check_universe(universe_path=args.universe_path, blacklist_path=args.blacklist_path)
     sys.exit(0 if ok else 1)
 
 
