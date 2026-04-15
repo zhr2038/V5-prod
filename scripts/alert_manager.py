@@ -11,13 +11,16 @@ V5 Telegram 分级告警系统
 import os
 import json
 import asyncio
+import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.runtime_config import load_runtime_config, resolve_runtime_path
 from src.execution.fill_store import derive_runtime_named_json_path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # 告警级别
 ALERT_LEVELS = {

@@ -12,6 +12,11 @@ import time
 import logging
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from configs.runtime_config import (
     resolve_runtime_config_path,
     resolve_runtime_env_path,
@@ -22,8 +27,6 @@ from src.execution.fill_store import (
     derive_runtime_named_json_path,
 )
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
 ENV_WORKSPACE = os.getenv('V5_WORKSPACE')
 WORKSPACE = Path(ENV_WORKSPACE).expanduser() if ENV_WORKSPACE else PROJECT_ROOT
 if str(WORKSPACE) not in sys.path:
