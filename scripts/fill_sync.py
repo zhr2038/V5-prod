@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 import time
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.loader import load_config
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
@@ -12,7 +17,6 @@ from src.execution.okx_private_client import OKXPrivateClient
 
 
 log = logging.getLogger("fill_sync")
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _resolve_store_path(raw_path: str) -> str:
