@@ -14,6 +14,9 @@ import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_named_json_path
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # 告警级别
@@ -34,8 +37,23 @@ class AlertManager:
     def __init__(self, workspace: Path = PROJECT_ROOT):
         self.workspace = Path(workspace).resolve()
         self.reports_dir = self.workspace / 'reports'
-        self.alert_state_file = self.reports_dir / 'alert_state.json'
+        self.alert_state_file = self._resolve_alert_state_file()
         self.state = self.load_state()
+
+    def _resolve_alert_state_file(self) -> Path:
+        try:
+            cfg = load_runtime_config(project_root=self.workspace)
+            execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+            orders_db = Path(
+                resolve_runtime_path(
+                    execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                    default="reports/orders.sqlite",
+                    project_root=self.workspace,
+                )
+            ).resolve()
+            return derive_runtime_named_json_path(orders_db, "alert_state").resolve()
+        except Exception:
+            return (self.reports_dir / "alert_state.json").resolve()
     
     def load_state(self):
         """加载告警状态"""
