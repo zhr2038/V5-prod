@@ -36,7 +36,14 @@ def resolve_runtime_config_path(raw_config_path: str | None = None, *, project_r
 
 def resolve_runtime_env_path(raw_env_path: str | None = None, *, project_root: Path | None = None) -> str:
     root = (project_root or PROJECT_ROOT).resolve()
-    value = str(raw_env_path).strip() if raw_env_path is not None else ".env"
+    if raw_env_path is not None and str(raw_env_path).strip():
+        return _resolve_path(str(raw_env_path), project_root=root)
+
+    env_cfg = os.getenv("V5_ENV", "").strip()
+    if env_cfg:
+        return _resolve_path(env_cfg, project_root=root)
+
+    value = ".env"
     return _resolve_path(value or ".env", project_root=root)
 
 

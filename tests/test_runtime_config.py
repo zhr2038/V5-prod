@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from configs import runtime_config
+
+
+def test_resolve_runtime_env_path_uses_explicit_arg_before_env(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("V5_ENV", "configs/runtime.env")
+    resolved = runtime_config.resolve_runtime_env_path(".env.override", project_root=tmp_path)
+    assert resolved == str((tmp_path / ".env.override").resolve())
+
+
+def test_resolve_runtime_env_path_uses_v5_env_when_arg_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("V5_ENV", "configs/runtime.env")
+    resolved = runtime_config.resolve_runtime_env_path(project_root=tmp_path)
+    assert resolved == str((tmp_path / "configs" / "runtime.env").resolve())
+
+
+def test_resolve_runtime_env_path_falls_back_to_dotenv(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("V5_ENV", raising=False)
+    resolved = runtime_config.resolve_runtime_env_path(project_root=tmp_path)
+    assert resolved == str((tmp_path / ".env").resolve())
