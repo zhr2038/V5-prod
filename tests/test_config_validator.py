@@ -39,6 +39,20 @@ def test_check_env_variables_loads_root_dotenv(monkeypatch, tmp_path) -> None:
     assert "缺少.env文件，将使用系统环境变量" not in validator.warnings
 
 
+def test_resolve_env_path_uses_runtime_env_helper(monkeypatch, tmp_path) -> None:
+    expected = (tmp_path / "configs" / "validator.env").resolve()
+    monkeypatch.setattr(
+        config_validator,
+        "resolve_runtime_env_path",
+        lambda project_root=None: str(expected),
+    )
+    monkeypatch.setattr(config_validator, "WORKSPACE", tmp_path)
+
+    path = config_validator.resolve_env_path()
+
+    assert path == expected
+
+
 def test_check_timers_uses_current_production_timer_names(monkeypatch) -> None:
     captured = {}
 
@@ -124,5 +138,4 @@ def test_check_timers_warns_when_systemctl_call_fails(monkeypatch) -> None:
 
     assert validator.checks_passed == 0
     assert validator.warnings == ["定时任务检查失败: systemctl timed out"]
-
 

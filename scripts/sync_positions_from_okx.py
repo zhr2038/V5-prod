@@ -242,6 +242,14 @@ def fix_equity_calculation() -> bool:
     return True
 
 
+def _format_follow_up_config_path(config_path: str | None) -> str:
+    resolved = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    try:
+        return str(resolved.relative_to(PROJECT_ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(resolved)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=None)
@@ -256,7 +264,7 @@ def main() -> None:
 
     print("\nRecommended follow-up check:")
     print(f"cd {PROJECT_ROOT}")
-    print("export V5_CONFIG=configs/live_prod.yaml")
+    print(f"export V5_CONFIG={_format_follow_up_config_path(args.config)}")
     print("export V5_LIVE_ARM=YES")
     print("python3 main.py --run-id 'fix_test_$(date +%Y%m%d_%H%M%S)'")
 

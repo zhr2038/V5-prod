@@ -15,6 +15,8 @@ import yaml
 from pathlib import Path
 from datetime import datetime
 
+from configs.runtime_config import resolve_runtime_env_path
+
 CURRENT_PRODUCTION_TIMERS = (
     'v5-prod.user.timer',
     'v5-reconcile.timer',
@@ -48,6 +50,10 @@ WORKSPACE = resolve_workspace()
 CONFIG_DIR = WORKSPACE / 'configs'
 REPORTS_DIR = WORKSPACE / 'reports'
 DATA_DIR = WORKSPACE / 'data'
+
+
+def resolve_env_path() -> Path:
+    return Path(resolve_runtime_env_path(project_root=WORKSPACE)).resolve()
 
 
 def _resolve_workspace_relative_path(raw_path, default: str) -> Path:
@@ -164,7 +170,7 @@ class ConfigValidator:
         self.log("\n🔐 检查环境变量...")
 
         # 加载.env文件
-        env_file = WORKSPACE / '.env'
+        env_file = resolve_env_path()
         if env_file.exists():
             load_env_file(env_file)
             self.checks_passed += 1
