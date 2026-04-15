@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import resolve_runtime_config_path
-from src.execution.fill_store import derive_runtime_runs_dir
+from src.execution.fill_store import derive_runtime_named_json_path, derive_runtime_runs_dir
 
 
 @dataclass
@@ -65,6 +65,24 @@ def _resolve_reports_dir(raw_reports_dir: str | None = None) -> Path:
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()
     return path
+
+
+def _resolve_ab_gate_output_path(reports_dir: Path) -> Path:
+    reports_dir = Path(reports_dir).resolve()
+    default_orders = (reports_dir / "orders.sqlite").resolve()
+    if default_orders.exists():
+        return derive_runtime_named_json_path(default_orders, "ab_gate_status").resolve()
+
+    candidates = sorted(
+        {
+            candidate.resolve()
+            for candidate in reports_dir.glob("*orders*.sqlite")
+            if candidate.is_file()
+        }
+    )
+    if len(candidates) == 1:
+        return derive_runtime_named_json_path(candidates[0], "ab_gate_status").resolve()
+    return (reports_dir / "ab_gate_status.json").resolve()
 
 
 def load_runs(runs_dir: Path, limit: int = 120):
@@ -133,7 +151,7 @@ def main() -> None:
 
     reports_dir = _resolve_reports_dir(args.reports_dir)
     runs_dir = reports_dir / "runs"
-    out_path = reports_dir / "ab_gate_status.json"
+    out_path = _resolve_ab_gate_output_path(reports_dir)
 
     runs = load_runs(runs_dir, limit=args.limit)
     cur, drifts = calc_current(runs)
