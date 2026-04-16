@@ -229,9 +229,23 @@ def _run(client: paramiko.SSHClient, command: str) -> tuple[int, str, str]:
     return stdout.channel.recv_exit_status(), out, err
 
 
-def _user_bus_wrapped_command(service_user: str, inner: str) -> str:
+def _user_bus_wrapped_command(
+    service_user: str,
+    inner: str,
+    *,
+    current_user: str | None = None,
+) -> str:
     escaped_inner = shlex.quote(inner)
     escaped_user = shlex.quote(service_user)
+    same_user = str(current_user or "").strip() == str(service_user).strip()
+    if same_user:
+        return (
+            "uid=$(id -u) && "
+            "env "
+            "XDG_RUNTIME_DIR=/run/user/$uid "
+            "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus "
+            "bash -lc {inner}"
+        ).format(inner=escaped_inner)
     return (
         "uid=$(id -u {user}) && "
         "sudo -u {user} env "
@@ -267,6 +281,7 @@ def _install_units(
     remote_root: str,
     shadow_root: str,
     service_user: str,
+    ssh_user: str,
     enable_prod_timer: bool,
     enable_event_driven_timer: bool,
     restart_web_dashboard: bool,
@@ -289,7 +304,7 @@ def _install_units(
         cmd.append("--restart-web-dashboard")
 
     inner = f"cd {shlex.quote(remote_root)} && {' '.join(shlex.quote(part) for part in cmd)}"
-    wrapped = _user_bus_wrapped_command(service_user, inner)
+    wrapped = _user_bus_wrapped_command(service_user, inner, current_user=ssh_user)
     code, out, err = _run(client, wrapped)
     if code != 0:
         raise RuntimeError(f"install_systemd failed\nSTDOUT:\n{out}\nSTDERR:\n{err}")
@@ -298,6 +313,7 @@ def _install_units(
 def _validate_units(
     client: paramiko.SSHClient,
     service_user: str,
+    ssh_user: str,
     *,
     enable_prod_timer: bool,
     enable_event_driven_timer: bool,
@@ -349,7 +365,7 @@ def _validate_units(
             ]
         )
     inner = " && ".join(checks)
-    cmd = _user_bus_wrapped_command(service_user, inner)
+    cmd = _user_bus_wrapped_command(service_user, inner, current_user=ssh_user)
     code, out, err = _run(client, cmd)
     if code != 0:
         raise RuntimeError(f"systemd validation failed\nSTDOUT:\n{out}\nSTDERR:\n{err}")
@@ -438,6 +454,7 @@ def main() -> None:
                 remote_root=remote_root,
                 shadow_root=shadow_root,
                 service_user=service_user,
+                ssh_user=args.user,
                 enable_prod_timer=args.enable_prod_timer,
                 enable_event_driven_timer=args.enable_event_driven_timer,
                 restart_web_dashboard=restart_web_dashboard,
@@ -446,6 +463,7 @@ def main() -> None:
                 _validate_units(
                     client,
                     service_user,
+                    args.user,
                     enable_prod_timer=args.enable_prod_timer,
                     enable_event_driven_timer=args.enable_event_driven_timer,
                 )

@@ -236,8 +236,20 @@ def test_shadow_sync_items_cover_shadow_runtime_without_dashboard_payload() -> N
 def test_user_bus_wrapped_command_exports_user_bus() -> None:
     wrapped = _user_bus_wrapped_command("admin", "systemctl --user daemon-reload")
     assert "id -u admin" in wrapped
+    assert "sudo -u admin" in wrapped
     assert "XDG_RUNTIME_DIR=/run/user/$uid" in wrapped
     assert "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" in wrapped
+
+
+def test_user_bus_wrapped_command_skips_sudo_for_same_user() -> None:
+    wrapped = _user_bus_wrapped_command(
+        "ubuntu",
+        "systemctl --user daemon-reload",
+        current_user="ubuntu",
+    )
+    assert "id -u)" in wrapped
+    assert "sudo -u" not in wrapped
+    assert "XDG_RUNTIME_DIR=/run/user/$uid" in wrapped
 
 
 def test_production_sync_relative_paths_and_roots(tmp_path: Path) -> None:
@@ -459,6 +471,7 @@ def test_validate_units_requires_active_dashboard_and_optional_live_timers(monke
         _validate_units(
             object(),
             "ubuntu",
+            "ubuntu",
             enable_prod_timer=True,
             enable_event_driven_timer=True,
         )
@@ -488,6 +501,7 @@ def test_validate_units_skips_optional_live_timer_checks_when_not_enabled(monkey
     assert (
         _validate_units(
             object(),
+            "ubuntu",
             "ubuntu",
             enable_prod_timer=False,
             enable_event_driven_timer=False,
