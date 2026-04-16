@@ -7,6 +7,7 @@ import { MLBand } from './components/MLBand';
 import { PositionsPanel } from './components/PositionsPanel';
 import { MarketRadar } from './components/MarketRadar';
 import { SignalsPanel } from './components/SignalsPanel';
+import { ExecutionInsightsPanel } from './components/ExecutionInsightsPanel';
 import { Sidebar } from './components/Sidebar';
 import { ShadowMLPanel } from './components/ShadowMLPanel';
 import { api } from './api';
@@ -90,6 +91,7 @@ function App() {
               <PositionsPanel positions={dashboard?.positions || []} account={dashboard?.account || null} />
               <MarketRadar marketState={marketState} />
               <SignalsPanel decisionAudit={decisionAudit} />
+              <ExecutionInsightsPanel slippageInsights={dashboard?.slippageInsights || null} />
             </div>
             <div className="lg:col-span-1">
               <Sidebar

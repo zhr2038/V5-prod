@@ -54,6 +54,18 @@ from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_
 from src.regime.rss_vote_utils import build_rss_vote
 from src.research.cache_loader import load_cached_market_data
 
+SLIPPAGE_HISTOGRAM_BINS = (
+    (None, -10.0, '≤-10'),
+    (-10.0, -5.0, '-10~-5'),
+    (-5.0, 0.0, '-5~0'),
+    (0.0, 5.0, '0~5'),
+    (5.0, 10.0, '5~10'),
+    (10.0, 20.0, '10~20'),
+    (20.0, 40.0, '20~40'),
+    (40.0, 80.0, '40~80'),
+    (80.0, None, '≥80'),
+)
+
 
 def _detect_workspace() -> Path:
     candidates: List[Path] = []
@@ -1786,7 +1798,7 @@ def _format_dashboard_ts_ms(ts_ms: Any) -> str:
     return datetime.fromtimestamp(ts_f / 1000.0, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 
-def _percentile_ms(values: List[float], quantile: float) -> Optional[float]:
+def _percentile_value(values: List[float], quantile: float) -> Optional[float]:
     xs: List[float] = []
     for value in values or []:
         try:
@@ -1899,8 +1911,8 @@ def _load_api_telemetry_summary(
     rate_limited_count = int((window_row['rate_limited_count'] or 0) if window_row else 0)
     success_rate = (float(success_count) / float(total_requests)) if total_requests > 0 else None
     durations = [float(row['duration_ms']) for row in latency_rows or [] if row['duration_ms'] is not None]
-    p50_latency_ms = _percentile_ms(durations, 0.50)
-    p95_latency_ms = _percentile_ms(durations, 0.95)
+    p50_latency_ms = _percentile_value(durations, 0.50)
+    p95_latency_ms = _percentile_value(durations, 0.95)
 
     summary.update(
         {
@@ -1942,6 +1954,200 @@ def _load_api_telemetry_summary(
     else:
         summary['status'] = 'healthy'
         summary['note'] = 'API 遥测稳定'
+    return summary
+
+
+def _load_backtest_slippage_baseline(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    config = cfg if isinstance(cfg, dict) else load_config()
+    backtest_cfg = config.get('backtest', {}) if isinstance(config, dict) else {}
+
+    try:
+        default_bps = float(backtest_cfg.get('slippage_bps', 5.0) or 5.0)
+    except Exception:
+        default_bps = 5.0
+
+    mode = str(backtest_cfg.get('cost_model', 'default') or 'default').lower()
+    quantile = str(backtest_cfg.get('slippage_quantile', 'p90') or 'p90')
+    baseline = {
+        'valueBps': float(default_bps),
+        'label': f'回测默认 {default_bps:.1f}bps',
+        'mode': 'default',
+        'quantile': quantile,
+        'sourceDay': None,
+    }
+    if mode != 'calibrated':
+        return baseline
+
+    try:
+        from src.backtest.cost_calibration import load_latest_cost_stats
+    except Exception:
+        return baseline
+
+    raw_stats_dir = backtest_cfg.get('cost_stats_dir')
+    stats_dir = _resolve_workspace_relative_path(raw_stats_dir, 'reports/cost_stats')
+    max_age_days = int(backtest_cfg.get('max_stats_age_days', 7) or 7)
+    min_fills_global = int(backtest_cfg.get('min_fills_global', 30) or 30)
+    stats, _stats_path = load_latest_cost_stats(str(stats_dir), max_age_days=max_age_days)
+    if not isinstance(stats, dict):
+        return baseline
+
+    try:
+        global_fills = int(((stats.get('coverage') or {}).get('fills')) or 0)
+    except Exception:
+        global_fills = 0
+    if global_fills < min_fills_global:
+        return baseline
+
+    bucket = ((stats.get('buckets') or {}).get('ALL|ALL|ALL|ALL') or {})
+    slippage_bps = ((bucket.get('slippage_bps') or {}).get(quantile))
+    try:
+        baseline_value = float(slippage_bps)
+    except Exception:
+        return baseline
+
+    source_day = str(stats.get('day') or '').strip() or None
+    return {
+        'valueBps': baseline_value,
+        'label': f'回测校准 {quantile.upper()}',
+        'mode': 'calibrated',
+        'quantile': quantile,
+        'sourceDay': source_day,
+    }
+
+
+def _build_slippage_histogram(values: List[float]) -> List[Dict[str, Any]]:
+    histogram: List[Dict[str, Any]] = []
+    for lower, upper, label in SLIPPAGE_HISTOGRAM_BINS:
+        count = 0
+        for value in values or []:
+            numeric = float(value)
+            if lower is None:
+                if numeric <= float(upper):
+                    count += 1
+                continue
+            if upper is None:
+                if numeric >= float(lower):
+                    count += 1
+                continue
+            if numeric >= float(lower) and numeric < float(upper):
+                count += 1
+        histogram.append({
+            'label': label,
+            'startBps': lower,
+            'endBps': upper,
+            'count': count,
+        })
+    return histogram
+
+
+def _load_slippage_insights(
+    runtime_paths: Optional[DashboardRuntimePaths] = None,
+    *,
+    cfg: Optional[Dict[str, Any]] = None,
+    lookback_days: int = 14,
+) -> Dict[str, Any]:
+    config = cfg if isinstance(cfg, dict) else load_config()
+    paths = runtime_paths or _resolve_dashboard_runtime_paths(config)
+    events_dir = derive_runtime_cost_events_dir(paths.orders_db).resolve()
+    baseline = _load_backtest_slippage_baseline(config)
+    summary: Dict[str, Any] = {
+        'status': 'missing',
+        'lookbackDays': int(lookback_days),
+        'sampleCount': 0,
+        'actualAvgBps': None,
+        'actualP50Bps': None,
+        'actualP90Bps': None,
+        'actualP95Bps': None,
+        'actualMinBps': None,
+        'actualMaxBps': None,
+        'baselineBps': baseline.get('valueBps'),
+        'baselineLabel': baseline.get('label'),
+        'baselineMode': baseline.get('mode'),
+        'baselineSourceDay': baseline.get('sourceDay'),
+        'bins': _build_slippage_histogram([]),
+        'lastFillAt': '',
+        'note': '暂无实测滑点数据',
+    }
+    if not events_dir.exists():
+        return summary
+
+    values: List[float] = []
+    last_fill_ts = 0
+    event_files = sorted(events_dir.glob('*.jsonl'))[-max(1, int(lookback_days)):]
+    for event_file in event_files:
+        try:
+            lines = event_file.read_text(encoding='utf-8').splitlines()
+        except Exception:
+            continue
+        for line in lines:
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                event = json.loads(raw)
+            except Exception:
+                continue
+            if str(event.get('event_type') or '').lower() != 'fill':
+                continue
+            slip = event.get('slippage_bps')
+            if slip is None:
+                notional = float(event.get('notional_usdt') or 0.0)
+                slip_usdt = event.get('slippage_usdt')
+                if slip_usdt is not None and notional > 0:
+                    try:
+                        slip = float(slip_usdt) / notional * 10000.0
+                    except Exception:
+                        slip = None
+            try:
+                slip_f = float(slip)
+            except Exception:
+                continue
+            if not math.isfinite(slip_f):
+                continue
+            values.append(slip_f)
+            try:
+                ts_val = int((event.get('ts') or 0)) * 1000
+                last_fill_ts = max(last_fill_ts, ts_val)
+            except Exception:
+                pass
+
+    if not values:
+        return summary
+
+    values.sort()
+    sample_count = len(values)
+    p50_bps = _percentile_value(values, 0.50)
+    p90_bps = _percentile_value(values, 0.90)
+    p95_bps = _percentile_value(values, 0.95)
+    avg_bps = float(sum(values) / sample_count) if sample_count > 0 else None
+
+    summary.update(
+        {
+            'sampleCount': sample_count,
+            'actualAvgBps': avg_bps,
+            'actualP50Bps': p50_bps,
+            'actualP90Bps': p90_bps,
+            'actualP95Bps': p95_bps,
+            'actualMinBps': float(values[0]),
+            'actualMaxBps': float(values[-1]),
+            'bins': _build_slippage_histogram(values),
+            'lastFillAt': _format_dashboard_ts_ms(last_fill_ts),
+        }
+    )
+
+    baseline_bps = baseline.get('valueBps')
+    if sample_count < 5:
+        summary['status'] = 'warning'
+        summary['note'] = '滑点样本偏少，先观察趋势'
+    elif baseline_bps is not None and avg_bps is not None and avg_bps > float(baseline_bps) * 1.8:
+        summary['status'] = 'critical'
+        summary['note'] = '实测滑点显著高于回测基线'
+    elif baseline_bps is not None and p90_bps is not None and p90_bps > float(baseline_bps) * 1.4:
+        summary['status'] = 'warning'
+        summary['note'] = '滑点尾部偏高，需关注执行质量'
+    else:
+        summary['status'] = 'healthy'
+        summary['note'] = '实测滑点基本贴近回测基线'
     return summary
 
 
@@ -3718,6 +3924,7 @@ def api_dashboard():
         ml_training = _call_dashboard_api(api_ml_training, default={'status': 'unknown'}, label='ml_training', errors=errors)
         reflection_reports = _call_dashboard_api(api_reflection_reports, default={'reports': []}, label='reflection_reports', errors=errors)
         api_telemetry = _load_api_telemetry_summary(runtime_paths=runtime_paths)
+        slippage_insights = _load_slippage_insights(runtime_paths=runtime_paths, cfg=load_config())
 
         positions_data = positions_payload
         if isinstance(positions_payload, dict):
@@ -3847,6 +4054,7 @@ def api_dashboard():
             'mlTraining': ml_training,
             'reflectionReports': reflection_reports,
             'apiTelemetry': api_telemetry,
+            'slippageInsights': slippage_insights,
         }
         
         return jsonify(dashboard_data)
@@ -3898,6 +4106,24 @@ def api_dashboard():
                 'lastErrorAt': '',
                 'latestError': None,
                 'note': 'API 遥测读取失败',
+            },
+            slippageInsights={
+                'status': 'error',
+                'lookbackDays': 14,
+                'sampleCount': 0,
+                'actualAvgBps': None,
+                'actualP50Bps': None,
+                'actualP90Bps': None,
+                'actualP95Bps': None,
+                'actualMinBps': None,
+                'actualMaxBps': None,
+                'baselineBps': None,
+                'baselineLabel': '',
+                'baselineMode': 'default',
+                'baselineSourceDay': None,
+                'bins': [],
+                'lastFillAt': '',
+                'note': '滑点数据读取失败',
             },
         )
 

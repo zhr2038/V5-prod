@@ -6,7 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -668,6 +668,28 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
             "note": "API 出现限流或延迟抬升",
         },
     )
+    monkeypatch.setattr(
+        module,
+        "_load_slippage_insights",
+        lambda runtime_paths=None, cfg=None, lookback_days=14: {
+            "status": "warning",
+            "lookbackDays": lookback_days,
+            "sampleCount": 18,
+            "actualAvgBps": 6.4,
+            "actualP50Bps": 4.8,
+            "actualP90Bps": 12.2,
+            "actualP95Bps": 16.5,
+            "actualMinBps": -1.5,
+            "actualMaxBps": 28.0,
+            "baselineBps": 5.0,
+            "baselineLabel": "回测校准 P90",
+            "baselineMode": "calibrated",
+            "baselineSourceDay": "20260416",
+            "bins": [{"label": "0~5", "startBps": 0.0, "endBps": 5.0, "count": 8}],
+            "lastFillAt": "2026-03-08 21:00:00",
+            "note": "滑点尾部偏高，需关注执行质量",
+        },
+    )
 
     response = client.get("/api/dashboard")
 
@@ -684,6 +706,9 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     assert payload["apiTelemetry"]["status"] == "warning"
     assert payload["apiTelemetry"]["totalRequests"] == 42
     assert payload["apiTelemetry"]["latestError"]["okxCode"] == "50011"
+    assert payload["slippageInsights"]["status"] == "warning"
+    assert payload["slippageInsights"]["baselineSourceDay"] == "20260416"
+    assert payload["slippageInsights"]["bins"][0]["label"] == "0~5"
 
 
 def test_load_api_telemetry_summary_reads_runtime_db(monkeypatch, tmp_path):
@@ -746,6 +771,75 @@ def test_load_api_telemetry_summary_reads_runtime_db(monkeypatch, tmp_path):
     assert summary["p50LatencyMs"] == pytest.approx(120.0)
     assert summary["p95LatencyMs"] == pytest.approx(822.0)
     assert summary["latestError"]["okxCode"] == "50011"
+
+
+def test_load_slippage_insights_reads_cost_events_and_calibrated_baseline(tmp_path):
+    module = load_web_dashboard_module()
+    orders_db = tmp_path / "reports" / "orders.sqlite"
+    events_dir = tmp_path / "reports" / "cost_events"
+    stats_dir = tmp_path / "reports" / "cost_stats"
+    events_dir.mkdir(parents=True, exist_ok=True)
+    stats_dir.mkdir(parents=True, exist_ok=True)
+
+    (events_dir / "20260416.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"event_type": "fill", "slippage_bps": -2.0, "ts": 1760000000}),
+                json.dumps({"event_type": "fill", "slippage_bps": 3.0, "ts": 1760000100}),
+                json.dumps({"event_type": "fill", "slippage_bps": 8.0, "ts": 1760000200}),
+                json.dumps({"event_type": "fill", "slippage_bps": 25.0, "ts": 1760000300}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    day_tag = datetime.now(timezone.utc).strftime("%Y%m%d")
+    (stats_dir / f"daily_cost_stats_{day_tag}.json").write_text(
+        json.dumps(
+            {
+                "day": day_tag,
+                "coverage": {"fills": 40},
+                "buckets": {
+                    "ALL|ALL|ALL|ALL": {
+                        "count": 40,
+                        "slippage_bps": {"p90": 7.5, "p95": 9.1},
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeRuntimePaths:
+        def __init__(self, db_path: Path):
+            self.orders_db = db_path
+
+    cfg = {
+        "backtest": {
+            "slippage_bps": 5,
+            "cost_model": "calibrated",
+            "slippage_quantile": "p90",
+            "cost_stats_dir": str(stats_dir),
+            "max_stats_age_days": 7,
+            "min_fills_global": 30,
+        }
+    }
+
+    summary = module._load_slippage_insights(
+        runtime_paths=FakeRuntimePaths(orders_db),
+        cfg=cfg,
+        lookback_days=14,
+    )
+
+    assert summary["status"] == "warning"
+    assert summary["sampleCount"] == 4
+    assert summary["baselineBps"] == pytest.approx(7.5)
+    assert summary["baselineMode"] == "calibrated"
+    assert summary["actualAvgBps"] == pytest.approx(8.5)
+    assert summary["actualP50Bps"] == pytest.approx(5.5)
+    assert summary["actualP90Bps"] == pytest.approx(19.9)
+    assert any(bin_item["label"] == "20~40" and bin_item["count"] == 1 for bin_item in summary["bins"])
 
 
 def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypatch):

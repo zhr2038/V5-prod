@@ -89,6 +89,32 @@ export interface ApiTelemetryData {
   note?: string;
 }
 
+export interface SlippageHistogramBin {
+  label: string;
+  startBps?: number | null;
+  endBps?: number | null;
+  count: number;
+}
+
+export interface SlippageInsightsData {
+  status: string;
+  lookbackDays: number;
+  sampleCount: number;
+  actualAvgBps?: number | null;
+  actualP50Bps?: number | null;
+  actualP90Bps?: number | null;
+  actualP95Bps?: number | null;
+  actualMinBps?: number | null;
+  actualMaxBps?: number | null;
+  baselineBps?: number | null;
+  baselineLabel?: string;
+  baselineMode?: string;
+  baselineSourceDay?: string | null;
+  bins: SlippageHistogramBin[];
+  lastFillAt?: string;
+  note?: string;
+}
+
 export interface DashboardData {
   account: AccountData;
   positions: Position[];
@@ -103,6 +129,7 @@ export interface DashboardData {
   mlTraining: MLTrainingData;
   reflectionReports: any;
   apiTelemetry?: ApiTelemetryData | null;
+  slippageInsights?: SlippageInsightsData | null;
 }
 
 export interface EquityPoint {
