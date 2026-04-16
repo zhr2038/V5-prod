@@ -55,10 +55,6 @@ def resolve_live_timer_unit_name() -> str:
     if _get_unit_load_state(current_unit) not in {"", "not-found"}:
         return current_unit
 
-    legacy_unit = "v5-live-20u.user.timer"
-    if _get_unit_load_state(legacy_unit) not in {"", "not-found"}:
-        return legacy_unit
-
     return "v5-prod.user.timer"
 
 

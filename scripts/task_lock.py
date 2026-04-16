@@ -22,7 +22,7 @@ class TaskLock:
     
     def __init__(self, task_name, timeout=300):
         """
-        task_name: 任务名称（如 'v5-live-20u'）
+        task_name: 任务名称（如 'v5-prod'）
         timeout: 锁超时时间（秒），默认5分钟
         """
         self.task_name = task_name

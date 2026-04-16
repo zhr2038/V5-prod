@@ -28,7 +28,7 @@ from src.execution.fill_store import derive_fill_store_path, derive_runtime_name
 
 
 TELEGRAM_CHAT_ID = "5065024131"
-LIVE_SERVICE_UNITS = ("v5-prod.user.service", "v5-live-20u.user.service")
+LIVE_SERVICE_UNITS = ("v5-prod.user.service",)
 ALERT_THRESHOLDS = {
     "no_trade_hours": 6,
     "no_trade_critical": 12,
@@ -135,11 +135,6 @@ def resolve_live_service_unit_name() -> str:
     current_unit = LIVE_SERVICE_UNITS[0]
     if _get_unit_load_state(current_unit) not in {"", "not-found"}:
         return current_unit
-
-    legacy_unit = LIVE_SERVICE_UNITS[1]
-    if _get_unit_load_state(legacy_unit) not in {"", "not-found"}:
-        return legacy_unit
-
     return LIVE_SERVICE_UNITS[0]
 
 
