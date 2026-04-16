@@ -1,6 +1,6 @@
 
 # 100 USDT 回测配置
-# 基于 live_20u_real.yaml 修改
+# 基于 live_prod.yaml 修改
 
 symbols:
   - BTC/USDT

@@ -2,7 +2,7 @@
 # - Larger per-trade sizing (~100u) so symbols with larger minSz (e.g. SPACE) become tradable.
 # - Keep exchange min-order protection to avoid OKX 51020 and minSz failures.
 
-# Base: copy from live_20u_real.yaml and adjust budget sizing knobs.
+# Base: copy from live_prod.yaml and adjust budget sizing knobs.
 
 symbols:
   - BTC/USDT

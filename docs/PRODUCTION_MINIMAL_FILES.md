@@ -161,4 +161,4 @@ The canonical production service name is now:
 - `v5-prod.user.service`
 - `v5-prod.user.timer`
 
-Legacy names such as `v5-live-20u.user.service` remain in the repository for historical compatibility, but should not be treated as the primary production identity.
+Retired names such as `v5-live-20u.user.service` have been removed from the active production paths and should not be used again.

@@ -1,5 +1,5 @@
 # Event-Driven Trading Configuration
-# Copy to configs/live_20u_real.yaml to enable
+# Copy to configs/live_prod.yaml to enable
 
 event_driven:
   enabled: true
