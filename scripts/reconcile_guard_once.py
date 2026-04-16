@@ -11,16 +11,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
-from src.execution.account_store import AccountStore
-from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
-from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
-from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXRateLimitError
-from src.execution.position_store import PositionStore
-from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
-
-
 log = logging.getLogger("reconcile_guard")
 
 
@@ -29,6 +19,9 @@ def _coalesce(value, default):
 
 
 def _resolve_runtime_json_path(raw_path, *, order_store_path: str, base_name: str, legacy_default: str) -> str:
+    from configs.runtime_config import resolve_runtime_path
+    from src.execution.fill_store import derive_runtime_named_json_path
+
     if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
         return str(derive_runtime_named_json_path(order_store_path, base_name))
     return resolve_runtime_path(raw_path, default=legacy_default)
@@ -56,6 +49,15 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    from configs.loader import load_config
+    from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
+    from src.execution.account_store import AccountStore
+    from src.execution.fill_store import derive_position_store_path
+    from src.execution.kill_switch_guard import GuardConfig, KillSwitchGuard
+    from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXRateLimitError
+    from src.execution.position_store import PositionStore
+    from src.execution.reconcile_engine import ReconcileEngine, ReconcileThresholds
+
     cfg = load_config(
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),

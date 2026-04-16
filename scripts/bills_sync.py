@@ -10,17 +10,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
-from src.execution.fill_store import derive_runtime_named_artifact_path
-from src.execution.bills_store import BillsStore, parse_okx_bills
-from src.execution.okx_private_client import OKXPrivateClient
-
 
 log = logging.getLogger("bills_sync")
 
 
 def _resolve_bills_db_path(raw_db_path: str | None, cfg) -> str:
+    from configs.runtime_config import resolve_runtime_path
+    from src.execution.fill_store import derive_runtime_named_artifact_path
+
     if raw_db_path:
         return resolve_runtime_path(raw_db_path, default="reports/bills.sqlite")
 
@@ -44,6 +41,7 @@ def sync_once(*, store: BillsStore, client: OKXPrivateClient, limit: int = 100, 
     total_new = 0
     last_bill_id = None
     last_ts = None
+    from src.execution.bills_store import parse_okx_bills
 
     for _ in range(int(max_pages)):
         r = client.get_bills(after=after, limit=int(limit))
@@ -90,6 +88,11 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    from configs.loader import load_config
+    from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+    from src.execution.bills_store import BillsStore
+    from src.execution.okx_private_client import OKXPrivateClient
+
     cfg = load_config(
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),

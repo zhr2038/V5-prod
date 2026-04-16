@@ -9,9 +9,29 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
-from src.execution.okx_private_client import OKXPrivateClient
+
+def resolve_runtime_config_path(raw_config_path=None, project_root=None):
+    from configs.runtime_config import resolve_runtime_config_path as _resolve_runtime_config_path
+
+    return _resolve_runtime_config_path(raw_config_path, project_root=project_root)
+
+
+def resolve_runtime_env_path(raw_env_path=None, project_root=None):
+    from configs.runtime_config import resolve_runtime_env_path as _resolve_runtime_env_path
+
+    return _resolve_runtime_env_path(raw_env_path, project_root=project_root)
+
+
+def load_config(path, env_path=None):
+    from configs.loader import load_config as _load_config
+
+    return _load_config(path, env_path=env_path)
+
+
+def OKXPrivateClient(*args, **kwargs):
+    from src.execution.okx_private_client import OKXPrivateClient as _OKXPrivateClient
+
+    return _OKXPrivateClient(*args, **kwargs)
 
 
 def _resolve_runtime_entry_paths(

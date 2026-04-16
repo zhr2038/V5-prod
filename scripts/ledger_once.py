@@ -10,14 +10,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
-from src.execution.fill_store import derive_runtime_named_artifact_path, derive_runtime_named_json_path
-from src.execution.bills_store import BillsStore
-from src.execution.ledger_engine import LedgerEngine, LedgerThresholds
-from src.execution.okx_private_client import OKXPrivateClient
-
-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
@@ -27,6 +19,13 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    from configs.loader import load_config
+    from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path, resolve_runtime_path
+    from src.execution.fill_store import derive_runtime_named_artifact_path, derive_runtime_named_json_path
+    from src.execution.bills_store import BillsStore
+    from src.execution.ledger_engine import LedgerEngine, LedgerThresholds
+    from src.execution.okx_private_client import OKXPrivateClient
+
     cfg = load_config(
         resolve_runtime_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),

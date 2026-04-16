@@ -10,12 +10,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.loader import load_config
-from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
-from src.execution.fill_store import FillStore, derive_fill_store_path, parse_okx_fills
-from src.execution.okx_private_client import OKXPrivateClient
-
-
 log = logging.getLogger("fill_sync")
 
 
@@ -35,6 +29,7 @@ def sync_once(*, store: FillStore, client: OKXPrivateClient, limit: int = 100, m
 
     after = None
     total_new = 0
+    from src.execution.fill_store import parse_okx_fills
     for _ in range(int(max_pages)):
         r = client.get_fills(after=after, limit=int(limit))
         rows = parse_okx_fills(r.data, source="fills")
@@ -70,6 +65,11 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    from configs.loader import load_config
+    from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
+    from src.execution.fill_store import FillStore, derive_fill_store_path
+    from src.execution.okx_private_client import OKXPrivateClient
+
     cfg = load_config(
         resolve_runtime_config_path(args.config, project_root=PROJECT_ROOT),
         env_path=resolve_runtime_env_path(args.env, project_root=PROJECT_ROOT),
