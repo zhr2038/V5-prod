@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - exercised in deployment/runtime validation
+    def load_dotenv(*_args, **_kwargs):
+        return False
 
 from src.utils.auto_blacklist import resolve_auto_blacklist_path
 
