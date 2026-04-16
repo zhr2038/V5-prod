@@ -172,7 +172,7 @@ fi
 echo "Installing system units to /etc/systemd/system (requires sudo)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-render_units "$TMP_DIR" --copy-all
+render_units "$TMP_DIR" "$ROOT" --copy-all
 sudo cp "$TMP_DIR"/*.service "$TMP_DIR"/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now v5-hourly.timer
