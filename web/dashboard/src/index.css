@@ -42,6 +42,7 @@ body,
 #root {
   margin: 0;
   padding: 0;
+  padding-top: 0;
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
@@ -72,9 +73,19 @@ body {
   width: 100%;
   max-width: 1920px;
   margin: 0 auto;
+  background: inherit;
+  background-color: inherit;
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
+}
+
+.hero-safe-top {
+  padding-top: max(1.6rem, calc(env(safe-area-inset-top, 0px) + 0.75rem));
+}
+
+.top-control-rail {
+  margin-top: max(0px, calc(env(safe-area-inset-top, 0px) * 0.08));
 }
 
 .liquid-filters {
