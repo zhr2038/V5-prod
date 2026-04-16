@@ -112,6 +112,17 @@ def _resolve_react_build_path() -> Path:
 
 
 REACT_BUILD_PATH = _resolve_react_build_path()
+
+
+def _dashboard_renderer_mode() -> str:
+    raw = str(os.getenv("V5_DASHBOARD_RENDERER") or "").strip().lower()
+    if raw in {"react", "spa", "dist"}:
+        return "react"
+    if raw in {"template", "jinja", "legacy"}:
+        return "template"
+    return "template"
+
+
 SYSTEMCTL_BIN = shutil.which('systemctl')
 TIMER_TS_RE = re.compile(r'(\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})')
 
@@ -1887,6 +1898,12 @@ def _static_asset_version(filename: str) -> str:
 
 def _render_monitor_v2():
     template_path = WEB_DIR / 'templates' / 'monitor_v2.html'
+    index_path = REACT_BUILD_PATH / 'index.html'
+    renderer_mode = _dashboard_renderer_mode()
+
+    if renderer_mode == "react" and index_path.exists():
+        return send_from_directory(str(REACT_BUILD_PATH), 'index.html')
+
     if template_path.exists():
         return render_template(
             'monitor_v2.html',
@@ -1894,7 +1911,6 @@ def _render_monitor_v2():
             ml_status_panel_js_version=_static_asset_version('js/ml_status_panel.js'),
         )
 
-    index_path = REACT_BUILD_PATH / 'index.html'
     if index_path.exists():
         return send_from_directory(str(REACT_BUILD_PATH), 'index.html')
 
