@@ -489,6 +489,180 @@ def test_close_only_sell_not_blocked_by_cash_gate(tmp_path):
     )
 
 
+def test_zero_target_close_sell_bypasses_turnover_cap(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT", "SUI/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.max_rebalance_turnover_per_cycle = 0.10
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={},
+        selected=[],
+        volatilities={},
+        notes="",
+    )
+
+    market_data = {
+        "BTC/USDT": _series("BTC/USDT", 50000.0),
+        "SUI/USDT": _series("SUI/USDT", 1.0),
+    }
+    positions = [
+        Position(
+            symbol="SUI/USDT",
+            qty=40.0,
+            avg_px=1.0,
+            entry_ts="2026-03-10T08:00:00Z",
+            highest_px=1.05,
+            last_update_ts="2026-03-10T08:00:00Z",
+            last_mark_px=1.0,
+            unrealized_pnl_pct=0.0,
+        )
+    ]
+    alpha = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"SUI/USDT": 1.0, "BTC/USDT": 0.5},
+    )
+    audit = DecisionAudit(run_id="zero-target-close-bypass")
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=positions,
+        cash_usdt=1.0,
+        equity_peak_usdt=41.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    order = out.orders[0]
+    assert order.symbol == "SUI/USDT"
+    assert order.side == "sell"
+    assert bool((order.meta or {}).get("bypass_turnover_cap_for_exit")) is True
+    assert (order.meta or {}).get("turnover_cap_bypass_reason") == "zero_target_close"
+    assert any(
+        d.get("symbol") == "SUI/USDT"
+        and d.get("reason") == "zero_target_close"
+        and d.get("bypass_turnover_cap_for_exit") is True
+        for d in audit.router_decisions
+    )
+
+
+def test_exit_signal_sell_bypasses_turnover_cap_while_buy_is_blocked(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT", "SUI/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.max_rebalance_turnover_per_cycle = 0.05
+    cfg.budget.min_trade_notional_base = 10.0
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    pipe.exit_policy.evaluate = lambda positions, market_data, regime_state: [
+        pipeline_module.Order(
+            symbol="SUI/USDT",
+            side="sell",
+            intent="CLOSE_LONG",
+            notional_usdt=40.0,
+            signal_price=1.0,
+            meta={"reason": "atr_trailing"},
+        )
+    ]
+
+    market_data = {
+        "BTC/USDT": _series("BTC/USDT", 50000.0),
+        "SUI/USDT": _series("SUI/USDT", 1.0),
+    }
+    positions = [
+        Position(
+            symbol="SUI/USDT",
+            qty=40.0,
+            avg_px=1.0,
+            entry_ts="2026-03-10T08:00:00Z",
+            highest_px=1.05,
+            last_update_ts="2026-03-10T08:00:00Z",
+            last_mark_px=1.0,
+            unrealized_pnl_pct=0.0,
+        )
+    ]
+    alpha = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"BTC/USDT": 1.0, "SUI/USDT": 0.5},
+    )
+    audit = DecisionAudit(run_id="exit-priority-bypass")
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=positions,
+        cash_usdt=100.0,
+        equity_peak_usdt=140.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert any(order.symbol == "SUI/USDT" and order.side == "sell" for order in out.orders)
+    assert not any(order.symbol == "BTC/USDT" and order.side == "buy" for order in out.orders)
+    assert any(
+        d.get("symbol") == "SUI/USDT"
+        and d.get("reason") == "exit_signal_priority"
+        and d.get("bypass_turnover_cap_for_exit") is True
+        for d in audit.router_decisions
+    )
+    assert any(
+        d.get("symbol") == "BTC/USDT"
+        and d.get("reason") == "turnover_cap"
+        for d in audit.router_decisions
+    )
+
+
+def test_open_long_buy_still_blocked_when_turnover_cap_is_full(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.max_rebalance_turnover_per_cycle = 0.05
+    cfg.budget.min_trade_notional_base = 10.0
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+
+    market_data = {
+        "BTC/USDT": _series("BTC/USDT", 50000.0),
+    }
+    alpha = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"BTC/USDT": 1.0},
+    )
+    audit = DecisionAudit(run_id="buy-turnover-block")
+
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=alpha,
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(
+        d.get("symbol") == "BTC/USDT"
+        and d.get("reason") == "turnover_cap"
+        for d in audit.router_decisions
+    )
+
+
 def test_rank_exit_audit_does_not_mislead_for_in_rank_position(tmp_path):
     cfg = AppConfig(symbols=["BTC/USDT", "XRP/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False

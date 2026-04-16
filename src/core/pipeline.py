@@ -1296,18 +1296,28 @@ class V5Pipeline:
         *,
         equity_raw: float,
     ) -> Tuple[List[Order], List[Order], Dict[str, float]]:
+        protected_orders = [
+            order
+            for order in (rebalance_orders or [])
+            if bool(((order.meta or {}).get("bypass_turnover_cap_for_exit", False)))
+        ]
+        cap_eligible_orders = [
+            order
+            for order in (rebalance_orders or [])
+            if not bool(((order.meta or {}).get("bypass_turnover_cap_for_exit", False)))
+        ]
         max_rb_turnover = getattr(self.cfg.execution, "max_rebalance_turnover_per_cycle", None)
         if (
             max_rb_turnover is None
             or float(max_rb_turnover) <= 0.0
             or float(equity_raw) <= 0.0
-            or not rebalance_orders
+            or not cap_eligible_orders
         ):
             return rebalance_orders, [], {}
 
         cap_notional = float(max_rb_turnover) * float(equity_raw)
-        buy_orders = [order for order in rebalance_orders if str(order.side or "").lower() == "buy"]
-        sell_orders = [order for order in rebalance_orders if str(order.side or "").lower() == "sell"]
+        buy_orders = [order for order in cap_eligible_orders if str(order.side or "").lower() == "buy"]
+        sell_orders = [order for order in cap_eligible_orders if str(order.side or "").lower() == "sell"]
         total_buy = float(sum(abs(float(order.notional_usdt or 0.0)) for order in buy_orders))
         total_sell = float(sum(abs(float(order.notional_usdt or 0.0)) for order in sell_orders))
         effective_turnover = float(max(total_buy, total_sell))
@@ -1316,6 +1326,10 @@ class V5Pipeline:
             "total_buy_notional": float(total_buy),
             "total_sell_notional": float(total_sell),
             "effective_turnover_notional": float(effective_turnover),
+            "bypassed_exit_count": float(len(protected_orders)),
+            "bypassed_exit_notional": float(
+                sum(abs(float(order.notional_usdt or 0.0)) for order in protected_orders)
+            ),
         }
 
         if effective_turnover <= cap_notional:
@@ -1329,9 +1343,14 @@ class V5Pipeline:
             sell_orders,
             cap_notional=cap_notional,
         )
-        keep_ids = {id(order) for order in (kept_buys + kept_sells)}
+        keep_ids = {id(order) for order in (protected_orders + kept_buys + kept_sells)}
+        protected_ids = {id(order) for order in protected_orders}
         kept_orders = [order for order in rebalance_orders if id(order) in keep_ids]
-        dropped_orders = [order for order in rebalance_orders if id(order) not in keep_ids]
+        dropped_orders = [
+            order
+            for order in rebalance_orders
+            if id(order) not in keep_ids and id(order) not in protected_ids
+        ]
         clipped_orders = list(clipped_buys) + list(clipped_sells)
         stats.update(
             {
@@ -2081,6 +2100,25 @@ class V5Pipeline:
                 if cur is None or prio > cur[0]:
                     best[o.symbol] = (prio, o)
             exit_orders = [v[1] for v in best.values()]
+
+        exit_router_decisions = []
+        for order in exit_orders:
+            meta = dict(order.meta or {})
+            meta["bypass_turnover_cap_for_exit"] = True
+            meta["turnover_cap_bypass_reason"] = "exit_signal_priority"
+            order.meta = meta
+            exit_router_decisions.append(
+                {
+                    "symbol": order.symbol,
+                    "action": "create",
+                    "reason": "exit_signal_priority",
+                    "source_reason": meta.get("reason"),
+                    "side": order.side,
+                    "intent": order.intent,
+                    "notional": float(order.notional_usdt or 0.0),
+                    "bypass_turnover_cap_for_exit": True,
+                }
+            )
         exit_symbols = {o.symbol for o in exit_orders}
         
         if audit:
@@ -2101,13 +2139,15 @@ class V5Pipeline:
                         "atr": meta.get("atr"),
                         "atr_mult": meta.get("atr_mult"),
                         "atr_n": meta.get("atr_n"),
+                        "bypass_turnover_cap_for_exit": bool(meta.get("bypass_turnover_cap_for_exit", False)),
+                        "turnover_cap_bypass_reason": meta.get("turnover_cap_bypass_reason"),
                     }
                 )
             audit.exit_signals = xs
 
         # 7. Rebalance orders生成（deadband + 拒绝原因审计）
         rebalance_orders: List[Order] = []
-        router_decisions = []
+        router_decisions = list(exit_router_decisions)
         invalid_price_warnings: List[Dict] = []  # 记录价格无效的告警
 
         # Risk-Off 下是否进入 close-only：
@@ -2191,6 +2231,7 @@ class V5Pipeline:
         # Optional hard rule: force-close held symbols that are no longer in current scored universe.
         scored_symbols = set(alpha.scores.keys()) if alpha and getattr(alpha, 'scores', None) else set()
         force_close_unscored = bool(getattr(self.cfg.execution, 'force_close_unscored_positions', False))
+        target_hold_eps = float(_coalesce(getattr(self.cfg.rebalance, "close_only_weight_eps", None), 0.001))
 
         # Optional hard rule: require fused strategy signals for any buy order (disable alpha fallback buys).
         require_fused_buy = bool(getattr(self.cfg.execution, 'require_fused_signals_for_buy', False))
@@ -2258,12 +2299,24 @@ class V5Pipeline:
                                 intent='CLOSE_LONG',
                                 notional_usdt=notional_fs,
                                 signal_price=px_fs,
-                                meta={'reason': 'force_close_unscored'},
+                                meta={
+                                    'reason': 'force_close_unscored',
+                                    'bypass_turnover_cap_for_exit': True,
+                                    'turnover_cap_bypass_reason': 'zero_target_close',
+                                },
                             )
                         )
                         if audit:
                             audit.add_note(f"Force close unscored: {sym} qty={float(getattr(held,'qty',0.0)):.8f}")
-                            router_decisions.append({'symbol': sym, 'action': 'close', 'reason': 'force_close_unscored'})
+                            router_decisions.append(
+                                {
+                                    'symbol': sym,
+                                    'action': 'close',
+                                    'reason': 'zero_target_close',
+                                    'source_reason': 'force_close_unscored',
+                                    'bypass_turnover_cap_for_exit': True,
+                                }
+                            )
                         continue
             
             # Banding 逻辑：新建仓阈值 > 维持仓阈值
@@ -2281,8 +2334,7 @@ class V5Pipeline:
 
             # If target weight is ~0 (close-only), shrink deadband (but keep sells allowed) to avoid stuck dust positions.
             try:
-                tw_eps = float(_coalesce(getattr(self.cfg.rebalance, "close_only_weight_eps", None), 0.001))
-                if abs(float(tw)) <= tw_eps and abs(float(cw)) > tw_eps:
+                if abs(float(tw)) <= target_hold_eps and abs(float(cw)) > target_hold_eps:
                     # 清仓模式：死区大幅降低，确保能卖出
                     cm = float(_coalesce(getattr(self.cfg.rebalance, "close_only_deadband_multiplier", None), 0.1))
                     effective_deadband = min(float(effective_deadband), float(deadband) * float(cm))
@@ -2363,6 +2415,10 @@ class V5Pipeline:
                     notional = desired_notional
                 if notional <= 0:
                     continue
+
+            bypass_turnover_cap_for_exit = bool(
+                side == "sell" and held is not None and abs(float(tw)) <= float(target_hold_eps)
+            )
 
             if side == "buy" and eligible_buy_symbols and sym not in eligible_buy_symbols:
                 if audit:
@@ -2771,6 +2827,10 @@ class V5Pipeline:
             }
             if side == "buy":
                 meta["clip_min_notional"] = float(clip_min_notional)
+            if bypass_turnover_cap_for_exit:
+                meta["bypass_turnover_cap_for_exit"] = True
+                meta["turnover_cap_bypass_reason"] = "zero_target_close"
+                meta["target_hold_eps"] = float(target_hold_eps)
             if audit:
                 meta.update(
                     {
@@ -2808,14 +2868,16 @@ class V5Pipeline:
                 cash_remaining += float(notional)
 
             if audit:
+                decision_reason = "zero_target_close" if bypass_turnover_cap_for_exit else "ok"
                 router_decisions.append(
                     {
                         "symbol": sym,
                         "action": "create",
-                        "reason": "ok",
+                        "reason": decision_reason,
                         "side": side,
                         "notional": notional,
                         "cash_after": cash_remaining,
+                        "bypass_turnover_cap_for_exit": bool(bypass_turnover_cap_for_exit),
                     }
                 )
 
@@ -2843,6 +2905,7 @@ class V5Pipeline:
                         f"sell=${float(turnover_cap_stats.get('total_sell_notional', 0.0)):.2f}, "
                         f"effective=${float(turnover_cap_stats.get('effective_turnover_notional', 0.0)):.2f} "
                         f"> cap=${float(turnover_cap_stats.get('cap_notional', 0.0)):.2f}, "
+                        f"bypassed_exit_count={int(turnover_cap_stats.get('bypassed_exit_count', 0.0))}, "
                         f"kept={len(kept_rebalance_orders)}, dropped={len(dropped_rebalance_orders)}, "
                         f"clipped={len(clipped_rebalance_orders)}"
                     )
