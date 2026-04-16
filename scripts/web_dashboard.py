@@ -1358,11 +1358,11 @@ def _load_avg_cost_from_fills(symbol: str, current_qty: float, reports_dir: Opti
 
 def load_config():
     """加载配置"""
-    try:
-        with open(_resolve_config_path(), 'r') as f:
-            return yaml.safe_load(f)
-    except:
-        return {}
+    cfg = load_app_config(
+        str(_resolve_config_path()),
+        env_path=str(_resolve_workspace_env_path()),
+    )
+    return cfg.model_dump(mode='python')
 
 
 def _dashboard_execution_mode(config: Dict[str, Any]) -> str:

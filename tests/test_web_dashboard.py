@@ -53,6 +53,26 @@ def test_load_config_uses_runtime_helper_dynamically(monkeypatch, tmp_path):
     assert payload["alpha"]["long_top_pct"] == 0.42
 
 
+def test_load_config_surfaces_invalid_config(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    cfg_path = tmp_path / "configs" / "runtime.yaml"
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text("symbols:\n  - BTCUSDT\n", encoding="utf-8")
+    monkeypatch.setattr(
+        module,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(cfg_path.resolve()),
+    )
+    monkeypatch.setattr(
+        module,
+        "resolve_runtime_env_path",
+        lambda raw_env_path=None, project_root=None: str((tmp_path / ".env").resolve()),
+    )
+
+    with pytest.raises(Exception, match="invalid symbol format"):
+        module.load_config()
+
+
 def test_multi_strategy_score_transform_uses_dynamic_runtime_config(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     cfg_path = tmp_path / "configs" / "runtime.yaml"
