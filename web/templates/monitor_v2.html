@@ -98,15 +98,7 @@ body::after{
   overflow:hidden;
 }
 .liquid-sheet{
-  position:absolute;
-  border-radius:42px;
-  border:1px solid rgba(255,255,255,.12);
-  background:
-    linear-gradient(145deg, rgba(255,255,255,.22), rgba(255,255,255,.06) 32%, rgba(255,255,255,.02) 100%);
-  backdrop-filter:blur(30px) saturate(160%);
-  -webkit-backdrop-filter:blur(30px) saturate(160%);
-  box-shadow:0 18px 60px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.2);
-  opacity:.1;
+  display:none;
 }
 .liquid-sheet::after{
   content:"";
@@ -274,15 +266,7 @@ body::after{
 .hero-plane::after,
 .rail-panel::after,
 .impact-panel::after{
-  content:"";
-  position:absolute;
-  inset:auto -14% -44% auto;
-  width:56%;
-  height:56%;
-  pointer-events:none;
-  border-radius:50%;
-  background:radial-gradient(circle, rgba(141,196,255,.18), transparent 72%);
-  opacity:.62;
+  display:none;
 }
 .hero-plane{animation-delay:.02s}
 .rail-panel:nth-child(1){animation-delay:.08s}

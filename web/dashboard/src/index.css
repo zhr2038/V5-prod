@@ -162,17 +162,7 @@ body {
 }
 
 .liquid-sheet {
-  border-radius: 42px;
-  border: 1px solid rgba(255,255,255,0.22);
-  background: rgba(255,255,255,0.015);
-  backdrop-filter: blur(34px) saturate(188%) brightness(1.16);
-  -webkit-backdrop-filter: blur(34px) saturate(188%) brightness(1.16);
-  box-shadow:
-    0 24px 68px rgba(0,0,0,0.18),
-    inset 0 1px 0 rgba(255,255,255,0.34),
-    inset 0 -1px 0 rgba(255,255,255,0.08);
-  opacity: 0.26;
-  filter: url("#liquid-distortion");
+  display: none;
 }
 
 .liquid-sheet::before,
@@ -357,14 +347,7 @@ body {
 
 .glass-card::after,
 .glass-panel::after {
-  inset: auto -20% -56% auto;
-  width: 70%;
-  height: 72%;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 30% 30%, rgba(255,255,255,0.18), rgba(255,255,255,0.04) 34%, transparent 72%);
-  opacity: 0.82;
-  filter: blur(18px);
+  display: none;
 }
 
 .glass-card > *,
