@@ -64,12 +64,11 @@ export function MLBand({ mlTraining }: MLBandProps) {
           <span className="ml-auto font-mono text-[var(--accent)]">{progress.toFixed(0)}%</span>
         </div>
 
-        <div className="material-surface material-inset tone-pearl relative h-2.5 rounded-full overflow-hidden mb-5">
+        <div className="ml-progress-track relative mb-5">
           <motion.div
-            className="absolute inset-y-0 left-0 rounded-full"
+            className="ml-progress-fill absolute inset-y-0 left-0"
             style={{
-              background: 'linear-gradient(90deg, rgba(148, 233, 209, 0.96), rgba(158, 235, 220, 0.92))',
-              backgroundSize: '200% 100%',
+              width: `${progress}%`,
             }}
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
