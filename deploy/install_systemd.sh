@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SHADOW_ROOT=""
 USER_MODE=0
 PRODUCTION_ONLY=0
 ENABLE_PROD_TIMER=0
@@ -15,6 +16,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --root)
       ROOT="$2"
+      shift 2
+      ;;
+    --shadow-root)
+      SHADOW_ROOT="$2"
       shift 2
       ;;
     --production-only)
@@ -35,6 +40,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$SHADOW_ROOT" ]]; then
+  SHADOW_ROOT="$(dirname "$ROOT")/v5-shadow-tuned-xgboost"
+fi
 
 SRC="$ROOT/deploy/systemd"
 RENDERER="$ROOT/deploy/render_systemd_units.py"
@@ -70,8 +79,9 @@ fi
 
 render_units() {
   local dst="$1"
-  shift
-  "$PYTHON_BIN" "$RENDERER" --src-dir "$SRC" --dst-dir "$dst" --root "$ROOT" "$@"
+  local render_root="$2"
+  shift 2
+  "$PYTHON_BIN" "$RENDERER" --src-dir "$SRC" --dst-dir "$dst" --root "$render_root" "$@"
 }
 
 if [[ "$USER_MODE" == "1" ]]; then
@@ -86,7 +96,7 @@ if [[ "$USER_MODE" == "1" ]]; then
   mkdir -p "$DST"
 
   if [[ "$PRODUCTION_ONLY" == "1" ]]; then
-    render_units "$DST" \
+    render_units "$DST" "$ROOT" \
       --mapping v5-prod.user.service=v5-prod.user.service \
       --mapping v5-prod.user.timer=v5-prod.user.timer \
       --mapping v5-event-driven.service=v5-event-driven.service \
@@ -105,9 +115,14 @@ if [[ "$USER_MODE" == "1" ]]; then
       --mapping v5-ledger.user.service=v5-ledger.service \
       --mapping v5-ledger.timer=v5-ledger.timer \
       --mapping v5-cost-rollup-real.user.service=v5-cost-rollup-real.user.service \
-      --mapping v5-cost-rollup-real.user.timer=v5-cost-rollup-real.user.timer
+      --mapping v5-cost-rollup-real.user.timer=v5-cost-rollup-real.user.timer \
+      --mapping v5-spread-rollup.user.service=v5-spread-rollup.service \
+      --mapping v5-spread-rollup.timer=v5-spread-rollup.timer
+    render_units "$DST" "$SHADOW_ROOT" \
+      --mapping v5-shadow-tuned-xgboost.user.service=v5-shadow-tuned-xgboost.user.service \
+      --mapping v5-shadow-tuned-xgboost.user.timer=v5-shadow-tuned-xgboost.user.timer
   else
-    render_units "$DST" --copy-all \
+    render_units "$DST" "$ROOT" --copy-all \
       --mapping v5-reconcile.user.service=v5-reconcile.service \
       --mapping v5-ledger.user.service=v5-ledger.service
   fi
@@ -133,13 +148,15 @@ if [[ "$USER_MODE" == "1" ]]; then
     systemctl --user enable --now v5-reconcile.timer
     systemctl --user enable --now v5-ledger.timer
     systemctl --user enable --now v5-cost-rollup-real.user.timer
+    systemctl --user enable --now v5-spread-rollup.timer
+    systemctl --user enable --now v5-shadow-tuned-xgboost.user.timer
     if [[ "$ENABLE_PROD_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-prod.user.timer
     fi
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real|spread-rollup|shadow-tuned-xgboost)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer
