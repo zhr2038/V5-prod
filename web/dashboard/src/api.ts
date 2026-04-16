@@ -27,6 +27,7 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 
 export const api = {
   dashboard: () => fetchJson<DashboardData>('/api/dashboard'),
+  positions: () => fetchJson<{ positions?: import('./types').Position[] }>('/api/positions'),
   riskGuard: () => fetchJson<RiskGuardData>('/api/auto_risk_guard'),
   marketState: () => fetchJson<MarketStateData>('/api/market_state'),
   decisionAudit: () => fetchJson<DecisionAuditData>('/api/decision_audit'),

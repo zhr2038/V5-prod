@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct } from '../lib/format';
 import { api } from '../api';
+import { useInterval } from '../hooks/useInterval';
 import type { Position, KlineData } from '../types';
 
 interface PositionsPanelProps {
@@ -115,15 +116,33 @@ function CandlestickSvg({ data }: { data: KlineData[] }) {
 }
 
 export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
+  const [livePositions, setLivePositions] = useState<Position[]>(positions);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>('');
   const sorted = useMemo(
-    () => [...positions].sort((a, b) => b.value - a.value),
-    [positions]
+    () => [...livePositions].sort((a, b) => b.value - a.value),
+    [livePositions]
   );
-  const [index, setIndex] = useState(0);
   const [tf, setTf] = useState('1h');
   const [kline, setKline] = useState<KlineData[] | null>(null);
 
-  const spotlight = sorted[index] || null;
+  useEffect(() => {
+    setLivePositions(positions);
+  }, [positions]);
+
+  useEffect(() => {
+    if (!sorted.length) {
+      setSelectedSymbol('');
+      return;
+    }
+    if (!selectedSymbol || !sorted.some((item) => item.symbol === selectedSymbol)) {
+      setSelectedSymbol(sorted[0].symbol);
+    }
+  }, [sorted, selectedSymbol]);
+
+  const spotlightIndex = selectedSymbol
+    ? sorted.findIndex((item) => item.symbol === selectedSymbol)
+    : 0;
+  const spotlight = sorted[Math.max(0, spotlightIndex)] || null;
 
   useEffect(() => {
     if (!spotlight) return;
@@ -139,6 +158,24 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
     };
   }, [spotlight?.symbol, tf]);
 
+  useInterval(() => {
+    if (document.hidden) return;
+    api.positions().then((payload) => {
+      const next = Array.isArray(payload?.positions) ? payload.positions : [];
+      setLivePositions(next);
+    });
+  }, 5000);
+
+  useInterval(() => {
+    if (document.hidden || !spotlight) return;
+    const klineSymbol = String(spotlight.symbol || '')
+      .replace('/USDT', '')
+      .replace('-USDT', '');
+    api.positionKline(klineSymbol, tf).then((data) => {
+      setKline(data);
+    });
+  }, spotlight ? 10000 : null);
+
   return (
     <div className="material-surface material-regular tone-sky reading-frame p-5 flex flex-col gap-5">
       <div className="flex items-center justify-between">
@@ -150,8 +187,11 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
           <div className="flex items-center gap-2">
             <button
               className="p-1 rounded-lg hover:bg-white/10 disabled:opacity-30"
-              onClick={() => setIndex((i) => Math.max(0, i - 1))}
-              disabled={index === 0}
+              onClick={() => {
+                const nextIndex = Math.max(0, spotlightIndex - 1);
+                setSelectedSymbol(sorted[nextIndex]?.symbol || '');
+              }}
+              disabled={spotlightIndex <= 0}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -160,8 +200,11 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
             </span>
             <button
               className="p-1 rounded-lg hover:bg-white/10 disabled:opacity-30"
-              onClick={() => setIndex((i) => Math.min(sorted.length - 1, i + 1))}
-              disabled={index >= sorted.length - 1}
+              onClick={() => {
+                const nextIndex = Math.min(sorted.length - 1, spotlightIndex + 1);
+                setSelectedSymbol(sorted[nextIndex]?.symbol || '');
+              }}
+              disabled={spotlightIndex >= sorted.length - 1}
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -240,8 +283,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
                   key={pos.symbol}
                   className="border-b border-white/5 hover:bg-white/5 transition cursor-pointer"
                   onClick={() => {
-                    const idx = sorted.findIndex((p) => p.symbol === pos.symbol);
-                    if (idx >= 0) setIndex(idx);
+                    setSelectedSymbol(pos.symbol);
                   }}
                 >
                   <td className="py-2.5 font-medium">{pos.symbol.replace('-USDT', '')}</td>

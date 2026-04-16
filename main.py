@@ -600,7 +600,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parent
     cfg_path = os.getenv("V5_CONFIG")
     if not cfg_path:
-        for candidate in ("configs/live_prod.yaml", "configs/live_20u_real.yaml", "configs/config.yaml"):
+        for candidate in ("configs/live_prod.yaml", "configs/config.yaml"):
             candidate_path = repo_root / candidate
             if candidate_path.exists():
                 cfg_path = str(candidate_path)
