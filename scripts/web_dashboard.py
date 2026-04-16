@@ -1377,6 +1377,14 @@ def _dashboard_dry_run(config: Dict[str, Any]) -> bool:
     return _dashboard_execution_mode(config) != 'live'
 
 
+def _dashboard_to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equity: float) -> float:
     total_equity = float(total_equity or 0.0)
     initial_capital = float(initial_capital or 0.0)
@@ -1824,13 +1832,17 @@ def _dashboard_kill_switch_enabled(path: Path) -> bool:
 
     if isinstance(payload, dict):
         if 'enabled' in payload:
-            return bool(payload.get('enabled'))
+            return _dashboard_to_bool(payload.get('enabled'))
         nested = payload.get('kill_switch')
         if isinstance(nested, dict):
-            return bool(nested.get('enabled') or nested.get('active'))
+            if 'enabled' in nested:
+                return _dashboard_to_bool(nested.get('enabled'))
+            if 'active' in nested:
+                return _dashboard_to_bool(nested.get('active'))
+            return False
         if 'active' in payload:
-            return bool(payload.get('active'))
-    return bool(payload)
+            return _dashboard_to_bool(payload.get('active'))
+    return _dashboard_to_bool(payload)
 
 
 def _percentile_value(values: List[float], quantile: float) -> Optional[float]:
@@ -4078,7 +4090,7 @@ def api_dashboard():
                 'isRunning': status_data.get('timer_active', False),
                 'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',
                 'lastUpdate': account_data.get('last_update', ''),
-                'killSwitch': bool(status_data.get('kill_switch', False)),
+                'killSwitch': _dashboard_to_bool(status_data.get('kill_switch', False)),
                 'errors': (
                     ([
                         _sanitize_public_error_text(status_data['timer_error'], default='internal error')

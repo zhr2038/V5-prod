@@ -412,6 +412,20 @@ def test_status_api_derives_live_mode_from_legacy_dry_run_flag(monkeypatch):
     assert payload["equity_cap"] == 123.0
 
 
+def test_dashboard_kill_switch_enabled_treats_string_false_values_as_false(tmp_path):
+    module = load_web_dashboard_module()
+    kill_switch_path = tmp_path / "kill_switch.json"
+
+    kill_switch_path.write_text(json.dumps({"enabled": "false"}), encoding="utf-8")
+    assert module._dashboard_kill_switch_enabled(kill_switch_path) is False
+
+    kill_switch_path.write_text(json.dumps({"kill_switch": {"active": "0"}}), encoding="utf-8")
+    assert module._dashboard_kill_switch_enabled(kill_switch_path) is False
+
+    kill_switch_path.write_text(json.dumps({"kill_switch": {"enabled": "true"}}), encoding="utf-8")
+    assert module._dashboard_kill_switch_enabled(kill_switch_path) is True
+
+
 def test_timer_api_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
