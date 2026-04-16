@@ -123,6 +123,15 @@ def _should_restart_web_dashboard(changed_paths: Iterable[str]) -> bool:
     return False
 
 
+def _upload_order_key(local_path: Path, workspace_root: Path) -> tuple[int, str]:
+    rel_path = local_path.relative_to(workspace_root).as_posix()
+    # Keep web entry HTML last so a partially interrupted upload does not point
+    # the live dashboard at bundles that have not finished uploading yet.
+    if rel_path.startswith("web/dist/") and local_path.suffix == ".html":
+        return (1, rel_path)
+    return (0, rel_path)
+
+
 def _upload_files(
     sftp: paramiko.SFTPClient,
     workspace_root: Path,
@@ -133,7 +142,11 @@ def _upload_files(
     uploaded = 0
     skipped = 0
     rel_paths: list[str] = []
-    for local_path in iter_production_files(workspace_root, items=items):
+    local_paths = sorted(
+        iter_production_files(workspace_root, items=items),
+        key=lambda path: _upload_order_key(path, workspace_root),
+    )
+    for local_path in local_paths:
         rel_path = local_path.relative_to(workspace_root)
         remote_path = _remote_join(remote_root, rel_path)
         parent = remote_path.rsplit("/", 1)[0]

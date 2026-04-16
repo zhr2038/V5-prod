@@ -25,6 +25,7 @@ from deploy.sync_prod_release import (
     _resolve_shadow_root,
     _should_upload,
     _should_restart_web_dashboard,
+    _upload_files,
     _user_bus_wrapped_command,
     _validate_units,
 )
@@ -275,6 +276,10 @@ class _FakeSFTP:
     def __init__(self, files: dict[str, bytes]) -> None:
         self.files = {self._norm(path): content for path, content in files.items()}
         self.removed: list[str] = []
+        self.uploaded: list[str] = []
+        self.chmod_calls: list[tuple[str, int]] = []
+        self.utime_calls: list[tuple[str, tuple[int, int]]] = []
+        self.created_dirs: list[str] = []
 
     def _norm(self, path: str) -> str:
         parts = [part for part in path.replace("\\", "/").split("/") if part]
@@ -321,6 +326,20 @@ class _FakeSFTP:
             raise FileNotFoundError(normalized)
         return io.BytesIO(self.files[normalized])
 
+    def mkdir(self, path: str) -> None:
+        self.created_dirs.append(self._norm(path))
+
+    def put(self, local_path: str, remote_path: str) -> None:
+        normalized = self._norm(remote_path)
+        self.uploaded.append(normalized)
+        self.files[normalized] = Path(local_path).read_bytes()
+
+    def chmod(self, path: str, mode: int) -> None:
+        self.chmod_calls.append((self._norm(path), mode))
+
+    def utime(self, path: str, times: tuple[int, int]) -> None:
+        self.utime_calls.append((self._norm(path), times))
+
     def remove(self, path: str) -> None:
         normalized = self._norm(path)
         self.removed.append(normalized)
@@ -348,6 +367,32 @@ def test_should_restart_web_dashboard_only_for_web_runtime_changes() -> None:
     assert _should_restart_web_dashboard(["scripts/web_dashboard.py"]) is True
     assert _should_restart_web_dashboard(["web/static/app.js"]) is True
     assert _should_restart_web_dashboard(["deploy/systemd/v5-web-dashboard.service"]) is True
+
+
+def test_upload_files_defers_web_dist_html_until_after_assets(tmp_path: Path) -> None:
+    (tmp_path / "web" / "dist" / "assets").mkdir(parents=True)
+    (tmp_path / "web" / "dist" / "assets" / "index-new.js").write_text("bundle", encoding="utf-8")
+    (tmp_path / "web" / "dist" / "index.html").write_text("html", encoding="utf-8")
+    (tmp_path / "web" / "static").mkdir(parents=True)
+    (tmp_path / "web" / "static" / "app.js").write_text("console.log('app')", encoding="utf-8")
+
+    fake_sftp = _FakeSFTP({})
+
+    uploaded, skipped, rel_paths = _upload_files(
+        fake_sftp,
+        tmp_path,
+        "/remote",
+        items=("web",),
+    )
+
+    assert uploaded == 3
+    assert skipped == 0
+    assert rel_paths[-1] == "web/dist/index.html"
+    assert fake_sftp.uploaded[-1] == "/remote/web/dist/index.html"
+    assert fake_sftp.uploaded[:2] == [
+        "/remote/web/dist/assets/index-new.js",
+        "/remote/web/static/app.js",
+    ]
 
 
 def test_prune_remote_files_removes_stale_production_files_only(tmp_path: Path) -> None:
