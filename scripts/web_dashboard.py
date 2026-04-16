@@ -142,6 +142,7 @@ class DashboardRuntimePaths:
     reconcile_status_path: Path
     runs_dir: Path
     auto_risk_eval_path: Path
+    telemetry_db: Path
 
 
 _DASHBOARD_API_CACHE_MISS = object()
@@ -1771,7 +1772,177 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
         ),
         runs_dir=derive_runtime_runs_dir(orders_db),
         auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
+        telemetry_db=derive_runtime_named_artifact_path(orders_db, 'api_telemetry', '.sqlite').resolve(),
     )
+
+
+def _format_dashboard_ts_ms(ts_ms: Any) -> str:
+    try:
+        ts_f = float(ts_ms or 0)
+    except Exception:
+        return ''
+    if ts_f <= 0:
+        return ''
+    return datetime.fromtimestamp(ts_f / 1000.0, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _percentile_ms(values: List[float], quantile: float) -> Optional[float]:
+    xs: List[float] = []
+    for value in values or []:
+        try:
+            numeric = float(value)
+        except Exception:
+            continue
+        if math.isfinite(numeric):
+            xs.append(numeric)
+    xs.sort()
+    if not xs:
+        return None
+    if len(xs) == 1:
+        return float(xs[0])
+    q = min(max(float(quantile), 0.0), 1.0)
+    pos = q * (len(xs) - 1)
+    lower = int(math.floor(pos))
+    upper = int(math.ceil(pos))
+    if lower == upper:
+        return float(xs[lower])
+    frac = pos - lower
+    return float(xs[lower] + (xs[upper] - xs[lower]) * frac)
+
+
+def _load_api_telemetry_summary(
+    runtime_paths: Optional[DashboardRuntimePaths] = None,
+    *,
+    lookback_hours: int = 24,
+) -> Dict[str, Any]:
+    paths = runtime_paths or _resolve_dashboard_runtime_paths(load_config())
+    telemetry_db = Path(
+        getattr(
+            paths,
+            'telemetry_db',
+            derive_runtime_named_artifact_path(paths.orders_db, 'api_telemetry', '.sqlite'),
+        )
+    ).resolve()
+    summary: Dict[str, Any] = {
+        'status': 'missing',
+        'lookbackHours': int(lookback_hours),
+        'totalRequests': 0,
+        'successRate': None,
+        'errorCount': 0,
+        'rateLimitedCount': 0,
+        'p50LatencyMs': None,
+        'p95LatencyMs': None,
+        'lastRequestAt': '',
+        'lastErrorAt': '',
+        'latestError': None,
+        'note': '暂无 API 遥测数据',
+    }
+    if not telemetry_db.exists():
+        return summary
+
+    since_ts_ms = int((time.time() - max(1, int(lookback_hours)) * 3600) * 1000)
+    conn = None
+    try:
+        conn = sqlite3.connect(str(telemetry_db))
+        conn.row_factory = sqlite3.Row
+        window_row = conn.execute(
+            """
+            SELECT
+              COUNT(*) AS total_requests,
+              SUM(CASE WHEN status_class = '2xx' THEN 1 ELSE 0 END) AS success_count,
+              SUM(CASE WHEN status_class != '2xx' THEN 1 ELSE 0 END) AS error_count,
+              SUM(CASE WHEN rate_limited = 1 THEN 1 ELSE 0 END) AS rate_limited_count
+            FROM api_request_log
+            WHERE ts_ms >= ?
+            """,
+            (since_ts_ms,),
+        ).fetchone()
+        latency_rows = conn.execute(
+            """
+            SELECT duration_ms
+            FROM api_request_log
+            WHERE ts_ms >= ?
+              AND duration_ms IS NOT NULL
+            ORDER BY duration_ms ASC
+            """,
+            (since_ts_ms,),
+        ).fetchall()
+        latest_request = conn.execute(
+            """
+            SELECT ts_ms
+            FROM api_request_log
+            ORDER BY ts_ms DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        latest_error = conn.execute(
+            """
+            SELECT ts_ms, method, endpoint, status_class, http_status, okx_code, okx_msg
+            FROM api_request_log
+            WHERE status_class != '2xx'
+            ORDER BY ts_ms DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    except sqlite3.Error as exc:
+        summary['status'] = 'error'
+        summary['note'] = 'API 遥测读取失败'
+        summary['latestError'] = {'message': _sanitize_public_error_text(str(exc), default='internal error')}
+        return summary
+    finally:
+        if conn is not None:
+            conn.close()
+
+    total_requests = int((window_row['total_requests'] or 0) if window_row else 0)
+    success_count = int((window_row['success_count'] or 0) if window_row else 0)
+    error_count = int((window_row['error_count'] or 0) if window_row else 0)
+    rate_limited_count = int((window_row['rate_limited_count'] or 0) if window_row else 0)
+    success_rate = (float(success_count) / float(total_requests)) if total_requests > 0 else None
+    durations = [float(row['duration_ms']) for row in latency_rows or [] if row['duration_ms'] is not None]
+    p50_latency_ms = _percentile_ms(durations, 0.50)
+    p95_latency_ms = _percentile_ms(durations, 0.95)
+
+    summary.update(
+        {
+            'totalRequests': total_requests,
+            'successRate': success_rate,
+            'errorCount': error_count,
+            'rateLimitedCount': rate_limited_count,
+            'p50LatencyMs': p50_latency_ms,
+            'p95LatencyMs': p95_latency_ms,
+            'lastRequestAt': _format_dashboard_ts_ms(latest_request['ts_ms'] if latest_request else None),
+            'lastErrorAt': _format_dashboard_ts_ms(latest_error['ts_ms'] if latest_error else None),
+            'latestError': (
+                {
+                    'method': str(latest_error['method'] or ''),
+                    'endpoint': str(latest_error['endpoint'] or ''),
+                    'statusClass': str(latest_error['status_class'] or ''),
+                    'httpStatus': (int(latest_error['http_status']) if latest_error['http_status'] is not None else None),
+                    'okxCode': (str(latest_error['okx_code']) if latest_error['okx_code'] is not None else None),
+                    'message': _sanitize_public_error_text(latest_error['okx_msg'], default='error'),
+                }
+                if latest_error
+                else None
+            ),
+        }
+    )
+
+    if total_requests <= 0:
+        summary['status'] = 'missing'
+        summary['note'] = f'近{int(lookback_hours)}h 未采集到 API 请求'
+        return summary
+
+    error_rate = float(error_count) / float(total_requests)
+    if rate_limited_count >= 10 or error_rate >= 0.10 or (p95_latency_ms or 0.0) >= 2500.0:
+        summary['status'] = 'critical'
+        summary['note'] = 'API 延迟或错误率偏高'
+    elif rate_limited_count > 0 or error_rate >= 0.03 or (p95_latency_ms or 0.0) >= 1200.0:
+        summary['status'] = 'warning'
+        summary['note'] = 'API 出现限流或延迟抬升'
+    else:
+        summary['status'] = 'healthy'
+        summary['note'] = 'API 遥测稳定'
+    return summary
 
 
 def _runtime_ic_diagnostic_pattern(orders_db: Path) -> str:
@@ -3533,6 +3704,7 @@ def api_dashboard():
     """Dashboard 完整数据API"""
     try:
         errors: List[str] = []
+        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         account_data = _call_dashboard_api(api_account, default={}, label='account', errors=errors)
         positions_payload = _call_dashboard_api(api_positions, default={'positions': []}, label='positions', errors=errors)
         trades_payload = _call_dashboard_api(api_trades, default={'trades': []}, label='trades', errors=errors)
@@ -3545,6 +3717,7 @@ def api_dashboard():
         ic_diagnostics = _call_dashboard_api(api_ic_diagnostics, default={'status': 'no_data'}, label='ic_diagnostics', errors=errors)
         ml_training = _call_dashboard_api(api_ml_training, default={'status': 'unknown'}, label='ml_training', errors=errors)
         reflection_reports = _call_dashboard_api(api_reflection_reports, default={'reports': []}, label='reflection_reports', errors=errors)
+        api_telemetry = _load_api_telemetry_summary(runtime_paths=runtime_paths)
 
         positions_data = positions_payload
         if isinstance(positions_payload, dict):
@@ -3673,6 +3846,7 @@ def api_dashboard():
             'icDiagnostics': ic_diagnostics,
             'mlTraining': ml_training,
             'reflectionReports': reflection_reports,
+            'apiTelemetry': api_telemetry,
         }
         
         return jsonify(dashboard_data)
@@ -3711,6 +3885,20 @@ def api_dashboard():
             icDiagnostics={'status': 'no_data'},
             mlTraining={'status': 'unknown'},
             reflectionReports={'reports': []},
+            apiTelemetry={
+                'status': 'error',
+                'lookbackHours': 24,
+                'totalRequests': 0,
+                'successRate': None,
+                'errorCount': 0,
+                'rateLimitedCount': 0,
+                'p50LatencyMs': None,
+                'p95LatencyMs': None,
+                'lastRequestAt': '',
+                'lastErrorAt': '',
+                'latestError': None,
+                'note': 'API 遥测读取失败',
+            },
         )
 
 

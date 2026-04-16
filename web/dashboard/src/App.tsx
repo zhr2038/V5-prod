@@ -98,6 +98,7 @@ function App() {
                 trades={dashboard?.trades || []}
                 health={health}
                 decisionAudit={decisionAudit}
+                apiTelemetry={dashboard?.apiTelemetry || null}
               />
             </div>
           </div>

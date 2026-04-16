@@ -650,6 +650,24 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     monkeypatch.setattr(module, "api_ic_diagnostics", lambda: module.jsonify({"status": "ok"}))
     monkeypatch.setattr(module, "api_ml_training", lambda: module.jsonify({"status": "idle"}))
     monkeypatch.setattr(module, "api_reflection_reports", lambda: module.jsonify({"reports": []}))
+    monkeypatch.setattr(
+        module,
+        "_load_api_telemetry_summary",
+        lambda runtime_paths=None, lookback_hours=24: {
+            "status": "warning",
+            "lookbackHours": lookback_hours,
+            "totalRequests": 42,
+            "successRate": 0.976,
+            "errorCount": 1,
+            "rateLimitedCount": 1,
+            "p50LatencyMs": 82.0,
+            "p95LatencyMs": 340.0,
+            "lastRequestAt": "2026-03-08 21:00:00",
+            "lastErrorAt": "2026-03-08 20:55:00",
+            "latestError": {"method": "GET", "endpoint": "/api/v5/market/ticker", "okxCode": "50011"},
+            "note": "API 出现限流或延迟抬升",
+        },
+    )
 
     response = client.get("/api/dashboard")
 
@@ -663,6 +681,71 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     assert payload["trades"][0]["symbol"] == "BTC/USDT"
     assert payload["alphaScores"][0]["symbol"] == "BTC/USDT"
     assert payload["systemStatus"]["errors"] == ["systemctl is not available"]
+    assert payload["apiTelemetry"]["status"] == "warning"
+    assert payload["apiTelemetry"]["totalRequests"] == 42
+    assert payload["apiTelemetry"]["latestError"]["okxCode"] == "50011"
+
+
+def test_load_api_telemetry_summary_reads_runtime_db(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    telemetry_db = tmp_path / "reports" / "api_telemetry.sqlite"
+    telemetry_db.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(telemetry_db))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE api_request_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              ts_ms INTEGER NOT NULL,
+              exchange TEXT NOT NULL,
+              method TEXT NOT NULL,
+              endpoint TEXT NOT NULL,
+              status_class TEXT NOT NULL,
+              http_status INTEGER,
+              okx_code TEXT,
+              okx_msg TEXT,
+              duration_ms REAL NOT NULL,
+              rate_limited INTEGER NOT NULL DEFAULT 0,
+              attempt INTEGER NOT NULL DEFAULT 1,
+              error_type TEXT
+            )
+            """
+        )
+        rows = [
+            (1760000000000, "okx", "GET", "/api/v5/market/ticker", "2xx", 200, "0", "", 80.0, 0, 1, None),
+            (1760000001000, "okx", "GET", "/api/v5/market/ticker", "2xx", 200, "0", "", 120.0, 0, 1, None),
+            (1760000002000, "okx", "GET", "/api/v5/trade/order", "429", 200, "50011", "rate limit", 900.0, 1, 2, None),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO api_request_log(
+              ts_ms, exchange, method, endpoint, status_class, http_status,
+              okx_code, okx_msg, duration_ms, rate_limited, attempt, error_type
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    class FakeRuntimePaths:
+        def __init__(self, telemetry_db_path: Path):
+            self.telemetry_db = telemetry_db_path
+            self.orders_db = telemetry_db_path.with_name("orders.sqlite")
+
+    monkeypatch.setattr(module.time, "time", lambda: 1760000000.5)
+
+    summary = module._load_api_telemetry_summary(runtime_paths=FakeRuntimePaths(telemetry_db), lookback_hours=24)
+
+    assert summary["status"] == "critical"
+    assert summary["totalRequests"] == 3
+    assert summary["rateLimitedCount"] == 1
+    assert summary["errorCount"] == 1
+    assert summary["p50LatencyMs"] == pytest.approx(120.0)
+    assert summary["p95LatencyMs"] == pytest.approx(822.0)
+    assert summary["latestError"]["okxCode"] == "50011"
 
 
 def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypatch):
