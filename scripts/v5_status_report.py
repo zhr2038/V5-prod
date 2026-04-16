@@ -31,6 +31,7 @@ FILLS_DB = REPORTS_DIR / "fills.sqlite"
 ORDERS_DB = REPORTS_DIR / "orders.sqlite"
 LIVE_UNITS = (
     ("v5-prod.user.service", "v5-prod.user.timer"),
+    ("v5-live-20u.user.service", "v5-live-20u.user.timer"),
 )
 
 
@@ -119,8 +120,16 @@ def _get_unit_load_state(unit: str) -> str:
 
 def _resolve_live_units() -> tuple[str, str]:
     current_units = LIVE_UNITS[0]
-    if any(_get_unit_load_state(unit) not in {"", "not-found"} for unit in current_units):
+    legacy_units = LIVE_UNITS[1]
+
+    current_exists = any(_get_unit_load_state(unit) not in {"", "not-found"} for unit in current_units)
+    if current_exists:
         return current_units
+
+    legacy_exists = any(_get_unit_load_state(unit) not in {"", "not-found"} for unit in legacy_units)
+    if legacy_exists:
+        return legacy_units
+
     return current_units
 
 

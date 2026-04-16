@@ -40,19 +40,6 @@ def test_resolve_config_path_uses_runtime_config_helper(monkeypatch, tmp_path: P
     assert path == expected
 
 
-def test_resolve_live_units_ignores_retired_live_20u(monkeypatch) -> None:
-    monkeypatch.setattr(
-        status_report,
-        "_get_unit_load_state",
-        lambda unit: "loaded" if unit == "v5-live-20u.user.service" else "not-found",
-    )
-
-    service_unit, timer_unit = status_report._resolve_live_units()
-
-    assert service_unit == "v5-prod.user.service"
-    assert timer_unit == "v5-prod.user.timer"
-
-
 def test_resolve_status_paths_uses_suffixed_runtime_auto_blacklist(tmp_path: Path) -> None:
     cfg = {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}}
 

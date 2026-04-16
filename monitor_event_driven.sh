@@ -19,6 +19,9 @@ else
 fi
 
 STANDARD_TIMER_UNIT="v5-prod.user.timer"
+if ! systemctl --user cat "$STANDARD_TIMER_UNIT" >/dev/null 2>&1; then
+  STANDARD_TIMER_UNIT="v5-live-20u.user.timer"
+fi
 
 EVENT_RUNTIME_INFO="$("$PYTHON_BIN" - "$ROOT" <<'PY'
 from pathlib import Path

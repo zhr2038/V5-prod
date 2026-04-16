@@ -26,7 +26,7 @@ def resolve_runtime_config_path(raw_config_path: str | None = None, *, project_r
     if env_cfg:
         return _resolve_path(env_cfg, project_root=root)
 
-    for candidate in ("configs/live_prod.yaml", "configs/config.yaml"):
+    for candidate in ("configs/live_prod.yaml", "configs/live_20u_real.yaml", "configs/config.yaml"):
         path = root / candidate
         if path.exists():
             return str(path.resolve())

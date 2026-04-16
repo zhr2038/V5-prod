@@ -13,16 +13,17 @@ CONFIG_FILE="${V5_CONFIG:-}"
 if [[ -z "$CONFIG_FILE" ]]; then
   if [[ -f "$ROOT/configs/live_prod.yaml" ]]; then
     CONFIG_FILE="$ROOT/configs/live_prod.yaml"
-  elif [[ -f "$ROOT/configs/config.yaml" ]]; then
-    CONFIG_FILE="$ROOT/configs/config.yaml"
   else
-    CONFIG_FILE="$ROOT/configs/live_prod.yaml"
+    CONFIG_FILE="$ROOT/configs/live_20u_real.yaml"
   fi
 elif [[ "$CONFIG_FILE" != /* ]]; then
   CONFIG_FILE="$ROOT/$CONFIG_FILE"
 fi
 
 STANDARD_TIMER_UNIT="v5-prod.user.timer"
+if ! systemctl --user cat "$STANDARD_TIMER_UNIT" >/dev/null 2>&1; then
+  STANDARD_TIMER_UNIT="v5-live-20u.user.timer"
+fi
 
 if [[ -x "$ROOT/.venv/bin/python" ]]; then
   PYTHON_BIN="$ROOT/.venv/bin/python"
@@ -109,7 +110,7 @@ echo "  - Event-driven config: enabled=false (log only)"
 echo "  - Config file: $CONFIG_FILE"
 echo ""
 echo "To enable active mode (Phase 2):"
-echo "  1. Edit $(basename "$CONFIG_FILE")"
+echo "  1. Edit configs/live_20u_real.yaml"
 echo "  2. Set event_driven.enabled: true"
 echo "  3. Restart timer: systemctl --user restart v5-event-driven.timer"
 echo ""

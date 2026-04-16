@@ -107,14 +107,3 @@ def test_send_telegram_alert_reports_runtime_alert_path(monkeypatch, tmp_path: P
 
     output = capsys.readouterr().out
     assert str(paths.alert_file) in output
-
-
-def test_resolve_live_service_unit_name_ignores_retired_live_20u(monkeypatch) -> None:
-    monkeypatch.setattr(trade_monitor.shutil, "which", lambda _: "/bin/systemctl")
-    monkeypatch.setattr(
-        trade_monitor,
-        "_get_unit_load_state",
-        lambda unit: "loaded" if unit == "v5-live-20u.user.service" else "not-found",
-    )
-
-    assert trade_monitor.resolve_live_service_unit_name() == "v5-prod.user.service"

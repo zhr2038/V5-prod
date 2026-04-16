@@ -126,7 +126,8 @@ def resolve_config_path() -> Path:
     Priority:
     1) V5_CONFIG env
     2) configs/live_prod.yaml
-    3) configs/config.yaml
+    3) configs/live_20u_real.yaml
+    4) configs/config.yaml
     """
     env_cfg = os.getenv('V5_CONFIG', '').strip()
     if env_cfg:
@@ -138,6 +139,7 @@ def resolve_config_path() -> Path:
 
     candidates = [
         PROJECT_ROOT / 'configs/live_prod.yaml',
+        PROJECT_ROOT / 'configs/live_20u_real.yaml',
         PROJECT_ROOT / 'configs/config.yaml',
     ]
     for p in candidates:
@@ -156,6 +158,12 @@ def resolve_live_service_unit(ev_cfg: dict) -> str:
     env_unit = os.getenv('V5_LIVE_SERVICE', '').strip()
     if env_unit:
         return env_unit
+
+    # Prefer production service if present
+    for unit in ('v5-prod.user.service', 'v5-live-20u.user.service'):
+        p = Path.home() / '.config/systemd/user' / unit
+        if p.exists():
+            return unit
 
     return 'v5-prod.user.service'
 

@@ -47,7 +47,7 @@ Primary environment file:
 ### 1. Process bootstrap
 
 `main.py`:
-- resolves config with priority `V5_CONFIG -> configs/live_prod.yaml -> configs/config.yaml`
+- resolves config with priority `V5_CONFIG -> configs/live_prod.yaml -> configs/live_20u_real.yaml -> configs/config.yaml`
 - loads `.env` from repository root
 - builds logging, run id, and decision audit context
 

@@ -1,0 +1,22 @@
+[Unit]
+Description=V5 20U small-budget LIVE hourly window (OKX spot)
+Wants=network-online.target
+After=network-online.target v5-trend-update.user.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/clawd/v5-trading-bot
+Environment=PYTHONUNBUFFERED=1
+Environment=V5_CONFIG=configs/live_20u_real.yaml
+Environment=V5_DATA_PROVIDER=okx
+Environment=V5_LIVE_ARM=YES
+Environment=V5_USE_CACHED_TREND=1
+# 使用 venv 的 Python 而不是系统 Python（确保 numpy 可用）
+Environment=PATH=/home/admin/clawd/v5-trading-bot/.venv/bin:$PATH
+# 加载DeepSeek API Key
+EnvironmentFile=/home/admin/clawd/v5-trading-bot/.env
+
+# 预同步：在交易前自动同步持仓（防止kill switch触发）
+ExecStartPre=/home/admin/clawd/v5-trading-bot/.venv/bin/python /home/admin/clawd/v5-trading-bot/scripts/auto_sync_before_trade.py
+
+ExecStart=/usr/bin/flock -n /tmp/v5_live_20u_hourly.lock -c "/bin/bash -lc 'cd /home/admin/clawd/v5-trading-bot && .venv/bin/python main.py'"

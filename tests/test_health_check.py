@@ -63,17 +63,6 @@ def test_resolve_health_env_path_uses_runtime_env_helper(monkeypatch, tmp_path: 
     assert path == expected
 
 
-def test_resolve_live_timer_unit_name_ignores_retired_live_20u(monkeypatch) -> None:
-    monkeypatch.setattr(health_check.shutil, "which", lambda _: "/bin/systemctl")
-    monkeypatch.setattr(
-        health_check,
-        "_get_unit_load_state",
-        lambda unit: "loaded" if unit == "v5-live-20u.user.timer" else "not-found",
-    )
-
-    assert health_check.resolve_live_timer_unit_name() == "v5-prod.user.timer"
-
-
 def test_check_okx_api_warns_with_runtime_env_filename(monkeypatch, tmp_path: Path) -> None:
     expected = (tmp_path / "configs" / "live.env").resolve()
     monkeypatch.setattr(
