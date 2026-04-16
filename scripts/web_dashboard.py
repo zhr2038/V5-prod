@@ -1365,14 +1365,16 @@ def load_config():
         return {}
 
 
-def _dashboard_dry_run(config: Dict[str, Any]) -> bool:
+def _dashboard_execution_mode(config: Dict[str, Any]) -> str:
     execution_cfg = config.get('execution', {}) if isinstance(config, dict) else {}
     mode = str(execution_cfg.get('mode') or '').strip().lower()
-    if mode == 'live':
-        return False
-    if mode == 'dry_run':
-        return True
-    return bool(execution_cfg.get('dry_run', True))
+    if mode in {'live', 'dry_run'}:
+        return mode
+    return 'dry_run' if bool(execution_cfg.get('dry_run', True)) else 'live'
+
+
+def _dashboard_dry_run(config: Dict[str, Any]) -> bool:
+    return _dashboard_execution_mode(config) != 'live'
 
 
 def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equity: float) -> float:
@@ -3256,13 +3258,14 @@ def api_status():
         runtime_paths = _resolve_dashboard_runtime_paths(config)
         timer_name = _pick_timer_name()
         timer_state = _get_timer_state(timer_name)
+        mode = _dashboard_execution_mode(config)
         dry_run = _dashboard_dry_run(config)
 
         return jsonify({
             'timer_active': bool(timer_state.get('active')),
             'timer_name': timer_name,
             'timer_error': timer_state.get('error'),
-            'mode': config.get('execution', {}).get('mode', 'unknown'),
+            'mode': mode,
             'dry_run': dry_run,
             'kill_switch': _dashboard_kill_switch_enabled(runtime_paths.kill_switch_path),
             'equity_cap': config.get('budget', {}).get('live_equity_cap_usdt', 0),
