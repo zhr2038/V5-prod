@@ -33,6 +33,10 @@ export const api = {
   health: () => fetchJson<HealthData>('/api/health'),
   mlTraining: () => fetchJson<MLTrainingData>('/api/ml_training'),
   shadowMl: () => fetchJson<ShadowMLData>('/api/shadow_ml_overlay'),
-  positionKline: (symbol: string, timeframe: string) =>
-    fetchJson<KlineData[]>(`/api/position_kline?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`),
+  positionKline: async (symbol: string, timeframe: string) => {
+    const payload = await fetchJson<{ candles?: KlineData[] }>(
+      `/api/position_kline?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`
+    );
+    return Array.isArray(payload?.candles) ? payload.candles : [];
+  },
 };

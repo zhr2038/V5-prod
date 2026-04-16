@@ -69,26 +69,28 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
   ];
 
   return (
-    <motion.div
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="relative z-10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 px-6 pb-6"
-    >
-      {cards.map((card) => (
-        <motion.div
-          key={card.label}
-          variants={item}
-          className={`${card.surface} p-5 flex flex-col gap-2`}
-        >
-          <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm">
-            <card.icon className="w-4 h-4" />
-            <span>{card.label}</span>
-          </div>
-          <div className="text-2xl font-semibold tracking-tight">{card.value}</div>
-          <div className={`text-sm font-medium ${card.tone}`}>{card.sub}</div>
-        </motion.div>
-      ))}
-    </motion.div>
+    <div className="relative z-10 px-6 pb-6">
+      <motion.div
+        variants={container}
+        initial="hidden"
+        animate="show"
+        className="max-w-[1780px] mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"
+      >
+        {cards.map((card) => (
+          <motion.div
+            key={card.label}
+            variants={item}
+            className={`${card.surface} p-5 flex flex-col gap-2`}
+          >
+            <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm">
+              <card.icon className="w-4 h-4" />
+              <span>{card.label}</span>
+            </div>
+            <div className="text-2xl font-semibold tracking-tight">{card.value}</div>
+            <div className={`text-sm font-medium ${card.tone}`}>{card.sub}</div>
+          </motion.div>
+        ))}
+      </motion.div>
+    </div>
   );
 }

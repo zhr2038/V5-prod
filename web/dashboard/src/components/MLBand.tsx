@@ -57,18 +57,18 @@ export function MLBand({ mlTraining }: MLBandProps) {
       transition={{ delay: 0.15 }}
       className="relative z-10 px-6 pb-6"
     >
-      <div className="material-surface material-regular tone-neutral p-5">
+      <div className="max-w-[1780px] mx-auto material-surface material-regular tone-neutral p-5">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)] mb-4">
           <Brain className="w-4 h-4" />
           <span>ML 训练链路</span>
           <span className="ml-auto font-mono text-[var(--accent)]">{progress.toFixed(0)}%</span>
         </div>
 
-        <div className="material-surface material-inset tone-sky relative h-3 rounded-full overflow-hidden mb-5">
+        <div className="material-surface material-inset tone-pearl relative h-2.5 rounded-full overflow-hidden mb-5">
           <motion.div
             className="absolute inset-y-0 left-0 rounded-full"
             style={{
-              background: 'linear-gradient(90deg, rgba(154,235,212,0.95), rgba(173,205,255,0.92), rgba(232,198,142,0.88))',
+              background: 'linear-gradient(90deg, rgba(148, 233, 209, 0.96), rgba(158, 235, 220, 0.92))',
               backgroundSize: '200% 100%',
             }}
             initial={{ width: 0 }}

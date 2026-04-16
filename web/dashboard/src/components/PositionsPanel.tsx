@@ -128,7 +128,10 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
   useEffect(() => {
     if (!spotlight) return;
     let mounted = true;
-    api.positionKline(spotlight.symbol, tf).then((data) => {
+    const klineSymbol = String(spotlight.symbol || '')
+      .replace('/USDT', '')
+      .replace('-USDT', '');
+    api.positionKline(klineSymbol, tf).then((data) => {
       if (mounted) setKline(data);
     });
     return () => {

@@ -232,9 +232,12 @@ export interface ShadowMLSymbol {
 }
 
 export interface KlineData {
-  timestamp: number;
+  timestamp?: number;
+  ts?: number;
+  time?: string;
   open: number;
   high: number;
   low: number;
   close: number;
+  volume?: number;
 }
