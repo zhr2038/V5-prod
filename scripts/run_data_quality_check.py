@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -264,11 +265,21 @@ def create_data_optimization_plan(stats: dict[str, int]) -> bool:
     return True
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run alpha history data quality checks.")
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help="Optional workspace root. Defaults to repository root.",
+    )
+    args = parser.parse_args(argv)
+
+    workspace = Path(args.workspace).expanduser().resolve() if args.workspace else None
+
     print("数据质量检查与优化")
     print("=" * 60)
 
-    stats = run_data_quality_checks()
+    stats = run_data_quality_checks(build_paths(workspace))
     create_data_optimization_plan(stats)
 
     print("\n" + "=" * 60)
