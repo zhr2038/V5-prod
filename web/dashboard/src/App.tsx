@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useEffectEvent, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { LiquidBg } from './components/LiquidBg';
 import { Hero } from './components/Hero';
@@ -50,10 +50,14 @@ function App() {
     if (s) setShadowML(s);
   }, []);
 
+  const loadInitialData = useEffectEvent(() => {
+    void loadPrimary();
+    void loadSecondary();
+  });
+
   useEffect(() => {
-    loadPrimary();
-    loadSecondary();
-  }, [loadPrimary, loadSecondary]);
+    loadInitialData();
+  }, []);
 
   useInterval(() => {
     loadPrimary();
@@ -88,7 +92,11 @@ function App() {
         <div className="px-6">
           <div className="max-w-[1780px] mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 flex flex-col gap-4">
-              <PositionsPanel positions={dashboard?.positions || []} account={dashboard?.account || null} />
+              <PositionsPanel
+                positions={dashboard?.positions || []}
+                trades={dashboard?.trades || []}
+                account={dashboard?.account || null}
+              />
               <MarketRadar marketState={marketState} />
               <SignalsPanel decisionAudit={decisionAudit} />
               <ExecutionInsightsPanel slippageInsights={dashboard?.slippageInsights || null} />

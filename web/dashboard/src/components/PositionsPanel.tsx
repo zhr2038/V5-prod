@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 // import { motion } from 'framer-motion';
 import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
-import { fmtUsd, fmtNum, fmtPct } from '../lib/format';
+import { fmtUsd, fmtNum, fmtPct, sideLabels } from '../lib/format';
 import { api } from '../api';
 import { useInterval } from '../hooks/useInterval';
-import type { Position, KlineData } from '../types';
+import type { Position, KlineData, Trade } from '../types';
 
 interface PositionsPanelProps {
   positions?: Position[];
+  trades?: Trade[];
   account?: import('../types').AccountData | null;
 }
 
@@ -115,12 +116,26 @@ function CandlestickSvg({ data }: { data: KlineData[] }) {
   );
 }
 
-export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
+function tradeTimeValue(trade: Trade) {
+  const raw = String(trade.timestamp || '').trim();
+  if (!raw) return 0;
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const ts = Date.parse(normalized);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelProps) {
   const [livePositions, setLivePositions] = useState<Position[]>(positions);
+  const [liveTrades, setLiveTrades] = useState<Trade[]>(trades);
   const [selectedSymbol, setSelectedSymbol] = useState<string>('');
   const sorted = useMemo(
     () => [...livePositions].sort((a, b) => b.value - a.value),
     [livePositions]
+  );
+  const latestTrade = useMemo(
+    () =>
+      [...liveTrades].sort((a, b) => tradeTimeValue(b) - tradeTimeValue(a))[0] || null,
+    [liveTrades]
   );
   const [tf, setTf] = useState('1h');
   const [kline, setKline] = useState<KlineData[] | null>(null);
@@ -128,6 +143,10 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
   useEffect(() => {
     setLivePositions(positions);
   }, [positions]);
+
+  useEffect(() => {
+    setLiveTrades(trades);
+  }, [trades]);
 
   useEffect(() => {
     if (!sorted.length) {
@@ -142,12 +161,20 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
   const spotlightIndex = selectedSymbol
     ? sorted.findIndex((item) => item.symbol === selectedSymbol)
     : 0;
-  const spotlight = sorted[Math.max(0, spotlightIndex)] || null;
+  const spotlightPosition = sorted[Math.max(0, spotlightIndex)] || null;
+  const fallbackTrade = !spotlightPosition ? latestTrade : null;
+  const fallbackSymbol = fallbackTrade
+    ? String(fallbackTrade.symbol || '').replace('/USDT', '').replace('-USDT', '')
+    : '';
+  const spotlightLabel = spotlightPosition
+    ? spotlightPosition.symbol.replace('-USDT', '')
+    : fallbackSymbol || '—';
 
   useEffect(() => {
-    if (!spotlight) return;
+    const activeSymbol = spotlightPosition?.symbol || fallbackSymbol;
+    if (!activeSymbol) return;
     let mounted = true;
-    const klineSymbol = String(spotlight.symbol || '')
+    const klineSymbol = String(activeSymbol || '')
       .replace('/USDT', '')
       .replace('-USDT', '');
     api.positionKline(klineSymbol, tf).then((data) => {
@@ -156,7 +183,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
     return () => {
       mounted = false;
     };
-  }, [spotlight?.symbol, tf]);
+  }, [spotlightPosition?.symbol, fallbackSymbol, tf]);
 
   useInterval(() => {
     if (document.hidden) return;
@@ -167,14 +194,23 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
   }, 5000);
 
   useInterval(() => {
-    if (document.hidden || !spotlight) return;
-    const klineSymbol = String(spotlight.symbol || '')
+    if (document.hidden) return;
+    api.trades().then((payload) => {
+      const next = Array.isArray(payload?.trades) ? payload.trades : [];
+      setLiveTrades(next);
+    });
+  }, 5000);
+
+  useInterval(() => {
+    const activeSymbol = spotlightPosition?.symbol || fallbackSymbol;
+    if (document.hidden || !activeSymbol) return;
+    const klineSymbol = String(activeSymbol || '')
       .replace('/USDT', '')
       .replace('-USDT', '');
     api.positionKline(klineSymbol, tf).then((data) => {
       setKline(data);
     });
-  }, spotlight ? 10000 : null);
+  }, (spotlightPosition || fallbackTrade) ? 10000 : null);
 
   return (
     <div className="material-surface material-regular tone-sky reading-frame p-5 flex flex-col gap-5">
@@ -183,7 +219,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
           <CandlestickChart className="w-4 h-4" />
           <span>持仓聚焦</span>
         </div>
-        {spotlight && (
+        {(spotlightPosition || fallbackTrade) && (
           <div className="flex items-center gap-2">
             <button
               className="p-1 rounded-lg hover:bg-white/10 disabled:opacity-30"
@@ -191,12 +227,12 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
                 const nextIndex = Math.max(0, spotlightIndex - 1);
                 setSelectedSymbol(sorted[nextIndex]?.symbol || '');
               }}
-              disabled={spotlightIndex <= 0}
+              disabled={!spotlightPosition || spotlightIndex <= 0}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <span className="text-sm font-medium min-w-[5rem] text-center">
-              {spotlight.symbol.replace('-USDT', '')}
+              {spotlightLabel}
             </span>
             <button
               className="p-1 rounded-lg hover:bg-white/10 disabled:opacity-30"
@@ -204,7 +240,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
                 const nextIndex = Math.min(sorted.length - 1, spotlightIndex + 1);
                 setSelectedSymbol(sorted[nextIndex]?.symbol || '');
               }}
-              disabled={spotlightIndex >= sorted.length - 1}
+              disabled={!spotlightPosition || spotlightIndex >= sorted.length - 1}
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -212,32 +248,53 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
         )}
       </div>
 
-      {spotlight ? (
+      {spotlightPosition || fallbackTrade ? (
         <>
-          <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
+          {spotlightPosition ? (
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
+                  <div className="text-xs text-[var(--text-dim)]">市值</div>
+                  <div className="text-lg font-semibold">{fmtUsd(spotlightPosition.value)}</div>
+                </div>
+                <div className="material-surface material-clear clear-control metric-pill tone-sage px-4 py-3">
+                  <div className="text-xs text-[var(--text-dim)]">数量</div>
+                  <div className="text-lg font-mono">{fmtNum(spotlightPosition.qty, 4)}</div>
+                </div>
+                <div className="material-surface material-clear clear-control metric-pill tone-amber px-4 py-3">
+                  <div className="text-xs text-[var(--text-dim)]">均价</div>
+                  <div className="text-lg font-mono">{fmtUsd(spotlightPosition.avgPrice)}</div>
+                </div>
+                <div className="material-surface material-clear clear-control metric-pill tone-coral px-4 py-3">
+                  <div className="text-xs text-[var(--text-dim)]">现价</div>
+                  <div className="text-lg font-mono">{fmtUsd(spotlightPosition.currentPrice)}</div>
+                </div>
+              </div>
+              <div className={`xl:text-right px-2 pt-2 ${spotlightPosition.pnlPercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                <div className="text-2xl font-semibold">{fmtPct(spotlightPosition.pnlPercent)}</div>
+                <div className="text-sm">{fmtUsd(spotlightPosition.pnl)}</div>
+              </div>
+            </div>
+          ) : fallbackTrade ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">市值</div>
-                <div className="text-lg font-semibold">{fmtUsd(spotlight.value)}</div>
+                <div className="text-xs text-[var(--text-dim)]">状态</div>
+                <div className="text-lg font-semibold">最近成交</div>
               </div>
               <div className="material-surface material-clear clear-control metric-pill tone-sage px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">数量</div>
-                <div className="text-lg font-mono">{fmtNum(spotlight.qty, 4)}</div>
+                <div className="text-xs text-[var(--text-dim)]">方向</div>
+                <div className="text-lg font-medium">{sideLabels[fallbackTrade.side] || fallbackTrade.side || '--'}</div>
               </div>
               <div className="material-surface material-clear clear-control metric-pill tone-amber px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">均价</div>
-                <div className="text-lg font-mono">{fmtUsd(spotlight.avgPrice)}</div>
+                <div className="text-xs text-[var(--text-dim)]">成交额</div>
+                <div className="text-lg font-mono">{fmtUsd(fallbackTrade.value)}</div>
               </div>
               <div className="material-surface material-clear clear-control metric-pill tone-coral px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">现价</div>
-                <div className="text-lg font-mono">{fmtUsd(spotlight.currentPrice)}</div>
+                <div className="text-xs text-[var(--text-dim)]">时间</div>
+                <div className="text-sm font-medium">{fallbackTrade.timestamp || '--'}</div>
               </div>
             </div>
-            <div className={`xl:text-right px-2 pt-2 ${spotlight.pnlPercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-              <div className="text-2xl font-semibold">{fmtPct(spotlight.pnlPercent)}</div>
-              <div className="text-sm">{fmtUsd(spotlight.pnl)}</div>
-            </div>
-          </div>
+          ) : null}
 
           <div className="material-surface material-reading reading-surface tone-neutral h-56 w-full p-2">
             <CandlestickSvg data={kline || []} />
