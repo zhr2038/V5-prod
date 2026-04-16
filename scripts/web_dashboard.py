@@ -151,6 +151,7 @@ class DashboardRuntimePaths:
     orders_db: Path
     fills_db: Path
     positions_db: Path
+    kill_switch_path: Path
     reconcile_status_path: Path
     runs_dir: Path
     auto_risk_eval_path: Path
@@ -1777,6 +1778,11 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
         orders_db=orders_db,
         fills_db=derive_fill_store_path(orders_db),
         positions_db=derive_position_store_path(orders_db),
+        kill_switch_path=_resolve_dashboard_runtime_artifact_path(
+            orders_db,
+            execution_cfg.get('kill_switch_path'),
+            'reports/kill_switch.json',
+        ),
         reconcile_status_path=_resolve_dashboard_runtime_artifact_path(
             orders_db,
             execution_cfg.get('reconcile_status_path'),
@@ -1796,6 +1802,23 @@ def _format_dashboard_ts_ms(ts_ms: Any) -> str:
     if ts_f <= 0:
         return ''
     return datetime.fromtimestamp(ts_f / 1000.0, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _dashboard_kill_switch_enabled(path: Path) -> bool:
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8', errors='ignore'))
+    except Exception:
+        return False
+
+    if isinstance(payload, dict):
+        if 'enabled' in payload:
+            return bool(payload.get('enabled'))
+        nested = payload.get('kill_switch')
+        if isinstance(nested, dict):
+            return bool(nested.get('enabled') or nested.get('active'))
+        if 'active' in payload:
+            return bool(payload.get('active'))
+    return bool(payload)
 
 
 def _percentile_value(values: List[float], quantile: float) -> Optional[float]:
@@ -3220,6 +3243,7 @@ def api_status():
     """系统状态API"""
     try:
         config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
         timer_name = _pick_timer_name()
         timer_state = _get_timer_state(timer_name)
 
@@ -3229,6 +3253,7 @@ def api_status():
             'timer_error': timer_state.get('error'),
             'mode': config.get('execution', {}).get('mode', 'unknown'),
             'dry_run': config.get('execution', {}).get('dry_run', True),
+            'kill_switch': _dashboard_kill_switch_enabled(runtime_paths.kill_switch_path),
             'equity_cap': config.get('budget', {}).get('live_equity_cap_usdt', 0),
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
@@ -3240,6 +3265,7 @@ def api_status():
             timer_error=None,
             mode='unknown',
             dry_run=True,
+            kill_switch=False,
             equity_cap=0,
             last_check='',
         )
@@ -4038,7 +4064,7 @@ def api_dashboard():
                 'isRunning': status_data.get('timer_active', False),
                 'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',
                 'lastUpdate': account_data.get('last_update', ''),
-                'killSwitch': False,
+                'killSwitch': bool(status_data.get('kill_switch', False)),
                 'errors': (
                     ([
                         _sanitize_public_error_text(status_data['timer_error'], default='internal error')

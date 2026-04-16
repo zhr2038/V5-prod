@@ -306,6 +306,7 @@ def test_timer_endpoints_degrade_without_systemctl(monkeypatch):
     timers_payload = timers_response.get_json()
 
     assert status_payload["timer_active"] is False
+    assert status_payload["kill_switch"] is False
     assert "systemctl" in status_payload["timer_error"]
     assert timer_payload["next_run"] is None
     assert "systemctl" in timer_payload["error"]
@@ -331,6 +332,7 @@ def test_status_api_error_response_hides_internal_paths(monkeypatch):
     assert payload["timer_active"] is False
     assert payload["mode"] == "unknown"
     assert payload["dry_run"] is True
+    assert payload["kill_switch"] is False
     assert payload["equity_cap"] == 0
     assert payload["last_check"] == ""
     _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
@@ -632,6 +634,7 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     monkeypatch.setattr(module, "api_status", lambda: module.jsonify({
         "timer_active": False,
         "dry_run": True,
+        "kill_switch": True,
         "timer_error": "systemctl is not available",
     }))
     monkeypatch.setattr(module, "api_equity_history", lambda: module.jsonify([{
@@ -702,6 +705,7 @@ def test_dashboard_api_uses_expected_payload_shapes(monkeypatch):
     assert payload["positions"][0]["pnlPercent"] == 0.1
     assert payload["trades"][0]["symbol"] == "BTC/USDT"
     assert payload["alphaScores"][0]["symbol"] == "BTC/USDT"
+    assert payload["systemStatus"]["killSwitch"] is True
     assert payload["systemStatus"]["errors"] == ["systemctl is not available"]
     assert payload["apiTelemetry"]["status"] == "warning"
     assert payload["apiTelemetry"]["totalRequests"] == 42
