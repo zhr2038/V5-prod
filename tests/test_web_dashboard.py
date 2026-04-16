@@ -338,6 +338,43 @@ def test_status_api_error_response_hides_internal_paths(monkeypatch):
     _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/configs/live_prod.yaml", "live_prod.yaml")
 
 
+def test_status_api_derives_dry_run_from_live_mode_when_flag_missing(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "load_config", lambda: {
+        "execution": {
+            "mode": "live",
+        },
+        "budget": {
+            "live_equity_cap_usdt": 321.0,
+        },
+    })
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config=None: module.DashboardRuntimePaths(
+        reports_dir=Path("/tmp/reports"),
+        orders_db=Path("/tmp/reports/orders.sqlite"),
+        fills_db=Path("/tmp/reports/fills.sqlite"),
+        positions_db=Path("/tmp/reports/positions.sqlite"),
+        kill_switch_path=Path("/tmp/reports/kill_switch.json"),
+        reconcile_status_path=Path("/tmp/reports/reconcile_status.json"),
+        runs_dir=Path("/tmp/reports/runs"),
+        auto_risk_eval_path=Path("/tmp/reports/auto_risk_eval.json"),
+        telemetry_db=Path("/tmp/reports/api_telemetry.sqlite"),
+    ))
+    monkeypatch.setattr(module, "_dashboard_kill_switch_enabled", lambda _path: True)
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["mode"] == "live"
+    assert payload["dry_run"] is False
+    assert payload["kill_switch"] is True
+    assert payload["equity_cap"] == 321.0
+
+
 def test_timer_api_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

@@ -1365,6 +1365,16 @@ def load_config():
         return {}
 
 
+def _dashboard_dry_run(config: Dict[str, Any]) -> bool:
+    execution_cfg = config.get('execution', {}) if isinstance(config, dict) else {}
+    mode = str(execution_cfg.get('mode') or '').strip().lower()
+    if mode == 'live':
+        return False
+    if mode == 'dry_run':
+        return True
+    return bool(execution_cfg.get('dry_run', True))
+
+
 def _sanitize_peak_equity(total_equity: float, initial_capital: float, peak_equity: float) -> float:
     total_equity = float(total_equity or 0.0)
     initial_capital = float(initial_capital or 0.0)
@@ -3246,13 +3256,14 @@ def api_status():
         runtime_paths = _resolve_dashboard_runtime_paths(config)
         timer_name = _pick_timer_name()
         timer_state = _get_timer_state(timer_name)
+        dry_run = _dashboard_dry_run(config)
 
         return jsonify({
             'timer_active': bool(timer_state.get('active')),
             'timer_name': timer_name,
             'timer_error': timer_state.get('error'),
             'mode': config.get('execution', {}).get('mode', 'unknown'),
-            'dry_run': config.get('execution', {}).get('dry_run', True),
+            'dry_run': dry_run,
             'kill_switch': _dashboard_kill_switch_enabled(runtime_paths.kill_switch_path),
             'equity_cap': config.get('budget', {}).get('live_equity_cap_usdt', 0),
             'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
