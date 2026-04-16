@@ -1886,6 +1886,12 @@ def _static_asset_version(filename: str) -> str:
 
 
 def _render_monitor_v2():
+    # 优先使用 React 构建产物
+    index_path = REACT_BUILD_PATH / 'index.html'
+    if index_path.exists():
+        return send_from_directory(str(REACT_BUILD_PATH), 'index.html')
+
+    # Fallback 到旧模板
     template_path = WEB_DIR / 'templates' / 'monitor_v2.html'
     if template_path.exists():
         return render_template(
@@ -1893,10 +1899,6 @@ def _render_monitor_v2():
             monitor_v2_js_version=_static_asset_version('js/monitor_v2.js'),
             ml_status_panel_js_version=_static_asset_version('js/ml_status_panel.js'),
         )
-
-    index_path = REACT_BUILD_PATH / 'index.html'
-    if index_path.exists():
-        return send_from_directory(str(REACT_BUILD_PATH), 'index.html')
 
     return 'Not found', 404
 
