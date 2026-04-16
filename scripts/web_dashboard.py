@@ -1370,7 +1370,7 @@ def _dashboard_execution_mode(config: Dict[str, Any]) -> str:
     mode = str(execution_cfg.get('mode') or '').strip().lower()
     if mode in {'live', 'dry_run'}:
         return mode
-    return 'dry_run' if bool(execution_cfg.get('dry_run', True)) else 'live'
+    return 'dry_run' if _dashboard_to_bool(execution_cfg.get('dry_run', True)) else 'live'
 
 
 def _dashboard_dry_run(config: Dict[str, Any]) -> bool:

@@ -412,6 +412,38 @@ def test_status_api_derives_live_mode_from_legacy_dry_run_flag(monkeypatch):
     assert payload["equity_cap"] == 123.0
 
 
+def test_status_api_treats_string_false_legacy_dry_run_as_live(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "load_config", lambda: {
+        "execution": {
+            "dry_run": "false",
+        },
+    })
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config=None: module.DashboardRuntimePaths(
+        reports_dir=Path("/tmp/reports"),
+        orders_db=Path("/tmp/reports/orders.sqlite"),
+        fills_db=Path("/tmp/reports/fills.sqlite"),
+        positions_db=Path("/tmp/reports/positions.sqlite"),
+        kill_switch_path=Path("/tmp/reports/kill_switch.json"),
+        reconcile_status_path=Path("/tmp/reports/reconcile_status.json"),
+        runs_dir=Path("/tmp/reports/runs"),
+        auto_risk_eval_path=Path("/tmp/reports/auto_risk_eval.json"),
+        telemetry_db=Path("/tmp/reports/api_telemetry.sqlite"),
+    ))
+    monkeypatch.setattr(module, "_dashboard_kill_switch_enabled", lambda _path: False)
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["mode"] == "live"
+    assert payload["dry_run"] is False
+
+
 def test_dashboard_kill_switch_enabled_treats_string_false_values_as_false(tmp_path):
     module = load_web_dashboard_module()
     kill_switch_path = tmp_path / "kill_switch.json"
