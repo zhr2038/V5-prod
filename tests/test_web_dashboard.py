@@ -1003,7 +1003,7 @@ def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypa
     monkeypatch.setattr(module, "api_positions", lambda: (module.jsonify({"error": "positions db locked"}), 500))
     monkeypatch.setattr(module, "api_trades", lambda: module.jsonify({"trades": []}))
     monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
-    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({"timer_active": True, "dry_run": False}))
+    monkeypatch.setattr(module, "api_status", lambda: (module.jsonify({"error": "status unavailable"}), 500))
     monkeypatch.setattr(module, "api_equity_history", lambda: module.jsonify([]))
     monkeypatch.setattr(module, "api_market_state", lambda: module.jsonify({"state": "TRENDING"}))
     monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": []}))
@@ -1018,7 +1018,12 @@ def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypa
     payload = response.get_json()
     assert payload["positions"] == []
     assert payload["account"]["positionsValue"] == 0.0
-    assert payload["systemStatus"]["errors"] == ["positions: positions db locked"]
+    assert payload["systemStatus"]["mode"] == "unknown"
+    assert payload["systemStatus"]["isRunning"] is False
+    assert payload["systemStatus"]["errors"] == [
+        "positions: positions db locked",
+        "status: status unavailable",
+    ]
 
 
 def test_dashboard_api_sanitizes_child_error_messages(monkeypatch):

@@ -1845,6 +1845,15 @@ def _dashboard_kill_switch_enabled(path: Path) -> bool:
     return _dashboard_to_bool(payload)
 
 
+def _dashboard_status_mode(status_data: Dict[str, Any], errors: Optional[List[str]] = None) -> str:
+    mode = str(status_data.get('mode') or '').strip().lower() if isinstance(status_data, dict) else ''
+    if mode in {'live', 'dry_run', 'unknown'}:
+        return mode
+    if any(str(err).startswith('status:') for err in (errors or [])):
+        return 'unknown'
+    return 'live' if not _dashboard_to_bool((status_data or {}).get('dry_run', True)) else 'dry_run'
+
+
 def _percentile_value(values: List[float], quantile: float) -> Optional[float]:
     xs: List[float] = []
     for value in values or []:
@@ -4087,8 +4096,8 @@ def api_dashboard():
             'alphaScores': alpha_scores,
             'marketState': market_state_data,
             'systemStatus': {
-                'isRunning': status_data.get('timer_active', False),
-                'mode': 'live' if not status_data.get('dry_run', True) else 'dry_run',
+                'isRunning': _dashboard_to_bool(status_data.get('timer_active', False)),
+                'mode': _dashboard_status_mode(status_data, errors),
                 'lastUpdate': account_data.get('last_update', ''),
                 'killSwitch': _dashboard_to_bool(status_data.get('kill_switch', False)),
                 'errors': (
