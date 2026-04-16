@@ -153,6 +153,15 @@ class V5Pipeline:
 
         self.clock = clock or SystemClock()
         self._data_provider = data_provider  # 数据提供者（用于ML数据收集器从API获取历史K线）
+        self._live_symbol_whitelist = (
+            {
+                str(sym).strip()
+                for sym in (getattr(cfg, "symbols", None) or [])
+                if str(sym).strip()
+            }
+            if str(getattr(getattr(cfg, "execution", None), "mode", "dry_run") or "dry_run").lower() == "live"
+            else set()
+        )
         runtime_order_store_path = Path(
             str(getattr(cfg.execution, "order_store_path", "reports/orders.sqlite"))
         )
@@ -320,6 +329,79 @@ class V5Pipeline:
                 ).resolve()
             ),
             data_provider=self._data_provider,
+        )
+
+    def _record_live_whitelist_drop(
+        self,
+        *,
+        audit: Optional[DecisionAudit],
+        stage: str,
+        dropped_symbols: List[str],
+    ) -> None:
+        unique = sorted({str(sym) for sym in (dropped_symbols or []) if str(sym).strip()})
+        if not unique or audit is None:
+            return
+        for _ in unique:
+            audit.reject("live_symbol_not_whitelisted")
+        audit.add_note(
+            f"live whitelist enforced at {stage}: dropped_non_whitelist_symbols={unique}"
+        )
+
+    def _filter_live_alpha_snapshot(
+        self,
+        alpha: AlphaSnapshot,
+        *,
+        audit: Optional[DecisionAudit],
+    ) -> AlphaSnapshot:
+        if not self._live_symbol_whitelist:
+            return alpha
+
+        dropped = sorted(
+            {
+                str(sym)
+                for sym in (
+                    list((alpha.scores or {}).keys())
+                    + list((alpha.raw_factors or {}).keys())
+                    + list((alpha.z_factors or {}).keys())
+                )
+                if str(sym) not in self._live_symbol_whitelist
+            }
+        )
+        self._record_live_whitelist_drop(audit=audit, stage="alpha_snapshot", dropped_symbols=dropped)
+
+        def _filter_optional_scores(payload):
+            if payload is None:
+                return None
+            return {
+                sym: score
+                for sym, score in (payload or {}).items()
+                if sym in self._live_symbol_whitelist
+            }
+
+        return AlphaSnapshot(
+            raw_factors={
+                sym: factors
+                for sym, factors in (alpha.raw_factors or {}).items()
+                if sym in self._live_symbol_whitelist
+            },
+            z_factors={
+                sym: factors
+                for sym, factors in (alpha.z_factors or {}).items()
+                if sym in self._live_symbol_whitelist
+            },
+            scores={
+                sym: score
+                for sym, score in (alpha.scores or {}).items()
+                if sym in self._live_symbol_whitelist
+            },
+            raw_scores=_filter_optional_scores(alpha.raw_scores),
+            telemetry_scores=_filter_optional_scores(alpha.telemetry_scores),
+            base_scores=_filter_optional_scores(alpha.base_scores),
+            base_raw_scores=_filter_optional_scores(alpha.base_raw_scores),
+            ml_attribution_scores=_filter_optional_scores(alpha.ml_attribution_scores),
+            ml_overlay_scores=_filter_optional_scores(alpha.ml_overlay_scores),
+            ml_overlay_raw_scores=_filter_optional_scores(alpha.ml_overlay_raw_scores),
+            ml_runtime=alpha.ml_runtime,
         )
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
@@ -1328,6 +1410,42 @@ class V5Pipeline:
         self.alpha_engine.set_run_id(run_id)
         self.portfolio_engine.set_run_id(run_id)
 
+        if self._live_symbol_whitelist:
+            dropped_market_symbols = sorted(
+                sym for sym in market_data_1h.keys() if sym not in self._live_symbol_whitelist
+            )
+            if dropped_market_symbols:
+                self._record_live_whitelist_drop(
+                    audit=audit,
+                    stage="market_data",
+                    dropped_symbols=dropped_market_symbols,
+                )
+            market_data_1h = {
+                sym: series
+                for sym, series in (market_data_1h or {}).items()
+                if sym in self._live_symbol_whitelist
+            }
+
+            dropped_position_symbols = sorted(
+                {
+                    str(getattr(p, "symbol", "") or "")
+                    for p in (positions or [])
+                    if str(getattr(p, "symbol", "") or "").strip()
+                    and str(getattr(p, "symbol", "") or "") not in self._live_symbol_whitelist
+                }
+            )
+            if dropped_position_symbols:
+                self._record_live_whitelist_drop(
+                    audit=audit,
+                    stage="positions",
+                    dropped_symbols=dropped_position_symbols,
+                )
+            positions = [
+                p
+                for p in (positions or [])
+                if str(getattr(p, "symbol", "") or "").strip() in self._live_symbol_whitelist
+            ]
+
         # 1) Regime detection (needed early if we want regime-aware alpha weights)
         # Regime检测后审计（显式处理空行情，避免 StopIteration）
         if not market_data_1h:
@@ -1348,6 +1466,7 @@ class V5Pipeline:
         regime_key = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
         self.alpha_engine.set_regime_context(regime_key)
         alpha = precomputed_alpha if precomputed_alpha is not None else self.alpha_engine.compute_snapshot(market_data_1h)
+        alpha = self._filter_live_alpha_snapshot(alpha, audit=audit)
         neg_feedback_enabled = any(
             [
                 bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False)),
@@ -1581,7 +1700,40 @@ class V5Pipeline:
             regime_mult=regime.multiplier,
             audit=audit
         )
-        
+
+        if self._live_symbol_whitelist:
+            dropped_selected = [
+                str(sym)
+                for sym in (portfolio.selected or [])
+                if str(sym) not in self._live_symbol_whitelist
+            ]
+            self._record_live_whitelist_drop(
+                audit=audit,
+                stage="portfolio_selected",
+                dropped_symbols=dropped_selected,
+            )
+            portfolio.selected = [
+                sym for sym in (portfolio.selected or []) if sym in self._live_symbol_whitelist
+            ]
+            target_weights = dict(portfolio.target_weights or {})
+            dropped_targets = [str(sym) for sym in target_weights.keys() if str(sym) not in self._live_symbol_whitelist]
+            self._record_live_whitelist_drop(
+                audit=audit,
+                stage="portfolio_targets",
+                dropped_symbols=dropped_targets,
+            )
+            portfolio.target_weights = {
+                sym: weight
+                for sym, weight in target_weights.items()
+                if sym in self._live_symbol_whitelist
+            }
+            if hasattr(portfolio, "entry_candidates") and getattr(portfolio, "entry_candidates", None) is not None:
+                portfolio.entry_candidates = [
+                    sym
+                    for sym in (getattr(portfolio, "entry_candidates", None) or [])
+                    if sym in self._live_symbol_whitelist
+                ]
+
         # Filter out symbols that don't meet OKX minSz requirement
         # to avoid DUST_SKIP rejection at execution time
         from src.data.okx_instruments import OKXSpotInstrumentsCache
@@ -2722,6 +2874,55 @@ class V5Pipeline:
                         )
         except Exception:
             pass
+
+        if self._live_symbol_whitelist:
+            leaked_router_symbols = [
+                str(d.get("symbol") or "").strip()
+                for d in router_decisions
+                if str(d.get("symbol") or "").strip()
+                and str(d.get("symbol") or "").strip() not in self._live_symbol_whitelist
+            ]
+            if leaked_router_symbols:
+                self._record_live_whitelist_drop(
+                    audit=audit,
+                    stage="router_decisions",
+                    dropped_symbols=leaked_router_symbols,
+                )
+                router_decisions = [
+                    d
+                    for d in router_decisions
+                    if str(d.get("symbol") or "").strip() in self._live_symbol_whitelist
+                ]
+
+            leaked_rebalance_symbols = [
+                str(order.symbol)
+                for order in rebalance_orders
+                if str(order.symbol) not in self._live_symbol_whitelist
+            ]
+            if leaked_rebalance_symbols:
+                self._record_live_whitelist_drop(
+                    audit=audit,
+                    stage="rebalance_orders",
+                    dropped_symbols=leaked_rebalance_symbols,
+                )
+                rebalance_orders = [
+                    order for order in rebalance_orders if str(order.symbol) in self._live_symbol_whitelist
+                ]
+
+            leaked_exit_symbols = [
+                str(order.symbol)
+                for order in exit_orders
+                if str(order.symbol) not in self._live_symbol_whitelist
+            ]
+            if leaked_exit_symbols:
+                self._record_live_whitelist_drop(
+                    audit=audit,
+                    stage="exit_orders",
+                    dropped_symbols=leaked_exit_symbols,
+                )
+                exit_orders = [
+                    order for order in exit_orders if str(order.symbol) in self._live_symbol_whitelist
+                ]
 
         if audit:
             audit.router_decisions = router_decisions

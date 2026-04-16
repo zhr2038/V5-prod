@@ -7,7 +7,7 @@ import os
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 # Ensure repo-local imports work even when the entrypoint is launched outside the repo root.
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -427,6 +427,175 @@ def _resolve_runtime_run_paths(cfg: AppConfig, run_id: str) -> dict[str, Path]:
     }
 
 
+def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def _live_symbol_whitelist(cfg: AppConfig) -> list[str]:
+    mode = str(getattr(getattr(cfg, "execution", None), "mode", "dry_run") or "dry_run").lower()
+    if mode != "live":
+        return []
+    return list(dict.fromkeys(str(sym).strip() for sym in (cfg.symbols or []) if str(sym).strip()))
+
+
+def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
+    return {
+        "symbols": list(cfg.symbols or []),
+        "universe": {
+            "enabled": bool(getattr(cfg.universe, "enabled", False)),
+            "use_universe_symbols": bool(getattr(cfg.universe, "use_universe_symbols", False)),
+        },
+        "alpha": {
+            "alpha158_overlay": {
+                "enabled": bool(getattr(getattr(cfg.alpha, "alpha158_overlay", None), "enabled", False)),
+            },
+            "long_top_pct": float(getattr(cfg.alpha, "long_top_pct", 0.0) or 0.0),
+            "min_score_threshold": float(getattr(cfg.alpha, "min_score_threshold", 0.0) or 0.0),
+        },
+        "execution": {
+            "fee_bps": float(getattr(cfg.execution, "fee_bps", 0.0) or 0.0),
+            "cost_aware_roundtrip_cost_bps": (
+                None
+                if getattr(cfg.execution, "cost_aware_roundtrip_cost_bps", None) is None
+                else float(getattr(cfg.execution, "cost_aware_roundtrip_cost_bps", 0.0) or 0.0)
+            ),
+            "rank_exit_max_rank": int(getattr(cfg.execution, "rank_exit_max_rank", 0) or 0),
+            "rank_exit_confirm_rounds": int(getattr(cfg.execution, "rank_exit_confirm_rounds", 0) or 0),
+            "rank_exit_strict_mode": bool(getattr(cfg.execution, "rank_exit_strict_mode", False)),
+            "min_hold_minutes_before_rank_exit": int(
+                getattr(cfg.execution, "min_hold_minutes_before_rank_exit", 0) or 0
+            ),
+            "min_hold_minutes_before_regime_exit": int(
+                getattr(cfg.execution, "min_hold_minutes_before_regime_exit", 0) or 0
+            ),
+            "max_rebalance_turnover_per_cycle": (
+                None
+                if getattr(cfg.execution, "max_rebalance_turnover_per_cycle", None) is None
+                else float(getattr(cfg.execution, "max_rebalance_turnover_per_cycle", 0.0) or 0.0)
+            ),
+        },
+    }
+
+
+def _write_effective_live_config(cfg: AppConfig) -> Path:
+    order_store_path = str(
+        getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
+        or "reports/orders.sqlite"
+    )
+    out_path = derive_runtime_named_json_path(order_store_path, "effective_live_config")
+    return _atomic_write_json(out_path, _effective_live_config_payload(cfg))
+
+
+def _audit_and_raise(audit, runtime_run_dir: Path, reject_reason: str, message: str) -> None:
+    if audit is not None:
+        audit.reject(reject_reason)
+        audit.add_note(message)
+        audit.save(str(runtime_run_dir))
+    raise RuntimeError(message)
+
+
+def _validate_live_contract(cfg: AppConfig) -> list[str]:
+    whitelist = _live_symbol_whitelist(cfg)
+    if not whitelist:
+        return []
+
+    errors: list[str] = []
+    if bool(getattr(cfg.universe, "use_universe_symbols", False)):
+        errors.append(
+            "universe.use_universe_symbols must be false in live mode when top-level symbols whitelist is enforced"
+        )
+    if not bool(getattr(cfg.execution, "preflight_enabled", True)):
+        errors.append("execution.preflight_enabled must be true in live mode")
+    return errors
+
+
+def _assert_live_symbol_subset(
+    symbols: list[str],
+    allowed_symbols: list[str],
+    *,
+    stage: str,
+    audit,
+    runtime_run_dir: Path,
+) -> None:
+    allowed = {str(sym) for sym in (allowed_symbols or []) if str(sym).strip()}
+    unexpected = sorted({str(sym) for sym in (symbols or []) if str(sym).strip() and str(sym) not in allowed})
+    if not unexpected:
+        return
+    _audit_and_raise(
+        audit,
+        runtime_run_dir,
+        "live_whitelist_violation",
+        f"live whitelist violation at {stage}: unexpected={unexpected} allowed={sorted(allowed)}",
+    )
+
+
+def _run_live_preflight_or_raise(
+    cfg: AppConfig,
+    *,
+    store,
+    acc_store,
+    audit,
+    runtime_run_dir: Path,
+):
+    mode = str(getattr(getattr(cfg, "execution", None), "mode", "dry_run") or "dry_run").lower()
+    if mode != "live":
+        return None, None
+
+    from src.execution.live_preflight import LivePreflight
+    from src.execution.okx_private_client import OKXPrivateClient
+
+    client = OKXPrivateClient(exchange=cfg.exchange)
+    try:
+        runtime_order_store_path = str(
+            getattr(cfg.execution, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite"
+        )
+        pf = LivePreflight(
+            cfg.execution,
+            okx=client,
+            position_store=store,
+            account_store=acc_store,
+            bills_db_path=str(
+                derive_runtime_named_artifact_path(runtime_order_store_path, "bills", ".sqlite")
+            ),
+            ledger_state_path=str(
+                derive_runtime_named_json_path(runtime_order_store_path, "ledger_state")
+            ),
+            ledger_status_path=str(
+                derive_runtime_named_json_path(runtime_order_store_path, "ledger_status")
+            ),
+            reconcile_status_path=str(
+                derive_runtime_named_json_path(runtime_order_store_path, "reconcile_status")
+                if str(getattr(cfg.execution, "reconcile_status_path", "") or "").strip()
+                in {"", "reports/reconcile_status.json"}
+                else getattr(cfg.execution, "reconcile_status_path")
+            ),
+        )
+        res = pf.run(
+            max_pages=int(getattr(cfg.execution, "preflight_max_pages", 5)),
+            max_status_age_sec=int(getattr(cfg.execution, "max_status_age_sec", 180)),
+        )
+        if audit is not None:
+            audit.add_note(f"LIVE_PREFLIGHT decision={res.decision} reason={res.reason}")
+        if str(res.decision).upper() != "ALLOW":
+            _audit_and_raise(
+                audit,
+                runtime_run_dir,
+                "live_preflight_blocked",
+                f"live preflight blocked before routing: decision={res.decision} reason={res.reason}",
+            )
+        return client, res
+    except RuntimeError:
+        raise
+    except Exception as e:
+        _audit_and_raise(audit, runtime_run_dir, "live_preflight_failed", f"live preflight failed: {e}")
+    return None, None
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent
     cfg_path = os.getenv("V5_CONFIG")
@@ -487,7 +656,18 @@ def main() -> None:
         window_end_ts=window_end_ts,
     )
 
-    provider = build_provider(cfg)
+    live_whitelist = _live_symbol_whitelist(cfg)
+    if live_whitelist:
+        effective_cfg_path = _write_effective_live_config(cfg)
+        audit.add_note(f"effective live config written: {effective_cfg_path}")
+        contract_errors = _validate_live_contract(cfg)
+        if contract_errors:
+            _audit_and_raise(
+                audit,
+                runtime_run_dir,
+                "live_config_contract",
+                "live config contract violation: " + "; ".join(contract_errors),
+            )
 
     # load persisted positions/account early so current holdings always stay in managed market-data scope
     order_store_path = str(getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite"))
@@ -500,10 +680,31 @@ def main() -> None:
         for p in held
         if float(getattr(p, "qty", 0.0) or 0.0) > 0.0
     ]
+    if live_whitelist:
+        _assert_live_symbol_subset(
+            held_symbols,
+            live_whitelist,
+            stage="held_symbols",
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+        )
 
-    symbols = list(cfg.symbols)
+    live_okx_client = None
+    live_preflight_result = None
+    if live_whitelist:
+        live_okx_client, live_preflight_result = _run_live_preflight_or_raise(
+            cfg,
+            store=store,
+            acc_store=acc_store,
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+        )
+
+    provider = build_provider(cfg)
+
+    symbols = list(live_whitelist or cfg.symbols)
     # Optional: dynamic universe
-    if cfg.universe.enabled:
+    if cfg.universe.enabled and not live_whitelist:
         try:
             from src.data.universe.okx_universe import OKXUniverseProvider
 
@@ -528,9 +729,19 @@ def main() -> None:
                 log.info(f"Universe enabled: using {len(symbols)} symbols (include={len(inc)})")
         except Exception as e:
             log.warning(f"Universe fetch failed, fallback to config symbols: {e}")
+    elif live_whitelist and cfg.universe.enabled:
+        audit.add_note("live whitelist active: dynamic universe fetch skipped")
 
-    scored_symbols = [str(s) for s in (symbols or []) if str(s).strip()]
+    scored_symbols = [str(s) for s in (live_whitelist or symbols or []) if str(s).strip()]
     managed_symbols = _merge_managed_symbols(scored_symbols, held_symbols)
+    if live_whitelist:
+        _assert_live_symbol_subset(
+            managed_symbols,
+            live_whitelist,
+            stage="managed_symbols",
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+        )
     if len(managed_symbols) > len(scored_symbols):
         added = [sym for sym in managed_symbols if sym not in set(scored_symbols)]
         log.info(
@@ -555,6 +766,8 @@ def main() -> None:
         "managed_symbols_sample": managed_symbols[:10] if managed_symbols else [],
         "held_symbols_count": len(held_symbols),
         "held_symbols_sample": held_symbols[:10] if held_symbols else [],
+        "whitelist_enforced": bool(live_whitelist),
+        "whitelist_symbols": list(live_whitelist),
     }
 
     # fetch 1h bars for alpha/regime and 4h for auxiliary (placeholder)
@@ -799,6 +1012,25 @@ def main() -> None:
         precomputed_alpha=alpha_snap,
         precomputed_regime=regime,
     )
+    if live_whitelist:
+        _assert_live_symbol_subset(
+            list((out.portfolio.target_weights or {}).keys()),
+            live_whitelist,
+            stage="targets",
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+        )
+        _assert_live_symbol_subset(
+            [
+                str(d.get("symbol") or "").strip()
+                for d in (audit.router_decisions or [])
+                if str(d.get("symbol") or "").strip()
+            ],
+            live_whitelist,
+            stage="router_decisions",
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+        )
 
     collector = None
     log.info(f"ALPHA_HISTORY_ENABLED={ALPHA_HISTORY_ENABLED}, AlphaHistoryCollector={AlphaHistoryCollector}")
@@ -906,6 +1138,14 @@ def main() -> None:
         order_store_path=str(getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite"),
         audit=audit,
     )
+    if live_whitelist:
+        _assert_live_symbol_subset(
+            [str(getattr(order, "symbol", "") or "").strip() for order in (orders or []) if str(getattr(order, "symbol", "") or "").strip()],
+            live_whitelist,
+            stage="order_intents_pre_arbitration",
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+        )
 
     # Order arbitration layer: unified priority + per-symbol state machine
     # to avoid cross-module conflicts (close vs rebalance/open in same run, cooldown churn, etc.).
@@ -968,7 +1208,7 @@ def main() -> None:
 
             from src.execution.order_store import OrderStore
             
-            client = OKXPrivateClient(exchange=cfg.exchange)
+            client = live_okx_client or OKXPrivateClient(exchange=cfg.exchange)
             order_store = OrderStore(cfg.execution.order_store_path)
             live = LiveExecutionEngine(
                 cfg.execution,
@@ -1011,71 +1251,34 @@ def main() -> None:
         except Exception as e:
             log.warning(f"live poll_open (pre) failed: {e}")
 
-    # Live preflight catch-up (Commit A): bills -> ledger -> reconcile/guard -> decision
-    if is_live and bool(getattr(cfg.execution, "preflight_enabled", True)):
-        try:
-            from src.execution.live_preflight import LivePreflight
-
-            client = getattr(exec_engine, "okx", None)
-            if client is not None:
-                runtime_order_store_path = str(
-                    getattr(cfg.execution, "order_store_path", "reports/orders.sqlite")
-                    or "reports/orders.sqlite"
+    if is_live and live_preflight_result is not None:
+        borrow_blocked = {
+            str(sym)
+            for sym in (((live_preflight_result.details or {}).get("borrow_check") or {}).get("blocked_symbols") or [])
+            if str(sym)
+        }
+        if borrow_blocked:
+            before_n = len(orders)
+            orders = [o for o in orders if str(getattr(o, "symbol", "")) not in borrow_blocked]
+            after_n = len(orders)
+            if before_n != after_n:
+                log.warning(
+                    "live preflight filtered borrow-blocked symbols: blocked=%s removed=%d",
+                    sorted(borrow_blocked),
+                    before_n - after_n,
                 )
-                pf = LivePreflight(
-                    cfg.execution,
-                    okx=client,
-                    position_store=store,
-                    account_store=acc_store,
-                    bills_db_path=str(
-                        derive_runtime_named_artifact_path(runtime_order_store_path, "bills", ".sqlite")
-                    ),
-                    ledger_state_path=str(
-                        derive_runtime_named_json_path(runtime_order_store_path, "ledger_state")
-                    ),
-                    ledger_status_path=str(
-                        derive_runtime_named_json_path(runtime_order_store_path, "ledger_status")
-                    ),
-                    reconcile_status_path=str(
-                        derive_runtime_named_json_path(runtime_order_store_path, "reconcile_status")
-                        if str(getattr(cfg.execution, "reconcile_status_path", "") or "").strip()
-                        in {"", "reports/reconcile_status.json"}
-                        else getattr(cfg.execution, "reconcile_status_path")
-                    ),
+                audit.add_note(
+                    f"live preflight filtered borrow-blocked symbols: blocked={sorted(borrow_blocked)} removed={before_n - after_n}"
                 )
-                res = pf.run(
-                    max_pages=int(getattr(cfg.execution, "preflight_max_pages", 5)),
-                    max_status_age_sec=int(getattr(cfg.execution, "max_status_age_sec", 180)),
-                )
-                log.info(f"LIVE_PREFLIGHT decision={res.decision} reason={res.reason}")
 
-                fail_action = str(getattr(cfg.execution, "preflight_fail_action", "sell_only") or "sell_only").lower()
-                if res.decision == "ABORT" or (res.decision == "SELL_ONLY" and fail_action == "abort"):
-                    raise RuntimeError(f"live preflight blocked: {res.decision} {res.reason}")
-
-                borrow_blocked = {
-                    str(sym)
-                    for sym in (((res.details or {}).get("borrow_check") or {}).get("blocked_symbols") or [])
-                    if str(sym)
-                }
-                if borrow_blocked:
-                    before_n = len(orders)
-                    orders = [o for o in orders if str(getattr(o, "symbol", "")) not in borrow_blocked]
-                    after_n = len(orders)
-                    if before_n != after_n:
-                        log.warning(
-                            "live preflight filtered borrow-blocked symbols: blocked=%s removed=%d",
-                            sorted(borrow_blocked),
-                            before_n - after_n,
-                        )
-
-                if res.decision == "SELL_ONLY":
-                    orders = [o for o in orders if str(o.side).lower() == "sell" or str(o.intent) == "CLOSE_LONG"]
-        except Exception as e:
-            # Safety: in live mode, preflight failure must stop execution.
-            # Otherwise we could trade with stale/unknown reconcile state or while liabilities exist.
-            log.error(f"live preflight failed (ABORT LIVE): {e}")
-            raise
+    if live_whitelist:
+        _assert_live_symbol_subset(
+            [str(getattr(order, "symbol", "") or "").strip() for order in (orders or []) if str(getattr(order, "symbol", "") or "").strip()],
+            live_whitelist,
+            stage="order_intents",
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+        )
 
     report = exec_engine.execute(orders)
     report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
