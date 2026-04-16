@@ -140,7 +140,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
   }, [spotlight?.symbol, tf]);
 
   return (
-    <div className="material-surface material-reading tone-sky reading-frame p-5 flex flex-col gap-5">
+    <div className="material-surface material-regular tone-sky reading-frame p-5 flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <CandlestickChart className="w-4 h-4" />
@@ -173,19 +173,19 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
         <>
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="material-surface material-clear clear-control tone-sky px-4 py-3">
+              <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">市值</div>
                 <div className="text-lg font-semibold">{fmtUsd(spotlight.value)}</div>
               </div>
-              <div className="material-surface material-clear clear-control tone-sage px-4 py-3">
+              <div className="material-surface material-clear clear-control metric-pill tone-sage px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">数量</div>
                 <div className="text-lg font-mono">{fmtNum(spotlight.qty, 4)}</div>
               </div>
-              <div className="material-surface material-clear clear-control tone-amber px-4 py-3">
+              <div className="material-surface material-clear clear-control metric-pill tone-amber px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">均价</div>
                 <div className="text-lg font-mono">{fmtUsd(spotlight.avgPrice)}</div>
               </div>
-              <div className="material-surface material-clear clear-control tone-coral px-4 py-3">
+              <div className="material-surface material-clear clear-control metric-pill tone-coral px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">现价</div>
                 <div className="text-lg font-mono">{fmtUsd(spotlight.currentPrice)}</div>
               </div>
@@ -196,7 +196,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
             </div>
           </div>
 
-          <div className="material-surface material-inset tone-smoke h-56 w-full p-2">
+          <div className="material-surface material-reading reading-surface tone-neutral h-56 w-full p-2">
             <CandlestickSvg data={kline || []} />
           </div>
 
@@ -205,7 +205,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
               <button
                 key={t.key}
                 onClick={() => setTf(t.key)}
-                className={`material-surface material-clear clear-chip px-3 py-1.5 text-xs transition ${
+                className={`material-surface material-clear clear-chip control-pill px-3 py-1.5 text-xs transition ${
                   tf === t.key
                     ? 'tone-sky text-white border-white/20'
                     : 'tone-pearl text-[var(--text-dim)] surface-lift'
@@ -224,7 +224,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
 
       <div className="mt-2">
         <div className="text-sm text-[var(--text-dim)] mb-3">持仓清单</div>
-        <div className="overflow-x-auto">
+        <div className="material-surface material-reading reading-block tone-neutral overflow-x-auto px-3 py-2">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-[var(--text-dim)] text-xs border-b border-white/10">

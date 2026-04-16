@@ -22,7 +22,7 @@ function Section({
   tone?: string;
 }) {
   return (
-    <div className={`material-surface material-reading reading-frame p-4 flex flex-col gap-3 ${tone || 'tone-smoke'}`}>
+    <div className={`material-surface material-regular reading-frame p-4 flex flex-col gap-3 ${tone || 'tone-smoke'}`}>
       <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
         <Icon className="w-4 h-4" />
         <span>{title}</span>
@@ -42,7 +42,7 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
       <Section icon={Clock} title="服务与定时器" tone="tone-sky">
         <div className="flex flex-col gap-2 max-h-48 overflow-auto pr-1">
           {(timers?.timers || []).map((t) => (
-            <div key={t.name} className="material-surface material-clear clear-control tone-pearl flex items-center justify-between text-xs px-2 py-2">
+            <div key={t.name} className="material-surface material-clear clear-control list-row tone-pearl flex items-center justify-between text-xs px-2 py-2">
               <span className="text-[var(--text-soft)]">{t.name}</span>
               <span
                 className={`px-1.5 py-0.5 rounded border ${
@@ -61,19 +61,19 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
 
       <Section icon={Route} title="执行路径" tone="tone-sage">
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="material-surface material-clear clear-control tone-sky p-2 text-center">
+          <div className="material-surface material-clear clear-control list-row tone-sky p-2 text-center">
             <div className="text-[var(--text-dim)]">已成交</div>
             <div className="font-semibold">{exec.filled || 0}</div>
           </div>
-          <div className="material-surface material-clear clear-control tone-coral p-2 text-center">
+          <div className="material-surface material-clear clear-control list-row tone-coral p-2 text-center">
             <div className="text-[var(--text-dim)]">已选订单</div>
             <div className="font-semibold">{exec.submitted || orders.length || 0}</div>
           </div>
-          <div className="material-surface material-clear clear-control tone-amber p-2 text-center">
+          <div className="material-surface material-clear clear-control list-row tone-amber p-2 text-center">
             <div className="text-[var(--text-dim)]">被拦截</div>
             <div className="font-semibold">{rejected.total || 0}</div>
           </div>
-          <div className="material-surface material-clear clear-control tone-plum p-2 text-center">
+          <div className="material-surface material-clear clear-control list-row tone-plum p-2 text-center">
             <div className="text-[var(--text-dim)]">本轮订单</div>
             <div className="font-semibold">{orders.length || 0}</div>
           </div>
@@ -104,7 +104,7 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
       <Section icon={Receipt} title="最近成交" tone="tone-coral">
         <div className="flex flex-col gap-2">
           {trades.slice(0, 6).map((t, i) => (
-            <div key={i} className="material-surface material-clear clear-control tone-pearl flex items-center justify-between text-xs px-2 py-2">
+            <div key={i} className="material-surface material-clear clear-control list-row tone-pearl flex items-center justify-between text-xs px-2 py-2">
               <div className="flex items-center gap-2">
                 <span className="font-medium">{t.symbol.replace('-USDT', '')}</span>
                 <span className={`px-1.5 rounded border ${t.side === 'buy' ? 'text-emerald-300 border-emerald-400/25' : 'text-rose-300 border-rose-400/25'}`}>
@@ -138,7 +138,7 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
           </div>
           <div className="flex flex-col gap-1.5">
             {(health?.checks || []).map((c, i) => (
-              <div key={i} className="material-surface material-clear clear-control tone-smoke flex items-center justify-between text-xs px-2 py-1.5">
+              <div key={i} className="material-surface material-clear clear-control list-row tone-smoke flex items-center justify-between text-xs px-2 py-1.5">
                 <span className="text-[var(--text-soft)]">{c.name}</span>
                 <span
                   className={`${

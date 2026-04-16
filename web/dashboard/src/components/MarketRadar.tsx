@@ -84,7 +84,7 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
   const alerts = marketState?.alerts || [];
 
   return (
-    <div className="material-surface material-reading tone-smoke reading-frame p-5 flex flex-col gap-4">
+    <div className="material-surface material-regular tone-smoke reading-frame p-5 flex flex-col gap-4">
       <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
         <Radar className="w-4 h-4" />
         <span>市场雷达</span>
@@ -106,7 +106,7 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
         </div>
       )}
 
-      <div>
+      <div className="material-surface material-reading reading-block tone-neutral px-3 py-3">
         <div className="text-xs text-[var(--text-dim)] mb-2">24h 投票轨迹</div>
         <div className="flex items-center gap-1 flex-wrap">
           {history.map((h, i) => {

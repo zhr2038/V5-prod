@@ -49,17 +49,17 @@ export function Hero({ marketState, riskGuard, systemStatus, updateTime }: HeroP
           </h1>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className={`px-4 py-2 text-sm font-medium ${stateClasses[state] || stateClasses.SIDEWAYS}`}>
+        <div className="material-surface material-clear tone-pearl control-rail self-start md:self-auto">
+          <div className={`control-pill ${stateClasses[state] || stateClasses.SIDEWAYS}`}>
             市场: {stateLabels[state] || state}
           </div>
-          <div className={`px-4 py-2 text-sm font-medium ${riskClasses[level] || riskClasses.NEUTRAL}`}>
+          <div className={`control-pill ${riskClasses[level] || riskClasses.NEUTRAL}`}>
             风险: {riskLabels[level] || level}
           </div>
-          <div className="material-surface material-clear clear-chip tone-sky surface-lift px-4 py-2 text-sm">
+          <div className="material-surface material-clear clear-chip tone-sky control-pill surface-lift" data-emphasis="soft">
             仓位倍数 <span className="font-mono text-[var(--accent)]">{fmtNum(multiplier, 2)}x</span>
           </div>
-          <div className="material-surface material-clear clear-chip tone-coral surface-lift px-4 py-2 text-sm">
+          <div className="material-surface material-clear clear-chip tone-coral control-pill surface-lift" data-emphasis="soft">
             回撤 <span className="font-mono">{dd == null ? '--' : fmtPct(dd, 1)}</span>
           </div>
         </div>
