@@ -45,11 +45,8 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
             <div key={t.name} className="material-surface material-clear clear-control list-row tone-pearl flex items-center justify-between text-xs px-2 py-2">
               <span className="text-[var(--text-soft)]">{t.name}</span>
               <span
-                className={`px-1.5 py-0.5 rounded border ${
-                  t.active
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/25'
-                    : 'bg-white/5 text-[var(--text-dim)] border-white/10'
-                }`}
+                className="status-badge"
+                data-state={t.active ? 'on' : 'off'}
               >
                 {t.active ? '运行中' : '停止'}
               </span>
