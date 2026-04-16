@@ -9,7 +9,7 @@ function syncThemeColor() {
   const root = getComputedStyle(document.documentElement)
   const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches
   const token = prefersLight ? '--theme-chrome-light' : '--theme-chrome-dark'
-  const fallback = prefersLight ? '#eef2f7' : '#252a34'
+  const fallback = prefersLight ? '#f3efed' : '#322f34'
   const color = root.getPropertyValue(token).trim() || fallback
   const themeMeta = document.querySelector<HTMLMetaElement>(THEME_COLOR_SELECTOR)
   if (themeMeta) {

@@ -27,8 +27,8 @@
   --surface-border-strong: rgba(255, 255, 255, 0.26);
   --shadow-soft: 0 18px 48px rgba(8, 10, 16, 0.16);
   --shadow-deep: 0 28px 80px rgba(7, 9, 15, 0.22);
-  --theme-chrome-dark: #252a34;
-  --theme-chrome-light: #eef2f7;
+  --theme-chrome-dark: #322f34;
+  --theme-chrome-light: #f3efed;
   --mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   --sans: "SF Pro Display", "MiSans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
@@ -43,12 +43,24 @@ body,
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+}
+
+html {
+  background:
+    radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
+    radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
+    radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
+  background-color: var(--theme-chrome-dark);
 }
 
 body {
   font-family: var(--sans);
   color: var(--text);
   overflow-x: hidden;
+  overscroll-behavior-y: none;
   background:
     radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
     radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
@@ -60,6 +72,9 @@ body {
   width: 100%;
   max-width: 1920px;
   margin: 0 auto;
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
 }
 
 .liquid-filters {
@@ -627,6 +642,16 @@ body {
     --surface-border-strong: rgba(102, 114, 139, 0.24);
     --shadow-soft: 0 18px 40px rgba(119, 129, 149, 0.10);
     --shadow-deep: 0 22px 56px rgba(119, 129, 149, 0.14);
+    --theme-chrome-light: #f3efed;
+  }
+
+  html {
+    background:
+      radial-gradient(1200px 860px at 10% 14%, rgba(208, 150, 128, 0.12), transparent 58%),
+      radial-gradient(980px 760px at 86% 16%, rgba(157, 174, 208, 0.10), transparent 54%),
+      radial-gradient(940px 860px at 56% 76%, rgba(157, 171, 146, 0.08), transparent 58%),
+      linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
+    background-color: var(--theme-chrome-light);
   }
 
   body {
