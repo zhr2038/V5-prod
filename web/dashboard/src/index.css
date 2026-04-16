@@ -80,12 +80,12 @@ body {
   min-height: 100dvh;
 }
 
-.hero-safe-top {
-  padding-top: max(1.6rem, calc(env(safe-area-inset-top, 0px) + 0.75rem));
+.hero-safe-copy {
+  padding-top: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.35rem));
 }
 
-.top-control-rail {
-  margin-top: max(0px, calc(env(safe-area-inset-top, 0px) * 0.08));
+.hero-safe-rail {
+  margin-top: max(0.2rem, calc(env(safe-area-inset-top, 0px) + 0.1rem));
 }
 
 .liquid-filters {
