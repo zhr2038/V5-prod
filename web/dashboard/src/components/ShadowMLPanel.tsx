@@ -9,7 +9,7 @@ interface ShadowMLPanelProps {
 export function ShadowMLPanel({ shadowML }: ShadowMLPanelProps) {
   if (!shadowML || !shadowML.available) {
     return (
-      <div className="glass-card p-5 flex flex-col gap-4">
+      <div className="material-surface material-reading tone-neutral reading-frame p-5 flex flex-col gap-4">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <Layers className="w-4 h-4" />
           <span>旁路模型叠加（Shadow ML / XGBoost 归因）</span>
@@ -34,37 +34,37 @@ export function ShadowMLPanel({ shadowML }: ShadowMLPanelProps) {
   };
 
   return (
-    <div className="glass-card p-5 flex flex-col gap-4">
+    <div className="material-surface material-reading tone-neutral reading-frame p-5 flex flex-col gap-4">
       <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
         <Layers className="w-4 h-4" />
         <span>旁路模型叠加（Shadow ML / XGBoost 归因）</span>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="glass-panel p-3 text-center">
+        <div className="material-surface material-clear clear-control tone-sky p-3 text-center">
           <div className="text-xs text-[var(--text-dim)]">状态</div>
           <div className="text-lg font-semibold">{impactText[ml.impact_status || 'insufficient'] || ml.impact_status}</div>
         </div>
-        <div className="glass-panel p-3 text-center">
+        <div className="material-surface material-clear clear-control tone-sage p-3 text-center">
           <div className="text-xs text-[var(--text-dim)]">24h 前N影响</div>
           <div className="text-lg font-semibold">
             {rolling.topn_delta_mean_bps != null ? `${fmtNum(rolling.topn_delta_mean_bps, 1)} 基点` : '--'}
           </div>
         </div>
-        <div className="glass-panel p-3 text-center">
+        <div className="material-surface material-clear clear-control tone-coral p-3 text-center">
           <div className="text-xs text-[var(--text-dim)]">本轮</div>
           <div className="text-lg font-semibold">
             {lastStep.delta_bps != null ? `${fmtNum(lastStep.delta_bps, 1)} 基点` : '--'}
           </div>
         </div>
-        <div className="glass-panel p-3 text-center">
+        <div className="material-surface material-clear clear-control tone-amber p-3 text-center">
           <div className="text-xs text-[var(--text-dim)]">覆盖</div>
           <div className="text-lg font-semibold">{ml.coverage_count || ml.active_symbols || 0} 币</div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="glass-panel p-4">
+        <div className="material-surface material-inset tone-sage p-4">
           <div className="text-xs text-emerald-300 mb-3 font-medium">抬升最多</div>
           <div className="flex flex-col gap-2">
             {promoted.slice(0, 6).map((item, i) => (
@@ -79,7 +79,7 @@ export function ShadowMLPanel({ shadowML }: ShadowMLPanelProps) {
           </div>
         </div>
 
-        <div className="glass-panel p-4">
+        <div className="material-surface material-inset tone-rose p-4">
           <div className="text-xs text-rose-300 mb-3 font-medium">压低最多</div>
           <div className="flex flex-col gap-2">
             {suppressed.slice(0, 6).map((item, i) => (

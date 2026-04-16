@@ -113,7 +113,7 @@ function App() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="fixed bottom-4 right-4 z-50 text-xs px-3 py-1.5 rounded-full glass-panel border border-white/10"
+            className="fixed bottom-4 right-4 z-50 text-xs px-3 py-1.5 material-surface material-clear clear-chip tone-pearl"
           >
             刷新中...
           </motion.div>

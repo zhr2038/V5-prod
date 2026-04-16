@@ -30,6 +30,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
       value: fmtUsd(account?.totalEquity),
       sub: `盈亏 ${fmtUsd(account?.totalPnl)} (${fmtPct(account?.totalPnlPercent)})`,
       tone: (account?.totalPnlPercent || 0) >= 0 ? 'text-emerald-300' : 'text-rose-300',
+      surface: 'material-surface material-regular tone-coral surface-lift',
     },
     {
       icon: PieChart,
@@ -39,6 +40,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
         ? `${((account.cash / account.totalEquity) * 100).toFixed(1)}% 现金`
         : '--',
       tone: 'text-[var(--accent-3)]',
+      surface: 'material-surface material-regular tone-sky surface-lift',
     },
     {
       icon: TrendingUp,
@@ -46,6 +48,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
       value: fmtUsd(account?.positionsValue),
       sub: `初始 ${fmtUsd(account?.initialCapital)}`,
       tone: 'text-[var(--accent-2)]',
+      surface: 'material-surface material-regular tone-amber surface-lift',
     },
     {
       icon: Activity,
@@ -53,6 +56,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
       value: systemStatus?.isRunning ? '运行中' : '停止',
       sub: systemStatus?.errors?.length ? `${systemStatus.errors.length} 个告警` : '无异常',
       tone: systemStatus?.isRunning ? 'text-emerald-300' : 'text-rose-300',
+      surface: 'material-surface material-regular tone-sage surface-lift',
     },
     {
       icon: Target,
@@ -60,6 +64,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
       value: focusSymbol || '—',
       sub: '持仓聚焦',
       tone: 'text-[var(--accent)]',
+      surface: 'material-surface material-clear tone-plum surface-lift',
     },
   ];
 
@@ -74,7 +79,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
         <motion.div
           key={card.label}
           variants={item}
-          className="glass-card p-5 flex flex-col gap-2"
+          className={`${card.surface} p-5 flex flex-col gap-2`}
         >
           <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm">
             <card.icon className="w-4 h-4" />

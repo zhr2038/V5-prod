@@ -55,12 +55,15 @@ export function LiquidBg() {
       </svg>
 
       <div className="liquid-bg" aria-hidden="true">
-        <div className="liquid-aura aura-1" />
-        <div className="liquid-aura aura-2" />
+        <div className="ambient-wash wash-coral" />
+        <div className="ambient-wash wash-sky" />
+        <div className="ambient-wash wash-sage" />
+        <div className="ambient-ribbon ribbon-coral" />
+        <div className="ambient-ribbon ribbon-ice" />
+        <div className="ambient-pane pane-left" />
+        <div className="ambient-pane pane-right" />
         <div className="liquid-caustic caustic-1" />
         <div className="liquid-caustic caustic-2" />
-        <div className="liquid-sheet sheet-1" />
-        <div className="liquid-sheet sheet-2" />
         <div className="liquid-orb orb-1" />
         <div className="liquid-orb orb-2" />
         <div className="liquid-orb orb-3" />

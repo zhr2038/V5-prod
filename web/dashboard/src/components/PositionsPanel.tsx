@@ -137,7 +137,7 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
   }, [spotlight?.symbol, tf]);
 
   return (
-    <div className="glass-card p-5 flex flex-col gap-5">
+    <div className="material-surface material-reading tone-sky reading-frame p-5 flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <CandlestickChart className="w-4 h-4" />
@@ -168,32 +168,32 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
 
       {spotlight ? (
         <>
-          <div className="flex items-center justify-between">
-            <div className="flex gap-4">
-              <div>
+          <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="material-surface material-clear clear-control tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">市值</div>
                 <div className="text-lg font-semibold">{fmtUsd(spotlight.value)}</div>
               </div>
-              <div>
+              <div className="material-surface material-clear clear-control tone-sage px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">数量</div>
                 <div className="text-lg font-mono">{fmtNum(spotlight.qty, 4)}</div>
               </div>
-              <div>
+              <div className="material-surface material-clear clear-control tone-amber px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">均价</div>
                 <div className="text-lg font-mono">{fmtUsd(spotlight.avgPrice)}</div>
               </div>
-              <div>
+              <div className="material-surface material-clear clear-control tone-coral px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">现价</div>
                 <div className="text-lg font-mono">{fmtUsd(spotlight.currentPrice)}</div>
               </div>
             </div>
-            <div className={`text-right ${spotlight.pnlPercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+            <div className={`xl:text-right px-2 pt-2 ${spotlight.pnlPercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
               <div className="text-2xl font-semibold">{fmtPct(spotlight.pnlPercent)}</div>
               <div className="text-sm">{fmtUsd(spotlight.pnl)}</div>
             </div>
           </div>
 
-          <div className="h-56 w-full glass-panel p-2">
+          <div className="material-surface material-inset tone-smoke h-56 w-full p-2">
             <CandlestickSvg data={kline || []} />
           </div>
 
@@ -202,10 +202,10 @@ export function PositionsPanel({ positions = [] }: PositionsPanelProps) {
               <button
                 key={t.key}
                 onClick={() => setTf(t.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs border transition ${
+                className={`material-surface material-clear clear-chip px-3 py-1.5 text-xs transition ${
                   tf === t.key
-                    ? 'bg-white/10 border-white/20 text-white'
-                    : 'bg-transparent border-white/10 text-[var(--text-dim)] hover:bg-white/5'
+                    ? 'tone-sky text-white border-white/20'
+                    : 'tone-pearl text-[var(--text-dim)] surface-lift'
                 }`}
               >
                 {t.label}

@@ -43,6 +43,12 @@ const stageConfig = [
 export function MLBand({ mlTraining }: MLBandProps) {
   const stages = (mlTraining?.stages || {}) as Record<string, boolean>;
   const progress = mlTraining?.progress_percent || 0;
+  const stageTone: Record<string, string> = {
+    sampling: 'tone-sage',
+    trained: 'tone-sky',
+    promoted: 'tone-amber',
+    liveActive: 'tone-coral',
+  };
 
   return (
     <motion.div
@@ -51,18 +57,18 @@ export function MLBand({ mlTraining }: MLBandProps) {
       transition={{ delay: 0.15 }}
       className="relative z-10 px-6 pb-6"
     >
-      <div className="glass-card p-5">
+      <div className="material-surface material-regular tone-neutral p-5">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)] mb-4">
           <Brain className="w-4 h-4" />
           <span>ML 训练链路</span>
           <span className="ml-auto font-mono text-[var(--accent)]">{progress.toFixed(0)}%</span>
         </div>
 
-        <div className="relative h-2 bg-white/10 rounded-full overflow-hidden mb-5">
+        <div className="material-surface material-inset tone-sky relative h-3 rounded-full overflow-hidden mb-5">
           <motion.div
             className="absolute inset-y-0 left-0 rounded-full"
             style={{
-              background: 'linear-gradient(90deg, #7fffd4, #8dc4ff, #7fffd4)',
+              background: 'linear-gradient(90deg, rgba(154,235,212,0.95), rgba(173,205,255,0.92), rgba(232,198,142,0.88))',
               backgroundSize: '200% 100%',
             }}
             initial={{ width: 0 }}
@@ -78,9 +84,7 @@ export function MLBand({ mlTraining }: MLBandProps) {
             return (
               <div
                 key={stage.key}
-                className={`glass-panel px-3 py-3 flex flex-col gap-1 ${
-                  active ? 'border-emerald-400/20' : ''
-                }`}
+                className={`material-surface material-clear clear-control surface-lift ${stageTone[stage.key] || 'tone-neutral'} px-3 py-3 flex flex-col gap-1`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-[var(--text-soft)]">{stage.title}</span>

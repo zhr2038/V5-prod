@@ -28,6 +28,12 @@ function VoteCard({
   const state = String(vote.state || '').toUpperCase();
   const confidence = vote.confidence ?? 0;
   const probs = vote.probs || {};
+  const surfaceTone =
+    state === 'TRENDING' || state === 'TRENDINGUP'
+      ? 'tone-sage'
+      : state === 'RISK_OFF' || state === 'TRENDINGDOWN'
+      ? 'tone-rose'
+      : 'tone-amber';
 
   const rows = showProbs
     ? [
@@ -44,10 +50,10 @@ function VoteCard({
     : [];
 
   return (
-    <div className="glass-panel p-4 flex flex-col gap-3">
+    <div className={`material-surface material-clear clear-control surface-lift ${surfaceTone} p-4 flex flex-col gap-3`}>
       <div className="flex items-center justify-between">
         <span className="text-sm text-[var(--text-dim)]">{title}</span>
-        <span className={`text-xs px-2 py-0.5 rounded-full border ${stateBg[state] || 'bg-white/5 border-white/10'}`}>
+        <span className={`text-xs px-2 py-0.5 rounded-full border ${stateBg[state] || 'bg-white/8 border-white/12'}`}>
           {stateLabels[state] || vote.state || '—'}
         </span>
       </div>
@@ -78,7 +84,7 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
   const alerts = marketState?.alerts || [];
 
   return (
-    <div className="glass-card p-5 flex flex-col gap-4">
+    <div className="material-surface material-reading tone-smoke reading-frame p-5 flex flex-col gap-4">
       <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
         <Radar className="w-4 h-4" />
         <span>市场雷达</span>
