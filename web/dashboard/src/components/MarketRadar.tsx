@@ -104,7 +104,9 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
         <div className="text-xs text-[var(--text-dim)] mb-2">24h 投票轨迹</div>
         <div className="flex items-center gap-1 flex-wrap">
           {history.map((h, i) => {
-            const s = String(h.state || '').toUpperCase();
+            const final = h.final || {};
+            const s = String(final.state || '').toUpperCase();
+            const confidence = final.confidence ?? 0.5;
             const color =
               s === 'TRENDING' || s === 'TRENDINGUP'
                 ? 'bg-emerald-400'
@@ -115,11 +117,11 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
               <motion.div
                 key={i}
                 initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: h.confidence || 0.5, scale: 1 }}
+                animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: i * 0.01 }}
-                title={`${h.time}: ${stateLabels[s] || s}`}
+                title={`${h.label}: ${stateLabels[s] || s}`}
                 className={`w-3 h-6 rounded-sm ${color}`}
-                style={{ opacity: 0.3 + (h.confidence || 0.5) * 0.7 }}
+                style={{ opacity: 0.3 + confidence * 0.7 }}
               />
             );
           })}

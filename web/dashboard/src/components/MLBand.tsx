@@ -6,10 +6,42 @@ interface MLBandProps {
   mlTraining?: MLTrainingData | null;
 }
 
-const stageNames = ['采样', '训练', '门控', '实盘'];
+const stageConfig = [
+  {
+    key: 'sampling',
+    title: '采样',
+    summary: (data: MLTrainingData) =>
+      `${Number(data.labeled_samples || 0)} / ${Number(data.samples_needed || 0) || '--'}`,
+  },
+  {
+    key: 'trained',
+    title: '训练',
+    summary: (data: MLTrainingData) => data.last_training_ts || '未训练',
+  },
+  {
+    key: 'promoted',
+    title: '门控',
+    summary: (data: MLTrainingData) =>
+      Array.isArray(data.promotion_fail_reasons) && data.promotion_fail_reasons.length
+        ? '未通过'
+        : data.last_promotion_ts
+        ? '已通过'
+        : '待评估',
+  },
+  {
+    key: 'liveActive',
+    title: '实盘',
+    summary: (data: MLTrainingData) =>
+      data.runtime_reason && data.runtime_reason !== 'ok'
+        ? data.runtime_reason
+        : data.last_runtime_ts
+        ? '已启用'
+        : '未启用',
+  },
+];
 
 export function MLBand({ mlTraining }: MLBandProps) {
-  const stages = mlTraining?.stages || [];
+  const stages = (mlTraining?.stages || {}) as Record<string, boolean>;
   const progress = mlTraining?.progress_percent || 0;
 
   return (
@@ -40,30 +72,29 @@ export function MLBand({ mlTraining }: MLBandProps) {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {stageNames.map((name, idx) => {
-            const stage = stages[idx];
-            const status = stage?.status || 'pending';
-            const isDone = status === 'completed';
-            const isRunning = status === 'running';
+          {stageConfig.map((stage) => {
+            const active = Boolean(stages[stage.key]);
+            const note = stage.summary(mlTraining || {});
             return (
               <div
-                key={name}
-                className={`glass-panel px-3 py-3 flex items-center justify-between gap-2 ${
-                  isDone ? 'border-emerald-400/20' : isRunning ? 'border-sky-400/20' : ''
+                key={stage.key}
+                className={`glass-panel px-3 py-3 flex flex-col gap-1 ${
+                  active ? 'border-emerald-400/20' : ''
                 }`}
               >
-                <span className="text-sm text-[var(--text-soft)]">{name}</span>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full border ${
-                    isDone
-                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/25'
-                      : isRunning
-                      ? 'bg-sky-500/15 text-sky-300 border-sky-400/25'
-                      : 'bg-white/5 text-[var(--text-dim)] border-white/10'
-                  }`}
-                >
-                  {isDone ? '完成' : isRunning ? '进行中' : '等待'}
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[var(--text-soft)]">{stage.title}</span>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full border ${
+                      active
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/25'
+                        : 'bg-white/5 text-[var(--text-dim)] border-white/10'
+                    }`}
+                  >
+                    {active ? '已到位' : '等待'}
+                  </span>
+                </div>
+                <div className="text-xs text-[var(--text-dim)] truncate">{note}</div>
               </div>
             );
           })}

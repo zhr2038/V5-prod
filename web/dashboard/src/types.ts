@@ -112,9 +112,14 @@ export interface MarketStateData {
 }
 
 export interface MarketHistoryPoint {
-  time: string;
-  state: string;
-  confidence: number;
+  label: string;
+  ts_ms: number;
+  final: {
+    state: string;
+    confidence: number;
+    score: number;
+  };
+  votes?: any;
 }
 
 export interface RiskGuardData {
@@ -175,22 +180,55 @@ export interface HealthData {
 
 export interface MLTrainingData {
   status?: string;
-  stages?: MLStage[];
+  phase?: string;
+  stages?: MLStages;
   progress_percent?: number;
+  labeled_samples?: number;
+  samples_needed?: number;
+  last_training_ts?: string;
+  promotion_fail_reasons?: string[];
+  last_runtime_ts?: string;
+  last_ic?: number;
+  runtime_prediction_count?: number;
+  runtime_reason?: string;
   [k: string]: any;
 }
 
-export interface MLStage {
-  name: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  detail?: string;
+export interface MLStages {
+  sampling?: boolean;
+  trained?: boolean;
+  promoted?: boolean;
+  liveActive?: boolean;
 }
 
 export interface ShadowMLData {
-  lift?: { symbol: string; impact: number }[];
-  drag?: { symbol: string; impact: number }[];
-  summary?: string;
+  available?: boolean;
+  error?: string;
+  impact_status?: string;
+  ml_signal_overview?: {
+    impact_status?: string;
+    coverage_count?: number;
+    active_symbols?: number;
+    last_step?: {
+      delta_bps?: number;
+      promoted_symbols?: ShadowMLSymbol[];
+      suppressed_symbols?: ShadowMLSymbol[];
+    };
+    rolling_24h?: {
+      topn_delta_mean_bps?: number;
+      points?: number;
+    };
+    [k: string]: any;
+  };
   [k: string]: any;
+}
+
+export interface ShadowMLSymbol {
+  symbol: string;
+  base_rank?: number;
+  final_rank?: number;
+  rank_delta?: number;
+  return_bps?: number;
 }
 
 export interface KlineData {
