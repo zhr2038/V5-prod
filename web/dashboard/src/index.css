@@ -515,25 +515,26 @@ body {
   align-items: center;
   justify-content: center;
   min-width: 0;
-  padding: 7px 14px;
-  border-radius: 16px;
-  font-size: 0.8rem;
+  padding: 6px 12px;
+  border-radius: 14px;
+  font-size: 0.76rem;
+  font-weight: 540;
   line-height: 1;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   white-space: nowrap;
 }
 
 .status-badge[data-state="on"] {
-  background: rgba(27, 122, 101, 0.18);
-  color: #5df0c5;
-  border: 1px solid rgba(86, 237, 196, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background: rgba(29, 117, 97, 0.15);
+  color: #67f2ca;
+  border: 1px solid rgba(95, 235, 197, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .status-badge[data-state="off"] {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-dim);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .tone-coral {
