@@ -65,6 +65,30 @@ export interface TimerData {
   error?: string;
 }
 
+export interface ApiTelemetryErrorData {
+  method?: string;
+  endpoint?: string;
+  statusClass?: string;
+  httpStatus?: number | null;
+  okxCode?: string | null;
+  message?: string;
+}
+
+export interface ApiTelemetryData {
+  status: string;
+  lookbackHours: number;
+  totalRequests: number;
+  successRate?: number | null;
+  errorCount: number;
+  rateLimitedCount: number;
+  p50LatencyMs?: number | null;
+  p95LatencyMs?: number | null;
+  lastRequestAt?: string;
+  lastErrorAt?: string;
+  latestError?: ApiTelemetryErrorData | null;
+  note?: string;
+}
+
 export interface DashboardData {
   account: AccountData;
   positions: Position[];
@@ -78,6 +102,7 @@ export interface DashboardData {
   icDiagnostics: any;
   mlTraining: MLTrainingData;
   reflectionReports: any;
+  apiTelemetry?: ApiTelemetryData | null;
 }
 
 export interface EquityPoint {

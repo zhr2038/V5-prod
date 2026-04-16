@@ -1,6 +1,6 @@
-import { Clock, Route, BarChart3, Receipt, HeartPulse } from 'lucide-react';
-import { fmtUsd, fmtNum, statusLabels, sideLabels } from '../lib/format';
-import type { TimerData, AlphaScore, Trade, HealthData, DecisionAuditData } from '../types';
+import { Clock, Route, BarChart3, Receipt, HeartPulse, Gauge } from 'lucide-react';
+import { fmtUsd, fmtNum, fmtPct, statusLabels, sideLabels } from '../lib/format';
+import type { TimerData, AlphaScore, Trade, HealthData, DecisionAuditData, ApiTelemetryData } from '../types';
 
 interface SidebarProps {
   timers?: { timers: TimerData[] } | null;
@@ -8,6 +8,7 @@ interface SidebarProps {
   trades?: Trade[];
   health?: HealthData | null;
   decisionAudit?: DecisionAuditData | null;
+  apiTelemetry?: ApiTelemetryData | null;
 }
 
 function Section({
@@ -32,10 +33,37 @@ function Section({
   );
 }
 
-export function Sidebar({ timers, alphaScores = [], trades = [], health, decisionAudit }: SidebarProps) {
+function fmtLatencyMs(value: unknown) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '--';
+  return `${num >= 100 ? num.toFixed(0) : num.toFixed(1)}ms`;
+}
+
+function fmtShortStamp(value?: string) {
+  const text = String(value || '').trim();
+  return text ? text.slice(5, 16).replace('T', ' ') : '—';
+}
+
+function statusDotClass(status?: string) {
+  if (status === 'healthy') return 'bg-emerald-400';
+  if (status === 'warning') return 'bg-amber-400';
+  if (status === 'critical' || status === 'error') return 'bg-rose-400';
+  return 'bg-white/35';
+}
+
+function latestErrorLabel(apiTelemetry?: ApiTelemetryData | null) {
+  const latestError = apiTelemetry?.latestError;
+  if (!latestError) return '';
+  return [latestError.method, latestError.endpoint, latestError.okxCode || latestError.httpStatus || latestError.statusClass]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+export function Sidebar({ timers, alphaScores = [], trades = [], health, decisionAudit, apiTelemetry }: SidebarProps) {
   const exec = decisionAudit?.execution_summary || {};
   const rejected = decisionAudit?.rejected_summary || {};
   const orders = decisionAudit?.orders || [];
+  const errorLabel = latestErrorLabel(apiTelemetry);
 
   return (
     <div className="flex flex-col gap-4">
@@ -73,6 +101,58 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
           <div className="material-surface material-clear clear-control list-row tone-plum p-2 text-center">
             <div className="text-[var(--text-dim)]">本轮订单</div>
             <div className="font-semibold">{orders.length || 0}</div>
+          </div>
+        </div>
+      </Section>
+
+      <Section icon={Gauge} title="API 遥测" tone="tone-sky">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${statusDotClass(apiTelemetry?.status)}`} />
+            <span className="text-sm font-medium">{statusLabels[apiTelemetry?.status || ''] || apiTelemetry?.status || '—'}</span>
+            <span className="ml-auto text-xs text-[var(--text-dim)]">近{Number(apiTelemetry?.lookbackHours || 24)}h</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="material-surface material-clear clear-control list-row tone-pearl p-2 text-center">
+              <div className="text-[var(--text-dim)]">请求数</div>
+              <div className="font-semibold">{fmtNum(apiTelemetry?.totalRequests, 0)}</div>
+            </div>
+            <div className="material-surface material-clear clear-control list-row tone-sage p-2 text-center">
+              <div className="text-[var(--text-dim)]">成功率</div>
+              <div className="font-semibold">{fmtPct(apiTelemetry?.successRate, 1)}</div>
+            </div>
+            <div className="material-surface material-clear clear-control list-row tone-coral p-2 text-center">
+              <div className="text-[var(--text-dim)]">限流次数</div>
+              <div className="font-semibold">{fmtNum(apiTelemetry?.rateLimitedCount, 0)}</div>
+            </div>
+            <div className="material-surface material-clear clear-control list-row tone-plum p-2 text-center">
+              <div className="text-[var(--text-dim)]">P95 延迟</div>
+              <div className="font-semibold">{fmtLatencyMs(apiTelemetry?.p95LatencyMs)}</div>
+            </div>
+          </div>
+
+          <div className="material-surface material-clear clear-control list-row tone-pearl flex flex-col gap-1.5 px-2 py-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[var(--text-dim)]">最近请求</span>
+              <span className="text-[var(--text-soft)]">{fmtShortStamp(apiTelemetry?.lastRequestAt)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[var(--text-dim)]">P50 / 错误</span>
+              <span className="text-[var(--text-soft)]">
+                {fmtLatencyMs(apiTelemetry?.p50LatencyMs)} · {fmtNum(apiTelemetry?.errorCount, 0)}
+              </span>
+            </div>
+            <div className="text-xs text-[var(--text-dim)]">{apiTelemetry?.note || '暂无 API 遥测数据'}</div>
+            {errorLabel ? (
+              <div className="border-t border-white/8 pt-1.5">
+                <div className="flex items-center justify-between text-xs text-[var(--text-dim)]">
+                  <span>最近错误</span>
+                  <span className="text-[var(--text-soft)]">{fmtShortStamp(apiTelemetry?.lastErrorAt)}</span>
+                </div>
+                <div className="mt-1 text-[11px] font-mono text-[var(--text-soft)] break-all">{errorLabel}</div>
+              </div>
+            ) : null}
           </div>
         </div>
       </Section>
