@@ -160,6 +160,12 @@ try:
 except Exception as e:
     print(f"[WebDashboard] Failed to register health blueprint: {e}")
 
+try:
+    from src.monitoring.prometheus_exporter import render_prometheus_metrics
+except Exception as e:
+    render_prometheus_metrics = None
+    print(f"[WebDashboard] Failed to import prometheus exporter: {e}")
+
 
 @app.after_request
 def add_no_cache_headers(resp):
@@ -200,6 +206,21 @@ def _json_internal_error_response(
     payload = dict(extra)
     payload['error'] = error
     return jsonify(payload), status_code
+
+
+@app.route('/metrics')
+def prometheus_metrics():
+    if render_prometheus_metrics is None:
+        body = "v5_metrics_exporter_up 0\n"
+        return body, 500, {'Content-Type': 'text/plain; version=0.0.4; charset=utf-8'}
+
+    try:
+        body = render_prometheus_metrics(workspace=WORKSPACE, config=load_config())
+        return body, 200, {'Content-Type': 'text/plain; version=0.0.4; charset=utf-8'}
+    except Exception as exc:
+        _log_dashboard_exception('metrics export error', exc)
+        body = "v5_metrics_exporter_up 0\n"
+        return body, 500, {'Content-Type': 'text/plain; version=0.0.4; charset=utf-8'}
 
 
 def _extract_endpoint_json(result: Any) -> tuple[Any, int]:

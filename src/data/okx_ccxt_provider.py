@@ -7,6 +7,7 @@ import ccxt  # type: ignore
 import requests
 
 from src.core.models import MarketSeries
+from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, record_api_request
 from .market_data_provider import MarketDataProvider
 
 
@@ -158,15 +159,48 @@ class OKXCCXTProvider(MarketDataProvider):
         last_exc: Exception | None = None
         for attempt in range(max_attempts):
             self._throttle_history_request()
+            started_at = time.perf_counter()
+            recorded = False
             try:
                 r = requests.get(url, params=params, timeout=self.timeout_sec)
+                http_status = int(getattr(r, "status_code", 0) or 0) or None
                 r.raise_for_status()
                 obj = r.json()
+                code = str(obj.get("code")) if isinstance(obj, dict) and obj.get("code") is not None else None
+                msg = str(obj.get("msg")) if isinstance(obj, dict) and obj.get("msg") is not None else None
+                record_api_request(
+                    exchange="okx",
+                    method="GET",
+                    endpoint="/api/v5/market/history-candles",
+                    duration_ms=(time.perf_counter() - started_at) * 1000.0,
+                    status_class=classify_api_status(http_status=http_status, okx_code=code),
+                    http_status=http_status,
+                    okx_code=code,
+                    okx_msg=msg,
+                    rate_limited=is_rate_limited(http_status=http_status, okx_code=code, error_text=msg),
+                    attempt=attempt + 1,
+                )
+                recorded = True
                 if str(obj.get("code", "0")) != "0":
                     raise RuntimeError(f"OKX history-candles error: code={obj.get('code')} msg={obj.get('msg')}")
                 break
             except Exception as exc:
                 last_exc = exc
+                if not recorded:
+                    response = getattr(exc, "response", None)
+                    http_status = int(getattr(response, "status_code", 0) or 0) or None
+                    record_api_request(
+                        exchange="okx",
+                        method="GET",
+                        endpoint="/api/v5/market/history-candles",
+                        duration_ms=(time.perf_counter() - started_at) * 1000.0,
+                        status_class=classify_api_status(http_status=http_status, okx_code=None),
+                        http_status=http_status,
+                        okx_msg=str(exc),
+                        rate_limited=is_rate_limited(http_status=http_status, okx_code=None, error_text=str(exc)),
+                        attempt=attempt + 1,
+                        error_type=exc.__class__.__name__,
+                    )
                 if attempt + 1 >= max_attempts or not self._is_rate_limited_error(exc):
                     raise
                 sleep_sec = self._rate_limit_sleep_sec(exc, attempt)

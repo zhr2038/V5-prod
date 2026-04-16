@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple, List
@@ -13,6 +14,7 @@ from urllib.parse import urlencode
 import httpx
 
 from configs.schema import ExchangeConfig
+from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, record_api_request
 from src.utils.retry import RetryConfig, retry
 
 
@@ -159,22 +161,56 @@ class OKXPrivateClient:
         method_u = str(method).upper()
         request_path = self._build_request_path(path, params)
         body_str = "" if json_body is None else _json_dumps_compact(json_body)
+        endpoint = "/" + str(path).lstrip("/")
+        attempt_no = 0
 
         def _do() -> OKXResponse:
+            nonlocal attempt_no
+            attempt_no += 1
             ts = _utc_iso_ms()
             headers = self._headers(timestamp=ts, method=method_u, request_path=request_path, body=body_str)
             if exp_time_ms is not None:
                 x = int(exp_time_ms)
                 exp = x if x > 1_000_000_000_000 else (_epoch_ms() + x)
                 headers["expTime"] = str(int(exp))
+            started_at = time.perf_counter()
             try:
                 resp = self._client.request(method_u, request_path, content=body_str if body_str else None, headers=headers)
             except httpx.TimeoutException as e:
+                duration_ms = (time.perf_counter() - started_at) * 1000.0
+                record_api_request(
+                    exchange="okx",
+                    method=method_u,
+                    endpoint=endpoint,
+                    duration_ms=duration_ms,
+                    status_class="transport_error",
+                    okx_msg=str(e),
+                    rate_limited=False,
+                    attempt=attempt_no,
+                    error_type="timeout",
+                )
                 raise OKXPrivateClientError(f"timeout: {e}") from e
             except httpx.HTTPError as e:
+                duration_ms = (time.perf_counter() - started_at) * 1000.0
+                response = getattr(e, "response", None)
+                http_status = int(getattr(response, "status_code", 0) or 0) or None
+                rate_limited = is_rate_limited(http_status=http_status, okx_code=None, error_text=str(e))
+                record_api_request(
+                    exchange="okx",
+                    method=method_u,
+                    endpoint=endpoint,
+                    duration_ms=duration_ms,
+                    status_class=classify_api_status(http_status=http_status, okx_code=None),
+                    http_status=http_status,
+                    okx_msg=str(e),
+                    rate_limited=rate_limited,
+                    attempt=attempt_no,
+                    error_type=e.__class__.__name__,
+                )
                 raise OKXPrivateClientError(f"http error: {e}") from e
 
             http_status = int(resp.status_code)
+            duration_ms = (time.perf_counter() - started_at) * 1000.0
             try:
                 payload = resp.json()
             except Exception:
@@ -185,6 +221,20 @@ class OKXPrivateClient:
             if isinstance(payload, dict):
                 code = str(payload.get("code")) if payload.get("code") is not None else None
                 msg = str(payload.get("msg")) if payload.get("msg") is not None else None
+
+            rate_limited = is_rate_limited(http_status=http_status, okx_code=code, error_text=msg)
+            record_api_request(
+                exchange="okx",
+                method=method_u,
+                endpoint=endpoint,
+                duration_ms=duration_ms,
+                status_class=classify_api_status(http_status=http_status, okx_code=code),
+                http_status=http_status,
+                okx_code=code,
+                okx_msg=msg,
+                rate_limited=rate_limited,
+                attempt=attempt_no,
+            )
 
             # OKX rate limit code
             if code == "50011":

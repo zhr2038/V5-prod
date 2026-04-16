@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
+from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, record_api_request
 
 @dataclass
 class SpotSpec:
@@ -113,9 +114,40 @@ class OKXSpotInstrumentsCache:
 
     def _fetch(self) -> Dict[str, Any]:
         url = f"{self.base_url}/api/v5/public/instruments"
-        r = requests.get(url, params={"instType": "SPOT"}, timeout=self.timeout_sec)
-        r.raise_for_status()
-        obj = r.json()
+        started_at = time.perf_counter()
+        try:
+            r = requests.get(url, params={"instType": "SPOT"}, timeout=self.timeout_sec)
+            http_status = int(getattr(r, "status_code", 0) or 0) or None
+            r.raise_for_status()
+            obj = r.json()
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            http_status = int(getattr(response, "status_code", 0) or 0) or None
+            record_api_request(
+                exchange="okx",
+                method="GET",
+                endpoint="/api/v5/public/instruments",
+                duration_ms=(time.perf_counter() - started_at) * 1000.0,
+                status_class=classify_api_status(http_status=http_status, okx_code=None),
+                http_status=http_status,
+                okx_msg=str(exc),
+                rate_limited=is_rate_limited(http_status=http_status, okx_code=None, error_text=str(exc)),
+                error_type=exc.__class__.__name__,
+            )
+            raise
+        code = str(obj.get("code")) if isinstance(obj, dict) and obj.get("code") is not None else None
+        msg = str(obj.get("msg")) if isinstance(obj, dict) and obj.get("msg") is not None else None
+        record_api_request(
+            exchange="okx",
+            method="GET",
+            endpoint="/api/v5/public/instruments",
+            duration_ms=(time.perf_counter() - started_at) * 1000.0,
+            status_class=classify_api_status(http_status=http_status, okx_code=code),
+            http_status=http_status,
+            okx_code=code,
+            okx_msg=msg,
+            rate_limited=is_rate_limited(http_status=http_status, okx_code=code, error_text=msg),
+        )
         data = obj.get("data") if isinstance(obj, dict) else None
         return {"ts": time.time(), "data": data or []}
 

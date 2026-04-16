@@ -15,6 +15,7 @@ from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
 from src.execution.clordid import make_cl_ord_id, make_decision_hash
 from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
+from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, record_api_request
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
@@ -390,9 +391,40 @@ def _public_mid_at_submit(*, inst_id: str, timeout_sec: float = 2.0) -> Optional
 
     try:
         url = "https://www.okx.com/api/v5/market/ticker"
-        r = requests.get(url, params={"instId": str(inst_id)}, timeout=float(timeout_sec))
-        r.raise_for_status()
-        obj = r.json() if r is not None else {}
+        started_at = time.perf_counter()
+        try:
+            r = requests.get(url, params={"instId": str(inst_id)}, timeout=float(timeout_sec))
+            http_status = int(getattr(r, "status_code", 0) or 0) or None
+            r.raise_for_status()
+            obj = r.json() if r is not None else {}
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            http_status = int(getattr(response, "status_code", 0) or 0) or None
+            record_api_request(
+                exchange="okx",
+                method="GET",
+                endpoint="/api/v5/market/ticker",
+                duration_ms=(time.perf_counter() - started_at) * 1000.0,
+                status_class=classify_api_status(http_status=http_status, okx_code=None),
+                http_status=http_status,
+                okx_msg=str(exc),
+                rate_limited=is_rate_limited(http_status=http_status, okx_code=None, error_text=str(exc)),
+                error_type=exc.__class__.__name__,
+            )
+            raise
+        code = str(obj.get("code")) if isinstance(obj, dict) and obj.get("code") is not None else None
+        msg = str(obj.get("msg")) if isinstance(obj, dict) and obj.get("msg") is not None else None
+        record_api_request(
+            exchange="okx",
+            method="GET",
+            endpoint="/api/v5/market/ticker",
+            duration_ms=(time.perf_counter() - started_at) * 1000.0,
+            status_class=classify_api_status(http_status=http_status, okx_code=code),
+            http_status=http_status,
+            okx_code=code,
+            okx_msg=msg,
+            rate_limited=is_rate_limited(http_status=http_status, okx_code=code, error_text=msg),
+        )
         rows = obj.get("data") if isinstance(obj, dict) else None
         if not isinstance(rows, list) or not rows:
             return None

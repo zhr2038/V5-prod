@@ -145,6 +145,19 @@ def test_static_files_serves_assets_and_spa_fallback(monkeypatch, tmp_path):
     assert fallback_response.get_data(as_text=True) == "INDEX"
 
 
+def test_metrics_route_returns_prometheus_payload(monkeypatch):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "render_prometheus_metrics", lambda workspace=None, config=None: "v5_metrics_exporter_up 1\n")
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+    client = module.app.test_client()
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/plain")
+    assert response.get_data(as_text=True) == "v5_metrics_exporter_up 1\n"
+
+
 def test_static_files_rejects_encoded_path_traversal(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     build_root = tmp_path / "web" / "dist"
