@@ -83,6 +83,20 @@ def test_iter_production_files_excludes_runtime_state(tmp_path: Path) -> None:
     assert files == ["main.py", "scripts/run.py"]
 
 
+def test_iter_production_files_excludes_nested_node_modules(tmp_path: Path) -> None:
+    (tmp_path / "web" / "dashboard" / "src").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "web" / "dashboard" / "src" / "App.tsx").write_text("export {}", encoding="utf-8")
+    (tmp_path / "web" / "dashboard" / "node_modules" / "pkg").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "web" / "dashboard" / "node_modules" / "pkg" / "index.js").write_text(
+        "module.exports = {}",
+        encoding="utf-8",
+    )
+
+    files = sorted(path.relative_to(tmp_path).as_posix() for path in iter_production_files(tmp_path, items=("web",)))
+
+    assert files == ["web/dashboard/src/App.tsx"]
+
+
 def test_iter_production_files_includes_explicit_model_file(tmp_path: Path) -> None:
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "ml_factor_model.pkl").write_bytes(b"binary-model")

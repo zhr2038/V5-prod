@@ -35,6 +35,7 @@ PRODUCTION_SYNC_ITEMS = (
 PRODUCTION_SYNC_EXCLUDES = (
     ".git",
     ".venv",
+    "node_modules",
     "logs",
     "reports",
     "__pycache__",
@@ -80,7 +81,10 @@ def _is_excluded(rel_path: Path) -> bool:
     for prefix in PRODUCTION_SYNC_EXCLUDES:
         if rel_text == prefix or rel_text.startswith(prefix + "/"):
             return True
-    return any(part in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"} for part in rel_path.parts)
+    return any(
+        part in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules"}
+        for part in rel_path.parts
+    )
 
 
 def iter_production_files(workspace_root: Path, items: Iterable[str] = PRODUCTION_SYNC_ITEMS) -> Iterator[Path]:
