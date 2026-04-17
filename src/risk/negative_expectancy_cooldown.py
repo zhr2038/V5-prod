@@ -1,14 +1,16 @@
 
 import json
+import logging
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Iterable, Set
 
 from src.execution.fill_store import derive_fill_store_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,6 +26,10 @@ class NegativeExpectancyConfig:
     fills_db_path: str = "reports/fills.sqlite"
     prefer_net_from_fills: bool = True
     fast_fail_max_hold_minutes: int = 120
+    whitelist_symbols: list[str] = field(default_factory=list)
+    open_position_symbols: list[str] = field(default_factory=list)
+    managed_symbols: list[str] = field(default_factory=list)
+    config_fingerprint: str = ""
 
 
 class NegativeExpectancyCooldown:
@@ -40,6 +46,8 @@ class NegativeExpectancyCooldown:
             self.cfg.fills_db_path = str(self._resolve_path(raw_fills_path))
         self._last_refresh_ms = 0
         self._cache: Dict[str, Any] = self._load_state()
+        self._scope_symbols: Optional[Set[str]] = None
+        self._scope_metadata: Dict[str, Any] = {}
 
     @staticmethod
     def _resolve_path(path: str | Path) -> Path:
@@ -73,6 +81,50 @@ class NegativeExpectancyCooldown:
         tmp = p.with_suffix(p.suffix + ".tmp")
         tmp.write_text(json.dumps(self._cache, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(p)
+
+    def set_scope(
+        self,
+        *,
+        whitelist_symbols: Optional[Iterable[str]] = None,
+        open_position_symbols: Optional[Iterable[str]] = None,
+        managed_symbols: Optional[Iterable[str]] = None,
+        config_fingerprint: Optional[str] = None,
+    ) -> None:
+        if whitelist_symbols is not None:
+            self.cfg.whitelist_symbols = self._normalize_symbols(whitelist_symbols)
+        if open_position_symbols is not None:
+            self.cfg.open_position_symbols = self._normalize_symbols(open_position_symbols)
+        if managed_symbols is not None:
+            self.cfg.managed_symbols = self._normalize_symbols(managed_symbols)
+        if config_fingerprint is not None:
+            self.cfg.config_fingerprint = str(config_fingerprint or "").strip()
+        self._refresh_scope_metadata()
+
+    @staticmethod
+    def _normalize_symbols(symbols: Iterable[str] | None) -> list[str]:
+        seen = set()
+        out: list[str] = []
+        for sym in symbols or []:
+            norm = NegativeExpectancyCooldown._norm_symbol(str(sym or "").strip())
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            out.append(norm)
+        return out
+
+    def _refresh_scope_metadata(self) -> None:
+        whitelist_symbols = self._normalize_symbols(getattr(self.cfg, "whitelist_symbols", []))
+        open_position_symbols = self._normalize_symbols(getattr(self.cfg, "open_position_symbols", []))
+        managed_symbols = self._normalize_symbols(getattr(self.cfg, "managed_symbols", []))
+        scope = sorted({*whitelist_symbols, *open_position_symbols, *managed_symbols})
+        self._scope_symbols = set(scope) if scope else None
+        self._scope_metadata = {
+            "whitelist_symbols": whitelist_symbols,
+            "open_position_symbols": open_position_symbols,
+            "managed_symbols": managed_symbols,
+            "scope_symbols": scope,
+            "config_fingerprint": str(getattr(self.cfg, "config_fingerprint", "") or "").strip(),
+        }
 
     @staticmethod
     def _fee_to_usdt_cost(*, fee: Any, fee_ccy: Any, inst_id: str, fill_px: Any) -> float:
@@ -180,13 +232,15 @@ class NegativeExpectancyCooldown:
             "fast_fail_avg_hold_minutes": float(ff_hold_minutes_avg),
         }
 
-    def _scan_expectancy_from_fills(self) -> Dict[str, Dict[str, Any]]:
+    def _scan_expectancy_from_fills(
+        self,
+        *,
+        since_ms: int,
+        allowed_symbols: Optional[Set[str]],
+    ) -> Dict[str, Dict[str, Any]]:
         p = Path(self.cfg.fills_db_path)
         if not p.exists():
             return {}
-
-        lookback_ms = int(self.cfg.lookback_hours) * 3600 * 1000
-        since_ms = int(time.time() * 1000) - max(0, lookback_ms)
 
         conn = None
         try:
@@ -218,6 +272,8 @@ class NegativeExpectancyCooldown:
         for r in rows:
             inst_id = str(r["inst_id"] or "")
             sym = self._norm_symbol(inst_id)
+            if allowed_symbols is not None and sym not in allowed_symbols:
+                continue
             side = str(r["side"] or "").lower()
             try:
                 qty = float(r["fill_sz"] or 0.0)
@@ -319,7 +375,12 @@ class NegativeExpectancyCooldown:
             )
         return out
 
-    def _scan_expectancy_from_orders(self) -> Dict[str, Dict[str, Any]]:
+    def _scan_expectancy_from_orders(
+        self,
+        *,
+        since_ms: int,
+        allowed_symbols: Optional[Set[str]],
+    ) -> Dict[str, Dict[str, Any]]:
         """Fallback path from orders.sqlite.
 
         This is a degraded approximation because orders.sqlite does not preserve fee_ccy.
@@ -329,9 +390,6 @@ class NegativeExpectancyCooldown:
         p = Path(self.cfg.orders_db_path)
         if not p.exists():
             return {}
-
-        lookback_ms = int(self.cfg.lookback_hours) * 3600 * 1000
-        since_ms = int(time.time() * 1000) - max(0, lookback_ms)
 
         by_symbol: Dict[str, Dict[str, float]] = {}
         conn = None
@@ -370,6 +428,8 @@ class NegativeExpectancyCooldown:
         for r in rows:
             inst_id = str(r["inst_id"] or "")
             sym = self._norm_symbol(inst_id)
+            if allowed_symbols is not None and sym not in allowed_symbols:
+                continue
             side = str(r["side"] or "").lower()
             try:
                 qty = float(r["acc_fill_sz"] or 0.0)
@@ -468,28 +528,75 @@ class NegativeExpectancyCooldown:
             )
         return out
 
-    def _scan_expectancy(self) -> Dict[str, Dict[str, Any]]:
+    def _scan_expectancy(
+        self,
+        *,
+        since_ms: int,
+        allowed_symbols: Optional[Set[str]],
+    ) -> Dict[str, Dict[str, Any]]:
         if bool(getattr(self.cfg, "prefer_net_from_fills", True)):
-            fills_stats = self._scan_expectancy_from_fills()
+            fills_stats = self._scan_expectancy_from_fills(
+                since_ms=since_ms,
+                allowed_symbols=allowed_symbols,
+            )
             if fills_stats:
                 return fills_stats
-            return self._scan_expectancy_from_orders()
-        orders_stats = self._scan_expectancy_from_orders()
+            return self._scan_expectancy_from_orders(
+                since_ms=since_ms,
+                allowed_symbols=allowed_symbols,
+            )
+        orders_stats = self._scan_expectancy_from_orders(
+            since_ms=since_ms,
+            allowed_symbols=allowed_symbols,
+        )
         if orders_stats:
             return orders_stats
-        return self._scan_expectancy_from_fills()
+        return self._scan_expectancy_from_fills(
+            since_ms=since_ms,
+            allowed_symbols=allowed_symbols,
+        )
 
     def refresh(self, force: bool = False) -> Dict[str, Any]:
         if not self.cfg.enabled:
             return self._cache
+
+        self._refresh_scope_metadata()
 
         now_ms = int(time.time() * 1000)
         # 至多每15分钟刷新一次，避免频繁扫库
         if (not force) and (now_ms - int(self._last_refresh_ms) < 15 * 60 * 1000):
             return self._cache
 
-        stats = self._scan_expectancy()
-        symbols = self._cache.get("symbols") or {}
+        cached_symbols = self._cache.get("symbols") or {}
+        symbols = {
+            self._norm_symbol(sym): dict(st)
+            for sym, st in cached_symbols.items()
+            if isinstance(st, dict)
+            and (self._scope_symbols is None or self._norm_symbol(sym) in self._scope_symbols)
+        }
+
+        cached_fp = str(self._cache.get("config_fingerprint") or "").strip()
+        current_fp = str(self._scope_metadata.get("config_fingerprint") or "").strip()
+        legacy_state_present = bool((self._cache.get("stats") or {}) or cached_symbols)
+        release_start_ts = int(self._cache.get("release_start_ts") or 0)
+        if current_fp and cached_fp != current_fp:
+            if cached_fp or legacy_state_present:
+                logger.warning(
+                    "NegativeExpectancy scope fingerprint changed: previous=%s current=%s; resetting scoped state",
+                    cached_fp or "missing",
+                    current_fp,
+                )
+                symbols = {}
+                release_start_ts = now_ms
+        lookback_ms = int(self.cfg.lookback_hours) * 3600 * 1000
+        since_ms = int(now_ms - max(0, lookback_ms))
+        if release_start_ts > 0:
+            since_ms = max(since_ms, release_start_ts)
+
+        stats = self._scan_expectancy(
+            since_ms=since_ms,
+            allowed_symbols=self._scope_symbols,
+        )
 
         min_cycles = int(self.cfg.min_closed_cycles)
         exp_th_usdt = float(self.cfg.expectancy_threshold_usdt)
@@ -555,6 +662,11 @@ class NegativeExpectancyCooldown:
             "prefer_net_from_fills": bool(getattr(self.cfg, "prefer_net_from_fills", True)),
             "fills_db_path": str(self.cfg.fills_db_path),
             "orders_db_path": str(self.cfg.orders_db_path),
+            "config_fingerprint": current_fp,
+            "release_start_ts": int(release_start_ts or 0),
+            "whitelist_symbols": list(self._scope_metadata.get("whitelist_symbols") or []),
+            "managed_symbols": list(self._scope_metadata.get("managed_symbols") or []),
+            "scope_symbols": list(self._scope_metadata.get("scope_symbols") or []),
             "symbols": symbols,
             "stats": stats_cache,
         }

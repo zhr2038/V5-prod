@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 import sys
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -12,6 +15,40 @@ from src.risk.negative_expectancy_cooldown import (
     NegativeExpectancyConfig,
     NegativeExpectancyCooldown,
 )
+
+
+def _write_round_trip(
+    store: FillStore,
+    *,
+    inst_id: str,
+    buy_px: float,
+    sell_px: float,
+    base_ts_ms: int,
+) -> None:
+    store.upsert_many(
+        [
+            FillRow(
+                inst_id=inst_id,
+                trade_id=f"{inst_id}-buy",
+                ts_ms=base_ts_ms,
+                side="buy",
+                fill_px=str(buy_px),
+                fill_sz="1",
+                fee="0",
+                fee_ccy="USDT",
+            ),
+            FillRow(
+                inst_id=inst_id,
+                trade_id=f"{inst_id}-sell",
+                ts_ms=base_ts_ms + 60_000,
+                side="sell",
+                fill_px=str(sell_px),
+                fill_sz="1",
+                fee="0",
+                fee_ccy="USDT",
+            ),
+        ]
+    )
 
 
 def test_negative_expectancy_prefers_net_bps_from_fills_with_fee_conversion(tmp_path):
@@ -69,3 +106,92 @@ def test_negative_expectancy_prefers_net_bps_from_fills_with_fee_conversion(tmp_
     blocked = cooldown.is_blocked("BTC/USDT")
     assert blocked is not None
     assert blocked["metric_used"] == "net_expectancy_bps"
+
+
+def test_negative_expectancy_scope_filters_to_whitelist_positions_and_managed_symbols(tmp_path: Path) -> None:
+    fills_path = tmp_path / "fills.sqlite"
+    store = FillStore(path=str(fills_path))
+    now_ms = int(time.time() * 1000)
+    _write_round_trip(store, inst_id="BTC-USDT", buy_px=100.0, sell_px=99.0, base_ts_ms=now_ms - 300_000)
+    _write_round_trip(store, inst_id="ETH-USDT", buy_px=200.0, sell_px=198.0, base_ts_ms=now_ms - 240_000)
+    _write_round_trip(store, inst_id="SOL-USDT", buy_px=50.0, sell_px=49.0, base_ts_ms=now_ms - 180_000)
+    _write_round_trip(store, inst_id="DOGE-USDT", buy_px=10.0, sell_px=9.0, base_ts_ms=now_ms - 120_000)
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=24,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(tmp_path / "negative_expectancy_state.json"),
+            orders_db_path=str(tmp_path / "orders.sqlite"),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=120,
+        )
+    )
+    cooldown.set_scope(
+        whitelist_symbols=["BTC/USDT"],
+        open_position_symbols=["ETH/USDT"],
+        managed_symbols=["SOL/USDT"],
+        config_fingerprint="scope-fp",
+    )
+
+    state = cooldown.refresh(force=True)
+
+    assert state["config_fingerprint"] == "scope-fp"
+    assert state["whitelist_symbols"] == ["BTC/USDT"]
+    assert set(state["scope_symbols"]) == {"BTC/USDT", "ETH/USDT", "SOL/USDT"}
+    assert set((state.get("stats") or {}).keys()) == {"BTC/USDT", "ETH/USDT", "SOL/USDT"}
+    assert "DOGE/USDT" not in (state.get("stats") or {})
+
+
+def test_negative_expectancy_fingerprint_change_resets_legacy_state_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state_path = tmp_path / "negative_expectancy_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "updated_ts_ms": 111,
+                "symbols": {
+                    "DOGE/USDT": {
+                        "cooldown_until_ms": 9999999999999,
+                        "closed_cycles": 2,
+                    }
+                },
+                "stats": {
+                    "DOGE/USDT": {
+                        "closed_cycles": 2,
+                        "net_expectancy_bps": -100.0,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("src.risk.negative_expectancy_cooldown.time.time", lambda: 2_000_000.0)
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=24,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(tmp_path / "orders.sqlite"),
+            fills_db_path=str(tmp_path / "fills.sqlite"),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=120,
+        )
+    )
+    cooldown.set_scope(
+        whitelist_symbols=["BTC/USDT"],
+        config_fingerprint="new-scope-fp",
+    )
+
+    state = cooldown.refresh(force=True)
+
+    assert state["config_fingerprint"] == "new-scope-fp"
+    assert state["release_start_ts"] == 2_000_000_000
+    assert state["whitelist_symbols"] == ["BTC/USDT"]
+    assert state["symbols"] == {}
+    assert state["stats"] == {}

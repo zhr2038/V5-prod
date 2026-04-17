@@ -146,6 +146,49 @@ def test_negative_expectancy_rank_guard_records_preselection_blockers(tmp_path: 
     assert any("reason=negative_expectancy_cooldown" in note for note in (audit.notes or []))
 
 
+def test_pipeline_negative_expectancy_refresh_sets_live_scope(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.mode = "live"
+    pipe = _build_pipe(cfg, tmp_path)
+
+    calls: dict[str, object] = {}
+
+    class _DummyCooldown:
+        def set_scope(self, **kwargs):
+            calls.update(kwargs)
+
+        def refresh(self, force: bool = False):
+            calls["force"] = force
+            return {}
+
+    pipe.negative_expectancy_cooldown = _DummyCooldown()
+
+    positions = [
+        Position(
+            symbol="ETH/USDT",
+            qty=1.0,
+            avg_px=2500.0,
+            entry_ts="2026-04-16T00:00:00Z",
+            highest_px=2500.0,
+            last_update_ts="2026-04-16T00:00:00Z",
+            last_mark_px=2500.0,
+            unrealized_pnl_pct=0.0,
+        )
+    ]
+
+    pipe._refresh_negative_expectancy_state_with_scope(
+        positions=positions,
+        managed_symbols=["SOL/USDT"],
+        audit=None,
+    )
+
+    assert calls["whitelist_symbols"] == ["BTC/USDT"]
+    assert calls["open_position_symbols"] == ["ETH/USDT"]
+    assert calls["managed_symbols"] == ["SOL/USDT"]
+    assert isinstance(calls["config_fingerprint"], str) and len(str(calls["config_fingerprint"])) == 16
+    assert calls["force"] is False
+
+
 def test_decision_audit_record_gate_dedupes_symbol_reason() -> None:
     audit = DecisionAudit(run_id="negexp-dedupe")
 
