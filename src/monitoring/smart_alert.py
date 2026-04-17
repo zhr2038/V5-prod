@@ -258,7 +258,8 @@ class SmartAlertEngine:
                 counts = data.get("counts", {}) or {}
                 selected = int(counts.get("selected", 0) or 0)
                 rebalance = int(counts.get("orders_rebalance", 0) or 0)
-                if selected > 0 and rebalance == 0:
+                exits = int(counts.get("orders_exit", 0) or 0)
+                if selected > 0 and (rebalance + exits) == 0:
                     consecutive_no_trade += 1
 
             if consecutive_no_trade >= 2 and self._should_alert("signal_no_trade", cooldown_minutes=120):
