@@ -2667,6 +2667,8 @@ def api_trades():
                             trades.append({
                                 'symbol': inst,
                                 'side': str(r.get('side', '')),
+                                'price': round(px, 6),
+                                'qty': round(sz, 8),
                                 'amount': round(amount, 4),
                                 'fee': round(fee, 6),
                                 'state': 'FILLED',
@@ -2712,10 +2714,15 @@ def api_trades():
 
                 for row in cursor.fetchall():
                     try:
+                        price = float(row[5] or 0)
+                        amount = float(row[2] or 0)
+                        qty = (amount / price) if price > 0 else 0.0
                         trades.append({
                             'symbol': str(row[0]),
                             'side': str(row[1]),
-                            'amount': round(float(row[2]), 4),
+                            'price': round(price, 6),
+                            'qty': round(qty, 8),
+                            'amount': round(amount, 4),
                             'fee': round(_signed_fee_usdt_from_order_fee(str(row[0]), row[5], row[3]), 6),
                             'state': str(row[4]),
                             'time': str(row[6])
@@ -2743,10 +2750,17 @@ def api_trades():
                                     continue
                                 if any(ex in sym for ex in EXCLUDED_SYMBOLS):
                                     continue
+                                price = float(r.get('price') or r.get('avg_px') or 0)
+                                amount = float(r.get('notional_usdt') or 0)
+                                qty = float(r.get('qty') or 0)
+                                if qty <= 0 and price > 0 and amount > 0:
+                                    qty = amount / price
                                 trades.append({
                                     'symbol': sym.replace('/USDT', '-USDT'),
                                     'side': str(r.get('side', '')),
-                                    'amount': round(float(r.get('notional_usdt') or 0), 4),
+                                    'price': round(price, 6),
+                                    'qty': round(qty, 8),
+                                    'amount': round(amount, 4),
                                     'fee': round(float(r.get('fee_usdt') or 0), 6),
                                     'state': 'FILLED',
                                     'time': str(r.get('ts', '')),
@@ -4103,8 +4117,8 @@ def api_dashboard():
                 'symbol': trade.get('symbol', '').replace('-USDT', '/USDT'),
                 'side': trade.get('side', 'buy'),
                 'type': 'REBALANCE',
-                'price': 0,
-                'qty': 0,
+                'price': float(trade.get('price', 0) or 0),
+                'qty': float(trade.get('qty', 0) or 0),
                 'value': trade.get('amount', 0),
                 'fee': abs(trade.get('fee', 0))
             })

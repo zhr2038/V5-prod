@@ -6295,6 +6295,8 @@ def test_api_trades_converts_live_base_fee_to_signed_usdt(monkeypatch, tmp_path)
         payload = module.api_trades().get_json()
 
     assert len(payload["trades"]) == 1
+    assert payload["trades"][0]["price"] == pytest.approx(50000.0)
+    assert payload["trades"][0]["qty"] == pytest.approx(0.002)
     assert payload["trades"][0]["amount"] == pytest.approx(100.0)
     assert payload["trades"][0]["fee"] == pytest.approx(-5.0)
 
@@ -6337,6 +6339,8 @@ def test_api_trades_db_fallback_converts_json_fee_maps_to_signed_usdt(monkeypatc
 
     assert len(payload["trades"]) == 1
     assert payload["trades"][0]["symbol"] == "BTC-USDT"
+    assert payload["trades"][0]["price"] == pytest.approx(50000.0)
+    assert payload["trades"][0]["qty"] == pytest.approx(0.002)
     assert payload["trades"][0]["amount"] == pytest.approx(100.0)
     assert payload["trades"][0]["fee"] == pytest.approx(-50.0)
 
@@ -6451,6 +6455,8 @@ def test_api_trades_uses_active_runtime_paths(monkeypatch, tmp_path):
 
     assert len(payload["trades"]) == 1
     assert payload["trades"][0]["symbol"] == "ETH-USDT"
+    assert payload["trades"][0]["price"] == pytest.approx(0.0)
+    assert payload["trades"][0]["qty"] == pytest.approx(0.0)
     assert payload["trades"][0]["amount"] == pytest.approx(200.0)
     assert payload["trades"][0]["fee"] == pytest.approx(1.5)
     assert payload["trades"][0]["time"] == "2024-04-08 11:00:00"

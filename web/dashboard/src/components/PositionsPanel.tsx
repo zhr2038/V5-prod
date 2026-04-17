@@ -85,11 +85,13 @@ function buildSeriesPath(
 function CandlestickSvg({
   data,
   timeframe,
-  avgPrice,
+  referencePrice,
+  referenceLabel,
 }: {
   data: KlineData[];
   timeframe: string;
-  avgPrice?: number;
+  referencePrice?: number;
+  referenceLabel?: string;
 }) {
   if (!data.length) {
     return (
@@ -110,7 +112,7 @@ function CandlestickSvg({
 
   const highs = data.map((item) => item.high);
   const lows = data.map((item) => item.low);
-  const lineAnchors = [avgPrice || null, ...movingAverage(data, 7), ...movingAverage(data, 20)].filter(
+  const lineAnchors = [referencePrice || null, ...movingAverage(data, 7), ...movingAverage(data, 20)].filter(
     (value): value is number => Number.isFinite(value)
   );
   const rawMax = Math.max(...highs, ...(lineAnchors.length ? lineAnchors : [highs[0]]));
@@ -137,7 +139,11 @@ function CandlestickSvg({
   const highestIndex = highs.findIndex((value) => value === Math.max(...highs));
   const lowestIndex = lows.findIndex((value) => value === Math.min(...lows));
   const lastPriceLabelY = y(lastClose);
-  const avgPriceVisible = Number.isFinite(avgPrice) && Number(avgPrice) > 0 && Number(avgPrice) <= max && Number(avgPrice) >= min;
+  const referencePriceVisible =
+    Number.isFinite(referencePrice) &&
+    Number(referencePrice) > 0 &&
+    Number(referencePrice) <= max &&
+    Number(referencePrice) >= min;
   const ma7Path = buildSeriesPath(ma7, x, y);
   const ma20Path = buildSeriesPath(ma20, x, y);
 
@@ -240,12 +246,12 @@ function CandlestickSvg({
         strokeWidth={1}
         strokeDasharray="6 4"
       />
-      {avgPriceVisible ? (
+      {referencePriceVisible ? (
         <line
           x1={pad.l}
           x2={w - pad.r}
-          y1={y(Number(avgPrice))}
-          y2={y(Number(avgPrice))}
+          y1={y(Number(referencePrice))}
+          y2={y(Number(referencePrice))}
           stroke="rgba(255, 205, 120, 0.75)"
           strokeWidth={1}
           strokeDasharray="3 4"
@@ -335,11 +341,11 @@ function CandlestickSvg({
       >
         {formatAxisPrice(lastClose)}
       </text>
-      {avgPriceVisible ? (
+      {referencePriceVisible ? (
         <>
           <rect
             x={w - pad.r + 4}
-            y={y(Number(avgPrice)) - 10}
+            y={y(Number(referencePrice)) - 10}
             width="52"
             height="18"
             rx="9"
@@ -348,13 +354,24 @@ function CandlestickSvg({
           />
           <text
             x={w - pad.r + 30}
-            y={y(Number(avgPrice)) + 3}
+            y={y(Number(referencePrice)) + 3}
             fill="#ffcb7f"
             fontSize="11"
             textAnchor="middle"
           >
-            {formatAxisPrice(Number(avgPrice))}
+            {formatAxisPrice(Number(referencePrice))}
           </text>
+          {referenceLabel ? (
+            <text
+              x={w - pad.r - 42}
+              y={y(Number(referencePrice)) - 14}
+              fill="rgba(255, 205, 120, 0.8)"
+              fontSize="10"
+              textAnchor="end"
+            >
+              {referenceLabel}
+            </text>
+          ) : null}
         </>
       ) : null}
     </svg>
@@ -411,6 +428,14 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
   const fallbackSymbol = fallbackTrade
     ? String(fallbackTrade.symbol || '').replace('/USDT', '').replace('-USDT', '')
     : '';
+  const activeSymbol = spotlightPosition?.symbol || fallbackSymbol;
+  const activeReferencePrice =
+    spotlightPosition && Number(spotlightPosition.avgPrice) > 0
+      ? spotlightPosition.avgPrice
+      : (fallbackTrade && Number(fallbackTrade.price) > 0 ? fallbackTrade.price : undefined);
+  const activeReferenceLabel = spotlightPosition
+    ? '持仓均价'
+    : (fallbackTrade && Number(fallbackTrade.price) > 0 ? '成交价' : undefined);
   const spotlightLabel = spotlightPosition
     ? spotlightPosition.symbol.replace('-USDT', '')
     : fallbackSymbol || '—';
@@ -440,9 +465,14 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
     chartCandles.length >= 20
       ? chartCandles.slice(-20).reduce((sum, candle) => sum + candle.close, 0) / 20
       : null;
+  const displayAvgPrice =
+    spotlightPosition && Number(spotlightPosition.avgPrice) > 0 ? spotlightPosition.avgPrice : activeReferencePrice;
+  const displayCurrentPrice =
+    spotlightPosition && Number(spotlightPosition.currentPrice) > 0
+      ? spotlightPosition.currentPrice
+      : (Number(chartSummary?.close || latestCandle?.close || 0) || 0);
 
   useEffect(() => {
-    const activeSymbol = spotlightPosition?.symbol;
     if (!activeSymbol) {
       setKline(null);
       return;
@@ -457,7 +487,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
     return () => {
       mounted = false;
     };
-  }, [spotlightPosition?.symbol, tf]);
+  }, [activeSymbol, tf]);
 
   useInterval(() => {
     if (document.hidden) return;
@@ -476,7 +506,6 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
   }, 5000);
 
   useInterval(() => {
-    const activeSymbol = spotlightPosition?.symbol;
     if (document.hidden || !activeSymbol) return;
     const klineSymbol = String(activeSymbol || '')
       .replace('/USDT', '')
@@ -484,7 +513,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
     api.positionKline(klineSymbol, tf).then((data) => {
       setKline(data);
     });
-  }, spotlightPosition ? 10000 : null);
+  }, activeSymbol ? 10000 : null);
 
   return (
     <div className="material-surface material-regular tone-sky reading-frame p-5 flex flex-col gap-5">
@@ -537,11 +566,11 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                 </div>
                 <div className="material-surface material-clear clear-control metric-pill tone-amber px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">均价</div>
-                  <div className="text-lg font-mono">{fmtUsd(spotlightPosition.avgPrice)}</div>
+                  <div className="text-lg font-mono">{fmtUsd(displayAvgPrice)}</div>
                 </div>
                 <div className="material-surface material-clear clear-control metric-pill tone-coral px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">现价</div>
-                  <div className="text-lg font-mono">{fmtUsd(spotlightPosition.currentPrice)}</div>
+                  <div className="text-lg font-mono">{fmtUsd(displayCurrentPrice)}</div>
                 </div>
               </div>
               <div className={`xl:text-right px-2 pt-2 ${spotlightPosition.pnlPercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
@@ -550,7 +579,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
               </div>
             </div>
           ) : fallbackTrade ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">状态</div>
                 <div className="text-lg font-semibold">最近成交</div>
@@ -560,17 +589,22 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                 <div className="text-lg font-medium">{sideLabels[fallbackTrade.side] || fallbackTrade.side || '--'}</div>
               </div>
               <div className="material-surface material-clear clear-control metric-pill tone-amber px-4 py-3">
-                <div className="text-xs text-[var(--text-dim)]">成交额</div>
-                <div className="text-lg font-mono">{fmtUsd(fallbackTrade.value)}</div>
+                <div className="text-xs text-[var(--text-dim)]">成交单价</div>
+                <div className="text-lg font-mono">{fmtUsd(fallbackTrade.price)}</div>
               </div>
               <div className="material-surface material-clear clear-control metric-pill tone-coral px-4 py-3">
+                <div className="text-xs text-[var(--text-dim)]">成交数量</div>
+                <div className="text-lg font-mono">{fmtNum(fallbackTrade.qty, 6)}</div>
+              </div>
+              <div className="material-surface material-clear clear-control metric-pill tone-plum px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">时间</div>
                 <div className="text-sm font-medium">{fallbackTrade.timestamp || '--'}</div>
+                <div className="text-[11px] text-[var(--text-dim)] mt-1">额 {fmtUsd(fallbackTrade.value)}</div>
               </div>
             </div>
           ) : null}
 
-          {spotlightPosition ? (
+          {activeSymbol ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-2">
@@ -646,7 +680,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                     <span className="text-[var(--text-dim)]">MA7 <span className="ml-1 font-mono text-sky-200">{ma7Value ? fmtUsd(ma7Value) : '--'}</span></span>
                     <span className="text-[var(--text-dim)]">MA20 <span className="ml-1 font-mono text-amber-200">{ma20Value ? fmtUsd(ma20Value) : '--'}</span></span>
                     <span className="text-[var(--text-dim)]">均量 <span className="ml-1 font-mono text-white">{formatCompactVolume(averageVolume)}</span></span>
-                    <span className="text-[var(--text-dim)]">持仓均价 <span className="ml-1 font-mono text-amber-200">{fmtUsd(spotlightPosition.avgPrice)}</span></span>
+                    <span className="text-[var(--text-dim)]">{activeReferenceLabel || '参考价'} <span className="ml-1 font-mono text-amber-200">{fmtUsd(activeReferencePrice)}</span></span>
                   </div>
                   <div className="text-xs text-[var(--text-dim)]">
                     最近收盘 <span className="ml-1 font-mono text-white">{fmtUsd(Number(chartSummary?.close || latestCandle?.close || 0))}</span>
@@ -656,23 +690,12 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                   <CandlestickSvg
                     data={chartCandles}
                     timeframe={tf}
-                    avgPrice={spotlightPosition.avgPrice}
+                    referencePrice={activeReferencePrice}
+                    referenceLabel={activeReferenceLabel}
                   />
                 </div>
               </div>
             </>
-          ) : fallbackTrade ? (
-            <div className="material-surface material-reading reading-surface tone-neutral px-4 py-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="text-sm text-white">当前无有效持仓，已隐藏 K 线图</div>
-                <div className="text-xs text-[var(--text-dim)] mt-1">
-                  持仓聚焦只在存在真实持仓时展示图表，最近成交仍保留在上方供参考。
-                </div>
-              </div>
-              <div className="text-xs text-[var(--text-dim)]">
-                最近成交币种 <span className="ml-1 font-medium text-white">{fallbackSymbol || '--'}</span>
-              </div>
-            </div>
           ) : null}
         </>
       ) : (

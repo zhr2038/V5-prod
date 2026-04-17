@@ -17,6 +17,15 @@ type ApiTradePayload = Partial<Trade> & {
   amount?: number;
 };
 
+type ApiPositionPayload = Partial<import('./types').Position> & {
+  avg_px?: number;
+  last_price?: number;
+  pnl_value?: number;
+  pnl_pct?: number;
+  value_usdt?: number;
+  price?: number;
+};
+
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
     const res = await fetch(`${API_BASE}${url}${url.includes('?') ? '&' : '?'}_=${Date.now()}`, {
@@ -38,11 +47,33 @@ function normalizeTradeSymbol(symbol: unknown): string {
   return raw.replace('-USDT', '/USDT');
 }
 
+function normalizePositionEntry(position: ApiPositionPayload) {
+  const qty = Number(position.qty ?? 0) || 0;
+  const avgPrice = Number(position.avgPrice ?? position.avg_px ?? 0) || 0;
+  const currentPrice = Number(position.currentPrice ?? position.last_price ?? position.price ?? 0) || 0;
+  const value = Number(position.value ?? position.value_usdt ?? 0) || 0;
+  const pnl = Number(position.pnl ?? position.pnl_value ?? 0) || 0;
+  const pnlPercent = Number(position.pnlPercent ?? position.pnl_pct ?? 0) || 0;
+
+  return {
+    symbol: String(position.symbol || ''),
+    qty,
+    avgPrice,
+    currentPrice,
+    value,
+    pnl,
+    pnlPercent,
+  };
+}
+
 function normalizeTradeEntry(trade: ApiTradePayload, index: number): Trade {
   const symbol = normalizeTradeSymbol(trade.symbol);
   const timestamp = String(trade.timestamp || trade.time || '').trim();
   const value = Number(trade.value ?? trade.amount ?? 0) || 0;
   const fee = Math.abs(Number(trade.fee ?? 0) || 0);
+  const price = Number(trade.price ?? 0) || 0;
+  const qty = Number(trade.qty ?? 0) || 0;
+  const derivedQty = qty > 0 ? qty : (price > 0 && value > 0 ? value / price : 0);
 
   return {
     id: String(trade.id || `${symbol || 'trade'}-${timestamp || index}`),
@@ -50,8 +81,8 @@ function normalizeTradeEntry(trade: ApiTradePayload, index: number): Trade {
     symbol,
     side: String(trade.side || 'buy'),
     type: String(trade.type || 'REBALANCE'),
-    price: Number(trade.price ?? 0) || 0,
-    qty: Number(trade.qty ?? 0) || 0,
+    price,
+    qty: derivedQty,
     value,
     fee,
   };
@@ -60,7 +91,13 @@ function normalizeTradeEntry(trade: ApiTradePayload, index: number): Trade {
 export const api = {
   dashboard: () => fetchJson<DashboardData>('/api/dashboard?view=primary'),
   dashboardDeferred: () => fetchJson<Partial<DashboardData>>('/api/dashboard?view=deferred'),
-  positions: () => fetchJson<{ positions?: import('./types').Position[] }>('/api/positions'),
+  positions: async () => {
+    const payload = await fetchJson<{ positions?: ApiPositionPayload[] }>('/api/positions');
+    const positions = Array.isArray(payload?.positions)
+      ? payload.positions.map((position) => normalizePositionEntry(position))
+      : [];
+    return { positions };
+  },
   trades: async () => {
     const payload = await fetchJson<{ trades?: ApiTradePayload[] }>('/api/trades');
     const trades = Array.isArray(payload?.trades)
