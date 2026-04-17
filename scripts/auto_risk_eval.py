@@ -157,12 +157,14 @@ def calculate_metrics(runs: List[Dict], *, runtime_paths: Optional[AutoRiskEvalP
 
     for run in runs:
         counts = run.get("counts", {})
+        rejects = run.get("rejects", {}) if isinstance(run, dict) else {}
         total_selected += int(counts.get("selected", 0) or 0)
         total_rebalance += int(counts.get("orders_rebalance", 0) or 0)
-        total_rejected += int(counts.get("orders_exit", 0) or 0)
+        total_rejected += int(rejects.get("min_notional", 0) or 0)
+        total_rejected += int(rejects.get("exchange_min_notional", 0) or 0)
 
         for rd in run.get("router_decisions", []):
-            if rd.get("reason") == "min_notional":
+            if rd.get("reason") in {"min_notional", "exchange_min_notional"}:
                 total_dust += 1
 
         pnl = run.get("realized_pnl")

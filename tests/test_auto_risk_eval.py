@@ -22,3 +22,33 @@ def test_main_passes_cli_paths_to_evaluate_and_switch(monkeypatch):
     auto_risk_eval.main(["--config", "configs/runtime.yaml", "--env", ".env.runtime"])
 
     assert captured == {"config_path": "configs/runtime.yaml", "env_path": ".env.runtime"}
+
+
+def test_calculate_metrics_ignores_orders_exit_for_dust_reject_rate() -> None:
+    metrics = auto_risk_eval.calculate_metrics(
+        [
+            {
+                "counts": {"selected": 10, "orders_rebalance": 4, "orders_exit": 3},
+                "rejects": {"min_notional": 1, "exchange_min_notional": 1},
+                "router_decisions": [{"reason": "min_notional"}, {"reason": "exchange_min_notional"}],
+            }
+        ]
+    )
+
+    assert metrics["conversion_rate"] == 0.4
+    assert metrics["dust_reject_rate"] == 2 / 12
+
+
+def test_calculate_metrics_uses_notional_rejects_not_exit_orders() -> None:
+    metrics = auto_risk_eval.calculate_metrics(
+        [
+            {
+                "counts": {"selected": 5, "orders_rebalance": 1, "orders_exit": 9},
+                "rejects": {"min_notional": 0, "exchange_min_notional": 0},
+                "router_decisions": [],
+            }
+        ]
+    )
+
+    assert metrics["conversion_rate"] == 0.2
+    assert metrics["dust_reject_rate"] == 0.0
