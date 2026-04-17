@@ -798,6 +798,7 @@ class V5Pipeline:
 
         if demoted and audit:
             for sym, before, after, reason in demoted:
+                audit.record_gate(reason, symbol=sym)
                 audit.add_note(
                     "NegativeExpectancy rank-guard: "
                     f"{sym} reason={reason} score={before:.4f}->{after:.4f}"
@@ -2445,7 +2446,7 @@ class V5Pipeline:
                 blocked = self.negative_expectancy_cooldown.is_blocked(sym)
                 if blocked:
                     if audit:
-                        audit.reject("cooldown_hit")
+                        audit.record_gate("negative_expectancy_cooldown", symbol=sym)
                         router_decisions.append(
                             {
                                 "symbol": sym,
@@ -2475,7 +2476,7 @@ class V5Pipeline:
                 expectancy_bps = self._negative_expectancy_bps(neg_stats or {})
                 if closed_cycles >= min_cycles and expectancy_bps < floor_bps:
                     if audit:
-                        audit.reject("negative_expectancy_open_block")
+                        audit.record_gate("negative_expectancy_open_block", symbol=sym)
                         router_decisions.append(
                             {
                                 "symbol": sym,
@@ -2523,7 +2524,7 @@ class V5Pipeline:
                 ff_avg_hold_minutes = float((neg_stats or {}).get("fast_fail_avg_hold_minutes") or 0.0)
                 if ff_closed_cycles >= ff_min_cycles and ff_expectancy_bps < ff_floor_bps:
                     if audit:
-                        audit.reject("negative_expectancy_fast_fail_open_block")
+                        audit.record_gate("negative_expectancy_fast_fail_open_block", symbol=sym)
                         router_decisions.append(
                             {
                                 "symbol": sym,

@@ -123,6 +123,40 @@ def test_live_whitelist_blocks_non_whitelist_router_symbols(tmp_path: Path) -> N
     assert any("live whitelist enforced" in note for note in (audit.notes or []))
 
 
+def test_negative_expectancy_rank_guard_records_preselection_blockers(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT"])
+    pipe = _build_pipe(cfg, tmp_path)
+    audit = DecisionAudit(run_id="negexp-rank-guard")
+    alpha = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"BTC/USDT": 1.0, "ETH/USDT": 0.8},
+    )
+
+    adjusted = pipe._apply_negative_expectancy_rank_guard(
+        alpha,
+        {"symbols": {"BTC/USDT": {"remain_seconds": 3600}}, "stats": {}},
+        positions=[],
+        audit=audit,
+    )
+
+    assert adjusted.scores["BTC/USDT"] < adjusted.scores["ETH/USDT"]
+    assert audit.rejects["negative_expectancy_cooldown"] == 1
+    assert audit.counts["negative_expectancy_cooldown"] == 1
+    assert any("reason=negative_expectancy_cooldown" in note for note in (audit.notes or []))
+
+
+def test_decision_audit_record_gate_dedupes_symbol_reason() -> None:
+    audit = DecisionAudit(run_id="negexp-dedupe")
+
+    audit.record_gate("negative_expectancy_open_block", symbol="BTC/USDT")
+    audit.record_gate("negative_expectancy_open_block", symbol="BTC/USDT")
+    audit.record_gate("negative_expectancy_open_block", symbol="ETH/USDT")
+
+    assert audit.rejects["negative_expectancy_open_block"] == 2
+    assert audit.counts["negative_expectancy_open_block"] == 2
+
+
 def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> None:
     cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT"])
     cfg.execution.mode = "live"

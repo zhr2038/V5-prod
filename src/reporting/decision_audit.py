@@ -40,6 +40,9 @@ class DecisionAudit:
         "targets_pre_risk": 0,
         "orders_exit": 0,
         "orders_rebalance": 0,
+        "negative_expectancy_cooldown": 0,
+        "negative_expectancy_open_block": 0,
+        "negative_expectancy_fast_fail_open_block": 0,
     })
     
     # 详细数据
@@ -74,6 +77,9 @@ class DecisionAudit:
         "cooldown_hit": 0,
         "cost_edge_insufficient": 0,
         "confirmation_pending": 0,
+        "negative_expectancy_cooldown": 0,
+        "negative_expectancy_open_block": 0,
+        "negative_expectancy_fast_fail_open_block": 0,
     })
     
     # Budget (F3)
@@ -102,6 +108,25 @@ class DecisionAudit:
             self.rejects[reason] += 1
         else:
             self.rejects[reason] = 1
+
+    def record_gate(self, reason: str, *, symbol: str | None = None) -> None:
+        """Record a gate/blocker once per symbol+reason and surface it in both counts and rejects."""
+        norm_reason = str(reason or "").strip()
+        if not norm_reason:
+            return
+
+        seen = getattr(self, "_gate_reject_seen", None)
+        if seen is None:
+            seen = set()
+            setattr(self, "_gate_reject_seen", seen)
+
+        dedupe_key = (norm_reason, str(symbol or "").strip())
+        if dedupe_key in seen:
+            return
+        seen.add(dedupe_key)
+
+        self.reject(norm_reason)
+        self.counts[norm_reason] = int(self.counts.get(norm_reason, 0) or 0) + 1
     
     def add_note(self, note: str) -> None:
         """添加备注"""
