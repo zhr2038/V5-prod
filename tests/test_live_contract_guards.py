@@ -200,6 +200,17 @@ def test_decision_audit_record_gate_dedupes_symbol_reason() -> None:
     assert audit.counts["negative_expectancy_open_block"] == 2
 
 
+def test_decision_audit_record_count_dedupes_without_rejecting() -> None:
+    audit = DecisionAudit(run_id="negexp-penalty")
+
+    audit.record_count("negative_expectancy_score_penalty", symbol="BTC/USDT")
+    audit.record_count("negative_expectancy_score_penalty", symbol="BTC/USDT")
+    audit.record_count("negative_expectancy_score_penalty", symbol="ETH/USDT")
+
+    assert audit.counts["negative_expectancy_score_penalty"] == 2
+    assert audit.rejects.get("negative_expectancy_score_penalty", 0) == 0
+
+
 def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> None:
     cfg = AppConfig(symbols=["BTC/USDT", "ETH/USDT"])
     cfg.execution.mode = "live"

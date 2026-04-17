@@ -5540,6 +5540,7 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
                     "targets_pre_risk": 2,
                     "orders_rebalance": 1,
                     "orders_exit": 0,
+                    "negative_expectancy_score_penalty": 7,
                     "negative_expectancy_cooldown": 1,
                     "negative_expectancy_open_block": 2,
                     "negative_expectancy_fast_fail_open_block": 3,
@@ -5560,6 +5561,7 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["rounds"][0]["run_id"] == "20260408_01"
     assert payload["rounds"][0]["strategy_signals"][0]["symbol"] == "ETH/USDT"
     assert payload["rounds"][0]["execution_result"]["orders_rebalance"] == 1
+    assert payload["rounds"][0]["execution_result"]["negative_expectancy_score_penalty"] == 7
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_cooldown"] == 1
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_open_block"] == 2
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_fast_fail_open_block"] == 3
@@ -5653,6 +5655,7 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
                     "selected": 10,
                     "orders_rebalance": 2,
                     "orders_exit": 1,
+                    "negative_expectancy_score_penalty": 3,
                     "negative_expectancy_cooldown": 4,
                     "negative_expectancy_open_block": 5,
                     "negative_expectancy_fast_fail_open_block": 6,
@@ -5698,6 +5701,7 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["window_rounds"] == 1
     assert payload["comparison"]["current"]["avg_selected_per_round"] == 10.0
     assert payload["comparison"]["current"]["avg_rebalance_per_round"] == 2.0
+    assert payload["comparison"]["current"]["negative_expectancy_score_penalty_count"] == 3
     assert payload["comparison"]["current"]["negative_expectancy_cooldown_count"] == 4
     assert payload["comparison"]["current"]["negative_expectancy_open_block_count"] == 5
     assert payload["comparison"]["current"]["negative_expectancy_fast_fail_open_block_count"] == 6

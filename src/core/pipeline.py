@@ -824,6 +824,7 @@ class V5Pipeline:
                 ff_closed_cycles,
                 penalty,
             ) in penalized:
+                audit.record_count("negative_expectancy_score_penalty", symbol=sym)
                 audit.add_note(
                     "NegativeExpectancy penalty: "
                     f"{sym} cycles={closed_cycles} expectancy_bps={expectancy_bps:.2f} "

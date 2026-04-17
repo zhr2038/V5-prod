@@ -40,6 +40,7 @@ class DecisionAudit:
         "targets_pre_risk": 0,
         "orders_exit": 0,
         "orders_rebalance": 0,
+        "negative_expectancy_score_penalty": 0,
         "negative_expectancy_cooldown": 0,
         "negative_expectancy_open_block": 0,
         "negative_expectancy_fast_fail_open_block": 0,
@@ -109,24 +110,29 @@ class DecisionAudit:
         else:
             self.rejects[reason] = 1
 
-    def record_gate(self, reason: str, *, symbol: str | None = None) -> None:
-        """Record a gate/blocker once per symbol+reason and surface it in both counts and rejects."""
+    def record_count(self, reason: str, *, symbol: str | None = None, also_reject: bool = False) -> None:
+        """Record a per-symbol reason count, optionally mirroring it into rejects."""
         norm_reason = str(reason or "").strip()
         if not norm_reason:
             return
 
-        seen = getattr(self, "_gate_reject_seen", None)
+        seen = getattr(self, "_count_seen", None)
         if seen is None:
             seen = set()
-            setattr(self, "_gate_reject_seen", seen)
+            setattr(self, "_count_seen", seen)
 
         dedupe_key = (norm_reason, str(symbol or "").strip())
         if dedupe_key in seen:
             return
         seen.add(dedupe_key)
 
-        self.reject(norm_reason)
         self.counts[norm_reason] = int(self.counts.get(norm_reason, 0) or 0) + 1
+        if also_reject:
+            self.reject(norm_reason)
+
+    def record_gate(self, reason: str, *, symbol: str | None = None) -> None:
+        """Record a gate/blocker once per symbol+reason and surface it in both counts and rejects."""
+        self.record_count(reason, symbol=symbol, also_reject=True)
     
     def add_note(self, note: str) -> None:
         """添加备注"""
