@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 import main as main_module
 from configs.schema import AppConfig, RegimeState
 from src.alpha.alpha_engine import AlphaSnapshot
-from src.core.models import MarketSeries
+from src.core.models import MarketSeries, Order
 from src.core.pipeline import V5Pipeline
 from src.execution.position_store import Position
 from src.regime.regime_engine import RegimeResult
@@ -193,3 +193,58 @@ def test_main_live_preflight_blocks_before_provider_and_order_generation(
 
     assert calls == {"preflight": 1, "provider": 0}
     assert (tmp_path / "reports" / "effective_live_config.json").exists()
+
+
+def test_run_live_preflight_respects_sell_only_fail_action(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.mode = "live"
+    cfg.execution.preflight_fail_action = "sell_only"
+    cfg.execution.order_store_path = str((tmp_path / "reports" / "orders.sqlite").resolve())
+
+    dummy_result = SimpleNamespace(decision="SELL_ONLY", reason="status_stale", details={})
+    dummy_client = object()
+
+    class DummyPreflight:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def run(self, **kwargs):
+            return dummy_result
+
+    monkeypatch.setattr("src.execution.live_preflight.LivePreflight", DummyPreflight)
+    monkeypatch.setattr("src.execution.okx_private_client.OKXPrivateClient", lambda exchange: dummy_client)
+
+    audit = DecisionAudit(run_id="preflight-sell-only")
+    client, result = main_module._run_live_preflight_or_raise(
+        cfg,
+        store=None,
+        acc_store=None,
+        audit=audit,
+        runtime_run_dir=tmp_path,
+    )
+
+    assert client is dummy_client
+    assert result is dummy_result
+
+
+def test_apply_live_preflight_order_restrictions_filters_buy_orders() -> None:
+    orders = [
+        Order(symbol="BTC/USDT", side="buy", intent="OPEN_LONG", notional_usdt=10.0, signal_price=100.0, meta={}),
+        Order(symbol="ETH/USDT", side="buy", intent="REBALANCE", notional_usdt=5.0, signal_price=200.0, meta={}),
+        Order(symbol="SOL/USDT", side="sell", intent="CLOSE_LONG", notional_usdt=8.0, signal_price=20.0, meta={}),
+        Order(symbol="ADA/USDT", side="buy", intent="REPAY_LIABILITY", notional_usdt=4.0, signal_price=1.0, meta={}),
+    ]
+    audit = DecisionAudit(run_id="preflight-filter")
+
+    filtered = main_module._apply_live_preflight_order_restrictions(
+        orders=orders,
+        live_preflight_result=SimpleNamespace(decision="SELL_ONLY", reason="status_stale"),
+        audit=audit,
+        log=None,
+    )
+
+    assert [(order.symbol, order.side, order.intent) for order in filtered] == [
+        ("SOL/USDT", "sell", "CLOSE_LONG"),
+        ("ADA/USDT", "buy", "REPAY_LIABILITY"),
+    ]
+    assert any("live preflight sell-only filtered buy orders" in note for note in (audit.notes or []))

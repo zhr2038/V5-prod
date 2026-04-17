@@ -403,6 +403,36 @@ def _merge_event_close_override_orders(
     return list(orders or []) + appended
 
 
+def _apply_live_preflight_order_restrictions(
+    *,
+    orders: list[Order],
+    live_preflight_result,
+    audit=None,
+    log=None,
+) -> list[Order]:
+    decision = str(getattr(live_preflight_result, "decision", "") or "").upper()
+    if decision != "SELL_ONLY":
+        return list(orders or [])
+
+    filtered = [
+        order
+        for order in (orders or [])
+        if not (
+            str(getattr(order, "side", "")).lower() == "buy"
+            and str(getattr(order, "intent", "")).upper() in {"OPEN_LONG", "REBALANCE"}
+        )
+    ]
+    removed = len(list(orders or [])) - len(filtered)
+    if removed > 0:
+        reason = str(getattr(live_preflight_result, "reason", "") or "sell_only")
+        message = f"live preflight sell-only filtered buy orders: removed={removed} reason={reason}"
+        if log is not None:
+            log.warning(message)
+        if audit is not None:
+            audit.add_note(message)
+    return filtered
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -581,7 +611,15 @@ def _run_live_preflight_or_raise(
         )
         if audit is not None:
             audit.add_note(f"LIVE_PREFLIGHT decision={res.decision} reason={res.reason}")
-        if str(res.decision).upper() != "ALLOW":
+        decision = str(res.decision).upper()
+        fail_action = str(getattr(cfg.execution, "preflight_fail_action", "sell_only") or "sell_only").lower()
+        if decision == "ALLOW":
+            return client, res
+        if decision == "SELL_ONLY" and fail_action in {"sell_only", "allow"}:
+            if audit is not None:
+                audit.add_note(f"LIVE_PREFLIGHT continue decision={decision} fail_action={fail_action}")
+            return client, res
+        if decision != "ALLOW":
             _audit_and_raise(
                 audit,
                 runtime_run_dir,
@@ -1270,6 +1308,13 @@ def main() -> None:
                 audit.add_note(
                     f"live preflight filtered borrow-blocked symbols: blocked={sorted(borrow_blocked)} removed={before_n - after_n}"
                 )
+
+        orders = _apply_live_preflight_order_restrictions(
+            orders=list(orders or []),
+            live_preflight_result=live_preflight_result,
+            audit=audit,
+            log=log,
+        )
 
     if live_whitelist:
         _assert_live_symbol_subset(
