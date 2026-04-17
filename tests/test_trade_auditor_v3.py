@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -120,3 +121,33 @@ def test_build_paths_uses_runtime_entry_helpers(monkeypatch, tmp_path: Path) -> 
     paths = auditor_mod.build_paths(tmp_path, config_path="configs/x.yaml", env_path="configs/x.env")
 
     assert paths.env_path == expected_env
+
+
+def test_trade_auditor_v3_report_includes_negative_expectancy_counts(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260417_01"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "TRENDING",
+                "counts": {
+                    "negative_expectancy_score_penalty": 2,
+                    "negative_expectancy_cooldown": 3,
+                    "negative_expectancy_open_block": 4,
+                    "negative_expectancy_fast_fail_open_block": 5,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    auditor = auditor_mod.TradeAuditorV3(workspace=tmp_path)
+    report = auditor.generate_report(
+        {
+            "okx": {"total_eq_usdt": 100.0, "usdt": 80.0, "positions": []},
+            "orders": {"buy": 1, "sell": 0, "rejected": 0, "total": 1},
+            "market": auditor.get_market_state(),
+        }
+    )
+
+    assert "Negative expectancy: penalty=2 cooldown=3 open_block=4 fast_fail_open_block=5" in report

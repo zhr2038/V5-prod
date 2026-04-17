@@ -136,6 +136,22 @@ class TradeAuditorV3:
     def log(self, msg: str) -> None:
         print(msg)
 
+    def _load_latest_decision_audit(self) -> dict[str, Any]:
+        try:
+            runs_dir = self.paths.runs_dir
+            if runs_dir.exists():
+                run_dirs = [
+                    d
+                    for d in runs_dir.iterdir()
+                    if d.is_dir() and (d / "decision_audit.json").exists()
+                ]
+                run_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+                if run_dirs:
+                    return json.loads((run_dirs[0] / "decision_audit.json").read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {}
+
     def get_okx_balance(self) -> dict[str, Any] | None:
         try:
             key, secret, passphrase = load_exchange_credentials(self.paths)
@@ -214,26 +230,25 @@ class TradeAuditorV3:
         return rows
 
     def get_market_state(self) -> dict[str, Any]:
-        try:
-            runs_dir = self.paths.runs_dir
-            if runs_dir.exists():
-                run_dirs = [
-                    d
-                    for d in runs_dir.iterdir()
-                    if d.is_dir() and (d / "decision_audit.json").exists()
-                ]
-                run_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-                if run_dirs:
-                    data = json.loads((run_dirs[0] / "decision_audit.json").read_text(encoding="utf-8"))
-                    regime = data.get("regime")
-                    details = data.get("regime_details", {})
-                    multiplier = details.get(
-                        "position_multiplier",
-                        data.get("regime_multiplier", 0.6),
-                    )
-                    return {"state": regime, "multiplier": multiplier}
-        except Exception:
-            pass
+        data = self._load_latest_decision_audit()
+        if data:
+            regime = data.get("regime")
+            details = data.get("regime_details", {})
+            multiplier = details.get(
+                "position_multiplier",
+                data.get("regime_multiplier", 0.6),
+            )
+            counts = data.get("counts", {}) if isinstance(data, dict) else {}
+            return {
+                "state": regime,
+                "multiplier": multiplier,
+                "negative_expectancy_penalty_count": int(counts.get("negative_expectancy_score_penalty", 0) or 0),
+                "negative_expectancy_cooldown_count": int(counts.get("negative_expectancy_cooldown", 0) or 0),
+                "negative_expectancy_open_block_count": int(counts.get("negative_expectancy_open_block", 0) or 0),
+                "negative_expectancy_fast_fail_open_block_count": int(
+                    counts.get("negative_expectancy_fast_fail_open_block", 0) or 0
+                ),
+            }
         return {"state": "Unknown", "multiplier": 0}
 
     def analyze(self) -> dict[str, Any]:
@@ -275,6 +290,13 @@ class TradeAuditorV3:
 
         lines.extend(["", f"市场状态: {data.get('market', {}).get('state', 'Unknown')}"])
         lines.append(f"仓位乘数: {data.get('market', {}).get('multiplier', 0):.2f}x")
+        lines.append(
+            "Negative expectancy: "
+            f"penalty={data.get('market', {}).get('negative_expectancy_penalty_count', 0)} "
+            f"cooldown={data.get('market', {}).get('negative_expectancy_cooldown_count', 0)} "
+            f"open_block={data.get('market', {}).get('negative_expectancy_open_block_count', 0)} "
+            f"fast_fail_open_block={data.get('market', {}).get('negative_expectancy_fast_fail_open_block_count', 0)}"
+        )
         lines.extend(["", "最近2小时交易:"])
 
         orders = data.get("orders", {})

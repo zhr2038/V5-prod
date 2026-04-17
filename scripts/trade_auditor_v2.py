@@ -219,7 +219,7 @@ class SmartTradeAuditor:
             "sell_rejected": sell_rejected,
         }
 
-    def check_market_regime(self) -> str:
+    def _load_latest_decision_audit(self) -> dict[str, Any]:
         try:
             runs_dir = self.paths.runs_dir
             if runs_dir.exists():
@@ -230,13 +230,17 @@ class SmartTradeAuditor:
                 ]
                 run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
                 if run_dirs:
-                    data = json.loads((run_dirs[0] / "decision_audit.json").read_text(encoding="utf-8"))
-                    details = data.get("regime_details") or {}
-                    regime = details.get("final_state") or data.get("regime")
-                    if regime:
-                        return str(regime)
+                    return json.loads((run_dirs[0] / "decision_audit.json").read_text(encoding="utf-8"))
         except Exception:
             pass
+        return {}
+
+    def check_market_regime(self) -> str:
+        data = self._load_latest_decision_audit()
+        details = data.get("regime_details") or {}
+        regime = details.get("final_state") or data.get("regime")
+        if regime:
+            return str(regime)
 
         possible_paths = [
             self.paths.reports_dir / "regime_state.json",
@@ -341,6 +345,8 @@ class SmartTradeAuditor:
         return issues
 
     def generate_report(self, analysis: dict[str, list[tuple[Any, ...]]], regime: str) -> dict[str, Any]:
+        audit_data = self._load_latest_decision_audit()
+        counts = audit_data.get("counts", {}) if isinstance(audit_data, dict) else {}
         return {
             "timestamp": datetime.now().isoformat(),
             "market_regime": regime,
@@ -350,6 +356,12 @@ class SmartTradeAuditor:
                 "buy_rejected": len(analysis["buy_rejected"]),
                 "sell_rejected": len(analysis["sell_rejected"]),
                 "total": sum(len(v) for v in analysis.values()),
+                "negative_expectancy_penalty_count": int(counts.get("negative_expectancy_score_penalty", 0) or 0),
+                "negative_expectancy_cooldown_count": int(counts.get("negative_expectancy_cooldown", 0) or 0),
+                "negative_expectancy_open_block_count": int(counts.get("negative_expectancy_open_block", 0) or 0),
+                "negative_expectancy_fast_fail_open_block_count": int(
+                    counts.get("negative_expectancy_fast_fail_open_block", 0) or 0
+                ),
             },
             "issues": self.issues,
             "warnings": self.warnings,
@@ -368,6 +380,12 @@ class SmartTradeAuditor:
         self.log(f"  卖出成交: {summary['sell_filled']} 笔")
         self.log(f"  买入拒绝: {summary['buy_rejected']} 笔")
         self.log(f"  卖出拒绝: {summary['sell_rejected']} 笔")
+        self.log(f"  Negative expectancy penalty: {summary['negative_expectancy_penalty_count']} 笔")
+        self.log(f"  Negative expectancy cooldown: {summary['negative_expectancy_cooldown_count']} 笔")
+        self.log(f"  Negative expectancy open block: {summary['negative_expectancy_open_block_count']} 笔")
+        self.log(
+            f"  Negative expectancy fast-fail open block: {summary['negative_expectancy_fast_fail_open_block_count']} 笔"
+        )
 
         if self.insights:
             self.log("\n智能分析:")
