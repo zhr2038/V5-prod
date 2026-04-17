@@ -407,11 +407,12 @@ def _apply_live_preflight_order_restrictions(
     *,
     orders: list[Order],
     live_preflight_result,
+    fail_action: str,
     audit=None,
     log=None,
 ) -> list[Order]:
     decision = str(getattr(live_preflight_result, "decision", "") or "").upper()
-    if decision != "SELL_ONLY":
+    if decision != "SELL_ONLY" or str(fail_action or "").lower() != "sell_only":
         return list(orders or [])
 
     filtered = [
@@ -1312,6 +1313,7 @@ def main() -> None:
         orders = _apply_live_preflight_order_restrictions(
             orders=list(orders or []),
             live_preflight_result=live_preflight_result,
+            fail_action=str(getattr(cfg.execution, "preflight_fail_action", "sell_only") or "sell_only"),
             audit=audit,
             log=log,
         )

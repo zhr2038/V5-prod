@@ -239,6 +239,7 @@ def test_apply_live_preflight_order_restrictions_filters_buy_orders() -> None:
     filtered = main_module._apply_live_preflight_order_restrictions(
         orders=orders,
         live_preflight_result=SimpleNamespace(decision="SELL_ONLY", reason="status_stale"),
+        fail_action="sell_only",
         audit=audit,
         log=None,
     )
@@ -248,3 +249,20 @@ def test_apply_live_preflight_order_restrictions_filters_buy_orders() -> None:
         ("ADA/USDT", "buy", "REPAY_LIABILITY"),
     ]
     assert any("live preflight sell-only filtered buy orders" in note for note in (audit.notes or []))
+
+
+def test_apply_live_preflight_order_restrictions_keeps_orders_when_fail_action_is_allow() -> None:
+    orders = [
+        Order(symbol="BTC/USDT", side="buy", intent="OPEN_LONG", notional_usdt=10.0, signal_price=100.0, meta={}),
+        Order(symbol="SOL/USDT", side="sell", intent="CLOSE_LONG", notional_usdt=8.0, signal_price=20.0, meta={}),
+    ]
+
+    filtered = main_module._apply_live_preflight_order_restrictions(
+        orders=orders,
+        live_preflight_result=SimpleNamespace(decision="SELL_ONLY", reason="status_stale"),
+        fail_action="allow",
+        audit=None,
+        log=None,
+    )
+
+    assert filtered == orders
