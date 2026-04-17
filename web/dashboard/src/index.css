@@ -723,6 +723,36 @@ body {
   }
 }
 
+@supports (-webkit-touch-callout: none) {
+  @media (hover: none) and (pointer: coarse) {
+    .ambient-pane,
+    .liquid-caustic,
+    .liquid-orb,
+    .liquid-bg::before,
+    .liquid-bg::after {
+      display: none;
+    }
+
+    .material-surface,
+    .glass-card,
+    .glass-panel {
+      --surface-blur: 14px;
+      --surface-saturate: 112%;
+      --surface-brightness: 1.01;
+      --surface-shadow: 0 10px 24px rgba(8, 10, 16, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      --surface-shadow-hover: 0 12px 28px rgba(8, 10, 16, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+      --highlight-opacity: 0.08;
+      --lens-opacity: 0;
+    }
+
+    .material-surface::after,
+    .glass-card::after,
+    .glass-panel::after {
+      display: none;
+    }
+  }
+}
+
 @supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
   .material-surface,
   .glass-card,

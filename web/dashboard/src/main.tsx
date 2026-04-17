@@ -36,3 +36,10 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+requestAnimationFrame(() => {
+  const bootShell = document.getElementById('boot-shell')
+  if (!bootShell) return
+  bootShell.classList.add('boot-shell-hidden')
+  globalThis.setTimeout(() => bootShell.remove(), 240)
+})
