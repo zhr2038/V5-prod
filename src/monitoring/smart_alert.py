@@ -25,8 +25,7 @@ KNOWN_NO_TRADE_BLOCK_REASONS = {
     "negative_expectancy_open_block",
     "negative_expectancy_fast_fail_open_block",
 }
-NEGATIVE_EXPECTANCY_COUNT_KEYS = (
-    "negative_expectancy_score_penalty",
+NEGATIVE_EXPECTANCY_HARD_BLOCK_COUNT_KEYS = (
     "negative_expectancy_cooldown",
     "negative_expectancy_open_block",
     "negative_expectancy_fast_fail_open_block",
@@ -194,7 +193,7 @@ class SmartAlertEngine:
 
     def _audit_has_known_trade_blockers(self, audit: dict[str, Any]) -> bool:
         counts = audit.get("counts", {}) or {}
-        for key in NEGATIVE_EXPECTANCY_COUNT_KEYS:
+        for key in NEGATIVE_EXPECTANCY_HARD_BLOCK_COUNT_KEYS:
             if int(counts.get(key, 0) or 0) > 0:
                 return True
 
