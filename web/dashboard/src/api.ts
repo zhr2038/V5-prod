@@ -6,7 +6,7 @@ import type {
   HealthData,
   MLTrainingData,
   ShadowMLData,
-  KlineData,
+  PositionKlinePayload,
   Trade,
 } from './types';
 
@@ -74,10 +74,10 @@ export const api = {
   health: () => fetchJson<HealthData>('/api/health'),
   mlTraining: () => fetchJson<MLTrainingData>('/api/ml_training'),
   shadowMl: () => fetchJson<ShadowMLData>('/api/shadow_ml_overlay'),
-  positionKline: async (symbol: string, timeframe: string) => {
-    const payload = await fetchJson<{ candles?: KlineData[] }>(
+  positionKline: async (symbol: string, timeframe: string): Promise<PositionKlinePayload> => {
+    const payload = await fetchJson<PositionKlinePayload>(
       `/api/position_kline?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`
     );
-    return Array.isArray(payload?.candles) ? payload.candles : [];
+    return payload && Array.isArray(payload.candles) ? payload : { candles: [] };
   },
 };

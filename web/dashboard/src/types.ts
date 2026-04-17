@@ -293,3 +293,22 @@ export interface KlineData {
   close: number;
   volume?: number;
 }
+
+export interface PositionKlineSummary {
+  bars?: number;
+  open?: number;
+  close?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
+  change_pct?: number;
+  last_time?: string;
+}
+
+export interface PositionKlinePayload {
+  symbol?: string;
+  timeframe?: string;
+  source?: string;
+  candles?: KlineData[];
+  summary?: PositionKlineSummary;
+}

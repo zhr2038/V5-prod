@@ -4,7 +4,7 @@ import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, sideLabels } from '../lib/format';
 import { api } from '../api';
 import { useInterval } from '../hooks/useInterval';
-import type { Position, KlineData, Trade } from '../types';
+import type { Position, KlineData, PositionKlinePayload, Trade } from '../types';
 
 interface PositionsPanelProps {
   positions?: Position[];
@@ -138,7 +138,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
     [liveTrades]
   );
   const [tf, setTf] = useState('1h');
-  const [kline, setKline] = useState<KlineData[] | null>(null);
+  const [kline, setKline] = useState<PositionKlinePayload | null>(null);
 
   useEffect(() => {
     setLivePositions(positions);
@@ -297,7 +297,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
           ) : null}
 
           <div className="material-surface material-reading reading-surface tone-neutral h-56 w-full p-2">
-            <CandlestickSvg data={kline || []} />
+            <CandlestickSvg data={Array.isArray(kline?.candles) ? kline.candles : []} />
           </div>
 
           <div className="flex gap-2">
