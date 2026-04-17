@@ -294,7 +294,7 @@ execution:
   negative_expectancy_score_penalty_max: 0.35
   negative_expectancy_open_block_enabled: true
   negative_expectancy_open_block_min_closed_cycles: 4
-  negative_expectancy_open_block_floor_bps: 25.0
+  negative_expectancy_open_block_floor_bps: 20.0
   negative_expectancy_fast_fail_max_hold_minutes: 360
   negative_expectancy_fast_fail_open_block_enabled: true
   negative_expectancy_fast_fail_open_block_min_closed_cycles: 4
