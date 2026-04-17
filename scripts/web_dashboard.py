@@ -5550,6 +5550,13 @@ def api_decision_audit():
             'cancelled': 0,
             'other': 0,
             'reject_reasons': {},
+            'negative_expectancy_penalty_count': int((audit_data.get('counts', {}) or {}).get('negative_expectancy_score_penalty', 0) or 0),
+            'negative_expectancy_cooldown_count': int((audit_data.get('counts', {}) or {}).get('negative_expectancy_cooldown', 0) or 0),
+            'negative_expectancy_open_block_count': int((audit_data.get('counts', {}) or {}).get('negative_expectancy_open_block', 0) or 0),
+            'negative_expectancy_fast_fail_open_block_count': int(
+                (audit_data.get('counts', {}) or {}).get('negative_expectancy_fast_fail_open_block', 0) or 0
+            ),
+            'negative_expectancy_probation_release_count': 0,
         }
         try:
             conn = get_db_connection()

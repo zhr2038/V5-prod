@@ -21,6 +21,34 @@ def _resolve_run_dir(run_dir: str | Path) -> Path:
     return resolved
 
 
+def _negative_expectancy_summary_fields(rd: Path) -> Dict[str, int]:
+    decision_audit_path = rd / "decision_audit.json"
+    if not decision_audit_path.exists():
+        return {
+            "negative_expectancy_penalty_count": 0,
+            "negative_expectancy_cooldown_count": 0,
+            "negative_expectancy_open_block_count": 0,
+            "negative_expectancy_fast_fail_open_block_count": 0,
+            "negative_expectancy_probation_release_count": 0,
+        }
+
+    try:
+        payload = json.loads(decision_audit_path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    counts = payload.get("counts", {}) if isinstance(payload, dict) else {}
+
+    return {
+        "negative_expectancy_penalty_count": int(counts.get("negative_expectancy_score_penalty", 0) or 0),
+        "negative_expectancy_cooldown_count": int(counts.get("negative_expectancy_cooldown", 0) or 0),
+        "negative_expectancy_open_block_count": int(counts.get("negative_expectancy_open_block", 0) or 0),
+        "negative_expectancy_fast_fail_open_block_count": int(
+            counts.get("negative_expectancy_fast_fail_open_block", 0) or 0
+        ),
+        "negative_expectancy_probation_release_count": 0,
+    }
+
+
 def write_summary(
     run_dir: str,
     window_start_ts: int | None = None,
@@ -59,6 +87,7 @@ def write_summary(
         "avg_equity": avg_equity,
         **eqm,
         **tm,
+        **_negative_expectancy_summary_fields(rd),
     }
 
     (rd / "summary.json").write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -94,6 +123,8 @@ def refresh_summary_metrics(run_dir: str) -> Dict[str, Any]:
     # patch
     summ["avg_equity"] = avg_equity
     for k, v in {**eqm, **tm}.items():
+        summ[k] = v
+    for k, v in _negative_expectancy_summary_fields(rd).items():
         summ[k] = v
 
     p.write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")

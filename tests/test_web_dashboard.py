@@ -2644,6 +2644,8 @@ def test_api_decision_audit_run_orders_prefers_updated_ts_sort(monkeypatch, tmp_
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["execution_summary"]["total"] == 2
+    assert payload["execution_summary"]["negative_expectancy_penalty_count"] == 0
+    assert payload["execution_summary"]["negative_expectancy_cooldown_count"] == 0
     assert payload["run_orders"][0]["ord_id"] == "ord-1"
     assert payload["run_orders"][0]["created_ts"] == 1_710_088_200_000
     assert payload["run_orders"][1]["ord_id"] == "ord-2"
@@ -2662,7 +2664,15 @@ def test_api_decision_audit_execution_summary_counts_all_orders_beyond_preview_l
             {
                 "run_id": "20260313_16",
                 "regime": "TRENDING",
-                "counts": {"selected": 101, "orders_rebalance": 101, "orders_exit": 0},
+                "counts": {
+                    "selected": 101,
+                    "orders_rebalance": 101,
+                    "orders_exit": 0,
+                    "negative_expectancy_score_penalty": 7,
+                    "negative_expectancy_cooldown": 8,
+                    "negative_expectancy_open_block": 9,
+                    "negative_expectancy_fast_fail_open_block": 10,
+                },
             },
             ensure_ascii=False,
         ),
@@ -2741,6 +2751,11 @@ def test_api_decision_audit_execution_summary_counts_all_orders_beyond_preview_l
     assert payload["execution_summary"]["total"] == 101
     assert payload["execution_summary"]["filled"] == 100
     assert payload["execution_summary"]["rejected"] == 1
+    assert payload["execution_summary"]["negative_expectancy_penalty_count"] == 7
+    assert payload["execution_summary"]["negative_expectancy_cooldown_count"] == 8
+    assert payload["execution_summary"]["negative_expectancy_open_block_count"] == 9
+    assert payload["execution_summary"]["negative_expectancy_fast_fail_open_block_count"] == 10
+    assert payload["execution_summary"]["negative_expectancy_probation_release_count"] == 0
     assert payload["execution_summary"]["reject_reasons"]["500"] == 1
     assert len(payload["run_orders"]) == 30
 

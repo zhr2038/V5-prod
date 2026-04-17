@@ -32,10 +32,28 @@ def test_write_summary_resolves_relative_run_dir_from_project_root(monkeypatch, 
         "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct\n",
         encoding="utf-8",
     )
+    (run_dir / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "counts": {
+                    "negative_expectancy_score_penalty": 2,
+                    "negative_expectancy_cooldown": 3,
+                    "negative_expectancy_open_block": 4,
+                    "negative_expectancy_fast_fail_open_block": 5,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
     summary = summary_writer.write_summary("reports/runs/test_run")
 
     assert summary["run_id"] == "test_run"
+    assert summary["negative_expectancy_penalty_count"] == 2
+    assert summary["negative_expectancy_cooldown_count"] == 3
+    assert summary["negative_expectancy_open_block_count"] == 4
+    assert summary["negative_expectancy_fast_fail_open_block_count"] == 5
+    assert summary["negative_expectancy_probation_release_count"] == 0
     assert (run_dir / "summary.json").exists()
 
 
