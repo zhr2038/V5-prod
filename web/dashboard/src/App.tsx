@@ -28,6 +28,29 @@ type IdleWindow = Window & {
   cancelIdleCallback?: (handle: number) => void;
 };
 
+function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
+  if (!payload) return true;
+  const timerCount = Array.isArray(payload.timers?.timers) ? payload.timers.timers.length : 0;
+  const scoreCount = Array.isArray(payload.alphaScores) ? payload.alphaScores.length : 0;
+  const tradeCount = Array.isArray(payload.trades) ? payload.trades.length : 0;
+  const telemetryKeys = payload.apiTelemetry && typeof payload.apiTelemetry === 'object'
+    ? Object.keys(payload.apiTelemetry).length
+    : 0;
+  const slippageKeys = payload.slippageInsights && typeof payload.slippageInsights === 'object'
+    ? Object.keys(payload.slippageInsights).length
+    : 0;
+
+  return timerCount === 0 && scoreCount === 0 && tradeCount === 0 && telemetryKeys === 0 && slippageKeys === 0;
+}
+
+function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<DashboardData>) {
+  if (!prev) return deferred as DashboardData;
+  if (deferredPayloadLooksSparse(deferred)) {
+    return prev;
+  }
+  return { ...prev, ...deferred };
+}
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [riskGuard, setRiskGuard] = useState<RiskGuardData | null>(null);
@@ -38,6 +61,7 @@ function App() {
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
+  const [secondaryReady, setSecondaryReady] = useState(false);
 
   const loadPrimary = useCallback(async () => {
     if (document.hidden) return;
@@ -65,7 +89,8 @@ function App() {
     ]);
     startTransition(() => {
       if (deferred) {
-        setDashboard((prev) => (prev ? { ...prev, ...deferred } : (deferred as DashboardData)));
+        setDashboard((prev) => mergeDeferredDashboard(prev, deferred));
+        setSecondaryReady(true);
       }
       if (dec) setDecisionAudit(dec);
       if (h) setHealth(h);
@@ -163,9 +188,13 @@ function App() {
               <MarketRadar marketState={marketState} />
               <SignalsPanel decisionAudit={decisionAudit} />
               {showDeferredPanels ? (
-                <Suspense fallback={<DeferredPanelFallback />}>
-                  <ExecutionInsightsPanel slippageInsights={dashboard?.slippageInsights || null} />
-                </Suspense>
+                secondaryReady ? (
+                  <Suspense fallback={<DeferredPanelFallback />}>
+                    <ExecutionInsightsPanel slippageInsights={dashboard?.slippageInsights || null} />
+                  </Suspense>
+                ) : (
+                  <DeferredPanelFallback />
+                )
               ) : null}
             </div>
             <div className="lg:col-span-1">
@@ -176,6 +205,7 @@ function App() {
                 health={health}
                 decisionAudit={decisionAudit}
                 apiTelemetry={dashboard?.apiTelemetry || null}
+                deferredReady={secondaryReady}
               />
             </div>
           </div>

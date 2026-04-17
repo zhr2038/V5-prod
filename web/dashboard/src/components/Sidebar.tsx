@@ -9,6 +9,7 @@ interface SidebarProps {
   health?: HealthData | null;
   decisionAudit?: DecisionAuditData | null;
   apiTelemetry?: ApiTelemetryData | null;
+  deferredReady?: boolean;
 }
 
 function Section({
@@ -59,7 +60,15 @@ function latestErrorLabel(apiTelemetry?: ApiTelemetryData | null) {
     .join(' · ');
 }
 
-export function Sidebar({ timers, alphaScores = [], trades = [], health, decisionAudit, apiTelemetry }: SidebarProps) {
+export function Sidebar({
+  timers,
+  alphaScores = [],
+  trades = [],
+  health,
+  decisionAudit,
+  apiTelemetry,
+  deferredReady = false,
+}: SidebarProps) {
   const exec = decisionAudit?.execution_summary || {};
   const rejected = decisionAudit?.rejected_summary || {};
   const orders = decisionAudit?.orders || [];
@@ -80,7 +89,11 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
               </span>
             </div>
           ))}
-          {!timers?.timers?.length && <div className="text-xs text-[var(--text-dim)]">无定时器数据</div>}
+          {!timers?.timers?.length && (
+            <div className="text-xs text-[var(--text-dim)]">
+              {deferredReady ? '无定时器数据' : '加载中...'}
+            </div>
+          )}
         </div>
       </Section>
 
@@ -109,7 +122,11 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <span className={`w-2 h-2 rounded-full ${statusDotClass(apiTelemetry?.status)}`} />
-            <span className="text-sm font-medium">{statusLabels[apiTelemetry?.status || ''] || apiTelemetry?.status || '—'}</span>
+            <span className="text-sm font-medium">
+              {deferredReady
+                ? statusLabels[apiTelemetry?.status || ''] || apiTelemetry?.status || '—'
+                : '加载中'}
+            </span>
             <span className="ml-auto text-xs text-[var(--text-dim)]">近{Number(apiTelemetry?.lookbackHours || 24)}h</span>
           </div>
 
@@ -143,7 +160,9 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
                 {fmtLatencyMs(apiTelemetry?.p50LatencyMs)} · {fmtNum(apiTelemetry?.errorCount, 0)}
               </span>
             </div>
-            <div className="text-xs text-[var(--text-dim)]">{apiTelemetry?.note || '暂无 API 遥测数据'}</div>
+            <div className="text-xs text-[var(--text-dim)]">
+              {apiTelemetry?.note || (deferredReady ? '暂无 API 遥测数据' : '加载中...')}
+            </div>
             {errorLabel ? (
               <div className="border-t border-white/8 pt-1.5">
                 <div className="flex items-center justify-between text-xs text-[var(--text-dim)]">
@@ -174,7 +193,11 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
               <span className="w-10 text-right font-mono">{fmtNum(s.score, 2)}</span>
             </div>
           ))}
-          {!alphaScores.length && <div className="text-xs text-[var(--text-dim)]">无评分数据</div>}
+          {!alphaScores.length && (
+            <div className="text-xs text-[var(--text-dim)]">
+              {deferredReady ? '无评分数据' : '加载中...'}
+            </div>
+          )}
         </div>
       </Section>
 
@@ -189,12 +212,20 @@ export function Sidebar({ timers, alphaScores = [], trades = [], health, decisio
                 </span>
               </div>
               <div className="text-right">
-                <div className="font-mono">{fmtUsd(t.value)}</div>
-                <div className="text-[var(--text-dim)]">{t.timestamp ? t.timestamp.slice(5, 16).replace('T', ' ') : ''}</div>
+                <div className="font-mono">
+                  {fmtUsd(t.price)} · {fmtNum(t.qty, 6)}
+                </div>
+                <div className="text-[var(--text-dim)]">
+                  {fmtUsd(t.value)} · {t.timestamp ? t.timestamp.slice(5, 16).replace('T', ' ') : ''}
+                </div>
               </div>
             </div>
           ))}
-          {!trades.length && <div className="text-xs text-[var(--text-dim)]">暂无成交</div>}
+          {!trades.length && (
+            <div className="text-xs text-[var(--text-dim)]">
+              {deferredReady ? '暂无成交' : '加载中...'}
+            </div>
+          )}
         </div>
       </Section>
 
