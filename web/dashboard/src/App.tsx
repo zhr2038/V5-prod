@@ -77,6 +77,7 @@ function App() {
 
   const loadInitialData = useEffectEvent(() => {
     void loadPrimary();
+    void loadSecondary();
   });
 
   useEffect(() => {
@@ -86,7 +87,6 @@ function App() {
     const idleWindow = window as IdleWindow;
 
     const runDeferred = () => {
-      void loadSecondary();
       startTransition(() => {
         setShowDeferredPanels(true);
       });
@@ -106,7 +106,7 @@ function App() {
         globalThis.clearTimeout(timeoutId);
       }
     };
-  }, [loadInitialData, loadSecondary]);
+  }, []);
 
   useEffect(() => {
     if (!showDeferredPanels) return;
