@@ -5033,7 +5033,12 @@ def api_decision_chain():
                     'selected': int(counts.get('selected', 0) or 0),
                     'targets_pre_risk': int(counts.get('targets_pre_risk', 0) or 0),
                     'orders_rebalance': int(counts.get('orders_rebalance', 0) or 0),
-                    'orders_exit': int(counts.get('orders_exit', 0) or 0)
+                    'orders_exit': int(counts.get('orders_exit', 0) or 0),
+                    'negative_expectancy_cooldown': int(counts.get('negative_expectancy_cooldown', 0) or 0),
+                    'negative_expectancy_open_block': int(counts.get('negative_expectancy_open_block', 0) or 0),
+                    'negative_expectancy_fast_fail_open_block': int(
+                        counts.get('negative_expectancy_fast_fail_open_block', 0) or 0
+                    ),
                 }
 
                 # 4. 阻塞原因统计
@@ -5079,7 +5084,15 @@ def api_decision_chain():
                     'time': run_dir.name,
                     'strategy_signals': [],
                     'risk_state': {'regime': 'Error'},
-                    'execution_result': {'selected': 0, 'targets_pre_risk': 0, 'orders_rebalance': 0, 'orders_exit': 0},
+                    'execution_result': {
+                        'selected': 0,
+                        'targets_pre_risk': 0,
+                        'orders_rebalance': 0,
+                        'orders_exit': 0,
+                        'negative_expectancy_cooldown': 0,
+                        'negative_expectancy_open_block': 0,
+                        'negative_expectancy_fast_fail_open_block': 0,
+                    },
                     'block_reasons': {'parse_error': 1},
                     'blocked_top': [],
                     'error': 'internal parse error'
@@ -5119,6 +5132,9 @@ def api_shadow_test():
             'total_selected': 0,
             'total_rebalance': 0,
             'total_exit': 0,
+            'negative_expectancy_cooldown_count': 0,
+            'negative_expectancy_open_block_count': 0,
+            'negative_expectancy_fast_fail_open_block_count': 0,
             'deadband_blocks': 0,
             'avg_deadband_skip': 0
         }
@@ -5147,6 +5163,15 @@ def api_shadow_test():
                 current_stats['total_selected'] += counts.get('selected', 0)
                 current_stats['total_rebalance'] += counts.get('orders_rebalance', 0)
                 current_stats['total_exit'] += counts.get('orders_exit', 0)
+                current_stats['negative_expectancy_cooldown_count'] += int(
+                    counts.get('negative_expectancy_cooldown', 0) or 0
+                )
+                current_stats['negative_expectancy_open_block_count'] += int(
+                    counts.get('negative_expectancy_open_block', 0) or 0
+                )
+                current_stats['negative_expectancy_fast_fail_open_block_count'] += int(
+                    counts.get('negative_expectancy_fast_fail_open_block', 0) or 0
+                )
                 
                 # 统计deadband拦截
                 router_decisions = data.get('router_decisions', [])
@@ -5211,7 +5236,10 @@ def api_shadow_test():
                     'avg_rebalance_per_round': current_stats.get('avg_rebalance', 0),
                     'conversion_rate': current_stats.get('conversion_rate', 0),
                     'total_deadband_blocks': current_stats['deadband_blocks'],
-                    'avg_drift_when_blocked': current_stats['avg_deadband_skip']
+                    'avg_drift_when_blocked': current_stats['avg_deadband_skip'],
+                    'negative_expectancy_cooldown_count': current_stats['negative_expectancy_cooldown_count'],
+                    'negative_expectancy_open_block_count': current_stats['negative_expectancy_open_block_count'],
+                    'negative_expectancy_fast_fail_open_block_count': current_stats['negative_expectancy_fast_fail_open_block_count'],
                 },
                 'estimated_with_proposed': {
                     'avg_rebalance_per_round': round(

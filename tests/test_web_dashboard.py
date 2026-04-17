@@ -5535,7 +5535,15 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
                 "now_ts": 1_710_000_600,
                 "regime": "TRENDING",
                 "top_scores": [{"symbol": "ETH/USDT", "score": 0.9, "rank": 1}],
-                "counts": {"selected": 2, "targets_pre_risk": 2, "orders_rebalance": 1, "orders_exit": 0},
+                "counts": {
+                    "selected": 2,
+                    "targets_pre_risk": 2,
+                    "orders_rebalance": 1,
+                    "orders_exit": 0,
+                    "negative_expectancy_cooldown": 1,
+                    "negative_expectancy_open_block": 2,
+                    "negative_expectancy_fast_fail_open_block": 3,
+                },
                 "router_decisions": [],
             },
             ensure_ascii=False,
@@ -5552,6 +5560,9 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["rounds"][0]["run_id"] == "20260408_01"
     assert payload["rounds"][0]["strategy_signals"][0]["symbol"] == "ETH/USDT"
     assert payload["rounds"][0]["execution_result"]["orders_rebalance"] == 1
+    assert payload["rounds"][0]["execution_result"]["negative_expectancy_cooldown"] == 1
+    assert payload["rounds"][0]["execution_result"]["negative_expectancy_open_block"] == 2
+    assert payload["rounds"][0]["execution_result"]["negative_expectancy_fast_fail_open_block"] == 3
 
 
 def test_decision_chain_error_response_hides_internal_paths(monkeypatch):
@@ -5638,7 +5649,14 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     (runtime_run / "decision_audit.json").write_text(
         json.dumps(
             {
-                "counts": {"selected": 10, "orders_rebalance": 2, "orders_exit": 1},
+                "counts": {
+                    "selected": 10,
+                    "orders_rebalance": 2,
+                    "orders_exit": 1,
+                    "negative_expectancy_cooldown": 4,
+                    "negative_expectancy_open_block": 5,
+                    "negative_expectancy_fast_fail_open_block": 6,
+                },
                 "router_decisions": [{"reason": "deadband", "drift": 0.035}],
             },
             ensure_ascii=False,
@@ -5680,6 +5698,9 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["window_rounds"] == 1
     assert payload["comparison"]["current"]["avg_selected_per_round"] == 10.0
     assert payload["comparison"]["current"]["avg_rebalance_per_round"] == 2.0
+    assert payload["comparison"]["current"]["negative_expectancy_cooldown_count"] == 4
+    assert payload["comparison"]["current"]["negative_expectancy_open_block_count"] == 5
+    assert payload["comparison"]["current"]["negative_expectancy_fast_fail_open_block_count"] == 6
     assert payload["ab_gate"]["window_runs"] == 1
     assert payload["ab_gate"]["decision"]["switch_recommended"] is True
     assert payload["ab_gate_status"] == "fresh"
