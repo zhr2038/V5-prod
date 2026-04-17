@@ -262,9 +262,10 @@ function App() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="fixed bottom-4 right-4 z-50 text-xs px-3 py-1.5 material-surface material-clear clear-chip tone-pearl"
+            className="fixed bottom-4 right-5 z-50 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-dim)]"
           >
-            刷新中...
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]/80" />
+            <span>刷新中</span>
           </motion.div>
         )}
       </div>

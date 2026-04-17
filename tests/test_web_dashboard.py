@@ -1321,6 +1321,74 @@ def test_position_kline_api_error_response_hides_internal_paths(monkeypatch):
     _assert_internal_error_hidden(body, "/home/ubuntu/clawd/v5-prod/reports/position_cache.db", "position_cache.db")
 
 
+def test_load_position_market_series_prefers_okx_when_cache_is_stale(monkeypatch):
+    module = load_web_dashboard_module()
+
+    stale_series = module.MarketSeries(
+        symbol="BTC/USDT",
+        timeframe="1h",
+        ts=[1710201600000, 1710205200000],
+        open=[100.0, 101.0],
+        high=[102.0, 105.0],
+        low=[99.5, 100.5],
+        close=[101.0, 103.0],
+        volume=[10.0, 12.0],
+    )
+    live_series = module.MarketSeries(
+        symbol="BTC/USDT",
+        timeframe="1h",
+        ts=[1_775_900_400_000, 1_775_904_000_000],
+        open=[110.0, 111.0],
+        high=[112.0, 115.0],
+        low=[109.5, 110.5],
+        close=[111.0, 113.0],
+        volume=[14.0, 16.0],
+    )
+
+    class FakeProvider:
+        def fetch_ohlcv(self, symbols, timeframe="1h", limit=0):
+            assert symbols == ["BTC/USDT"]
+            assert timeframe == "1h"
+            return {"BTC/USDT": live_series}
+
+    monkeypatch.setattr(module, "_load_cached_position_market_series", lambda symbol, timeframe, limit: stale_series)
+    monkeypatch.setattr(module, "_get_okx_public_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module.time, "time", lambda: 1_776_000_000.0)
+
+    series, source = module._load_position_market_series("BTC", "1h", 2)
+
+    assert source == "okx"
+    assert series.close[-1] == 113.0
+
+
+def test_load_position_market_series_falls_back_to_stale_cache_when_okx_unavailable(monkeypatch):
+    module = load_web_dashboard_module()
+
+    stale_series = module.MarketSeries(
+        symbol="BTC/USDT",
+        timeframe="1h",
+        ts=[1710201600000, 1710205200000],
+        open=[100.0, 101.0],
+        high=[102.0, 105.0],
+        low=[99.5, 100.5],
+        close=[101.0, 103.0],
+        volume=[10.0, 12.0],
+    )
+
+    class BrokenProvider:
+        def fetch_ohlcv(self, symbols, timeframe="1h", limit=0):
+            raise RuntimeError("network down")
+
+    monkeypatch.setattr(module, "_load_cached_position_market_series", lambda symbol, timeframe, limit: stale_series)
+    monkeypatch.setattr(module, "_get_okx_public_provider", lambda: BrokenProvider())
+    monkeypatch.setattr(module.time, "time", lambda: 1_776_000_000.0)
+
+    series, source = module._load_position_market_series("BTC", "1h", 2)
+
+    assert source == "cache_stale"
+    assert series.close[-1] == 103.0
+
+
 def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

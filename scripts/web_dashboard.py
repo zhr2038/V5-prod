@@ -306,9 +306,9 @@ def _resolve_config_path() -> Path:
 
 CONFIG_PATH = _resolve_config_path()
 POSITION_KLINE_TIMEFRAMES: Dict[str, Dict[str, Any]] = {
-    '1h': {'source_timeframe': '1h', 'resample_rule': None, 'source_limit_multiplier': 1},
-    '4h': {'source_timeframe': '1h', 'resample_rule': '4H', 'source_limit_multiplier': 4},
-    '1d': {'source_timeframe': '1h', 'resample_rule': '1D', 'source_limit_multiplier': 24},
+    '1h': {'source_timeframe': '1h', 'resample_rule': None, 'source_limit_multiplier': 1, 'fresh_for_seconds': 6 * 3600},
+    '4h': {'source_timeframe': '1h', 'resample_rule': '4H', 'source_limit_multiplier': 4, 'fresh_for_seconds': 24 * 3600},
+    '1d': {'source_timeframe': '1h', 'resample_rule': '1D', 'source_limit_multiplier': 24, 'fresh_for_seconds': 7 * 24 * 3600},
 }
 POSITION_KLINE_DEFAULT_LIMIT = 96
 _OKX_PUBLIC_PROVIDER: Optional[OKXCCXTProvider] = None
@@ -415,6 +415,24 @@ def _load_cached_position_market_series(symbol: str, timeframe: str, limit: int)
     return _frame_to_market_series(resampled.tail(int(limit or 0)), symbol=symbol, timeframe=timeframe)
 
 
+def _position_market_series_is_fresh(series: Optional[MarketSeries], timeframe: str) -> bool:
+    if series is None or not series.ts:
+        return False
+    try:
+        last_ts = int(series.ts[-1] or 0)
+    except (TypeError, ValueError):
+        return False
+    if last_ts <= 0:
+        return False
+    if last_ts < 10_000_000_000:
+        last_ts *= 1000
+    max_age_seconds = float(POSITION_KLINE_TIMEFRAMES.get(timeframe, {}).get('fresh_for_seconds') or 0)
+    if max_age_seconds <= 0:
+        return False
+    age_seconds = (time.time() * 1000 - last_ts) / 1000.0
+    return age_seconds <= max_age_seconds
+
+
 def _get_okx_public_provider() -> OKXCCXTProvider:
     global _OKX_PUBLIC_PROVIDER
     if _OKX_PUBLIC_PROVIDER is None:
@@ -424,19 +442,29 @@ def _get_okx_public_provider() -> OKXCCXTProvider:
 
 def _load_position_market_series(symbol: str, timeframe: str, limit: int) -> tuple[MarketSeries, str]:
     normalized_symbol = _normalize_dashboard_symbol(symbol)
+    stale_cached_series: Optional[MarketSeries] = None
 
     try:
         cached_series = _load_cached_position_market_series(normalized_symbol, timeframe, limit)
         if cached_series is not None and cached_series.ts:
-            return cached_series, 'cache'
+            if _position_market_series_is_fresh(cached_series, timeframe):
+                return cached_series, 'cache'
+            stale_cached_series = cached_series
     except Exception:
         pass
 
     provider = _get_okx_public_provider()
-    series = provider.fetch_ohlcv([normalized_symbol], timeframe=timeframe, limit=int(limit or 0)).get(normalized_symbol)
-    if series is None or not series.ts:
-        raise FileNotFoundError(f'no OHLCV data for {normalized_symbol}')
-    return _trim_market_series(series, limit), 'okx'
+    try:
+        series = provider.fetch_ohlcv([normalized_symbol], timeframe=timeframe, limit=int(limit or 0)).get(normalized_symbol)
+        if series is not None and series.ts:
+            return _trim_market_series(series, limit), 'okx'
+    except Exception:
+        pass
+
+    if stale_cached_series is not None and stale_cached_series.ts:
+        return _trim_market_series(stale_cached_series, limit), 'cache_stale'
+
+    raise FileNotFoundError(f'no OHLCV data for {normalized_symbol}')
 
 
 def _load_multi_strategy_score_transform() -> tuple[str, float]:
