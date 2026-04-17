@@ -609,23 +609,6 @@ class LivePreflight:
                     details=details,
                 )
 
-        if not reconcile_ok and not ledger_ok:
-            force_allow = bool(getattr(self.cfg, "allow_trade_on_small_reconcile_drift", False))
-            if force_allow:
-                details["reconcile_warn"] = {
-                    "original_ok": False,
-                    "allowed": True,
-                    "reason": "forced_by_config_emergency",
-                }
-                return LivePreflightResult(
-                    decision="ALLOW",
-                    reconcile_ok=True,
-                    ledger_ok=True,
-                    kill_switch_enabled=False,
-                    reason="ok_with_forced_config",
-                    details=details,
-                )
-
         return LivePreflightResult(
             decision="SELL_ONLY",
             reconcile_ok=reconcile_ok,
