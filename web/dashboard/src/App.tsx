@@ -43,12 +43,49 @@ function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
   return timerCount === 0 && scoreCount === 0 && tradeCount === 0 && telemetryKeys === 0 && slippageKeys === 0;
 }
 
+function pickListWithFallback<T>(incoming: T[] | undefined, current: T[] | undefined): T[] {
+  if (Array.isArray(incoming) && incoming.length > 0) return incoming;
+  if (Array.isArray(current) && current.length > 0) return current;
+  if (Array.isArray(incoming)) return incoming;
+  if (Array.isArray(current)) return current;
+  return [];
+}
+
+function pickTimersWithFallback(
+  incoming: DashboardData['timers'] | undefined,
+  current: DashboardData['timers'] | undefined
+): DashboardData['timers'] {
+  const incomingTimers = Array.isArray(incoming?.timers) ? incoming.timers : [];
+  const currentTimers = Array.isArray(current?.timers) ? current.timers : [];
+  if (incomingTimers.length > 0 && incoming) return incoming;
+  if (currentTimers.length > 0 && current) return current;
+  if (incoming) return incoming;
+  if (current) return current;
+  return { timers: [] };
+}
+
+function pickObjectWithFallback<T extends object | null | undefined>(incoming: T, current: T) {
+  const incomingKeys = incoming && typeof incoming === 'object' ? Object.keys(incoming).length : 0;
+  const currentKeys = current && typeof current === 'object' ? Object.keys(current).length : 0;
+  if (incomingKeys > 0) return incoming;
+  if (currentKeys > 0) return current;
+  return incoming || current;
+}
+
 function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<DashboardData>) {
   if (!prev) return deferred as DashboardData;
   if (deferredPayloadLooksSparse(deferred)) {
     return deferred.systemStatus ? { ...prev, systemStatus: deferred.systemStatus } : prev;
   }
-  return { ...prev, ...deferred };
+  return {
+    ...prev,
+    ...deferred,
+    alphaScores: pickListWithFallback(deferred.alphaScores, prev.alphaScores),
+    trades: pickListWithFallback(deferred.trades, prev.trades),
+    timers: pickTimersWithFallback(deferred.timers, prev.timers),
+    apiTelemetry: pickObjectWithFallback(deferred.apiTelemetry, prev.apiTelemetry),
+    slippageInsights: pickObjectWithFallback(deferred.slippageInsights, prev.slippageInsights),
+  };
 }
 
 function App() {
@@ -71,7 +108,7 @@ function App() {
       api.riskGuard(),
     ]);
     if (d) {
-      setDashboard(d);
+      setDashboard((prev) => (prev ? { ...prev, ...d } : d));
       setMarketState(d.marketState || null);
     }
     if (r) {

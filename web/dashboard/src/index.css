@@ -49,11 +49,6 @@ body,
 }
 
 html {
-  background:
-    radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
-    radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
-    radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
-    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
   background-color: var(--theme-chrome-dark);
 }
 
@@ -62,19 +57,15 @@ body {
   color: var(--text);
   overflow-x: hidden;
   overscroll-behavior-y: none;
-  background:
-    radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
-    radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
-    radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
-    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
+  background: transparent;
 }
 
 #root {
   width: 100%;
   max-width: 1920px;
   margin: 0 auto;
-  background: inherit;
-  background-color: inherit;
+  background: transparent;
+  background-color: transparent;
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
@@ -101,6 +92,12 @@ body {
   pointer-events: none;
   overflow: hidden;
   isolation: isolate;
+  background:
+    radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
+    radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
+    radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
+  background-color: var(--theme-chrome-dark);
 }
 
 .liquid-bg::before {
@@ -708,20 +705,20 @@ body {
   }
 
   html {
+    background-color: var(--theme-chrome-light);
+  }
+
+  body {
+    background: transparent;
+  }
+
+  .liquid-bg {
     background:
       radial-gradient(1200px 860px at 10% 14%, rgba(208, 150, 128, 0.12), transparent 58%),
       radial-gradient(980px 760px at 86% 16%, rgba(157, 174, 208, 0.10), transparent 54%),
       radial-gradient(940px 860px at 56% 76%, rgba(157, 171, 146, 0.08), transparent 58%),
       linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
     background-color: var(--theme-chrome-light);
-  }
-
-  body {
-    background:
-      radial-gradient(1200px 860px at 10% 14%, rgba(208, 150, 128, 0.12), transparent 58%),
-      radial-gradient(980px 760px at 86% 16%, rgba(157, 174, 208, 0.10), transparent 54%),
-      radial-gradient(940px 860px at 56% 76%, rgba(157, 171, 146, 0.08), transparent 58%),
-      linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
   }
 }
 

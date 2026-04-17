@@ -60,8 +60,6 @@ export function LiquidBg() {
         <div className="ambient-wash wash-sage" />
         <div className="ambient-ribbon ribbon-coral" />
         <div className="ambient-ribbon ribbon-ice" />
-        <div className="ambient-pane pane-left" />
-        <div className="ambient-pane pane-right" />
         <div className="liquid-caustic caustic-1" />
         <div className="liquid-caustic caustic-2" />
         <div className="liquid-orb orb-1" />
