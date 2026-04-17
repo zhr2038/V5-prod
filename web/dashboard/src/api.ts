@@ -58,7 +58,8 @@ function normalizeTradeEntry(trade: ApiTradePayload, index: number): Trade {
 }
 
 export const api = {
-  dashboard: () => fetchJson<DashboardData>('/api/dashboard'),
+  dashboard: () => fetchJson<DashboardData>('/api/dashboard?view=primary'),
+  dashboardDeferred: () => fetchJson<Partial<DashboardData>>('/api/dashboard?view=deferred'),
   positions: () => fetchJson<{ positions?: import('./types').Position[] }>('/api/positions'),
   trades: async () => {
     const payload = await fetchJson<{ trades?: ApiTradePayload[] }>('/api/trades');

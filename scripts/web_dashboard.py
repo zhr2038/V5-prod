@@ -1854,6 +1854,26 @@ def _dashboard_status_mode(status_data: Dict[str, Any], errors: Optional[List[st
     return 'live' if not _dashboard_to_bool((status_data or {}).get('dry_run', True)) else 'dry_run'
 
 
+def _build_dashboard_system_status(
+    status_data: Dict[str, Any],
+    *,
+    account_data: Dict[str, Any],
+    errors: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return {
+        'isRunning': _dashboard_to_bool(status_data.get('timer_active', False)),
+        'mode': _dashboard_status_mode(status_data, errors),
+        'lastUpdate': account_data.get('last_update', ''),
+        'killSwitch': _dashboard_to_bool(status_data.get('kill_switch', False)),
+        'errors': (
+            ([
+                _sanitize_public_error_text(status_data['timer_error'], default='internal error')
+            ] if status_data.get('timer_error') else [])
+            + list(errors or [])
+        ),
+    }
+
+
 def _percentile_value(values: List[float], quantile: float) -> Optional[float]:
     xs: List[float] = []
     for value in values or []:
@@ -3970,36 +3990,20 @@ def api_equity_curve():
 def api_dashboard():
     """Dashboard 完整数据API"""
     try:
+        view = str(request.args.get('view', 'full') or 'full').strip().lower()
         errors: List[str] = []
         runtime_paths = _resolve_dashboard_runtime_paths(load_config())
         account_data = _call_dashboard_api(api_account, default={}, label='account', errors=errors)
         positions_payload = _call_dashboard_api(api_positions, default={'positions': []}, label='positions', errors=errors)
-        trades_payload = _call_dashboard_api(api_trades, default={'trades': []}, label='trades', errors=errors)
-        scores_data = _call_dashboard_api(api_scores, default={'scores': []}, label='scores', errors=errors)
         status_data = _call_dashboard_api(api_status, default={}, label='status', errors=errors)
-        equity_data = _call_dashboard_api(api_equity_history, default=[], label='equity_history', errors=errors)
         market_state_data = _call_dashboard_api(api_market_state, default={}, label='market_state', errors=errors)
-        timers_data = _call_dashboard_api(api_timers, default={'timers': []}, label='timers', errors=errors)
-        cost_calibration = _call_dashboard_api(api_cost_calibration, default={'status': 'unknown'}, label='cost_calibration', errors=errors)
-        ic_diagnostics = _call_dashboard_api(api_ic_diagnostics, default={'status': 'no_data'}, label='ic_diagnostics', errors=errors)
         ml_training = _call_dashboard_api(api_ml_training, default={'status': 'unknown'}, label='ml_training', errors=errors)
-        reflection_reports = _call_dashboard_api(api_reflection_reports, default={'reports': []}, label='reflection_reports', errors=errors)
-        api_telemetry = _load_api_telemetry_summary(runtime_paths=runtime_paths)
-        slippage_insights = _load_slippage_insights(runtime_paths=runtime_paths, cfg=load_config())
 
         positions_data = positions_payload
         if isinstance(positions_payload, dict):
             positions_data = positions_payload.get('positions', positions_payload.get('data', []))
         if not isinstance(positions_data, list):
             positions_data = []
-
-        trades_data = trades_payload
-        if isinstance(trades_payload, dict):
-            trades_data = trades_payload.get('trades', trades_payload.get('data', []))
-        if not isinstance(trades_data, list):
-            trades_data = []
-        if not isinstance(scores_data, dict):
-            scores_data = {'scores': []}
         if not isinstance(status_data, dict):
             status_data = {}
         
@@ -4027,35 +4031,6 @@ def api_dashboard():
                 'pnlPercent': round(pnl_pct, 4)
             })
         
-        # 转换交易格式
-        trades = []
-        for i, trade in enumerate(trades_data[:20]):
-            trades.append({
-                'id': str(i),
-                'timestamp': trade.get('time', '') if trade.get('time') else '',
-                'symbol': trade.get('symbol', '').replace('-USDT', '/USDT'),
-                'side': trade.get('side', 'buy'),
-                'type': 'REBALANCE',
-                'price': 0,
-                'qty': 0,
-                'value': trade.get('amount', 0),
-                'fee': abs(trade.get('fee', 0))
-            })
-        
-        # 转换Alpha评分
-        alpha_scores = []
-        for i, score in enumerate(scores_data.get('scores', [])[:10]):
-            alpha_scores.append({
-                'symbol': score.get('symbol', '').replace('-USDT', '/USDT'),
-                'score': score.get('score', 0),
-                'f1_mom_5d': 0,
-                'f2_mom_20d': 0,
-                'f3_vol_adj': 0,
-                'f4_volume': 0,
-                'f5_rsi': 0,
-                'weight': 0.1
-            })
-        
         positions_value = float(account_data.get('positions_value_usdt', 0) or 0)
         if positions_value <= 0:
             positions_value = sum(float(p.get('value', 0) or 0) for p in positions)
@@ -4073,6 +4048,8 @@ def api_dashboard():
         total_pnl_pct = float(account_data.get('total_pnl_pct', 0) or 0)
         drawdown_pct = float(account_data.get('drawdown_pct', 0) or 0)
         realized_pnl = float(account_data.get('realized_pnl', 0) or 0)
+        trades: List[Dict[str, Any]] = []
+        alpha_scores: List[Dict[str, Any]] = []
 
         dashboard_data = {
             'account': {
@@ -4095,29 +4072,86 @@ def api_dashboard():
             'trades': trades,
             'alphaScores': alpha_scores,
             'marketState': market_state_data,
-            'systemStatus': {
-                'isRunning': _dashboard_to_bool(status_data.get('timer_active', False)),
-                'mode': _dashboard_status_mode(status_data, errors),
-                'lastUpdate': account_data.get('last_update', ''),
-                'killSwitch': _dashboard_to_bool(status_data.get('kill_switch', False)),
-                'errors': (
-                    ([
-                        _sanitize_public_error_text(status_data['timer_error'], default='internal error')
-                    ] if status_data.get('timer_error') else [])
-                    + errors
-                ),
-            },
-            'equityCurve': equity_data if isinstance(equity_data, list) else [],
-            # 新增：系统进度数据
-            'timers': timers_data,
-            'costCalibration': cost_calibration,
-            'icDiagnostics': ic_diagnostics,
+            'systemStatus': _build_dashboard_system_status(status_data, account_data=account_data, errors=errors),
             'mlTraining': ml_training,
-            'reflectionReports': reflection_reports,
+        }
+
+        if view == 'primary':
+            dashboard_data.pop('trades', None)
+            dashboard_data.pop('alphaScores', None)
+            return jsonify(dashboard_data)
+
+        trades_payload = _call_dashboard_api(api_trades, default={'trades': []}, label='trades', errors=errors)
+        scores_data = _call_dashboard_api(api_scores, default={'scores': []}, label='scores', errors=errors)
+        timers_data = _call_dashboard_api(api_timers, default={'timers': []}, label='timers', errors=errors)
+        api_telemetry = _load_api_telemetry_summary(runtime_paths=runtime_paths)
+        slippage_insights = _load_slippage_insights(runtime_paths=runtime_paths, cfg=load_config())
+
+        trades_data = trades_payload
+        if isinstance(trades_payload, dict):
+            trades_data = trades_payload.get('trades', trades_payload.get('data', []))
+        if not isinstance(trades_data, list):
+            trades_data = []
+        if not isinstance(scores_data, dict):
+            scores_data = {'scores': []}
+
+        trades = []
+        for i, trade in enumerate(trades_data[:20]):
+            trades.append({
+                'id': str(i),
+                'timestamp': trade.get('time', '') if trade.get('time') else '',
+                'symbol': trade.get('symbol', '').replace('-USDT', '/USDT'),
+                'side': trade.get('side', 'buy'),
+                'type': 'REBALANCE',
+                'price': 0,
+                'qty': 0,
+                'value': trade.get('amount', 0),
+                'fee': abs(trade.get('fee', 0))
+            })
+
+        alpha_scores = []
+        for i, score in enumerate(scores_data.get('scores', [])[:10]):
+            alpha_scores.append({
+                'symbol': score.get('symbol', '').replace('-USDT', '/USDT'),
+                'score': score.get('score', 0),
+                'f1_mom_5d': 0,
+                'f2_mom_20d': 0,
+                'f3_vol_adj': 0,
+                'f4_volume': 0,
+                'f5_rsi': 0,
+                'weight': 0.1
+            })
+
+        dashboard_data.update({
+            'trades': trades,
+            'alphaScores': alpha_scores,
+            'timers': timers_data,
             'apiTelemetry': api_telemetry,
             'slippageInsights': slippage_insights,
-        }
-        
+            'systemStatus': _build_dashboard_system_status(status_data, account_data=account_data, errors=errors),
+        })
+
+        if view == 'deferred':
+            return jsonify({
+                'trades': trades,
+                'alphaScores': alpha_scores,
+                'timers': timers_data,
+                'apiTelemetry': api_telemetry,
+                'slippageInsights': slippage_insights,
+                'systemStatus': dashboard_data['systemStatus'],
+            })
+
+        equity_data = _call_dashboard_api(api_equity_history, default=[], label='equity_history', errors=errors)
+        cost_calibration = _call_dashboard_api(api_cost_calibration, default={'status': 'unknown'}, label='cost_calibration', errors=errors)
+        ic_diagnostics = _call_dashboard_api(api_ic_diagnostics, default={'status': 'no_data'}, label='ic_diagnostics', errors=errors)
+        reflection_reports = _call_dashboard_api(api_reflection_reports, default={'reports': []}, label='reflection_reports', errors=errors)
+        dashboard_data.update({
+            'equityCurve': equity_data if isinstance(equity_data, list) else [],
+            'costCalibration': cost_calibration,
+            'icDiagnostics': ic_diagnostics,
+            'reflectionReports': reflection_reports,
+        })
+
         return jsonify(dashboard_data)
     except Exception as e:
         return _json_internal_error_response(

@@ -58,11 +58,15 @@ function App() {
   }, []);
 
   const loadSecondary = useCallback(async () => {
-    const [dec, h] = await Promise.all([
+    const [deferred, dec, h] = await Promise.all([
+      api.dashboardDeferred(),
       api.decisionAudit(),
       api.health(),
     ]);
     startTransition(() => {
+      if (deferred) {
+        setDashboard((prev) => (prev ? { ...prev, ...deferred } : (deferred as DashboardData)));
+      }
       if (dec) setDecisionAudit(dec);
       if (h) setHealth(h);
     });

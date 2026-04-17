@@ -1026,6 +1026,39 @@ def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypa
     ]
 
 
+def test_dashboard_api_deferred_view_keeps_deferred_child_errors(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "api_account", lambda: module.jsonify({
+        "cash_usdt": 100.0,
+        "positions_value_usdt": 0.0,
+        "total_equity_usdt": 100.0,
+        "total_pnl_pct": 0.0,
+        "drawdown_pct": 0.0,
+        "realized_pnl": 0.0,
+        "total_trades": 0,
+        "last_update": "2026-04-10 12:00:00",
+    }))
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": []}))
+    monkeypatch.setattr(module, "api_status", lambda: module.jsonify({"timer_active": True, "dry_run": False, "mode": "live"}))
+    monkeypatch.setattr(module, "api_market_state", lambda: module.jsonify({"state": "TRENDING"}))
+    monkeypatch.setattr(module, "api_ml_training", lambda: module.jsonify({"status": "idle"}))
+    monkeypatch.setattr(module, "api_trades", lambda: (module.jsonify({"error": "trades unavailable"}), 500))
+    monkeypatch.setattr(module, "api_scores", lambda: module.jsonify({"scores": []}))
+    monkeypatch.setattr(module, "api_timers", lambda: module.jsonify({"timers": []}))
+    monkeypatch.setattr(module, "_load_api_telemetry_summary", lambda runtime_paths=None, lookback_hours=24: None)
+    monkeypatch.setattr(module, "_load_slippage_insights", lambda runtime_paths=None, cfg=None, lookback_days=14: None)
+
+    response = client.get("/api/dashboard?view=deferred")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["systemStatus"]["mode"] == "live"
+    assert payload["systemStatus"]["errors"] == ["trades: trades unavailable"]
+    assert payload["trades"] == []
+
+
 def test_dashboard_api_sanitizes_child_error_messages(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
