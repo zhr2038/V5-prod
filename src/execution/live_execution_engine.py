@@ -128,6 +128,23 @@ def load_reconcile_ok(path: str) -> bool:
     return True
 
 
+def load_ledger_ok(path: str) -> bool:
+    """检查 ledger 状态是否正常。
+
+    Keep the execution fallback gate aligned with live preflight: missing status
+    is treated as OK, but an explicit falsey ledger status must hold the engine
+    in SELL_ONLY mode.
+    """
+    d = _load_json(path)
+    if d is None:
+        return True
+    if "ok" in d:
+        return _to_bool(d.get("ok"))
+    if "ledger_ok" in d:
+        return _to_bool(d.get("ledger_ok"))
+    return True
+
+
 def _remove_symbol_from_state_file(path: str, symbol: str) -> bool:
     """Best-effort remove symbol state from a JSON dict file.
 
@@ -287,8 +304,9 @@ def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
 
     Keep execution gate aligned with preflight policy:
     - kill-switch => SELL_ONLY
-    - reconcile not ok + allow_trade_on_small_reconcile_drift => ALLOW (forced)
-    - otherwise reconcile not ok => SELL_ONLY
+    - reconcile ok + ledger ok => ALLOW
+    - reconcile not ok + ledger ok + allow_trade_on_small_reconcile_drift => ALLOW (forced)
+    - otherwise reconcile/ledger not ok => SELL_ONLY
     """
     ks = load_kill_switch_enabled(
         _resolve_runtime_json_path(
@@ -306,17 +324,27 @@ def submit_gate_for_live(cfg: ExecutionConfig) -> Tuple[str, bool, bool]:
             legacy_default="reports/reconcile_status.json",
         )
     )
+    ledger_ok = load_ledger_ok(
+        _resolve_runtime_json_path(
+            cfg,
+            attr_name="ledger_status_path",
+            base_name="ledger_status",
+            legacy_default="reports/ledger_status.json",
+        )
+    )
 
     if ks:
         return "SELL_ONLY", rc_ok, ks
 
-    if not rc_ok:
+    if rc_ok and ledger_ok:
+        return "ALLOW", rc_ok, ks
+
+    if ledger_ok and not rc_ok:
         force_allow = bool(getattr(cfg, "allow_trade_on_small_reconcile_drift", False))
         if force_allow:
             return "ALLOW", rc_ok, ks
-        return "SELL_ONLY", rc_ok, ks
 
-    return "ALLOW", rc_ok, ks
+    return "SELL_ONLY", rc_ok, ks
 
 
 def _parse_okx_order_ack(ack_data: Any) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:

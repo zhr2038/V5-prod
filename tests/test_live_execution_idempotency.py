@@ -180,6 +180,37 @@ def test_submit_gate_uses_runtime_default_status_paths_from_order_store() -> Non
         assert submit_gate_for_live(cfg) == ("ALLOW", True, False)
 
 
+def test_submit_gate_blocks_when_runtime_ledger_status_is_not_ok() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        runtime_dir = Path(td) / "shadow_runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        (runtime_dir / "reconcile_status.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+        (runtime_dir / "kill_switch.json").write_text(json.dumps({"enabled": False}), encoding="utf-8")
+        (runtime_dir / "ledger_status.json").write_text(json.dumps({"ok": False}), encoding="utf-8")
+
+        cfg = ExecutionConfig(
+            order_store_path=str(runtime_dir / "orders.sqlite"),
+        )
+
+        assert submit_gate_for_live(cfg) == ("SELL_ONLY", True, False)
+
+
+def test_submit_gate_does_not_force_allow_when_runtime_ledger_status_is_not_ok() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        runtime_dir = Path(td) / "shadow_runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        (runtime_dir / "reconcile_status.json").write_text(json.dumps({"ok": False}), encoding="utf-8")
+        (runtime_dir / "kill_switch.json").write_text(json.dumps({"enabled": False}), encoding="utf-8")
+        (runtime_dir / "ledger_status.json").write_text(json.dumps({"ok": False}), encoding="utf-8")
+
+        cfg = ExecutionConfig(
+            order_store_path=str(runtime_dir / "orders.sqlite"),
+            allow_trade_on_small_reconcile_drift=True,
+        )
+
+        assert submit_gate_for_live(cfg) == ("SELL_ONLY", False, False)
+
+
 def test_place_idempotent_same_intent() -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
