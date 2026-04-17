@@ -19,6 +19,18 @@ from src.execution.fill_store import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+KNOWN_NO_TRADE_BLOCK_REASONS = {
+    "deadband",
+    "negative_expectancy_cooldown",
+    "negative_expectancy_open_block",
+    "negative_expectancy_fast_fail_open_block",
+}
+NEGATIVE_EXPECTANCY_COUNT_KEYS = (
+    "negative_expectancy_score_penalty",
+    "negative_expectancy_cooldown",
+    "negative_expectancy_open_block",
+    "negative_expectancy_fast_fail_open_block",
+)
 
 
 @dataclass(frozen=True)
@@ -180,6 +192,17 @@ class SmartAlertEngine:
                 continue
         return audits
 
+    def _audit_has_known_trade_blockers(self, audit: dict[str, Any]) -> bool:
+        counts = audit.get("counts", {}) or {}
+        for key in NEGATIVE_EXPECTANCY_COUNT_KEYS:
+            if int(counts.get(key, 0) or 0) > 0:
+                return True
+
+        for route in audit.get("router_decisions", []) or []:
+            if str(route.get("reason") or "").strip() in KNOWN_NO_TRADE_BLOCK_REASONS:
+                return True
+        return False
+
     def _count_recent_buy_fills_from_fill_store(self, cutoff_ts: int) -> int | None:
         fills_db = self.paths.fills_db
         try:
@@ -259,7 +282,7 @@ class SmartAlertEngine:
                 selected = int(counts.get("selected", 0) or 0)
                 rebalance = int(counts.get("orders_rebalance", 0) or 0)
                 exits = int(counts.get("orders_exit", 0) or 0)
-                if selected > 0 and (rebalance + exits) == 0:
+                if selected > 0 and (rebalance + exits) == 0 and not self._audit_has_known_trade_blockers(data):
                     consecutive_no_trade += 1
 
             if consecutive_no_trade >= 2 and self._should_alert("signal_no_trade", cooldown_minutes=120):
@@ -282,14 +305,23 @@ class SmartAlertEngine:
                 return None
 
             in_good_market = False
+            had_unblocked_signal = False
             for data in audits:
                 regime = str(data.get("regime") or "").strip().upper()
                 if regime in {"SIDEWAYS", "TRENDING"}:
                     in_good_market = True
-                    break
+                counts = data.get("counts", {}) or {}
+                selected = int(counts.get("selected", 0) or 0)
+                if selected > 0 and not self._audit_has_known_trade_blockers(data):
+                    had_unblocked_signal = True
 
             recent_buy_fills = self._count_recent_buy_fills(hours=6)
-            if in_good_market and recent_buy_fills == 0 and self._should_alert("no_buy_in_market", cooldown_minutes=360):
+            if (
+                in_good_market
+                and had_unblocked_signal
+                and recent_buy_fills == 0
+                and self._should_alert("no_buy_in_market", cooldown_minutes=360)
+            ):
                 return {
                     "type": "no_buy_in_market",
                     "level": "medium",

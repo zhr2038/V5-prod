@@ -70,3 +70,71 @@ def test_check_signal_no_trade_alerts_when_selected_without_any_orders(tmp_path:
 
     assert alert is not None
     assert alert["type"] == "signal_no_trade"
+
+
+def test_check_signal_no_trade_ignores_known_policy_blockers(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit: [
+        {
+            "counts": {
+                "selected": 2,
+                "orders_rebalance": 0,
+                "orders_exit": 0,
+                "negative_expectancy_open_block": 2,
+            },
+            "router_decisions": [],
+        },
+        {
+            "counts": {
+                "selected": 1,
+                "orders_rebalance": 0,
+                "orders_exit": 0,
+            },
+            "router_decisions": [{"reason": "deadband"}],
+        },
+    ]
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    assert engine.check_signal_no_trade() is None
+
+
+def test_check_no_buy_in_market_ignores_known_policy_blockers(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit: [
+        {
+            "regime": "TRENDING",
+            "counts": {
+                "selected": 2,
+                "orders_rebalance": 0,
+                "orders_exit": 0,
+                "negative_expectancy_cooldown": 1,
+            },
+            "router_decisions": [],
+        }
+    ]
+    engine._count_recent_buy_fills = lambda hours=6: 0
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    assert engine.check_no_buy_in_market() is None
+
+
+def test_check_no_buy_in_market_alerts_for_unblocked_signals(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit: [
+        {
+            "regime": "SIDEWAYS",
+            "counts": {
+                "selected": 2,
+                "orders_rebalance": 0,
+                "orders_exit": 0,
+            },
+            "router_decisions": [],
+        }
+    ]
+    engine._count_recent_buy_fills = lambda hours=6: 0
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    alert = engine.check_no_buy_in_market()
+
+    assert alert is not None
+    assert alert["type"] == "no_buy_in_market"
