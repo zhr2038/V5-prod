@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState, useCallback } from 'react';
+import { Suspense, lazy, startTransition, useEffect, useEffectEvent, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { LiquidBg } from './components/LiquidBg';
 import { Hero } from './components/Hero';
@@ -7,12 +7,26 @@ import { MLBand } from './components/MLBand';
 import { PositionsPanel } from './components/PositionsPanel';
 import { MarketRadar } from './components/MarketRadar';
 import { SignalsPanel } from './components/SignalsPanel';
-import { ExecutionInsightsPanel } from './components/ExecutionInsightsPanel';
 import { Sidebar } from './components/Sidebar';
-import { ShadowMLPanel } from './components/ShadowMLPanel';
 import { api } from './api';
 import { useInterval } from './hooks/useInterval';
 import type { DashboardData, RiskGuardData, MarketStateData, DecisionAuditData, HealthData, ShadowMLData } from './types';
+
+const ExecutionInsightsPanel = lazy(() =>
+  import('./components/ExecutionInsightsPanel').then((module) => ({ default: module.ExecutionInsightsPanel }))
+);
+const ShadowMLPanel = lazy(() =>
+  import('./components/ShadowMLPanel').then((module) => ({ default: module.ShadowMLPanel }))
+);
+
+function DeferredPanelFallback() {
+  return <div className="material-surface material-reading reading-frame h-40" />;
+}
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
 
 function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -23,41 +37,81 @@ function App() {
   const [shadowML, setShadowML] = useState<ShadowMLData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [showDeferredPanels, setShowDeferredPanels] = useState(false);
 
   const loadPrimary = useCallback(async () => {
     if (document.hidden) return;
     setLoading(true);
-    const [d, r, m] = await Promise.all([
+    const [d, r] = await Promise.all([
       api.dashboard(),
       api.riskGuard(),
-      api.marketState(),
     ]);
-    if (d) setDashboard(d);
-    if (r) setRiskGuard(r);
-    if (m) setMarketState(m);
+    if (d) {
+      setDashboard(d);
+      setMarketState(d.marketState || null);
+    }
+    if (r) {
+      setRiskGuard(r);
+    }
     setUpdateTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
     setLoading(false);
   }, []);
 
   const loadSecondary = useCallback(async () => {
-    const [dec, h, s] = await Promise.all([
+    const [dec, h] = await Promise.all([
       api.decisionAudit(),
       api.health(),
-      api.shadowMl(),
     ]);
-    if (dec) setDecisionAudit(dec);
-    if (h) setHealth(h);
-    if (s) setShadowML(s);
+    startTransition(() => {
+      if (dec) setDecisionAudit(dec);
+      if (h) setHealth(h);
+    });
+  }, []);
+
+  const loadDeferred = useCallback(async () => {
+    const s = await api.shadowMl();
+    startTransition(() => {
+      if (s) setShadowML(s);
+    });
   }, []);
 
   const loadInitialData = useEffectEvent(() => {
     void loadPrimary();
-    void loadSecondary();
   });
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+    let timeoutId: number | null = null;
+    let idleId: number | null = null;
+    const idleWindow = window as IdleWindow;
+
+    const runDeferred = () => {
+      void loadSecondary();
+      startTransition(() => {
+        setShowDeferredPanels(true);
+      });
+    };
+
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(() => runDeferred(), { timeout: 1200 });
+    } else {
+      timeoutId = globalThis.setTimeout(runDeferred, 400);
+    }
+
+    return () => {
+      if (idleId !== null && idleWindow.cancelIdleCallback) {
+        idleWindow.cancelIdleCallback(idleId);
+      }
+      if (timeoutId !== null) {
+        globalThis.clearTimeout(timeoutId);
+      }
+    };
+  }, [loadInitialData, loadSecondary]);
+
+  useEffect(() => {
+    if (!showDeferredPanels) return;
+    void loadDeferred();
+  }, [showDeferredPanels, loadDeferred]);
 
   useInterval(() => {
     loadPrimary();
@@ -66,6 +120,11 @@ function App() {
   useInterval(() => {
     loadSecondary();
   }, 60000);
+
+  useInterval(() => {
+    if (!showDeferredPanels) return;
+    loadDeferred();
+  }, showDeferredPanels ? 120000 : null);
 
   const focusSymbol = dashboard?.positions?.[0]?.symbol?.replace('-USDT', '') || '';
 
@@ -99,7 +158,11 @@ function App() {
               />
               <MarketRadar marketState={marketState} />
               <SignalsPanel decisionAudit={decisionAudit} />
-              <ExecutionInsightsPanel slippageInsights={dashboard?.slippageInsights || null} />
+              {showDeferredPanels ? (
+                <Suspense fallback={<DeferredPanelFallback />}>
+                  <ExecutionInsightsPanel slippageInsights={dashboard?.slippageInsights || null} />
+                </Suspense>
+              ) : null}
             </div>
             <div className="lg:col-span-1">
               <Sidebar
@@ -116,7 +179,11 @@ function App() {
 
         <div className="px-6 mt-4">
           <div className="max-w-[1780px] mx-auto">
-            <ShadowMLPanel shadowML={shadowML} />
+            {showDeferredPanels ? (
+              <Suspense fallback={<DeferredPanelFallback />}>
+                <ShadowMLPanel shadowML={shadowML} />
+              </Suspense>
+            ) : null}
           </div>
         </div>
 
