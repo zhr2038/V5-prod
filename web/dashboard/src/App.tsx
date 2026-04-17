@@ -46,7 +46,7 @@ function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
 function mergeDeferredDashboard(prev: DashboardData | null, deferred: Partial<DashboardData>) {
   if (!prev) return deferred as DashboardData;
   if (deferredPayloadLooksSparse(deferred)) {
-    return prev;
+    return deferred.systemStatus ? { ...prev, systemStatus: deferred.systemStatus } : prev;
   }
   return { ...prev, ...deferred };
 }

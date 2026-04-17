@@ -23,10 +23,10 @@
   --warn: #ffcd87;
   --line: rgba(255, 255, 255, 0.10);
   --line-strong: rgba(255, 255, 255, 0.22);
-  --surface-border: rgba(255, 255, 255, 0.16);
-  --surface-border-strong: rgba(255, 255, 255, 0.26);
-  --shadow-soft: 0 18px 48px rgba(8, 10, 16, 0.16);
-  --shadow-deep: 0 28px 80px rgba(7, 9, 15, 0.22);
+  --surface-border: rgba(255, 255, 255, 0.13);
+  --surface-border-strong: rgba(255, 255, 255, 0.20);
+  --shadow-soft: 0 16px 40px rgba(8, 10, 16, 0.11);
+  --shadow-deep: 0 24px 60px rgba(7, 9, 15, 0.16);
   --theme-chrome-dark: #322f34;
   --theme-chrome-light: #f3efed;
   --mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
@@ -326,15 +326,15 @@ body {
 .material-surface,
 .glass-card,
 .glass-panel {
-  --tone-fill: rgba(132, 145, 168, 0.08);
-  --tone-lens: rgba(132, 145, 168, 0.10);
+  --tone-fill: rgba(132, 145, 168, 0.05);
+  --tone-lens: rgba(132, 145, 168, 0.04);
   --highlight-x: 18%;
   --highlight-y: 14%;
-  --highlight-opacity: 0.36;
+  --highlight-opacity: 0.12;
   --lens-left: auto;
   --lens-right: -12%;
   --lens-bottom: -16%;
-  --lens-opacity: 0.12;
+  --lens-opacity: 0.02;
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -364,9 +364,9 @@ body {
   inset: 0;
   border-radius: inherit;
   background:
-    radial-gradient(120px 64px at var(--highlight-x) var(--highlight-y), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05) 34%, transparent 76%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02) 16%, transparent 38%),
-    linear-gradient(132deg, rgba(255, 255, 255, 0.05), transparent 28%, rgba(255, 255, 255, 0.02) 56%, transparent 82%);
+    radial-gradient(120px 64px at var(--highlight-x) var(--highlight-y), rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.025) 32%, transparent 74%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012) 16%, transparent 34%),
+    linear-gradient(132deg, rgba(255, 255, 255, 0.018), transparent 28%, rgba(255, 255, 255, 0.008) 56%, transparent 82%);
   opacity: var(--highlight-opacity);
 }
 
@@ -380,8 +380,8 @@ body {
   height: 54%;
   border-radius: 50%;
   background:
-    radial-gradient(circle at 34% 32%, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025) 28%, var(--tone-lens) 46%, transparent 78%);
-  filter: blur(14px);
+    radial-gradient(circle at 34% 32%, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012) 28%, var(--tone-lens) 46%, transparent 78%);
+  filter: blur(10px);
   opacity: var(--lens-opacity);
 }
 
@@ -401,59 +401,61 @@ body {
 .material-clear,
 .glass-panel {
   --surface-fill:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.035) 18%, rgba(255, 255, 255, 0.015) 38%, rgba(255, 255, 255, 0.03) 100%),
-    linear-gradient(165deg, var(--tone-fill), rgba(255, 255, 255, 0.016) 44%, rgba(19, 22, 29, 0.03) 100%);
-  --surface-blur: 24px;
-  --surface-saturate: 162%;
-  --surface-brightness: 1.04;
-  --surface-shadow: 0 14px 34px rgba(8, 10, 16, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
-  --surface-shadow-hover: 0 16px 36px rgba(8, 10, 16, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
-  --highlight-opacity: 0.28;
-  --lens-opacity: 0.10;
+    linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.022) 18%, rgba(255, 255, 255, 0.008) 38%, rgba(255, 255, 255, 0.018) 100%),
+    linear-gradient(165deg, var(--tone-fill), rgba(255, 255, 255, 0.008) 44%, rgba(19, 22, 29, 0.016) 100%);
+  --surface-blur: 12px;
+  --surface-saturate: 138%;
+  --surface-brightness: 1.02;
+  --surface-shadow: 0 10px 24px rgba(8, 10, 16, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(255, 255, 255, 0.015);
+  --surface-shadow-hover: 0 12px 26px rgba(8, 10, 16, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+  --highlight-opacity: 0.10;
+  --lens-opacity: 0.015;
 }
 
 .material-regular,
 .glass-card {
   --surface-fill:
-    linear-gradient(152deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.045) 16%, rgba(255, 255, 255, 0.018) 34%, rgba(255, 255, 255, 0.035) 100%),
-    linear-gradient(168deg, var(--tone-fill), rgba(255, 255, 255, 0.012) 48%, rgba(21, 24, 32, 0.07) 100%);
-  --surface-blur: 28px;
-  --surface-saturate: 146%;
-  --surface-brightness: 1.06;
-  --surface-shadow: 0 18px 46px rgba(8, 10, 16, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
-  --surface-shadow-hover: 0 22px 52px rgba(8, 10, 16, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+    linear-gradient(152deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.026) 16%, rgba(255, 255, 255, 0.010) 34%, rgba(255, 255, 255, 0.02) 100%),
+    linear-gradient(168deg, var(--tone-fill), rgba(255, 255, 255, 0.008) 48%, rgba(21, 24, 32, 0.032) 100%);
+  --surface-blur: 14px;
+  --surface-saturate: 132%;
+  --surface-brightness: 1.02;
+  --surface-shadow: 0 14px 34px rgba(8, 10, 16, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(255, 255, 255, 0.018);
+  --surface-shadow-hover: 0 16px 38px rgba(8, 10, 16, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+  --highlight-opacity: 0.11;
+  --lens-opacity: 0.02;
 }
 
 .material-reading {
   --surface-fill:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.018) 14%, rgba(28, 32, 41, 0.16) 100%),
-    linear-gradient(168deg, rgba(255, 255, 255, 0.018), var(--tone-fill) 38%, rgba(14, 17, 24, 0.20) 100%);
-  --surface-blur: 20px;
-  --surface-saturate: 118%;
-  --surface-brightness: 0.98;
-  --surface-shadow: 0 20px 48px rgba(8, 10, 16, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.10);
-  --highlight-opacity: 0.18;
-  --lens-opacity: 0.08;
-  --surface-border: rgba(255, 255, 255, 0.12);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012) 14%, rgba(28, 32, 41, 0.10) 100%),
+    linear-gradient(168deg, rgba(255, 255, 255, 0.012), var(--tone-fill) 38%, rgba(14, 17, 24, 0.14) 100%);
+  --surface-blur: 10px;
+  --surface-saturate: 110%;
+  --surface-brightness: 1;
+  --surface-shadow: 0 14px 32px rgba(8, 10, 16, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --highlight-opacity: 0.08;
+  --lens-opacity: 0;
+  --surface-border: rgba(255, 255, 255, 0.10);
 }
 
 .material-reading::before {
   background:
-    radial-gradient(110px 56px at var(--highlight-x) var(--highlight-y), rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.03) 30%, transparent 76%),
-    linear-gradient(132deg, rgba(255, 255, 255, 0.035), transparent 26%, rgba(255, 255, 255, 0.016) 52%, transparent 78%);
+    radial-gradient(110px 56px at var(--highlight-x) var(--highlight-y), rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015) 30%, transparent 76%),
+    linear-gradient(132deg, rgba(255, 255, 255, 0.014), transparent 26%, rgba(255, 255, 255, 0.008) 52%, transparent 78%);
 }
 
 .material-inset {
   --surface-fill:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01) 16%, rgba(15, 18, 24, 0.12) 100%),
-    linear-gradient(165deg, rgba(122, 138, 164, 0.05), rgba(15, 18, 24, 0.14) 68%);
-  --surface-blur: 12px;
-  --surface-saturate: 112%;
-  --surface-brightness: 0.98;
-  --surface-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 10px 20px rgba(6, 8, 12, 0.08);
-  --highlight-opacity: 0.12;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.006) 16%, rgba(15, 18, 24, 0.08) 100%),
+    linear-gradient(165deg, rgba(122, 138, 164, 0.03), rgba(15, 18, 24, 0.10) 68%);
+  --surface-blur: 6px;
+  --surface-saturate: 106%;
+  --surface-brightness: 1;
+  --surface-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 16px rgba(6, 8, 12, 0.06);
+  --highlight-opacity: 0.06;
   --lens-opacity: 0;
-  --surface-border: rgba(255, 255, 255, 0.08);
+  --surface-border: rgba(255, 255, 255, 0.06);
   border-radius: 24px;
 }
 
@@ -534,9 +536,9 @@ body {
 
 .list-row {
   border-radius: 18px;
-  --highlight-opacity: 0.12;
-  --lens-opacity: 0.04;
-  --surface-border: rgba(255, 255, 255, 0.07);
+  --highlight-opacity: 0.05;
+  --lens-opacity: 0;
+  --surface-border: rgba(255, 255, 255, 0.06);
 }
 
 .list-row:hover {
@@ -736,12 +738,12 @@ body {
     .material-surface,
     .glass-card,
     .glass-panel {
-      --surface-blur: 14px;
-      --surface-saturate: 112%;
+      --surface-blur: 8px;
+      --surface-saturate: 108%;
       --surface-brightness: 1.01;
-      --surface-shadow: 0 10px 24px rgba(8, 10, 16, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-      --surface-shadow-hover: 0 12px 28px rgba(8, 10, 16, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.10);
-      --highlight-opacity: 0.08;
+      --surface-shadow: 0 8px 18px rgba(8, 10, 16, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      --surface-shadow-hover: 0 10px 20px rgba(8, 10, 16, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      --highlight-opacity: 0.04;
       --lens-opacity: 0;
     }
 
