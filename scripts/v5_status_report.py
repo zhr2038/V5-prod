@@ -228,6 +228,15 @@ def build_next_run_hint() -> str:
     return next_run.strftime("%Y-%m-%d %H:%M")
 
 
+def _negative_expectancy_lines(counts: Dict[str, Any]) -> list[str]:
+    return [
+        f"- negative_expectancy_score_penalty: {counts.get('negative_expectancy_score_penalty', 'n/a')}",
+        f"- negative_expectancy_cooldown: {counts.get('negative_expectancy_cooldown', 'n/a')}",
+        f"- negative_expectancy_open_block: {counts.get('negative_expectancy_open_block', 'n/a')}",
+        f"- negative_expectancy_fast_fail_open_block: {counts.get('negative_expectancy_fast_fail_open_block', 'n/a')}",
+    ]
+
+
 def generate_report() -> str:
     cfg = load_config()
     run_data = get_latest_run_data(cfg) or {}
@@ -264,6 +273,7 @@ def generate_report() -> str:
             f"- selected: {counts.get('selected', 'n/a')}",
             f"- targets_pre_risk: {counts.get('targets_pre_risk', 'n/a')}",
             f"- orders_rebalance: {counts.get('orders_rebalance', 'n/a')}",
+            *_negative_expectancy_lines(counts),
             f"- drawdown_note: {drawdown_note}",
             f"- last_filled_trade: {last_trade}",
         ]

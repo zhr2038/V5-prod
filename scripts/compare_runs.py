@@ -182,6 +182,18 @@ def _budget_header_lines(v5: Dict[str, Any], v5_audit: Optional[Dict[str, Any]])
     return lines
 
 
+def _negative_expectancy_header_lines(v5_audit: Optional[Dict[str, Any]]) -> list[str]:
+    if not v5_audit:
+        return []
+    counts = v5_audit.get("counts") or {}
+    return [
+        f"- v5 negative_expectancy_score_penalty: {_fmt(counts.get('negative_expectancy_score_penalty'))}",
+        f"- v5 negative_expectancy_cooldown: {_fmt(counts.get('negative_expectancy_cooldown'))}",
+        f"- v5 negative_expectancy_open_block: {_fmt(counts.get('negative_expectancy_open_block'))}",
+        f"- v5 negative_expectancy_fast_fail_open_block: {_fmt(counts.get('negative_expectancy_fast_fail_open_block'))}",
+    ]
+
+
 def compare(
     v4: Dict[str, Any],
     v5: Dict[str, Any],
@@ -212,6 +224,7 @@ def compare(
         lines.append(f"- v5 rejects.deadband_skip: {_fmt(deadband_rej)}")
 
     lines.extend(_budget_header_lines(v5, v5_audit))
+    lines.extend(_negative_expectancy_header_lines(v5_audit))
     lines.append("")
     lines.append("| metric | v4 | v5 | delta |")
     lines.append("|---|---:|---:|---:|")

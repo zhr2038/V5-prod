@@ -100,3 +100,43 @@ def test_resolve_report_output_path_uses_suffixed_runtime_name(tmp_path: Path) -
     path = status_report._resolve_report_output_path(paths, "20260414_1930")
 
     assert path == (reports_dir / "status_report_20260414_1930_accelerated.txt").resolve()
+
+
+def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> None:
+    monkeypatch.setattr(status_report, "load_config", lambda: {"budget": {"live_equity_cap_usdt": 20}})
+    monkeypatch.setattr(
+        status_report,
+        "get_latest_run_data",
+        lambda cfg=None: {
+            "regime": "TRENDING",
+            "counts": {
+                "selected": 3,
+                "targets_pre_risk": 2,
+                "orders_rebalance": 1,
+                "negative_expectancy_score_penalty": 4,
+                "negative_expectancy_cooldown": 5,
+                "negative_expectancy_open_block": 6,
+                "negative_expectancy_fast_fail_open_block": 7,
+            },
+            "notes": [],
+        },
+    )
+    monkeypatch.setattr(
+        status_report,
+        "check_borrow_status",
+        lambda cfg=None: {
+            "config": {"liab_eps": 0.01, "neg_eq_eps": 0.01, "mode": "symbol_only"},
+            "blacklist_count": 0,
+            "blacklist_symbols": [],
+        },
+    )
+    monkeypatch.setattr(status_report, "get_service_status", lambda: "running")
+    monkeypatch.setattr(status_report, "get_last_filled_trade_ts", lambda cfg=None: "2026-04-17T12:00")
+    monkeypatch.setattr(status_report, "build_next_run_hint", lambda: "2026-04-17 13:00")
+
+    report = status_report.generate_report()
+
+    assert "- negative_expectancy_score_penalty: 4" in report
+    assert "- negative_expectancy_cooldown: 5" in report
+    assert "- negative_expectancy_open_block: 6" in report
+    assert "- negative_expectancy_fast_fail_open_block: 7" in report
