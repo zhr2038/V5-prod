@@ -67,6 +67,7 @@ from src.utils.time import utc_now_iso
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
+    derive_runtime_auto_risk_eval_path,
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_artifact_path,
     derive_runtime_named_json_path,
@@ -168,6 +169,7 @@ class V5Pipeline:
         )
         if not runtime_order_store_path.is_absolute():
             runtime_order_store_path = (REPORTS_DIR.parent / runtime_order_store_path).resolve()
+        self._runtime_order_store_path = runtime_order_store_path.resolve()
         self.alpha_engine = AlphaEngine(cfg.alpha)
         
         # RegimeEngine选择：Ensemble（HMM+情绪）或传统MA
@@ -404,6 +406,151 @@ class V5Pipeline:
             ml_overlay_raw_scores=_filter_optional_scores(alpha.ml_overlay_raw_scores),
             ml_runtime=alpha.ml_runtime,
         )
+
+    def _load_current_auto_risk_level(self) -> Optional[str]:
+        try:
+            path = derive_runtime_auto_risk_eval_path(self._runtime_order_store_path).resolve()
+            if not path.exists():
+                return None
+            obj = json.loads(path.read_text(encoding="utf-8"))
+            level = str((obj or {}).get("current_level", "") or "").strip().upper()
+            return level or None
+        except Exception:
+            return None
+
+    def _resolve_strategy_signal_lookup(self, audit: Optional[DecisionAudit]) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        strategy_entries = []
+        if audit is not None and getattr(audit, "strategy_signals", None):
+            strategy_entries = list(audit.strategy_signals or [])
+        else:
+            try:
+                strategy_payload = self.alpha_engine.get_latest_strategy_signal_payload()
+                if isinstance(strategy_payload, dict) and strategy_payload.get("strategies"):
+                    strategy_entries = list(strategy_payload.get("strategies") or [])
+            except Exception:
+                strategy_entries = []
+            if not strategy_entries:
+                try:
+                    strategy_file = self.alpha_engine.strategy_signals_path()
+                    if strategy_file is not None and strategy_file.exists():
+                        payload = json.loads(strategy_file.read_text(encoding="utf-8"))
+                        if isinstance(payload, dict) and payload.get("strategies"):
+                            strategy_entries = list(payload.get("strategies") or [])
+                except Exception:
+                    strategy_entries = []
+
+        lookup: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for entry in strategy_entries:
+            strategy_name = str((entry or {}).get("strategy", "") or "").strip()
+            if not strategy_name:
+                continue
+            sym_map: Dict[str, Dict[str, Any]] = {}
+            for signal in (entry or {}).get("signals", []) or []:
+                symbol = str((signal or {}).get("symbol", "") or "").strip()
+                if not symbol:
+                    continue
+                sym_map[symbol] = dict(signal or {})
+            lookup[strategy_name] = sym_map
+        return lookup
+
+    @staticmethod
+    def _signal_score(signal: Optional[Dict[str, Any]]) -> Optional[float]:
+        if not isinstance(signal, dict):
+            return None
+        for key in ("score", "raw_score"):
+            value = signal.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _signal_side(signal: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not isinstance(signal, dict):
+            return None
+        side = str(signal.get("side", "") or "").strip().lower()
+        return side or None
+
+    @staticmethod
+    def _alpha6_rsi_confirm(signal: Optional[Dict[str, Any]]) -> Optional[float]:
+        if not isinstance(signal, dict):
+            return None
+        metadata = signal.get("metadata") if isinstance(signal, dict) else None
+        metadata = metadata if isinstance(metadata, dict) else {}
+        for bucket in ("z_factors", "raw_factors"):
+            values = metadata.get(bucket)
+            if not isinstance(values, dict):
+                continue
+            if "f5_rsi_trend_confirm" not in values:
+                continue
+            try:
+                return float(values.get("f5_rsi_trend_confirm"))
+            except Exception:
+                continue
+        return None
+
+    def _evaluate_protect_entry_gate(
+        self,
+        *,
+        symbol: str,
+        strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
+        current_auto_risk_level: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        if str(current_auto_risk_level or "").upper() != "PROTECT":
+            return None
+
+        trend_signal = (strategy_signal_lookup.get("TrendFollowing") or {}).get(symbol)
+        alpha6_signal = (strategy_signal_lookup.get("Alpha6Factor") or {}).get(symbol)
+        trend_score = self._signal_score(trend_signal)
+        alpha6_score = self._signal_score(alpha6_signal)
+        alpha6_side = self._signal_side(alpha6_signal)
+        trend_side = self._signal_side(trend_signal)
+        rsi_confirm = self._alpha6_rsi_confirm(alpha6_signal)
+
+        if bool(getattr(self.cfg.execution, "protect_entry_block_trend_only", True)):
+            if trend_side == "buy" and alpha6_signal is None:
+                return {
+                    "reason": "protect_entry_trend_only",
+                    "trend_score": trend_score,
+                    "alpha6_score": alpha6_score,
+                    "alpha6_side": alpha6_side,
+                    "f5_rsi_trend_confirm": rsi_confirm,
+                }
+
+        if bool(getattr(self.cfg.execution, "protect_entry_require_alpha6_confirmation", True)):
+            if alpha6_side != "buy":
+                return {
+                    "reason": "protect_entry_no_alpha6_confirmation",
+                    "trend_score": trend_score,
+                    "alpha6_score": alpha6_score,
+                    "alpha6_side": alpha6_side,
+                    "f5_rsi_trend_confirm": rsi_confirm,
+                }
+
+        if bool(getattr(self.cfg.execution, "protect_entry_require_alpha6_rsi_confirm_positive", True)):
+            if rsi_confirm is None or float(rsi_confirm) <= 0.0:
+                return {
+                    "reason": "protect_entry_alpha6_rsi_confirm_negative",
+                    "trend_score": trend_score,
+                    "alpha6_score": alpha6_score,
+                    "alpha6_side": alpha6_side,
+                    "f5_rsi_trend_confirm": rsi_confirm,
+                }
+
+        alpha6_min_score = float(getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.10) or 0.0)
+        if alpha6_score is None or float(alpha6_score) < float(alpha6_min_score):
+            return {
+                "reason": "protect_entry_alpha6_score_too_low",
+                "trend_score": trend_score,
+                "alpha6_score": alpha6_score,
+                "alpha6_side": alpha6_side,
+                "f5_rsi_trend_confirm": rsi_confirm,
+            }
+
+        return None
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         """按市值计价更新持仓
@@ -2360,6 +2507,21 @@ class V5Pipeline:
         # Optional hard rule: require fused strategy signals for any buy order (disable alpha fallback buys).
         require_fused_buy = bool(getattr(self.cfg.execution, 'require_fused_signals_for_buy', False))
         fused_buy_symbols = set()
+        current_auto_risk_level = self._load_current_auto_risk_level()
+        protect_entry_gate_active = str(current_auto_risk_level or "").upper() == "PROTECT"
+        strategy_signal_lookup = (
+            self._resolve_strategy_signal_lookup(audit)
+            if protect_entry_gate_active
+            else {}
+        )
+        if protect_entry_gate_active and audit:
+            audit.add_note(
+                "PROTECT entry gate active: "
+                f"require_alpha6_confirmation={bool(getattr(self.cfg.execution, 'protect_entry_require_alpha6_confirmation', True))}, "
+                f"block_trend_only={bool(getattr(self.cfg.execution, 'protect_entry_block_trend_only', True))}, "
+                f"require_alpha6_rsi_confirm_positive={bool(getattr(self.cfg.execution, 'protect_entry_require_alpha6_rsi_confirm_positive', True))}, "
+                f"alpha6_min_score={float(getattr(self.cfg.execution, 'protect_entry_alpha6_min_score', 0.10) or 0.0):.2f}"
+            )
         if require_fused_buy:
             try:
                 import json as _json
@@ -2556,6 +2718,29 @@ class V5Pipeline:
                         }
                     )
                 continue
+
+            if side == "buy" and intent == "OPEN_LONG" and protect_entry_gate_active:
+                protect_block = self._evaluate_protect_entry_gate(
+                    symbol=sym,
+                    strategy_signal_lookup=strategy_signal_lookup,
+                    current_auto_risk_level=current_auto_risk_level,
+                )
+                if protect_block is not None:
+                    if audit:
+                        audit.record_gate(str(protect_block.get("reason") or "protect_entry_no_alpha6_confirmation"), symbol=sym)
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": str(protect_block.get("reason") or "protect_entry_no_alpha6_confirmation"),
+                                "trend_score": protect_block.get("trend_score"),
+                                "alpha6_score": protect_block.get("alpha6_score"),
+                                "alpha6_side": protect_block.get("alpha6_side"),
+                                "f5_rsi_trend_confirm": protect_block.get("f5_rsi_trend_confirm"),
+                                "current_level": current_auto_risk_level,
+                            }
+                        )
+                    continue
 
             neg_stats = None
             if side == "buy" and neg_feedback_enabled:

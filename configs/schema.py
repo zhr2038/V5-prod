@@ -650,6 +650,24 @@ class ExecutionConfig(BaseModel):
         default=True,
         description="If top-of-book is unavailable, skip guard (true) or reject OPEN_LONG (false)",
     )
+    protect_entry_require_alpha6_confirmation: bool = Field(
+        default=True,
+        description="In PROTECT risk level, require Alpha6Factor buy confirmation before allowing OPEN_LONG",
+    )
+    protect_entry_block_trend_only: bool = Field(
+        default=True,
+        description="In PROTECT risk level, block TrendFollowing-only OPEN_LONG entries without Alpha6 confirmation",
+    )
+    protect_entry_require_alpha6_rsi_confirm_positive: bool = Field(
+        default=True,
+        description="In PROTECT risk level, require Alpha6Factor f5_rsi_trend_confirm > 0 before allowing OPEN_LONG",
+    )
+    protect_entry_alpha6_min_score: float = Field(
+        default=0.10,
+        ge=-10.0,
+        le=10.0,
+        description="Minimum Alpha6Factor signal score required for OPEN_LONG in PROTECT risk level",
+    )
 
     # Require fused strategy signal file for buy decisions. If missing, block buy orders.
     require_fused_signals_for_buy: bool = Field(default=False)
