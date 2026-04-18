@@ -154,16 +154,22 @@ def _budget_header_lines(v5: Dict[str, Any], v5_audit: Optional[Dict[str, Any]])
         lines.append(f"- v5 budget_exceeded: {_fmt_bool(exceeded)}")
         lines.append(f"- v5 budget_reason: {_budget_reason_norm(reason)}")
 
-        t_used = b.get("turnover_used")
-        t_budget = b.get("turnover_budget_per_day")
+        t_used_usdt = b.get("turnover_used_usdt", b.get("turnover_used"))
+        t_budget_usdt = b.get("turnover_budget_usdt")
+        t_used_ratio = b.get("turnover_used_ratio")
+        t_budget_ratio = b.get("turnover_budget_ratio", b.get("turnover_budget_per_day"))
         c_bps = b.get("cost_used_bps")
         c_budget = b.get("cost_budget_bps_per_day")
-        if t_budget is not None or c_budget is not None:
-            tu = _fmt(t_used)
-            tb = _fmt(t_budget)
-            cu = _fmt(c_bps)
-            cb = _fmt(c_budget)
-            lines.append(f"- v5 budget_used: turnover={tu}/{tb} cost_bps={cu}/{cb}")
+        if t_budget_usdt is not None or t_budget_ratio is not None or c_budget is not None:
+            if t_budget_usdt is not None or t_used_usdt is not None:
+                lines.append(
+                    f"- v5 budget_turnover_usdt: {_fmt(t_used_usdt)}/{_fmt(t_budget_usdt)}"
+                )
+            if t_budget_ratio is not None or t_used_ratio is not None:
+                lines.append(
+                    f"- v5 budget_turnover_ratio: {_fmt(t_used_ratio)}/{_fmt(t_budget_ratio)}"
+                )
+            lines.append(f"- v5 budget_cost_bps: {_fmt(c_bps)}/{_fmt(c_budget)}")
 
     ba = (v5_audit.get("budget_action") or {}) if v5_audit else {}
     if ba and _to_bool(ba.get("enabled")):
