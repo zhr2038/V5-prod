@@ -531,6 +531,17 @@ def _iter_decision_audits(reports_dir: Path, scan_limit: Optional[int] = None) -
     return audits
 
 
+def _sorted_run_dirs_by_artifact_mtime(runs_dir: Path, artifact_name: str, limit: Optional[int] = None) -> List[Path]:
+    if not runs_dir.exists():
+        return []
+
+    run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / artifact_name).exists()]
+    run_dirs.sort(key=lambda d: (d / artifact_name).stat().st_mtime, reverse=True)
+    if limit is not None:
+        run_dirs = run_dirs[:limit]
+    return run_dirs
+
+
 def _normalize_top_scores(raw_scores: Any, limit: int = 20) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     if not isinstance(raw_scores, list):
@@ -2763,8 +2774,8 @@ def api_trades():
         if not trades:
             runs_dir = runtime_paths.runs_dir
             if runs_dir.exists():
-                run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
-                for run_dir in run_dirs[:24]:
+                run_dirs = _sorted_run_dirs_by_artifact_mtime(runs_dir, 'trades.csv', limit=24)
+                for run_dir in run_dirs:
                     p = run_dir / 'trades.csv'
                     if not p.exists():
                         continue
@@ -2985,8 +2996,8 @@ def api_positions():
         if not authoritative_snapshot_seen and not positions:
             runs_dir = runtime_paths.runs_dir
             if runs_dir.exists():
-                run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
-                for run_dir in run_dirs[:12]:
+                run_dirs = _sorted_run_dirs_by_artifact_mtime(runs_dir, 'positions.jsonl', limit=12)
+                for run_dir in run_dirs:
                     p = run_dir / 'positions.jsonl'
                     if not p.exists():
                         continue
