@@ -113,15 +113,21 @@ def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPat
     if not runs_dir.exists():
         return runs
 
-    for run_dir in sorted(runs_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+    def _audit_mtime(run_dir: Path) -> float:
+        audit_file = run_dir / "decision_audit.json"
+        try:
+            return audit_file.stat().st_mtime
+        except Exception:
+            return 0.0
+
+    for run_dir in sorted(runs_dir.iterdir(), key=_audit_mtime, reverse=True):
         if not run_dir.is_dir():
             continue
-        mtime = datetime.fromtimestamp(run_dir.stat().st_mtime)
-        if mtime < cutoff:
-            continue
-
         audit_file = run_dir / "decision_audit.json"
         if not audit_file.exists():
+            continue
+        mtime = datetime.fromtimestamp(_audit_mtime(run_dir))
+        if mtime < cutoff:
             continue
 
         try:
