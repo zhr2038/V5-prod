@@ -160,12 +160,16 @@ def calculate_metrics(runs: List[Dict], *, runtime_paths: Optional[AutoRiskEvalP
         rejects = run.get("rejects", {}) if isinstance(run, dict) else {}
         total_selected += int(counts.get("selected", 0) or 0)
         total_rebalance += int(counts.get("orders_rebalance", 0) or 0)
-        total_rejected += int(rejects.get("min_notional", 0) or 0)
-        total_rejected += int(rejects.get("exchange_min_notional", 0) or 0)
+        reject_dust = int(rejects.get("min_notional", 0) or 0)
+        reject_dust += int(rejects.get("exchange_min_notional", 0) or 0)
+        total_rejected += reject_dust
 
+        router_dust = 0
         for rd in run.get("router_decisions", []):
             if rd.get("reason") in {"min_notional", "exchange_min_notional"}:
-                total_dust += 1
+                router_dust += 1
+
+        total_dust += max(reject_dust, router_dust)
 
         pnl = run.get("realized_pnl")
         if pnl is not None:

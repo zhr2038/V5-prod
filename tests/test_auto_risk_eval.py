@@ -52,3 +52,36 @@ def test_calculate_metrics_uses_notional_rejects_not_exit_orders() -> None:
 
     assert metrics["conversion_rate"] == 0.2
     assert metrics["dust_reject_rate"] == 0.0
+
+
+def test_calculate_metrics_uses_reject_counts_when_router_decisions_are_missing() -> None:
+    metrics = auto_risk_eval.calculate_metrics(
+        [
+            {
+                "counts": {"selected": 10, "orders_rebalance": 4, "orders_exit": 0},
+                "rejects": {"min_notional": 2, "exchange_min_notional": 1},
+                "router_decisions": [],
+            }
+        ]
+    )
+
+    assert metrics["conversion_rate"] == 0.4
+    assert metrics["dust_reject_rate"] == 3 / 13
+
+
+def test_calculate_metrics_does_not_double_count_router_and_reject_dust() -> None:
+    metrics = auto_risk_eval.calculate_metrics(
+        [
+            {
+                "counts": {"selected": 10, "orders_rebalance": 4, "orders_exit": 0},
+                "rejects": {"min_notional": 2, "exchange_min_notional": 1},
+                "router_decisions": [
+                    {"reason": "min_notional"},
+                    {"reason": "exchange_min_notional"},
+                    {"reason": "min_notional"},
+                ],
+            }
+        ]
+    )
+
+    assert metrics["dust_reject_rate"] == 3 / 13
