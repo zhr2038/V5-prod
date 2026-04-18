@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from src.monitoring import smart_alert as smart_alert_module
@@ -49,7 +50,7 @@ def test_resolve_paths_uses_suffixed_runtime_alert_state(monkeypatch, tmp_path: 
 
 def test_check_signal_no_trade_ignores_exit_only_rounds(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {"counts": {"selected": 2, "orders_rebalance": 0, "orders_exit": 1}},
         {"counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 2}},
     ]
@@ -58,9 +59,33 @@ def test_check_signal_no_trade_ignores_exit_only_rounds(tmp_path: Path) -> None:
     assert engine.check_signal_no_trade() is None
 
 
+def test_load_recent_run_audits_ignores_stale_runs(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "reports" / "runs"
+    fresh = runs_dir / "fresh_run"
+    stale = runs_dir / "stale_run"
+    fresh.mkdir(parents=True, exist_ok=True)
+    stale.mkdir(parents=True, exist_ok=True)
+    (fresh / "decision_audit.json").write_text('{"counts": {}}', encoding="utf-8")
+    (stale / "decision_audit.json").write_text('{"counts": {}}', encoding="utf-8")
+
+    now = datetime.now().timestamp()
+    fresh_ts = now - 1800
+    stale_ts = (datetime.now() - timedelta(hours=8)).timestamp()
+    fresh.touch()
+    stale.touch()
+    import os
+    os.utime(fresh, (fresh_ts, fresh_ts))
+    os.utime(stale, (stale_ts, stale_ts))
+
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    audits = engine._load_recent_run_audits(limit=5, max_age_hours=6)
+
+    assert len(audits) == 1
+
+
 def test_check_signal_no_trade_alerts_when_selected_without_any_orders(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {"counts": {"selected": 2, "orders_rebalance": 0, "orders_exit": 0}},
         {"counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 0}},
     ]
@@ -72,9 +97,17 @@ def test_check_signal_no_trade_alerts_when_selected_without_any_orders(tmp_path:
     assert alert["type"] == "signal_no_trade"
 
 
+def test_check_signal_no_trade_ignores_stale_runs(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: []
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    assert engine.check_signal_no_trade() is None
+
+
 def test_check_signal_no_trade_ignores_known_policy_blockers(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {
             "counts": {
                 "selected": 2,
@@ -100,7 +133,7 @@ def test_check_signal_no_trade_ignores_known_policy_blockers(tmp_path: Path) -> 
 
 def test_check_signal_no_trade_alerts_when_blockers_only_cover_subset(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {
             "counts": {
                 "selected": 2,
@@ -129,7 +162,7 @@ def test_check_signal_no_trade_alerts_when_blockers_only_cover_subset(tmp_path: 
 
 def test_check_no_buy_in_market_ignores_known_policy_blockers(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {
             "regime": "TRENDING",
             "counts": {
@@ -149,7 +182,7 @@ def test_check_no_buy_in_market_ignores_known_policy_blockers(tmp_path: Path) ->
 
 def test_check_no_buy_in_market_ignores_exit_only_rounds(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {
             "regime": "TRENDING",
             "counts": {
@@ -168,7 +201,7 @@ def test_check_no_buy_in_market_ignores_exit_only_rounds(tmp_path: Path) -> None
 
 def test_check_no_buy_in_market_alerts_for_unblocked_signals(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {
             "regime": "SIDEWAYS",
             "counts": {
@@ -188,9 +221,18 @@ def test_check_no_buy_in_market_alerts_for_unblocked_signals(tmp_path: Path) -> 
     assert alert["type"] == "no_buy_in_market"
 
 
+def test_check_no_buy_in_market_ignores_stale_runs(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: []
+    engine._count_recent_buy_fills = lambda hours=6: 0
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    assert engine.check_no_buy_in_market() is None
+
+
 def test_check_no_buy_in_market_does_not_treat_score_penalty_as_blocker(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {
             "regime": "TRENDING",
             "counts": {
@@ -213,7 +255,7 @@ def test_check_no_buy_in_market_does_not_treat_score_penalty_as_blocker(tmp_path
 
 def test_check_no_buy_in_market_alerts_when_blockers_only_cover_subset(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
-    engine._load_recent_run_audits = lambda limit: [
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
         {
             "regime": "TRENDING",
             "counts": {

@@ -170,15 +170,20 @@ class SmartAlertEngine:
             return True
         return False
 
-    def _load_recent_run_audits(self, limit: int) -> list[dict[str, Any]]:
+    def _load_recent_run_audits(self, limit: int, *, max_age_hours: float | None = None) -> list[dict[str, Any]]:
         runs_dir = self.paths.runs_dir
         if not runs_dir.exists():
             return []
+
+        cutoff_ts = None
+        if max_age_hours is not None:
+            cutoff_ts = (datetime.now() - timedelta(hours=float(max_age_hours))).timestamp()
 
         run_dirs = [
             run_dir
             for run_dir in runs_dir.iterdir()
             if run_dir.is_dir() and (run_dir / "decision_audit.json").exists()
+            and (cutoff_ts is None or run_dir.stat().st_mtime >= cutoff_ts)
         ]
         run_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
 
@@ -284,7 +289,7 @@ class SmartAlertEngine:
 
     def check_signal_no_trade(self) -> Optional[dict[str, Any]]:
         try:
-            audits = self._load_recent_run_audits(limit=2)
+            audits = self._load_recent_run_audits(limit=2, max_age_hours=6)
             if len(audits) < 2:
                 return None
 
@@ -312,7 +317,7 @@ class SmartAlertEngine:
 
     def check_no_buy_in_market(self) -> Optional[dict[str, Any]]:
         try:
-            audits = self._load_recent_run_audits(limit=6)
+            audits = self._load_recent_run_audits(limit=6, max_age_hours=6)
             if not audits:
                 return None
 
