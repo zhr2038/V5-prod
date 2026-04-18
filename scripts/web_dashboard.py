@@ -513,7 +513,7 @@ def _iter_decision_audits(reports_dir: Path, scan_limit: Optional[int] = None) -
         return []
 
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-    run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    run_dirs.sort(key=lambda d: (d / 'decision_audit.json').stat().st_mtime, reverse=True)
     if scan_limit is not None:
         run_dirs = run_dirs[:scan_limit]
 
@@ -5000,7 +5000,7 @@ def api_decision_chain():
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
 
         run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        run_dirs.sort(key=lambda x: (x / 'decision_audit.json').stat().st_mtime, reverse=True)
 
         rounds = []
         for run_dir in run_dirs[:5]:
@@ -5015,7 +5015,7 @@ def api_decision_chain():
                     # 判断是旧数据(UTC)还是新数据(CST)
                     # 通过比较 run_id 小时和文件修改时间来判断
                     import os
-                    mtime = os.path.getmtime(run_dir)
+                    mtime = os.path.getmtime(run_dir / 'decision_audit.json')
                     mtime_dt = datetime.fromtimestamp(mtime)
                     
                     # 如果 run_id 小时与本地修改时间相差很大，说明是旧UTC数据
@@ -5173,7 +5173,7 @@ def api_shadow_test():
             return jsonify({'status': 'no_data', 'message': '暂无运行数据'})
         
         run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        run_dirs.sort(key=lambda x: (x / 'decision_audit.json').stat().st_mtime, reverse=True)
         
         # 取最近7天（最多50轮）
         recent_runs = run_dirs[:50]
@@ -5428,7 +5428,7 @@ def api_decision_audit():
         if not run_dirs:
             return jsonify({'error': 'No audit files found'}), 404
 
-        run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        run_dirs.sort(key=lambda x: (x / 'decision_audit.json').stat().st_mtime, reverse=True)
         decision_audit_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT')
         if decision_audit_scan_limit is not None:
             run_dirs = run_dirs[:decision_audit_scan_limit]
@@ -5439,7 +5439,7 @@ def api_decision_audit():
             audit_data = json.load(f)
 
         # 默认时间戳：决策文件目录时间
-        ts = latest_run_dir.stat().st_mtime
+        ts = (latest_run_dir / 'decision_audit.json').stat().st_mtime
 
         def _load_strategy_signals(path: Path):
             """兼容多种 strategy_signals.json 结构。"""
@@ -5534,7 +5534,7 @@ def api_decision_audit():
                 strategy_signals = fallback_signals
                 strategy_source_run = stale_run_dir.name
                 strategy_signal_source = f'previous_run_{fallback_source}'
-                ts = fallback_ts if fallback_ts is not None else stale_run_dir.stat().st_mtime
+                ts = fallback_ts if fallback_ts is not None else (stale_run_dir / 'decision_audit.json').stat().st_mtime
                 break
 
         # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.

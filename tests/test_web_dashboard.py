@@ -3178,6 +3178,37 @@ def test_api_decision_audit_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert [row["symbol"] for row in payload["actionable_signals"]["sell_candidates"]] == ["ETH/USDT"]
 
 
+def test_api_decision_audit_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    stale_run = runs_dir / "20260408_02"
+    fresh_run = runs_dir / "20260408_01"
+    stale_run.mkdir(parents=True, exist_ok=True)
+    fresh_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+
+    stale_audit = stale_run / "decision_audit.json"
+    fresh_audit = fresh_run / "decision_audit.json"
+    stale_audit.write_text(json.dumps({"run_id": "20260408_02", "regime": "SIDEWAYS", "counts": {"selected": 1}}), encoding="utf-8")
+    fresh_audit.write_text(json.dumps({"run_id": "20260408_01", "regime": "TRENDING", "counts": {"selected": 2}}), encoding="utf-8")
+    os.utime(stale_audit, (100, 100))
+    os.utime(fresh_audit, (200, 200))
+    os.utime(stale_run, (500, 500))
+    os.utime(fresh_run, (50, 50))
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["run_id"] == "20260408_01"
+
+
 def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -5666,6 +5697,37 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_cooldown"] == 1
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_open_block"] == 2
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_fast_fail_open_block"] == 3
+
+
+def test_decision_chain_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    stale_run = runs_dir / "20260408_02"
+    fresh_run = runs_dir / "20260408_01"
+    stale_run.mkdir(parents=True, exist_ok=True)
+    fresh_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+
+    stale_audit = stale_run / "decision_audit.json"
+    fresh_audit = fresh_run / "decision_audit.json"
+    stale_audit.write_text(json.dumps({"run_id": "20260408_02", "counts": {"selected": 1}}), encoding="utf-8")
+    fresh_audit.write_text(json.dumps({"run_id": "20260408_01", "counts": {"selected": 2}}), encoding="utf-8")
+    os.utime(stale_audit, (100, 100))
+    os.utime(fresh_audit, (200, 200))
+    os.utime(stale_run, (500, 500))
+    os.utime(fresh_run, (50, 50))
+
+    response = client.get("/api/decision_chain")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rounds"][0]["run_id"] == "20260408_01"
 
 
 def test_decision_chain_error_response_hides_internal_paths(monkeypatch):
