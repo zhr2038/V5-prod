@@ -33,6 +33,7 @@ class BudgetState:
     ymd_utc: str
 
     turnover_budget_per_day: Optional[float] = None
+    turnover_budget_unit: Optional[str] = None
     cost_budget_bps_per_day: Optional[float] = None
 
     turnover_used: float = 0.0
@@ -56,6 +57,11 @@ class BudgetState:
     def _turnover_budget_is_legacy_absolute(self) -> bool:
         if self.turnover_budget_per_day is None:
             return False
+        unit = str(self.turnover_budget_unit or "").strip().lower()
+        if unit == "ratio":
+            return False
+        if unit in {"usdt", "absolute_usdt", "usdt_legacy"}:
+            return True
         try:
             return float(self.turnover_budget_per_day) > 1.0
         except Exception:
@@ -121,6 +127,8 @@ class BudgetState:
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
+        if self.turnover_budget_per_day is not None and not d.get("turnover_budget_unit"):
+            d["turnover_budget_unit"] = "usdt_legacy" if self._turnover_budget_is_legacy_absolute() else "ratio"
         d["turnover_used_usdt"] = self.turnover_used_usdt()
         d["turnover_used_ratio"] = self.turnover_used_ratio()
         d["turnover_budget_ratio"] = self.turnover_budget_ratio()
@@ -142,6 +150,7 @@ def load_budget_state(path: str) -> Optional[BudgetState]:
     data = json.loads(p.read_text(encoding="utf-8"))
     st = BudgetState(ymd_utc=str(data.get("ymd_utc")))
     st.turnover_budget_per_day = data.get("turnover_budget_per_day")
+    st.turnover_budget_unit = data.get("turnover_budget_unit")
     st.cost_budget_bps_per_day = data.get("cost_budget_bps_per_day")
     st.turnover_used = _safe_float(data.get("turnover_used"), 0.0)
     st.cost_used_usdt = _safe_float(data.get("cost_used_usdt"), 0.0)
@@ -181,6 +190,7 @@ def update_daily_budget_state(
 
     # budgets are part of state (latest config wins)
     st.turnover_budget_per_day = turnover_budget_per_day
+    st.turnover_budget_unit = "ratio" if turnover_budget_per_day is not None else None
     st.cost_budget_bps_per_day = cost_budget_bps_per_day
 
     # update avg equity estimate (use latest non-null)
