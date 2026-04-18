@@ -12,7 +12,7 @@ from configs.schema import AppConfig, RegimeState
 from src.alpha.alpha_engine import AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.core.pipeline import V5Pipeline
-from src.execution.fill_store import derive_runtime_auto_risk_eval_path
+from src.execution.fill_store import derive_runtime_auto_risk_eval_path, derive_runtime_auto_risk_guard_path
 from src.execution.position_store import Position
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
@@ -51,6 +51,12 @@ def _regime() -> RegimeResult:
 
 def _write_auto_risk_level(order_store_path: str, level: str) -> None:
     path = derive_runtime_auto_risk_eval_path(order_store_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"current_level": level}, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_auto_risk_guard_level(order_store_path: str, level: str) -> None:
+    path = derive_runtime_auto_risk_guard_path(order_store_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"current_level": level}, ensure_ascii=False), encoding="utf-8")
 
@@ -153,6 +159,43 @@ def test_protect_trend_only_buy_is_skipped(tmp_path: Path) -> None:
         and d.get("trend_score") == 0.92
         for d in audit.router_decisions
     )
+
+
+def test_protect_gate_falls_back_to_auto_risk_guard_when_eval_snapshot_missing(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_guard_level(cfg.execution.order_store_path, "PROTECT")
+
+    payload = _strategy_payload(
+        trend_signal={
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "score": 0.92,
+            "confidence": 0.8,
+            "metadata": {"adx": 35.0},
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="protect-guard-fallback")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(d.get("reason") == "protect_entry_trend_only" for d in audit.router_decisions)
 
 
 def test_protect_trend_plus_alpha6_buy_can_pass(tmp_path: Path) -> None:

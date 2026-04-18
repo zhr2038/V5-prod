@@ -15,6 +15,7 @@ from configs.schema import AlphaConfig, RiskConfig
 from src.core.models import MarketSeries
 from src.execution.fill_store import (
     derive_runtime_auto_risk_eval_path,
+    derive_runtime_auto_risk_guard_path,
     derive_runtime_named_artifact_path,
     derive_runtime_runs_dir,
 )
@@ -349,20 +350,26 @@ class PortfolioEngine:
             pass
 
         try:
-            cfg = load_runtime_config(project_root=RUNTIME_PROJECT_ROOT)
+            project_root = self._runtime_project_root()
+            cfg = load_runtime_config(project_root=project_root)
             execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
             orders_db = Path(
                 resolve_runtime_path(
                     execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
                     default="reports/orders.sqlite",
-                    project_root=RUNTIME_PROJECT_ROOT,
+                    project_root=project_root,
                 )
             )
             p = derive_runtime_auto_risk_eval_path(orders_db)
-            if not p.exists():
-                return None
-            obj = json.loads(p.read_text(encoding="utf-8"))
-            lvl = str(obj.get("current_level", "")).upper()
+            lvl = ""
+            if p.exists():
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                lvl = str(obj.get("current_level", "")).upper()
+            if not lvl:
+                gp = derive_runtime_auto_risk_guard_path(orders_db)
+                if gp.exists():
+                    obj = json.loads(gp.read_text(encoding="utf-8"))
+                    lvl = str(obj.get("current_level", "")).upper()
             cap_map = {
                 "PROTECT": 1,
                 "DEFENSE": 3,

@@ -410,11 +410,13 @@ class V5Pipeline:
     def _load_current_auto_risk_level(self) -> Optional[str]:
         try:
             path = derive_runtime_auto_risk_eval_path(self._runtime_order_store_path).resolve()
-            if not path.exists():
-                return None
-            obj = json.loads(path.read_text(encoding="utf-8"))
-            level = str((obj or {}).get("current_level", "") or "").strip().upper()
-            return level or None
+            if path.exists():
+                obj = json.loads(path.read_text(encoding="utf-8"))
+                level = str((obj or {}).get("current_level", "") or "").strip().upper()
+                if level:
+                    return level
+            guard_level = str(getattr(self.auto_risk_guard, "current_level", "") or "").strip().upper()
+            return guard_level or None
         except Exception:
             return None
 
