@@ -53,25 +53,51 @@ class BudgetState:
     small_trade_ratio_today: Optional[float] = None
     small_trade_notional_cutoff: Optional[float] = None
 
+    def turnover_used_usdt(self) -> float:
+        return float(self.turnover_used)
+
+    def turnover_budget_ratio(self) -> Optional[float]:
+        if self.turnover_budget_per_day is None:
+            return None
+        return float(self.turnover_budget_per_day)
+
+    def turnover_used_ratio(self) -> Optional[float]:
+        if not self.avg_equity_est or float(self.avg_equity_est) <= 0:
+            return None
+        return float(self.turnover_used_usdt()) / float(self.avg_equity_est)
+
+    def turnover_budget_usdt(self) -> Optional[float]:
+        budget_ratio = self.turnover_budget_ratio()
+        if budget_ratio is None or not self.avg_equity_est or float(self.avg_equity_est) <= 0:
+            return None
+        return float(budget_ratio) * float(self.avg_equity_est)
+
+    def turnover_exceeded(self) -> bool:
+        used_ratio = self.turnover_used_ratio()
+        budget_ratio = self.turnover_budget_ratio()
+        if used_ratio is None or budget_ratio is None:
+            return False
+        return float(used_ratio) > float(budget_ratio)
+
+    def cost_exceeded(self) -> bool:
+        bps = self.cost_used_bps()
+        if self.cost_budget_bps_per_day is None or bps is None:
+            return False
+        return float(bps) > float(self.cost_budget_bps_per_day)
+
     def cost_used_bps(self) -> Optional[float]:
         if not self.avg_equity_est or self.avg_equity_est <= 0:
             return None
         return float(self.cost_used_usdt) / float(self.avg_equity_est) * 10_000.0
 
     def exceeded(self) -> bool:
-        if self.turnover_budget_per_day is not None and self.turnover_used > float(self.turnover_budget_per_day):
-            return True
-        bps = self.cost_used_bps()
-        if self.cost_budget_bps_per_day is not None and bps is not None and bps > float(self.cost_budget_bps_per_day):
-            return True
-        return False
+        return self.turnover_exceeded() or self.cost_exceeded()
 
     def reason(self) -> Optional[str]:
         reasons = []
-        if self.turnover_budget_per_day is not None and self.turnover_used > float(self.turnover_budget_per_day):
+        if self.turnover_exceeded():
             reasons.append("exceeded_turnover")
-        bps = self.cost_used_bps()
-        if self.cost_budget_bps_per_day is not None and bps is not None and bps > float(self.cost_budget_bps_per_day):
+        if self.cost_exceeded():
             reasons.append("exceeded_cost")
         if not reasons:
             return None
@@ -79,7 +105,13 @@ class BudgetState:
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
+        d["turnover_used_usdt"] = self.turnover_used_usdt()
+        d["turnover_used_ratio"] = self.turnover_used_ratio()
+        d["turnover_budget_ratio"] = self.turnover_budget_ratio()
+        d["turnover_budget_usdt"] = self.turnover_budget_usdt()
+        d["turnover_exceeded"] = self.turnover_exceeded()
         d["cost_used_bps"] = self.cost_used_bps()
+        d["cost_exceeded"] = self.cost_exceeded()
         d["exceeded"] = self.exceeded()
         d["reason"] = self.reason()
         return d
