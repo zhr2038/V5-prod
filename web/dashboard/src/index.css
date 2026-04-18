@@ -494,10 +494,24 @@ body {
   gap: 8px;
   padding: 7px;
   border-radius: 999px;
+  position: relative;
+  overflow: hidden;
+  border: 1px double rgba(255, 255, 255, 0.07);
   box-shadow:
     inset 2px -2px 1px -1px rgba(255, 255, 255, 0.12),
     inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
     inset 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.control-rail::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.16) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.12) 100%);
+  opacity: 0.26;
 }
 
 .control-pill {
@@ -509,10 +523,24 @@ body {
   align-items: center;
   justify-content: center;
   white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+  border: 1px double rgba(255, 255, 255, 0.07);
   box-shadow:
     inset 2px -2px 1px -1px rgba(255, 255, 255, 0.12),
     inset -2px 2px 1px -1px rgba(255, 255, 255, 0.09),
     inset 0 0 1px rgba(0, 0, 0, 0.10);
+}
+
+.control-pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.14) 0%, transparent 22%, transparent 78%, rgba(255, 255, 255, 0.11) 100%);
+  opacity: 0.28;
 }
 
 .control-pill[data-emphasis="soft"] {
@@ -526,10 +554,24 @@ body {
 .metric-pill {
   border-radius: 26px;
   min-height: 92px;
+  position: relative;
+  overflow: hidden;
+  border: 1px double rgba(255, 255, 255, 0.06);
   box-shadow:
     inset 2px -2px 1px -1px rgba(255, 255, 255, 0.10),
     inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
     inset 0 0 1px rgba(0, 0, 0, 0.10);
+}
+
+.metric-pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.10) 0%, transparent 24%, transparent 76%, rgba(255, 255, 255, 0.08) 100%);
+  opacity: 0.18;
 }
 
 .ml-progress-track {
@@ -567,9 +609,23 @@ body {
   --highlight-opacity: 0.05;
   --lens-opacity: 0;
   --surface-border: rgba(255, 255, 255, 0.06);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.05);
   box-shadow:
     inset 1px -1px 0 rgba(255, 255, 255, 0.08),
     inset -1px 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.list-row::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.08) 0%, transparent 24%, transparent 76%, rgba(255, 255, 255, 0.06) 100%);
+  opacity: 0.16;
 }
 
 .list-row:hover {
@@ -588,6 +644,24 @@ body {
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+  border: 1px double rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.10),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
+    inset 0 0 1px rgba(0, 0, 0, 0.10);
+}
+
+.status-badge::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.12) 0%, transparent 24%, transparent 76%, rgba(255, 255, 255, 0.09) 100%);
+  opacity: 0.24;
 }
 
 .status-badge[data-state="on"] {
