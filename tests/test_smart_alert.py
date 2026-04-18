@@ -86,8 +86,14 @@ def test_load_recent_run_audits_ignores_stale_runs(tmp_path: Path) -> None:
 def test_check_signal_no_trade_alerts_when_selected_without_any_orders(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
     engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
-        {"counts": {"selected": 2, "orders_rebalance": 0, "orders_exit": 0}},
-        {"counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 0}},
+        {
+            "counts": {"selected": 2, "orders_rebalance": 0, "orders_exit": 0},
+            "router_decisions": [{"symbol": "BTC/USDT", "action": "skip", "reason": "insufficient_cash"}],
+        },
+        {
+            "counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 0},
+            "router_decisions": [{"symbol": "ETH/USDT", "action": "skip", "reason": "cost_aware_edge"}],
+        },
     ]
     engine._should_alert = lambda alert_type, cooldown_minutes=60: True
 
@@ -141,7 +147,7 @@ def test_check_signal_no_trade_alerts_when_blockers_only_cover_subset(tmp_path: 
                 "orders_exit": 0,
                 "negative_expectancy_open_block": 1,
             },
-            "router_decisions": [],
+            "router_decisions": [{"symbol": "ETH/USDT", "action": "skip", "reason": "insufficient_cash"}],
         },
         {
             "counts": {
@@ -158,6 +164,17 @@ def test_check_signal_no_trade_alerts_when_blockers_only_cover_subset(tmp_path: 
 
     assert alert is not None
     assert alert["type"] == "signal_no_trade"
+
+
+def test_check_signal_no_trade_ignores_runs_without_router_evidence(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
+        {"counts": {"selected": 2, "orders_rebalance": 0, "orders_exit": 0}, "router_decisions": []},
+        {"counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 0}, "router_decisions": []},
+    ]
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    assert engine.check_signal_no_trade() is None
 
 
 def test_check_no_buy_in_market_ignores_known_policy_blockers(tmp_path: Path) -> None:
@@ -209,7 +226,7 @@ def test_check_no_buy_in_market_alerts_for_unblocked_signals(tmp_path: Path) -> 
                 "orders_rebalance": 0,
                 "orders_exit": 0,
             },
-            "router_decisions": [],
+            "router_decisions": [{"symbol": "BTC/USDT", "action": "skip", "reason": "insufficient_cash"}],
         }
     ]
     engine._count_recent_buy_fills = lambda hours=6: 0
@@ -241,7 +258,7 @@ def test_check_no_buy_in_market_does_not_treat_score_penalty_as_blocker(tmp_path
                 "orders_exit": 0,
                 "negative_expectancy_score_penalty": 2,
             },
-            "router_decisions": [],
+            "router_decisions": [{"symbol": "BTC/USDT", "action": "skip", "reason": "insufficient_cash"}],
         }
     ]
     engine._count_recent_buy_fills = lambda hours=6: 0
@@ -264,7 +281,10 @@ def test_check_no_buy_in_market_alerts_when_blockers_only_cover_subset(tmp_path:
                 "orders_exit": 0,
                 "negative_expectancy_cooldown": 1,
             },
-            "router_decisions": [{"reason": "deadband", "symbol": "BTC/USDT"}],
+            "router_decisions": [
+                {"reason": "deadband", "symbol": "BTC/USDT"},
+                {"reason": "insufficient_cash", "symbol": "ETH/USDT"},
+            ],
         }
     ]
     engine._count_recent_buy_fills = lambda hours=6: 0
@@ -274,3 +294,22 @@ def test_check_no_buy_in_market_alerts_when_blockers_only_cover_subset(tmp_path:
 
     assert alert is not None
     assert alert["type"] == "no_buy_in_market"
+
+
+def test_check_no_buy_in_market_ignores_runs_without_router_evidence(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
+        {
+            "regime": "TRENDING",
+            "counts": {
+                "selected": 2,
+                "orders_rebalance": 0,
+                "orders_exit": 0,
+            },
+            "router_decisions": [],
+        }
+    ]
+    engine._count_recent_buy_fills = lambda hours=6: 0
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    assert engine.check_no_buy_in_market() is None
