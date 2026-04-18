@@ -5383,7 +5383,7 @@ def api_smart_alerts():
 def api_auto_risk_guard():
     """自动风险档位API - 显示当前风险档位和配置"""
     try:
-        from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard
+        from src.risk.auto_risk_guard import AutoRiskGuard
         config = load_config()
         runtime_paths = _resolve_dashboard_runtime_paths(config)
 
@@ -5407,7 +5407,7 @@ def api_auto_risk_guard():
                 'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             })
 
-        guard = get_auto_risk_guard(str(runtime_paths.auto_risk_guard_path))
+        guard = AutoRiskGuard(state_path=str(runtime_paths.auto_risk_guard_path))
         return jsonify({
             'current_level': guard.current_level,
             'config': guard.get_current_config(),

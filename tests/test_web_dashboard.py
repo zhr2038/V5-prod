@@ -5143,6 +5143,18 @@ def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(
     assert payload["current_level"] == "PROTECT"
     assert payload["metrics"]["last_dd_pct"] == 0.25
 
+    (runtime_dir / "auto_risk_guard.json").write_text(
+        json.dumps({"current_level": "DEFENSE", "metrics": {"last_dd_pct": 0.12}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_level"] == "DEFENSE"
+    assert payload["metrics"]["last_dd_pct"] == 0.12
+
 
 def test_auto_risk_guard_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
