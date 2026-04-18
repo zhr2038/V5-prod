@@ -67,6 +67,18 @@ def _resolve_reports_dir(raw_reports_dir: str | None = None) -> Path:
     return path
 
 
+def _resolve_deadband_params(*, project_root: Path) -> tuple[float, float]:
+    current_deadband = 0.04
+    try:
+        cfg = _load_active_config(project_root=project_root)
+        rebalance_cfg = cfg.get("rebalance", {}) if isinstance(cfg, dict) else {}
+        current_deadband = float(rebalance_cfg.get("deadband_sideways", 0.04) or 0.04)
+    except Exception:
+        current_deadband = 0.04
+    proposed_deadband = max(0.0, round(current_deadband - 0.01, 4))
+    return current_deadband, proposed_deadband
+
+
 def _resolve_ab_gate_output_path(reports_dir: Path) -> Path:
     reports_dir = Path(reports_dir).resolve()
     default_orders = (reports_dir / "orders.sqlite").resolve()
@@ -152,10 +164,11 @@ def main() -> None:
     reports_dir = _resolve_reports_dir(args.reports_dir)
     runs_dir = reports_dir / "runs"
     out_path = _resolve_ab_gate_output_path(reports_dir)
+    current_deadband, proposed_deadband = _resolve_deadband_params(project_root=PROJECT_ROOT)
 
     runs = load_runs(runs_dir, limit=args.limit)
     cur, drifts = calc_current(runs)
-    sim, opened = simulate_candidate(cur, drifts)
+    sim, opened = simulate_candidate(cur, drifts, old_deadband=current_deadband, new_deadband=proposed_deadband)
     switch, detail = decide(cur, sim)
 
     out = {
@@ -172,12 +185,15 @@ def main() -> None:
             "deadband_blocks": sim.deadband_blocks,
             "conversion": round(sim.conversion, 4),
             "estimated_opened_from_deadband": int(opened),
+            "deadband_sideways": proposed_deadband,
         },
         "decision": {
             "switch_recommended": bool(switch),
             "reason": "meets_gate" if switch else "insufficient_evidence",
             **detail,
         },
+        "current_params": {"deadband_sideways": current_deadband},
+        "proposed_params": {"deadband_sideways": proposed_deadband},
         "note": "advisory_only_no_auto_apply",
     }
 

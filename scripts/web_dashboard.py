@@ -5160,6 +5160,12 @@ def api_shadow_test():
         runtime_paths = _resolve_dashboard_runtime_paths(config)
         import sys
         sys.path.insert(0, str(WORKSPACE))
+        rebalance_cfg = config.get('rebalance', {}) if isinstance(config, dict) else {}
+        try:
+            current_deadband = float(rebalance_cfg.get('deadband_sideways', 0.04) or 0.04)
+        except Exception:
+            current_deadband = 0.04
+        proposed_deadband = max(0.0, round(current_deadband - 0.01, 4))
         
         # 获取最近7天的运行数据用于对比
         runs_dir = runtime_paths.runs_dir
@@ -5185,7 +5191,7 @@ def api_shadow_test():
             'avg_deadband_skip': 0
         }
         
-        # 模拟：新参数效果（deadband从0.04->0.03的预估影响）
+        # 模拟：deadband_sideways 轻微下调后的预估影响
         # 实际实现需要重新跑历史数据，这里用启发式估算
         simulated_stats = {
             'rounds': 0,
@@ -5233,8 +5239,8 @@ def api_shadow_test():
                         drift = abs(float(rd.get('drift', 0)))
                         deadband_skips.append(drift)
                         
-                        # 模拟：如果deadband是0.03而不是0.04，有多少能成交
-                        if drift > 0.03:  # 新阈值下能通过
+                        # 模拟：如果 deadband 收紧到 proposed_deadband，有多少能成交
+                        if drift > proposed_deadband:
                             simulated_stats['estimated_improvement'] += 1
                             
             except Exception:
@@ -5272,11 +5278,11 @@ def api_shadow_test():
             'window_days': 7,
             'window_rounds': current_stats['rounds'],
             'current_params': {
-                'deadband_sideways': 0.04,
+                'deadband_sideways': current_deadband,
                 'description': '当前参数'
             },
             'proposed_params': {
-                'deadband_sideways': 0.03,
+                'deadband_sideways': proposed_deadband,
                 'description': '建议参数（更激进）'
             },
             'comparison': {
@@ -5309,11 +5315,15 @@ def api_shadow_test():
             'recommendation': {
                 'action': 'cautious_try' if simulated_stats['estimated_improvement'] > 5 else 'keep_current',
                 'reason': f"过去{current_stats['rounds']}轮中，约{simulated_stats['estimated_improvement']}笔额外交易可成交" if simulated_stats['estimated_improvement'] > 0 else "当前参数下成交率已合理",
-                'suggested_next_step': '将 deadband_sideways 从 0.04 调至 0.03，观察24小时' if simulated_stats['estimated_improvement'] > 5 else '保持当前参数'
+                'suggested_next_step': (
+                    f'将 deadband_sideways 从 {current_deadband:.2f} 调至 {proposed_deadband:.2f}，观察24小时'
+                    if simulated_stats['estimated_improvement'] > 5
+                    else '保持当前参数'
+                )
             },
             'matrix': [
-                {'name': 'A(当前)', 'params': {'deadband_sideways': 0.04, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
-                {'name': 'B1', 'params': {'deadband_sideways': 0.025}},
+                {'name': 'A(当前)', 'params': {'deadband_sideways': current_deadband, 'min_trade_notional_base': 2.0, 'pos_mult_sideways': 0.8}},
+                {'name': 'B1', 'params': {'deadband_sideways': proposed_deadband}},
                 {'name': 'B2', 'params': {'min_trade_notional_base': 2.5}},
                 {'name': 'B3', 'params': {'pos_mult_sideways': 0.7}},
             ],

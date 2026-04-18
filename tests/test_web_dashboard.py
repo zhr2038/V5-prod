@@ -1596,7 +1596,10 @@ def test_api_scores_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(
         module,
         "load_config",
-        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "rebalance": {"deadband_sideways": 0.07},
+        },
     )
 
     (root_run / "decision_audit.json").write_text(
@@ -1704,7 +1707,10 @@ def test_api_scores_falls_back_to_active_runtime_alpha_snapshot(monkeypatch, tmp
     monkeypatch.setattr(
         module,
         "load_config",
-        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "rebalance": {"deadband_sideways": 0.07},
+        },
     )
 
     failed_payload = json.dumps(
@@ -3606,7 +3612,10 @@ def test_ml_training_api_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(
         module,
         "load_config",
-        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "rebalance": {"deadband_sideways": 0.07},
+        },
     )
 
     def _raise_load_app_config(*args, **kwargs):
@@ -3715,7 +3724,10 @@ def test_ml_training_api_treats_legacy_default_ml_paths_as_runtime_paths(monkeyp
     monkeypatch.setattr(
         module,
         "load_config",
-        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "rebalance": {"deadband_sideways": 0.07},
+        },
     )
 
     class _Cfg:
@@ -3975,7 +3987,10 @@ def test_api_reflection_reports_uses_active_runtime_reflection_dir(monkeypatch, 
     monkeypatch.setattr(
         module,
         "load_config",
-        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "rebalance": {"deadband_sideways": 0.07},
+        },
     )
 
     response = client.get("/api/reflection_reports")
@@ -4153,7 +4168,10 @@ def test_api_ic_diagnostics_uses_active_runtime_reports_dir(monkeypatch, tmp_pat
     monkeypatch.setattr(
         module,
         "load_config",
-        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "rebalance": {"deadband_sideways": 0.07},
+        },
     )
 
     response = client.get("/api/ic_diagnostics")
@@ -5718,7 +5736,10 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(
         module,
         "load_config",
-        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "rebalance": {"deadband_sideways": 0.07},
+        },
     )
 
     (root_run / "decision_audit.json").write_text(
@@ -5791,8 +5812,8 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["ab_gate"]["window_runs"] == 1
     assert payload["ab_gate"]["decision"]["switch_recommended"] is True
     assert payload["ab_gate_status"] == "fresh"
-    assert payload["current_params"]["deadband_sideways"] == 0.04
-    assert payload["proposed_params"]["deadband_sideways"] == 0.03
+    assert payload["current_params"]["deadband_sideways"] == 0.07
+    assert payload["proposed_params"]["deadband_sideways"] == 0.06
     assert payload["matrix"][0]["name"] == "A(当前)"
     assert payload["matrix"][0]["params"]["deadband_sideways"] == payload["current_params"]["deadband_sideways"]
 
