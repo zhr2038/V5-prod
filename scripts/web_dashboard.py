@@ -44,6 +44,7 @@ from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
+    derive_runtime_auto_risk_guard_path,
     derive_runtime_auto_risk_eval_path,
     derive_runtime_cost_events_dir,
     derive_runtime_named_artifact_path,
@@ -154,6 +155,7 @@ class DashboardRuntimePaths:
     kill_switch_path: Path
     reconcile_status_path: Path
     runs_dir: Path
+    auto_risk_guard_path: Path
     auto_risk_eval_path: Path
     telemetry_db: Path
 
@@ -1848,6 +1850,7 @@ def _resolve_dashboard_runtime_paths(cfg: Optional[Dict[str, Any]] = None) -> Da
             'reports/reconcile_status.json',
         ),
         runs_dir=derive_runtime_runs_dir(orders_db),
+        auto_risk_guard_path=derive_runtime_auto_risk_guard_path(orders_db),
         auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
         telemetry_db=derive_runtime_named_artifact_path(orders_db, 'api_telemetry', '.sqlite').resolve(),
     )
@@ -5404,7 +5407,7 @@ def api_auto_risk_guard():
                 'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             })
 
-        guard = get_auto_risk_guard()
+        guard = get_auto_risk_guard(str(runtime_paths.auto_risk_guard_path))
         return jsonify({
             'current_level': guard.current_level,
             'config': guard.get_current_config(),
