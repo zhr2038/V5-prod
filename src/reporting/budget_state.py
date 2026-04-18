@@ -53,12 +53,24 @@ class BudgetState:
     small_trade_ratio_today: Optional[float] = None
     small_trade_notional_cutoff: Optional[float] = None
 
+    def _turnover_budget_is_legacy_absolute(self) -> bool:
+        if self.turnover_budget_per_day is None:
+            return False
+        try:
+            return float(self.turnover_budget_per_day) > 1.0
+        except Exception:
+            return False
+
     def turnover_used_usdt(self) -> float:
         return float(self.turnover_used)
 
     def turnover_budget_ratio(self) -> Optional[float]:
         if self.turnover_budget_per_day is None:
             return None
+        if self._turnover_budget_is_legacy_absolute():
+            if not self.avg_equity_est or float(self.avg_equity_est) <= 0:
+                return None
+            return float(self.turnover_budget_per_day) / float(self.avg_equity_est)
         return float(self.turnover_budget_per_day)
 
     def turnover_used_ratio(self) -> Optional[float]:
@@ -67,6 +79,10 @@ class BudgetState:
         return float(self.turnover_used_usdt()) / float(self.avg_equity_est)
 
     def turnover_budget_usdt(self) -> Optional[float]:
+        if self.turnover_budget_per_day is None:
+            return None
+        if self._turnover_budget_is_legacy_absolute():
+            return float(self.turnover_budget_per_day)
         budget_ratio = self.turnover_budget_ratio()
         if budget_ratio is None or not self.avg_equity_est or float(self.avg_equity_est) <= 0:
             return None

@@ -54,3 +54,19 @@ def test_cost_budget_can_exceed_independently_of_turnover_budget() -> None:
     assert st.cost_exceeded() is True
     assert st.exceeded() is True
     assert st.reason() == "exceeded_cost"
+
+
+def test_legacy_absolute_turnover_budget_remains_usdt_compatible() -> None:
+    st = BudgetState(
+        ymd_utc="20260418",
+        turnover_budget_per_day=1000.0,
+        cost_budget_bps_per_day=40.0,
+        turnover_used=160.0,
+        cost_used_usdt=0.0,
+        avg_equity_est=200.0,
+    )
+
+    assert st.turnover_budget_usdt() == 1000.0
+    assert st.turnover_budget_ratio() == 5.0
+    assert st.turnover_used_ratio() == 0.8
+    assert st.turnover_exceeded() is False
