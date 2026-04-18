@@ -100,8 +100,14 @@ def _resolve_ab_gate_output_path(reports_dir: Path) -> Path:
 def load_runs(runs_dir: Path, limit: int = 120):
     if not runs_dir.exists():
         return []
+    def _audit_mtime(run_dir: Path) -> float:
+        try:
+            return (run_dir / "decision_audit.json").stat().st_mtime
+        except OSError:
+            return run_dir.stat().st_mtime
+
     ds = [d for d in runs_dir.iterdir() if d.is_dir() and (d / "decision_audit.json").exists()]
-    ds.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    ds.sort(key=_audit_mtime, reverse=True)
     return ds[:limit]
 
 
