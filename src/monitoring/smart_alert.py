@@ -324,7 +324,8 @@ class SmartAlertEngine:
                     in_good_market = True
                 counts = data.get("counts", {}) or {}
                 selected = int(counts.get("selected", 0) or 0)
-                if selected > 0 and not self._audit_is_fully_explained_by_known_blockers(data):
+                exits = int(counts.get("orders_exit", 0) or 0)
+                if selected > 0 and exits == 0 and not self._audit_is_fully_explained_by_known_blockers(data):
                     had_unblocked_signal = True
 
             recent_buy_fills = self._count_recent_buy_fills(hours=6)

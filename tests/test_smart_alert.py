@@ -147,6 +147,25 @@ def test_check_no_buy_in_market_ignores_known_policy_blockers(tmp_path: Path) ->
     assert engine.check_no_buy_in_market() is None
 
 
+def test_check_no_buy_in_market_ignores_exit_only_rounds(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit: [
+        {
+            "regime": "TRENDING",
+            "counts": {
+                "selected": 2,
+                "orders_rebalance": 0,
+                "orders_exit": 1,
+            },
+            "router_decisions": [],
+        }
+    ]
+    engine._count_recent_buy_fills = lambda hours=6: 0
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    assert engine.check_no_buy_in_market() is None
+
+
 def test_check_no_buy_in_market_alerts_for_unblocked_signals(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
     engine._load_recent_run_audits = lambda limit: [
