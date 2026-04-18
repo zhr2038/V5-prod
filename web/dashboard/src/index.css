@@ -332,6 +332,14 @@ body {
   --lens-right: -12%;
   --lens-bottom: -16%;
   --lens-opacity: 0.02;
+  --surface-sheen:
+    linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.12) 0%,
+      transparent 16%,
+      transparent 84%,
+      rgba(255, 255, 255, 0.10) 100%
+    );
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -340,7 +348,11 @@ body {
   background: var(--surface-fill);
   backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate)) brightness(var(--surface-brightness));
   -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate)) brightness(var(--surface-brightness));
-  box-shadow: var(--surface-shadow);
+  box-shadow:
+    var(--surface-shadow),
+    inset 1px -1px 0 rgba(255, 255, 255, 0.08),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 0 1px rgba(0, 0, 0, 0.14);
   transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
 }
 
@@ -361,6 +373,7 @@ body {
   inset: 0;
   border-radius: inherit;
   background:
+    var(--surface-sheen),
     radial-gradient(120px 64px at var(--highlight-x) var(--highlight-y), rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.025) 32%, transparent 74%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012) 16%, transparent 34%),
     linear-gradient(132deg, rgba(255, 255, 255, 0.018), transparent 28%, rgba(255, 255, 255, 0.008) 56%, transparent 82%);
@@ -370,16 +383,20 @@ body {
 .material-surface::after,
 .glass-card::after,
 .glass-panel::after {
-  left: var(--lens-left);
-  right: var(--lens-right);
-  bottom: var(--lens-bottom);
-  width: 46%;
-  height: 54%;
-  border-radius: 50%;
+  inset: 7px;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   background:
-    radial-gradient(circle at 34% 32%, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012) 28%, var(--tone-lens) 46%, transparent 78%);
-  filter: blur(10px);
-  opacity: var(--lens-opacity);
+    linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.16) 0%,
+      transparent 18%,
+      transparent 82%,
+      rgba(255, 255, 255, 0.14) 100%
+    ),
+    radial-gradient(circle at 52% 82%, rgba(0, 0, 0, 0.08), transparent 54%);
+  filter: blur(2px);
+  opacity: 0.24;
 }
 
 .material-surface > *,
@@ -392,35 +409,37 @@ body {
 .surface-lift:hover {
   transform: translateY(-1px);
   border-color: var(--surface-border-strong);
-  box-shadow: var(--surface-shadow-hover);
+  box-shadow:
+    var(--surface-shadow-hover),
+    inset 1px -1px 0 rgba(255, 255, 255, 0.10),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 1px rgba(0, 0, 0, 0.16);
 }
 
 .material-clear,
 .glass-panel {
   --surface-fill:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.022) 18%, rgba(255, 255, 255, 0.008) 38%, rgba(255, 255, 255, 0.018) 100%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.072), rgba(255, 255, 255, 0.024) 18%, rgba(255, 255, 255, 0.008) 38%, rgba(255, 255, 255, 0.018) 100%),
     linear-gradient(165deg, var(--tone-fill), rgba(255, 255, 255, 0.008) 44%, rgba(19, 22, 29, 0.016) 100%);
-  --surface-blur: 12px;
-  --surface-saturate: 138%;
+  --surface-blur: 10px;
+  --surface-saturate: 142%;
   --surface-brightness: 1.02;
   --surface-shadow: 0 10px 24px rgba(8, 10, 16, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(255, 255, 255, 0.015);
   --surface-shadow-hover: 0 12px 26px rgba(8, 10, 16, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(255, 255, 255, 0.02);
-  --highlight-opacity: 0.10;
-  --lens-opacity: 0.015;
+  --highlight-opacity: 0.12;
 }
 
 .material-regular,
 .glass-card {
   --surface-fill:
-    linear-gradient(152deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.026) 16%, rgba(255, 255, 255, 0.010) 34%, rgba(255, 255, 255, 0.02) 100%),
+    linear-gradient(152deg, rgba(255, 255, 255, 0.082), rgba(255, 255, 255, 0.028) 16%, rgba(255, 255, 255, 0.010) 34%, rgba(255, 255, 255, 0.02) 100%),
     linear-gradient(168deg, var(--tone-fill), rgba(255, 255, 255, 0.008) 48%, rgba(21, 24, 32, 0.032) 100%);
-  --surface-blur: 14px;
-  --surface-saturate: 132%;
+  --surface-blur: 11px;
+  --surface-saturate: 136%;
   --surface-brightness: 1.02;
   --surface-shadow: 0 14px 34px rgba(8, 10, 16, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(255, 255, 255, 0.018);
   --surface-shadow-hover: 0 16px 38px rgba(8, 10, 16, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(255, 255, 255, 0.02);
-  --highlight-opacity: 0.11;
-  --lens-opacity: 0.02;
+  --highlight-opacity: 0.105;
 }
 
 .material-reading {
@@ -475,6 +494,10 @@ body {
   gap: 8px;
   padding: 7px;
   border-radius: 999px;
+  box-shadow:
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.12),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
+    inset 0 0 1px rgba(0, 0, 0, 0.12);
 }
 
 .control-pill {
@@ -486,6 +509,10 @@ body {
   align-items: center;
   justify-content: center;
   white-space: nowrap;
+  box-shadow:
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.12),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.09),
+    inset 0 0 1px rgba(0, 0, 0, 0.10);
 }
 
 .control-pill[data-emphasis="soft"] {
@@ -499,6 +526,10 @@ body {
 .metric-pill {
   border-radius: 26px;
   min-height: 92px;
+  box-shadow:
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.10),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
+    inset 0 0 1px rgba(0, 0, 0, 0.10);
 }
 
 .ml-progress-track {
@@ -536,6 +567,9 @@ body {
   --highlight-opacity: 0.05;
   --lens-opacity: 0;
   --surface-border: rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 1px -1px 0 rgba(255, 255, 255, 0.08),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .list-row:hover {
