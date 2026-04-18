@@ -175,6 +175,13 @@ class SmartAlertEngine:
         if not runs_dir.exists():
             return []
 
+        def _audit_mtime(run_dir: Path) -> float:
+            audit_file = run_dir / "decision_audit.json"
+            try:
+                return audit_file.stat().st_mtime
+            except Exception:
+                return 0.0
+
         cutoff_ts = None
         if max_age_hours is not None:
             cutoff_ts = (datetime.now() - timedelta(hours=float(max_age_hours))).timestamp()
@@ -183,9 +190,9 @@ class SmartAlertEngine:
             run_dir
             for run_dir in runs_dir.iterdir()
             if run_dir.is_dir() and (run_dir / "decision_audit.json").exists()
-            and (cutoff_ts is None or run_dir.stat().st_mtime >= cutoff_ts)
+            and (cutoff_ts is None or _audit_mtime(run_dir) >= cutoff_ts)
         ]
-        run_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        run_dirs.sort(key=_audit_mtime, reverse=True)
 
         audits: list[dict[str, Any]] = []
         for run_dir in run_dirs[:limit]:

@@ -71,11 +71,11 @@ def test_load_recent_run_audits_ignores_stale_runs(tmp_path: Path) -> None:
     now = datetime.now().timestamp()
     fresh_ts = now - 1800
     stale_ts = (datetime.now() - timedelta(hours=8)).timestamp()
-    fresh.touch()
-    stale.touch()
     import os
-    os.utime(fresh, (fresh_ts, fresh_ts))
-    os.utime(stale, (stale_ts, stale_ts))
+    os.utime(fresh / "decision_audit.json", (fresh_ts, fresh_ts))
+    os.utime(stale / "decision_audit.json", (stale_ts, stale_ts))
+    os.utime(fresh, (stale_ts, stale_ts))
+    os.utime(stale, (fresh_ts + 500, fresh_ts + 500))
 
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
     audits = engine._load_recent_run_audits(limit=5, max_age_hours=6)
