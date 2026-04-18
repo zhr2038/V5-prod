@@ -98,13 +98,42 @@ def test_check_signal_no_trade_ignores_known_policy_blockers(tmp_path: Path) -> 
     assert engine.check_signal_no_trade() is None
 
 
+def test_check_signal_no_trade_alerts_when_blockers_only_cover_subset(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit: [
+        {
+            "counts": {
+                "selected": 2,
+                "orders_rebalance": 0,
+                "orders_exit": 0,
+                "negative_expectancy_open_block": 1,
+            },
+            "router_decisions": [],
+        },
+        {
+            "counts": {
+                "selected": 2,
+                "orders_rebalance": 0,
+                "orders_exit": 0,
+            },
+            "router_decisions": [{"reason": "deadband", "symbol": "BTC/USDT"}],
+        },
+    ]
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    alert = engine.check_signal_no_trade()
+
+    assert alert is not None
+    assert alert["type"] == "signal_no_trade"
+
+
 def test_check_no_buy_in_market_ignores_known_policy_blockers(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
     engine._load_recent_run_audits = lambda limit: [
         {
             "regime": "TRENDING",
             "counts": {
-                "selected": 2,
+                "selected": 1,
                 "orders_rebalance": 0,
                 "orders_exit": 0,
                 "negative_expectancy_cooldown": 1,
@@ -152,6 +181,29 @@ def test_check_no_buy_in_market_does_not_treat_score_penalty_as_blocker(tmp_path
                 "negative_expectancy_score_penalty": 2,
             },
             "router_decisions": [],
+        }
+    ]
+    engine._count_recent_buy_fills = lambda hours=6: 0
+    engine._should_alert = lambda alert_type, cooldown_minutes=60: True
+
+    alert = engine.check_no_buy_in_market()
+
+    assert alert is not None
+    assert alert["type"] == "no_buy_in_market"
+
+
+def test_check_no_buy_in_market_alerts_when_blockers_only_cover_subset(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    engine._load_recent_run_audits = lambda limit: [
+        {
+            "regime": "TRENDING",
+            "counts": {
+                "selected": 3,
+                "orders_rebalance": 0,
+                "orders_exit": 0,
+                "negative_expectancy_cooldown": 1,
+            },
+            "router_decisions": [{"reason": "deadband", "symbol": "BTC/USDT"}],
         }
     ]
     engine._count_recent_buy_fills = lambda hours=6: 0

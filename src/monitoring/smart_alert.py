@@ -191,16 +191,29 @@ class SmartAlertEngine:
                 continue
         return audits
 
-    def _audit_has_known_trade_blockers(self, audit: dict[str, Any]) -> bool:
+    def _known_trade_blocked_symbol_count(self, audit: dict[str, Any]) -> int:
         counts = audit.get("counts", {}) or {}
-        for key in NEGATIVE_EXPECTANCY_HARD_BLOCK_COUNT_KEYS:
-            if int(counts.get(key, 0) or 0) > 0:
-                return True
+        blocked = sum(int(counts.get(key, 0) or 0) for key in NEGATIVE_EXPECTANCY_HARD_BLOCK_COUNT_KEYS)
 
+        route_symbols = set()
+        route_count = 0
         for route in audit.get("router_decisions", []) or []:
-            if str(route.get("reason") or "").strip() in KNOWN_NO_TRADE_BLOCK_REASONS:
-                return True
-        return False
+            if str(route.get("reason") or "").strip() not in KNOWN_NO_TRADE_BLOCK_REASONS:
+                continue
+            symbol = str(route.get("symbol") or "").strip()
+            if symbol:
+                route_symbols.add(symbol)
+            else:
+                route_count += 1
+
+        return max(blocked, len(route_symbols) + route_count)
+
+    def _audit_is_fully_explained_by_known_blockers(self, audit: dict[str, Any]) -> bool:
+        counts = audit.get("counts", {}) or {}
+        selected = int(counts.get("selected", 0) or 0)
+        if selected <= 0:
+            return False
+        return self._known_trade_blocked_symbol_count(audit) >= selected
 
     def _count_recent_buy_fills_from_fill_store(self, cutoff_ts: int) -> int | None:
         fills_db = self.paths.fills_db
@@ -281,7 +294,7 @@ class SmartAlertEngine:
                 selected = int(counts.get("selected", 0) or 0)
                 rebalance = int(counts.get("orders_rebalance", 0) or 0)
                 exits = int(counts.get("orders_exit", 0) or 0)
-                if selected > 0 and (rebalance + exits) == 0 and not self._audit_has_known_trade_blockers(data):
+                if selected > 0 and (rebalance + exits) == 0 and not self._audit_is_fully_explained_by_known_blockers(data):
                     consecutive_no_trade += 1
 
             if consecutive_no_trade >= 2 and self._should_alert("signal_no_trade", cooldown_minutes=120):
@@ -311,7 +324,7 @@ class SmartAlertEngine:
                     in_good_market = True
                 counts = data.get("counts", {}) or {}
                 selected = int(counts.get("selected", 0) or 0)
-                if selected > 0 and not self._audit_has_known_trade_blockers(data):
+                if selected > 0 and not self._audit_is_fully_explained_by_known_blockers(data):
                     had_unblocked_signal = True
 
             recent_buy_fills = self._count_recent_buy_fills(hours=6)
