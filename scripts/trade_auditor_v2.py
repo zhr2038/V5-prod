@@ -228,7 +228,7 @@ class SmartTradeAuditor:
                     for d in runs_dir.iterdir()
                     if d.is_dir() and (d / "decision_audit.json").exists()
                 ]
-                run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                run_dirs.sort(key=lambda p: (p / "decision_audit.json").stat().st_mtime, reverse=True)
                 if run_dirs:
                     return json.loads((run_dirs[0] / "decision_audit.json").read_text(encoding="utf-8"))
         except Exception:

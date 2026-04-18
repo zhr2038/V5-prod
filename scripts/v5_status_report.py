@@ -87,7 +87,7 @@ def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
     if not run_dirs:
         return None
 
-    latest_dir = max(run_dirs, key=lambda path: path.stat().st_mtime)
+    latest_dir = max(run_dirs, key=lambda path: (path / "decision_audit.json").stat().st_mtime)
     try:
         return json.loads((latest_dir / "decision_audit.json").read_text(encoding="utf-8"))
     except Exception:

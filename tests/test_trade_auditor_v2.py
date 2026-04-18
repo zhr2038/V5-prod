@@ -81,3 +81,26 @@ def test_generate_report_includes_negative_expectancy_counts(tmp_path: Path) -> 
     assert report["summary"]["negative_expectancy_cooldown_count"] == 3
     assert report["summary"]["negative_expectancy_open_block_count"] == 4
     assert report["summary"]["negative_expectancy_fast_fail_open_block_count"] == 5
+
+
+def test_load_latest_decision_audit_prefers_audit_file_mtime(tmp_path: Path) -> None:
+    stale_run = tmp_path / "reports" / "runs" / "stale"
+    fresh_run = tmp_path / "reports" / "runs" / "fresh"
+    stale_run.mkdir(parents=True, exist_ok=True)
+    fresh_run.mkdir(parents=True, exist_ok=True)
+    stale_audit = stale_run / "decision_audit.json"
+    fresh_audit = fresh_run / "decision_audit.json"
+    stale_audit.write_text(json.dumps({"run_id": "stale"}), encoding="utf-8")
+    fresh_audit.write_text(json.dumps({"run_id": "fresh"}), encoding="utf-8")
+
+    import os
+    stale_audit_ts = 1_710_000_000
+    fresh_audit_ts = 1_710_000_100
+    os.utime(stale_audit, (stale_audit_ts, stale_audit_ts))
+    os.utime(fresh_audit, (fresh_audit_ts, fresh_audit_ts))
+    os.utime(stale_run, (fresh_audit_ts + 500, fresh_audit_ts + 500))
+    os.utime(fresh_run, (stale_audit_ts, stale_audit_ts))
+
+    auditor = trade_auditor_v2.SmartTradeAuditor(workspace=tmp_path)
+
+    assert auditor._load_latest_decision_audit()["run_id"] == "fresh"

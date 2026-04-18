@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import scripts.v5_status_report as status_report
@@ -140,3 +142,30 @@ def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> Non
     assert "- negative_expectancy_cooldown: 5" in report
     assert "- negative_expectancy_open_block: 6" in report
     assert "- negative_expectancy_fast_fail_open_block: 7" in report
+
+
+def test_get_latest_run_data_prefers_decision_audit_mtime(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    stale_run = runs_dir / "stale"
+    fresh_run = runs_dir / "fresh"
+    stale_run.mkdir(parents=True, exist_ok=True)
+    fresh_run.mkdir(parents=True, exist_ok=True)
+
+    stale_audit = stale_run / "decision_audit.json"
+    fresh_audit = fresh_run / "decision_audit.json"
+    stale_audit.write_text(json.dumps({"run_id": "stale"}), encoding="utf-8")
+    fresh_audit.write_text(json.dumps({"run_id": "fresh"}), encoding="utf-8")
+
+    stale_audit_ts = 1_710_000_000
+    fresh_audit_ts = 1_710_000_100
+    os.utime(stale_audit, (stale_audit_ts, stale_audit_ts))
+    os.utime(fresh_audit, (fresh_audit_ts, fresh_audit_ts))
+    os.utime(stale_run, (fresh_audit_ts + 500, fresh_audit_ts + 500))
+    os.utime(fresh_run, (stale_audit_ts, stale_audit_ts))
+
+    cfg = {"execution": {"order_store_path": str((reports_dir / "orders.sqlite").resolve())}}
+    data = status_report.get_latest_run_data(cfg)
+
+    assert data is not None
+    assert data["run_id"] == "fresh"
