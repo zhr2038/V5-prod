@@ -91,15 +91,21 @@ def _risk_state_epoch(payload: object, *, primary_keys: tuple[str, ...]) -> floa
 
 
 def _load_active_config() -> dict:
+    path = _resolve_active_config_path()
+    if not path.exists():
+        raise FileNotFoundError(f"runtime config not found: {path}")
     try:
         import yaml
 
-        path = _resolve_active_config_path()
-        if path.exists():
-            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        pass
-    return {}
+        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {path}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {path}")
+    execution_cfg = payload.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {path}")
+    return payload
 
 
 def _resolve_runtime_path(raw_path: object, default_rel_path: str) -> Path:

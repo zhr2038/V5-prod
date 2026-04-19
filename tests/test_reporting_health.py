@@ -20,6 +20,22 @@ def test_resolve_active_config_path_uses_runtime_config_helper(monkeypatch, tmp_
     assert path == expected
 
 
+def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    expected = (tmp_path / "configs" / "runtime_live.yaml").resolve()
+    monkeypatch.setattr(
+        reporting_health,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(expected),
+    )
+
+    try:
+        reporting_health._load_active_config()
+    except FileNotFoundError as exc:
+        assert str(expected) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
+
+
 def test_health_check_falls_back_to_runtime_guard_path_when_eval_missing(monkeypatch, tmp_path: Path) -> None:
     app = Flask(__name__)
     app.register_blueprint(reporting_health.health_bp)

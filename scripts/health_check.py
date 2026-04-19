@@ -22,7 +22,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_env_path, resolve_runtime_path
+from configs.runtime_config import (
+    load_runtime_config,
+    resolve_runtime_config_path,
+    resolve_runtime_env_path,
+    resolve_runtime_path,
+)
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
@@ -80,50 +85,48 @@ def load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
+def _load_active_runtime_config() -> dict[str, Any]:
+    cfg = load_runtime_config(project_root=WORKSPACE)
+    config_path = Path(resolve_runtime_config_path(project_root=WORKSPACE)).resolve()
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
+    return cfg
+
+
 def _resolve_health_database_paths() -> list[tuple[Path, str]]:
-    try:
-        cfg = load_runtime_config(project_root=WORKSPACE)
-        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-        orders_db = Path(
-            resolve_runtime_path(
-                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                default="reports/orders.sqlite",
-                project_root=WORKSPACE,
-            )
-        ).resolve()
-        return [
-            (orders_db, "orders"),
-            (derive_position_store_path(orders_db).resolve(), "positions"),
-            (derive_fill_store_path(orders_db).resolve(), "fills"),
-        ]
-    except Exception:
-        return [
-            (REPORTS_DIR / "orders.sqlite", "orders"),
-            (REPORTS_DIR / "positions.sqlite", "positions"),
-            (REPORTS_DIR / "fills.sqlite", "fills"),
-        ]
+    cfg = _load_active_runtime_config()
+    execution_cfg = cfg.get("execution", {})
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=WORKSPACE,
+        )
+    ).resolve()
+    return [
+        (orders_db, "orders"),
+        (derive_position_store_path(orders_db).resolve(), "positions"),
+        (derive_fill_store_path(orders_db).resolve(), "fills"),
+    ]
 
 
 def _resolve_health_risk_paths() -> tuple[Path, Path]:
-    try:
-        cfg = load_runtime_config(project_root=WORKSPACE)
-        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-        orders_db = Path(
-            resolve_runtime_path(
-                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                default="reports/orders.sqlite",
-                project_root=WORKSPACE,
-            )
-        ).resolve()
-        return (
-            derive_runtime_auto_risk_eval_path(orders_db).resolve(),
-            derive_runtime_auto_risk_guard_path(orders_db).resolve(),
+    cfg = _load_active_runtime_config()
+    execution_cfg = cfg.get("execution", {})
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=WORKSPACE,
         )
-    except Exception:
-        return (
-            (REPORTS_DIR / "auto_risk_eval.json").resolve(),
-            (REPORTS_DIR / "auto_risk_guard.json").resolve(),
-        )
+    ).resolve()
+    return (
+        derive_runtime_auto_risk_eval_path(orders_db).resolve(),
+        derive_runtime_auto_risk_guard_path(orders_db).resolve(),
+    )
 
 
 def _load_json_safe(path: Path) -> dict[str, Any]:
@@ -168,19 +171,16 @@ def _risk_state_epoch(payload: object, *, primary_keys: tuple[str, ...]) -> floa
 
 
 def _resolve_health_output_path() -> Path:
-    try:
-        cfg = load_runtime_config(project_root=WORKSPACE)
-        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-        orders_db = Path(
-            resolve_runtime_path(
-                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                default="reports/orders.sqlite",
-                project_root=WORKSPACE,
-            )
-        ).resolve()
-        return derive_runtime_named_json_path(orders_db, "health_status").resolve()
-    except Exception:
-        return HEALTH_FILE.resolve()
+    cfg = _load_active_runtime_config()
+    execution_cfg = cfg.get("execution", {})
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=WORKSPACE,
+        )
+    ).resolve()
+    return derive_runtime_named_json_path(orders_db, "health_status").resolve()
 
 
 def _resolve_health_env_path() -> Path:

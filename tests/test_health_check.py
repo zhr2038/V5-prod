@@ -64,6 +64,23 @@ def test_resolve_health_env_path_uses_runtime_env_helper(monkeypatch, tmp_path: 
     assert path == expected
 
 
+def test_load_active_runtime_config_fails_fast_when_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(health_check, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(health_check, "load_runtime_config", lambda project_root=None: {})
+    monkeypatch.setattr(
+        health_check,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str((tmp_path / "configs" / "live_prod.yaml").resolve()),
+    )
+
+    try:
+        health_check._load_active_runtime_config()
+    except ValueError as exc:
+        assert "live_prod.yaml" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_resolve_live_timer_unit_name_ignores_retired_live_20u(monkeypatch) -> None:
     monkeypatch.setattr(health_check.shutil, "which", lambda _: "/bin/systemctl")
     monkeypatch.setattr(
