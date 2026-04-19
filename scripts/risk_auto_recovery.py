@@ -180,6 +180,23 @@ class RiskAutoRecovery:
             return 0
         
         return sum(drawdowns) / len(drawdowns)
+
+    @staticmethod
+    def _parse_state_datetime(raw_value: str | None) -> datetime | None:
+        try:
+            text = str(raw_value or "").strip()
+            if not text:
+                return None
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = parsed.astimezone(timezone.utc)
+            return parsed
+        except Exception:
+            return None
     
     def check_recovery_conditions(self, current_level):
         """检查是否满足降级条件"""
@@ -198,8 +215,10 @@ class RiskAutoRecovery:
     def time_in_current_level(self, state):
         """计算在当前档位停留的时间"""
         try:
-            since = datetime.fromisoformat(state.get('since', datetime.now().isoformat()))
-            return (datetime.now() - since).total_seconds() / 3600  # 小时
+            since = self._parse_state_datetime(state.get('since'))
+            if since is None:
+                raise ValueError("missing since")
+            return (datetime.now(timezone.utc) - since).total_seconds() / 3600  # 小时
         except:
             return 999  # 如果解析失败，假设已停留很久
     
@@ -207,8 +226,8 @@ class RiskAutoRecovery:
         """评估是否执行自动恢复"""
         # 检查是否被手动暂停
         if self.config.get('manual_override_until'):
-            until = datetime.fromisoformat(self.config['manual_override_until'])
-            if datetime.now() < until:
+            until = self._parse_state_datetime(self.config['manual_override_until'])
+            if until is not None and datetime.now(timezone.utc) < until:
                 return {'action': 'paused', 'reason': f'手动暂停至 {until}'}
         
         # 检查是否启用

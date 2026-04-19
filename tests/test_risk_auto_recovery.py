@@ -97,3 +97,18 @@ def test_get_drawdown_history_accepts_current_dd_field_from_runtime_equity(monke
 
     assert len(points) == 1
     assert points[0]["drawdown"] == 0.31
+
+
+def test_time_in_current_level_accepts_zulu_timestamp(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path
+    monkeypatch.setattr(
+        risk_auto_recovery,
+        "load_runtime_config",
+        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
+
+    hours = manager.time_in_current_level({"since": "2026-04-19T10:00:00Z"})
+
+    assert hours != 999
