@@ -4,7 +4,25 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import scripts.trade_auditor_v3 as auditor_mod
+
+
+@pytest.fixture(autouse=True)
+def _runtime_config(monkeypatch, tmp_path: Path) -> Path:
+    config_path = tmp_path / "configs" / "live_prod.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        "execution:\n  order_store_path: reports/orders.sqlite\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        auditor_mod,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(config_path),
+    )
+    return config_path
 
 
 def test_get_okx_balance_prefers_total_equity_and_eq_usd(monkeypatch, tmp_path: Path) -> None:
@@ -106,6 +124,8 @@ def test_trade_auditor_v3_main_passes_cli_paths(monkeypatch, tmp_path: Path) -> 
 def test_build_paths_uses_runtime_entry_helpers(monkeypatch, tmp_path: Path) -> None:
     expected_cfg = (tmp_path / "configs" / "auditor.yaml").resolve()
     expected_env = (tmp_path / "configs" / "auditor.env").resolve()
+    expected_cfg.parent.mkdir(parents=True, exist_ok=True)
+    expected_cfg.write_text("execution:\n  order_store_path: reports/orders.sqlite\n", encoding="utf-8")
 
     monkeypatch.setattr(
         auditor_mod,
@@ -121,6 +141,22 @@ def test_build_paths_uses_runtime_entry_helpers(monkeypatch, tmp_path: Path) -> 
     paths = auditor_mod.build_paths(tmp_path, config_path="configs/x.yaml", env_path="configs/x.env")
 
     assert paths.env_path == expected_env
+
+
+def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(
+        auditor_mod,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(missing),
+    )
+
+    try:
+        auditor_mod._load_active_config(project_root=tmp_path)
+    except FileNotFoundError as exc:
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
 
 
 def test_trade_auditor_v3_report_includes_negative_expectancy_counts(tmp_path: Path) -> None:
