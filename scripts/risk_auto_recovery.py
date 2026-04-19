@@ -14,7 +14,7 @@ import sqlite3
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -25,6 +25,7 @@ from src.execution.fill_store import (
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_json_path,
     derive_runtime_reports_dir,
+    derive_runtime_runs_dir,
 )
 from src.risk.auto_risk_guard import AutoRiskGuard
 
@@ -56,6 +57,7 @@ class RiskAutoRecovery:
             )
         ).resolve()
         self.reports_dir = derive_runtime_reports_dir(order_store_path).resolve()
+        self.runs_dir = derive_runtime_runs_dir(order_store_path).resolve()
         self.risk_state_file = derive_runtime_auto_risk_guard_path(order_store_path).resolve()
         self.config_file = derive_runtime_named_json_path(order_store_path, 'risk_recovery_config').resolve()
         self.config = self.load_config()
@@ -117,30 +119,50 @@ class RiskAutoRecovery:
     def get_drawdown_history(self, hours=24):
         """获取回撤历史"""
         try:
-            # 从equity曲线计算回撤
-            equity_file = self.reports_dir / 'equity_history.jsonl'
-            if not equity_file.exists():
-                return []
-            
             points = []
-            cutoff = datetime.now() - timedelta(hours=hours)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+            equity_files = []
+            legacy_equity_file = self.reports_dir / 'equity_history.jsonl'
+            if legacy_equity_file.exists():
+                equity_files.append(legacy_equity_file)
+            if self.runs_dir.exists():
+                equity_files.extend(sorted(run_dir / 'equity.jsonl' for run_dir in self.runs_dir.iterdir() if run_dir.is_dir()))
+
+            if not equity_files:
+                return []
+
+            for equity_file in equity_files:
+                try:
+                    with open(equity_file) as f:
+                        for line in f:
+                            try:
+                                data = json.loads(line)
+                                raw_ts = str(data.get('ts', '') or '').strip()
+                                if not raw_ts:
+                                    continue
+                                ts = datetime.fromisoformat(raw_ts.replace('Z', '+00:00'))
+                                if ts.tzinfo is None:
+                                    ts = ts.replace(tzinfo=timezone.utc)
+                                else:
+                                    ts = ts.astimezone(timezone.utc)
+                                if ts > cutoff:
+                                    points.append({
+                                        'ts': ts,
+                                        'equity': data.get('equity', 0),
+                                        'peak': data.get('peak', 0),
+                                        'drawdown': data.get('drawdown', 0)
+                                    })
+                            except:
+                                continue
+                except:
+                    continue
             
-            with open(equity_file) as f:
-                for line in f:
-                    try:
-                        data = json.loads(line)
-                        ts = datetime.fromisoformat(data.get('ts', '').replace('Z', '+00:00'))
-                        if ts > cutoff:
-                            points.append({
-                                'ts': ts,
-                                'equity': data.get('equity', 0),
-                                'peak': data.get('peak', 0),
-                                'drawdown': data.get('drawdown', 0)
-                            })
-                    except:
-                        continue
-            
-            return points
+            points.sort(key=lambda item: item['ts'])
+            dedup = {}
+            for point in points:
+                dedup[point['ts'].isoformat()] = point
+            return list(dedup.values())
         except:
             return []
     

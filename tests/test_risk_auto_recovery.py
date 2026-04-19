@@ -45,3 +45,32 @@ def test_execute_recovery_writes_guard_schema_compatible_state(monkeypatch, tmp_
 
     guard = AutoRiskGuard(state_path=manager.risk_state_file)
     assert guard.current_level == "DEFENSE"
+
+
+def test_get_drawdown_history_reads_runtime_runs_equity_jsonl(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path
+    runtime_runs_dir = workspace / "reports" / "shadow_runtime" / "runs" / "20260419_1300"
+    runtime_runs_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        risk_auto_recovery,
+        "load_runtime_config",
+        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
+    (runtime_runs_dir / "equity.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"ts": "2026-04-19T13:00:00Z", "equity": 100.0, "drawdown": 0.22}),
+                json.dumps({"ts": "2026-04-19T14:00:00Z", "equity": 105.0, "drawdown": 0.12}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    points = manager.get_drawdown_history(hours=24)
+
+    assert len(points) == 2
+    assert [point["drawdown"] for point in points] == [0.22, 0.12]
