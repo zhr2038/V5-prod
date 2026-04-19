@@ -293,6 +293,8 @@ def health_check():
             "level": level,
             "drawdown": risk.get("metrics", {}).get("dd_pct", risk.get("metrics", {}).get("last_dd_pct", 0)),
         }
+        if level == "UNKNOWN":
+            checks["status"] = _merge_health_status(checks["status"], "degraded")
     except Exception as exc:
         checks["checks"]["risk_guard"] = {"status": "error", "error": str(exc)}
 

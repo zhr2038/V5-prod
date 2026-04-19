@@ -99,7 +99,8 @@ def test_health_check_marks_unknown_risk_guard_as_warning(monkeypatch, tmp_path:
     client = app.test_client()
     response = client.get("/health")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
     payload = response.get_json()
+    assert payload["status"] == "degraded"
     assert payload["checks"]["risk_guard"]["status"] == "warning"
     assert payload["checks"]["risk_guard"]["level"] == "UNKNOWN"
