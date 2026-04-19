@@ -4816,6 +4816,44 @@ def test_health_api_marks_warning_when_database_probe_errors(monkeypatch, tmp_pa
     )
 
 
+def test_health_api_promotes_database_warning_even_when_other_checks_are_healthy(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "orders.sqlite").mkdir()
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+    monkeypatch.setattr(module, "_dashboard_live_account_enabled", lambda: True)
+    monkeypatch.setattr(module, "_load_workspace_exchange_creds", lambda: ("k", "s", "p"))
+    monkeypatch.setattr(module, "_load_okx_account_balance", lambda *_args: {"code": "0", "data": []})
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "warning"
+    assert payload["warning_count"] >= 1
+    assert any(
+        check.get("name") == "数据库"
+        and check.get("status") == "warning"
+        and "unable to open database file" in str(check.get("detail", ""))
+        for check in payload["checks"]
+    )
+    assert any(check.get("name") == "OKX API" and check.get("status") == "healthy" for check in payload["checks"])
+
+
 def test_health_api_uses_active_runtime_orders_db(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

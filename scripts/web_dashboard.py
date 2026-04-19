@@ -6255,6 +6255,11 @@ def api_health():
         
         warning_count = sum(1 for item in checks if item.get('status') == 'warning')
         critical_count = sum(1 for item in checks if item.get('status') == 'critical')
+        if overall_status == 'healthy':
+            if critical_count > 0:
+                overall_status = 'critical'
+            elif warning_count > 0:
+                overall_status = 'warning'
         checked_at = datetime.now()
         return jsonify({
             'status': overall_status,
