@@ -38,6 +38,22 @@ def test_resolve_deadband_params_uses_runtime_config(monkeypatch, tmp_path: Path
     assert proposed_deadband == 0.06
 
 
+def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    missing = tmp_path / "configs" / "missing.yaml"
+    monkeypatch.setattr(
+        ab_decision_gate,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(missing),
+    )
+
+    try:
+        ab_decision_gate._load_active_config(project_root=tmp_path)
+    except FileNotFoundError as exc:
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
+
+
 def test_load_runs_prefers_decision_audit_file_mtime(tmp_path: Path) -> None:
     runs_dir = tmp_path / "runs"
     stale_run = runs_dir / "stale"
