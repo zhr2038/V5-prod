@@ -378,6 +378,7 @@ def test_status_api_derives_dry_run_from_live_mode_when_flag_missing(monkeypatch
         kill_switch_path=Path("/tmp/reports/kill_switch.json"),
         reconcile_status_path=Path("/tmp/reports/reconcile_status.json"),
         runs_dir=Path("/tmp/reports/runs"),
+        auto_risk_guard_path=Path("/tmp/reports/auto_risk_guard.json"),
         auto_risk_eval_path=Path("/tmp/reports/auto_risk_eval.json"),
         telemetry_db=Path("/tmp/reports/api_telemetry.sqlite"),
     ))
@@ -415,6 +416,7 @@ def test_status_api_derives_live_mode_from_legacy_dry_run_flag(monkeypatch):
         kill_switch_path=Path("/tmp/reports/kill_switch.json"),
         reconcile_status_path=Path("/tmp/reports/reconcile_status.json"),
         runs_dir=Path("/tmp/reports/runs"),
+        auto_risk_guard_path=Path("/tmp/reports/auto_risk_guard.json"),
         auto_risk_eval_path=Path("/tmp/reports/auto_risk_eval.json"),
         telemetry_db=Path("/tmp/reports/api_telemetry.sqlite"),
     ))
@@ -449,6 +451,7 @@ def test_status_api_treats_string_false_legacy_dry_run_as_live(monkeypatch):
         kill_switch_path=Path("/tmp/reports/kill_switch.json"),
         reconcile_status_path=Path("/tmp/reports/reconcile_status.json"),
         runs_dir=Path("/tmp/reports/runs"),
+        auto_risk_guard_path=Path("/tmp/reports/auto_risk_guard.json"),
         auto_risk_eval_path=Path("/tmp/reports/auto_risk_eval.json"),
         telemetry_db=Path("/tmp/reports/api_telemetry.sqlite"),
     ))
