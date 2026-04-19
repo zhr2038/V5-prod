@@ -41,3 +41,18 @@ def test_alert_manager_uses_suffixed_runtime_state_file(monkeypatch, tmp_path: P
     manager = alert_manager.AlertManager(workspace=tmp_path)
 
     assert manager.alert_state_file == (tmp_path / "reports" / "alert_state_accelerated.json").resolve()
+
+
+def test_alert_manager_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        alert_manager,
+        "load_runtime_config",
+        lambda project_root=None: {},
+    )
+
+    try:
+        alert_manager.AlertManager(workspace=tmp_path)
+    except ValueError as exc:
+        assert "live_prod.yaml" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")

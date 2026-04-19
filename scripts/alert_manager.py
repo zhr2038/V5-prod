@@ -44,19 +44,20 @@ class AlertManager:
         self.state = self.load_state()
 
     def _resolve_alert_state_file(self) -> Path:
-        try:
-            cfg = load_runtime_config(project_root=self.workspace)
-            execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-            orders_db = Path(
-                resolve_runtime_path(
-                    execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                    default="reports/orders.sqlite",
-                    project_root=self.workspace,
-                )
-            ).resolve()
-            return derive_runtime_named_json_path(orders_db, "alert_state").resolve()
-        except Exception:
-            return (self.reports_dir / "alert_state.json").resolve()
+        cfg = load_runtime_config(project_root=self.workspace)
+        if not isinstance(cfg, dict) or not cfg:
+            raise ValueError(f"runtime config is empty or invalid: {self.workspace / 'configs' / 'live_prod.yaml'}")
+        execution_cfg = cfg.get("execution")
+        if not isinstance(execution_cfg, dict):
+            raise ValueError(f"runtime config missing execution section: {self.workspace / 'configs' / 'live_prod.yaml'}")
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path"),
+                default="reports/orders.sqlite",
+                project_root=self.workspace,
+            )
+        ).resolve()
+        return derive_runtime_named_json_path(orders_db, "alert_state").resolve()
     
     def load_state(self):
         """加载告警状态"""
