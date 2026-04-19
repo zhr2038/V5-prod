@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import scripts.universe_guard as universe_guard
 
 
@@ -35,3 +37,11 @@ def test_check_universe_passes_clean_universe(tmp_path: Path, capsys) -> None:
     output = capsys.readouterr().out
     assert ok is True
     assert "币池检查通过" in output
+
+
+def test_build_paths_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(universe_guard, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(universe_guard, "load_runtime_config", lambda project_root=None: {})
+
+    with pytest.raises(ValueError, match="live_prod.yaml"):
+        universe_guard.build_paths(tmp_path)

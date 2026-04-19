@@ -25,30 +25,30 @@ class GuardPaths:
 
 def build_paths(workspace: Path | None = None) -> GuardPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    try:
-        cfg = load_runtime_config(project_root=root)
-        universe_cfg = cfg.get("universe", {}) if isinstance(cfg, dict) else {}
-        universe_path = Path(
-            resolve_runtime_path(
-                universe_cfg.get("cache_path") if isinstance(universe_cfg, dict) else None,
-                default="reports/universe_cache.json",
-                project_root=root,
-            )
-        ).resolve()
-        blacklist_path = Path(
-            resolve_runtime_path(
-                universe_cfg.get("blacklist_path") if isinstance(universe_cfg, dict) else None,
-                default="configs/blacklist.json",
-                project_root=root,
-            )
-        ).resolve()
-        reports_dir = universe_path.parent.resolve()
-        configs_dir = blacklist_path.parent.resolve()
-    except Exception:
-        reports_dir = (root / "reports").resolve()
-        configs_dir = (root / "configs").resolve()
-        universe_path = (reports_dir / "universe_cache.json").resolve()
-        blacklist_path = (configs_dir / "blacklist.json").resolve()
+    cfg = load_runtime_config(project_root=root)
+    config_path = (root / "configs" / "live_prod.yaml").resolve()
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    universe_cfg = cfg.get("universe")
+    if universe_cfg is not None and not isinstance(universe_cfg, dict):
+        raise ValueError(f"runtime config universe section is invalid: {config_path}")
+    universe_cfg = universe_cfg or {}
+    universe_path = Path(
+        resolve_runtime_path(
+            universe_cfg.get("cache_path"),
+            default="reports/universe_cache.json",
+            project_root=root,
+        )
+    ).resolve()
+    blacklist_path = Path(
+        resolve_runtime_path(
+            universe_cfg.get("blacklist_path"),
+            default="configs/blacklist.json",
+            project_root=root,
+        )
+    ).resolve()
+    reports_dir = universe_path.parent.resolve()
+    configs_dir = blacklist_path.parent.resolve()
     return GuardPaths(
         workspace=root,
         reports_dir=reports_dir,
