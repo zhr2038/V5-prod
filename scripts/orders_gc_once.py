@@ -16,11 +16,16 @@ def resolve_orders_db(raw_db: str | None = None, *, config_path: str | None = No
     if raw_db:
         return Path(resolve_runtime_path(raw_db, default="reports/orders.sqlite", project_root=PROJECT_ROOT)).resolve()
 
+    resolved_config_path = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
     cfg = load_runtime_config(config_path, project_root=PROJECT_ROOT)
-    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {resolved_config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved_config_path}")
     return Path(
         resolve_runtime_path(
-            execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+            execution_cfg.get("order_store_path"),
             default="reports/orders.sqlite",
             project_root=PROJECT_ROOT,
         )
