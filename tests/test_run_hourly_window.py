@@ -20,10 +20,22 @@ def _write_fake_date(path: Path) -> None:
     path.chmod(0o755)
 
 
-def _write_fake_python(path: Path, args_log: Path) -> None:
+def _write_fake_python(path: Path, project_root: Path, args_log: Path, env_log: Path) -> None:
     path.write_text(
         "#!/bin/bash\n"
         "if [[ \"$1\" == \"-c\" ]]; then\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$1\" == \"-\" ]]; then\n"
+        "  script=$(cat)\n"
+        "  if [[ \"$script\" == *\"resolve_runtime_config_path\"* ]]; then\n"
+        f"    echo \"{(project_root / 'configs' / 'runtime.yaml').resolve()}\"\n"
+        "    exit 0\n"
+        "  fi\n"
+        "  if [[ \"$script\" == *\"derive_runtime_reports_dir\"* ]]; then\n"
+        f"    echo \"{(project_root / 'reports' / 'shadow_runtime').resolve()}\"\n"
+        "    exit 0\n"
+        "  fi\n"
         "  exit 0\n"
         "fi\n"
         "printf '%s\\n' \"$@\" >> \"$ARGS_LOG\"\n",
@@ -35,7 +47,9 @@ def _write_fake_python(path: Path, args_log: Path) -> None:
 def test_run_hourly_window_skips_compare_when_v4_reports_missing(tmp_path: Path) -> None:
     project_root = tmp_path
     scripts_dir = project_root / "scripts"
-    reports_dir = project_root / "reports" / "runs" / "20260415_23"
+    reports_dir = project_root / "reports" / "shadow_runtime" / "runs" / "20260415_23"
+    (project_root / "configs").mkdir(parents=True, exist_ok=True)
+    (project_root / "configs" / "runtime.yaml").write_text("execution: {}\n", encoding="utf-8")
     scripts_dir.mkdir(parents=True, exist_ok=True)
     reports_dir.mkdir(parents=True, exist_ok=True)
 
@@ -49,9 +63,10 @@ def test_run_hourly_window_skips_compare_when_v4_reports_missing(tmp_path: Path)
     fake_bin_dir = project_root / "fake-bin"
     fake_bin_dir.mkdir(parents=True, exist_ok=True)
     args_log = project_root / "args.log"
+    env_log = project_root / "env.log"
     fake_python = fake_bin_dir / "python3"
     fake_date = fake_bin_dir / "date"
-    _write_fake_python(fake_python, args_log)
+    _write_fake_python(fake_python, project_root, args_log, env_log)
     _write_fake_date(fake_date)
 
     env = {
@@ -59,6 +74,7 @@ def test_run_hourly_window_skips_compare_when_v4_reports_missing(tmp_path: Path)
         "PATH": f"{fake_bin_dir}:{os.environ.get('PATH', '')}",
         "V5_PYTHON_BIN": str(fake_python),
         "ARGS_LOG": str(args_log),
+        "ENV_LOG": str(env_log),
     }
 
     result = subprocess.run(
@@ -78,10 +94,17 @@ def test_run_hourly_window_skips_compare_when_v4_reports_missing(tmp_path: Path)
 def test_run_hourly_window_uses_runtime_v4_reports_dir_when_present(tmp_path: Path) -> None:
     project_root = tmp_path
     scripts_dir = project_root / "scripts"
-    reports_dir = project_root / "reports" / "runs" / "20260415_23"
+    reports_dir = project_root / "reports" / "shadow_runtime" / "runs" / "20260415_23"
     v4_dir = project_root / "v4_export"
+    runtime_reports_dir = project_root / "reports" / "shadow_runtime"
+    (project_root / "configs").mkdir(parents=True, exist_ok=True)
+    (project_root / "configs" / "runtime.yaml").write_text(
+        "execution:\n  order_store_path: reports/shadow_runtime/orders.sqlite\n",
+        encoding="utf-8",
+    )
     scripts_dir.mkdir(parents=True, exist_ok=True)
     reports_dir.mkdir(parents=True, exist_ok=True)
+    runtime_reports_dir.mkdir(parents=True, exist_ok=True)
     v4_dir.mkdir(parents=True, exist_ok=True)
 
     wrapper_src = Path(__file__).resolve().parents[1] / "scripts" / "run_hourly_window.sh"
@@ -94,9 +117,10 @@ def test_run_hourly_window_uses_runtime_v4_reports_dir_when_present(tmp_path: Pa
     fake_bin_dir = project_root / "fake-bin"
     fake_bin_dir.mkdir(parents=True, exist_ok=True)
     args_log = project_root / "args.log"
+    env_log = project_root / "env.log"
     fake_python = fake_bin_dir / "python3"
     fake_date = fake_bin_dir / "date"
-    _write_fake_python(fake_python, args_log)
+    _write_fake_python(fake_python, project_root, args_log, env_log)
     _write_fake_date(fake_date)
 
     env = {
@@ -105,6 +129,7 @@ def test_run_hourly_window_uses_runtime_v4_reports_dir_when_present(tmp_path: Pa
         "V5_PYTHON_BIN": str(fake_python),
         "V4_REPORTS_DIR": str(v4_dir),
         "ARGS_LOG": str(args_log),
+        "ENV_LOG": str(env_log),
     }
 
     subprocess.run(
@@ -121,3 +146,7 @@ def test_run_hourly_window_uses_runtime_v4_reports_dir_when_present(tmp_path: Pa
     assert args[1] == "scripts/compare_runs.py"
     assert args[2] == "--v4_reports_dir"
     assert args[3] == str(v4_dir)
+    assert args[4] == "--v5_summary"
+    assert args[5] == str((runtime_reports_dir / "runs" / "20260415_23" / "summary.json").resolve())
+    assert args[6] == "--out"
+    assert args[7] == str((runtime_reports_dir / "compare" / "hourly" / "compare_20260415_23.md").resolve())

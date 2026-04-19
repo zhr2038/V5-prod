@@ -44,8 +44,57 @@ resolve_python_bin() {
 
 PYTHON_BIN="$(resolve_python_bin)"
 
+resolve_config_path() {
+  "$PYTHON_BIN" - <<'PY'
+from pathlib import Path
+import os
+
+from configs.runtime_config import resolve_runtime_config_path
+
+root = Path(os.environ["V5_PROJECT_ROOT"])
+print(resolve_runtime_config_path(project_root=root))
+PY
+}
+
+resolve_runtime_reports_dir() {
+  "$PYTHON_BIN" - <<'PY'
+from pathlib import Path
+import os
+
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+from src.execution.fill_store import derive_runtime_reports_dir
+
+root = Path(os.environ["V5_PROJECT_ROOT"])
+cfg_path = Path(os.environ["V5_CONFIG"])
+if not cfg_path.is_absolute():
+    cfg_path = root / cfg_path
+
+order_store_path = "reports/orders.sqlite"
+if yaml is not None and cfg_path.exists():
+    try:
+        payload = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        execution = payload.get("execution") or {}
+        candidate = execution.get("order_store_path")
+        if candidate:
+            order_store_path = str(candidate)
+    except Exception:
+        pass
+
+order_store = Path(order_store_path)
+if not order_store.is_absolute():
+    order_store = root / order_store
+print(derive_runtime_reports_dir(order_store))
+PY
+}
+
+export V5_PROJECT_ROOT="$ROOT"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export V5_DATA_PROVIDER="${V5_DATA_PROVIDER:-okx}"
+export V5_CONFIG="${V5_CONFIG:-$(resolve_config_path)}"
 export V5_RUN_ID="$WIN_ID"
 export V5_WINDOW_START_TS="${START_EPOCH}"
 export V5_WINDOW_END_TS="${END_EPOCH}"
@@ -75,8 +124,9 @@ resolve_v4_reports_dir() {
 
 "$PYTHON_BIN" main.py
 
-V5_SUMMARY="reports/runs/${WIN_ID}/summary.json"
-COMPARE_OUT="reports/compare/hourly/compare_${WIN_ID}.md"
+RUNTIME_REPORTS_DIR="${V5_RUNTIME_REPORTS_DIR:-$(resolve_runtime_reports_dir)}"
+V5_SUMMARY="${RUNTIME_REPORTS_DIR}/runs/${WIN_ID}/summary.json"
+COMPARE_OUT="${RUNTIME_REPORTS_DIR}/compare/hourly/compare_${WIN_ID}.md"
 
 if [[ ! -f "$V5_SUMMARY" ]]; then
   echo "[V5] skip compare_runs: missing $V5_SUMMARY"
