@@ -445,7 +445,7 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
             elif hours_since_trade >= ALERT_THRESHOLDS["no_trade_hours"]:
                 alerts.append(f"warning: no trade for {hours_since_trade:.1f} hours")
                 priority = "warning"
-    else:
+    elif risk_level != "PROTECT":
         alerts.append("warning: unable to determine last trade time")
 
     if trade_runs == 0:
