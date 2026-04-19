@@ -82,6 +82,8 @@ def test_resolve_report_output_path_uses_prefixed_runtime_name(tmp_path: Path) -
         orders_db=(reports_dir / "shadow_orders.sqlite").resolve(),
         fills_db=(reports_dir / "shadow_fills.sqlite").resolve(),
         auto_blacklist_path=(reports_dir / "shadow_auto_blacklist.json").resolve(),
+        auto_risk_eval_path=(reports_dir / "shadow_auto_risk_eval.json").resolve(),
+        auto_risk_guard_path=(reports_dir / "shadow_auto_risk_guard.json").resolve(),
         runs_dir=(reports_dir / "runs").resolve(),
     )
 
@@ -96,6 +98,8 @@ def test_resolve_report_output_path_uses_suffixed_runtime_name(tmp_path: Path) -
         orders_db=(reports_dir / "orders_accelerated.sqlite").resolve(),
         fills_db=(reports_dir / "fills_accelerated.sqlite").resolve(),
         auto_blacklist_path=(reports_dir / "auto_blacklist_accelerated.json").resolve(),
+        auto_risk_eval_path=(reports_dir / "auto_risk_eval_accelerated.json").resolve(),
+        auto_risk_guard_path=(reports_dir / "auto_risk_guard_accelerated.json").resolve(),
         runs_dir=(reports_dir / "runs").resolve(),
     )
 
@@ -133,6 +137,11 @@ def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> Non
         },
     )
     monkeypatch.setattr(status_report, "get_service_status", lambda: "running")
+    monkeypatch.setattr(
+        status_report,
+        "get_current_risk_guard",
+        lambda cfg=None: {"level": "DEFENSE", "source": "guard", "last_update": "2026-04-17T11:55:00"},
+    )
     monkeypatch.setattr(status_report, "get_last_filled_trade_ts", lambda cfg=None: "2026-04-17T12:00")
     monkeypatch.setattr(status_report, "build_next_run_hint", lambda: "2026-04-17 13:00")
 
@@ -142,6 +151,29 @@ def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> Non
     assert "- negative_expectancy_cooldown: 5" in report
     assert "- negative_expectancy_open_block: 6" in report
     assert "- negative_expectancy_fast_fail_open_block: 7" in report
+    assert "- risk_guard_level: DEFENSE" in report
+    assert "- risk_guard_source: guard" in report
+    assert "- risk_guard_last_update: 2026-04-17T11:55:00" in report
+
+
+def test_get_current_risk_guard_prefers_newer_guard_state_over_eval(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    cfg = {"execution": {"order_store_path": str((reports_dir / "shadow_orders.sqlite").resolve())}}
+    (reports_dir / "shadow_auto_risk_eval.json").write_text(
+        json.dumps({"ts": "2026-04-19T13:00:00", "current_level": "PROTECT"}),
+        encoding="utf-8",
+    )
+    (reports_dir / "shadow_auto_risk_guard.json").write_text(
+        json.dumps({"current_level": "DEFENSE", "last_update": "2026-04-19T14:05:00"}),
+        encoding="utf-8",
+    )
+
+    state = status_report.get_current_risk_guard(cfg)
+
+    assert state["level"] == "DEFENSE"
+    assert state["source"] == "guard"
+    assert state["last_update"] == "2026-04-19T14:05:00"
 
 
 def test_get_latest_run_data_prefers_decision_audit_mtime(tmp_path: Path) -> None:

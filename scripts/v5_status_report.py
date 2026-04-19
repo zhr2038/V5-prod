@@ -20,6 +20,8 @@ sys.path.insert(0, str(WORKSPACE))
 from configs.runtime_config import resolve_runtime_config_path
 from src.execution.fill_store import (
     derive_fill_store_path,
+    derive_runtime_auto_risk_eval_path,
+    derive_runtime_auto_risk_guard_path,
     derive_runtime_named_artifact_path,
     derive_runtime_named_json_path,
     derive_runtime_runs_dir,
@@ -46,6 +48,8 @@ class StatusPaths:
     orders_db: Path
     fills_db: Path
     auto_blacklist_path: Path
+    auto_risk_eval_path: Path
+    auto_risk_guard_path: Path
     runs_dir: Path
 
 
@@ -74,8 +78,87 @@ def _resolve_status_paths(cfg: Optional[Dict[str, Any]] = None) -> StatusPaths:
         orders_db=orders_db,
         fills_db=derive_fill_store_path(orders_db),
         auto_blacklist_path=derive_runtime_named_json_path(orders_db, "auto_blacklist"),
+        auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
+        auto_risk_guard_path=derive_runtime_auto_risk_guard_path(orders_db),
         runs_dir=derive_runtime_runs_dir(orders_db),
     )
+
+
+def _load_json_safe(path: Path) -> Dict[str, Any]:
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _coerce_timestamp_epoch(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _risk_state_epoch(payload: Any, *, primary_keys: tuple[str, ...]) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in primary_keys:
+        epoch = _coerce_timestamp_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+    history = payload.get("history")
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            epoch = _coerce_timestamp_epoch(item.get("ts"))
+            if epoch is not None:
+                return epoch
+    return None
+
+
+def get_current_risk_guard(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    paths = _resolve_status_paths(cfg)
+    eval_state = _load_json_safe(paths.auto_risk_eval_path)
+    guard_state = _load_json_safe(paths.auto_risk_guard_path)
+    eval_level = str((eval_state or {}).get("current_level", "") or "").strip().upper()
+    guard_level = str((guard_state or {}).get("current_level", "") or "").strip().upper()
+    eval_epoch = _risk_state_epoch(eval_state, primary_keys=("ts",))
+    guard_epoch = _risk_state_epoch(guard_state, primary_keys=("last_update",))
+
+    source = "missing"
+    state: Dict[str, Any] = {}
+    if eval_level and (not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):
+        source = "eval"
+        state = eval_state
+    elif guard_level:
+        source = "guard"
+        state = guard_state
+
+    level = str((state or {}).get("current_level", "UNKNOWN") or "UNKNOWN").upper()
+    last_update = (
+        str((state or {}).get("ts") or "").strip()
+        if source == "eval"
+        else str((state or {}).get("last_update") or "").strip()
+    )
+    if not last_update and isinstance(state.get("history"), list) and state["history"]:
+        tail = state["history"][-1]
+        if isinstance(tail, dict):
+            last_update = str(tail.get("ts") or "").strip()
+
+    return {
+        "level": level,
+        "source": source,
+        "last_update": last_update or "n/a",
+    }
 
 
 def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -241,6 +324,7 @@ def generate_report() -> str:
     cfg = load_config()
     run_data = get_latest_run_data(cfg) or {}
     borrow = check_borrow_status(cfg)
+    risk_guard = get_current_risk_guard(cfg)
     service_status = get_service_status()
     last_trade = get_last_filled_trade_ts(cfg) or "n/a"
     budget_cap = cfg.get("budget", {}).get("live_equity_cap_usdt", "n/a") if isinstance(cfg, dict) else "n/a"
@@ -259,6 +343,9 @@ def generate_report() -> str:
             "System",
             f"- live_service: {service_status}",
             f"- live_equity_cap_usdt: {budget_cap}",
+            f"- risk_guard_level: {risk_guard['level']}",
+            f"- risk_guard_source: {risk_guard['source']}",
+            f"- risk_guard_last_update: {risk_guard['last_update']}",
             f"- next_expected_run: {build_next_run_hint()}",
             "",
             "Borrow Guard",
