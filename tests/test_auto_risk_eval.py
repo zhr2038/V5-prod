@@ -9,8 +9,24 @@ import scripts.auto_risk_eval as auto_risk_eval
 
 def test_resolve_runtime_paths_tracks_runtime_env(monkeypatch, tmp_path):
     monkeypatch.setattr(auto_risk_eval, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "configs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "configs" / "live_prod.yaml").write_text(
+        "execution:\n  order_store_path: reports/orders.sqlite\n",
+        encoding="utf-8",
+    )
     runtime = auto_risk_eval._resolve_runtime_paths(raw_env_path=".env.runtime")
     assert runtime.env_path == (tmp_path / ".env.runtime").resolve()
+
+
+def test_resolve_runtime_paths_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(auto_risk_eval, "PROJECT_ROOT", tmp_path)
+
+    try:
+        auto_risk_eval._resolve_runtime_paths(raw_config_path="configs/missing.yaml")
+    except FileNotFoundError as exc:
+        assert "configs/missing.yaml" in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
 
 
 def test_main_passes_cli_paths_to_evaluate_and_switch(monkeypatch):

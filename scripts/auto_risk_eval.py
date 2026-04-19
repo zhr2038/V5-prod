@@ -22,7 +22,12 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_env_path, resolve_runtime_path
+from configs.runtime_config import (
+    load_runtime_config,
+    resolve_runtime_config_path,
+    resolve_runtime_env_path,
+    resolve_runtime_path,
+)
 from src.execution.fill_store import (
     derive_position_store_path,
     derive_runtime_auto_risk_eval_path,
@@ -60,34 +65,34 @@ def _resolve_runtime_paths(
     raw_config_path: str | None = None,
     raw_env_path: str | None = None,
 ) -> AutoRiskEvalPaths:
-    try:
-        cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
-        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-        orders_db = Path(
-            resolve_runtime_path(
-                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                default="reports/orders.sqlite",
-                project_root=PROJECT_ROOT,
-            )
+    config_path = Path(resolve_runtime_config_path(raw_config_path=raw_config_path, project_root=PROJECT_ROOT))
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
+
+    cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
+
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
         )
-        reports_dir = derive_runtime_reports_dir(orders_db)
-        return AutoRiskEvalPaths(
-            reports_dir=reports_dir,
-            runs_dir=reports_dir / "runs",
-            auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
-            positions_db=derive_position_store_path(orders_db),
-            auto_risk_guard_path=derive_runtime_auto_risk_guard_path(orders_db),
-            env_path=Path(resolve_runtime_env_path(raw_env_path, project_root=PROJECT_ROOT)),
-        )
-    except Exception:
-        return AutoRiskEvalPaths(
-            reports_dir=REPORTS_DIR,
-            runs_dir=RUNS_DIR,
-            auto_risk_eval_path=AUTO_RISK_EVAL_PATH,
-            positions_db=REPORTS_DIR / "positions.sqlite",
-            auto_risk_guard_path=REPORTS_DIR / "auto_risk_guard.json",
-            env_path=Path(resolve_runtime_env_path(raw_env_path, project_root=PROJECT_ROOT)),
-        )
+    )
+    reports_dir = derive_runtime_reports_dir(orders_db)
+    return AutoRiskEvalPaths(
+        reports_dir=reports_dir,
+        runs_dir=reports_dir / "runs",
+        auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
+        positions_db=derive_position_store_path(orders_db),
+        auto_risk_guard_path=derive_runtime_auto_risk_guard_path(orders_db),
+        env_path=Path(resolve_runtime_env_path(raw_env_path, project_root=PROJECT_ROOT)),
+    )
 
 
 def _sanitize_peak_equity(live_equity: float, peak_equity: float, initial_capital: float = 120.0) -> float:
