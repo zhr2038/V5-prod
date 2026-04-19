@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 import scripts.run_latest_signal_monitor as monitor
+from src.research import latest_signal_monitor
 
 
 def test_main_finalizes_failed_run_when_variant_execution_raises(monkeypatch, tmp_path: Path) -> None:
@@ -134,3 +135,27 @@ def test_main_uses_runtime_config_and_env_helpers(monkeypatch, tmp_path: Path) -
     assert captured["baseline"]["env_path"] == str((tmp_path / ".env.runtime").resolve())
     assert captured["champion"]["base_config_path"] == str((tmp_path / "configs" / "runtime.yaml").resolve())
     assert captured["champion"]["env_path"] == str((tmp_path / ".env.runtime").resolve())
+
+
+def test_selected_zero_reason_buckets_distinguish_target_zero_from_deadband() -> None:
+    buckets = latest_signal_monitor._selected_zero_reason_buckets(
+        {
+            "risk_off_suppressed_count": 2,
+            "target_zero_after_regime_count": 2,
+            "target_zero_after_dd_throttle_count": 1,
+            "protect_entry_block_count": 1,
+            "negative_expectancy_open_block": 3,
+        },
+        [
+            {"action": "skip", "reason": "target_zero_no_order", "target_zero_reason": "risk_off_pos_mult_zero"},
+            {"action": "skip", "reason": "target_zero_no_order", "target_zero_reason": "dd_throttle_zero"},
+            {"action": "skip", "reason": "deadband"},
+            {"action": "skip", "reason": "cost_aware_edge"},
+        ],
+    )
+
+    assert buckets["risk_off_target_zero"] >= 2
+    assert buckets["target_zero_after_dd_throttle"] >= 1
+    assert buckets["deadband"] == 1
+    assert buckets["cost_aware_block"] == 1
+    assert buckets["negative_expectancy_block"] == 3

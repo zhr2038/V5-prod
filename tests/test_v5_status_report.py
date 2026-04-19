@@ -131,6 +131,12 @@ def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> Non
                 "selected": 3,
                 "targets_pre_risk": 2,
                 "orders_rebalance": 1,
+                "risk_off_suppressed_count": 1,
+                "target_zero_after_regime_count": 2,
+                "target_zero_after_dd_throttle_count": 3,
+                "protect_entry_block_count": 4,
+                "protect_entry_trend_only_block_count": 5,
+                "protect_entry_alpha6_rsi_block_count": 6,
                 "negative_expectancy_score_penalty": 4,
                 "negative_expectancy_cooldown": 5,
                 "negative_expectancy_open_block": 6,
@@ -159,6 +165,12 @@ def test_generate_report_includes_negative_expectancy_counts(monkeypatch) -> Non
 
     report = status_report.generate_report()
 
+    assert "- risk_off_suppressed_count: 1" in report
+    assert "- target_zero_after_regime_count: 2" in report
+    assert "- target_zero_after_dd_throttle_count: 3" in report
+    assert "- protect_entry_block_count: 4" in report
+    assert "- protect_entry_trend_only_block_count: 5" in report
+    assert "- protect_entry_alpha6_rsi_block_count: 6" in report
     assert "- negative_expectancy_score_penalty: 4" in report
     assert "- negative_expectancy_cooldown: 5" in report
     assert "- negative_expectancy_open_block: 6" in report

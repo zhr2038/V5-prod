@@ -59,6 +59,50 @@ def _skip_reason_counts(router_decisions: list[dict[str, Any]]) -> dict[str, int
     return {key: int(value) for key, value in sorted(counter.items(), key=lambda pair: (-pair[1], pair[0]))}
 
 
+def _selected_zero_reason_buckets(
+    counts: dict[str, int] | Counter[str],
+    router_decisions: list[dict[str, Any]],
+) -> dict[str, int]:
+    buckets: Counter[str] = Counter()
+    c = counts or {}
+
+    mappings = {
+        "risk_off_suppressed_count": "risk_off_target_zero",
+        "target_zero_after_regime_count": "target_zero_after_regime",
+        "target_zero_after_dd_throttle_count": "target_zero_after_dd_throttle",
+        "protect_entry_block_count": "protect_entry_block",
+        "protect_entry_trend_only_block_count": "protect_entry_trend_only_block",
+        "protect_entry_alpha6_rsi_block_count": "protect_entry_alpha6_rsi_block",
+        "negative_expectancy_cooldown": "negative_expectancy_block",
+        "negative_expectancy_open_block": "negative_expectancy_block",
+        "negative_expectancy_fast_fail_open_block": "negative_expectancy_block",
+    }
+    for key, bucket_name in mappings.items():
+        value = int(c.get(key, 0) or 0)
+        if value > 0:
+            buckets[bucket_name] += value
+
+    for item in (router_decisions or []):
+        if str(item.get("action") or "").lower() != "skip":
+            continue
+        reason = str(item.get("reason") or "").strip()
+        if reason == "deadband":
+            buckets["deadband"] += 1
+        elif reason == "target_zero_no_order":
+            bucket_name = str(item.get("target_zero_reason") or "target_zero_no_order")
+            buckets[bucket_name] += 1
+        elif reason == "cost_aware_edge":
+            buckets["cost_aware_block"] += 1
+        elif reason.startswith("negative_expectancy_"):
+            buckets["negative_expectancy_block"] += 1
+
+    return {
+        key: int(value)
+        for key, value in sorted(buckets.items(), key=lambda pair: (-pair[1], pair[0]))
+        if int(value or 0) > 0
+    }
+
+
 def _serialize_orders(orders: list[Order]) -> list[dict[str, Any]]:
     return [
         {
@@ -171,6 +215,10 @@ def run_latest_signal_variant(
         "counts": dict(audit.counts or {}),
         "rejects": _nonzero_counter(audit.rejects or {}),
         "skip_reasons": _skip_reason_counts(audit.router_decisions or []),
+        "selected_zero_reason_buckets": _selected_zero_reason_buckets(
+            dict(audit.counts or {}),
+            audit.router_decisions or [],
+        ),
         "orders": _serialize_orders(out.orders or []),
         "notes_tail": list((audit.notes or [])[-8:]),
         "output_dir": str(output_dir),

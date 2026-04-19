@@ -326,6 +326,17 @@ def _negative_expectancy_lines(counts: Dict[str, Any]) -> list[str]:
     ]
 
 
+def _selected_zero_reason_lines(counts: Dict[str, Any]) -> list[str]:
+    return [
+        f"- risk_off_suppressed_count: {counts.get('risk_off_suppressed_count', 'n/a')}",
+        f"- target_zero_after_regime_count: {counts.get('target_zero_after_regime_count', 'n/a')}",
+        f"- target_zero_after_dd_throttle_count: {counts.get('target_zero_after_dd_throttle_count', 'n/a')}",
+        f"- protect_entry_block_count: {counts.get('protect_entry_block_count', 'n/a')}",
+        f"- protect_entry_trend_only_block_count: {counts.get('protect_entry_trend_only_block_count', 'n/a')}",
+        f"- protect_entry_alpha6_rsi_block_count: {counts.get('protect_entry_alpha6_rsi_block_count', 'n/a')}",
+    ]
+
+
 def generate_report() -> str:
     cfg = load_config()
     run_data = get_latest_run_data(cfg) or {}
@@ -366,6 +377,7 @@ def generate_report() -> str:
             f"- selected: {counts.get('selected', 'n/a')}",
             f"- targets_pre_risk: {counts.get('targets_pre_risk', 'n/a')}",
             f"- orders_rebalance: {counts.get('orders_rebalance', 'n/a')}",
+            *_selected_zero_reason_lines(counts),
             *_negative_expectancy_lines(counts),
             f"- drawdown_note: {drawdown_note}",
             f"- last_filled_trade: {last_trade}",

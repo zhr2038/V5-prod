@@ -595,6 +595,25 @@ class V5Pipeline:
 
         return None
 
+    @staticmethod
+    def _record_target_zero_reason(
+        target_zero_reason_by_symbol: Dict[str, str],
+        *,
+        audit: Optional[DecisionAudit],
+        symbol: str,
+        reason: str,
+    ) -> None:
+        sym = str(symbol or "").strip()
+        if not sym:
+            return
+        if sym not in target_zero_reason_by_symbol:
+            target_zero_reason_by_symbol[sym] = str(reason)
+        if audit is None:
+            return
+        audit.record_count("target_zero_after_regime_count", symbol=sym)
+        if str(reason) == "risk_off_pos_mult_zero":
+            audit.record_count("risk_off_suppressed_count", symbol=sym)
+
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         """按市值计价更新持仓
         
@@ -2109,6 +2128,36 @@ class V5Pipeline:
         eligible_buy_symbols = set(
             getattr(portfolio, "entry_candidates", None) or list(portfolio.selected or [])
         )
+        regime_state_str = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
+        risk_off_mult = float(getattr(self.cfg.regime, 'pos_mult_risk_off', 0.0) or 0.0)
+        is_risk_off_close_only = (
+            regime_state_str in ("Risk-Off", "Risk_Off", "RiskOff") and risk_off_mult <= 0.0
+        )
+        target_hold_eps = float(_coalesce(getattr(self.cfg.rebalance, "close_only_weight_eps", None), 0.001))
+        target_zero_reason_by_symbol: Dict[str, str] = {}
+        if abs(float(regime.multiplier or 0.0)) <= target_hold_eps:
+            zero_after_regime_reason = "risk_off_pos_mult_zero" if is_risk_off_close_only else "regime_mult_zero"
+            candidate_zero_symbols = sorted(
+                set(list(target0.keys()) + list(portfolio.selected or []) + list(eligible_buy_symbols or []))
+            )
+            for sym in candidate_zero_symbols:
+                if abs(float(target0.get(sym, 0.0) or 0.0)) <= target_hold_eps:
+                    self._record_target_zero_reason(
+                        target_zero_reason_by_symbol,
+                        audit=audit,
+                        symbol=sym,
+                        reason=zero_after_regime_reason,
+                    )
+        if abs(float(dd_mult)) <= target_hold_eps:
+            for sym, pre_risk_target in (target0 or {}).items():
+                if abs(float(pre_risk_target or 0.0)) <= target_hold_eps:
+                    continue
+                if abs(float(target.get(sym, 0.0) or 0.0)) > target_hold_eps:
+                    continue
+                if sym not in target_zero_reason_by_symbol:
+                    target_zero_reason_by_symbol[sym] = "dd_throttle_zero"
+                if audit:
+                    audit.record_count("target_zero_after_dd_throttle_count", symbol=sym)
 
         # 4.4 确保已有持仓都注册到止损/利润管理（避免重启后状态丢失）
         for p in positions:
@@ -2693,7 +2742,21 @@ class V5Pipeline:
             if audit:
                 audit.rebalance_drift_by_symbol[sym] = drift
                 audit.rebalance_effective_deadband_by_symbol[sym] = effective_deadband
-            
+
+            target_zero_reason = target_zero_reason_by_symbol.get(sym)
+            if held is None and abs(float(tw)) <= target_hold_eps:
+                if audit:
+                    router_decisions.append({
+                        "symbol": sym,
+                        "action": "skip",
+                        "reason": "target_zero_no_order",
+                        "target_zero_reason": target_zero_reason or "zero_target",
+                        "drift": drift,
+                        "deadband": effective_deadband,
+                        "is_new_position": is_new_position,
+                    })
+                continue
+
             if abs(drift) <= effective_deadband:
                 if audit:
                     audit.rebalance_skipped_deadband_count += 1
@@ -2724,6 +2787,7 @@ class V5Pipeline:
             # P0 FIX: Risk-Off close-only 模式：跳过所有买入型的 rebalance
             if is_risk_off_close_only and drift > 0:
                 if audit:
+                    audit.record_count("risk_off_suppressed_count", symbol=sym)
                     audit.reject("risk_off_close_only")
                     router_decisions.append({
                         "symbol": sym,
@@ -2788,6 +2852,11 @@ class V5Pipeline:
                 )
                 if protect_block is not None:
                     if audit:
+                        audit.record_count("protect_entry_block_count", symbol=sym)
+                        if str(protect_block.get("reason") or "") == "protect_entry_trend_only":
+                            audit.record_count("protect_entry_trend_only_block_count", symbol=sym)
+                        if str(protect_block.get("reason") or "") == "protect_entry_alpha6_rsi_confirm_negative":
+                            audit.record_count("protect_entry_alpha6_rsi_block_count", symbol=sym)
                         audit.record_gate(str(protect_block.get("reason") or "protect_entry_no_alpha6_confirmation"), symbol=sym)
                         router_decisions.append(
                             {
