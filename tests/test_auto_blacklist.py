@@ -49,3 +49,18 @@ def test_add_symbol_writes_prefixed_runtime_blacklist(monkeypatch, tmp_path: Pat
     assert not root_path.exists()
     payload = json.loads(runtime_path.read_text(encoding="utf-8"))
     assert payload["symbols"] == ["PEPE/USDT"]
+
+
+def test_resolve_auto_blacklist_path_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        auto_blacklist,
+        "load_runtime_config",
+        lambda project_root=None: {},
+    )
+
+    try:
+        auto_blacklist.resolve_auto_blacklist_path(project_root=tmp_path)
+    except ValueError as exc:
+        assert "live_prod.yaml" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")

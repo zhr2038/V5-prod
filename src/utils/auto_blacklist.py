@@ -31,19 +31,21 @@ def _now_ms() -> int:
 def resolve_auto_blacklist_path(path: str = DEFAULT_PATH, *, project_root: Path = PROJECT_ROOT) -> Path:
     p = Path(path)
     if not p.is_absolute() and str(p).replace("\\", "/") == DEFAULT_PATH:
-        try:
-            cfg = load_runtime_config(project_root=project_root)
-            execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-            orders_db = Path(
-                resolve_runtime_path(
-                    execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                    default="reports/orders.sqlite",
-                    project_root=project_root,
-                )
-            ).resolve()
-            return derive_runtime_named_json_path(orders_db, "auto_blacklist").resolve()
-        except Exception:
-            pass
+        cfg = load_runtime_config(project_root=project_root)
+        config_path = (project_root / "configs" / "live_prod.yaml").resolve()
+        if not isinstance(cfg, dict) or not cfg:
+            raise ValueError(f"runtime config is empty or invalid: {config_path}")
+        execution_cfg = cfg.get("execution")
+        if not isinstance(execution_cfg, dict):
+            raise ValueError(f"runtime config missing execution section: {config_path}")
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path"),
+                default="reports/orders.sqlite",
+                project_root=project_root,
+            )
+        ).resolve()
+        return derive_runtime_named_json_path(orders_db, "auto_blacklist").resolve()
     if not p.is_absolute():
         p = (project_root / p).resolve()
     return p
