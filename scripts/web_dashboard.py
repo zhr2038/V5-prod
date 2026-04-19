@@ -935,6 +935,27 @@ def _coerce_timestamp_epoch(value: Any) -> Optional[float]:
         return None
 
 
+def _risk_state_epoch(payload: Any, *, primary_keys: tuple[str, ...]) -> Optional[float]:
+    if not isinstance(payload, dict):
+        return None
+
+    for key in primary_keys:
+        epoch = _coerce_timestamp_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+
+    history = payload.get('history')
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            epoch = _coerce_timestamp_epoch(item.get('ts'))
+            if epoch is not None:
+                return epoch
+
+    return None
+
+
 def _run_id_epoch(run_id: str) -> Optional[float]:
     match = re.search(r'(\d{8})_(\d{2})(\d{2})?(\d{2})?$', str(run_id or '').strip())
     if not match:
@@ -5387,12 +5408,21 @@ def api_auto_risk_guard():
         config = load_config()
         runtime_paths = _resolve_dashboard_runtime_paths(config)
 
-        eval_path = runtime_paths.auto_risk_eval_path or (runtime_paths.reports_dir / 'auto_risk_eval.json')
-        if eval_path.exists():
-            with open(eval_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+        eval_data = _load_json_payload(runtime_paths.auto_risk_eval_path)
+        guard_state = _load_json_payload(runtime_paths.auto_risk_guard_path)
+        eval_level = str((eval_data or {}).get('current_level', '') or '').strip().upper()
+        guard_level = str((guard_state or {}).get('current_level', '') or '').strip().upper()
+        eval_epoch = _risk_state_epoch(eval_data, primary_keys=('ts',))
+        guard_epoch = _risk_state_epoch(guard_state, primary_keys=('last_update',))
 
-            level = str(data.get('current_level', 'NEUTRAL') or 'NEUTRAL').upper()
+        eval_path = runtime_paths.auto_risk_eval_path or (runtime_paths.reports_dir / 'auto_risk_eval.json')
+        use_eval_snapshot = False
+        if eval_level and eval_path.exists():
+            use_eval_snapshot = not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)
+
+        if use_eval_snapshot:
+            data = eval_data if isinstance(eval_data, dict) else {}
+            level = eval_level or 'NEUTRAL'
             risk_level = AutoRiskGuard.LEVELS.get(level, AutoRiskGuard.LEVELS['NEUTRAL'])
             config = data.get('config')
             if not isinstance(config, dict):
@@ -5407,7 +5437,6 @@ def api_auto_risk_guard():
                 'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             })
 
-        guard_state = _load_json_payload(runtime_paths.auto_risk_guard_path)
         guard = AutoRiskGuard(state_path=str(runtime_paths.auto_risk_guard_path))
         guard_config = guard.get_current_config()
         guard_history = guard.history[-5:]

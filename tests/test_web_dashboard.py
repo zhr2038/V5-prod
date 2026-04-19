@@ -5151,6 +5151,60 @@ def test_auto_risk_guard_api_uses_suffixed_runtime_eval_path(monkeypatch, tmp_pa
     assert payload["metrics"]["dd_pct"] == 0.41
 
 
+def test_auto_risk_guard_api_prefers_newer_guard_state_over_stale_eval(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (runtime_dir / "auto_risk_eval.json").write_text(
+        json.dumps(
+            {
+                "ts": "2026-04-19T13:00:00",
+                "current_level": "PROTECT",
+                "config": {"max_positions": 1},
+                "metrics": {"dd_pct": 0.25},
+                "reason": "stale eval snapshot",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (runtime_dir / "auto_risk_guard.json").write_text(
+        json.dumps(
+            {
+                "current_level": "DEFENSE",
+                "current_config": {"max_positions": 3},
+                "metrics": {"last_dd_pct": 0.12},
+                "history": [{"to": "DEFENSE", "reason": "newer guard state", "ts": "2026-04-19T14:00:00"}],
+                "last_update": "2026-04-19T14:05:00",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_level"] == "DEFENSE"
+    assert payload["config"]["max_positions"] == 3
+    assert payload["reason"] == "newer guard state"
+    assert payload["last_update"] == "2026-04-19T14:05:00"
+
+
 def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

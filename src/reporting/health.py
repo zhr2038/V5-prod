@@ -52,6 +52,43 @@ def _load_json_safe(path: Path) -> dict:
     return {}
 
 
+def _coerce_timestamp_epoch(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _risk_state_epoch(payload: object, *, primary_keys: tuple[str, ...]) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+
+    for key in primary_keys:
+        epoch = _coerce_timestamp_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+
+    history = payload.get("history")
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            epoch = _coerce_timestamp_epoch(item.get("ts"))
+            if epoch is not None:
+                return epoch
+    return None
+
+
 def _load_active_config() -> dict:
     try:
         import yaml
@@ -283,10 +320,16 @@ def health_check():
 
     try:
         risk_eval_path = health_paths.auto_risk_eval_path or (REPORTS_DIR / "auto_risk_eval.json")
-        risk = _load_json_safe(risk_eval_path)
-        if not isinstance(risk, dict) or not risk.get("current_level"):
-            risk_guard_path = health_paths.auto_risk_guard_path or (REPORTS_DIR / "auto_risk_guard.json")
-            risk = _load_json_safe(risk_guard_path)
+        risk_eval = _load_json_safe(risk_eval_path)
+        risk_guard_path = health_paths.auto_risk_guard_path or (REPORTS_DIR / "auto_risk_guard.json")
+        risk_guard = _load_json_safe(risk_guard_path)
+        eval_level = str((risk_eval or {}).get("current_level", "") or "").strip().upper()
+        guard_level = str((risk_guard or {}).get("current_level", "") or "").strip().upper()
+        eval_epoch = _risk_state_epoch(risk_eval, primary_keys=("ts",))
+        guard_epoch = _risk_state_epoch(risk_guard, primary_keys=("last_update",))
+        risk = risk_eval
+        if not eval_level or (guard_level and guard_epoch is not None and (eval_epoch is None or guard_epoch > eval_epoch)):
+            risk = risk_guard
         level = str(risk.get("current_level", "UNKNOWN") or "UNKNOWN").upper()
         checks["checks"]["risk_guard"] = {
             "status": "ok" if level != "UNKNOWN" else "warning",
