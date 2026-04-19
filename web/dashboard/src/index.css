@@ -789,47 +789,6 @@ body {
   outline: none;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg-deep: #eef2f7;
-    --bg-floor: #e7ebf2;
-    --bg-top: #f6f8fb;
-    --bg-mid: #edf1f6;
-    --bg-bottom: #e7ebf2;
-    --bg-cloud-warm: rgba(208, 150, 128, 0.16);
-    --bg-cloud-sky: rgba(157, 174, 208, 0.14);
-    --bg-cloud-sage: rgba(157, 171, 146, 0.12);
-    --text: #17202c;
-    --text-soft: #374052;
-    --text-dim: #667189;
-    --text-faint: #818ca2;
-    --line: rgba(71, 82, 104, 0.12);
-    --line-strong: rgba(71, 82, 104, 0.22);
-    --surface-border: rgba(102, 114, 139, 0.16);
-    --surface-border-strong: rgba(102, 114, 139, 0.24);
-    --shadow-soft: 0 18px 40px rgba(119, 129, 149, 0.10);
-    --shadow-deep: 0 22px 56px rgba(119, 129, 149, 0.14);
-    --theme-chrome-light: #f3efed;
-  }
-
-  html {
-    background-color: var(--theme-chrome-light);
-  }
-
-  body {
-    background: transparent;
-  }
-
-  .liquid-bg {
-    background:
-      radial-gradient(1200px 860px at 10% 14%, rgba(208, 150, 128, 0.12), transparent 58%),
-      radial-gradient(980px 760px at 86% 16%, rgba(157, 174, 208, 0.10), transparent 54%),
-      radial-gradient(940px 860px at 56% 76%, rgba(157, 171, 146, 0.08), transparent 58%),
-      linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
-    background-color: var(--theme-chrome-light);
-  }
-}
-
 @supports (-webkit-touch-callout: none) {
   @media (hover: none) and (pointer: coarse) {
     .ambient-pane,

@@ -7,9 +7,8 @@ const THEME_COLOR_SELECTOR = 'meta[name="theme-color"]:not([media])'
 
 function syncThemeColor() {
   const root = getComputedStyle(document.documentElement)
-  const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches
-  const token = prefersLight ? '--theme-chrome-light' : '--theme-chrome-dark'
-  const fallback = prefersLight ? '#f3efed' : '#322f34'
+  const token = '--theme-chrome-dark'
+  const fallback = '#322f34'
   const color = root.getPropertyValue(token).trim() || fallback
   const themeMeta = document.querySelector<HTMLMetaElement>(THEME_COLOR_SELECTOR)
   if (themeMeta) {
@@ -18,9 +17,6 @@ function syncThemeColor() {
 }
 
 syncThemeColor()
-
-const media = window.matchMedia('(prefers-color-scheme: light)')
-media.addEventListener?.('change', syncThemeColor)
 
 const observer = new MutationObserver(() => {
   syncThemeColor()
