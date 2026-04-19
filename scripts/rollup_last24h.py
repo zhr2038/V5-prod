@@ -5,6 +5,7 @@ import csv
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
@@ -13,6 +14,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_reports_dir, derive_runtime_runs_dir
 from src.reporting.summary_writer import write_summary
 
 
@@ -21,6 +24,34 @@ def _resolve_repo_path(value: str | Path | None, *, default: Path) -> Path:
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return path.resolve()
+
+
+@dataclass(frozen=True)
+class RollupPaths:
+    reports_dir: Path
+    runs_dir: Path
+
+
+def _resolve_runtime_rollup_paths() -> RollupPaths:
+    cfg = load_runtime_config(project_root=PROJECT_ROOT)
+    config_path = (PROJECT_ROOT / "configs" / "live_prod.yaml").resolve()
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    reports_dir = derive_runtime_reports_dir(orders_db).resolve()
+    return RollupPaths(
+        reports_dir=reports_dir,
+        runs_dir=derive_runtime_runs_dir(orders_db).resolve(),
+    )
 
 
 def _utc_hour_floor(dt: datetime) -> datetime:
@@ -101,15 +132,16 @@ def main() -> None:
     end = _utc_hour_floor(datetime.now(timezone.utc))
     tag = end.strftime("%Y%m%d_%H")
 
-    runs_dir = _resolve_repo_path(args.runs_dir, default=PROJECT_ROOT / "reports" / "runs")
-    out_dir = _resolve_repo_path(args.out_dir, default=PROJECT_ROOT / "reports" / "rollups" / f"last24h_{tag}")
+    runtime_paths = _resolve_runtime_rollup_paths()
+    runs_dir = _resolve_repo_path(args.runs_dir, default=runtime_paths.runs_dir)
+    out_dir = _resolve_repo_path(args.out_dir, default=runtime_paths.reports_dir / "rollups" / f"last24h_{tag}")
     v4_reports_dir = _resolve_repo_path(args.v4_reports_dir, default=PROJECT_ROOT / "v4_export")
 
     v5_summary = rollup(end, runs_dir=runs_dir, out_dir=out_dir, hours=int(args.hours))
 
     compare_out = _resolve_repo_path(
         args.compare_out,
-        default=PROJECT_ROOT / "reports" / "compare" / "daily" / f"v4_vs_v5_last24h_{tag}.md",
+        default=runtime_paths.reports_dir / "compare" / "daily" / f"v4_vs_v5_last24h_{tag}.md",
     )
     compare_out.parent.mkdir(parents=True, exist_ok=True)
 
