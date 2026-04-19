@@ -19,6 +19,19 @@ def _resolve_runtime_json_path(raw_path, *, order_store_path: str, base_name: st
     return resolve_runtime_path(raw_path, default=legacy_default)
 
 
+def _resolve_active_config_path(raw_config_path: str | None = None) -> str:
+    from configs.runtime_config import load_runtime_config, resolve_runtime_config_path
+
+    resolved = Path(resolve_runtime_config_path(raw_config_path, project_root=PROJECT_ROOT)).resolve()
+    cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {resolved}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved}")
+    return str(resolved)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
@@ -39,7 +52,7 @@ def main() -> None:
     from src.execution.position_store import PositionStore
 
     cfg = load_config(
-        resolve_runtime_config_path(args.config),
+        _resolve_active_config_path(args.config),
         env_path=resolve_runtime_env_path(args.env),
     )
     order_store_path = resolve_runtime_path(
