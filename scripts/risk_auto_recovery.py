@@ -191,7 +191,7 @@ class RiskAutoRecovery:
                 text = text[:-1] + "+00:00"
             parsed = datetime.fromisoformat(text)
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
+                parsed = datetime.fromtimestamp(parsed.timestamp(), tz=timezone.utc)
             else:
                 parsed = parsed.astimezone(timezone.utc)
             return parsed

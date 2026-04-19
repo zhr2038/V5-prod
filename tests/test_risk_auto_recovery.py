@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import scripts.risk_auto_recovery as risk_auto_recovery
@@ -112,3 +115,29 @@ def test_time_in_current_level_accepts_zulu_timestamp(monkeypatch, tmp_path: Pat
     hours = manager.time_in_current_level({"since": "2026-04-19T10:00:00Z"})
 
     assert hours != 999
+
+
+def test_parse_state_datetime_treats_naive_timestamp_as_local_time(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path
+    monkeypatch.setattr(
+        risk_auto_recovery,
+        "load_runtime_config",
+        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    previous_tz = os.environ.get("TZ")
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    if hasattr(time, "tzset"):
+        time.tzset()
+
+    try:
+        manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
+        parsed = manager._parse_state_datetime("2026-04-19T10:00:00")
+        assert parsed == datetime(2026, 4, 19, 2, 0, 0, tzinfo=timezone.utc)
+    finally:
+        if previous_tz is None:
+            monkeypatch.delenv("TZ", raising=False)
+        else:
+            monkeypatch.setenv("TZ", previous_tz)
+        if hasattr(time, "tzset"):
+            time.tzset()
