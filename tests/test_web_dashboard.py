@@ -5275,6 +5275,46 @@ def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(
     assert payload["last_update"] == "2026-04-19T14:05:00"
 
 
+def test_auto_risk_guard_api_accepts_legacy_guard_level_field(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (runtime_dir / "auto_risk_guard.json").write_text(
+        json.dumps(
+            {
+                "level": "PROTECT",
+                "current_config": {"max_positions": 1},
+                "metrics": {"last_dd_pct": 0.25},
+                "history": [{"to": "PROTECT", "reason": "legacy guard schema", "ts": "2026-04-19T13:00:00"}],
+                "last_update": "2026-04-19T13:05:00",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_level"] == "PROTECT"
+    assert payload["config"]["max_positions"] == 1
+    assert payload["reason"] == "legacy guard schema"
+
+
 def test_auto_risk_guard_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

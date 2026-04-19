@@ -30,6 +30,7 @@ from src.execution.fill_store import (
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_artifact_path,
 )
+from src.risk.auto_risk_guard import extract_risk_level
 
 
 TELEGRAM_CHAT_ID = "5065024131"
@@ -152,8 +153,8 @@ def get_current_risk_level(paths: MonitorPaths = DEFAULT_PATHS) -> str:
     eval_path, guard_path = _resolve_risk_state_paths(paths)
     eval_state = _load_json_safe(eval_path)
     guard_state = _load_json_safe(guard_path)
-    eval_level = str((eval_state or {}).get("current_level", "") or "").strip().upper()
-    guard_level = str((guard_state or {}).get("current_level", "") or "").strip().upper()
+    eval_level = extract_risk_level(eval_state)
+    guard_level = extract_risk_level(guard_state)
     eval_epoch = _risk_state_epoch(eval_state, primary_keys=("ts",))
     guard_epoch = _risk_state_epoch(guard_state, primary_keys=("last_update",))
     if eval_level and (not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):

@@ -17,6 +17,12 @@ from typing import Dict, List, Optional, Tuple
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def extract_risk_level(payload: object) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("current_level") or payload.get("level") or "").strip().upper()
+
+
 @dataclass
 class RiskLevel:
     """风险档位配置"""
@@ -127,7 +133,7 @@ class AutoRiskGuard:
             try:
                 with open(self.state_path, 'r') as f:
                     data = json.load(f)
-                    self.current_level = data.get('current_level', 'NEUTRAL')
+                    self.current_level = extract_risk_level(data) or 'NEUTRAL'
                     self.history = data.get('history', [])
                     self.metrics = data.get('metrics', self.metrics)
             except Exception as e:

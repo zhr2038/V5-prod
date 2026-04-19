@@ -139,6 +139,29 @@ def test_get_current_risk_level_prefers_newer_guard_state(monkeypatch, tmp_path:
     assert level == "DEFENSE"
 
 
+def test_get_current_risk_level_accepts_legacy_guard_level_field(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    paths = trade_monitor.MonitorPaths(
+        project_root=tmp_path,
+        reports_dir=reports_dir.resolve(),
+        logs_dir=(tmp_path / "logs").resolve(),
+        fills_db_path=(reports_dir / "fills.sqlite").resolve(),
+        orders_db_path=(reports_dir / "shadow_orders.sqlite").resolve(),
+        env_path=(tmp_path / ".env").resolve(),
+        alert_file=(reports_dir / "shadow_monitor_alert.txt").resolve(),
+    )
+    guard_path = reports_dir / "shadow_auto_risk_guard.json"
+    guard_path.write_text(
+        json.dumps({"level": "PROTECT", "last_update": "2026-04-19T14:05:00"}),
+        encoding="utf-8",
+    )
+
+    level = trade_monitor.get_current_risk_level(paths)
+
+    assert level == "PROTECT"
+
+
 def test_check_and_alert_suppresses_no_trade_alert_when_protect(monkeypatch, tmp_path: Path) -> None:
     paths = trade_monitor.MonitorPaths(
         project_root=tmp_path,

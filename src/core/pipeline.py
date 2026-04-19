@@ -113,7 +113,7 @@ from src.risk.exit_policy import ExitPolicy, ExitConfig
 from src.risk.risk_engine import RiskEngine
 from src.risk.fixed_stop_loss import FixedStopLossManager, FixedStopLossConfig
 from src.risk.profit_taking import PeakDrawdownLevel, ProfitTakingManager  # 程序化利润管理
-from src.risk.auto_risk_guard import AutoRiskGuard, get_auto_risk_guard  # 自动风险档位
+from src.risk.auto_risk_guard import AutoRiskGuard, extract_risk_level, get_auto_risk_guard  # 自动风险档位
 from src.risk.negative_expectancy_cooldown import (
     NegativeExpectancyCooldown,
     NegativeExpectancyConfig,
@@ -440,7 +440,7 @@ class V5Pipeline:
             eval_epoch = None
             if eval_path.exists():
                 eval_obj = json.loads(eval_path.read_text(encoding="utf-8"))
-                eval_level = str((eval_obj or {}).get("current_level", "") or "").strip().upper()
+                eval_level = extract_risk_level(eval_obj)
                 eval_epoch = _risk_state_epoch(eval_obj, primary_keys=("ts",))
 
             guard_path = derive_runtime_auto_risk_guard_path(self._runtime_order_store_path).resolve()
@@ -449,7 +449,7 @@ class V5Pipeline:
             guard_epoch = None
             if guard_path.exists():
                 guard_obj = json.loads(guard_path.read_text(encoding="utf-8"))
-                guard_file_level = str((guard_obj or {}).get("current_level", "") or "").strip().upper()
+                guard_file_level = extract_risk_level(guard_obj)
                 guard_epoch = _risk_state_epoch(guard_obj, primary_keys=("last_update",))
 
             guard_level = str(getattr(self.auto_risk_guard, "current_level", "") or "").strip().upper()

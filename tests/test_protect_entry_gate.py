@@ -243,6 +243,45 @@ def test_protect_gate_prefers_newer_auto_risk_guard_over_stale_eval_snapshot(tmp
     assert not any(d.get("reason") == "protect_entry_trend_only" for d in audit.router_decisions)
 
 
+def test_protect_gate_accepts_legacy_guard_level_when_eval_missing(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    path = derive_runtime_auto_risk_guard_path(cfg.execution.order_store_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"level": "PROTECT", "last_update": "2026-04-19T14:05:00"}), encoding="utf-8")
+
+    payload = _strategy_payload(
+        trend_signal={
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "score": 0.92,
+            "confidence": 0.8,
+            "metadata": {"adx": 35.0},
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="protect-legacy-guard")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(d.get("reason") == "protect_entry_trend_only" for d in audit.router_decisions)
+
+
 def test_protect_trend_plus_alpha6_buy_can_pass(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")

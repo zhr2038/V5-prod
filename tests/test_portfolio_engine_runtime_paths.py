@@ -64,3 +64,21 @@ def test_portfolio_engine_dynamic_max_positions_prefers_newer_guard_state_over_s
     engine = PortfolioEngine(AlphaConfig(), RiskConfig())
 
     assert engine._get_dynamic_max_positions() == 3
+
+
+def test_portfolio_engine_dynamic_max_positions_accepts_legacy_guard_level(tmp_path, monkeypatch):
+    monkeypatch.setenv("V5_WORKSPACE", str(tmp_path))
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "configs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "configs" / "live_prod.yaml").write_text("execution:\n  order_store_path: reports/orders.sqlite\n", encoding="utf-8")
+    (reports_dir / "auto_risk_guard.json").write_text(
+        json.dumps({"level": "DEFENSE", "last_update": "2026-04-19T14:05:00"}),
+        encoding="utf-8",
+    )
+
+    engine = PortfolioEngine(AlphaConfig(), RiskConfig())
+
+    assert engine._get_dynamic_max_positions() == 3

@@ -20,6 +20,7 @@ from src.execution.fill_store import (
     derive_runtime_named_artifact_path,
     derive_runtime_runs_dir,
 )
+from src.risk.auto_risk_guard import extract_risk_level
 from src.utils.math import clamp
 
 
@@ -401,14 +402,14 @@ class PortfolioEngine:
             eval_epoch = None
             if p.exists():
                 obj = json.loads(p.read_text(encoding="utf-8"))
-                eval_level = str(obj.get("current_level", "")).upper()
+                eval_level = extract_risk_level(obj)
                 eval_epoch = _risk_state_epoch(obj, primary_keys=("ts",))
             guard_level = ""
             guard_epoch = None
             gp = derive_runtime_auto_risk_guard_path(orders_db)
             if gp.exists():
                 obj = json.loads(gp.read_text(encoding="utf-8"))
-                guard_level = str(obj.get("current_level", "")).upper()
+                guard_level = extract_risk_level(obj)
                 guard_epoch = _risk_state_epoch(obj, primary_keys=("last_update",))
             if eval_level and (not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):
                 lvl = eval_level

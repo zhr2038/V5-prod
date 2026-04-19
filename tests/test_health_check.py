@@ -118,6 +118,24 @@ def test_check_risk_guard_prefers_newer_guard_state_over_eval(monkeypatch, tmp_p
     assert result["details"]["source"] == "guard"
 
 
+def test_check_risk_guard_accepts_legacy_guard_level_field(monkeypatch, tmp_path: Path) -> None:
+    eval_path = tmp_path / "reports" / "shadow_runtime" / "auto_risk_eval.json"
+    guard_path = tmp_path / "reports" / "shadow_runtime" / "auto_risk_guard.json"
+    guard_path.parent.mkdir(parents=True, exist_ok=True)
+    guard_path.write_text(
+        json.dumps({"level": "PROTECT", "metrics": {"last_dd_pct": 0.25}, "last_update": "2026-04-19T14:05:00"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(health_check, "_resolve_health_risk_paths", lambda: (eval_path, guard_path))
+
+    result = health_check.HealthChecker().check_risk_guard()
+
+    assert result["status"] == "healthy"
+    assert result["details"]["level"] == "PROTECT"
+    assert result["details"]["source"] == "guard"
+
+
 def test_run_all_checks_promotes_risk_guard_warning_to_overall_warning(monkeypatch) -> None:
     checker = health_check.HealthChecker()
     monkeypatch.setattr(checker, "check_timer_health", lambda: {"name": "timers", "status": "healthy", "details": "ok"})

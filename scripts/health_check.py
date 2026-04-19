@@ -30,6 +30,7 @@ from src.execution.fill_store import (
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_json_path,
 )
+from src.risk.auto_risk_guard import extract_risk_level
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 REPORTS_DIR = WORKSPACE / "reports"
@@ -390,8 +391,8 @@ class HealthChecker:
         eval_path, guard_path = _resolve_health_risk_paths()
         eval_state = _load_json_safe(eval_path)
         guard_state = _load_json_safe(guard_path)
-        eval_level = str((eval_state or {}).get("current_level", "") or "").strip().upper()
-        guard_level = str((guard_state or {}).get("current_level", "") or "").strip().upper()
+        eval_level = extract_risk_level(eval_state)
+        guard_level = extract_risk_level(guard_state)
         eval_epoch = _risk_state_epoch(eval_state, primary_keys=("ts",))
         guard_epoch = _risk_state_epoch(guard_state, primary_keys=("last_update",))
 
@@ -404,7 +405,7 @@ class HealthChecker:
             risk = guard_state
             source = "guard"
 
-        level = str((risk or {}).get("current_level", "UNKNOWN") or "UNKNOWN").upper()
+        level = extract_risk_level(risk) or "UNKNOWN"
         metrics = risk.get("metrics", {}) if isinstance(risk, dict) else {}
         drawdown = metrics.get("dd_pct", metrics.get("last_dd_pct", 0))
         return {

@@ -176,6 +176,21 @@ def test_get_current_risk_guard_prefers_newer_guard_state_over_eval(tmp_path: Pa
     assert state["last_update"] == "2026-04-19T14:05:00"
 
 
+def test_get_current_risk_guard_accepts_legacy_guard_level_field(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    cfg = {"execution": {"order_store_path": str((reports_dir / "shadow_orders.sqlite").resolve())}}
+    (reports_dir / "shadow_auto_risk_guard.json").write_text(
+        json.dumps({"level": "DEFENSE", "last_update": "2026-04-19T14:05:00"}),
+        encoding="utf-8",
+    )
+
+    state = status_report.get_current_risk_guard(cfg)
+
+    assert state["level"] == "DEFENSE"
+    assert state["source"] == "guard"
+
+
 def test_get_latest_run_data_prefers_decision_audit_mtime(tmp_path: Path) -> None:
     reports_dir = tmp_path / "reports"
     runs_dir = reports_dir / "runs"

@@ -26,6 +26,7 @@ from src.execution.fill_store import (
     derive_runtime_named_json_path,
     derive_runtime_runs_dir,
 )
+from src.risk.auto_risk_guard import extract_risk_level
 
 REPORTS_DIR = WORKSPACE / "reports"
 RUNS_DIR = REPORTS_DIR / "runs"
@@ -129,8 +130,8 @@ def get_current_risk_guard(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, An
     paths = _resolve_status_paths(cfg)
     eval_state = _load_json_safe(paths.auto_risk_eval_path)
     guard_state = _load_json_safe(paths.auto_risk_guard_path)
-    eval_level = str((eval_state or {}).get("current_level", "") or "").strip().upper()
-    guard_level = str((guard_state or {}).get("current_level", "") or "").strip().upper()
+    eval_level = extract_risk_level(eval_state)
+    guard_level = extract_risk_level(guard_state)
     eval_epoch = _risk_state_epoch(eval_state, primary_keys=("ts",))
     guard_epoch = _risk_state_epoch(guard_state, primary_keys=("last_update",))
 
@@ -143,7 +144,7 @@ def get_current_risk_guard(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, An
         source = "guard"
         state = guard_state
 
-    level = str((state or {}).get("current_level", "UNKNOWN") or "UNKNOWN").upper()
+    level = extract_risk_level(state) or "UNKNOWN"
     last_update = (
         str((state or {}).get("ts") or "").strip()
         if source == "eval"

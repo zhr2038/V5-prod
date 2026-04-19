@@ -20,6 +20,7 @@ from src.execution.fill_store import (
     derive_runtime_auto_risk_eval_path,
     derive_runtime_named_json_path,
 )
+from src.risk.auto_risk_guard import extract_risk_level
 
 health_bp = Blueprint("health", __name__)
 
@@ -323,14 +324,14 @@ def health_check():
         risk_eval = _load_json_safe(risk_eval_path)
         risk_guard_path = health_paths.auto_risk_guard_path or (REPORTS_DIR / "auto_risk_guard.json")
         risk_guard = _load_json_safe(risk_guard_path)
-        eval_level = str((risk_eval or {}).get("current_level", "") or "").strip().upper()
-        guard_level = str((risk_guard or {}).get("current_level", "") or "").strip().upper()
+        eval_level = extract_risk_level(risk_eval)
+        guard_level = extract_risk_level(risk_guard)
         eval_epoch = _risk_state_epoch(risk_eval, primary_keys=("ts",))
         guard_epoch = _risk_state_epoch(risk_guard, primary_keys=("last_update",))
         risk = risk_eval
         if not eval_level or (guard_level and guard_epoch is not None and (eval_epoch is None or guard_epoch > eval_epoch)):
             risk = risk_guard
-        level = str(risk.get("current_level", "UNKNOWN") or "UNKNOWN").upper()
+        level = extract_risk_level(risk) or "UNKNOWN"
         checks["checks"]["risk_guard"] = {
             "status": "ok" if level != "UNKNOWN" else "warning",
             "level": level,

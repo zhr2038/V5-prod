@@ -54,6 +54,7 @@ from src.execution.fill_store import (
 from src.regime.funding_vote_utils import build_funding_vote, summarize_funding_rows
 from src.regime.rss_vote_utils import build_rss_vote
 from src.research.cache_loader import load_cached_market_data
+from src.risk.auto_risk_guard import extract_risk_level
 
 SLIPPAGE_HISTOGRAM_BINS = (
     (None, -10.0, '≤-10'),
@@ -5410,8 +5411,8 @@ def api_auto_risk_guard():
 
         eval_data = _load_json_payload(runtime_paths.auto_risk_eval_path)
         guard_state = _load_json_payload(runtime_paths.auto_risk_guard_path)
-        eval_level = str((eval_data or {}).get('current_level', '') or '').strip().upper()
-        guard_level = str((guard_state or {}).get('current_level', '') or '').strip().upper()
+        eval_level = extract_risk_level(eval_data)
+        guard_level = extract_risk_level(guard_state)
         eval_epoch = _risk_state_epoch(eval_data, primary_keys=('ts',))
         guard_epoch = _risk_state_epoch(guard_state, primary_keys=('last_update',))
 
