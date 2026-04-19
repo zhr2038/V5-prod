@@ -53,6 +53,18 @@ def test_build_paths_uses_suffixed_runtime_alert_file(monkeypatch, tmp_path: Pat
     assert paths.alert_file == (tmp_path / "reports" / "monitor_alert_accelerated.txt").resolve()
 
 
+def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    missing = tmp_path / "configs" / "missing.yaml"
+    monkeypatch.setattr(trade_monitor, "resolve_runtime_config_path", lambda project_root=None: str(missing))
+
+    try:
+        trade_monitor._load_active_config(project_root=tmp_path)
+    except FileNotFoundError as exc:
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
+
+
 def test_shell_wrapper_delegates_to_python_monitor(tmp_path: Path) -> None:
     import os
     import subprocess

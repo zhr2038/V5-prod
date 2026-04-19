@@ -55,6 +55,18 @@ def test_resolve_live_units_ignores_retired_live_20u(monkeypatch) -> None:
     assert timer_unit == "v5-prod.user.timer"
 
 
+def test_load_config_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(status_report, "CONFIG_PATH", missing)
+
+    try:
+        status_report.load_config()
+    except FileNotFoundError as exc:
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
+
+
 def test_resolve_status_paths_uses_suffixed_runtime_auto_blacklist(tmp_path: Path) -> None:
     cfg = {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}}
 

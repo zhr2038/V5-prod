@@ -56,14 +56,17 @@ class MonitorPaths:
 
 def _load_active_config(*, project_root: Path) -> dict:
     config_path = Path(resolve_runtime_config_path(project_root=project_root))
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
     try:
         import yaml
 
-        if config_path.exists():
-            return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        pass
-    return {}
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {config_path}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    return payload
 
 
 def _resolve_runtime_path(raw_path: object, *, default: str, project_root: Path) -> Path:

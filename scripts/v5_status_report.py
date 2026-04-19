@@ -55,12 +55,17 @@ class StatusPaths:
 
 
 def load_config() -> Dict[str, Any]:
+    if not CONFIG_PATH.exists():
+        raise FileNotFoundError(f"runtime config not found: {CONFIG_PATH}")
     try:
         import yaml
 
-        return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
+        payload = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {CONFIG_PATH}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {CONFIG_PATH}")
+    return payload
 
 
 def _resolve_runtime_path(raw_path: object, default_path: Path) -> Path:
