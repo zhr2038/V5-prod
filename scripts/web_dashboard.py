@@ -5407,14 +5407,47 @@ def api_auto_risk_guard():
                 'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             })
 
+        guard_state = _load_json_payload(runtime_paths.auto_risk_guard_path)
         guard = AutoRiskGuard(state_path=str(runtime_paths.auto_risk_guard_path))
+        guard_config = guard.get_current_config()
+        guard_history = guard.history[-5:]
+        guard_metrics = guard.metrics
+        guard_reason = ''
+        guard_last_update = ''
+
+        if isinstance(guard_state, dict):
+            stored_config = guard_state.get('current_config')
+            if isinstance(stored_config, dict):
+                guard_config = stored_config
+
+            stored_history = guard_state.get('history')
+            if isinstance(stored_history, list):
+                guard_history = stored_history[-5:]
+                latest_history = next(
+                    (
+                        item for item in reversed(stored_history)
+                        if isinstance(item, dict) and str(item.get('to') or '').strip().upper() == guard.current_level
+                    ),
+                    None,
+                )
+                if isinstance(latest_history, dict):
+                    guard_reason = str(latest_history.get('reason') or '').strip()
+                    if not guard_last_update:
+                        guard_last_update = str(latest_history.get('ts') or '').strip()
+
+            stored_metrics = guard_state.get('metrics')
+            if isinstance(stored_metrics, dict):
+                guard_metrics = stored_metrics
+
+            guard_last_update = str(guard_state.get('last_update') or guard_last_update or '').strip()
+
         return jsonify({
             'current_level': guard.current_level,
-            'config': guard.get_current_config(),
-            'history': guard.history[-5:],  # 最近5次切换
-            'metrics': guard.metrics,
-            'reason': '',
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'config': guard_config,
+            'history': guard_history,
+            'metrics': guard_metrics,
+            'reason': guard_reason,
+            'last_update': guard_last_update or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as exc:
         return _json_internal_error_response(

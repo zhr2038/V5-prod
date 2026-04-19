@@ -5135,7 +5135,16 @@ def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(
         encoding="utf-8",
     )
     (runtime_dir / "auto_risk_guard.json").write_text(
-        json.dumps({"current_level": "PROTECT", "metrics": {"last_dd_pct": 0.25}}, ensure_ascii=False),
+        json.dumps(
+            {
+                "current_level": "PROTECT",
+                "current_config": {"max_positions": 1},
+                "metrics": {"last_dd_pct": 0.25},
+                "history": [{"to": "PROTECT", "reason": "runtime guard fallback", "ts": "2026-04-19T13:00:00"}],
+                "last_update": "2026-04-19T13:05:00",
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
 
@@ -5144,10 +5153,22 @@ def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["current_level"] == "PROTECT"
+    assert payload["config"]["max_positions"] == 1
     assert payload["metrics"]["last_dd_pct"] == 0.25
+    assert payload["reason"] == "runtime guard fallback"
+    assert payload["last_update"] == "2026-04-19T13:05:00"
 
     (runtime_dir / "auto_risk_guard.json").write_text(
-        json.dumps({"current_level": "DEFENSE", "metrics": {"last_dd_pct": 0.12}}, ensure_ascii=False),
+        json.dumps(
+            {
+                "current_level": "DEFENSE",
+                "current_config": {"max_positions": 3},
+                "metrics": {"last_dd_pct": 0.12},
+                "history": [{"to": "DEFENSE", "reason": "recovered from protect", "ts": "2026-04-19T14:00:00"}],
+                "last_update": "2026-04-19T14:05:00",
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
 
@@ -5156,7 +5177,10 @@ def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["current_level"] == "DEFENSE"
+    assert payload["config"]["max_positions"] == 3
     assert payload["metrics"]["last_dd_pct"] == 0.12
+    assert payload["reason"] == "recovered from protect"
+    assert payload["last_update"] == "2026-04-19T14:05:00"
 
 
 def test_auto_risk_guard_error_response_hides_internal_paths(monkeypatch):
