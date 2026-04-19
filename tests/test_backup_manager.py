@@ -7,11 +7,41 @@ import pytest
 import scripts.backup_manager as backup_manager
 
 
+@pytest.fixture(autouse=True)
+def _runtime_config(monkeypatch, tmp_path):
+    config_path = tmp_path / "configs" / "live_prod.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        "execution:\n  order_store_path: reports/orders.sqlite\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        backup_manager,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(config_path),
+    )
+    return config_path
+
+
 def test_backup_manager_build_paths_anchor_to_workspace(tmp_path) -> None:
     paths = backup_manager.build_paths(tmp_path)
 
     assert paths.workspace == tmp_path.resolve()
     assert paths.backup_dir == (tmp_path / "backups").resolve()
+
+
+def test_backup_manager_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path) -> None:
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(
+        backup_manager,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(missing),
+    )
+
+    manager = backup_manager.BackupManager(workspace=tmp_path)
+
+    with pytest.raises(FileNotFoundError, match=str(missing)):
+        manager._load_active_config()
 
 
 def test_backup_manager_creates_backup_under_workspace(tmp_path) -> None:
