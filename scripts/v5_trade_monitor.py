@@ -24,7 +24,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
-from src.execution.fill_store import derive_fill_store_path, derive_runtime_named_artifact_path
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_runtime_auto_risk_eval_path,
+    derive_runtime_auto_risk_guard_path,
+    derive_runtime_named_artifact_path,
+)
 
 
 TELEGRAM_CHAT_ID = "5065024131"
@@ -93,6 +98,69 @@ def build_paths(project_root: Path | None = None) -> MonitorPaths:
 
 
 DEFAULT_PATHS = build_paths()
+
+
+def _resolve_risk_state_paths(paths: MonitorPaths) -> tuple[Path, Path]:
+    return (
+        derive_runtime_auto_risk_eval_path(paths.orders_db_path).resolve(),
+        derive_runtime_auto_risk_guard_path(paths.orders_db_path).resolve(),
+    )
+
+
+def _load_json_safe(path: Path) -> dict:
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _coerce_timestamp_epoch(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _risk_state_epoch(payload: object, *, primary_keys: tuple[str, ...]) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in primary_keys:
+        epoch = _coerce_timestamp_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+    history = payload.get("history")
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            epoch = _coerce_timestamp_epoch(item.get("ts"))
+            if epoch is not None:
+                return epoch
+    return None
+
+
+def get_current_risk_level(paths: MonitorPaths = DEFAULT_PATHS) -> str:
+    eval_path, guard_path = _resolve_risk_state_paths(paths)
+    eval_state = _load_json_safe(eval_path)
+    guard_state = _load_json_safe(guard_path)
+    eval_level = str((eval_state or {}).get("current_level", "") or "").strip().upper()
+    guard_level = str((guard_state or {}).get("current_level", "") or "").strip().upper()
+    eval_epoch = _risk_state_epoch(eval_state, primary_keys=("ts",))
+    guard_epoch = _risk_state_epoch(guard_state, primary_keys=("last_update",))
+    if eval_level and (not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):
+        return eval_level
+    if guard_level:
+        return guard_level
+    return "UNKNOWN"
 
 
 def run_command(cmd: Sequence[str], timeout: int = 30) -> str:
@@ -363,18 +431,20 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
     alerts: list[str] = []
     priority = "normal"
     service_unit = resolve_live_service_unit_name()
+    risk_level = get_current_risk_level(paths)
 
     last_trade = get_last_trade_time(paths, service_unit=service_unit)
     trade_runs, total_fills = get_recent_trades_count(service_unit=service_unit)
 
     if last_trade is not None:
         hours_since_trade = (datetime.now() - last_trade).total_seconds() / 3600
-        if hours_since_trade >= ALERT_THRESHOLDS["no_trade_critical"]:
-            alerts.append(f"critical: no trade for {hours_since_trade:.1f} hours")
-            priority = "critical"
-        elif hours_since_trade >= ALERT_THRESHOLDS["no_trade_hours"]:
-            alerts.append(f"warning: no trade for {hours_since_trade:.1f} hours")
-            priority = "warning"
+        if not (risk_level == "PROTECT" and hours_since_trade >= ALERT_THRESHOLDS["no_trade_hours"]):
+            if hours_since_trade >= ALERT_THRESHOLDS["no_trade_critical"]:
+                alerts.append(f"critical: no trade for {hours_since_trade:.1f} hours")
+                priority = "critical"
+            elif hours_since_trade >= ALERT_THRESHOLDS["no_trade_hours"]:
+                alerts.append(f"warning: no trade for {hours_since_trade:.1f} hours")
+                priority = "warning"
     else:
         alerts.append("warning: unable to determine last trade time")
 
