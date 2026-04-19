@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
 from src.execution.fill_store import (
     derive_runtime_named_artifact_path,
     derive_runtime_reports_dir,
@@ -57,8 +57,13 @@ def _resolve_runtime_ml_artifact_path(
 
 def build_paths(workspace: str | Path | None = None, raw_config_path: str | None = None) -> PromotionPaths:
     root = Path(workspace).expanduser().resolve() if workspace is not None else resolve_workspace()
+    config_path = Path(resolve_runtime_config_path(raw_config_path, project_root=root)).resolve()
     cfg = load_runtime_config(raw_config_path, project_root=root)
-    execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
     alpha_cfg = cfg.get("alpha") if isinstance(cfg.get("alpha"), dict) else {}
     ml_cfg = alpha_cfg.get("ml_factor") if isinstance(alpha_cfg.get("ml_factor"), dict) else {}
     order_store_path = resolve_runtime_path(
