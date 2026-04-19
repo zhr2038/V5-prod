@@ -61,29 +61,26 @@ def _derive_cleanup_report_path(order_store_path: Path, timestamp: str) -> Path:
 
 def _resolve_default_paths(project_root: Path | None = None) -> DustCleanerPaths:
     root = Path(project_root or PROJECT_ROOT).resolve()
-    try:
-        cfg = load_runtime_config(project_root=root)
-        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-        orders_db = Path(
-            resolve_runtime_path(
-                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                default="reports/orders.sqlite",
-                project_root=root,
-            )
-        ).resolve()
-        return DustCleanerPaths(
-            reports_dir=derive_runtime_reports_dir(orders_db).resolve(),
-            orders_db=orders_db,
-            positions_db=derive_position_store_path(orders_db).resolve(),
-            dust_config_path=derive_runtime_named_json_path(orders_db, "dust_config").resolve(),
+    cfg = load_runtime_config(project_root=root)
+    config_path = (root / "configs" / "live_prod.yaml").resolve()
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=root,
         )
-    except Exception:
-        return DustCleanerPaths(
-            reports_dir=REPORTS_DIR.resolve(),
-            orders_db=ORDERS_DB.resolve(),
-            positions_db=POSITIONS_DB.resolve(),
-            dust_config_path=(REPORTS_DIR / "dust_config.json").resolve(),
-        )
+    ).resolve()
+    return DustCleanerPaths(
+        reports_dir=derive_runtime_reports_dir(orders_db).resolve(),
+        orders_db=orders_db,
+        positions_db=derive_position_store_path(orders_db).resolve(),
+        dust_config_path=derive_runtime_named_json_path(orders_db, "dust_config").resolve(),
+    )
 
 
 def _resolve_manual_reports_dir_paths(reports_dir: Path) -> DustCleanerPaths:
