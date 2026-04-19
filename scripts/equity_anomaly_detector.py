@@ -44,22 +44,22 @@ def _derive_anomaly_report_path(order_store_path: Path, timestamp: str) -> Path:
 
 def build_paths(workspace: Path | None = None) -> DetectorPaths:
     root = (workspace or PROJECT_ROOT).resolve()
-    try:
-        cfg = load_runtime_config(project_root=root)
-        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-        orders_db = Path(
-            resolve_runtime_path(
-                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                default="reports/orders.sqlite",
-                project_root=root,
-            )
-        ).resolve()
-        reports_dir = derive_runtime_reports_dir(orders_db).resolve()
-        runs_dir = derive_runtime_runs_dir(orders_db).resolve()
-    except Exception:
-        reports_dir = (root / "reports").resolve()
-        runs_dir = (reports_dir / "runs").resolve()
-        orders_db = (reports_dir / "orders.sqlite").resolve()
+    cfg = load_runtime_config(project_root=root)
+    config_path = (root / "configs" / "live_prod.yaml").resolve()
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=root,
+        )
+    ).resolve()
+    reports_dir = derive_runtime_reports_dir(orders_db).resolve()
+    runs_dir = derive_runtime_runs_dir(orders_db).resolve()
 
     return DetectorPaths(
         workspace=root,
