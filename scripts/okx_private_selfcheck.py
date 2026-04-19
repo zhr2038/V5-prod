@@ -22,6 +22,12 @@ def resolve_runtime_env_path(raw_env_path=None, project_root=None):
     return _resolve_runtime_env_path(raw_env_path, project_root=project_root)
 
 
+def load_runtime_config(raw_config_path=None, project_root=None):
+    from configs.runtime_config import load_runtime_config as _load_runtime_config
+
+    return _load_runtime_config(raw_config_path, project_root=project_root)
+
+
 def load_config(path, env_path=None):
     from configs.loader import load_config as _load_config
 
@@ -38,8 +44,15 @@ def _resolve_runtime_entry_paths(
     config_path: str | None = None,
     env_path: str | None = None,
 ) -> tuple[str, str]:
+    resolved_config_path = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    cfg = load_runtime_config(config_path, project_root=PROJECT_ROOT)
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {resolved_config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved_config_path}")
     return (
-        resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT),
+        str(resolved_config_path),
         resolve_runtime_env_path(env_path, project_root=PROJECT_ROOT),
     )
 
