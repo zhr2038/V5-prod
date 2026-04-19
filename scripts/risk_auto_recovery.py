@@ -12,6 +12,7 @@ V5 风控自动恢复机制
 import json
 import sqlite3
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -25,6 +26,7 @@ from src.execution.fill_store import (
     derive_runtime_named_json_path,
     derive_runtime_reports_dir,
 )
+from src.risk.auto_risk_guard import AutoRiskGuard
 
 # 自动恢复阈值配置
 RECOVERY_THRESHOLDS = {
@@ -89,10 +91,28 @@ class RiskAutoRecovery:
         if self.risk_state_file.exists():
             try:
                 with open(self.risk_state_file) as f:
-                    return json.load(f)
+                    state = json.load(f)
+                    if isinstance(state, dict):
+                        current_level = str(state.get('current_level') or state.get('level') or 'NEUTRAL').upper()
+                        since = str(
+                            state.get('since')
+                            or state.get('last_update')
+                            or (
+                                state.get('history', [])[-1].get('ts')
+                                if isinstance(state.get('history'), list) and state.get('history')
+                                and isinstance(state.get('history')[-1], dict)
+                                else ''
+                            )
+                            or datetime.now().isoformat()
+                        )
+                        state['current_level'] = current_level
+                        state['level'] = current_level
+                        state['since'] = since
+                        return state
             except:
                 pass
-        return {'level': 'NEUTRAL', 'since': datetime.now().isoformat()}
+        now_iso = datetime.now().isoformat()
+        return {'current_level': 'NEUTRAL', 'level': 'NEUTRAL', 'since': now_iso, 'last_update': now_iso}
     
     def get_drawdown_history(self, hours=24):
         """获取回撤历史"""
@@ -172,7 +192,7 @@ class RiskAutoRecovery:
         
         # 获取当前状态
         state = self.get_current_risk_state()
-        current_level = state.get('level', 'NEUTRAL')
+        current_level = str(state.get('current_level') or state.get('level') or 'NEUTRAL').upper()
         
         # NEUTRAL不需要恢复
         if current_level == 'NEUTRAL':
@@ -204,11 +224,26 @@ class RiskAutoRecovery:
         """执行恢复（修改风险状态文件）"""
         try:
             state = self.get_current_risk_state()
-            old_level = state.get('level', 'NEUTRAL')
-            
+            old_level = str(state.get('current_level') or state.get('level') or 'NEUTRAL').upper()
+            now_iso = datetime.now().isoformat()
+            metrics = state.get('metrics') if isinstance(state.get('metrics'), dict) else {}
+            history = list(state.get('history') or []) if isinstance(state.get('history'), list) else []
+            history.append({
+                'ts': now_iso,
+                'from': old_level,
+                'to': target_level,
+                'reason': '[AUTO] recovery',
+                'metrics': dict(metrics),
+            })
+
             # 更新状态
+            state['current_level'] = target_level
+            state['current_config'] = asdict(AutoRiskGuard.LEVELS[target_level])
+            state['metrics'] = metrics
+            state['history'] = history[-50:]
+            state['last_update'] = now_iso
             state['level'] = target_level
-            state['since'] = datetime.now().isoformat()
+            state['since'] = now_iso
             state['recovered_from'] = old_level
             state['recovery_reason'] = 'auto'
             
