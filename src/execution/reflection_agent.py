@@ -33,20 +33,22 @@ REPORTS_DIR = PROJECT_ROOT / 'reports'
 
 
 def _resolve_reflection_runtime_paths() -> Tuple[Path, Path]:
-    try:
-        cfg = load_runtime_config(project_root=PROJECT_ROOT)
-        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
-        orders_db = Path(
-            resolve_runtime_path(
-                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
-                default="reports/orders.sqlite",
-                project_root=PROJECT_ROOT,
-            )
-        ).resolve()
-        reports_dir = derive_runtime_reports_dir(orders_db).resolve()
-        return orders_db, reports_dir
-    except Exception:
-        return (REPORTS_DIR / 'orders.sqlite').resolve(), REPORTS_DIR.resolve()
+    cfg = load_runtime_config(project_root=PROJECT_ROOT)
+    config_path = (PROJECT_ROOT / "configs" / "live_prod.yaml").resolve()
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=PROJECT_ROOT,
+        )
+    ).resolve()
+    reports_dir = derive_runtime_reports_dir(orders_db).resolve()
+    return orders_db, reports_dir
 
 
 class AlertLevel(Enum):

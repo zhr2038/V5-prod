@@ -397,3 +397,12 @@ def test_reflection_agent_uses_suffixed_runtime_defaults(monkeypatch, tmp_path: 
     assert agent.report_dir == (reports_dir / "reflection_accelerated").resolve()
     assert agent.bills_db == str((reports_dir / "bills_accelerated.sqlite").resolve())
     assert agent.ic_file == (reports_dir / "ic_diagnostics_30d_20u_accelerated.json").resolve()
+
+
+def test_reflection_agent_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(reflection_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(reflection_module, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(reflection_module, "load_runtime_config", lambda project_root=None: {})
+
+    with pytest.raises(ValueError, match="live_prod.yaml"):
+        reflection_module.ReflectionAgentV2()
