@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from src.reporting.spread_snapshots import compute_spread_stats
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
 from src.execution.fill_store import (
     derive_runtime_spread_snapshots_dir,
     derive_runtime_spread_stats_dir,
@@ -33,8 +33,19 @@ def _resolve_runtime_dirs(
     out_dir: str | None,
     config_path: str | None,
 ) -> tuple[Path, Path]:
+    if snapshots_dir is not None and out_dir is not None:
+        return (
+            _resolve_repo_path(snapshots_dir, default=PROJECT_ROOT / "reports" / "spread_snapshots"),
+            _resolve_repo_path(out_dir, default=PROJECT_ROOT / "reports" / "spread_stats"),
+        )
+
+    resolved_config_path = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
     cfg = load_runtime_config(config_path, project_root=PROJECT_ROOT)
-    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {resolved_config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved_config_path}")
     order_store_path = Path(
         resolve_runtime_path(
             execution_cfg.get("order_store_path"),
