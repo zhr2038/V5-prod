@@ -2552,18 +2552,36 @@ class V5Pipeline:
         fused_buy_symbols = set()
         current_auto_risk_level = self._load_current_auto_risk_level()
         protect_entry_gate_active = str(current_auto_risk_level or "").upper() == "PROTECT"
+        protect_entry_require_alpha6_confirmation = bool(
+            getattr(self.cfg.execution, "protect_entry_require_alpha6_confirmation", True)
+        )
+        protect_entry_block_trend_only = bool(
+            getattr(self.cfg.execution, "protect_entry_block_trend_only", True)
+        )
+        protect_entry_require_alpha6_rsi_confirm_positive = bool(
+            getattr(self.cfg.execution, "protect_entry_require_alpha6_rsi_confirm_positive", True)
+        )
+        protect_entry_alpha6_min_score = float(
+            getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.10) or 0.0
+        )
         strategy_signal_lookup = (
             self._resolve_strategy_signal_lookup(audit)
             if protect_entry_gate_active
             else {}
         )
+        if audit:
+            audit.protect_entry_gate_active = bool(protect_entry_gate_active)
+            audit.protect_entry_require_alpha6_confirmation = protect_entry_require_alpha6_confirmation
+            audit.protect_entry_block_trend_only = protect_entry_block_trend_only
+            audit.protect_entry_require_alpha6_rsi_confirm_positive = protect_entry_require_alpha6_rsi_confirm_positive
+            audit.protect_entry_alpha6_min_score = protect_entry_alpha6_min_score
         if protect_entry_gate_active and audit:
             audit.add_note(
                 "PROTECT entry gate active: "
-                f"require_alpha6_confirmation={bool(getattr(self.cfg.execution, 'protect_entry_require_alpha6_confirmation', True))}, "
-                f"block_trend_only={bool(getattr(self.cfg.execution, 'protect_entry_block_trend_only', True))}, "
-                f"require_alpha6_rsi_confirm_positive={bool(getattr(self.cfg.execution, 'protect_entry_require_alpha6_rsi_confirm_positive', True))}, "
-                f"alpha6_min_score={float(getattr(self.cfg.execution, 'protect_entry_alpha6_min_score', 0.10) or 0.0):.2f}"
+                f"require_alpha6_confirmation={protect_entry_require_alpha6_confirmation}, "
+                f"block_trend_only={protect_entry_block_trend_only}, "
+                f"require_alpha6_rsi_confirm_positive={protect_entry_require_alpha6_rsi_confirm_positive}, "
+                f"alpha6_min_score={protect_entry_alpha6_min_score:.2f}"
             )
         if require_fused_buy:
             try:

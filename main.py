@@ -508,6 +508,18 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
                 if getattr(cfg.execution, "max_rebalance_turnover_per_cycle", None) is None
                 else float(getattr(cfg.execution, "max_rebalance_turnover_per_cycle", 0.0) or 0.0)
             ),
+            "protect_entry_require_alpha6_confirmation": bool(
+                getattr(cfg.execution, "protect_entry_require_alpha6_confirmation", True)
+            ),
+            "protect_entry_block_trend_only": bool(
+                getattr(cfg.execution, "protect_entry_block_trend_only", True)
+            ),
+            "protect_entry_require_alpha6_rsi_confirm_positive": bool(
+                getattr(cfg.execution, "protect_entry_require_alpha6_rsi_confirm_positive", True)
+            ),
+            "protect_entry_alpha6_min_score": float(
+                getattr(cfg.execution, "protect_entry_alpha6_min_score", 0.10) or 0.0
+            ),
         },
     }
 
