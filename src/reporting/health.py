@@ -16,6 +16,7 @@ from configs.runtime_config import resolve_runtime_config_path
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_position_store_path,
+    derive_runtime_auto_risk_guard_path,
     derive_runtime_auto_risk_eval_path,
     derive_runtime_named_json_path,
 )
@@ -34,6 +35,7 @@ class HealthPaths:
     positions_db: Path
     kill_switch_path: Path
     reconcile_status_path: Path
+    auto_risk_guard_path: Path | None = None
     auto_risk_eval_path: Path | None = None
 
 
@@ -103,6 +105,7 @@ def _resolve_health_paths() -> HealthPaths:
             base_name="reconcile_status",
             legacy_default="reports/reconcile_status.json",
         ),
+        auto_risk_guard_path=derive_runtime_auto_risk_guard_path(orders_db),
         auto_risk_eval_path=derive_runtime_auto_risk_eval_path(orders_db),
     )
 
@@ -281,6 +284,9 @@ def health_check():
     try:
         risk_eval_path = health_paths.auto_risk_eval_path or (REPORTS_DIR / "auto_risk_eval.json")
         risk = _load_json_safe(risk_eval_path)
+        if not isinstance(risk, dict) or not risk.get("current_level"):
+            risk_guard_path = health_paths.auto_risk_guard_path or (REPORTS_DIR / "auto_risk_guard.json")
+            risk = _load_json_safe(risk_guard_path)
         checks["checks"]["risk_guard"] = {
             "status": "ok",
             "level": risk.get("current_level", "UNKNOWN"),
