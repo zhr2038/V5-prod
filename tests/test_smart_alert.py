@@ -3,7 +3,25 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from src.monitoring import smart_alert as smart_alert_module
+
+
+@pytest.fixture(autouse=True)
+def _runtime_config(monkeypatch, tmp_path: Path) -> Path:
+    config_path = tmp_path / "configs" / "live_prod.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        "execution:\n  order_store_path: reports/orders.sqlite\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        smart_alert_module,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(config_path),
+    )
+    return config_path
 
 
 def test_resolve_paths_uses_prefixed_runtime_alert_state(monkeypatch, tmp_path: Path) -> None:
@@ -46,6 +64,22 @@ def test_resolve_paths_uses_suffixed_runtime_alert_state(monkeypatch, tmp_path: 
     assert paths.orders_db == (tmp_path / "reports" / "orders_accelerated.sqlite")
     assert paths.alerts_state_file == (tmp_path / "reports" / "alerts_state_accelerated.json").resolve()
     assert paths.ic_file == (tmp_path / "reports" / "ic_diagnostics_30d_20u_accelerated.json").resolve()
+
+
+def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    missing = tmp_path / "configs" / "missing.yaml"
+    monkeypatch.setattr(
+        smart_alert_module,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(missing),
+    )
+
+    try:
+        smart_alert_module._load_active_config(workspace=tmp_path)
+    except FileNotFoundError as exc:
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
 
 
 def test_check_signal_no_trade_ignores_exit_only_rounds(tmp_path: Path) -> None:
