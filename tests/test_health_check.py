@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import scripts.health_check as health_check
@@ -92,3 +93,39 @@ def test_check_okx_api_warns_with_runtime_env_filename(monkeypatch, tmp_path: Pa
 
     assert result["status"] == "warning"
     assert result["details"] == "API credentials missing in runtime env file: live.env"
+
+
+def test_check_risk_guard_prefers_newer_guard_state_over_eval(monkeypatch, tmp_path: Path) -> None:
+    eval_path = tmp_path / "reports" / "shadow_runtime" / "auto_risk_eval.json"
+    guard_path = tmp_path / "reports" / "shadow_runtime" / "auto_risk_guard.json"
+    guard_path.parent.mkdir(parents=True, exist_ok=True)
+    eval_path.write_text(
+        json.dumps({"ts": "2026-04-19T13:00:00", "current_level": "PROTECT", "metrics": {"dd_pct": 0.25}}),
+        encoding="utf-8",
+    )
+    guard_path.write_text(
+        json.dumps({"current_level": "DEFENSE", "metrics": {"last_dd_pct": 0.12}, "last_update": "2026-04-19T14:05:00"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(health_check, "_resolve_health_risk_paths", lambda: (eval_path, guard_path))
+
+    result = health_check.HealthChecker().check_risk_guard()
+
+    assert result["status"] == "healthy"
+    assert result["details"]["level"] == "DEFENSE"
+    assert result["details"]["drawdown"] == 0.12
+    assert result["details"]["source"] == "guard"
+
+
+def test_run_all_checks_promotes_risk_guard_warning_to_overall_warning(monkeypatch) -> None:
+    checker = health_check.HealthChecker()
+    monkeypatch.setattr(checker, "check_timer_health", lambda: {"name": "timers", "status": "healthy", "details": "ok"})
+    monkeypatch.setattr(checker, "check_database_health", lambda: {"name": "database", "status": "healthy", "details": []})
+    monkeypatch.setattr(checker, "check_risk_guard", lambda: {"name": "risk_guard", "status": "warning", "details": {"level": "UNKNOWN"}})
+    monkeypatch.setattr(checker, "check_okx_api", lambda: {"name": "okx_api", "status": "healthy", "details": {"latency_ms": 1}})
+    monkeypatch.setattr(checker, "check_disk_space", lambda: {"name": "disk", "status": "healthy", "details": {}})
+
+    result = checker.run_all_checks()
+
+    assert result["overall_status"] == "warning"

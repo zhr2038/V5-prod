@@ -23,7 +23,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.runtime_config import load_runtime_config, resolve_runtime_env_path, resolve_runtime_path
-from src.execution.fill_store import derive_fill_store_path, derive_position_store_path, derive_runtime_named_json_path
+from src.execution.fill_store import (
+    derive_fill_store_path,
+    derive_position_store_path,
+    derive_runtime_auto_risk_eval_path,
+    derive_runtime_auto_risk_guard_path,
+    derive_runtime_named_json_path,
+)
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 REPORTS_DIR = WORKSPACE / "reports"
@@ -95,6 +101,69 @@ def _resolve_health_database_paths() -> list[tuple[Path, str]]:
             (REPORTS_DIR / "positions.sqlite", "positions"),
             (REPORTS_DIR / "fills.sqlite", "fills"),
         ]
+
+
+def _resolve_health_risk_paths() -> tuple[Path, Path]:
+    try:
+        cfg = load_runtime_config(project_root=WORKSPACE)
+        execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+        orders_db = Path(
+            resolve_runtime_path(
+                execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+                default="reports/orders.sqlite",
+                project_root=WORKSPACE,
+            )
+        ).resolve()
+        return (
+            derive_runtime_auto_risk_eval_path(orders_db).resolve(),
+            derive_runtime_auto_risk_guard_path(orders_db).resolve(),
+        )
+    except Exception:
+        return (
+            (REPORTS_DIR / "auto_risk_eval.json").resolve(),
+            (REPORTS_DIR / "auto_risk_guard.json").resolve(),
+        )
+
+
+def _load_json_safe(path: Path) -> dict[str, Any]:
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _coerce_timestamp_epoch(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _risk_state_epoch(payload: object, *, primary_keys: tuple[str, ...]) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in primary_keys:
+        epoch = _coerce_timestamp_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+    history = payload.get("history")
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            epoch = _coerce_timestamp_epoch(item.get("ts"))
+            if epoch is not None:
+                return epoch
+    return None
 
 
 def _resolve_health_output_path() -> Path:
@@ -317,10 +386,42 @@ class HealthChecker:
         except Exception as exc:
             return {"name": "disk", "status": "warning", "details": str(exc)}
 
+    def check_risk_guard(self) -> Dict[str, Any]:
+        eval_path, guard_path = _resolve_health_risk_paths()
+        eval_state = _load_json_safe(eval_path)
+        guard_state = _load_json_safe(guard_path)
+        eval_level = str((eval_state or {}).get("current_level", "") or "").strip().upper()
+        guard_level = str((guard_state or {}).get("current_level", "") or "").strip().upper()
+        eval_epoch = _risk_state_epoch(eval_state, primary_keys=("ts",))
+        guard_epoch = _risk_state_epoch(guard_state, primary_keys=("last_update",))
+
+        source = "missing"
+        risk = {}
+        if eval_level and (not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):
+            risk = eval_state
+            source = "eval"
+        elif guard_level:
+            risk = guard_state
+            source = "guard"
+
+        level = str((risk or {}).get("current_level", "UNKNOWN") or "UNKNOWN").upper()
+        metrics = risk.get("metrics", {}) if isinstance(risk, dict) else {}
+        drawdown = metrics.get("dd_pct", metrics.get("last_dd_pct", 0))
+        return {
+            "name": "risk_guard",
+            "status": "healthy" if level != "UNKNOWN" else "warning",
+            "details": {
+                "level": level,
+                "drawdown": drawdown,
+                "source": source,
+            },
+        }
+
     def run_all_checks(self) -> Dict[str, Any]:
         self.checks = [
             self.check_timer_health(),
             self.check_database_health(),
+            self.check_risk_guard(),
             self.check_okx_api(),
             self.check_disk_space(),
         ]
