@@ -287,9 +287,10 @@ def health_check():
         if not isinstance(risk, dict) or not risk.get("current_level"):
             risk_guard_path = health_paths.auto_risk_guard_path or (REPORTS_DIR / "auto_risk_guard.json")
             risk = _load_json_safe(risk_guard_path)
+        level = str(risk.get("current_level", "UNKNOWN") or "UNKNOWN").upper()
         checks["checks"]["risk_guard"] = {
-            "status": "ok",
-            "level": risk.get("current_level", "UNKNOWN"),
+            "status": "ok" if level != "UNKNOWN" else "warning",
+            "level": level,
             "drawdown": risk.get("metrics", {}).get("dd_pct", risk.get("metrics", {}).get("last_dd_pct", 0)),
         }
     except Exception as exc:
