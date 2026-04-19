@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.execution.fill_store import FillRow, FillStore, derive_fill_store_path, derive_runtime_runs_dir
 from src.execution.order_store import OrderStore
+import src.monitoring.api_telemetry as api_telemetry
+import src.monitoring.prometheus_exporter as prometheus_exporter
 from src.monitoring.api_telemetry import APITelemetryRecord, APITelemetryStore, classify_api_status
 from src.monitoring.prometheus_exporter import PrometheusRuntimePaths, render_prometheus_metrics
 
@@ -120,3 +124,29 @@ def test_render_prometheus_metrics_exports_runtime_metrics(tmp_path: Path) -> No
     assert 'v5_orders_total{intent="OPEN_LONG",side="buy",state="FILLED"} 1' in body
     assert 'v5_fills_total{side="buy"} 1' in body
     assert 'v5_latest_run_realized_pnl_usdt{run_id="run-1"} 0.8' in body
+
+
+def test_resolve_api_telemetry_path_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(api_telemetry, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        api_telemetry,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str((tmp_path / "configs" / "live_prod.yaml").resolve()),
+    )
+    monkeypatch.setattr(api_telemetry, "load_runtime_config", lambda project_root=None: {})
+
+    with pytest.raises(ValueError, match="live_prod.yaml"):
+        api_telemetry.resolve_api_telemetry_path(project_root=tmp_path)
+
+
+def test_resolve_prometheus_runtime_paths_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(prometheus_exporter, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        prometheus_exporter,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str((tmp_path / "configs" / "live_prod.yaml").resolve()),
+    )
+    monkeypatch.setattr(prometheus_exporter, "load_runtime_config", lambda project_root=None: {})
+
+    with pytest.raises(ValueError, match="live_prod.yaml"):
+        prometheus_exporter.resolve_prometheus_runtime_paths(workspace=tmp_path)

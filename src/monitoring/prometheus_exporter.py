@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
 from src.execution.fill_store import (
     derive_fill_store_path,
     derive_runtime_named_artifact_path,
@@ -79,11 +79,16 @@ def resolve_prometheus_runtime_paths(
     config: Optional[Dict[str, Any]] = None,
 ) -> PrometheusRuntimePaths:
     root = (workspace or PROJECT_ROOT).resolve()
+    config_path = Path(resolve_runtime_config_path(project_root=root)).resolve()
     cfg = config if isinstance(config, dict) else load_runtime_config(project_root=root)
-    execution_cfg = cfg.get("execution", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
     orders_db = Path(
         resolve_runtime_path(
-            execution_cfg.get("order_store_path") if isinstance(execution_cfg, dict) else None,
+            execution_cfg.get("order_store_path"),
             default="reports/orders.sqlite",
             project_root=root,
         )
