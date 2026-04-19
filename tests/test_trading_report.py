@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+import scripts.trading_report as trading_report
+
+
+def test_build_paths_uses_runtime_order_store(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        trading_report,
+        "load_runtime_config",
+        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+    monkeypatch.setattr(
+        trading_report,
+        "resolve_runtime_path",
+        lambda raw_path=None, default="reports/orders.sqlite", project_root=None: str(
+            (tmp_path / (raw_path or default)).resolve()
+        ),
+    )
+
+    paths = trading_report.build_paths(tmp_path)
+
+    assert paths.orders_db == (tmp_path / "reports" / "shadow_orders.sqlite").resolve()
+    assert paths.fills_db == (tmp_path / "reports" / "shadow_fills.sqlite").resolve()
+    assert paths.runs_dir == (tmp_path / "reports" / "runs").resolve()
+
+
+def test_build_paths_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(trading_report, "load_runtime_config", lambda project_root=None: {})
+
+    with pytest.raises(ValueError, match="live_prod.yaml"):
+        trading_report.build_paths(tmp_path)
