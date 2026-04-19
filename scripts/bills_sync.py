@@ -10,8 +10,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_env_path
+
 
 log = logging.getLogger("bills_sync")
+
+
+def _resolve_active_config_path(raw_config_path: str | None = None) -> str:
+    resolved = Path(resolve_runtime_config_path(raw_config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved}")
+    raw_cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
+    if not isinstance(raw_cfg, dict) or not raw_cfg:
+        raise ValueError(f"runtime config is empty or invalid: {resolved}")
+    execution_cfg = raw_cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved}")
+    return str(resolved)
 
 
 def _resolve_bills_db_path(raw_db_path: str | None, cfg) -> str:
@@ -89,13 +104,13 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
     from configs.loader import load_config
-    from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_env_path
     from src.execution.bills_store import BillsStore
     from src.execution.okx_private_client import OKXPrivateClient
 
+    resolved_config_path = _resolve_active_config_path(args.config)
     cfg = load_config(
-        resolve_runtime_config_path(args.config),
-        env_path=resolve_runtime_env_path(args.env),
+        resolved_config_path,
+        env_path=resolve_runtime_env_path(args.env, project_root=PROJECT_ROOT),
     )
 
     store = BillsStore(path=_resolve_bills_db_path(args.db, cfg))
