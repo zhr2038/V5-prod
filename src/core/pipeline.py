@@ -48,6 +48,31 @@ def _parse_iso_utc(ts: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _coerce_state_epoch(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    dt = _parse_iso_utc(str(value or "").strip())
+    return dt.timestamp() if dt is not None else None
+
+
+def _risk_state_epoch(payload: Any, *, primary_keys: tuple[str, ...]) -> Optional[float]:
+    if not isinstance(payload, dict):
+        return None
+    for key in primary_keys:
+        epoch = _coerce_state_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+    history = payload.get("history")
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            epoch = _coerce_state_epoch(item.get("ts"))
+            if epoch is not None:
+                return epoch
+    return None
+
+
 def _holding_minutes(entry_ts: Optional[str], now_utc: datetime) -> Optional[float]:
     ent = _parse_iso_utc(entry_ts)
     if ent is None:
@@ -409,13 +434,29 @@ class V5Pipeline:
 
     def _load_current_auto_risk_level(self) -> Optional[str]:
         try:
-            path = derive_runtime_auto_risk_eval_path(self._runtime_order_store_path).resolve()
-            if path.exists():
-                obj = json.loads(path.read_text(encoding="utf-8"))
-                level = str((obj or {}).get("current_level", "") or "").strip().upper()
-                if level:
-                    return level
+            eval_path = derive_runtime_auto_risk_eval_path(self._runtime_order_store_path).resolve()
+            eval_obj = {}
+            eval_level = ""
+            eval_epoch = None
+            if eval_path.exists():
+                eval_obj = json.loads(eval_path.read_text(encoding="utf-8"))
+                eval_level = str((eval_obj or {}).get("current_level", "") or "").strip().upper()
+                eval_epoch = _risk_state_epoch(eval_obj, primary_keys=("ts",))
+
+            guard_path = derive_runtime_auto_risk_guard_path(self._runtime_order_store_path).resolve()
+            guard_obj = {}
+            guard_file_level = ""
+            guard_epoch = None
+            if guard_path.exists():
+                guard_obj = json.loads(guard_path.read_text(encoding="utf-8"))
+                guard_file_level = str((guard_obj or {}).get("current_level", "") or "").strip().upper()
+                guard_epoch = _risk_state_epoch(guard_obj, primary_keys=("last_update",))
+
             guard_level = str(getattr(self.auto_risk_guard, "current_level", "") or "").strip().upper()
+            if eval_level and (not guard_file_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):
+                return eval_level
+            if guard_file_level:
+                return guard_file_level
             return guard_level or None
         except Exception:
             return None

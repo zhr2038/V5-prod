@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -24,6 +25,41 @@ from src.utils.math import clamp
 
 def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
+
+
+def _coerce_state_epoch(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).timestamp()
+
+
+def _risk_state_epoch(payload: Any, *, primary_keys: tuple[str, ...]) -> Optional[float]:
+    if not isinstance(payload, dict):
+        return None
+    for key in primary_keys:
+        epoch = _coerce_state_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+    history = payload.get("history")
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            epoch = _coerce_state_epoch(item.get("ts"))
+            if epoch is not None:
+                return epoch
+    return None
 
 
 @dataclass
@@ -361,15 +397,23 @@ class PortfolioEngine:
                 )
             )
             p = derive_runtime_auto_risk_eval_path(orders_db)
-            lvl = ""
+            eval_level = ""
+            eval_epoch = None
             if p.exists():
                 obj = json.loads(p.read_text(encoding="utf-8"))
-                lvl = str(obj.get("current_level", "")).upper()
-            if not lvl:
-                gp = derive_runtime_auto_risk_guard_path(orders_db)
-                if gp.exists():
-                    obj = json.loads(gp.read_text(encoding="utf-8"))
-                    lvl = str(obj.get("current_level", "")).upper()
+                eval_level = str(obj.get("current_level", "")).upper()
+                eval_epoch = _risk_state_epoch(obj, primary_keys=("ts",))
+            guard_level = ""
+            guard_epoch = None
+            gp = derive_runtime_auto_risk_guard_path(orders_db)
+            if gp.exists():
+                obj = json.loads(gp.read_text(encoding="utf-8"))
+                guard_level = str(obj.get("current_level", "")).upper()
+                guard_epoch = _risk_state_epoch(obj, primary_keys=("last_update",))
+            if eval_level and (not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):
+                lvl = eval_level
+            else:
+                lvl = guard_level
             cap_map = {
                 "PROTECT": 1,
                 "DEFENSE": 3,
