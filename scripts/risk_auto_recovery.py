@@ -147,11 +147,14 @@ class RiskAutoRecovery:
                                 else:
                                     ts = ts.astimezone(timezone.utc)
                                 if ts > cutoff:
+                                    drawdown = data.get('drawdown')
+                                    if drawdown is None:
+                                        drawdown = data.get('dd')
                                     points.append({
                                         'ts': ts,
                                         'equity': data.get('equity', 0),
                                         'peak': data.get('peak', 0),
-                                        'drawdown': data.get('drawdown', 0)
+                                        'drawdown': drawdown if drawdown is not None else 0
                                     })
                             except:
                                 continue

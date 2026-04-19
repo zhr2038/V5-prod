@@ -74,3 +74,26 @@ def test_get_drawdown_history_reads_runtime_runs_equity_jsonl(monkeypatch, tmp_p
 
     assert len(points) == 2
     assert [point["drawdown"] for point in points] == [0.22, 0.12]
+
+
+def test_get_drawdown_history_accepts_current_dd_field_from_runtime_equity(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path
+    runtime_runs_dir = workspace / "reports" / "shadow_runtime" / "runs" / "20260419_1300"
+    runtime_runs_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        risk_auto_recovery,
+        "load_runtime_config",
+        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
+    (runtime_runs_dir / "equity.jsonl").write_text(
+        json.dumps({"ts": "2026-04-19T13:00:00Z", "equity": 100.0, "dd": 0.31}) + "\n",
+        encoding="utf-8",
+    )
+
+    points = manager.get_drawdown_history(hours=24)
+
+    assert len(points) == 1
+    assert points[0]["drawdown"] == 0.31
