@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 logger = logging.getLogger(__name__)
+_ALIAS_LOGGED_ONCE: set[tuple[str, str, str]] = set()
 
 
 ALPHA_BASE_FACTOR_INPUT_TO_RUNTIME = {
@@ -75,7 +76,10 @@ def _normalize_factor_mapping(
         normalized_sources[runtime_key] = key
         normalized_runtime[runtime_key] = raw_value
         if log_alias and key != runtime_key:
-            logger.warning("%s alias mapped: %s -> %s", context, key, runtime_key)
+            alias_key = (str(context), str(key), str(runtime_key))
+            if alias_key not in _ALIAS_LOGGED_ONCE:
+                _ALIAS_LOGGED_ONCE.add(alias_key)
+                logger.info("%s alias mapped: %s -> %s", context, key, runtime_key)
 
     if output == "runtime":
         return normalized_runtime

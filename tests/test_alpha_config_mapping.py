@@ -56,7 +56,7 @@ alpha:
 """.strip(),
     )
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         cfg = load_config(str(cfg_path), env_path=None)
 
     assert "alpha.weights alias mapped: f3_vol_adj_ret_20d -> f3_vol_adj_ret" in caplog.text
@@ -66,6 +66,35 @@ alpha:
     assert "f3_vol_adj_ret_20d" not in engine.alpha6_strategy.factor_weights
     assert engine.alpha6_strategy.factor_weights["f3_vol_adj_ret"] == pytest.approx(0.30)
     assert engine.alpha6_strategy.config["alpha158_overlay"]["enabled"] is False
+
+
+def test_load_config_accepts_canonical_f3_key_without_alias_warning(tmp_path, caplog):
+    cfg_path = _write_yaml(
+        tmp_path,
+        """
+symbols:
+  - BTC/USDT
+alpha:
+  use_multi_strategy: true
+  weights:
+    f1_mom_5d: 0.10
+    f2_mom_20d: 0.20
+    f3_vol_adj_ret: 0.30
+    f4_volume_expansion: 0.15
+    f5_rsi_trend_confirm: 0.25
+  alpha158_overlay:
+    enabled: false
+""".strip(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        cfg = load_config(str(cfg_path), env_path=None)
+
+    assert "alias mapped" not in caplog.text
+
+    engine = AlphaEngine(cfg.alpha)
+    assert engine.alpha6_strategy is not None
+    assert engine.alpha6_strategy.factor_weights["f3_vol_adj_ret"] == pytest.approx(0.30)
 
 
 def test_alpha158_overlay_disabled_skips_compute_and_blend(monkeypatch):

@@ -63,7 +63,7 @@ alpha:
   weights:
     f1_mom_5d: 0.10
     f2_mom_20d: 0.30
-    f3_vol_adj_ret_20d: 0.35
+    f3_vol_adj_ret: 0.35
     f4_volume_expansion: 0.15
     f5_rsi_trend_confirm: 0.10
   
