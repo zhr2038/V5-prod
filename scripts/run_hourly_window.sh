@@ -56,6 +56,37 @@ print(resolve_runtime_config_path(project_root=root))
 PY
 }
 
+validate_runtime_config() {
+  if [[ ! -f "$V5_CONFIG" ]]; then
+    echo "runtime config not found: $V5_CONFIG" >&2
+    return 1
+  fi
+
+  "$PYTHON_BIN" - <<'PY'
+from pathlib import Path
+import os
+
+import yaml
+
+root = Path(os.environ["V5_PROJECT_ROOT"])
+cfg_path = Path(os.environ["V5_CONFIG"])
+if not cfg_path.is_absolute():
+    cfg_path = root / cfg_path
+
+try:
+    payload = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+except Exception as exc:
+    raise SystemExit(f"runtime config is invalid: {cfg_path}: {exc}")
+
+if not isinstance(payload, dict) or not payload:
+    raise SystemExit(f"runtime config is empty or invalid: {cfg_path}")
+
+execution = payload.get("execution")
+if not isinstance(execution, dict):
+    raise SystemExit(f"runtime config missing execution section: {cfg_path}")
+PY
+}
+
 resolve_runtime_reports_dir() {
   "$PYTHON_BIN" - <<'PY'
 from pathlib import Path
@@ -95,6 +126,7 @@ export V5_PROJECT_ROOT="$ROOT"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export V5_DATA_PROVIDER="${V5_DATA_PROVIDER:-okx}"
 export V5_CONFIG="${V5_CONFIG:-$(resolve_config_path)}"
+validate_runtime_config
 export V5_RUN_ID="$WIN_ID"
 export V5_WINDOW_START_TS="${START_EPOCH}"
 export V5_WINDOW_END_TS="${END_EPOCH}"
