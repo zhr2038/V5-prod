@@ -210,3 +210,22 @@ def test_trade_auditor_v3_load_latest_decision_audit_prefers_audit_file_mtime(tm
     auditor = auditor_mod.TradeAuditorV3(workspace=tmp_path)
 
     assert auditor._load_latest_decision_audit()["run_id"] == "fresh"
+
+
+def test_trade_auditor_v3_load_latest_decision_audit_prefers_run_id_epoch_when_file_mtime_is_misleading(tmp_path: Path) -> None:
+    older_run = tmp_path / "reports" / "runs" / "20260408_01"
+    newer_run = tmp_path / "reports" / "runs" / "20260408_02"
+    older_run.mkdir(parents=True, exist_ok=True)
+    newer_run.mkdir(parents=True, exist_ok=True)
+    older_audit = older_run / "decision_audit.json"
+    newer_audit = newer_run / "decision_audit.json"
+    older_audit.write_text(json.dumps({"run_id": "20260408_01"}), encoding="utf-8")
+    newer_audit.write_text(json.dumps({"run_id": "20260408_02"}), encoding="utf-8")
+
+    import os
+    os.utime(older_audit, (200, 200))
+    os.utime(newer_audit, (100, 100))
+
+    auditor = auditor_mod.TradeAuditorV3(workspace=tmp_path)
+
+    assert auditor._load_latest_decision_audit()["run_id"] == "20260408_02"

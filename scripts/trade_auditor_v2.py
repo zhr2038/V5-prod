@@ -234,7 +234,32 @@ class SmartTradeAuditor:
                     for d in runs_dir.iterdir()
                     if d.is_dir() and (d / "decision_audit.json").exists()
                 ]
-                run_dirs.sort(key=lambda p: (p / "decision_audit.json").stat().st_mtime, reverse=True)
+                def _sort_epoch(run_dir: Path) -> float:
+                    audit_path = run_dir / "decision_audit.json"
+                    try:
+                        payload = json.loads(audit_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        payload = {}
+
+                    for key in ("timestamp", "now_ts", "window_start_ts"):
+                        value = payload.get(key) if isinstance(payload, dict) else None
+                        if value is None:
+                            continue
+                        try:
+                            return float(value)
+                        except Exception:
+                            pass
+
+                    run_id = str(payload.get("run_id") or run_dir.name) if isinstance(payload, dict) else run_dir.name
+                    try:
+                        return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+                    except Exception:
+                        try:
+                            return audit_path.stat().st_mtime
+                        except OSError:
+                            return run_dir.stat().st_mtime
+
+                run_dirs.sort(key=_sort_epoch, reverse=True)
                 if run_dirs:
                     return json.loads((run_dirs[0] / "decision_audit.json").read_text(encoding="utf-8"))
         except Exception:
