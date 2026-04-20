@@ -40,8 +40,16 @@ def test_check_universe_passes_clean_universe(tmp_path: Path, capsys) -> None:
 
 
 def test_build_paths_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "configs" / "live_prod.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(universe_guard, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(universe_guard, "load_runtime_config", lambda project_root=None: {})
 
     with pytest.raises(ValueError, match="live_prod.yaml"):
+        universe_guard.build_paths(tmp_path)
+
+
+def test_build_paths_fails_fast_when_runtime_config_is_missing(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
         universe_guard.build_paths(tmp_path)
