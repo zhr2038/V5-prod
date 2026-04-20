@@ -8,6 +8,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -58,6 +59,22 @@ def _mid_px(symbol: str, ts_ms: int, *, spread_store: SpreadSnapshotStore) -> fl
     return 0.0
 
 
+def _resolve_active_config_path(config_path: str | None = None) -> Path:
+    resolved = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved}")
+    try:
+        payload = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {resolved}: {exc}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {resolved}")
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved}")
+    return resolved
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
@@ -68,9 +85,10 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    resolved_config_path = _resolve_active_config_path(args.config)
     cfg = load_config(
-        resolve_runtime_config_path(args.config),
-        env_path=resolve_runtime_env_path(args.env),
+        str(resolved_config_path),
+        env_path=resolve_runtime_env_path(args.env, project_root=PROJECT_ROOT),
     )
 
     if args.positions_db:
