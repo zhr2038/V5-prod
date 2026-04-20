@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from scripts.compare_runs import compare
+from scripts import compare_runs
 
 
 def test_compare_includes_negative_expectancy_counts() -> None:
@@ -51,3 +54,23 @@ def test_compare_uses_new_turnover_budget_units() -> None:
     assert "- v5 budget_turnover_usdt: 16/64.2" in markdown
     assert "- v5 budget_turnover_ratio: 0.1495/0.6" in markdown
     assert "- v5 budget_cost_bps: 12/40" in markdown
+
+
+def test_derive_runtime_reports_dir_from_run_summary_uses_runtime_reports_dir(tmp_path: Path) -> None:
+    summary = tmp_path / "reports" / "shadow_runtime" / "runs" / "20260420_01" / "summary.json"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text("{}", encoding="utf-8")
+
+    reports_dir = compare_runs._derive_runtime_reports_dir_from_v5_summary(summary)
+
+    assert reports_dir == (tmp_path / "reports" / "shadow_runtime").resolve()
+
+
+def test_derive_runtime_reports_dir_from_rollup_summary_uses_runtime_reports_dir(tmp_path: Path) -> None:
+    summary = tmp_path / "reports" / "shadow_runtime" / "rollups" / "last24h_20260420_01" / "summary.json"
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_text("{}", encoding="utf-8")
+
+    reports_dir = compare_runs._derive_runtime_reports_dir_from_v5_summary(summary)
+
+    assert reports_dir == (tmp_path / "reports" / "shadow_runtime").resolve()

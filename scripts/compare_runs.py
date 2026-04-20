@@ -21,8 +21,17 @@ def _resolve_repo_path(value: str | os.PathLike[str] | None, *, default: Path | 
     return path.resolve()
 
 
-def _default_v4_export_out_dir() -> Path:
-    return PROJECT_ROOT / "reports" / "compare" / "v4_export"
+def _derive_runtime_reports_dir_from_v5_summary(v5_summary_path: Path) -> Path:
+    summary = v5_summary_path.resolve()
+    parent = summary.parent
+    grandparent = parent.parent
+    if grandparent.name in {"runs", "rollups"}:
+        return grandparent.parent
+    return PROJECT_ROOT / "reports"
+
+
+def _default_v4_export_out_dir(reports_dir: Path) -> Path:
+    return reports_dir / "compare" / "v4_export"
 
 
 def _ts_to_epoch_sec(v: Any) -> Optional[int]:
@@ -258,10 +267,10 @@ def main() -> None:
     args = ap.parse_args()
 
     v5_summary_path = _resolve_repo_path(args.v5_summary)
-    out_path = _resolve_repo_path(args.out, default=PROJECT_ROOT / "reports" / "compare" / "v4_vs_v5.md")
-    v4_out_dir = _resolve_repo_path(args.v4_out_dir, default=_default_v4_export_out_dir())
-
     v5 = _load(str(v5_summary_path))
+    runtime_reports_dir = _derive_runtime_reports_dir_from_v5_summary(v5_summary_path)
+    out_path = _resolve_repo_path(args.out, default=runtime_reports_dir / "compare" / "v4_vs_v5.md")
+    v4_out_dir = _resolve_repo_path(args.v4_out_dir, default=_default_v4_export_out_dir(runtime_reports_dir))
 
     v5_start_raw = v5.get("window_start_ts", v5.get("start_ts"))
     v5_end_raw = v5.get("window_end_ts", v5.get("end_ts"))
