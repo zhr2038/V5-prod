@@ -20,6 +20,7 @@ import scripts.reconcile_guard_once as reconcile_guard_once
 def test_runtime_cli_helpers_accept_valid_runtime_config(monkeypatch, tmp_path: Path, module, resolver_name: str) -> None:
     config_path = (tmp_path / "configs" / "runtime.yaml").resolve()
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("execution:\n  order_store_path: reports/orders.sqlite\n", encoding="utf-8")
     monkeypatch.setattr(
         module,
         "PROJECT_ROOT",
@@ -50,6 +51,8 @@ def test_runtime_cli_helpers_accept_valid_runtime_config(monkeypatch, tmp_path: 
 )
 def test_runtime_cli_helpers_fail_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path, module, resolver_name: str) -> None:
     config_path = (tmp_path / "configs" / "runtime.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         module,
         "PROJECT_ROOT",
@@ -67,3 +70,28 @@ def test_runtime_cli_helpers_fail_fast_when_runtime_config_is_empty(monkeypatch,
 
     with pytest.raises(ValueError, match="runtime.yaml"):
         getattr(module, resolver_name)("configs/runtime.yaml")
+
+
+@pytest.mark.parametrize(
+    ("module", "resolver_name"),
+    [
+        (live_preflight_once, "_resolve_active_config_path"),
+        (ledger_once, "_resolve_active_config_path"),
+        (reconcile_guard_once, "_resolve_active_config_path"),
+    ],
+)
+def test_runtime_cli_helpers_fail_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path, module, resolver_name: str) -> None:
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(
+        module,
+        "PROJECT_ROOT",
+        tmp_path,
+    )
+
+    def _resolve(raw_config_path=None, project_root=None):
+        return str(missing)
+
+    monkeypatch.setattr("configs.runtime_config.resolve_runtime_config_path", _resolve)
+
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
+        getattr(module, resolver_name)("configs/missing.yaml")

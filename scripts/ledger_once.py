@@ -15,6 +15,8 @@ def _resolve_active_config_path(raw_config_path: str | None = None) -> str:
     from configs.runtime_config import load_runtime_config, resolve_runtime_config_path
 
     resolved = Path(resolve_runtime_config_path(raw_config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved}")
     cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError(f"runtime config is empty or invalid: {resolved}")
