@@ -3357,6 +3357,40 @@ def test_shadow_ml_overlay_error_response_hides_internal_paths(monkeypatch):
     assert "Traceback" not in body
 
 
+def test_shadow_ml_overlay_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    shadow_workspace = tmp_path / "v5-shadow-tuned-xgboost"
+    reports_dir = shadow_workspace / "reports"
+    stale_run_dir = reports_dir / "runs" / "shadow_tuned_xgboost_20260318_22"
+    fresh_run_dir = reports_dir / "runs" / "shadow_tuned_xgboost_20260404_14"
+    runtime_dir = reports_dir / "shadow_tuned_xgboost"
+    stale_run_dir.mkdir(parents=True, exist_ok=True)
+    fresh_run_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    stale_audit = stale_run_dir / "decision_audit.json"
+    fresh_audit = fresh_run_dir / "decision_audit.json"
+    stale_audit.write_text(json.dumps({"run_id": "shadow_tuned_xgboost_20260318_22", "ml_signal_overview": {}}), encoding="utf-8")
+    fresh_audit.write_text(json.dumps({"run_id": "shadow_tuned_xgboost_20260404_14", "ml_signal_overview": {}}), encoding="utf-8")
+
+    os.utime(stale_audit, (100, 100))
+    os.utime(fresh_audit, (200, 200))
+    os.utime(stale_run_dir, (9_999_999_999, 9_999_999_999))
+    os.utime(fresh_run_dir, (1, 1))
+    (runtime_dir / "ml_runtime_status.json").write_text(json.dumps({"configured_enabled": True}), encoding="utf-8")
+
+    monkeypatch.setattr(module, "_resolve_shadow_workspace", lambda: shadow_workspace)
+
+    response = client.get("/api/shadow_ml_overlay")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["run_id"] == "shadow_tuned_xgboost_20260404_14"
+    assert payload["timestamp"] == 200
+
+
 def test_smart_alerts_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
