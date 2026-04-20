@@ -10,11 +10,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
+from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_path
 from src.execution.fill_store import (
     derive_runtime_named_artifact_path,
     derive_runtime_reports_dir,
@@ -58,7 +60,12 @@ def _resolve_runtime_ml_artifact_path(
 def build_paths(workspace: str | Path | None = None, raw_config_path: str | None = None) -> PromotionPaths:
     root = Path(workspace).expanduser().resolve() if workspace is not None else resolve_workspace()
     config_path = Path(resolve_runtime_config_path(raw_config_path, project_root=root)).resolve()
-    cfg = load_runtime_config(raw_config_path, project_root=root)
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {config_path}: {exc}") from exc
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError(f"runtime config is empty or invalid: {config_path}")
     execution_cfg = cfg.get("execution")
