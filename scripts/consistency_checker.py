@@ -243,7 +243,18 @@ class BacktestLiveConsistencyChecker:
         if not cost_files:
             return None
 
-        latest = max(cost_files, key=lambda x: x.stat().st_mtime)
+        def _sort_epoch(path: Path) -> float:
+            stem = path.stem
+            prefix = "daily_cost_stats_"
+            if stem.startswith(prefix):
+                suffix = stem[len(prefix):]
+                try:
+                    return datetime.strptime(suffix, "%Y%m%d").timestamp()
+                except Exception:
+                    pass
+            return path.stat().st_mtime
+
+        latest = max(cost_files, key=_sort_epoch)
         with open(latest, encoding="utf-8") as f:
             return json.load(f)
 
