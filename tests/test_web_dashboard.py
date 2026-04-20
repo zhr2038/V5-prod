@@ -5269,6 +5269,33 @@ def test_auto_risk_guard_api_prefers_newer_guard_state_over_stale_eval(monkeypat
     assert payload["last_update"] == "2026-04-19T14:05:00"
 
 
+def test_calculate_market_indicators_prefers_latest_cache_file_by_filename_timestamp(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    older = cache_dir / "BTC_USDT_1H_20260408_00.csv"
+    newer = cache_dir / "BTC_USDT_1H_20260408_01.csv"
+
+    def _write_csv(path: Path, close_value: float) -> None:
+        rows = ["timestamp,open,high,low,close,volume"]
+        for idx in range(60):
+            base = 100 + idx
+            rows.append(f"{idx},{base},{base + 1},{base - 1},{close_value if idx == 59 else base},1")
+        path.write_text("\n".join(rows), encoding="utf-8")
+
+    _write_csv(older, 999)
+    _write_csv(newer, 111)
+    os.utime(older, (200, 200))
+    os.utime(newer, (100, 100))
+
+    monkeypatch.setattr(module, "CACHE_DIR", cache_dir)
+
+    indicators = module.calculate_market_indicators()
+
+    assert indicators["price"] == 111
+
+
 def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

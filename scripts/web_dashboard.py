@@ -3418,7 +3418,14 @@ def calculate_market_indicators():
             return {'ma20': 0, 'ma60': 0, 'atr_percent': 1.0, 'price': 0}
         
         # 读取最新的BTC数据
-        latest_file = max(btc_files, key=lambda x: x.stat().st_mtime)
+        def _sort_epoch(path: Path) -> float:
+            suffix = path.stem.removeprefix('BTC_USDT_1H_')
+            try:
+                return datetime.strptime(suffix, "%Y%m%d_%H").timestamp()
+            except Exception:
+                return path.stat().st_mtime
+
+        latest_file = max(btc_files, key=_sort_epoch)
         df = pd.read_csv(latest_file)
         
         if len(df) < 60:
