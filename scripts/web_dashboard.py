@@ -5034,12 +5034,17 @@ def api_decision_chain():
         config = load_config()
         runtime_paths = _resolve_dashboard_runtime_paths(config)
         # 获取最近5轮决策记录
-        runs_dir = runtime_paths.runs_dir
-        if not runs_dir.exists():
+        if not runtime_paths.runs_dir.exists():
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
 
-        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+        run_dirs = [d for d in runtime_paths.runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
         run_dirs.sort(key=lambda x: (x / 'decision_audit.json').stat().st_mtime, reverse=True)
+        decision_chain_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_CHAIN_SCAN_LIMIT')
+        if decision_chain_scan_limit is not None:
+            audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_chain_scan_limit)
+            run_dirs = [entry['run_dir'] for entry in audit_entries]
+        if not run_dirs:
+            return jsonify({'rounds': [], 'message': '暂无决策记录'})
 
         rounds = []
         for run_dir in run_dirs[:5]:
@@ -5500,18 +5505,22 @@ def api_decision_audit():
     try:
         config = load_config()
         runtime_paths = _resolve_dashboard_runtime_paths(config)
-        runs_dir = runtime_paths.runs_dir
-        if not runs_dir.exists():
+        if not runtime_paths.runs_dir.exists():
             return jsonify({'error': 'No runs directory'}), 404
 
-        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
+        run_dirs = [d for d in runtime_paths.runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
         if not run_dirs:
             return jsonify({'error': 'No audit files found'}), 404
 
         run_dirs.sort(key=lambda x: (x / 'decision_audit.json').stat().st_mtime, reverse=True)
         decision_audit_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT')
+        audit_entries = None
         if decision_audit_scan_limit is not None:
-            run_dirs = run_dirs[:decision_audit_scan_limit]
+            audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_audit_scan_limit)
+            if not audit_entries:
+                return jsonify({'error': 'No audit files found'}), 404
+            run_dirs = [entry['run_dir'] for entry in audit_entries]
+
         latest_run_dir = run_dirs[0]
         latest_audit_file = latest_run_dir / 'decision_audit.json'
 
@@ -5600,12 +5609,22 @@ def api_decision_audit():
 
         # 回退：按时间倒序遍历，找到第一个可成功解析的 strategy_signals.json
         if not strategy_signals:
-            for stale_run_dir in run_dirs[1:]:
-                try:
-                    with open(stale_run_dir / 'decision_audit.json', 'r') as f:
-                        stale_audit = json.load(f)
-                except Exception:
-                    continue
+            iterable = audit_entries[1:] if audit_entries is not None else run_dirs[1:]
+            for stale_item in iterable:
+                if audit_entries is not None:
+                    stale_run_dir = stale_item['run_dir']
+                    stale_audit = stale_item.get('audit')
+                    if not isinstance(stale_audit, dict):
+                        continue
+                    fallback_default_ts = float(stale_item.get('sort_epoch', 0.0) or 0.0)
+                else:
+                    stale_run_dir = stale_item
+                    try:
+                        with open(stale_run_dir / 'decision_audit.json', 'r') as f:
+                            stale_audit = json.load(f)
+                    except Exception:
+                        continue
+                    fallback_default_ts = (stale_run_dir / 'decision_audit.json').stat().st_mtime
                 fallback_signals, fallback_source, fallback_ts = _load_run_strategy_payload(stale_run_dir, stale_audit)
                 if not fallback_signals:
                     continue
@@ -5613,7 +5632,7 @@ def api_decision_audit():
                 strategy_signals = fallback_signals
                 strategy_source_run = stale_run_dir.name
                 strategy_signal_source = f'previous_run_{fallback_source}'
-                ts = fallback_ts if fallback_ts is not None else (stale_run_dir / 'decision_audit.json').stat().st_mtime
+                ts = fallback_ts if fallback_ts is not None else fallback_default_ts
                 break
 
         # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.
