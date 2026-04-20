@@ -128,11 +128,14 @@ def test_render_prometheus_metrics_exports_runtime_metrics(tmp_path: Path) -> No
 
 
 def test_resolve_api_telemetry_path_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(api_telemetry, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         api_telemetry,
         "resolve_runtime_config_path",
-        lambda project_root=None: str((tmp_path / "configs" / "live_prod.yaml").resolve()),
+        lambda project_root=None: str(config_path),
     )
     monkeypatch.setattr(api_telemetry, "load_runtime_config", lambda project_root=None: {})
 
@@ -140,16 +143,45 @@ def test_resolve_api_telemetry_path_fails_fast_when_runtime_config_is_empty(monk
         api_telemetry.resolve_api_telemetry_path(project_root=tmp_path)
 
 
+def test_resolve_api_telemetry_path_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(api_telemetry, "PROJECT_ROOT", tmp_path)
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(
+        api_telemetry,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(missing),
+    )
+
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
+        api_telemetry.resolve_api_telemetry_path(project_root=tmp_path)
+
+
 def test_resolve_prometheus_runtime_paths_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(prometheus_exporter, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         prometheus_exporter,
         "resolve_runtime_config_path",
-        lambda project_root=None: str((tmp_path / "configs" / "live_prod.yaml").resolve()),
+        lambda project_root=None: str(config_path),
     )
     monkeypatch.setattr(prometheus_exporter, "load_runtime_config", lambda project_root=None: {})
 
     with pytest.raises(ValueError, match="live_prod.yaml"):
+        prometheus_exporter.resolve_prometheus_runtime_paths(workspace=tmp_path)
+
+
+def test_resolve_prometheus_runtime_paths_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(prometheus_exporter, "PROJECT_ROOT", tmp_path)
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(
+        prometheus_exporter,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(missing),
+    )
+
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
         prometheus_exporter.resolve_prometheus_runtime_paths(workspace=tmp_path)
 
 

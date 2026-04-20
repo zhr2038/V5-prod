@@ -81,6 +81,8 @@ def resolve_prometheus_runtime_paths(
 ) -> PrometheusRuntimePaths:
     root = (workspace or PROJECT_ROOT).resolve()
     config_path = Path(resolve_runtime_config_path(project_root=root)).resolve()
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
     cfg = config if isinstance(config, dict) else load_runtime_config(project_root=root)
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError(f"runtime config is empty or invalid: {config_path}")

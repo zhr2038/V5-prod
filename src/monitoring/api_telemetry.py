@@ -77,6 +77,8 @@ def resolve_api_telemetry_path(
         return _resolve_path(candidate, project_root=root)
 
     config_path = Path(resolve_runtime_config_path(project_root=root)).resolve()
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
     cfg = load_runtime_config(project_root=root)
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError(f"runtime config is empty or invalid: {config_path}")
