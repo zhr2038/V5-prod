@@ -1392,6 +1392,27 @@ def test_load_position_market_series_falls_back_to_stale_cache_when_okx_unavaila
     assert series.close[-1] == 103.0
 
 
+def test_cache_json_response_ignores_cachebuster_query_param():
+    module = load_web_dashboard_module()
+    module._DASHBOARD_ROUTE_CACHE.clear()
+    calls = {"count": 0}
+
+    @module._cache_json_response(10.0)
+    def sample():
+        calls["count"] += 1
+        return module.jsonify({"count": calls["count"]})
+
+    with module.app.test_request_context("/api/sample?_=111"):
+        payload1, _ = module._extract_endpoint_json(sample())
+
+    with module.app.test_request_context("/api/sample?_=222"):
+        payload2, _ = module._extract_endpoint_json(sample())
+
+    assert payload1["count"] == 1
+    assert payload2["count"] == 1
+    assert calls["count"] == 1
+
+
 def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

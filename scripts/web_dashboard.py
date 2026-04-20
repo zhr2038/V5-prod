@@ -21,8 +21,10 @@ import sys
 import threading
 import time
 import traceback
+import copy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,7 +34,7 @@ _BOOTSTRAP_WORKSPACE_STR = str(_BOOTSTRAP_WORKSPACE)
 if _BOOTSTRAP_WORKSPACE_STR not in sys.path:
     sys.path.insert(0, _BOOTSTRAP_WORKSPACE_STR)
 
-from flask import Flask, g, has_app_context, render_template, jsonify, request, send_from_directory
+from flask import Flask, g, has_app_context, has_request_context, render_template, jsonify, request, send_from_directory
 import pandas as pd
 import yaml
 import requests
@@ -168,6 +170,8 @@ _OKX_PUBLIC_TICKER_CACHE: Dict[str, tuple[float, float]] = {}
 _OKX_PUBLIC_TICKER_CACHE_LOCK = threading.Lock()
 _OKX_HEALTH_CHECK_CACHE: Dict[tuple[str, str, str], tuple[float, Any, float]] = {}
 _OKX_HEALTH_CHECK_CACHE_LOCK = threading.Lock()
+_DASHBOARD_ROUTE_CACHE: Dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, Any, int]] = {}
+_DASHBOARD_ROUTE_CACHE_LOCK = threading.Lock()
 
 # 注册健康检查蓝图
 try:
@@ -301,6 +305,49 @@ def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[
         return default
 
     return payload if payload is not None else default
+
+
+def _dashboard_route_cache_key(name: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+    if not has_request_context():
+        return (name, ())
+    args = tuple(sorted((key, str(value)) for key, value in request.args.items() if key != '_'))
+    return (name, args)
+
+
+def _cache_json_response(ttl_seconds):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            ttl = float(ttl_seconds() if callable(ttl_seconds) else ttl_seconds or 0)
+            if ttl <= 0:
+                return func(*args, **kwargs)
+
+            cache_key = _dashboard_route_cache_key(func.__name__)
+            now = time.time()
+            with _DASHBOARD_ROUTE_CACHE_LOCK:
+                cached = _DASHBOARD_ROUTE_CACHE.get(cache_key)
+                if cached and cached[0] > now:
+                    return jsonify(copy.deepcopy(cached[1])), int(cached[2])
+
+            response = func(*args, **kwargs)
+            payload, status_code = _extract_endpoint_json(response)
+            if status_code < 400 and payload is not None:
+                with _DASHBOARD_ROUTE_CACHE_LOCK:
+                    _DASHBOARD_ROUTE_CACHE[cache_key] = (now + ttl, copy.deepcopy(payload), int(status_code))
+            return response
+
+        return wrapper
+
+    return decorator
+
+
+def _dashboard_view_cache_ttl_seconds() -> float:
+    view = str(request.args.get('view', 'full') or 'full').strip().lower() if has_request_context() else 'full'
+    if view == 'primary':
+        return 8.0
+    if view == 'deferred':
+        return 20.0
+    return 10.0
 
 def _resolve_config_path() -> Path:
     """Resolve config path via the shared runtime config helper."""
@@ -2533,6 +2580,7 @@ def static_files(filename):
 
 
 @app.route('/api/account')
+@_cache_json_response(5.0)
 def api_account():
     """账户信息API - 优先OKX实时数据"""
     try:
@@ -2706,6 +2754,7 @@ def api_account():
 
 
 @app.route('/api/trades')
+@_cache_json_response(10.0)
 def api_trades():
     """交易历史API（优先OKX实时成交，回退DB，再回退runs/*/trades.csv）"""
     try:
@@ -2859,6 +2908,7 @@ def api_trades():
 
 
 @app.route('/api/positions')
+@_cache_json_response(5.0)
 def api_positions():
     """持仓信息API（优先 positions.sqlite，回退最新 run 的 positions.jsonl）"""
     try:
@@ -3115,6 +3165,7 @@ def api_positions():
 
 
 @app.route('/api/position_kline')
+@_cache_json_response(15.0)
 def api_position_kline():
     """持仓币 K 线数据。"""
     try:
@@ -3185,6 +3236,7 @@ def api_position_kline():
 
 
 @app.route('/api/scores')
+@_cache_json_response(20.0)
 def api_scores():
     """币种评分API（当前run vs 上一个run 的排名变化）"""
     try:
@@ -3389,6 +3441,7 @@ def api_sentiment():
 
 
 @app.route('/api/status')
+@_cache_json_response(5.0)
 def api_status():
     """系统状态API"""
     try:
@@ -3836,6 +3889,7 @@ def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
 
 
 @app.route('/api/market_state')
+@_cache_json_response(10.0)
 def api_market_state():
     """市场状态 API，补齐投票详情和情绪缓存健康。"""
     try:
@@ -4107,6 +4161,7 @@ def api_equity_curve():
 
 
 @app.route('/api/dashboard')
+@_cache_json_response(_dashboard_view_cache_ttl_seconds)
 def api_dashboard():
     """Dashboard 完整数据API"""
     try:
@@ -4369,6 +4424,7 @@ def api_timer():
 
 
 @app.route('/api/timers')
+@_cache_json_response(15.0)
 def api_timers():
     """所有定时任务状态API"""
     try:
@@ -4984,6 +5040,7 @@ def _api_ml_training_v2():
 
 
 @app.route('/api/ml_training')
+@_cache_json_response(20.0)
 def api_ml_training():
     try:
         return _api_ml_training_v2()
@@ -5442,6 +5499,7 @@ def api_smart_alerts():
 
 
 @app.route('/api/auto_risk_guard')
+@_cache_json_response(8.0)
 def api_auto_risk_guard():
     """自动风险档位API - 显示当前风险档位和配置"""
     try:
@@ -5532,6 +5590,7 @@ def api_auto_risk_guard():
 
 
 @app.route('/api/decision_audit')
+@_cache_json_response(15.0)
 def api_decision_audit():
     """获取最新决策审计数据（策略信号带回退，避免前端空白）"""
     try:
@@ -6196,6 +6255,7 @@ def api_decision_audit():
 
 
 @app.route('/api/shadow_ml_overlay')
+@_cache_json_response(30.0)
 def api_shadow_ml_overlay():
     try:
         shadow_workspace = _resolve_shadow_workspace()
@@ -6214,6 +6274,7 @@ def api_shadow_ml_overlay():
 
 
 @app.route('/api/health')
+@_cache_json_response(15.0)
 def api_health():
     """系统健康检查API"""
     try:
