@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REPORTS_DIR = PROJECT_ROOT / "reports"
 POSITIONS_DB = REPORTS_DIR / "positions.sqlite"
@@ -64,6 +66,22 @@ def _resolve_runtime_paths(cfg: Any) -> tuple[Path, Path]:
     return positions_db, equity_file
 
 
+def _resolve_active_config_path(config_path: str | None = None) -> Path:
+    resolved = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved}")
+    try:
+        payload = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {resolved}: {exc}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {resolved}")
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved}")
+    return resolved
+
+
 def sync_positions(*, config_path: str | None = None, env_path: str = ".env") -> dict[str, Any] | None:
     print("Sync positions from OKX")
     print("=" * 50)
@@ -73,8 +91,9 @@ def sync_positions(*, config_path: str | None = None, env_path: str = ".env") ->
         return None
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    resolved_config_path = _resolve_active_config_path(config_path)
     cfg = load_config(
-        resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT),
+        str(resolved_config_path),
         env_path=resolve_runtime_env_path(env_path, project_root=PROJECT_ROOT),
     )
     positions_db, equity_file = _resolve_runtime_paths(cfg)
