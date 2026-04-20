@@ -2,6 +2,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 import scripts.ab_decision_gate as ab_decision_gate
 
 
@@ -36,6 +38,17 @@ def test_resolve_deadband_params_uses_runtime_config(monkeypatch, tmp_path: Path
 
     assert current_deadband == 0.07
     assert proposed_deadband == 0.06
+
+
+def test_resolve_deadband_params_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        ab_decision_gate,
+        "_load_active_config",
+        lambda project_root: (_ for _ in ()).throw(FileNotFoundError("runtime config not found")),
+    )
+
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
+        ab_decision_gate._resolve_deadband_params(project_root=tmp_path)
 
 
 def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:

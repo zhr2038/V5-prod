@@ -74,13 +74,9 @@ def _resolve_reports_dir(raw_reports_dir: str | None = None) -> Path:
 
 
 def _resolve_deadband_params(*, project_root: Path) -> tuple[float, float]:
-    current_deadband = 0.04
-    try:
-        cfg = _load_active_config(project_root=project_root)
-        rebalance_cfg = cfg.get("rebalance", {}) if isinstance(cfg, dict) else {}
-        current_deadband = float(rebalance_cfg.get("deadband_sideways", 0.04) or 0.04)
-    except Exception:
-        current_deadband = 0.04
+    cfg = _load_active_config(project_root=project_root)
+    rebalance_cfg = cfg.get("rebalance", {}) if isinstance(cfg, dict) else {}
+    current_deadband = float(rebalance_cfg.get("deadband_sideways", 0.04) or 0.04)
     proposed_deadband = max(0.0, round(current_deadband - 0.01, 4))
     return current_deadband, proposed_deadband
 
