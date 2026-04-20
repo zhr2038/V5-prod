@@ -17,6 +17,8 @@ def resolve_orders_db(raw_db: str | None = None, *, config_path: str | None = No
         return Path(resolve_runtime_path(raw_db, default="reports/orders.sqlite", project_root=PROJECT_ROOT)).resolve()
 
     resolved_config_path = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved_config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved_config_path}")
     cfg = load_runtime_config(config_path, project_root=PROJECT_ROOT)
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError(f"runtime config is empty or invalid: {resolved_config_path}")

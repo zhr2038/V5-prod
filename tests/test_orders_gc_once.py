@@ -5,6 +5,9 @@ import scripts.orders_gc_once as orders_gc_once
 
 def test_resolve_orders_db_uses_runtime_execution_path(monkeypatch, tmp_path):
     monkeypatch.setattr(orders_gc_once, "PROJECT_ROOT", tmp_path)
+    config_path = (tmp_path / "configs" / "runtime.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("execution:\n  order_store_path: reports/shadow_orders.sqlite\n", encoding="utf-8")
     monkeypatch.setattr(
         orders_gc_once,
         "load_runtime_config",
@@ -18,6 +21,9 @@ def test_resolve_orders_db_uses_runtime_execution_path(monkeypatch, tmp_path):
 
 def test_main_passes_runtime_orders_db_to_gc(monkeypatch, tmp_path):
     monkeypatch.setattr(orders_gc_once, "PROJECT_ROOT", tmp_path)
+    config_path = (tmp_path / "configs" / "runtime.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("execution:\n  order_store_path: reports/shadow_orders.sqlite\n", encoding="utf-8")
     monkeypatch.setattr(
         orders_gc_once,
         "load_runtime_config",
@@ -44,10 +50,13 @@ def test_main_passes_runtime_orders_db_to_gc(monkeypatch, tmp_path):
 
 def test_resolve_orders_db_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path):
     monkeypatch.setattr(orders_gc_once, "PROJECT_ROOT", tmp_path)
+    config_path = (tmp_path / "configs" / "runtime.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         orders_gc_once,
         "resolve_runtime_config_path",
-        lambda raw_config_path=None, project_root=None: str((tmp_path / "configs" / "runtime.yaml").resolve()),
+        lambda raw_config_path=None, project_root=None: str(config_path),
     )
     monkeypatch.setattr(
         orders_gc_once,
@@ -61,3 +70,20 @@ def test_resolve_orders_db_fails_fast_when_runtime_config_is_empty(monkeypatch, 
         assert "runtime.yaml" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_resolve_orders_db_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(orders_gc_once, "PROJECT_ROOT", tmp_path)
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(
+        orders_gc_once,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(missing),
+    )
+
+    try:
+        orders_gc_once.resolve_orders_db(config_path="configs/missing.yaml")
+    except FileNotFoundError as exc:
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
