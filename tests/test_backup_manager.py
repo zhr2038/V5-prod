@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import tarfile
 import pytest
 
@@ -205,3 +206,25 @@ def test_backup_manager_restore_rejects_path_traversal(tmp_path) -> None:
         manager.restore_backup("evil.tar.gz")
 
     assert not (tmp_path / "escape.txt").exists()
+
+
+def test_backup_manager_cleanup_prefers_backup_name_timestamp_over_mtime(monkeypatch, tmp_path) -> None:
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    older = backup_dir / "v5_backup_20260418_010101.tar.gz"
+    newer = backup_dir / "v5_backup_20260419_010101.tar.gz"
+    older.write_text("older", encoding="utf-8")
+    newer.write_text("newer", encoding="utf-8")
+
+    now_ts = 2_000_000_000
+    old_ts = 1_000_000_000
+    os.utime(older, (now_ts, now_ts))
+    os.utime(newer, (old_ts, old_ts))
+
+    monkeypatch.setattr(backup_manager, "KEEP_BACKUPS", 1)
+    manager = backup_manager.BackupManager(workspace=tmp_path)
+
+    manager.cleanup_old_backups()
+
+    assert newer.exists()
+    assert not older.exists()

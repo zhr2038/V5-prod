@@ -50,6 +50,32 @@ STATIC_BACKUP_ITEMS = [
 KEEP_BACKUPS = 7
 
 
+def _backup_sort_epoch(path: Path) -> float:
+    name = path.name
+    if name.endswith(".tar.gz"):
+        stem = name[:-7]
+    else:
+        stem = path.stem
+
+    prefix = "v5_backup_"
+    if stem.startswith(prefix):
+        suffix = stem[len(prefix):]
+        try:
+            return datetime.strptime(suffix, "%Y%m%d_%H%M%S").timestamp()
+        except Exception:
+            pass
+
+    parts = stem.rsplit("_", 2)
+    if len(parts) >= 2:
+        candidate = "_".join(parts[-2:])
+        try:
+            return datetime.strptime(candidate, "%Y%m%d_%H%M%S").timestamp()
+        except Exception:
+            pass
+
+    return path.stat().st_mtime
+
+
 def _safe_extract_backup(archive: tarfile.TarFile, destination: Path) -> None:
     destination = destination.resolve()
     members = archive.getmembers()
@@ -221,7 +247,7 @@ class BackupManager:
         if not self.paths.backup_dir.exists():
             return
 
-        backups = sorted(self.paths.backup_dir.glob("*.tar.gz"), key=lambda x: x.stat().st_mtime, reverse=True)
+        backups = sorted(self.paths.backup_dir.glob("*.tar.gz"), key=_backup_sort_epoch, reverse=True)
 
         if len(backups) > KEEP_BACKUPS:
             to_delete = backups[KEEP_BACKUPS:]
@@ -238,7 +264,7 @@ class BackupManager:
             print("no backups")
             return
 
-        backups = sorted(self.paths.backup_dir.glob("*.tar.gz"), key=lambda x: x.stat().st_mtime, reverse=True)
+        backups = sorted(self.paths.backup_dir.glob("*.tar.gz"), key=_backup_sort_epoch, reverse=True)
 
         print("\nbackup list:")
         print("-" * 60)
