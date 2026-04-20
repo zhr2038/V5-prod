@@ -40,6 +40,8 @@ def _resolve_runtime_dirs(
         )
 
     resolved_config_path = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved_config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved_config_path}")
     cfg = load_runtime_config(config_path, project_root=PROJECT_ROOT)
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError(f"runtime config is empty or invalid: {resolved_config_path}")
