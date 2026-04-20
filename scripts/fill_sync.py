@@ -6,6 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+import yaml
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -18,6 +20,24 @@ def _resolve_store_path(raw_path: str) -> str:
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()
     return str(path)
+
+
+def _resolve_active_config_path(config_path: str | None = None) -> Path:
+    from configs.runtime_config import resolve_runtime_config_path
+
+    resolved = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved}")
+    try:
+        payload = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {resolved}: {exc}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {resolved}")
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved}")
+    return resolved
 
 
 def sync_once(*, store: FillStore, client: OKXPrivateClient, limit: int = 100, max_pages: int = 20) -> int:
@@ -70,8 +90,9 @@ def main() -> None:
     from src.execution.fill_store import FillStore, derive_fill_store_path
     from src.execution.okx_private_client import OKXPrivateClient
 
+    resolved_config_path = _resolve_active_config_path(args.config)
     cfg = load_config(
-        resolve_runtime_config_path(args.config, project_root=PROJECT_ROOT),
+        str(resolved_config_path),
         env_path=resolve_runtime_env_path(args.env, project_root=PROJECT_ROOT),
     )
     if not (cfg.exchange.api_key and cfg.exchange.api_secret and cfg.exchange.passphrase):
