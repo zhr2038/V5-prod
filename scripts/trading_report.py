@@ -141,6 +141,30 @@ def _parse_equity_ts(raw_value: Any) -> datetime | None:
     return ts
 
 
+def _decision_audit_sort_epoch(run_dir: Path, payload: Any) -> float:
+    if isinstance(payload, dict):
+        for key in ("timestamp", "now_ts", "window_start_ts"):
+            value = payload.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except Exception:
+                pass
+        run_id = str(payload.get("run_id") or run_dir.name)
+    else:
+        run_id = run_dir.name
+
+    try:
+        return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+    except Exception:
+        audit_file = run_dir / "decision_audit.json"
+        try:
+            return audit_file.stat().st_mtime
+        except OSError:
+            return run_dir.stat().st_mtime
+
+
 class TradingReportGenerator:
     """Generate daily and weekly trading summaries from workspace reports."""
 
@@ -290,10 +314,10 @@ class TradingReportGenerator:
                 if not audit_file.exists():
                     continue
                 try:
-                    modified_at = datetime.fromtimestamp(audit_file.stat().st_mtime)
+                    data = json.loads(audit_file.read_text(encoding="utf-8"))
+                    modified_at = datetime.fromtimestamp(_decision_audit_sort_epoch(run_dir, data))
                     if modified_at <= cutoff:
                         continue
-                    data = json.loads(audit_file.read_text(encoding="utf-8"))
                 except Exception:
                     continue
                 regimes.append(
