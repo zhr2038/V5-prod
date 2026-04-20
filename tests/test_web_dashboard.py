@@ -6647,6 +6647,52 @@ def test_api_positions_fallback_prefers_positions_file_mtime_over_run_dir_mtime(
     assert [row["symbol"] for row in payload["positions"]] == ["ETH"]
 
 
+def test_api_positions_fallback_prefers_run_id_epoch_when_positions_file_mtime_is_misleading(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    older_run = runtime_dir / "runs" / "20260408_00"
+    newer_run = runtime_dir / "runs" / "20260408_01"
+    older_run.mkdir(parents=True, exist_ok=True)
+    newer_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {
+                "order_store_path": "reports/shadow_runtime/orders.sqlite",
+                "reconcile_status_path": "reports/shadow_runtime/reconcile_status.json",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network down")))
+
+    older_positions = older_run / "positions.jsonl"
+    older_positions.write_text(
+        json.dumps({"symbol": "BTC/USDT", "qty": 1.0, "mark_px": 30000.0, "avg_px": 30000.0}) + "\n",
+        encoding="utf-8",
+    )
+    newer_positions = newer_run / "positions.jsonl"
+    newer_positions.write_text(
+        json.dumps({"symbol": "ETH/USDT", "qty": 2.0, "mark_px": 2000.0, "avg_px": 1800.0}) + "\n",
+        encoding="utf-8",
+    )
+
+    os.utime(older_positions, (200, 200))
+    os.utime(newer_positions, (100, 100))
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    assert [row["symbol"] for row in payload["positions"]] == ["ETH"]
+
+
 def test_api_positions_derives_runtime_reconcile_status_when_config_uses_legacy_default(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
 
@@ -7124,3 +7170,49 @@ def test_api_trades_fallback_prefers_trade_file_mtime_over_run_dir_mtime(monkeyp
     assert payload["trades"][0]["amount"] == pytest.approx(200.0)
     assert payload["trades"][0]["fee"] == pytest.approx(1.5)
     assert payload["trades"][0]["time"] == "2024-04-08 11:00:00"
+
+
+def test_api_trades_fallback_prefers_run_id_epoch_when_trade_file_mtime_is_misleading(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    older_run = runtime_dir / "runs" / "20260408_00"
+    newer_run = runtime_dir / "runs" / "20260408_01"
+    older_run.mkdir(parents=True, exist_ok=True)
+    newer_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    monkeypatch.delenv("EXCHANGE_API_KEY", raising=False)
+    monkeypatch.delenv("EXCHANGE_API_SECRET", raising=False)
+    monkeypatch.delenv("EXCHANGE_PASSPHRASE", raising=False)
+
+    older_trades = older_run / "trades.csv"
+    older_trades.write_text(
+        "symbol,side,notional_usdt,fee_usdt,ts\n"
+        "BTC/USDT,buy,100,0.5,2024-04-08 10:00:00\n",
+        encoding="utf-8",
+    )
+    newer_trades = newer_run / "trades.csv"
+    newer_trades.write_text(
+        "symbol,side,notional_usdt,fee_usdt,ts\n"
+        "ETH/USDT,sell,200,1.5,2024-04-08 11:00:00\n",
+        encoding="utf-8",
+    )
+
+    os.utime(older_trades, (200, 200))
+    os.utime(newer_trades, (100, 100))
+
+    with module.app.app_context():
+        payload = module.api_trades().get_json()
+
+    assert len(payload["trades"]) == 2
+    assert payload["trades"][0]["symbol"] == "ETH-USDT"
+    assert payload["trades"][0]["amount"] == pytest.approx(200.0)

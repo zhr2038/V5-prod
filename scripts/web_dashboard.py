@@ -539,7 +539,13 @@ def _sorted_run_dirs_by_artifact_mtime(runs_dir: Path, artifact_name: str, limit
         return []
 
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / artifact_name).exists()]
-    run_dirs.sort(key=lambda d: (d / artifact_name).stat().st_mtime, reverse=True)
+    def _sort_epoch(run_dir: Path) -> float:
+        try:
+            return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+        except Exception:
+            return (run_dir / artifact_name).stat().st_mtime
+
+    run_dirs.sort(key=_sort_epoch, reverse=True)
     if limit is not None:
         run_dirs = run_dirs[:limit]
     return run_dirs
