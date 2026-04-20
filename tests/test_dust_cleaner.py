@@ -36,6 +36,9 @@ def test_dust_cleaner_manual_reports_dir_uses_suffixed_runtime_files(tmp_path: P
 def test_dust_cleaner_default_paths_fail_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
     import scripts.dust_cleaner as dust_cleaner
 
+    config_path = tmp_path / "configs" / "live_prod.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(dust_cleaner, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(dust_cleaner, "REPORTS_DIR", (tmp_path / "reports").resolve())
     monkeypatch.setattr(dust_cleaner, "ORDERS_DB", (tmp_path / "reports" / "orders.sqlite").resolve())
@@ -44,3 +47,11 @@ def test_dust_cleaner_default_paths_fail_fast_when_runtime_config_is_empty(monke
 
     with pytest.raises(ValueError, match="live_prod.yaml"):
         dust_cleaner.DustCleaner()
+
+
+def test_dust_cleaner_default_paths_fail_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    import scripts.dust_cleaner as dust_cleaner
+
+    monkeypatch.setattr(dust_cleaner, "PROJECT_ROOT", tmp_path)
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
+        dust_cleaner.DustCleaner(reports_dir=None)

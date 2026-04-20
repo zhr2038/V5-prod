@@ -63,6 +63,8 @@ def _resolve_default_paths(project_root: Path | None = None) -> DustCleanerPaths
     root = Path(project_root or PROJECT_ROOT).resolve()
     cfg = load_runtime_config(project_root=root)
     config_path = (root / "configs" / "live_prod.yaml").resolve()
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError(f"runtime config is empty or invalid: {config_path}")
     execution_cfg = cfg.get("execution")
