@@ -88,6 +88,8 @@ def load_env_file(path: Path) -> None:
 def _load_active_runtime_config() -> dict[str, Any]:
     cfg = load_runtime_config(project_root=WORKSPACE)
     config_path = Path(resolve_runtime_config_path(project_root=WORKSPACE)).resolve()
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError(f"runtime config is empty or invalid: {config_path}")
     execution_cfg = cfg.get("execution")

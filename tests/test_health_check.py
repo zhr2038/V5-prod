@@ -7,10 +7,18 @@ import scripts.health_check as health_check
 
 
 def test_resolve_health_output_path_uses_prefixed_runtime_file(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("execution:\n  order_store_path: reports/shadow_orders.sqlite\n", encoding="utf-8")
     monkeypatch.setattr(
         health_check,
         "load_runtime_config",
         lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+    monkeypatch.setattr(
+        health_check,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(config_path),
     )
     monkeypatch.setattr(
         health_check,
@@ -29,10 +37,18 @@ def test_resolve_health_output_path_uses_prefixed_runtime_file(monkeypatch, tmp_
 
 
 def test_resolve_health_output_path_uses_suffixed_runtime_file(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("execution:\n  order_store_path: reports/orders_accelerated.sqlite\n", encoding="utf-8")
     monkeypatch.setattr(
         health_check,
         "load_runtime_config",
         lambda project_root=None: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}},
+    )
+    monkeypatch.setattr(
+        health_check,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(config_path),
     )
     monkeypatch.setattr(
         health_check,
@@ -66,11 +82,14 @@ def test_resolve_health_env_path_uses_runtime_env_helper(monkeypatch, tmp_path: 
 
 def test_load_active_runtime_config_fails_fast_when_config_is_empty(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(health_check, "WORKSPACE", tmp_path)
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(health_check, "load_runtime_config", lambda project_root=None: {})
     monkeypatch.setattr(
         health_check,
         "resolve_runtime_config_path",
-        lambda project_root=None: str((tmp_path / "configs" / "live_prod.yaml").resolve()),
+        lambda project_root=None: str(config_path),
     )
 
     try:
@@ -79,6 +98,23 @@ def test_load_active_runtime_config_fails_fast_when_config_is_empty(monkeypatch,
         assert "live_prod.yaml" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_load_active_runtime_config_fails_fast_when_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(health_check, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(
+        health_check,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(missing),
+    )
+
+    try:
+        health_check._load_active_runtime_config()
+    except FileNotFoundError as exc:
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
 
 
 def test_resolve_live_timer_unit_name_ignores_retired_live_20u(monkeypatch) -> None:
