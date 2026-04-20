@@ -176,7 +176,32 @@ def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
     if not run_dirs:
         return None
 
-    latest_dir = max(run_dirs, key=lambda path: (path / "decision_audit.json").stat().st_mtime)
+    def _sort_epoch(run_dir: Path) -> float:
+        audit_path = run_dir / "decision_audit.json"
+        try:
+            payload = json.loads(audit_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+
+        for key in ("timestamp", "now_ts", "window_start_ts"):
+            value = payload.get(key) if isinstance(payload, dict) else None
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except Exception:
+                pass
+
+        run_id = str(payload.get("run_id") or run_dir.name) if isinstance(payload, dict) else run_dir.name
+        try:
+            return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+        except Exception:
+            try:
+                return audit_path.stat().st_mtime
+            except OSError:
+                return run_dir.stat().st_mtime
+
+    latest_dir = max(run_dirs, key=_sort_epoch)
     try:
         return json.loads((latest_dir / "decision_audit.json").read_text(encoding="utf-8"))
     except Exception:
