@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import os
 from pathlib import Path
 
@@ -87,3 +88,23 @@ def test_load_runs_prefers_decision_audit_file_mtime(tmp_path: Path) -> None:
     runs = ab_decision_gate.load_runs(runs_dir, limit=2)
 
     assert [run.name for run in runs] == ["fresh", "stale"]
+
+
+def test_load_runs_prefers_run_id_epoch_when_file_mtime_is_misleading(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    older_run = runs_dir / "20260408_01"
+    newer_run = runs_dir / "20260408_02"
+    older_run.mkdir(parents=True, exist_ok=True)
+    newer_run.mkdir(parents=True, exist_ok=True)
+
+    older_audit = older_run / "decision_audit.json"
+    newer_audit = newer_run / "decision_audit.json"
+    older_audit.write_text(json.dumps({"run_id": "20260408_01"}), encoding="utf-8")
+    newer_audit.write_text(json.dumps({"run_id": "20260408_02"}), encoding="utf-8")
+
+    os.utime(older_audit, (200, 200))
+    os.utime(newer_audit, (100, 100))
+
+    runs = ab_decision_gate.load_runs(runs_dir, limit=2)
+
+    assert [run.name for run in runs] == ["20260408_02", "20260408_01"]
