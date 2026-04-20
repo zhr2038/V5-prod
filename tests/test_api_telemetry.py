@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -150,3 +151,51 @@ def test_resolve_prometheus_runtime_paths_fails_fast_when_runtime_config_is_empt
 
     with pytest.raises(ValueError, match="live_prod.yaml"):
         prometheus_exporter.resolve_prometheus_runtime_paths(workspace=tmp_path)
+
+
+def test_render_prometheus_metrics_prefers_latest_run_by_run_id_epoch_when_trade_file_mtime_is_misleading(tmp_path: Path) -> None:
+    orders_db = (tmp_path / "reports" / "orders.sqlite").resolve()
+    fills_db = derive_fill_store_path(orders_db).resolve()
+    runs_dir = derive_runtime_runs_dir(orders_db).resolve()
+    telemetry_db = orders_db.with_name("api_telemetry.sqlite")
+
+    older_run = runs_dir / "20260416_00"
+    newer_run = runs_dir / "20260416_01"
+    older_run.mkdir(parents=True, exist_ok=True)
+    newer_run.mkdir(parents=True, exist_ok=True)
+
+    older_trades = older_run / "trades.csv"
+    newer_trades = newer_run / "trades.csv"
+    older_trades.write_text(
+        "\n".join(
+            [
+                "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct",
+                "2026-04-16T00:00:00Z,20260416_00,BTC/USDT,OPEN_LONG,buy,0.002,50000,100,0.1,0.2,,",
+                "2026-04-16T01:00:00Z,20260416_00,BTC/USDT,CLOSE_LONG,sell,0.002,50500,101,0.1,0.1,0.5,0.005",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    newer_trades.write_text(
+        "\n".join(
+            [
+                "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt,realized_pnl_usdt,realized_pnl_pct",
+                "2026-04-16T02:00:00Z,20260416_01,BTC/USDT,OPEN_LONG,buy,0.002,50000,100,0.1,0.2,,",
+                "2026-04-16T03:00:00Z,20260416_01,BTC/USDT,CLOSE_LONG,sell,0.002,50500,101,0.1,0.1,1.1,0.011",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    os.utime(older_trades, (200, 200))
+    os.utime(newer_trades, (100, 100))
+
+    body = render_prometheus_metrics(
+        runtime_paths=PrometheusRuntimePaths(
+            orders_db=orders_db,
+            fills_db=fills_db,
+            runs_dir=runs_dir,
+            telemetry_db=telemetry_db,
+        )
+    )
+
+    assert 'v5_latest_run_realized_pnl_usdt{run_id="20260416_01"} 1.1' in body

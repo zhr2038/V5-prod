@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -337,7 +338,13 @@ def _find_latest_run_dir(runs_dir: Path) -> Optional[Path]:
     candidates = [path for path in runs_dir.iterdir() if path.is_dir() and (path / "trades.csv").exists()]
     if not candidates:
         return None
-    candidates.sort(key=lambda path: (path / "trades.csv").stat().st_mtime, reverse=True)
+    def _sort_epoch(path: Path) -> float:
+        try:
+            return datetime.strptime(path.name, "%Y%m%d_%H").timestamp()
+        except Exception:
+            return (path / "trades.csv").stat().st_mtime
+
+    candidates.sort(key=_sort_epoch, reverse=True)
     return candidates[0]
 
 
