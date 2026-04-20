@@ -270,7 +270,7 @@ class BackupManager:
         print("-" * 60)
         for i, backup in enumerate(backups, 1):
             size_mb = backup.stat().st_size / (1024 * 1024)
-            mtime = datetime.fromtimestamp(backup.stat().st_mtime)
+            mtime = datetime.fromtimestamp(_backup_sort_epoch(backup))
             print(f"{i}. {backup.name}")
             print(f"   size: {size_mb:.1f} MB  time: {mtime.strftime('%Y-%m-%d %H:%M')}")
         print("-" * 60)

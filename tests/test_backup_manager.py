@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import os
 import tarfile
+from contextlib import redirect_stdout
 import pytest
 
 import scripts.backup_manager as backup_manager
@@ -228,3 +229,20 @@ def test_backup_manager_cleanup_prefers_backup_name_timestamp_over_mtime(monkeyp
 
     assert newer.exists()
     assert not older.exists()
+
+
+def test_backup_manager_list_backups_displays_backup_name_timestamp_over_mtime(tmp_path) -> None:
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup = backup_dir / "v5_backup_20260419_010101.tar.gz"
+    backup.write_text("payload", encoding="utf-8")
+    os.utime(backup, (2_000_000_000, 2_000_000_000))
+
+    manager = backup_manager.BackupManager(workspace=tmp_path)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        manager.list_backups()
+
+    output = buf.getvalue()
+    assert "v5_backup_20260419_010101.tar.gz" in output
+    assert "2026-04-19 01:01" in output
