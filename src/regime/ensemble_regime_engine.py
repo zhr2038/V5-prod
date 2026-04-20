@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Dict
+from datetime import datetime
 from pathlib import Path
 import json
+import re
 import sqlite3
 import time
 import numpy as np
@@ -351,10 +353,20 @@ class EnsembleRegimeEngine:
             print(f"[EnsembleRegime] persist regime history failed: {e}")
 
     def _latest_fresh_file(self, pattern: str, max_age_minutes: int) -> Optional[Path]:
-        files = sorted(self.sentiment_cache_dir.glob(pattern))
+        files = list(self.sentiment_cache_dir.glob(pattern))
         if not files:
             return None
-        candidate = files[-1]
+
+        def _sort_epoch(path: Path) -> float:
+            match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
+            if match:
+                try:
+                    return datetime.strptime(match.group(1), '%Y%m%d_%H').timestamp()
+                except Exception:
+                    pass
+            return path.stat().st_mtime
+
+        candidate = max(files, key=_sort_epoch)
         max_age_sec = max(int(max_age_minutes), 1) * 60
         age_sec = max(0.0, time.time() - candidate.stat().st_mtime)
         if age_sec > max_age_sec:
