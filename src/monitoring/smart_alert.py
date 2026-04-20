@@ -181,12 +181,31 @@ class SmartAlertEngine:
         if not runs_dir.exists():
             return []
 
-        def _audit_mtime(run_dir: Path) -> float:
+        def _sort_epoch(run_dir: Path) -> float:
             audit_file = run_dir / "decision_audit.json"
             try:
-                return audit_file.stat().st_mtime
+                with audit_file.open("r", encoding="utf-8") as f:
+                    payload = json.load(f)
             except Exception:
-                return 0.0
+                payload = {}
+
+            for key in ("timestamp", "now_ts", "window_start_ts"):
+                value = payload.get(key) if isinstance(payload, dict) else None
+                if value is None:
+                    continue
+                try:
+                    return float(value)
+                except Exception:
+                    pass
+
+            run_id = str(payload.get("run_id") or run_dir.name) if isinstance(payload, dict) else run_dir.name
+            try:
+                return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+            except Exception:
+                try:
+                    return audit_file.stat().st_mtime
+                except Exception:
+                    return 0.0
 
         cutoff_ts = None
         if max_age_hours is not None:
@@ -196,9 +215,9 @@ class SmartAlertEngine:
             run_dir
             for run_dir in runs_dir.iterdir()
             if run_dir.is_dir() and (run_dir / "decision_audit.json").exists()
-            and (cutoff_ts is None or _audit_mtime(run_dir) >= cutoff_ts)
+            and (cutoff_ts is None or _sort_epoch(run_dir) >= cutoff_ts)
         ]
-        run_dirs.sort(key=_audit_mtime, reverse=True)
+        run_dirs.sort(key=_sort_epoch, reverse=True)
 
         audits: list[dict[str, Any]] = []
         for run_dir in run_dirs[:limit]:

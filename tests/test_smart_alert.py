@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -143,6 +145,34 @@ def test_check_signal_no_trade_ignores_stale_runs(tmp_path: Path) -> None:
     engine._should_alert = lambda alert_type, cooldown_minutes=60: True
 
     assert engine.check_signal_no_trade() is None
+
+
+def test_load_recent_run_audits_prefers_run_id_epoch_when_file_mtime_is_misleading(tmp_path: Path) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    runs_dir = engine.paths.runs_dir
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    now = smart_alert_module.datetime.now()
+    older_run_name = (now - smart_alert_module.timedelta(hours=1)).strftime("%Y%m%d_%H")
+    newer_run_name = now.strftime("%Y%m%d_%H")
+    older_run = runs_dir / older_run_name
+    newer_run = runs_dir / newer_run_name
+    older_run.mkdir()
+    newer_run.mkdir()
+
+    older_audit = older_run / "decision_audit.json"
+    newer_audit = newer_run / "decision_audit.json"
+    older_audit.write_text(json.dumps({"run_id": older_run_name, "counts": {"selected": 1}}), encoding="utf-8")
+    newer_audit.write_text(json.dumps({"run_id": newer_run_name, "counts": {"selected": 2}}), encoding="utf-8")
+
+    now_ts = smart_alert_module.datetime.now().timestamp()
+    os.utime(older_audit, (now_ts - 100, now_ts - 100))
+    os.utime(newer_audit, (now_ts - 13 * 3600, now_ts - 13 * 3600))
+
+    audits = engine._load_recent_run_audits(limit=2, max_age_hours=6)
+
+    assert len(audits) == 2
+    assert audits[0]["run_id"] == newer_run_name
 
 
 def test_check_signal_no_trade_ignores_known_policy_blockers(tmp_path: Path) -> None:
