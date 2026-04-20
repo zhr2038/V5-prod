@@ -3242,6 +3242,35 @@ def test_api_decision_audit_scan_limit_prefers_sorted_epoch_over_file_mtime(monk
     assert payload["run_id"] == "20260408_02"
 
 
+def test_api_decision_audit_prefers_sorted_epoch_over_file_mtime_without_scan_limit(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    older_run = runs_dir / "20260408_01"
+    newer_run = runs_dir / "20260408_02"
+    older_run.mkdir(parents=True, exist_ok=True)
+    newer_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+
+    older_audit = older_run / "decision_audit.json"
+    newer_audit = newer_run / "decision_audit.json"
+    older_audit.write_text(json.dumps({"run_id": "20260408_01", "regime": "SIDEWAYS", "counts": {"selected": 1}}), encoding="utf-8")
+    newer_audit.write_text(json.dumps({"run_id": "20260408_02", "regime": "TRENDING", "counts": {"selected": 2}}), encoding="utf-8")
+    os.utime(older_audit, (200, 200))
+    os.utime(newer_audit, (100, 100))
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["run_id"] == "20260408_02"
+
+
 def test_shadow_ml_overlay_api_reads_shadow_workspace(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -6065,6 +6094,35 @@ def test_decision_chain_scan_limit_prefers_sorted_epoch_over_file_mtime(monkeypa
     monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
     monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
     monkeypatch.setenv("V5_DASHBOARD_DECISION_CHAIN_SCAN_LIMIT", "1")
+
+    older_audit = older_run / "decision_audit.json"
+    newer_audit = newer_run / "decision_audit.json"
+    older_audit.write_text(json.dumps({"run_id": "20260408_01", "counts": {"selected": 1}}), encoding="utf-8")
+    newer_audit.write_text(json.dumps({"run_id": "20260408_02", "counts": {"selected": 2}}), encoding="utf-8")
+    os.utime(older_audit, (200, 200))
+    os.utime(newer_audit, (100, 100))
+
+    response = client.get("/api/decision_chain")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rounds"][0]["run_id"] == "20260408_02"
+
+
+def test_decision_chain_prefers_sorted_epoch_over_file_mtime_without_scan_limit(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    older_run = runs_dir / "20260408_01"
+    newer_run = runs_dir / "20260408_02"
+    older_run.mkdir(parents=True, exist_ok=True)
+    newer_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
 
     older_audit = older_run / "decision_audit.json"
     newer_audit = newer_run / "decision_audit.json"

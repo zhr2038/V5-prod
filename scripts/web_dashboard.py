@@ -5066,12 +5066,9 @@ def api_decision_chain():
         if not runtime_paths.runs_dir.exists():
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
 
-        run_dirs = [d for d in runtime_paths.runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        run_dirs.sort(key=lambda x: (x / 'decision_audit.json').stat().st_mtime, reverse=True)
         decision_chain_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_CHAIN_SCAN_LIMIT')
-        if decision_chain_scan_limit is not None:
-            audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_chain_scan_limit)
-            run_dirs = [entry['run_dir'] for entry in audit_entries]
+        audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_chain_scan_limit)
+        run_dirs = [entry['run_dir'] for entry in audit_entries]
         if not run_dirs:
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
 
@@ -5533,20 +5530,12 @@ def api_decision_audit():
         if not runtime_paths.runs_dir.exists():
             return jsonify({'error': 'No runs directory'}), 404
 
-        run_dirs = [d for d in runtime_paths.runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        if not run_dirs:
+        decision_audit_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT')
+        audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_audit_scan_limit)
+        if not audit_entries:
             return jsonify({'error': 'No audit files found'}), 404
 
-        run_dirs.sort(key=lambda x: (x / 'decision_audit.json').stat().st_mtime, reverse=True)
-        decision_audit_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_AUDIT_SCAN_LIMIT')
-        audit_entries = None
-        if decision_audit_scan_limit is not None:
-            audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_audit_scan_limit)
-            if not audit_entries:
-                return jsonify({'error': 'No audit files found'}), 404
-            run_dirs = [entry['run_dir'] for entry in audit_entries]
-
-        latest_run_dir = run_dirs[0]
+        latest_run_dir = audit_entries[0]['run_dir']
         latest_audit_file = latest_run_dir / 'decision_audit.json'
 
         with open(latest_audit_file, 'r') as f:
