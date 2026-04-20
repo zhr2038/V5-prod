@@ -8,6 +8,8 @@ import scripts.okx_private_selfcheck as selfcheck
 def test_resolve_runtime_entry_paths_uses_runtime_helpers(monkeypatch, tmp_path: Path) -> None:
     expected_cfg = (tmp_path / "configs" / "selfcheck.yaml").resolve()
     expected_env = (tmp_path / "configs" / "selfcheck.env").resolve()
+    expected_cfg.parent.mkdir(parents=True, exist_ok=True)
+    expected_cfg.write_text("execution:\n  order_store_path: reports/orders.sqlite\n", encoding="utf-8")
 
     monkeypatch.setattr(selfcheck, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -35,6 +37,8 @@ def test_resolve_runtime_entry_paths_uses_runtime_helpers(monkeypatch, tmp_path:
 def test_main_passes_cli_paths_to_loader(monkeypatch, tmp_path: Path) -> None:
     expected_cfg = (tmp_path / "configs" / "selfcheck.yaml").resolve()
     expected_env = (tmp_path / "configs" / "selfcheck.env").resolve()
+    expected_cfg.parent.mkdir(parents=True, exist_ok=True)
+    expected_cfg.write_text("execution:\n  order_store_path: reports/orders.sqlite\n", encoding="utf-8")
     seen: dict[str, str] = {}
 
     monkeypatch.setattr(selfcheck, "PROJECT_ROOT", tmp_path)
@@ -83,6 +87,8 @@ def test_main_passes_cli_paths_to_loader(monkeypatch, tmp_path: Path) -> None:
 def test_resolve_runtime_entry_paths_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
     expected_cfg = (tmp_path / "configs" / "selfcheck.yaml").resolve()
     expected_env = (tmp_path / "configs" / "selfcheck.env").resolve()
+    expected_cfg.parent.mkdir(parents=True, exist_ok=True)
+    expected_cfg.write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(selfcheck, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -107,3 +113,27 @@ def test_resolve_runtime_entry_paths_fails_fast_when_runtime_config_is_empty(mon
         assert str(expected_cfg) in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_resolve_runtime_entry_paths_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    expected_cfg = (tmp_path / "configs" / "missing.yaml").resolve()
+    expected_env = (tmp_path / "configs" / "selfcheck.env").resolve()
+
+    monkeypatch.setattr(selfcheck, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        selfcheck,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(expected_cfg),
+    )
+    monkeypatch.setattr(
+        selfcheck,
+        "resolve_runtime_env_path",
+        lambda raw_env_path=None, project_root=None: str(expected_env),
+    )
+
+    try:
+        selfcheck._resolve_runtime_entry_paths(None, None)
+    except FileNotFoundError as exc:
+        assert str(expected_cfg) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
