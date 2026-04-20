@@ -14,6 +14,7 @@ V5 数据自动归档脚本
 """
 
 import os
+import re
 import shutil
 import tarfile
 from pathlib import Path
@@ -49,15 +50,24 @@ class DataArchiver:
         print(f"[{ts}] {msg}")
     
     def parse_run_date(self, run_name):
-        """从run目录名解析日期 (格式: YYYYMMDD_HH)"""
+        """从 run 名解析时间 (格式: YYYYMMDD_HH，兼容 .tar/.tar.gz 后缀)。"""
         try:
-            date_str = run_name.split('_')[0]
-            year = int(date_str[:4])
-            month = int(date_str[4:6])
-            day = int(date_str[6:8])
-            return datetime(year, month, day)
+            raw_name = str(run_name or '')
+            if raw_name.endswith('.tar.gz'):
+                raw_name = raw_name[:-7]
+            elif raw_name.endswith('.tar'):
+                raw_name = raw_name[:-4]
+
+            match = re.search(r'(?<!\d)(\d{8}_\d{2})(?!\d)', raw_name)
+            if match:
+                return datetime.strptime(match.group(1), '%Y%m%d_%H')
+
+            date_match = re.search(r'(?<!\d)(\d{8})(?!\d)', raw_name)
+            if date_match:
+                return datetime.strptime(date_match.group(1), '%Y%m%d')
         except:
             return None
+        return None
     
     def get_dir_size(self, path):
         """获取目录大小（MB）"""
@@ -135,13 +145,13 @@ class DataArchiver:
                 if not run_date:
                     continue
                 
-                age_days = (now - run_date).days
+                age = now - run_date
                 
-                if age_days <= KEEP_DAYS:
+                if age <= timedelta(days=KEEP_DAYS):
                     # 保留期内，跳过
                     continue
                 
-                elif age_days <= ARCHIVE_DAYS:
+                elif age <= timedelta(days=ARCHIVE_DAYS):
                     # 需要归档
                     size_mb = self.get_dir_size(run_path)
                     
@@ -172,9 +182,9 @@ class DataArchiver:
                 if not run_date:
                     continue
                 
-                age_days = (now - run_date).days
+                age = now - run_date
                 
-                if age_days > ARCHIVE_DAYS:
+                if age > timedelta(days=ARCHIVE_DAYS):
                     if dry_run:
                         size_mb = archive_path.stat().st_size / (1024 * 1024)
                         self.log(f"[干运行] 将删除归档: {archive_path.name} ({size_mb:.1f}MB)")
