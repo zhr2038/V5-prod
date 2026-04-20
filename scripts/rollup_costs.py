@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -13,12 +14,57 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
+from src.execution.fill_store import derive_runtime_cost_events_dir, derive_runtime_named_artifact_path
+
 
 def _resolve_repo_path(value: str | Path | None, *, default: Path) -> Path:
     path = Path(value) if value is not None else default
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return path.resolve()
+
+
+@dataclass(frozen=True)
+class RuntimeCostPaths:
+    events_dir: Path
+    stats_dir: Path
+
+
+def _resolve_runtime_cost_paths(
+    base_dir: str | Path | None = None,
+    out_dir: str | Path | None = None,
+    *,
+    project_root: Path = PROJECT_ROOT,
+) -> RuntimeCostPaths:
+    root = project_root.resolve()
+    if base_dir is not None and out_dir is not None:
+        return RuntimeCostPaths(
+            events_dir=_resolve_repo_path(base_dir, default=root / "reports" / "cost_events"),
+            stats_dir=_resolve_repo_path(out_dir, default=root / "reports" / "cost_stats"),
+        )
+
+    cfg = load_runtime_config(project_root=root)
+    config_path = Path(resolve_runtime_config_path(project_root=root)).resolve()
+    if not isinstance(cfg, dict) or not cfg:
+        raise ValueError(f"runtime config is empty or invalid: {config_path}")
+    execution_cfg = cfg.get("execution")
+    if not isinstance(execution_cfg, dict):
+        raise ValueError(f"runtime config missing execution section: {config_path}")
+
+    orders_db = Path(
+        resolve_runtime_path(
+            execution_cfg.get("order_store_path"),
+            default="reports/orders.sqlite",
+            project_root=root,
+        )
+    ).resolve()
+    default_events_dir = derive_runtime_cost_events_dir(orders_db).resolve()
+    default_stats_dir = derive_runtime_named_artifact_path(orders_db, "cost_stats", "").resolve()
+    return RuntimeCostPaths(
+        events_dir=_resolve_repo_path(base_dir, default=default_events_dir),
+        stats_dir=_resolve_repo_path(out_dir, default=default_stats_dir),
+    )
 
 
 def _iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
@@ -101,12 +147,13 @@ def notional_bucket(x: float) -> str:
 
 def rollup_day(
     day_yyyymmdd: str,
-    base_dir: str = "reports/cost_events",
-    out_dir: str = "reports/cost_stats",
+    base_dir: str | Path | None = None,
+    out_dir: str | Path | None = None,
     source: Optional[str] = None,
 ) -> Path:
-    src = _resolve_repo_path(base_dir, default=PROJECT_ROOT / "reports" / "cost_events") / f"{day_yyyymmdd}.jsonl"
-    dst = _resolve_repo_path(out_dir, default=PROJECT_ROOT / "reports" / "cost_stats")
+    runtime_paths = _resolve_runtime_cost_paths(base_dir, out_dir)
+    src = runtime_paths.events_dir / f"{day_yyyymmdd}.jsonl"
+    dst = runtime_paths.stats_dir
     dst.mkdir(parents=True, exist_ok=True)
 
     all_events0 = list(_iter_jsonl(src))
@@ -194,7 +241,7 @@ def _overall_p50_cost_bps(stats: Dict[str, Any]) -> Optional[float]:
 
 def check_anomaly(
     day_yyyymmdd: str,
-    out_dir: str = "reports/cost_stats",
+    out_dir: str | Path | None = None,
     lookback_days: int = 7,
     multiplier: float = 2.0,
     abs_bps: float = 30.0,
@@ -205,7 +252,7 @@ def check_anomaly(
     - anomaly if today's p50 >= max(lookback_median * multiplier, abs_bps)
     """
 
-    resolved_out_dir = _resolve_repo_path(out_dir, default=PROJECT_ROOT / "reports" / "cost_stats")
+    resolved_out_dir = _resolve_runtime_cost_paths(out_dir=out_dir).stats_dir
     out_path = resolved_out_dir / f"daily_cost_stats_{day_yyyymmdd}.json"
     today_stats = {}
     try:
@@ -274,8 +321,8 @@ def main() -> None:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", default=None, help="UTC day YYYYMMDD; default today(UTC)")
-    ap.add_argument("--base_dir", default="reports/cost_events")
-    ap.add_argument("--out_dir", default="reports/cost_stats")
+    ap.add_argument("--base_dir", default=None)
+    ap.add_argument("--out_dir", default=None)
     ap.add_argument("--source", default=None, help="Filter cost_events by event.source (e.g. okx_fill|dry_run)")
 
     ap.add_argument("--check_anomaly", action="store_true", help="Enable basic cost anomaly detection")
