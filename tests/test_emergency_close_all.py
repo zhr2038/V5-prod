@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import scripts.emergency_close_all as emergency_close_all
 
 
@@ -43,3 +45,16 @@ def test_resolve_report_path_uses_suffixed_runtime_file(monkeypatch, tmp_path: P
     path = emergency_close_all._resolve_report_path()
 
     assert path == (tmp_path / "reports" / "emergency_close_report_accelerated.json").resolve()
+
+
+def test_resolve_active_config_path_fails_fast_when_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    missing = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    monkeypatch.setattr(emergency_close_all, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        emergency_close_all,
+        "resolve_runtime_config_path",
+        lambda raw_config_path=None, project_root=None: str(missing),
+    )
+
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
+        emergency_close_all._resolve_active_config_path()

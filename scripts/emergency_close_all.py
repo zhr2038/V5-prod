@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import ccxt
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REPORTS_DIR = PROJECT_ROOT / "reports"
@@ -54,14 +55,31 @@ def _resolve_report_path(config_path: str | None = None) -> Path:
     return derive_runtime_named_json_path(orders_db, "emergency_close_report").resolve()
 
 
+def _resolve_active_config_path(config_path: str | None = None) -> Path:
+    resolved = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved}")
+    try:
+        payload = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {resolved}: {exc}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {resolved}")
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved}")
+    return resolved
+
+
 def emergency_close_all(
     *,
     config_path: str | None = None,
     env_path: str = ".env",
     dust_threshold: float = 0.5,
 ) -> dict[str, Any]:
+    resolved_config_path = _resolve_active_config_path(config_path)
     load_config(
-        resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT),
+        str(resolved_config_path),
         env_path=resolve_runtime_env_path(env_path, project_root=PROJECT_ROOT),
     )
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
