@@ -11,6 +11,7 @@ import json
 import time
 import logging
 from pathlib import Path
+import yaml
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -140,6 +141,22 @@ def _resolve_runtime_state_json_path(raw_path, *, order_store_path, base_name, l
     return resolved
 
 
+def _resolve_active_config_path(config_path: str | None = None) -> Path:
+    resolved = Path(resolve_runtime_config_path(config_path, project_root=WORKSPACE)).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved}")
+    try:
+        payload = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {resolved}: {exc}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {resolved}")
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved}")
+    return resolved
+
+
 def _extract_spot_qty(detail):
     """Extract best-effort spot quantity from OKX balance detail."""
     # Prefer cash/available balances; fall back to eq.
@@ -251,7 +268,7 @@ def main():
         from src.execution.bootstrap_patch import controlled_patch_from_okx_balance
         
         # Load config (prefer active V5_CONFIG)
-        cfg_path = resolve_runtime_config_path(project_root=WORKSPACE)
+        cfg_path = str(_resolve_active_config_path())
         cfg = load_config(
             cfg_path,
             env_path=resolve_runtime_env_path(project_root=WORKSPACE)
