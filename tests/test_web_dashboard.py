@@ -6,7 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -3385,6 +3385,30 @@ def test_shadow_ml_overlay_error_response_hides_internal_paths(monkeypatch):
     assert "v5-shadow-tuned-xgboost" not in body
     assert "/home/ubuntu/clawd" not in body
     assert "Traceback" not in body
+
+
+def test_signal_health_prefers_latest_file_by_filename_timestamp_not_mtime(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now()
+    older_name = f"rss_MARKET_{(now - timedelta(hours=1)).strftime('%Y%m%d_%H')}.json"
+    newer_name = f"rss_MARKET_{now.strftime('%Y%m%d_%H')}.json"
+    older = cache_dir / older_name
+    newer = cache_dir / newer_name
+    older.write_text("{}", encoding="utf-8")
+    newer.write_text("{}", encoding="utf-8")
+
+    os.utime(older, (200, 200))
+    os.utime(newer, (100, 100))
+
+    latest = module._latest_signal_file(cache_dir, ["rss_MARKET_*.json"])
+    health = module._signal_health(cache_dir, ["rss_MARKET_*.json"], 120, "rss_signal_stale_or_missing")
+
+    assert latest is not None
+    assert latest.name == newer_name
+    assert health["status"] == "fresh"
 
 
 def test_shadow_ml_overlay_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):

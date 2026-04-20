@@ -3551,17 +3551,26 @@ def _load_market_vote_history(reports_dir: Path, hours: int = 24, max_points: in
 
 
 def _latest_signal_file(cache_dir: Path, patterns: List[str]) -> Optional[Path]:
+    def _signal_file_epoch(path: Path) -> float:
+        parts = path.stem.split('_')
+        if len(parts) >= 2:
+            try:
+                return datetime.strptime('_'.join(parts[-2:]), "%Y%m%d_%H").timestamp()
+            except Exception:
+                pass
+        return path.stat().st_mtime
+
     latest: Optional[Path] = None
-    latest_mtime = -1.0
+    latest_epoch = -1.0
     for pattern in patterns:
         for path in cache_dir.glob(pattern):
             try:
-                mtime = path.stat().st_mtime
+                epoch = _signal_file_epoch(path)
             except OSError:
                 continue
-            if mtime > latest_mtime:
+            if epoch > latest_epoch:
                 latest = path
-                latest_mtime = mtime
+                latest_epoch = epoch
     return latest
 
 
@@ -3578,7 +3587,14 @@ def _signal_health(cache_dir: Path, patterns: List[str], max_age_minutes: int, e
             'max_age_minutes': int(max_age_minutes),
         }
 
-    age_minutes = max(0.0, (datetime.now().timestamp() - latest.stat().st_mtime) / 60.0)
+    parts = latest.stem.split('_')
+    signal_epoch = latest.stat().st_mtime
+    if len(parts) >= 2:
+        try:
+            signal_epoch = datetime.strptime('_'.join(parts[-2:]), "%Y%m%d_%H").timestamp()
+        except Exception:
+            signal_epoch = latest.stat().st_mtime
+    age_minutes = max(0.0, (datetime.now().timestamp() - signal_epoch) / 60.0)
     is_fresh = age_minutes <= max(int(max_age_minutes), 1)
     return {
         'status': 'fresh' if is_fresh else 'stale',
