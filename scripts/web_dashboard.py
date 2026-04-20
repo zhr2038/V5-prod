@@ -5541,8 +5541,8 @@ def api_decision_audit():
         with open(latest_audit_file, 'r') as f:
             audit_data = json.load(f)
 
-        # 默认时间戳：决策文件目录时间
-        ts = (latest_run_dir / 'decision_audit.json').stat().st_mtime
+        # 默认时间戳：使用审计自身的排序时间，避免文件 mtime 被补写后误导前端。
+        ts = float(audit_entries[0].get('sort_epoch', 0.0) or _decision_audit_sort_epoch(latest_run_dir, audit_data))
 
         def _load_strategy_signals(path: Path):
             """兼容多种 strategy_signals.json 结构。"""
