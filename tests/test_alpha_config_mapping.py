@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -139,3 +140,19 @@ def test_unknown_factor_keys_fail_fast_in_config_load(tmp_path, yaml_body, expec
     with pytest.raises(ValidationError) as exc_info:
         load_config(str(cfg_path), env_path=None)
     assert expected_fragment in str(exc_info.value)
+
+
+def test_alpha6_sentiment_factor_prefers_filename_timestamp_over_mtime(tmp_path):
+    strategy = Alpha6FactorStrategy()
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    strategy.sentiment_cache_dir = cache_dir
+
+    older = cache_dir / "funding_BTC-USDT_20260419_22.json"
+    newer = cache_dir / "funding_BTC-USDT_20260419_23.json"
+    older.write_text('{"f6_sentiment": -0.4}', encoding="utf-8")
+    newer.write_text('{"f6_sentiment": 0.35}', encoding="utf-8")
+    os.utime(older, (2_000_000_000, 2_000_000_000))
+    os.utime(newer, (1_000_000_000, 1_000_000_000))
+
+    assert strategy._load_sentiment_factor("BTC/USDT") == pytest.approx(0.35)

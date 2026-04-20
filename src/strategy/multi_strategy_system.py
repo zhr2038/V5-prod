@@ -17,6 +17,7 @@ import pandas as pd
 import numpy as np
 from decimal import Decimal
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -901,6 +902,22 @@ class Alpha6FactorStrategy(BaseStrategy):
         rs = avg_gain / avg_loss
         return 100.0 - 100.0 / (1.0 + rs)
 
+    def _latest_sentiment_cache_file(self, pattern: str) -> Optional[Path]:
+        files = list(self.sentiment_cache_dir.glob(pattern))
+        if not files:
+            return None
+
+        def _sort_epoch(path: Path) -> float:
+            match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
+            if match:
+                try:
+                    return datetime.strptime(match.group(1), '%Y%m%d_%H').timestamp()
+                except Exception:
+                    pass
+            return path.stat().st_mtime
+
+        return max(files, key=_sort_epoch)
+
     def _load_sentiment_factor(self, symbol: str) -> float:
         """从本地缓存读取情绪分值（-1~1）；支持多种数据源。"""
         try:
@@ -908,21 +925,21 @@ class Alpha6FactorStrategy(BaseStrategy):
             data = None
             
             # 1. 优先尝试 funding_rate（资金费率，最实时）
-            funding_files = sorted(self.sentiment_cache_dir.glob(f"funding_{s}_*.json"))
-            if funding_files:
-                data = json.loads(funding_files[-1].read_text())
+            funding_file = self._latest_sentiment_cache_file(f"funding_{s}_*.json")
+            if funding_file is not None:
+                data = json.loads(funding_file.read_text())
             
             # 2. 尝试 deepseek AI分析
             if data is None:
-                deepseek_files = sorted(self.sentiment_cache_dir.glob(f"deepseek_{s}_*.json"))
-                if deepseek_files:
-                    data = json.loads(deepseek_files[-1].read_text())
+                deepseek_file = self._latest_sentiment_cache_file(f"deepseek_{s}_*.json")
+                if deepseek_file is not None:
+                    data = json.loads(deepseek_file.read_text())
             
             # 3. 尝试其他格式
             if data is None:
-                other_files = sorted(self.sentiment_cache_dir.glob(f"{s}_*.json"))
-                if other_files:
-                    data = json.loads(other_files[-1].read_text())
+                other_file = self._latest_sentiment_cache_file(f"{s}_*.json")
+                if other_file is not None:
+                    data = json.loads(other_file.read_text())
             
             # 4. 若该币种没有缓存，尝试用DeepSeek生成一次
             if data is None:
@@ -931,9 +948,9 @@ class Alpha6FactorStrategy(BaseStrategy):
                     factor = DeepSeekSentimentFactor(cache_dir=str(self.sentiment_cache_dir))
                     factor.calculate(s)
                     # 重新尝试读取
-                    funding_files = sorted(self.sentiment_cache_dir.glob(f"funding_{s}_*.json"))
-                    if funding_files:
-                        data = json.loads(funding_files[-1].read_text())
+                    funding_file = self._latest_sentiment_cache_file(f"funding_{s}_*.json")
+                    if funding_file is not None:
+                        data = json.loads(funding_file.read_text())
                 except Exception:
                     pass
             
