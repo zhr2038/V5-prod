@@ -517,8 +517,6 @@ def _iter_decision_audits(reports_dir: Path, scan_limit: Optional[int] = None) -
 
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
     run_dirs.sort(key=lambda d: (d / 'decision_audit.json').stat().st_mtime, reverse=True)
-    if scan_limit is not None:
-        run_dirs = run_dirs[:scan_limit]
 
     audits: List[Dict[str, Any]] = []
     for run_dir in run_dirs:
@@ -531,6 +529,8 @@ def _iter_decision_audits(reports_dir: Path, scan_limit: Optional[int] = None) -
             'sort_epoch': _decision_audit_sort_epoch(run_dir, audit),
         })
     audits.sort(key=lambda item: float(item.get('sort_epoch', 0.0) or 0.0), reverse=True)
+    if scan_limit is not None:
+        audits = audits[:scan_limit]
     return audits
 
 
@@ -5606,7 +5606,6 @@ def api_decision_audit():
                         stale_audit = json.load(f)
                 except Exception:
                     continue
-
                 fallback_signals, fallback_source, fallback_ts = _load_run_strategy_payload(stale_run_dir, stale_audit)
                 if not fallback_signals:
                     continue

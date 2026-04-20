@@ -5969,6 +5969,31 @@ def test_decision_chain_prefers_decision_audit_file_mtime_over_run_dir_mtime(mon
     assert payload["rounds"][0]["run_id"] == "20260408_01"
 
 
+def test_iter_decision_audits_applies_scan_limit_after_sort_epoch(tmp_path):
+    import scripts.web_dashboard as module
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    older_run = runs_dir / "20260408_01"
+    newer_run = runs_dir / "20260408_02"
+    older_run.mkdir(parents=True, exist_ok=True)
+    newer_run.mkdir(parents=True, exist_ok=True)
+
+    older_audit = older_run / "decision_audit.json"
+    newer_audit = newer_run / "decision_audit.json"
+    older_audit.write_text(json.dumps({"run_id": "20260408_01"}), encoding="utf-8")
+    newer_audit.write_text(json.dumps({"run_id": "20260408_02"}), encoding="utf-8")
+
+    # Make the older run look newer by file mtime, so pre-limit-on-mtime would choose the wrong one.
+    os.utime(older_audit, (200, 200))
+    os.utime(newer_audit, (100, 100))
+
+    entries = module._iter_decision_audits(reports_dir, scan_limit=1)
+
+    assert len(entries) == 1
+    assert entries[0]["run_dir"].name == "20260408_02"
+
+
 def test_decision_chain_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
