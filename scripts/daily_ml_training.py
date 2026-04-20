@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
 from scripts.task_config_compat import load_task_config_with_compat as load_task_config_with_compat_legacy
 from src.execution.fill_store import derive_runtime_reports_dir
 from src.execution.ml_factor_model import LIGHTGBM_AVAILABLE, XGBOOST_AVAILABLE
@@ -80,6 +80,9 @@ def _load_daily_task_config(raw_config_path: str) -> dict:
 
 
 def _runtime_reports_dir() -> Path:
+    config_path = Path(resolve_runtime_config_path(project_root=PROJECT_ROOT)).resolve()
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
     cfg = load_runtime_config(project_root=PROJECT_ROOT)
     execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
     order_store_path = resolve_runtime_path(
