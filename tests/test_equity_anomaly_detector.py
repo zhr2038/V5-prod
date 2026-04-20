@@ -8,6 +8,9 @@ import scripts.equity_anomaly_detector as detector
 
 
 def test_build_paths_uses_runtime_order_store(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("execution:\n  order_store_path: reports/shadow_runtime/orders.sqlite\n", encoding="utf-8")
     monkeypatch.setattr(
         detector,
         "load_runtime_config",
@@ -29,7 +32,15 @@ def test_build_paths_uses_runtime_order_store(monkeypatch, tmp_path: Path) -> No
 
 
 def test_build_paths_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(detector, "load_runtime_config", lambda project_root=None: {})
 
     with pytest.raises(ValueError, match="live_prod.yaml"):
+        detector.build_paths(tmp_path)
+
+
+def test_build_paths_fails_fast_when_runtime_config_is_missing(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
         detector.build_paths(tmp_path)
