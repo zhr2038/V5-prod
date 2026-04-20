@@ -16,9 +16,9 @@ def test_execute_recovery_writes_guard_schema_compatible_state(monkeypatch, tmp_
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        risk_auto_recovery,
-        "load_runtime_config",
-        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
     )
 
     manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
@@ -56,9 +56,9 @@ def test_get_drawdown_history_reads_runtime_runs_equity_jsonl(monkeypatch, tmp_p
     runtime_runs_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        risk_auto_recovery,
-        "load_runtime_config",
-        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
     )
 
     manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
@@ -85,9 +85,9 @@ def test_get_drawdown_history_accepts_current_dd_field_from_runtime_equity(monke
     runtime_runs_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        risk_auto_recovery,
-        "load_runtime_config",
-        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
     )
 
     manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
@@ -105,9 +105,9 @@ def test_get_drawdown_history_accepts_current_dd_field_from_runtime_equity(monke
 def test_time_in_current_level_accepts_zulu_timestamp(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path
     monkeypatch.setattr(
-        risk_auto_recovery,
-        "load_runtime_config",
-        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
     )
 
     manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
@@ -120,9 +120,9 @@ def test_time_in_current_level_accepts_zulu_timestamp(monkeypatch, tmp_path: Pat
 def test_parse_state_datetime_treats_naive_timestamp_as_local_time(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path
     monkeypatch.setattr(
-        risk_auto_recovery,
-        "load_runtime_config",
-        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
     )
 
     previous_tz = os.environ.get("TZ")
@@ -149,9 +149,9 @@ def test_auto_risk_guard_loads_legacy_level_field(monkeypatch, tmp_path: Path) -
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        risk_auto_recovery,
-        "load_runtime_config",
-        lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
     )
 
     manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
@@ -163,3 +163,12 @@ def test_auto_risk_guard_loads_legacy_level_field(monkeypatch, tmp_path: Path) -
     guard = AutoRiskGuard(state_path=manager.risk_state_file)
 
     assert guard.current_level == "PROTECT"
+
+
+def test_risk_auto_recovery_fails_fast_when_runtime_config_is_missing(tmp_path: Path) -> None:
+    try:
+        risk_auto_recovery.RiskAutoRecovery(workspace=tmp_path)
+    except FileNotFoundError as exc:
+        assert "runtime config not found" in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")

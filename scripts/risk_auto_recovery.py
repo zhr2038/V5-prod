@@ -15,6 +15,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -47,7 +48,7 @@ class RiskAutoRecovery:
     
     def __init__(self, workspace: Path = PROJECT_ROOT):
         self.workspace = Path(workspace).resolve()
-        cfg = load_runtime_config(project_root=self.workspace)
+        cfg = self._load_active_runtime_config()
         execution_cfg = cfg.get('execution', {}) if isinstance(cfg, dict) else {}
         order_store_path = Path(
             resolve_runtime_path(
@@ -61,6 +62,21 @@ class RiskAutoRecovery:
         self.risk_state_file = derive_runtime_auto_risk_guard_path(order_store_path).resolve()
         self.config_file = derive_runtime_named_json_path(order_store_path, 'risk_recovery_config').resolve()
         self.config = self.load_config()
+
+    def _load_active_runtime_config(self):
+        config_path = (self.workspace / "configs" / "live_prod.yaml").resolve()
+        if not config_path.exists():
+            raise FileNotFoundError(f"runtime config not found: {config_path}")
+        try:
+            payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:
+            raise ValueError(f"runtime config is invalid: {config_path}: {exc}") from exc
+        if not isinstance(payload, dict) or not payload:
+            raise ValueError(f"runtime config is empty or invalid: {config_path}")
+        execution = payload.get("execution")
+        if not isinstance(execution, dict):
+            raise ValueError(f"runtime config missing execution section: {config_path}")
+        return payload
     
     def load_config(self):
         """加载配置"""
