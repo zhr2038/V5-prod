@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
 from src.data.okx_ccxt_provider import OKXCCXTProvider
 from src.execution.fill_store import derive_runtime_reports_dir
 from src.execution.ml_data_collector import MLDataCollector
@@ -322,6 +322,9 @@ def _resolve_cli_or_default_path(raw_path: str, *, default_path: Path) -> Path:
 
 
 def _runtime_training_db_path(raw_config_path: str | None = None) -> Path:
+    config_path = Path(resolve_runtime_config_path(raw_config_path, project_root=PROJECT_ROOT)).resolve()
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
     cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
     execution_cfg = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
     order_store_path = resolve_runtime_path(

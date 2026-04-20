@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
 from src.regime.rss_vote_utils import rss_vote_confidence, rss_vote_state
 
 
@@ -171,6 +171,9 @@ def _resolve_main_paths(
     raw_db_path: str | None,
     raw_cache_dir: str | None,
 ) -> tuple[Path, Path]:
+    config_path = Path(resolve_runtime_config_path(raw_config_path, project_root=PROJECT_ROOT)).resolve()
+    if not config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {config_path}")
     cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)
     regime_cfg = cfg.get("regime") if isinstance(cfg.get("regime"), dict) else {}
     db_path = Path(
