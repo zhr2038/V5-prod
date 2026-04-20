@@ -6,10 +6,18 @@ import scripts.alert_manager as alert_manager
 
 
 def test_alert_manager_uses_prefixed_runtime_state_file(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("execution:\n  order_store_path: reports/shadow_orders.sqlite\n", encoding="utf-8")
     monkeypatch.setattr(
         alert_manager,
         "load_runtime_config",
         lambda project_root=None: {"execution": {"order_store_path": "reports/shadow_orders.sqlite"}},
+    )
+    monkeypatch.setattr(
+        alert_manager,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(config_path),
     )
     monkeypatch.setattr(
         alert_manager,
@@ -25,10 +33,18 @@ def test_alert_manager_uses_prefixed_runtime_state_file(monkeypatch, tmp_path: P
 
 
 def test_alert_manager_uses_suffixed_runtime_state_file(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("execution:\n  order_store_path: reports/orders_accelerated.sqlite\n", encoding="utf-8")
     monkeypatch.setattr(
         alert_manager,
         "load_runtime_config",
         lambda project_root=None: {"execution": {"order_store_path": "reports/orders_accelerated.sqlite"}},
+    )
+    monkeypatch.setattr(
+        alert_manager,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(config_path),
     )
     monkeypatch.setattr(
         alert_manager,
@@ -44,6 +60,14 @@ def test_alert_manager_uses_suffixed_runtime_state_file(monkeypatch, tmp_path: P
 
 
 def test_alert_manager_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_path: Path) -> None:
+    config_path = (tmp_path / "configs" / "live_prod.yaml").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        alert_manager,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(config_path),
+    )
     monkeypatch.setattr(
         alert_manager,
         "load_runtime_config",
@@ -56,3 +80,19 @@ def test_alert_manager_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_
         assert "live_prod.yaml" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_alert_manager_fails_fast_when_runtime_config_is_missing(monkeypatch, tmp_path: Path) -> None:
+    missing = (tmp_path / "configs" / "missing.yaml").resolve()
+    monkeypatch.setattr(
+        alert_manager,
+        "resolve_runtime_config_path",
+        lambda project_root=None: str(missing),
+    )
+
+    try:
+        alert_manager.AlertManager(workspace=tmp_path)
+    except FileNotFoundError as exc:
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")

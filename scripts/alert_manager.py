@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from configs.runtime_config import load_runtime_config, resolve_runtime_path
+from configs.runtime_config import load_runtime_config, resolve_runtime_config_path, resolve_runtime_path
 from src.execution.fill_store import derive_runtime_named_json_path
 
 # 告警级别
@@ -44,12 +44,15 @@ class AlertManager:
         self.state = self.load_state()
 
     def _resolve_alert_state_file(self) -> Path:
+        config_path = Path(resolve_runtime_config_path(project_root=self.workspace)).resolve()
+        if not config_path.exists():
+            raise FileNotFoundError(f"runtime config not found: {config_path}")
         cfg = load_runtime_config(project_root=self.workspace)
         if not isinstance(cfg, dict) or not cfg:
-            raise ValueError(f"runtime config is empty or invalid: {self.workspace / 'configs' / 'live_prod.yaml'}")
+            raise ValueError(f"runtime config is empty or invalid: {config_path}")
         execution_cfg = cfg.get("execution")
         if not isinstance(execution_cfg, dict):
-            raise ValueError(f"runtime config missing execution section: {self.workspace / 'configs' / 'live_prod.yaml'}")
+            raise ValueError(f"runtime config missing execution section: {config_path}")
         orders_db = Path(
             resolve_runtime_path(
                 execution_cfg.get("order_store_path"),
