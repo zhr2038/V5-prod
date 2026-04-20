@@ -12,6 +12,8 @@ import sys
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
+import yaml
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -21,9 +23,26 @@ from configs.runtime_config import resolve_runtime_config_path, resolve_runtime_
 from src.execution.okx_private_client import OKXPrivateClient
 
 
+def _resolve_active_config_path(config_path: str | None = None) -> Path:
+    resolved = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved}")
+    try:
+        payload = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {resolved}: {exc}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {resolved}")
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved}")
+    return resolved
+
+
 def emergency_liquidate(*, config_path: str | None = None, env_path: str = ".env") -> None:
+    resolved_config_path = _resolve_active_config_path(config_path)
     cfg = load_config(
-        resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT),
+        str(resolved_config_path),
         env_path=resolve_runtime_env_path(env_path, project_root=PROJECT_ROOT),
     )
     client = OKXPrivateClient(exchange=cfg.exchange)
