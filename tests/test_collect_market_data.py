@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
+
+import pytest
 
 import scripts.collect_market_data as collect_market_data
 
 
 def test_resolve_runtime_inputs_uses_runtime_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(collect_market_data, "PROJECT_ROOT", tmp_path)
+    runtime_config = tmp_path / "configs" / "runtime.yaml"
+    runtime_config.parent.mkdir(parents=True, exist_ok=True)
+    runtime_config.write_text("execution:\n  order_store_path: reports/orders.sqlite\n", encoding="utf-8")
     config_path, env_path, db_path = collect_market_data._resolve_runtime_inputs(
         "configs/runtime.yaml",
         ".env.runtime",
@@ -27,9 +33,19 @@ def test_load_seed_symbols_falls_back_when_alpha_snapshots_missing(tmp_path):
     assert collect_market_data._load_seed_symbols(str(db_path)) == collect_market_data.DEFAULT_SYMBOLS
 
 
+def test_resolve_runtime_inputs_fails_fast_when_config_is_missing(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(collect_market_data, "PROJECT_ROOT", tmp_path)
+
+    with pytest.raises(FileNotFoundError, match="runtime config not found"):
+        collect_market_data._resolve_runtime_inputs("configs/runtime.yaml", ".env.runtime")
+
+
 def test_main_passes_runtime_paths_to_loader(monkeypatch, tmp_path):
     monkeypatch.setenv("V5_LIVE_ARM", "YES")
     monkeypatch.setattr(collect_market_data, "PROJECT_ROOT", tmp_path)
+    runtime_config = tmp_path / "configs" / "runtime.yaml"
+    runtime_config.parent.mkdir(parents=True, exist_ok=True)
+    runtime_config.write_text("execution:\n  order_store_path: reports/orders.sqlite\n", encoding="utf-8")
 
     captured = {}
 

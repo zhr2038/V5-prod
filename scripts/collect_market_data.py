@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 import pandas as pd
 import numpy as np
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -34,8 +35,20 @@ def _resolve_runtime_inputs(
     env_path: str = ".env",
     db_path: str | None = None,
 ) -> tuple[str, str, str]:
+    resolved_config_path = Path(resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT)).resolve()
+    if not resolved_config_path.exists():
+        raise FileNotFoundError(f"runtime config not found: {resolved_config_path}")
+    try:
+        payload = yaml.safe_load(resolved_config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"runtime config is invalid: {resolved_config_path}: {exc}") from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"runtime config is empty or invalid: {resolved_config_path}")
+    execution = payload.get("execution")
+    if not isinstance(execution, dict):
+        raise ValueError(f"runtime config missing execution section: {resolved_config_path}")
     return (
-        resolve_runtime_config_path(config_path, project_root=PROJECT_ROOT),
+        str(resolved_config_path),
         resolve_runtime_env_path(env_path, project_root=PROJECT_ROOT),
         resolve_runtime_path(db_path, default="reports/alpha_history.db", project_root=PROJECT_ROOT),
     )
