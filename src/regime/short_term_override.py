@@ -12,6 +12,8 @@
 """
 
 import json
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 from dataclasses import dataclass
@@ -24,6 +26,23 @@ class ShortTermOverride:
     reason: str
     confidence: float  # 0-1
     new_multiplier: float  # 建议仓位倍数
+
+
+def _latest_funding_composite_file(cache_dir: Path) -> Optional[Path]:
+    files = list(cache_dir.glob('funding_COMPOSITE_*.json'))
+    if not files:
+        return None
+
+    def _sort_epoch(path: Path) -> float:
+        match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
+        if match:
+            try:
+                return datetime.strptime(match.group(1), '%Y%m%d_%H').timestamp()
+            except Exception:
+                pass
+        return path.stat().st_mtime
+
+    return max(files, key=_sort_epoch)
 
 
 def check_short_term_opportunity(
@@ -44,9 +63,9 @@ def check_short_term_opportunity(
     if funding_sentiment is None:
         cache_dir = cache_dir or (Path(__file__).resolve().parents[2] / 'data' / 'sentiment_cache')
         try:
-            funding_files = sorted(cache_dir.glob('funding_COMPOSITE_*.json'))
-            if funding_files:
-                data = json.loads(funding_files[-1].read_text())
+            latest_file = _latest_funding_composite_file(cache_dir)
+            if latest_file is not None:
+                data = json.loads(latest_file.read_text())
                 funding_sentiment = float(data.get('f6_sentiment', 0.0))
         except:
             funding_sentiment = 0.0
@@ -141,9 +160,9 @@ def apply_short_term_override(
     # 读取资金费率情绪
     funding_sentiment = 0.0
     try:
-        funding_files = sorted(cache_dir.glob('funding_COMPOSITE_*.json'))
-        if funding_files:
-            data = json.loads(funding_files[-1].read_text())
+        latest_file = _latest_funding_composite_file(cache_dir)
+        if latest_file is not None:
+            data = json.loads(latest_file.read_text())
             funding_sentiment = float(data.get('f6_sentiment', 0.0))
     except:
         pass
