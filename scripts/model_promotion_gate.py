@@ -129,6 +129,23 @@ def _load_history(workspace: str | Path | None = None):
         return []
 
 
+def _training_entry_sort_epoch(entry: dict) -> float:
+    if isinstance(entry, dict):
+        raw_ts = entry.get("timestamp") or entry.get("ts")
+        if raw_ts:
+            try:
+                return datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).timestamp()
+            except Exception:
+                pass
+        run_id = str(entry.get("run_id") or "")
+        if run_id:
+            try:
+                return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+            except Exception:
+                pass
+    return 0.0
+
+
 def _load_latest_training_entry(workspace: str | Path | None = None) -> dict | None:
     paths = build_paths(workspace)
     try:
@@ -195,6 +212,11 @@ def main(workspace: str | Path | None = None) -> int:
     if latest_run_entry:
         if not hist or str(hist[-1].get("run_id")) != str(latest_run_entry.get("run_id")):
             hist = [*hist, latest_run_entry]
+    hist = sorted(
+        [item for item in hist if isinstance(item, dict)],
+        key=_training_entry_sort_epoch,
+        reverse=False,
+    )
     if not hist:
         decision = {
             "ts": datetime.now().isoformat(),
