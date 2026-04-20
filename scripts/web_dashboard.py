@@ -2308,6 +2308,16 @@ def _runtime_ic_diagnostic_pattern(orders_db: Path) -> str:
     return "ic_diagnostics_*.json"
 
 
+def _ic_diagnostic_sort_epoch(path: Path) -> float:
+    match = re.search(r"(?<!\d)(20\d{6})(?!\d)", path.stem)
+    if match:
+        try:
+            return datetime.strptime(match.group(1), "%Y%m%d").timestamp()
+        except Exception:
+            pass
+    return path.stat().st_mtime
+
+
 def _can_execute_python(candidate: str) -> bool:
     try:
         result = subprocess.run(
@@ -4595,7 +4605,7 @@ def api_ic_diagnostics():
         config = load_config()
         runtime_paths = _resolve_dashboard_runtime_paths(config)
 
-        # 查找IC诊断文件（按修改时间，避免文件名排序误判）
+        # 查找IC诊断文件。优先按文件名中的日期选最新，解析失败时再退回 mtime。
         ic_files = list(runtime_paths.reports_dir.glob(_runtime_ic_diagnostic_pattern(runtime_paths.orders_db)))
 
         if not ic_files:
@@ -4604,7 +4614,7 @@ def api_ic_diagnostics():
                 'message': '暂无IC诊断数据'
             })
 
-        ic_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        ic_files.sort(key=_ic_diagnostic_sort_epoch, reverse=True)
 
         # 优先使用“有可用因子IC”的最新文件；否则回退到最近文件
         latest_ic = ic_files[0]
@@ -4693,7 +4703,7 @@ def api_ic_diagnostics():
                 'regimes': regimes,
                 'source_file': latest_ic.name,
                 'fallback_reason': 'fresh_format',
-                'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                'last_update': datetime.fromtimestamp(_ic_diagnostic_sort_epoch(latest_ic)).strftime('%Y-%m-%d %H:%M:%S')
             })
         
         # 解析IC数据 - 旧版结构在overall_tradable.ic下
@@ -4782,7 +4792,7 @@ def api_ic_diagnostics():
             'regimes': regimes,
             'source_file': latest_ic.name,
             'fallback_reason': fallback_reason,
-            'last_update': datetime.fromtimestamp(latest_ic.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': datetime.fromtimestamp(_ic_diagnostic_sort_epoch(latest_ic)).strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as exc:
         return _json_internal_error_response(
