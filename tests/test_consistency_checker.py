@@ -121,3 +121,17 @@ def test_build_paths_fails_fast_when_runtime_config_is_empty(monkeypatch, tmp_pa
         assert "live_prod.yaml" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_build_paths_fails_fast_when_runtime_config_is_missing(tmp_path: Path) -> None:
+    import scripts.consistency_checker as consistency_checker
+
+    missing_root = tmp_path / "missing-workspace"
+    missing_root.mkdir(parents=True, exist_ok=True)
+
+    try:
+        consistency_checker.build_paths(missing_root)
+    except FileNotFoundError as exc:
+        assert "runtime config not found" in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError")
