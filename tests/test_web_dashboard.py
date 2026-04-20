@@ -6204,6 +6204,67 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["matrix"][0]["params"]["deadband_sideways"] == payload["current_params"]["deadband_sideways"]
 
 
+def test_api_shadow_test_prefers_sorted_epoch_over_file_mtime_when_limited_to_50_runs(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runs_dir = runtime_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"},
+            "rebalance": {"deadband_sideways": 0.07},
+        },
+    )
+
+    for idx in range(50):
+        run_name = f"20260408_{idx:02d}"
+        run_dir = runs_dir / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        audit_path = run_dir / "decision_audit.json"
+        audit_path.write_text(
+            json.dumps(
+                {"run_id": run_name, "counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 0}, "router_decisions": []},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        os.utime(audit_path, (200 + idx, 200 + idx))
+
+    latest_run_name = "20260409_00"
+    latest_run_dir = runs_dir / latest_run_name
+    latest_run_dir.mkdir(parents=True, exist_ok=True)
+    latest_audit = latest_run_dir / "decision_audit.json"
+    latest_audit.write_text(
+        json.dumps(
+            {
+                "run_id": latest_run_name,
+                "counts": {"selected": 999, "orders_rebalance": 9, "orders_exit": 0},
+                "router_decisions": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    # Misleadingly old file mtime: pre-fix code would exclude this run from the top-50 window.
+    os.utime(latest_audit, (100, 100))
+
+    response = client.get("/api/shadow_test")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["window_rounds"] == 50
+    assert payload["comparison"]["current"]["avg_selected_per_round"] > 20
+
+
 def test_api_shadow_test_does_not_refresh_stale_ab_gate_in_request(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

@@ -5212,15 +5212,11 @@ def api_shadow_test():
         proposed_deadband = max(0.0, round(current_deadband - 0.01, 4))
         
         # 获取最近7天的运行数据用于对比
-        runs_dir = runtime_paths.runs_dir
-        if not runs_dir.exists():
+        if not runtime_paths.runs_dir.exists():
             return jsonify({'status': 'no_data', 'message': '暂无运行数据'})
-        
-        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        run_dirs.sort(key=lambda x: (x / 'decision_audit.json').stat().st_mtime, reverse=True)
-        
-        # 取最近7天（最多50轮）
-        recent_runs = run_dirs[:50]
+
+        audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=50)
+        recent_runs = [entry['run_dir'] for entry in audit_entries]
         
         current_stats = {
             'rounds': 0,
