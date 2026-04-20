@@ -118,28 +118,47 @@ def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPat
     if not runs_dir.exists():
         return runs
 
-    def _audit_mtime(run_dir: Path) -> float:
+    def _sort_epoch(run_dir: Path) -> float:
         audit_file = run_dir / "decision_audit.json"
         try:
-            return audit_file.stat().st_mtime
+            with open(audit_file, "r", encoding="utf-8") as f:
+                payload = json.load(f)
         except Exception:
-            return 0.0
+            payload = {}
 
-    for run_dir in sorted(runs_dir.iterdir(), key=_audit_mtime, reverse=True):
+        for key in ("timestamp", "now_ts", "window_start_ts"):
+            value = payload.get(key) if isinstance(payload, dict) else None
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except Exception:
+                pass
+
+        run_id = str(payload.get("run_id") or run_dir.name) if isinstance(payload, dict) else run_dir.name
+        try:
+            return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+        except Exception:
+            try:
+                return audit_file.stat().st_mtime
+            except Exception:
+                return 0.0
+
+    for run_dir in sorted(runs_dir.iterdir(), key=_sort_epoch, reverse=True):
         if not run_dir.is_dir():
             continue
         audit_file = run_dir / "decision_audit.json"
         if not audit_file.exists():
             continue
-        mtime = datetime.fromtimestamp(_audit_mtime(run_dir))
-        if mtime < cutoff:
+        sort_dt = datetime.fromtimestamp(_sort_epoch(run_dir))
+        if sort_dt < cutoff:
             continue
 
         try:
             with open(audit_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             data["_run_id"] = run_dir.name
-            data["_mtime"] = mtime.isoformat()
+            data["_mtime"] = sort_dt.isoformat()
             runs.append(data)
         except Exception:
             continue

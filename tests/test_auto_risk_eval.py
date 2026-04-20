@@ -140,3 +140,37 @@ def test_load_recent_runs_uses_decision_audit_mtime_not_run_dir_mtime(tmp_path: 
 
     assert len(runs) == 1
     assert runs[0]["_run_id"] == "fresh"
+
+
+def test_load_recent_runs_prefers_run_id_epoch_when_file_mtime_is_misleading(tmp_path: Path) -> None:
+    runtime = auto_risk_eval.AutoRiskEvalPaths(
+        reports_dir=(tmp_path / "reports").resolve(),
+        runs_dir=(tmp_path / "reports" / "runs").resolve(),
+        auto_risk_eval_path=(tmp_path / "reports" / "auto_risk_eval.json").resolve(),
+        positions_db=(tmp_path / "reports" / "positions.sqlite").resolve(),
+        auto_risk_guard_path=(tmp_path / "reports" / "auto_risk_guard.json").resolve(),
+        env_path=(tmp_path / ".env").resolve(),
+    )
+    runtime.runs_dir.mkdir(parents=True, exist_ok=True)
+
+    now = auto_risk_eval.datetime.now()
+    older_run_name = (now - auto_risk_eval.timedelta(hours=1)).strftime("%Y%m%d_%H")
+    newer_run_name = now.strftime("%Y%m%d_%H")
+    older_run = runtime.runs_dir / older_run_name
+    newer_run = runtime.runs_dir / newer_run_name
+    older_run.mkdir()
+    newer_run.mkdir()
+
+    older_audit = older_run / "decision_audit.json"
+    newer_audit = newer_run / "decision_audit.json"
+    older_audit.write_text(json.dumps({"counts": {"selected": 1}, "run_id": older_run_name}), encoding="utf-8")
+    newer_audit.write_text(json.dumps({"counts": {"selected": 2}, "run_id": newer_run_name}), encoding="utf-8")
+
+    now_ts = auto_risk_eval.datetime.now().timestamp()
+    os.utime(older_audit, (now_ts - 100, now_ts - 100))
+    os.utime(newer_audit, (now_ts - 13 * 3600, now_ts - 13 * 3600))
+
+    runs = auto_risk_eval.load_recent_runs(hours=12, runtime_paths=runtime)
+
+    assert len(runs) == 2
+    assert runs[0]["_run_id"] == newer_run_name
