@@ -210,8 +210,11 @@ def main(workspace: str | Path | None = None) -> int:
     hist = _load_history(paths.workspace)
     latest_run_entry = _load_latest_training_entry(paths.workspace)
     if latest_run_entry:
-        if not hist or str(hist[-1].get("run_id")) != str(latest_run_entry.get("run_id")):
-            hist = [*hist, latest_run_entry]
+        latest_run_id = str(latest_run_entry.get("run_id") or "")
+        hist = [
+            *(item for item in hist if not isinstance(item, dict) or str(item.get("run_id") or "") != latest_run_id),
+            latest_run_entry,
+        ]
     hist = sorted(
         [item for item in hist if isinstance(item, dict)],
         key=_training_entry_sort_epoch,
