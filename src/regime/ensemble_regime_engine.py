@@ -367,8 +367,9 @@ class EnsembleRegimeEngine:
             return path.stat().st_mtime
 
         candidate = max(files, key=_sort_epoch)
+        candidate_epoch = _sort_epoch(candidate)
         max_age_sec = max(int(max_age_minutes), 1) * 60
-        age_sec = max(0.0, time.time() - candidate.stat().st_mtime)
+        age_sec = max(0.0, time.time() - candidate_epoch)
         if age_sec > max_age_sec:
             return None
         return candidate

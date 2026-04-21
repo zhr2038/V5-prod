@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from configs.schema import RegimeConfig
 from src.regime.ensemble_regime_engine import EnsembleRegimeEngine
@@ -23,3 +24,19 @@ def test_latest_fresh_file_prefers_filename_timestamp_over_mtime(tmp_path) -> No
     latest = engine._latest_fresh_file("funding_COMPOSITE_*.json", max_age_minutes=10_000_000)
 
     assert latest == newer
+
+
+def test_latest_fresh_file_uses_filename_timestamp_for_freshness(tmp_path) -> None:
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    stale = cache_dir / "funding_COMPOSITE_20200101_00.json"
+    stale.write_text('{"f6_sentiment": 0.1}', encoding="utf-8")
+    os.utime(stale, (time.time(), time.time()))
+
+    engine = EnsembleRegimeEngine(RegimeConfig())
+    engine.sentiment_cache_dir = cache_dir
+
+    latest = engine._latest_fresh_file("funding_COMPOSITE_*.json", max_age_minutes=180)
+
+    assert latest is None
