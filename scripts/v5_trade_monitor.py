@@ -143,10 +143,13 @@ def _risk_state_epoch(payload: object, *, primary_keys: tuple[str, ...]) -> floa
             return epoch
     history = payload.get("history")
     if isinstance(history, list):
-        for item in reversed(history):
-            if not isinstance(item, dict):
-                continue
-            epoch = _coerce_timestamp_epoch(item.get("ts"))
+        latest_history = max(
+            (item for item in history if isinstance(item, dict)),
+            key=lambda item: float(_coerce_timestamp_epoch(item.get("ts")) or float("-inf")),
+            default=None,
+        )
+        if isinstance(latest_history, dict):
+            epoch = _coerce_timestamp_epoch(latest_history.get("ts"))
             if epoch is not None:
                 return epoch
     return None
