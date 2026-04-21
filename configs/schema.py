@@ -667,10 +667,26 @@ class ExecutionConfig(BaseModel):
         description="In PROTECT risk level, require Alpha6Factor f5_rsi_trend_confirm > 0 before allowing OPEN_LONG",
     )
     protect_entry_alpha6_min_score: float = Field(
-        default=0.10,
+        default=0.40,
         ge=-10.0,
         le=10.0,
         description="Minimum Alpha6Factor signal score required for OPEN_LONG in PROTECT risk level",
+    )
+    protect_entry_require_volume_confirm: bool = Field(
+        default=True,
+        description="In PROTECT risk level, require non-negative Alpha6Factor f4_volume_expansion confirmation before allowing OPEN_LONG",
+    )
+    protect_entry_min_f4_volume_expansion: float = Field(
+        default=0.0,
+        ge=-10.0,
+        le=10.0,
+        description="Minimum Alpha6Factor f4_volume_expansion required for OPEN_LONG in PROTECT risk level",
+    )
+    protect_entry_min_f5_rsi_trend_confirm: float = Field(
+        default=0.30,
+        ge=-10.0,
+        le=10.0,
+        description="Minimum Alpha6Factor f5_rsi_trend_confirm required for OPEN_LONG in PROTECT risk level",
     )
 
     # Require fused strategy signal file for buy decisions. If missing, block buy orders.

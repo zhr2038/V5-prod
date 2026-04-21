@@ -538,6 +538,24 @@ class V5Pipeline:
                 continue
         return None
 
+    @staticmethod
+    def _alpha6_volume_confirm(signal: Optional[Dict[str, Any]]) -> Optional[float]:
+        if not isinstance(signal, dict):
+            return None
+        metadata = signal.get("metadata") if isinstance(signal, dict) else None
+        metadata = metadata if isinstance(metadata, dict) else {}
+        for bucket in ("z_factors", "raw_factors"):
+            values = metadata.get(bucket)
+            if not isinstance(values, dict):
+                continue
+            if "f4_volume_expansion" not in values:
+                continue
+            try:
+                return float(values.get("f4_volume_expansion"))
+            except Exception:
+                continue
+        return None
+
     def _evaluate_protect_entry_gate(
         self,
         *,
@@ -555,6 +573,7 @@ class V5Pipeline:
         alpha6_side = self._signal_side(alpha6_signal)
         trend_side = self._signal_side(trend_signal)
         rsi_confirm = self._alpha6_rsi_confirm(alpha6_signal)
+        volume_confirm = self._alpha6_volume_confirm(alpha6_signal)
 
         if bool(getattr(self.cfg.execution, "protect_entry_block_trend_only", True)):
             if trend_side == "buy" and alpha6_signal is None:
@@ -563,6 +582,7 @@ class V5Pipeline:
                     "trend_score": trend_score,
                     "alpha6_score": alpha6_score,
                     "alpha6_side": alpha6_side,
+                    "f4_volume_expansion": volume_confirm,
                     "f5_rsi_trend_confirm": rsi_confirm,
                 }
 
@@ -573,28 +593,44 @@ class V5Pipeline:
                     "trend_score": trend_score,
                     "alpha6_score": alpha6_score,
                     "alpha6_side": alpha6_side,
+                    "f4_volume_expansion": volume_confirm,
                     "f5_rsi_trend_confirm": rsi_confirm,
                 }
 
+        protect_min_rsi = float(getattr(self.cfg.execution, "protect_entry_min_f5_rsi_trend_confirm", 0.30) or 0.0)
         if bool(getattr(self.cfg.execution, "protect_entry_require_alpha6_rsi_confirm_positive", True)):
-            if rsi_confirm is None or float(rsi_confirm) <= 0.0:
+            if rsi_confirm is None or float(rsi_confirm) < float(protect_min_rsi):
                 return {
-                    "reason": "protect_entry_alpha6_rsi_confirm_negative",
+                    "reason": "protect_entry_rsi_confirm_too_weak",
                     "trend_score": trend_score,
                     "alpha6_score": alpha6_score,
                     "alpha6_side": alpha6_side,
+                    "f4_volume_expansion": volume_confirm,
                     "f5_rsi_trend_confirm": rsi_confirm,
                 }
 
-        alpha6_min_score = float(getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.10) or 0.0)
+        alpha6_min_score = float(getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.40) or 0.0)
         if alpha6_score is None or float(alpha6_score) < float(alpha6_min_score):
             return {
                 "reason": "protect_entry_alpha6_score_too_low",
                 "trend_score": trend_score,
                 "alpha6_score": alpha6_score,
                 "alpha6_side": alpha6_side,
+                "f4_volume_expansion": volume_confirm,
                 "f5_rsi_trend_confirm": rsi_confirm,
             }
+
+        if bool(getattr(self.cfg.execution, "protect_entry_require_volume_confirm", True)):
+            min_f4 = float(getattr(self.cfg.execution, "protect_entry_min_f4_volume_expansion", 0.0) or 0.0)
+            if volume_confirm is None or float(volume_confirm) < float(min_f4):
+                return {
+                    "reason": "protect_entry_volume_confirm_negative",
+                    "trend_score": trend_score,
+                    "alpha6_score": alpha6_score,
+                    "alpha6_side": alpha6_side,
+                    "f4_volume_expansion": volume_confirm,
+                    "f5_rsi_trend_confirm": rsi_confirm,
+                }
 
         return None
 
@@ -2614,7 +2650,16 @@ class V5Pipeline:
             getattr(self.cfg.execution, "protect_entry_require_alpha6_rsi_confirm_positive", True)
         )
         protect_entry_alpha6_min_score = float(
-            getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.10) or 0.0
+            getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.40) or 0.0
+        )
+        protect_entry_require_volume_confirm = bool(
+            getattr(self.cfg.execution, "protect_entry_require_volume_confirm", True)
+        )
+        protect_entry_min_f4_volume_expansion = float(
+            getattr(self.cfg.execution, "protect_entry_min_f4_volume_expansion", 0.0) or 0.0
+        )
+        protect_entry_min_f5_rsi_trend_confirm = float(
+            getattr(self.cfg.execution, "protect_entry_min_f5_rsi_trend_confirm", 0.30) or 0.0
         )
         strategy_signal_lookup = (
             self._resolve_strategy_signal_lookup(audit)
@@ -2633,7 +2678,10 @@ class V5Pipeline:
                 f"require_alpha6_confirmation={protect_entry_require_alpha6_confirmation}, "
                 f"block_trend_only={protect_entry_block_trend_only}, "
                 f"require_alpha6_rsi_confirm_positive={protect_entry_require_alpha6_rsi_confirm_positive}, "
-                f"alpha6_min_score={protect_entry_alpha6_min_score:.2f}"
+                f"alpha6_min_score={protect_entry_alpha6_min_score:.2f}, "
+                f"require_volume_confirm={protect_entry_require_volume_confirm}, "
+                f"min_f4_volume_expansion={protect_entry_min_f4_volume_expansion:.2f}, "
+                f"min_f5_rsi_trend_confirm={protect_entry_min_f5_rsi_trend_confirm:.2f}"
             )
         if require_fused_buy:
             try:
@@ -2858,6 +2906,13 @@ class V5Pipeline:
                         audit.record_count("protect_entry_block_count", symbol=sym)
                         if str(protect_block.get("reason") or "") == "protect_entry_trend_only":
                             audit.record_count("protect_entry_trend_only_block_count", symbol=sym)
+                        if str(protect_block.get("reason") or "") == "protect_entry_alpha6_score_too_low":
+                            audit.record_count("protect_entry_alpha6_score_too_low_count", symbol=sym)
+                        if str(protect_block.get("reason") or "") == "protect_entry_volume_confirm_negative":
+                            audit.record_count("protect_entry_volume_confirm_negative_count", symbol=sym)
+                        if str(protect_block.get("reason") or "") == "protect_entry_rsi_confirm_too_weak":
+                            audit.record_count("protect_entry_rsi_confirm_too_weak_count", symbol=sym)
+                            audit.record_count("protect_entry_alpha6_rsi_block_count", symbol=sym)
                         if str(protect_block.get("reason") or "") == "protect_entry_alpha6_rsi_confirm_negative":
                             audit.record_count("protect_entry_alpha6_rsi_block_count", symbol=sym)
                         audit.record_gate(str(protect_block.get("reason") or "protect_entry_no_alpha6_confirmation"), symbol=sym)
@@ -2869,6 +2924,7 @@ class V5Pipeline:
                                 "trend_score": protect_block.get("trend_score"),
                                 "alpha6_score": protect_block.get("alpha6_score"),
                                 "alpha6_side": protect_block.get("alpha6_side"),
+                                "f4_volume_expansion": protect_block.get("f4_volume_expansion"),
                                 "f5_rsi_trend_confirm": protect_block.get("f5_rsi_trend_confirm"),
                                 "current_level": current_auto_risk_level,
                             }

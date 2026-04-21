@@ -305,7 +305,10 @@ execution:
   protect_entry_require_alpha6_confirmation: true
   protect_entry_block_trend_only: true
   protect_entry_require_alpha6_rsi_confirm_positive: true
-  protect_entry_alpha6_min_score: 0.10
+  protect_entry_alpha6_min_score: 0.40
+  protect_entry_require_volume_confirm: true
+  protect_entry_min_f4_volume_expansion: 0.0
+  protect_entry_min_f5_rsi_trend_confirm: 0.30
 
   # 当部分减仓触发 minSz dust 时，自动升级为整仓卖出（若整仓可交易）
   auto_upgrade_dust_sell_to_close: true
