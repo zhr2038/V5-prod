@@ -3377,6 +3377,7 @@ def api_sentiment():
             pass
         cache_dir = WORKSPACE / 'data/sentiment_cache'
         results = {}
+        latest_update_epoch: Optional[float] = None
 
         for symbol in symbols:
             try:
@@ -3397,6 +3398,8 @@ def api_sentiment():
 
                 with open(latest, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                logical_epoch = _signal_file_epoch(latest)
+                latest_update_epoch = logical_epoch if latest_update_epoch is None else max(latest_update_epoch, logical_epoch)
 
                 results[symbol] = {
                     'sentiment': float(data.get('f6_sentiment', 0.0)),
@@ -3405,7 +3408,7 @@ def api_sentiment():
                     'summary': data.get('f6_sentiment_summary', ''),
                     'source': data.get('f6_sentiment_source', 'cache'),
                     'cache_file': latest.name,
-                    'cache_mtime': datetime.fromtimestamp(latest.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                    'cache_mtime': datetime.fromtimestamp(logical_epoch).strftime('%Y-%m-%d %H:%M:%S')
                 }
             except Exception as e:
                 results[symbol] = {'error': 'cache_error'}
@@ -3433,7 +3436,7 @@ def api_sentiment():
                 'mood_color': mood_color
             },
             'by_symbol': results,
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': datetime.fromtimestamp(latest_update_epoch).strftime('%Y-%m-%d %H:%M:%S') if latest_update_epoch is not None else ''
         })
     except Exception as e:
         return _json_internal_error_response(
@@ -3622,15 +3625,17 @@ def _load_market_vote_history(reports_dir: Path, hours: int = 24, max_points: in
     return _downsample_history(points, max_points=max_points)
 
 
+def _signal_file_epoch(path: Path) -> float:
+    parts = path.stem.split('_')
+    if len(parts) >= 2:
+        try:
+            return datetime.strptime('_'.join(parts[-2:]), "%Y%m%d_%H").timestamp()
+        except Exception:
+            pass
+    return path.stat().st_mtime
+
+
 def _latest_signal_file(cache_dir: Path, patterns: List[str]) -> Optional[Path]:
-    def _signal_file_epoch(path: Path) -> float:
-        parts = path.stem.split('_')
-        if len(parts) >= 2:
-            try:
-                return datetime.strptime('_'.join(parts[-2:]), "%Y%m%d_%H").timestamp()
-            except Exception:
-                pass
-        return path.stat().st_mtime
 
     latest: Optional[Path] = None
     latest_epoch = -1.0

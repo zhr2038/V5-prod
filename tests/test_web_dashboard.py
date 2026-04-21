@@ -640,6 +640,8 @@ def test_sentiment_api_prefers_latest_cache_across_sources_by_timestamp(monkeypa
     assert payload["by_symbol"]["BTC-USDT"]["sentiment"] == 0.45
     assert payload["by_symbol"]["BTC-USDT"]["source"] == "funding_rate"
     assert payload["by_symbol"]["BTC-USDT"]["cache_file"] == "funding_BTC-USDT_20260410_13.json"
+    assert payload["by_symbol"]["BTC-USDT"]["cache_mtime"] == "2026-04-10 13:00:00"
+    assert payload["last_update"] == "2026-04-10 13:00:00"
 
 
 def test_dashboard_api_error_response_hides_internal_paths(monkeypatch):
