@@ -243,6 +243,58 @@ def test_protect_gate_prefers_newer_auto_risk_guard_over_stale_eval_snapshot(tmp
     assert not any(d.get("reason") == "protect_entry_trend_only" for d in audit.router_decisions)
 
 
+def test_protect_gate_prefers_latest_eval_history_ts_when_eval_history_is_unsorted(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    eval_path = derive_runtime_auto_risk_eval_path(cfg.execution.order_store_path)
+    eval_path.parent.mkdir(parents=True, exist_ok=True)
+    eval_path.write_text(
+        json.dumps(
+            {
+                "current_level": "PROTECT",
+                "history": [
+                    {"ts": "2026-04-19T15:05:00", "to": "PROTECT"},
+                    {"ts": "2026-04-19T13:00:00", "to": "DEFENSE"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    _write_auto_risk_guard_level(cfg.execution.order_store_path, "DEFENSE", last_update="2026-04-19T14:05:00")
+
+    payload = _strategy_payload(
+        trend_signal={
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "score": 0.92,
+            "confidence": 0.8,
+            "metadata": {"adx": 35.0},
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="protect-eval-history-newer-than-guard")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(d.get("reason") == "protect_entry_trend_only" for d in audit.router_decisions)
+
+
 def test_protect_gate_accepts_legacy_guard_level_when_eval_missing(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     path = derive_runtime_auto_risk_guard_path(cfg.execution.order_store_path)
