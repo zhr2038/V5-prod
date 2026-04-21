@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -136,6 +137,14 @@ def find_latest_task_run(task_name: str, *, base_dir: str | Path = "reports/runs
                 sort_key = datetime.fromisoformat(ended_at.replace("Z", "+00:00")).timestamp()
             except Exception:
                 pass
+        else:
+            run_id = str(meta.get("run_id") or child.name or "")
+            match = re.search(r"(20\d{6}_\d{6}_\d{6})$", run_id)
+            if match:
+                try:
+                    sort_key = datetime.strptime(match.group(1), "%Y%m%d_%H%M%S_%f").timestamp()
+                except Exception:
+                    pass
         candidates.append((sort_key, child))
     if not candidates:
         return None
