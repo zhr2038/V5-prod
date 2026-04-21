@@ -156,9 +156,14 @@ def get_current_risk_guard(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, An
         else str((state or {}).get("last_update") or "").strip()
     )
     if not last_update and isinstance(state.get("history"), list) and state["history"]:
-        tail = state["history"][-1]
-        if isinstance(tail, dict):
-            last_update = str(tail.get("ts") or "").strip()
+        def _history_sort_epoch(item: Any) -> float:
+            if not isinstance(item, dict):
+                return float("-inf")
+            return float(_coerce_timestamp_epoch(item.get("ts")) or float("-inf"))
+
+        latest_history = max(state["history"], key=_history_sort_epoch, default=None)
+        if isinstance(latest_history, dict):
+            last_update = str(latest_history.get("ts") or "").strip()
 
     return {
         "level": level,
