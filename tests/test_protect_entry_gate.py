@@ -751,3 +751,244 @@ def test_exit_sell_is_not_affected_by_protect_entry_gate(tmp_path: Path) -> None
         d.get("reason") == "exit_signal_priority" and d.get("symbol") == "BTC/USDT"
         for d in audit.router_decisions
     )
+
+
+def test_protect_holds_current_when_replacement_buy_is_blocked(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+
+    payload = _strategy_payload(
+        trend_signal={
+            "symbol": "BNB/USDT",
+            "side": "buy",
+            "score": 0.93,
+            "confidence": 0.8,
+            "metadata": {"adx": 30.0},
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BNB/USDT": 1.0},
+        selected=["BNB/USDT"],
+        entry_candidates=["BNB/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="hold-current-no-replacement")
+
+    out = pipe.run(
+        market_data_1h={
+            "BTC/USDT": _series("BTC/USDT", 50000.0),
+            "BNB/USDT": _series("BNB/USDT", 600.0),
+        },
+        positions=[
+            Position(
+                symbol="BTC/USDT",
+                qty=0.001,
+                avg_px=50000.0,
+                entry_ts="2026-04-21T00:00:00Z",
+                highest_px=51000.0,
+                last_update_ts="2026-04-21T00:00:00Z",
+                last_mark_px=50000.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=50.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 0.20, "BNB/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not any(order.symbol == "BTC/USDT" and order.side == "sell" for order in out.orders)
+    assert any(
+        d.get("reason") == "hold_current_no_valid_replacement"
+        and d.get("held_symbol") == "BTC/USDT"
+        and "BNB/USDT" in (d.get("blocked_replacement_symbols") or [])
+        and (d.get("blocked_replacement_reasons") or {}).get("BNB/USDT") == "protect_entry_trend_only"
+        for d in audit.router_decisions
+    )
+    assert audit.counts["hold_current_no_valid_replacement_count"] == 1
+    assert audit.counts["replacement_blocked_count"] == 1
+
+
+def test_protect_allows_zero_target_close_when_replacement_buy_passes(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+
+    payload = _strategy_payload(
+        alpha6_signal={
+            "symbol": "BNB/USDT",
+            "side": "buy",
+            "score": 0.50,
+            "raw_score": 0.50,
+            "confidence": 0.8,
+            "metadata": {
+                "raw_factors": {
+                    "f4_volume_expansion": 0.20,
+                    "f5_rsi_trend_confirm": 0.40,
+                },
+                "z_factors": {
+                    "f4_volume_expansion": 0.40,
+                    "f5_rsi_trend_confirm": 0.40,
+                },
+            },
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BNB/USDT": 1.0},
+        selected=["BNB/USDT"],
+        entry_candidates=["BNB/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="replacement-passes")
+
+    out = pipe.run(
+        market_data_1h={
+            "BTC/USDT": _series("BTC/USDT", 50000.0),
+            "BNB/USDT": _series("BNB/USDT", 600.0),
+        },
+        positions=[
+            Position(
+                symbol="BTC/USDT",
+                qty=0.001,
+                avg_px=50000.0,
+                entry_ts="2026-04-21T00:00:00Z",
+                highest_px=51000.0,
+                last_update_ts="2026-04-21T00:00:00Z",
+                last_mark_px=50000.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=50.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 0.20, "BNB/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert any(order.symbol == "BTC/USDT" and order.side == "sell" for order in out.orders)
+    assert any(order.symbol == "BNB/USDT" and order.side == "buy" for order in out.orders)
+    assert not any(d.get("reason") == "hold_current_no_valid_replacement" for d in audit.router_decisions)
+
+
+def test_protect_guard_does_not_intercept_atr_trailing_exit(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+
+    payload = _strategy_payload(
+        trend_signal={
+            "symbol": "BNB/USDT",
+            "side": "buy",
+            "score": 0.93,
+            "confidence": 0.8,
+            "metadata": {"adx": 30.0},
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BNB/USDT": 1.0},
+        selected=["BNB/USDT"],
+        entry_candidates=["BNB/USDT"],
+        volatilities={},
+        notes="",
+    )
+    pipe.exit_policy.evaluate = lambda positions, market_data, regime_state: [
+        Order(
+            symbol="BTC/USDT",
+            side="sell",
+            intent="CLOSE_LONG",
+            notional_usdt=50.0,
+            signal_price=50000.0,
+            meta={"reason": "atr_trailing"},
+        )
+    ]
+    audit = DecisionAudit(run_id="atr-exit-still-sells")
+
+    out = pipe.run(
+        market_data_1h={
+            "BTC/USDT": _series("BTC/USDT", 50000.0),
+            "BNB/USDT": _series("BNB/USDT", 600.0),
+        },
+        positions=[
+            Position(
+                symbol="BTC/USDT",
+                qty=0.001,
+                avg_px=50000.0,
+                entry_ts="2026-04-21T00:00:00Z",
+                highest_px=51000.0,
+                last_update_ts="2026-04-21T00:00:00Z",
+                last_mark_px=50000.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=50.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 0.20, "BNB/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert any(order.symbol == "BTC/USDT" and order.side == "sell" for order in out.orders)
+    assert any(d.get("reason") == "exit_signal_priority" for d in audit.router_decisions)
+    assert not any(d.get("reason") == "hold_current_no_valid_replacement" for d in audit.router_decisions)
+
+
+def test_risk_off_force_clear_not_intercepted_by_replacement_guard(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.regime.pos_mult_risk_off = 0.0
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+
+    payload = _strategy_payload(
+        trend_signal={
+            "symbol": "BNB/USDT",
+            "side": "buy",
+            "score": 0.93,
+            "confidence": 0.8,
+            "metadata": {"adx": 30.0},
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BNB/USDT": 1.0},
+        selected=["BNB/USDT"],
+        entry_candidates=["BNB/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="risk-off-force-clear")
+
+    out = pipe.run(
+        market_data_1h={
+            "BTC/USDT": _series("BTC/USDT", 50000.0),
+            "BNB/USDT": _series("BNB/USDT", 600.0),
+        },
+        positions=[
+            Position(
+                symbol="BTC/USDT",
+                qty=0.001,
+                avg_px=50000.0,
+                entry_ts="2026-04-21T00:00:00Z",
+                highest_px=51000.0,
+                last_update_ts="2026-04-21T00:00:00Z",
+                last_mark_px=50000.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=50.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 0.20, "BNB/USDT": 1.0}),
+        precomputed_regime=RegimeResult(
+            state=RegimeState.RISK_OFF,
+            atr_pct=0.01,
+            ma20=100.0,
+            ma60=95.0,
+            multiplier=0.0,
+        ),
+    )
+
+    assert any(order.symbol == "BTC/USDT" and order.side == "sell" for order in out.orders)
+    assert not any(d.get("reason") == "hold_current_no_valid_replacement" for d in audit.router_decisions)

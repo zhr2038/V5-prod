@@ -653,6 +653,66 @@ class V5Pipeline:
         if str(reason) == "risk_off_pos_mult_zero":
             audit.record_count("risk_off_suppressed_count", symbol=sym)
 
+    @staticmethod
+    def _replacement_block_reason_allowed(reason: str) -> bool:
+        norm = str(reason or "").strip()
+        return norm.startswith("protect_entry_") or norm in {
+            "cost_aware_edge",
+            "negative_expectancy_cooldown",
+            "negative_expectancy_open_block",
+            "negative_expectancy_fast_fail_open_block",
+            "min_notional",
+            "insufficient_cash",
+        }
+
+    def _held_symbol_has_negative_expectancy_hard_block(self, symbol: str) -> bool:
+        try:
+            if not any(
+                [
+                    bool(getattr(self.cfg.execution, "negative_expectancy_cooldown_enabled", False)),
+                    bool(getattr(self.cfg.execution, "negative_expectancy_open_block_enabled", False)),
+                    bool(getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_enabled", False)),
+                ]
+            ):
+                return False
+            blocked = self.negative_expectancy_cooldown.is_blocked(symbol)
+            if blocked:
+                return True
+            stat = self.negative_expectancy_cooldown.get_symbol_stats(symbol) or {}
+            if bool(getattr(self.cfg.execution, "negative_expectancy_open_block_enabled", False)):
+                min_cycles = int(getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2)
+                floor_bps = float(_coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0))
+                if int(stat.get("closed_cycles") or 0) >= min_cycles and self._negative_expectancy_bps(stat) < floor_bps:
+                    return True
+            if bool(getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_enabled", False)):
+                ff_min_cycles = int(
+                    getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_min_closed_cycles", 2) or 2
+                )
+                ff_floor_bps = float(
+                    _coalesce(getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0), 0.0)
+                )
+                if int(stat.get("fast_fail_closed_cycles") or 0) >= ff_min_cycles and self._negative_expectancy_bps(stat, fast_fail=True) < ff_floor_bps:
+                    return True
+        except Exception:
+            return False
+        return False
+
+    @staticmethod
+    def _record_replacement_block(
+        *,
+        audit: Optional[DecisionAudit],
+        blocked_replacement_reasons: Dict[str, str],
+        symbol: str,
+        reason: str,
+    ) -> None:
+        sym = str(symbol or "").strip()
+        norm_reason = str(reason or "").strip()
+        if not sym or not norm_reason:
+            return
+        blocked_replacement_reasons[sym] = norm_reason
+        if audit is not None:
+            audit.record_count("replacement_blocked_count", symbol=sym)
+
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         """按市值计价更新持仓
         
@@ -2661,6 +2721,15 @@ class V5Pipeline:
         protect_entry_min_f5_rsi_trend_confirm = float(
             getattr(self.cfg.execution, "protect_entry_min_f5_rsi_trend_confirm", 0.30) or 0.0
         )
+        protect_replacement_close_guard_enabled = bool(
+            getattr(self.cfg.execution, "protect_replacement_close_guard_enabled", True)
+        )
+        protect_hold_current_when_replacement_blocked = bool(
+            getattr(self.cfg.execution, "protect_hold_current_when_replacement_blocked", True)
+        )
+        protect_replacement_hold_min_score = float(
+            getattr(self.cfg.execution, "protect_replacement_hold_min_score", 0.10) or 0.0
+        )
         strategy_signal_lookup = (
             self._resolve_strategy_signal_lookup(audit)
             if protect_entry_gate_active
@@ -2681,7 +2750,10 @@ class V5Pipeline:
                 f"alpha6_min_score={protect_entry_alpha6_min_score:.2f}, "
                 f"require_volume_confirm={protect_entry_require_volume_confirm}, "
                 f"min_f4_volume_expansion={protect_entry_min_f4_volume_expansion:.2f}, "
-                f"min_f5_rsi_trend_confirm={protect_entry_min_f5_rsi_trend_confirm:.2f}"
+                f"min_f5_rsi_trend_confirm={protect_entry_min_f5_rsi_trend_confirm:.2f}, "
+                f"replacement_close_guard_enabled={protect_replacement_close_guard_enabled}, "
+                f"hold_current_when_replacement_blocked={protect_hold_current_when_replacement_blocked}, "
+                f"replacement_hold_min_score={protect_replacement_hold_min_score:.2f}"
             )
         if require_fused_buy:
             try:
@@ -2712,6 +2784,10 @@ class V5Pipeline:
         
         # 计算总买入权重，用于比例分配
         total_buy_drift = sum(d for _, d, _ in buy_candidates) if buy_candidates else 0.0
+        replacement_open_candidates: set[str] = set()
+        blocked_replacement_reasons: Dict[str, str] = {}
+        successful_replacement_symbols: set[str] = set()
+        pending_zero_target_close_candidates: list[Dict[str, Any]] = []
 
         for sym in symbols_all:
             tw = float(target.get(sym, 0.0))
@@ -2878,9 +2954,42 @@ class V5Pipeline:
                 if notional <= 0:
                     continue
 
+            if side == "buy" and intent == "OPEN_LONG":
+                replacement_open_candidates.add(sym)
+
             bypass_turnover_cap_for_exit = bool(
                 side == "sell" and held is not None and abs(float(tw)) <= float(target_hold_eps)
             )
+
+            if (
+                side == "sell"
+                and held is not None
+                and abs(float(tw)) <= float(target_hold_eps)
+                and protect_entry_gate_active
+                and protect_replacement_close_guard_enabled
+                and protect_hold_current_when_replacement_blocked
+                and not is_risk_off_close_only
+            ):
+                held_score = None
+                try:
+                    held_score = float((alpha.scores or {}).get(sym))
+                except Exception:
+                    held_score = None
+                pending_zero_target_close_candidates.append(
+                    {
+                        "symbol": sym,
+                        "order": Order(
+                            symbol=sym,
+                            side=side,
+                            intent=intent,
+                            notional_usdt=notional,
+                            signal_price=px,
+                            meta={},
+                        ),
+                        "held_score": held_score,
+                    }
+                )
+                continue
 
             if side == "buy" and eligible_buy_symbols and sym not in eligible_buy_symbols:
                 if audit:
@@ -2902,6 +3011,12 @@ class V5Pipeline:
                     current_auto_risk_level=current_auto_risk_level,
                 )
                 if protect_block is not None:
+                    self._record_replacement_block(
+                        audit=audit,
+                        blocked_replacement_reasons=blocked_replacement_reasons,
+                        symbol=sym,
+                        reason=str(protect_block.get("reason") or "protect_entry_no_alpha6_confirmation"),
+                    )
                     if audit:
                         audit.record_count("protect_entry_block_count", symbol=sym)
                         if str(protect_block.get("reason") or "") == "protect_entry_trend_only":
@@ -2942,6 +3057,13 @@ class V5Pipeline:
             if side == "buy" and neg_cd_enabled:
                 blocked = self.negative_expectancy_cooldown.is_blocked(sym)
                 if blocked:
+                    if intent == "OPEN_LONG":
+                        self._record_replacement_block(
+                            audit=audit,
+                            blocked_replacement_reasons=blocked_replacement_reasons,
+                            symbol=sym,
+                            reason="negative_expectancy_cooldown",
+                        )
                     if audit:
                         audit.record_gate("negative_expectancy_cooldown", symbol=sym)
                         router_decisions.append(
@@ -2972,6 +3094,13 @@ class V5Pipeline:
                 closed_cycles = int((neg_stats or {}).get("closed_cycles") or 0)
                 expectancy_bps = self._negative_expectancy_bps(neg_stats or {})
                 if closed_cycles >= min_cycles and expectancy_bps < floor_bps:
+                    if intent == "OPEN_LONG":
+                        self._record_replacement_block(
+                            audit=audit,
+                            blocked_replacement_reasons=blocked_replacement_reasons,
+                            symbol=sym,
+                            reason="negative_expectancy_open_block",
+                        )
                     if audit:
                         audit.record_gate("negative_expectancy_open_block", symbol=sym)
                         router_decisions.append(
@@ -3020,6 +3149,13 @@ class V5Pipeline:
                 ff_expectancy_bps = self._negative_expectancy_bps(neg_stats or {}, fast_fail=True)
                 ff_avg_hold_minutes = float((neg_stats or {}).get("fast_fail_avg_hold_minutes") or 0.0)
                 if ff_closed_cycles >= ff_min_cycles and ff_expectancy_bps < ff_floor_bps:
+                    if intent == "OPEN_LONG":
+                        self._record_replacement_block(
+                            audit=audit,
+                            blocked_replacement_reasons=blocked_replacement_reasons,
+                            symbol=sym,
+                            reason="negative_expectancy_fast_fail_open_block",
+                        )
                     if audit:
                         audit.record_gate("negative_expectancy_fast_fail_open_block", symbol=sym)
                         router_decisions.append(
@@ -3186,6 +3322,13 @@ class V5Pipeline:
                         required_score = max(alpha_floor, score_floor + rt_cost_bps * score_per_bps)
 
                         if float(score_sym) < float(required_score):
+                            if intent == "OPEN_LONG":
+                                self._record_replacement_block(
+                                    audit=audit,
+                                    blocked_replacement_reasons=blocked_replacement_reasons,
+                                    symbol=sym,
+                                    reason="cost_aware_edge",
+                                )
                             if audit:
                                 audit.reject("cost_edge_insufficient")
                                 router_decisions.append(
@@ -3274,6 +3417,13 @@ class V5Pipeline:
 
             # Min-notional filter: apply to buys; allow sells (especially for removed symbols) to reduce drift.
             if side == "buy" and notional < float(min_notional):
+                if intent == "OPEN_LONG":
+                    self._record_replacement_block(
+                        audit=audit,
+                        blocked_replacement_reasons=blocked_replacement_reasons,
+                        symbol=sym,
+                        reason="min_notional",
+                    )
                 if audit:
                     audit.reject("min_notional")
                     router_decisions.append(
@@ -3303,6 +3453,13 @@ class V5Pipeline:
             
             # 检查cash是否足够（按批次累计扣减，避免多单同时通过导致超额下单）
             if side == "buy" and notional > cash_remaining:
+                if intent == "OPEN_LONG":
+                    self._record_replacement_block(
+                        audit=audit,
+                        blocked_replacement_reasons=blocked_replacement_reasons,
+                        symbol=sym,
+                        reason="insufficient_cash",
+                    )
                 if audit:
                     audit.reject("insufficient_cash")
                     router_decisions.append(
@@ -3362,6 +3519,8 @@ class V5Pipeline:
             # Update batch cash budget.
             if side == "buy":
                 cash_remaining -= float(notional)
+                if intent == "OPEN_LONG":
+                    successful_replacement_symbols.add(sym)
             else:
                 cash_remaining += float(notional)
 
@@ -3378,6 +3537,72 @@ class V5Pipeline:
                         "bypass_turnover_cap_for_exit": bool(bypass_turnover_cap_for_exit),
                     }
                 )
+
+        if pending_zero_target_close_candidates:
+            replacement_candidate_symbols = set(replacement_open_candidates or set())
+            blocked_candidate_symbols = set(blocked_replacement_reasons.keys())
+            all_replacements_blocked = (
+                bool(replacement_candidate_symbols)
+                and not bool(replacement_candidate_symbols & successful_replacement_symbols)
+                and replacement_candidate_symbols.issubset(blocked_candidate_symbols)
+            )
+
+            for pending in pending_zero_target_close_candidates:
+                sym = str(pending.get("symbol") or "")
+                order = pending.get("order")
+                held_score = pending.get("held_score")
+
+                safe_to_hold = (
+                    all_replacements_blocked
+                    and held_score is not None
+                    and float(held_score) >= float(protect_replacement_hold_min_score)
+                    and not self._held_symbol_has_negative_expectancy_hard_block(sym)
+                )
+
+                if safe_to_hold:
+                    if audit:
+                        audit.record_count("hold_current_no_valid_replacement_count", symbol=sym)
+                        audit.add_note(
+                            f"Hold current instead of zero_target_close: {sym} replacements_blocked={sorted(blocked_candidate_symbols)}"
+                        )
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": "hold_current_no_valid_replacement",
+                                "held_symbol": sym,
+                                "blocked_replacement_symbols": sorted(blocked_candidate_symbols),
+                                "blocked_replacement_reasons": {
+                                    candidate: blocked_replacement_reasons[candidate]
+                                    for candidate in sorted(blocked_candidate_symbols)
+                                },
+                                "held_symbol_score": float(held_score),
+                                "protect_replacement_hold_min_score": float(protect_replacement_hold_min_score),
+                            }
+                        )
+                    continue
+
+                if order is None:
+                    continue
+                meta = dict(getattr(order, "meta", {}) or {})
+                meta["target_w"] = 0.0
+                meta["bypass_turnover_cap_for_exit"] = True
+                meta["turnover_cap_bypass_reason"] = "zero_target_close"
+                order.meta = meta
+                rebalance_orders.append(order)
+                cash_remaining += float(getattr(order, "notional_usdt", 0.0) or 0.0)
+                if audit:
+                    router_decisions.append(
+                        {
+                            "symbol": order.symbol,
+                            "action": "create",
+                            "reason": "zero_target_close",
+                            "side": order.side,
+                            "notional": float(order.notional_usdt or 0.0),
+                            "cash_after": cash_remaining,
+                            "bypass_turnover_cap_for_exit": True,
+                        }
+                    )
 
         # qlib migration: proactive per-cycle rebalance turnover cap.
         try:

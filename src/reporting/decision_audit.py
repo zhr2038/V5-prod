@@ -49,6 +49,8 @@ class DecisionAudit:
         "protect_entry_alpha6_score_too_low_count": 0,
         "protect_entry_volume_confirm_negative_count": 0,
         "protect_entry_rsi_confirm_too_weak_count": 0,
+        "hold_current_no_valid_replacement_count": 0,
+        "replacement_blocked_count": 0,
         "negative_expectancy_score_penalty": 0,
         "negative_expectancy_cooldown": 0,
         "negative_expectancy_open_block": 0,

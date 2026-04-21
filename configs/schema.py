@@ -688,6 +688,20 @@ class ExecutionConfig(BaseModel):
         le=10.0,
         description="Minimum Alpha6Factor f5_rsi_trend_confirm required for OPEN_LONG in PROTECT risk level",
     )
+    protect_hold_current_when_replacement_blocked: bool = Field(
+        default=True,
+        description="In PROTECT risk level, keep the current holding when all replacement OPEN_LONG candidates are blocked",
+    )
+    protect_replacement_close_guard_enabled: bool = Field(
+        default=True,
+        description="Enable PROTECT-mode zero-target close guard when no valid replacement entry survives gating",
+    )
+    protect_replacement_hold_min_score: float = Field(
+        default=0.10,
+        ge=-10.0,
+        le=10.0,
+        description="Minimum held symbol score required to keep the current holding when replacement entries are all blocked",
+    )
 
     # Require fused strategy signal file for buy decisions. If missing, block buy orders.
     require_fused_signals_for_buy: bool = Field(default=False)
