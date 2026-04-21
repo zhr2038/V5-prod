@@ -1010,6 +1010,16 @@ def _risk_state_epoch(payload: Any, *, primary_keys: tuple[str, ...]) -> Optiona
     return None
 
 
+def _sorted_risk_history_tail(history: Any, limit: int = 5) -> List[Dict[str, Any]]:
+    if not isinstance(history, list):
+        return []
+    ordered = sorted(
+        [item for item in history if isinstance(item, dict)],
+        key=lambda item: float(_coerce_timestamp_epoch(item.get('ts')) or float('-inf')),
+    )
+    return ordered[-max(1, int(limit)) :]
+
+
 def _run_id_epoch(run_id: str) -> Optional[float]:
     match = re.search(r'(\d{8})_(\d{2})(\d{2})?(\d{2})?$', str(run_id or '').strip())
     if not match:
@@ -5535,7 +5545,7 @@ def api_auto_risk_guard():
             return jsonify({
                 'current_level': level,
                 'config': config,
-                'history': data.get('history', [])[-5:],
+                'history': _sorted_risk_history_tail(data.get('history'), 5),
                 'metrics': data.get('metrics', {}),
                 'reason': data.get('reason', ''),
                 'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
@@ -5555,7 +5565,7 @@ def api_auto_risk_guard():
 
             stored_history = guard_state.get('history')
             if isinstance(stored_history, list):
-                guard_history = stored_history[-5:]
+                guard_history = _sorted_risk_history_tail(stored_history, 5)
                 latest_history = max(
                     (
                         item

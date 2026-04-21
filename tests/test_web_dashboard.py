@@ -5786,6 +5786,57 @@ def test_auto_risk_guard_api_prefers_latest_matching_history_ts_when_history_is_
     assert payload["last_update"] == "2026-04-19T14:05:00"
 
 
+def test_auto_risk_guard_api_sorts_history_tail_by_ts(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    history = [
+        {"to": "DEFENSE", "reason": "14:03", "ts": "2026-04-19T14:03:00"},
+        {"to": "DEFENSE", "reason": "13:59", "ts": "2026-04-19T13:59:00"},
+        {"to": "DEFENSE", "reason": "14:05", "ts": "2026-04-19T14:05:00"},
+        {"to": "DEFENSE", "reason": "14:01", "ts": "2026-04-19T14:01:00"},
+        {"to": "DEFENSE", "reason": "14:04", "ts": "2026-04-19T14:04:00"},
+        {"to": "DEFENSE", "reason": "14:02", "ts": "2026-04-19T14:02:00"},
+    ]
+    (runtime_dir / "auto_risk_guard.json").write_text(
+        json.dumps(
+            {
+                "current_level": "DEFENSE",
+                "current_config": {"max_positions": 3},
+                "metrics": {"last_dd_pct": 0.12},
+                "history": history,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert [item["ts"] for item in payload["history"]] == [
+        "2026-04-19T14:01:00",
+        "2026-04-19T14:02:00",
+        "2026-04-19T14:03:00",
+        "2026-04-19T14:04:00",
+        "2026-04-19T14:05:00",
+    ]
+
+
 def test_auto_risk_guard_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
