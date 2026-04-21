@@ -82,3 +82,33 @@ def test_portfolio_engine_dynamic_max_positions_accepts_legacy_guard_level(tmp_p
     engine = PortfolioEngine(AlphaConfig(), RiskConfig())
 
     assert engine._get_dynamic_max_positions() == 3
+
+
+def test_portfolio_engine_dynamic_max_positions_prefers_latest_eval_history_ts_when_history_is_unsorted(tmp_path, monkeypatch):
+    monkeypatch.setenv("V5_WORKSPACE", str(tmp_path))
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "configs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "configs" / "live_prod.yaml").write_text("execution:\n  order_store_path: reports/orders.sqlite\n", encoding="utf-8")
+    (reports_dir / "auto_risk_eval.json").write_text(
+        json.dumps(
+            {
+                "current_level": "PROTECT",
+                "history": [
+                    {"ts": "2026-04-19T15:05:00", "to": "PROTECT"},
+                    {"ts": "2026-04-19T13:00:00", "to": "DEFENSE"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "auto_risk_guard.json").write_text(
+        json.dumps({"current_level": "DEFENSE", "last_update": "2026-04-19T14:05:00"}),
+        encoding="utf-8",
+    )
+
+    engine = PortfolioEngine(AlphaConfig(), RiskConfig())
+
+    assert engine._get_dynamic_max_positions() == 1
