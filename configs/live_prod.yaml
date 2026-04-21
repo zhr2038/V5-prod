@@ -210,6 +210,11 @@ rebalance:
   close_only_deadband_multiplier: 0.25
   close_only_weight_eps: 0.001
 
+ml_labeler:
+  allow_legacy_order_backfill: false
+  legacy_order_poll_max_age_hours: 72
+  skip_non_whitelist_legacy_orders: true
+
 execution:
   mode: live
   dry_run: false

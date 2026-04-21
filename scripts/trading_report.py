@@ -269,8 +269,8 @@ class TradingReportGenerator:
                     """
                     SELECT inst_id, side, state, notional_usdt, fee, avg_px, created_ts, updated_ts
                     FROM orders
-                    WHERE COALESCE(NULLIF(updated_ts, 0), created_ts) > ? AND state = 'FILLED'
-                    ORDER BY COALESCE(NULLIF(updated_ts, 0), created_ts) DESC
+                    WHERE created_ts > ? AND state = 'FILLED'
+                    ORDER BY created_ts DESC
                     """,
                     (cutoff_ts,),
                 )
@@ -290,8 +290,7 @@ class TradingReportGenerator:
         trades: list[dict[str, Any]] = []
         for row in rows:
             inst_id, side, state, notional_usdt, fee, avg_px, created_ts = row[:7]
-            updated_ts = row[7] if len(row) > 7 else None
-            ts_ms = int(updated_ts or created_ts or 0)
+            ts_ms = int(created_ts or 0)
             trades.append(
                 {
                     "symbol": str(inst_id or "").replace("-USDT", "").replace("/USDT", ""),

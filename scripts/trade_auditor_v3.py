@@ -239,9 +239,9 @@ class TradeAuditorV3:
                         inst_id,
                         side,
                         state,
-                        COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
+                        created_ts AS event_ts
                     FROM orders
-                    WHERE COALESCE(NULLIF(updated_ts, 0), created_ts) > ?
+                    WHERE created_ts > ?
                     ORDER BY event_ts DESC
                     """,
                     (start_ts,),

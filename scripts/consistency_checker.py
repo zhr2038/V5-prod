@@ -68,10 +68,6 @@ class BacktestLiveConsistencyChecker:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
     @staticmethod
-    def _order_event_ts_expr() -> str:
-        return "COALESCE(NULLIF(updated_ts, 0), created_ts)"
-
-    @staticmethod
     def _split_inst_id_base_quote(inst_id: str) -> tuple[str, str]:
         normalized = str(inst_id or "").replace("/", "-")
         parts = [part.strip().upper() for part in normalized.split("-") if part.strip()]
@@ -144,7 +140,7 @@ class BacktestLiveConsistencyChecker:
                     f"""
                     SELECT state, COUNT(*)
                     FROM orders
-                    WHERE {self._order_event_ts_expr()} > ?
+                    WHERE created_ts > ?
                     GROUP BY state
                     """,
                     (cutoff,),
@@ -176,7 +172,7 @@ class BacktestLiveConsistencyChecker:
         try:
             try:
                 cursor.execute(
-                    f"""
+                    """
                     SELECT
                         inst_id,
                         side,
@@ -186,9 +182,9 @@ class BacktestLiveConsistencyChecker:
                         acc_fill_sz,
                         fee,
                         state,
-                        {self._order_event_ts_expr()} AS event_ts
+                        created_ts AS event_ts
                     FROM orders
-                    WHERE {self._order_event_ts_expr()} > ? AND state = 'FILLED'
+                    WHERE created_ts > ? AND state = 'FILLED'
                     """,
                     (cutoff,),
                 )

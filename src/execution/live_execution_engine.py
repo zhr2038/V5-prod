@@ -15,6 +15,10 @@ from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
 from src.execution.clordid import make_cl_ord_id, make_decision_hash
 from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
+from src.execution.legacy_order_polling import (
+    legacy_order_poll_skip_reason,
+    load_legacy_order_poll_policy,
+)
 from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, record_api_request
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
@@ -515,6 +519,7 @@ class LiveExecutionEngine:
         )
         self.run_id = str(run_id or "")
         self.exp_time_ms = exp_time_ms
+        self._legacy_order_poll_policy = load_legacy_order_poll_policy()
         self._closed = False  # 跟踪资源状态
         # In-run quote budget cache for buy-side no-borrow protection.
         self._buy_quote_budget_remaining: Optional[float] = None
@@ -1424,10 +1429,38 @@ class LiveExecutionEngine:
             pass
 
         out: List[LiveExecutionResult] = []
+        skipped_legacy_polls = 0
+        skipped_non_whitelist_legacy_polls = 0
+        skipped_fully_labeled_terminal_polls = 0
         rows = self.order_store.list_open(limit=limit)
         for r in rows:
+            skip_reason = legacy_order_poll_skip_reason(
+                {
+                    "inst_id": str(r.inst_id),
+                    "state": str(r.state),
+                    "created_ts": int(getattr(r, "created_ts", 0) or 0),
+                    "updated_ts": int(getattr(r, "updated_ts", 0) or 0),
+                    "last_poll_ts": int(getattr(r, "last_poll_ts", 0) or 0),
+                },
+                policy=self._legacy_order_poll_policy,
+                now_ms=_now_ms(),
+            )
+            if skip_reason:
+                skipped_legacy_polls += 1
+                if skip_reason == "non_whitelist_legacy_order":
+                    skipped_non_whitelist_legacy_polls += 1
+                if skip_reason == "fully_labeled_terminal_order":
+                    skipped_fully_labeled_terminal_polls += 1
+                continue
             st, oid = self._query_and_update(inst_id=str(r.inst_id), cl_ord_id=str(r.cl_ord_id))
             out.append(LiveExecutionResult(cl_ord_id=str(r.cl_ord_id), state=st, ord_id=oid))
+        if skipped_legacy_polls > 0:
+            log.info(
+                "legacy order poll skipped: total=%d non_whitelist=%d fully_labeled=%d",
+                skipped_legacy_polls,
+                skipped_non_whitelist_legacy_polls,
+                skipped_fully_labeled_terminal_polls,
+            )
         return out
 
     def execute(self, order_batch: List[Order]) -> ExecutionReport:

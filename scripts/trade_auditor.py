@@ -173,7 +173,7 @@ def get_latest_orders(limit: int = 20, *, paths: AuditorPaths = DEFAULT_PATHS) -
                         ord_id,
                         last_error_code,
                         last_error_msg,
-                        COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
+                        created_ts AS event_ts
                     FROM orders
                 )
                 ORDER BY event_ts DESC

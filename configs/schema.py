@@ -1001,6 +1001,23 @@ class BudgetConfig(BaseModel):
     small_trade_median_threshold_equity_ratio: float = Field(default=0.0025, ge=0, le=1)
 
 
+class MLLabelerConfig(BaseModel):
+    allow_legacy_order_backfill: bool = Field(
+        default=False,
+        description="Allow legacy orders outside the current release scope to continue remote status backfill polling",
+    )
+    legacy_order_poll_max_age_hours: int = Field(
+        default=72,
+        ge=1,
+        le=24 * 30,
+        description="Maximum age for continuing legacy order status polling before it is skipped",
+    )
+    skip_non_whitelist_legacy_orders: bool = Field(
+        default=True,
+        description="Skip legacy order status polling for symbols outside the current top-level whitelist",
+    )
+
+
 class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
     timeframe_main: str = "1h"
@@ -1014,6 +1031,7 @@ class AppConfig(BaseModel):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    ml_labeler: MLLabelerConfig = Field(default_factory=MLLabelerConfig)
 
     @field_validator("symbols")
     @classmethod

@@ -3,11 +3,16 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.execution.legacy_order_polling import (
+    legacy_order_poll_skip_reason,
+    load_legacy_order_poll_policy,
+)
 from src.execution.fill_store import FillStore, derive_runtime_named_json_path, derive_runtime_runs_dir
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.order_store import OrderStore
@@ -57,11 +62,13 @@ class FillReconciler:
         order_store: OrderStore,
         okx: Optional[OKXPrivateClient] = None,
         position_store: Optional[PositionStore] = None,
+        legacy_order_poll_policy=None,
     ):
         self.fill_store = fill_store
         self.order_store = order_store
         self.okx = okx
         self.position_store = position_store
+        self.legacy_order_poll_policy = legacy_order_poll_policy or load_legacy_order_poll_policy()
 
     @staticmethod
     def _order_reason(row) -> str:
@@ -246,11 +253,23 @@ class FillReconciler:
         """Reconcile"""
         fills = self._load_unprocessed_fills(limit=limit)
         if not fills:
-            return {"new_fills": 0, "updated_orders": 0, "get_order_calls": 0, "fills_exported": 0, "export_errors": 0}
+            return {
+                "new_fills": 0,
+                "updated_orders": 0,
+                "get_order_calls": 0,
+                "legacy_order_poll_skipped_count": 0,
+                "non_whitelist_legacy_order_poll_skipped_count": 0,
+                "fully_labeled_order_poll_skipped_count": 0,
+                "fills_exported": 0,
+                "export_errors": 0,
+            }
 
         aggs = self._aggregate(fills)
         updated = 0
         get_calls = 0
+        skipped_legacy_polls = 0
+        skipped_non_whitelist_legacy_polls = 0
+        skipped_fully_labeled_terminal_polls = 0
 
         # NOTE: processed marker is written *only after* successful export (trades/cost_events).
         # This prevents data loss if exporter fails mid-run.
@@ -288,6 +307,24 @@ class FillReconciler:
 
             # Confirm terminal state via get_order when possible
             if self.okx is not None and get_calls < int(max_get_order_per_run):
+                skip_reason = legacy_order_poll_skip_reason(
+                    {
+                        "inst_id": str(row.inst_id),
+                        "state": row_state_before,
+                        "created_ts": int(getattr(row, "created_ts", 0) or 0),
+                        "updated_ts": int(getattr(row, "updated_ts", 0) or 0),
+                        "last_poll_ts": int(getattr(row, "last_poll_ts", 0) or 0),
+                    },
+                    policy=self.legacy_order_poll_policy,
+                    now_ms=int(time.time() * 1000),
+                )
+                if skip_reason:
+                    skipped_legacy_polls += 1
+                    if skip_reason == "non_whitelist_legacy_order":
+                        skipped_non_whitelist_legacy_polls += 1
+                    if skip_reason == "fully_labeled_terminal_order":
+                        skipped_fully_labeled_terminal_polls += 1
+                    continue
                 try:
                     r = self.okx.get_order(inst_id=str(row.inst_id), ord_id=row.ord_id, cl_ord_id=row.cl_ord_id)
                     get_calls += 1
@@ -385,10 +422,21 @@ class FillReconciler:
             except Exception:
                 export_errors += 1
 
+        if skipped_legacy_polls > 0:
+            log.info(
+                "legacy order poll skipped: total=%d non_whitelist=%d fully_labeled=%d",
+                skipped_legacy_polls,
+                skipped_non_whitelist_legacy_polls,
+                skipped_fully_labeled_terminal_polls,
+            )
+
         return {
             "new_fills": len(fills),
             "updated_orders": updated,
             "get_order_calls": int(get_calls),
+            "legacy_order_poll_skipped_count": int(skipped_legacy_polls),
+            "non_whitelist_legacy_order_poll_skipped_count": int(skipped_non_whitelist_legacy_polls),
+            "fully_labeled_order_poll_skipped_count": int(skipped_fully_labeled_terminal_polls),
             "fills_exported": int(exported),
             "export_errors": int(export_errors),
         }

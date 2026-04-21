@@ -177,9 +177,9 @@ class SmartTradeAuditor:
                         ord_id,
                         last_error_code,
                         last_error_msg,
-                        COALESCE(NULLIF(updated_ts, 0), created_ts) AS event_ts
+                        created_ts AS event_ts
                     FROM orders
-                    WHERE COALESCE(NULLIF(updated_ts, 0), created_ts) BETWEEN ? AND ?
+                    WHERE created_ts BETWEEN ? AND ?
                     ORDER BY event_ts DESC
                     """,
                     (start_ts, end_ts),
