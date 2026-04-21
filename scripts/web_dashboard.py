@@ -3370,39 +3370,21 @@ def api_sentiment():
 
         for symbol in symbols:
             try:
-                # 优先顺序: rss > funding > deepseek > 通用
-                files = []
-                
-                # 1. 尝试RSS币种特定缓存
-                rss_files = sorted(cache_dir.glob(f'rss_{symbol}_*.json'))
-                if rss_files:
-                    files = rss_files
-                
-                # 2. 尝试RSS市场通用缓存 (rss_MARKET_*)
-                if not files:
-                    rss_market_files = sorted(cache_dir.glob('rss_MARKET_*.json'))
-                    if rss_market_files:
-                        files = rss_market_files
-                
-                # 3. 尝试funding缓存
-                if not files:
-                    funding_files = sorted(cache_dir.glob(f'funding_{symbol}_*.json'))
-                    if funding_files:
-                        files = funding_files
-                
-                # 4. 尝试deepseek缓存
-                if not files:
-                    files = sorted(cache_dir.glob(f'deepseek_{symbol}_*.json'))
-                
-                # 5. 回退通用缓存
-                if not files:
-                    files = sorted(cache_dir.glob(f'{symbol}_*.json'))
+                latest = _latest_signal_file(
+                    cache_dir,
+                    [
+                        f'rss_{symbol}_*.json',
+                        'rss_MARKET_*.json',
+                        f'funding_{symbol}_*.json',
+                        f'deepseek_{symbol}_*.json',
+                        f'{symbol}_*.json',
+                    ],
+                )
 
-                if not files:
+                if latest is None:
                     results[symbol] = {'error': 'no_cache'}
                     continue
 
-                latest = files[-1]
                 with open(latest, 'r', encoding='utf-8') as f:
                     data = json.load(f)
 

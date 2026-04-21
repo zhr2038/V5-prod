@@ -593,6 +593,55 @@ def test_sentiment_api_symbol_error_is_sanitized(monkeypatch, tmp_path):
     _assert_body_hides_internal_details(body, "/home/ubuntu/clawd/v5-prod/data/sentiment_cache", "rss_BTC-USDT_20260410_01.json")
 
 
+def test_sentiment_api_prefers_latest_cache_across_sources_by_timestamp(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(
+        module,
+        "api_scores",
+        lambda: (module.jsonify({"error": "scores unavailable"}), 500),
+    )
+
+    cache_dir = tmp_path / "data" / "sentiment_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    stale_rss = cache_dir / "rss_BTC-USDT_20260410_12.json"
+    fresh_funding = cache_dir / "funding_BTC-USDT_20260410_13.json"
+    stale_rss.write_text(
+        json.dumps(
+            {
+                "f6_sentiment": -0.2,
+                "f6_fear_greed_index": 40,
+                "f6_market_stage": "risk_off",
+                "f6_sentiment_summary": "stale rss",
+                "f6_sentiment_source": "rss",
+            }
+        ),
+        encoding="utf-8",
+    )
+    fresh_funding.write_text(
+        json.dumps(
+            {
+                "f6_sentiment": 0.45,
+                "f6_fear_greed_index": 72,
+                "f6_market_stage": "trending",
+                "f6_sentiment_summary": "fresh funding",
+                "f6_sentiment_source": "funding_rate",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/sentiment")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["by_symbol"]["BTC-USDT"]["sentiment"] == 0.45
+    assert payload["by_symbol"]["BTC-USDT"]["source"] == "funding_rate"
+    assert payload["by_symbol"]["BTC-USDT"]["cache_file"] == "funding_BTC-USDT_20260410_13.json"
+
+
 def test_dashboard_api_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
