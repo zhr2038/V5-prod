@@ -168,7 +168,11 @@ class AlphaICMonitor:
         short_n = max(1, int(self.cfg.roll_points_short))
         long_n = max(short_n, int(self.cfg.roll_points_long))
 
-        rows = ts_rows[-long_n:]
+        ordered_rows = sorted(
+            [row for row in ts_rows if isinstance(row, dict)],
+            key=lambda row: int(row.get("to_ts_ms") or row.get("from_ts_ms") or 0),
+        )
+        rows = ordered_rows[-long_n:]
         rows_short = rows[-short_n:]
 
         score_ic_short = [float(r.get("score_ic") or 0.0) for r in rows_short]

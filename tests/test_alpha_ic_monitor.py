@@ -62,3 +62,41 @@ def test_alpha_ic_monitor_update_prefers_latest_history_ts_when_history_is_unsor
     latest = json.loads(lines[-1])
     assert latest["from_ts_ms"] == 2_000
     assert latest["to_ts_ms"] == 3_000
+
+
+def test_alpha_ic_monitor_summary_prefers_latest_timeseries_ts_when_history_is_unsorted(tmp_path: Path) -> None:
+    monitor = AlphaICMonitor(
+        AlphaICMonitorConfig(
+            history_path=str(tmp_path / "alpha_ic_history.jsonl"),
+            timeseries_path=str(tmp_path / "alpha_ic_timeseries.jsonl"),
+            summary_path=str(tmp_path / "alpha_ic_monitor.json"),
+            roll_points_short=1,
+            roll_points_long=2,
+        )
+    )
+
+    rows = [
+        {
+            "from_ts_ms": 3_000,
+            "to_ts_ms": 4_000,
+            "score_ic": -0.4,
+            "score_rank_ic": -0.4,
+            "factor_ic": {},
+            "score_source": "scores",
+        },
+        {
+            "from_ts_ms": 1_000,
+            "to_ts_ms": 2_000,
+            "score_ic": 0.1,
+            "score_rank_ic": 0.1,
+            "factor_ic": {},
+            "score_source": "telemetry_scores",
+        },
+    ]
+
+    summary = monitor._build_summary(rows)
+
+    assert summary["points_short"] == 1
+    assert summary["points_long"] == 2
+    assert summary["score_source"] == "scores"
+    assert summary["score_ic_short"]["mean"] == -0.4
