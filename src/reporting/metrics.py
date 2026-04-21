@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,6 +34,16 @@ def read_equity_jsonl(path: str) -> List[Dict[str, Any]]:
             out.append(json.loads(line))
         except Exception:
             continue
+    def _sort_key(item: Dict[str, Any]) -> tuple[int, str]:
+        raw_ts = str(item.get("ts") or "").strip()
+        if not raw_ts:
+            return (1, "")
+        normalized = raw_ts[:-1] + "+00:00" if raw_ts.endswith("Z") else raw_ts
+        try:
+            return (0, datetime.fromisoformat(normalized).isoformat())
+        except Exception:
+            return (1, raw_ts)
+    out.sort(key=_sort_key)
     return out
 
 
