@@ -4889,7 +4889,11 @@ def _api_ml_training_v2():
 
     def _latest_model_file(base_path: Path) -> Optional[Path]:
         existing = [p for p in _model_artifact_candidates(base_path) if p.exists()]
-        return max(existing, key=lambda p: p.stat().st_mtime) if existing else None
+        if not existing:
+            return None
+        model_files = [p for p in existing if not p.name.endswith('_config.json')]
+        preferred = model_files or existing
+        return max(preferred, key=lambda p: p.stat().st_mtime)
 
     configured_enabled = False
     min_samples = 200

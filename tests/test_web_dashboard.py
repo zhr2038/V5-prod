@@ -3674,6 +3674,53 @@ def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
     assert payload["runtime_prediction_count"] == 3
 
 
+def test_ml_training_api_prefers_model_artifact_over_newer_config_file(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    models_dir = module.WORKSPACE / "models"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    db_path = reports_dir / "ml_training_data.db"
+    conn = sqlite3.connect(str(db_path))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE feature_snapshots(id INTEGER PRIMARY KEY, label_filled INTEGER NOT NULL)")
+    cur.execute("INSERT INTO feature_snapshots(label_filled) VALUES (1)")
+    conn.commit()
+    conn.close()
+
+    (reports_dir / "ml_training_history.json").write_text(
+        json.dumps([{"timestamp": "2026-03-10T00:30:00Z", "valid_ic": 0.12, "gate": {"passed": True}}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "model_promotion_decision.json").write_text(
+        json.dumps({"ts": "2026-03-10T00:40:00Z", "passed": True, "fail_reasons": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_runtime_status.json").write_text(
+        json.dumps({"ts": "2026-03-10T01:00:00Z", "used_in_latest_snapshot": True, "reason": "ok", "prediction_count": 1}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    model_file = models_dir / "ml_factor_model.pkl"
+    config_file = models_dir / "ml_factor_model_config.json"
+    model_file.write_bytes(b"model")
+    config_file.write_text("{}", encoding="utf-8")
+    os.utime(model_file, (1_000_000_000, 1_000_000_000))
+    os.utime(config_file, (2_000_000_000, 2_000_000_000))
+    (models_dir / "ml_factor_model_active.txt").write_text("models/ml_factor_model", encoding="utf-8")
+
+    response = client.get("/api/ml_training")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["latest_model"] == "ml_factor_model.pkl"
+
+
 def test_ml_training_api_treats_string_false_flags_as_false(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
