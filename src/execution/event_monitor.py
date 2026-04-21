@@ -458,8 +458,16 @@ class EventMonitor:
                 continue
 
             history = self.price_history.setdefault(sym, [])
-            if history and int(history[-1].get('timestamp_ms', 0) or 0) == now_ms:
-                history[-1]['price'] = price
+            existing = next(
+                (
+                    sample
+                    for sample in reversed(history)
+                    if int(sample.get('timestamp_ms', 0) or 0) == now_ms
+                ),
+                None,
+            )
+            if existing is not None:
+                existing['price'] = price
             else:
                 history.append({'timestamp_ms': now_ms, 'price': price})
 
