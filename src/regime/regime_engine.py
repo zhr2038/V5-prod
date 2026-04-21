@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -75,6 +77,22 @@ class RegimeEngine:
                 self.use_hmm = False
                 self.hmm_detector = None
 
+    def _latest_sentiment_cache_file(self, pattern: str) -> Optional[Path]:
+        files = list(self.sentiment_cache_dir.glob(pattern))
+        if not files:
+            return None
+
+        def _sort_epoch(path: Path) -> float:
+            match = re.search(r'(?<!\d)(20\d{6}_\d{2})(?!\d)', path.stem)
+            if match:
+                try:
+                    return datetime.strptime(match.group(1), "%Y%m%d_%H").timestamp()
+                except Exception:
+                    pass
+            return path.stat().st_mtime
+
+        return max(files, key=_sort_epoch)
+
     def _load_market_sentiment(self) -> float:
         """Load the latest cached sentiment snapshot and average core majors."""
         try:
@@ -91,9 +109,9 @@ class RegimeEngine:
                     f"{sym}_*.json",
                 ]
                 for pattern in patterns:
-                    files = sorted(self.sentiment_cache_dir.glob(pattern))
-                    if files:
-                        data = json.loads(files[-1].read_text(encoding="utf-8"))
+                    latest_file = self._latest_sentiment_cache_file(pattern)
+                    if latest_file is not None:
+                        data = json.loads(latest_file.read_text(encoding="utf-8"))
                         break
 
                 if data:
