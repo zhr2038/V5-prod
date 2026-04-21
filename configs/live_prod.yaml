@@ -215,6 +215,11 @@ ml_labeler:
   legacy_order_poll_max_age_hours: 72
   skip_non_whitelist_legacy_orders: true
 
+diagnostics:
+  skipped_candidate_label_enabled: true
+  skipped_candidate_horizons_hours: [4, 8, 12, 24]
+  skipped_candidate_roundtrip_cost_bps: 30
+
 execution:
   mode: live
   dry_run: false
