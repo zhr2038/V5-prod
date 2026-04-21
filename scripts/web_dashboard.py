@@ -5556,12 +5556,14 @@ def api_auto_risk_guard():
             stored_history = guard_state.get('history')
             if isinstance(stored_history, list):
                 guard_history = stored_history[-5:]
-                latest_history = next(
+                latest_history = max(
                     (
-                        item for item in reversed(stored_history)
+                        item
+                        for item in stored_history
                         if isinstance(item, dict) and str(item.get('to') or '').strip().upper() == guard.current_level
                     ),
-                    None,
+                    key=lambda item: float(_coerce_timestamp_epoch(item.get('ts')) or float('-inf')),
+                    default=None,
                 )
                 if isinstance(latest_history, dict):
                     guard_reason = str(latest_history.get('reason') or '').strip()
