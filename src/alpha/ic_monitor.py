@@ -233,7 +233,13 @@ class AlphaICMonitor:
         snap = self._build_snapshot(now_ts_ms=now_ts_ms, alpha_snapshot=alpha_snapshot, closes=closes)
         history = self._read_jsonl(self.cfg.history_path)
 
-        prev = history[-1] if history else None
+        prev = None
+        if history:
+            prev = max(
+                (item for item in history if isinstance(item, dict)),
+                key=lambda item: int(item.get("ts_ms") or 0),
+                default=None,
+            )
         self._append_jsonl(self.cfg.history_path, snap)
         self._trim_jsonl(self.cfg.history_path, keep_last=max(50, int(self.cfg.max_history_points)))
 
