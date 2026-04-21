@@ -165,6 +165,38 @@ def test_auto_risk_guard_loads_legacy_level_field(monkeypatch, tmp_path: Path) -
     assert guard.current_level == "PROTECT"
 
 
+def test_get_current_risk_state_prefers_latest_history_ts_when_history_is_unsorted(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path
+    reports_dir = workspace / "reports" / "shadow_runtime"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
+    manager.risk_state_file.write_text(
+        json.dumps(
+            {
+                "level": "PROTECT",
+                "history": [
+                    {"ts": "2026-04-19T14:00:00Z", "to": "PROTECT"},
+                    {"ts": "2026-04-19T13:00:00Z", "to": "DEFENSE"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    state = manager.get_current_risk_state()
+
+    assert state["current_level"] == "PROTECT"
+    assert state["since"] == "2026-04-19T14:00:00Z"
+
+
 def test_risk_auto_recovery_fails_fast_when_runtime_config_is_missing(tmp_path: Path) -> None:
     try:
         risk_auto_recovery.RiskAutoRecovery(workspace=tmp_path)

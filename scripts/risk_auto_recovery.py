@@ -112,15 +112,27 @@ class RiskAutoRecovery:
                     state = json.load(f)
                     if isinstance(state, dict):
                         current_level = str(state.get('current_level') or state.get('level') or 'NEUTRAL').upper()
+                        latest_history_ts = ''
+                        history = state.get('history')
+                        if isinstance(history, list):
+                            def _history_sort_epoch(item):
+                                if not isinstance(item, dict):
+                                    return float('-inf')
+                                try:
+                                    parsed = self._parse_state_datetime(item.get('ts'))
+                                    if parsed is not None:
+                                        return parsed.timestamp()
+                                except Exception:
+                                    pass
+                                return float('-inf')
+
+                            latest_history = max(history, key=_history_sort_epoch, default=None)
+                            if isinstance(latest_history, dict):
+                                latest_history_ts = str(latest_history.get('ts') or '').strip()
                         since = str(
                             state.get('since')
                             or state.get('last_update')
-                            or (
-                                state.get('history', [])[-1].get('ts')
-                                if isinstance(state.get('history'), list) and state.get('history')
-                                and isinstance(state.get('history')[-1], dict)
-                                else ''
-                            )
+                            or latest_history_ts
                             or datetime.now().isoformat()
                         )
                         state['current_level'] = current_level
