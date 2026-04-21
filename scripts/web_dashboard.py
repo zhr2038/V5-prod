@@ -2355,6 +2355,23 @@ def _runtime_ic_diagnostic_pattern(orders_db: Path) -> str:
     return "ic_diagnostics_*.json"
 
 
+def _history_entry_sort_epoch(entry: Dict[str, Any]) -> float:
+    if isinstance(entry, dict):
+        raw_ts = entry.get("timestamp") or entry.get("ts")
+        if raw_ts:
+            try:
+                return datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).timestamp()
+            except Exception:
+                pass
+        run_id = str(entry.get("run_id") or "")
+        if run_id:
+            try:
+                return datetime.strptime(run_id, "%Y%m%d_%H").timestamp()
+            except Exception:
+                pass
+    return 0.0
+
+
 def _ic_diagnostic_sort_epoch(path: Path) -> float:
     match = re.search(r"(?<!\d)(20\d{6})(?!\d)", path.stem)
     if match:
@@ -4957,7 +4974,9 @@ def _api_ml_training_v2():
         try:
             hist_obj = json.loads(history_path.read_text(encoding='utf-8'))
             if isinstance(hist_obj, list) and hist_obj:
-                latest_history = hist_obj[-1] if isinstance(hist_obj[-1], dict) else {}
+                entries = [entry for entry in hist_obj if isinstance(entry, dict)]
+                if entries:
+                    latest_history = max(entries, key=_history_entry_sort_epoch)
         except Exception:
             pass
 
