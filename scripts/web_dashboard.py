@@ -3709,13 +3709,7 @@ def _signal_health(cache_dir: Path, patterns: List[str], max_age_minutes: int, e
             'max_age_minutes': int(max_age_minutes),
         }
 
-    parts = latest.stem.split('_')
-    signal_epoch = latest.stat().st_mtime
-    if len(parts) >= 2:
-        try:
-            signal_epoch = datetime.strptime('_'.join(parts[-2:]), "%Y%m%d_%H").timestamp()
-        except Exception:
-            signal_epoch = latest.stat().st_mtime
+    signal_epoch = _signal_file_epoch(latest)
     age_minutes = max(0.0, (datetime.now().timestamp() - signal_epoch) / 60.0)
     is_fresh = age_minutes <= max(int(max_age_minutes), 1)
     return {
@@ -3723,7 +3717,7 @@ def _signal_health(cache_dir: Path, patterns: List[str], max_age_minutes: int, e
         'is_fresh': bool(is_fresh),
         'error': None if is_fresh else error_name,
         'last_file': latest.name,
-        'last_mtime': datetime.fromtimestamp(latest.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+        'last_mtime': datetime.fromtimestamp(signal_epoch).strftime('%Y-%m-%d %H:%M:%S'),
         'age_minutes': round(age_minutes, 1),
         'max_age_minutes': int(max_age_minutes),
     }

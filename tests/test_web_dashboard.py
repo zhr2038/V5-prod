@@ -3576,6 +3576,7 @@ def test_signal_health_prefers_latest_file_by_filename_timestamp_not_mtime(monke
     assert latest is not None
     assert latest.name == newer_name
     assert health["status"] == "fresh"
+    assert health["last_mtime"] == datetime.fromtimestamp(module._signal_file_epoch(newer)).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def test_shadow_ml_overlay_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
