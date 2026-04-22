@@ -96,3 +96,46 @@ def test_load_regime_history_prefers_audit_timestamp_over_file_mtime(tmp_path: P
     assert len(regimes) == 1
     assert regimes[0]["regime"] == "TRENDING"
     assert regimes[0]["multiplier"] == 0.9
+
+
+def test_load_regime_history_limits_audit_file_reads_before_parsing(tmp_path: Path, monkeypatch) -> None:
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now()
+    recent_hours = {19, 18, 17, 16}
+    for hour in range(20):
+        day_offset = 0 if hour in recent_hours else 10
+        run_dt = now - timedelta(days=day_offset, hours=19 - hour)
+        run_name = run_dt.strftime("%Y%m%d_%H")
+        run_dir = runs_dir / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps({"run_id": run_name, "regime": "TRENDING", "regime_multiplier": 0.8}),
+            encoding="utf-8",
+        )
+
+    generator = trading_report.TradingReportGenerator(
+        paths=trading_report.ReportPaths(
+            workspace=tmp_path,
+            reports_dir=reports_dir,
+            runs_dir=runs_dir,
+            orders_db=reports_dir / "orders.sqlite",
+            fills_db=reports_dir / "fills.sqlite",
+        )
+    )
+
+    original_loads = trading_report.json.loads
+    reads = {"decision_audit": 0}
+
+    def counting_loads(text: str, *args, **kwargs):
+        reads["decision_audit"] += 1
+        return original_loads(text, *args, **kwargs)
+
+    monkeypatch.setattr(trading_report.json, "loads", counting_loads)
+
+    regimes = generator.load_regime_history(days=1)
+
+    assert len(regimes) == 4
+    assert reads["decision_audit"] <= 4

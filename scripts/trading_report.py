@@ -307,10 +307,24 @@ class TradingReportGenerator:
         regimes: list[dict[str, Any]] = []
         cutoff = datetime.now() - timedelta(days=days)
 
+        def _candidate_sort_epoch(run_dir: Path) -> float:
+            try:
+                # Use the end of the run hour as a lightweight upper bound for cutoff filtering.
+                return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp() + 3600.0
+            except Exception:
+                audit_file = run_dir / "decision_audit.json"
+                try:
+                    return audit_file.stat().st_mtime
+                except OSError:
+                    return run_dir.stat().st_mtime
+
         if self.paths.runs_dir.exists():
-            for run_dir in self.paths.runs_dir.iterdir():
+            run_dirs = sorted(self.paths.runs_dir.iterdir(), key=_candidate_sort_epoch, reverse=True)
+            for run_dir in run_dirs:
                 audit_file = run_dir / "decision_audit.json"
                 if not audit_file.exists():
+                    continue
+                if datetime.fromtimestamp(_candidate_sort_epoch(run_dir)) <= cutoff:
                     continue
                 try:
                     data = json.loads(audit_file.read_text(encoding="utf-8"))
