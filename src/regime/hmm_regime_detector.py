@@ -3,6 +3,7 @@
 
 import csv
 import json
+import re
 import sqlite3
 import sys
 from datetime import datetime, timedelta
@@ -76,6 +77,28 @@ class HMMRegimeDetector:
             print(f'[HMM] load state labels failed: {exc}')
         return {0: 'TrendingUp', 1: 'Sideways', 2: 'TrendingDown'}
 
+    @staticmethod
+    def _cache_file_epoch(path: Path, *, prefix: str) -> float:
+        suffix = path.stem[len(prefix):] if path.stem.startswith(prefix) else path.stem
+
+        hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
+        if hourly_match:
+            try:
+                return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+            except Exception:
+                pass
+
+        date_tokens = re.findall(r"(20\d{2}-\d{2}-\d{2}|20\d{6})", suffix)
+        if date_tokens:
+            token = date_tokens[-1]
+            try:
+                fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
+                return datetime.strptime(token, fmt).timestamp()
+            except Exception:
+                pass
+
+        return path.stat().st_mtime
+
     def _load_training_data_from_cache(
         self,
         cache_dir: Path,
@@ -83,7 +106,10 @@ class HMMRegimeDetector:
         lookback_days: int,
     ) -> Optional[np.ndarray]:
         symbol_key = symbol.replace('/', '_').replace('-', '_').upper()
-        files = sorted(cache_dir.glob(f'{symbol_key}_1H_*.csv'))
+        files = sorted(
+            cache_dir.glob(f'{symbol_key}_1H_*.csv'),
+            key=lambda path: self._cache_file_epoch(path, prefix=f'{symbol_key}_1H_'),
+        )
         if not files:
             print(f'[HMM] missing price cache for {symbol_key} in {cache_dir}')
             return None
