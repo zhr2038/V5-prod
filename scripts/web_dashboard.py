@@ -744,10 +744,17 @@ def _load_alpha_snapshot_scores(reports_dir: Path, limit: int = 20) -> Dict[str,
         return {}
 
     regime_snapshot = _load_regime_json_snapshot(reports_dir)
-    try:
-        snapshot_ts = alpha_snapshot_path.stat().st_mtime
-    except OSError:
-        snapshot_ts = None
+    ml_runtime = payload.get('ml_runtime', {}) if isinstance(payload.get('ml_runtime', {}), dict) else {}
+    snapshot_ts = (
+        _coerce_timestamp_epoch(payload.get('timestamp'))
+        or _coerce_timestamp_epoch(payload.get('ts'))
+        or _coerce_timestamp_epoch(ml_runtime.get('ts'))
+    )
+    if snapshot_ts is None:
+        try:
+            snapshot_ts = alpha_snapshot_path.stat().st_mtime
+        except OSError:
+            snapshot_ts = None
     return {
         'regime': str(regime_snapshot.get('state') or 'Unknown'),
         'current_run': 'alpha_snapshot',

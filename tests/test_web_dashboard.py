@@ -1693,6 +1693,52 @@ def test_api_scores_falls_back_to_alpha_snapshot_when_runs_empty(monkeypatch, tm
     assert [item["symbol"] for item in payload["scores"][:2]] == ["SOL/USDT", "BTC/USDT"]
 
 
+def test_api_scores_prefers_alpha_snapshot_runtime_ts_over_file_mtime(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    failed_run = runs_dir / "20260311_01"
+    failed_run.mkdir(parents=True, exist_ok=True)
+    (failed_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "regime": "Unknown",
+                "top_scores": [],
+                "counts": {"universe": 0, "scored": 0},
+                "notes": ["No market data returned from provider"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    alpha_snapshot_path = reports_dir / "alpha_snapshot.json"
+    alpha_snapshot_path.write_text(
+        json.dumps(
+            {
+                "scores": {"SOL/USDT": 0.95},
+                "ml_runtime": {"ts": "2026-03-10T12:05:00Z"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(alpha_snapshot_path, (1_999_999_999, 1_999_999_999))
+    (reports_dir / "regime.json").write_text(
+        json.dumps({"state": "Trending", "multiplier": 1.2, "votes": {}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_run"] == "alpha_snapshot"
+    assert payload["last_update"] == datetime.fromtimestamp(module._coerce_timestamp_epoch("2026-03-10T12:05:00Z")).isoformat()
+
+
 def test_api_scores_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
