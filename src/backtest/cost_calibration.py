@@ -11,6 +11,18 @@ def _utc_today_yyyymmdd() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
+def _stats_day_epoch(path: Path) -> float | None:
+    prefix = "daily_cost_stats_"
+    stem = path.stem
+    if not stem.startswith(prefix):
+        return None
+    tag = stem[len(prefix):]
+    try:
+        return datetime.strptime(tag, "%Y%m%d").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
 def load_latest_cost_stats(stats_dir: str, max_age_days: int = 7) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Load newest daily_cost_stats_YYYYMMDD.json within max_age_days (UTC).
 
@@ -19,24 +31,18 @@ def load_latest_cost_stats(stats_dir: str, max_age_days: int = 7) -> Tuple[Optio
     d = Path(stats_dir)
     if not d.exists():
         return None, None
-    files = sorted(d.glob("daily_cost_stats_*.json"))
-    if not files:
+    dated_files = [(path, _stats_day_epoch(path)) for path in d.glob("daily_cost_stats_*.json")]
+    dated_files = [(path, epoch) for path, epoch in dated_files if epoch is not None]
+    if not dated_files:
         return None, None
 
-    # newest by filename (YYYYMMDD)
-    files.sort(key=lambda p: p.name)
-    latest = files[-1]
+    latest, latest_epoch = max(dated_files, key=lambda item: item[1])
 
     # age check by day tag
-    try:
-        tag = latest.stem.split("_")[-1]
-        dt = datetime.strptime(tag, "%Y%m%d").replace(tzinfo=timezone.utc)
-        age_days = (datetime.now(timezone.utc) - dt).days
-        if age_days > int(max_age_days):
-            return None, None
-    except Exception:
-        # if parse fails, allow load
-        pass
+    dt = datetime.fromtimestamp(latest_epoch, tz=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - dt).days
+    if age_days > int(max_age_days):
+        return None, None
 
     try:
         return json.loads(latest.read_text(encoding="utf-8")), str(latest)
