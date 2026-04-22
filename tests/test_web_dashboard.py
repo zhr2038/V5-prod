@@ -3579,7 +3579,7 @@ def test_signal_health_prefers_latest_file_by_filename_timestamp_not_mtime(monke
     assert health["last_mtime"] == datetime.fromtimestamp(module._signal_file_epoch(newer)).strftime('%Y-%m-%d %H:%M:%S')
 
 
-def test_shadow_ml_overlay_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
+def test_shadow_ml_overlay_timestamp_prefers_sort_epoch_over_file_mtime(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
 
@@ -3610,7 +3610,7 @@ def test_shadow_ml_overlay_prefers_decision_audit_file_mtime_over_run_dir_mtime(
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["run_id"] == "shadow_tuned_xgboost_20260404_14"
-    assert payload["timestamp"] == 200
+    assert payload["timestamp"] == module._run_id_epoch("shadow_tuned_xgboost_20260404_14")
 
 
 def test_smart_alerts_error_response_hides_internal_paths(monkeypatch):

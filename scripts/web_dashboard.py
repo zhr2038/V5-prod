@@ -1127,10 +1127,7 @@ def _load_shadow_ml_overlay_summary(shadow_workspace: Path) -> Dict[str, Any]:
     if ts is None and isinstance(audit, dict):
         ts = audit.get('timestamp') or audit.get('now_ts')
     if ts is None and run_dir is not None:
-        try:
-            ts = (run_dir / 'decision_audit.json').stat().st_mtime
-        except OSError:
-            ts = run_dir.stat().st_mtime
+        ts = _decision_audit_sort_epoch(run_dir, audit if isinstance(audit, dict) else {})
     run_id = str(audit.get('run_id') or (run_dir.name if run_dir is not None else '')) if isinstance(audit, dict) else ''
     if run_id and _coerce_timestamp_epoch(ts) is None:
         run_ts = _run_id_epoch(run_id)
