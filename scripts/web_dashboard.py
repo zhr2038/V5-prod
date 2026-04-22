@@ -4531,7 +4531,14 @@ def api_cost_calibration():
         
         # 优先从cost_stats_real读取已汇总的数据
         if cost_dir.exists():
-            stats_files = sorted(cost_dir.glob('daily_cost_stats_*.json'))
+            stats_files = sorted(
+                (
+                    path
+                    for path in cost_dir.glob('daily_cost_stats_*.json')
+                    if re.fullmatch(r'daily_cost_stats_\d{8}\.json', path.name)
+                ),
+                key=lambda path: path.name,
+            )
             
             for stats_file in stats_files[-30:]:  # 最近30天
                 try:
