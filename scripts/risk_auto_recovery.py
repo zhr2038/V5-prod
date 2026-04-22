@@ -150,12 +150,32 @@ class RiskAutoRecovery:
             points = []
             cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
+            def _candidate_sort_epoch(run_dir: Path) -> float:
+                try:
+                    # Use end-of-hour as a lightweight upper bound for cutoff filtering.
+                    return datetime.strptime(run_dir.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc).timestamp() + 3600.0
+                except Exception:
+                    equity_file = run_dir / 'equity.jsonl'
+                    try:
+                        return equity_file.stat().st_mtime
+                    except OSError:
+                        return run_dir.stat().st_mtime
+
             equity_files = []
             legacy_equity_file = self.reports_dir / 'equity_history.jsonl'
             if legacy_equity_file.exists():
                 equity_files.append(legacy_equity_file)
             if self.runs_dir.exists():
-                equity_files.extend(sorted(run_dir / 'equity.jsonl' for run_dir in self.runs_dir.iterdir() if run_dir.is_dir()))
+                run_dirs = sorted(self.runs_dir.iterdir(), key=_candidate_sort_epoch, reverse=True)
+                for run_dir in run_dirs:
+                    if not run_dir.is_dir():
+                        continue
+                    equity_file = run_dir / 'equity.jsonl'
+                    if not equity_file.exists():
+                        continue
+                    if datetime.fromtimestamp(_candidate_sort_epoch(run_dir), tz=timezone.utc) <= cutoff:
+                        continue
+                    equity_files.append(equity_file)
 
             if not equity_files:
                 return []

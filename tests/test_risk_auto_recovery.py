@@ -52,7 +52,9 @@ def test_execute_recovery_writes_guard_schema_compatible_state(monkeypatch, tmp_
 
 def test_get_drawdown_history_reads_runtime_runs_equity_jsonl(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path
-    runtime_runs_dir = workspace / "reports" / "shadow_runtime" / "runs" / "20260419_1300"
+    now = datetime.now(timezone.utc)
+    run_name = (now - risk_auto_recovery.timedelta(hours=1)).strftime("%Y%m%d_%H")
+    runtime_runs_dir = workspace / "reports" / "shadow_runtime" / "runs" / run_name
     runtime_runs_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
@@ -65,8 +67,8 @@ def test_get_drawdown_history_reads_runtime_runs_equity_jsonl(monkeypatch, tmp_p
     (runtime_runs_dir / "equity.jsonl").write_text(
         "\n".join(
             [
-                json.dumps({"ts": "2026-04-19T13:00:00Z", "equity": 100.0, "drawdown": 0.22}),
-                json.dumps({"ts": "2026-04-19T14:00:00Z", "equity": 105.0, "drawdown": 0.12}),
+                json.dumps({"ts": (now - risk_auto_recovery.timedelta(hours=1)).isoformat().replace("+00:00", "Z"), "equity": 100.0, "drawdown": 0.22}),
+                json.dumps({"ts": (now - risk_auto_recovery.timedelta(minutes=30)).isoformat().replace("+00:00", "Z"), "equity": 105.0, "drawdown": 0.12}),
             ]
         )
         + "\n",
@@ -81,7 +83,9 @@ def test_get_drawdown_history_reads_runtime_runs_equity_jsonl(monkeypatch, tmp_p
 
 def test_get_drawdown_history_accepts_current_dd_field_from_runtime_equity(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path
-    runtime_runs_dir = workspace / "reports" / "shadow_runtime" / "runs" / "20260419_1300"
+    now = datetime.now(timezone.utc)
+    run_name = (now - risk_auto_recovery.timedelta(hours=1)).strftime("%Y%m%d_%H")
+    runtime_runs_dir = workspace / "reports" / "shadow_runtime" / "runs" / run_name
     runtime_runs_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
@@ -92,7 +96,7 @@ def test_get_drawdown_history_accepts_current_dd_field_from_runtime_equity(monke
 
     manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
     (runtime_runs_dir / "equity.jsonl").write_text(
-        json.dumps({"ts": "2026-04-19T13:00:00Z", "equity": 100.0, "dd": 0.31}) + "\n",
+        json.dumps({"ts": (now - risk_auto_recovery.timedelta(hours=1)).isoformat().replace("+00:00", "Z"), "equity": 100.0, "dd": 0.31}) + "\n",
         encoding="utf-8",
     )
 
@@ -100,6 +104,55 @@ def test_get_drawdown_history_accepts_current_dd_field_from_runtime_equity(monke
 
     assert len(points) == 1
     assert points[0]["drawdown"] == 0.31
+
+
+def test_get_drawdown_history_limits_recent_equity_file_reads_before_parsing(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path
+    runtime_runs_dir = workspace / "reports" / "shadow_runtime" / "runs"
+    runtime_runs_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    now = datetime.now(timezone.utc)
+    recent_hours = {19, 18, 17, 16}
+    for hour in range(20):
+        day_offset = 0 if hour in recent_hours else 10
+        run_dt = now - risk_auto_recovery.timedelta(days=day_offset, hours=19 - hour)
+        run_name = run_dt.strftime("%Y%m%d_%H")
+        run_dir = runtime_runs_dir / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "equity.jsonl").write_text(
+            json.dumps(
+                {
+                    "ts": (run_dt + risk_auto_recovery.timedelta(minutes=30)).isoformat().replace("+00:00", "Z"),
+                    "equity": 100.0 + hour,
+                    "drawdown": 0.1,
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    original_open = Path.open
+    reads = {"equity": 0}
+
+    def counting_open(self: Path, *args, **kwargs):
+        if self.name == "equity.jsonl":
+            reads["equity"] += 1
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counting_open)
+
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
+    points = manager.get_drawdown_history(hours=24)
+
+    assert len(points) == 4
+    assert reads["equity"] <= 4
 
 
 def test_time_in_current_level_accepts_zulu_timestamp(monkeypatch, tmp_path: Path) -> None:
