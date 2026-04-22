@@ -6366,6 +6366,48 @@ def test_api_cost_calibration_uses_suffixed_runtime_cost_events_dir(monkeypatch,
     assert payload["daily_stats"][0]["date"] == "20260408"
 
 
+def test_api_cost_calibration_ignores_non_dated_event_files(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    events_dir = reports_dir / "cost_events"
+    events_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}},
+    )
+
+    (events_dir / "20260408.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"slippage_bps": 1.1, "fee_bps": 0.4}, ensure_ascii=False),
+                json.dumps({"slippage_bps": 0.9, "fee_bps": 0.6}, ensure_ascii=False),
+            ]
+        ) + "\n",
+        encoding="utf-8",
+    )
+    (events_dir / "latest.jsonl").write_text(
+        json.dumps({"slippage_bps": 99.0, "fee_bps": 99.0}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/cost_calibration")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["data_source"] == "events"
+    assert payload["total_days"] == 1
+    assert payload["avg_slippage_bps"] == 1.0
+    assert payload["avg_fee_bps"] == 0.5
+    assert payload["avg_total_cost_bps"] == 1.5
+    assert payload["daily_stats"][0]["date"] == "20260408"
+
+
 def test_market_state_snapshot_falls_back_to_regime_json_after_failed_run(tmp_path):
     module = load_web_dashboard_module()
 

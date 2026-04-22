@@ -4600,7 +4600,13 @@ def api_cost_calibration():
         
         # 如果没有stats数据，从cost_events原始数据计算
         if total_days == 0 and events_dir.exists():
-            event_files = sorted(events_dir.glob('*.jsonl'))
+            event_files = sorted(
+                (
+                    path
+                    for path in events_dir.glob('*.jsonl')
+                    if re.fullmatch(r'\d{8}\.jsonl', path.name)
+                )
+            )
             
             # 按日期分组统计
             daily_stats = {}
