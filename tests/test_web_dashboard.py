@@ -4924,6 +4924,7 @@ def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
         """.strip(),
         encoding="utf-8",
     )
+    os.utime(reconcile_path, (1_710_100_000, 1_710_100_000))
 
     db_path = tmp_path / "positions.sqlite"
     con = sqlite3.connect(str(db_path))
@@ -4952,6 +4953,7 @@ def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
     assert payload["total_equity_usdt"] == 127.1486
     assert payload["peak_equity_usdt"] == 127.15
     assert payload["drawdown_pct"] == 0.0
+    assert payload["last_update"] == "2024-03-11 03:46:40"
 
 
 def test_account_api_error_response_does_not_expose_traceback(monkeypatch):
@@ -5099,6 +5101,7 @@ def test_account_api_uses_active_runtime_paths(monkeypatch, tmp_path):
         json.dumps({"exchange_snapshot": {"ccy_cashBal": {"USDT": 50.0}}}),
         encoding="utf-8",
     )
+    os.utime(runtime_dir / "reconcile_status.json", (1_710_200_000, 1_710_200_000))
 
     root_positions_db = reports_dir / "positions.sqlite"
     con = sqlite3.connect(str(root_positions_db))
@@ -5154,6 +5157,7 @@ def test_account_api_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["total_equity_usdt"] == 150.0
     assert payload["total_trades"] == 2
     assert payload["peak_equity_usdt"] == 170.0
+    assert payload["last_update"] == "2024-03-12 07:33:20"
 
 
 def test_account_api_degrades_when_positions_endpoint_returns_error_tuple(monkeypatch, tmp_path):

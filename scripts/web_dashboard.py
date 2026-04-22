@@ -2637,6 +2637,14 @@ def api_account():
     try:
         config = load_config()
         runtime_paths = _resolve_dashboard_runtime_paths(config)
+        latest_update_epoch: Optional[float] = None
+        reconcile_path = runtime_paths.reconcile_status_path
+        reconcile_mtime = None
+        if reconcile_path.exists():
+            try:
+                reconcile_mtime = reconcile_path.stat().st_mtime
+            except OSError:
+                reconcile_mtime = None
         try:
             has_reconcile_cash, cash = _load_reconcile_cash_balance(runtime_paths=runtime_paths)
         except TypeError:
@@ -2667,6 +2675,7 @@ def api_account():
                         authoritative_equity = float(account_equity['total_equity_usdt'] or 0.0)
                         authoritative_positions_value = float(account_equity.get('positions_value_usdt') or 0.0)
                         equity_source = str(account_equity.get('source') or 'okx_live')
+                        latest_update_epoch = time.time()
         except Exception:
             pass
 
@@ -2679,9 +2688,13 @@ def api_account():
                 authoritative_equity = float(account_equity['total_equity_usdt'] or 0.0)
                 authoritative_positions_value = float(account_equity.get('positions_value_usdt') or 0.0)
                 equity_source = str(account_equity.get('source') or 'reconcile')
+                if reconcile_mtime is not None:
+                    latest_update_epoch = reconcile_mtime
 
         if (not has_reconcile_cash) and cash <= 0:
             cash = float(local_account_state.get('cash_usdt') or 0.0)
+        elif latest_update_epoch is None and has_reconcile_cash and reconcile_mtime is not None:
+            latest_update_epoch = reconcile_mtime
 
         conn = None
         if runtime_paths.orders_db.exists():
@@ -2762,6 +2775,11 @@ def api_account():
             drawdown_pct = (peak_equity - total_equity) / peak_equity if peak_equity > 0 else 0
 
         drawdown_pct = max(0.0, min(1.0, drawdown_pct))
+        if latest_update_epoch is None and runtime_paths.positions_db.exists():
+            try:
+                latest_update_epoch = runtime_paths.positions_db.stat().st_mtime
+            except OSError:
+                latest_update_epoch = None
 
         return jsonify({
             'cash_usdt': round(float(cash), 2),
@@ -2780,7 +2798,7 @@ def api_account():
             'total_sell': round(float(total_sell), 2),
             'total_fees': round(float(total_fees), 4),
             'realized_pnl': round(float(realized_pnl), 2),
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': datetime.fromtimestamp(latest_update_epoch).strftime('%Y-%m-%d %H:%M:%S') if latest_update_epoch is not None else ''
         })
     except Exception as e:
         return _json_internal_error_response(
