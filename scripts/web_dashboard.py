@@ -4168,11 +4168,10 @@ def _load_equity_points(limit: int = 800, runtime_paths: Optional[DashboardRunti
     if not runs_dir.exists():
         return points
 
-    run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()])
+    # Read older runs first so duplicate timestamps from newer runs override stale values.
+    run_dirs = list(reversed(_sorted_run_dirs_by_artifact_mtime(runs_dir, 'equity.jsonl')))
     for run_dir in run_dirs:
         eq_file = run_dir / 'equity.jsonl'
-        if not eq_file.exists():
-            continue
         try:
             with open(eq_file, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:

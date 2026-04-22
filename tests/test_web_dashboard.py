@@ -5565,6 +5565,45 @@ def test_api_equity_history_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload == [{"timestamp": "2026-04-08T11:00:00", "value": 123.0}]
 
 
+def test_api_equity_history_prefers_logically_newer_run_for_duplicate_timestamp(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    stale_run = runs_dir / "stale"
+    fresh_run = runs_dir / "fresh"
+    stale_run.mkdir(parents=True, exist_ok=True)
+    fresh_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}},
+    )
+
+    stale_equity = stale_run / "equity.jsonl"
+    fresh_equity = fresh_run / "equity.jsonl"
+    stale_equity.write_text(
+        json.dumps({"ts": "2026-04-08T10:00:00", "equity": 111.0}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    fresh_equity.write_text(
+        json.dumps({"ts": "2026-04-08T10:00:00", "equity": 222.0}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    os.utime(stale_equity, (100, 100))
+    os.utime(fresh_equity, (200, 200))
+
+    response = client.get("/api/equity_history")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload == [{"timestamp": "2026-04-08T10:00:00", "value": 222.0}]
+
+
 def test_equity_history_error_response_preserves_list_shape(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
