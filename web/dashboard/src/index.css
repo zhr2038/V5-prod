@@ -494,24 +494,10 @@ body {
   gap: 8px;
   padding: 7px;
   border-radius: 999px;
-  position: relative;
-  overflow: hidden;
-  border: 1px double rgba(255, 255, 255, 0.07);
   box-shadow:
     inset 2px -2px 1px -1px rgba(255, 255, 255, 0.12),
     inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
     inset 0 0 1px rgba(0, 0, 0, 0.12);
-}
-
-.control-rail::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.16) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.12) 100%);
-  opacity: 0.26;
 }
 
 .control-pill {
@@ -523,24 +509,10 @@ body {
   align-items: center;
   justify-content: center;
   white-space: nowrap;
-  position: relative;
-  overflow: hidden;
-  border: 1px double rgba(255, 255, 255, 0.07);
   box-shadow:
     inset 2px -2px 1px -1px rgba(255, 255, 255, 0.12),
     inset -2px 2px 1px -1px rgba(255, 255, 255, 0.09),
     inset 0 0 1px rgba(0, 0, 0, 0.10);
-}
-
-.control-pill::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.14) 0%, transparent 22%, transparent 78%, rgba(255, 255, 255, 0.11) 100%);
-  opacity: 0.28;
 }
 
 .control-pill[data-emphasis="soft"] {
@@ -554,46 +526,199 @@ body {
 .metric-pill {
   border-radius: 26px;
   min-height: 92px;
-  position: relative;
-  overflow: hidden;
-  border: 1px double rgba(255, 255, 255, 0.06);
   box-shadow:
     inset 2px -2px 1px -1px rgba(255, 255, 255, 0.10),
     inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
     inset 0 0 1px rgba(0, 0, 0, 0.10);
 }
 
-.metric-pill::before {
+.glass-progress-track,
+.ml-progress-track {
+  position: relative;
+  border-radius: 999px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02) 34%, rgba(14, 17, 23, 0.18) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.glass-progress-track::before,
+.ml-progress-track::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
   background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.10) 0%, transparent 24%, transparent 76%, rgba(255, 255, 255, 0.08) 100%);
-  opacity: 0.18;
+    linear-gradient(45deg, rgba(255, 255, 255, 0.14) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.10) 100%),
+    radial-gradient(110px 26px at 14% 18%, rgba(255, 255, 255, 0.08), transparent 60%);
+  opacity: 0.5;
+}
+
+.glass-progress-track--slim {
+  height: 10px;
 }
 
 .ml-progress-track {
-  position: relative;
   height: 10px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.10);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
+.glass-progress-track--center {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018) 34%, rgba(14, 17, 23, 0.16) 100%);
+}
+
+.liquid-progress-fill,
 .ml-progress-fill {
+  position: absolute;
+  left: 1px;
+  right: auto;
   top: 0;
   bottom: 0;
   z-index: 2;
   border-radius: inherit;
-  background: linear-gradient(90deg, #7eeccd 0%, #89f1d5 100%);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, var(--liquid-core, #89f1d5) 0%, var(--liquid-color, #7eeccd) 48%, var(--liquid-edge, #5fd8bb) 100%);
+  background-size: 100% 100%;
   box-shadow:
-    0 0 16px rgba(126, 236, 205, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    0 0 16px var(--liquid-glow, rgba(126, 236, 205, 0.28)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+  filter: saturate(1.08);
+}
+
+.liquid-progress-fill::before,
+.ml-progress-fill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(22px 14px at 12% 48%, rgba(255, 255, 255, 0.30), transparent 66%),
+    radial-gradient(34px 16px at 44% 52%, rgba(255, 255, 255, 0.16), transparent 70%),
+    radial-gradient(28px 14px at 74% 40%, rgba(255, 255, 255, 0.24), transparent 68%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.0) 0%, rgba(255, 255, 255, 0.24) 40%, rgba(255, 255, 255, 0.0) 76%);
+  opacity: 0.72;
+  transform: translateX(0);
+  animation: liquidFlow 3.6s linear infinite;
+}
+
+.liquid-progress-fill::after,
+.ml-progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.06) 18%, transparent 34%),
+    radial-gradient(120px 16px at 50% 6%, rgba(255, 255, 255, 0.18), transparent 62%);
+  mix-blend-mode: screen;
+  opacity: 0.58;
+  animation: liquidPulse 2.8s ease-in-out infinite;
+}
+
+.liquid-progress-fill--mint,
+.ml-progress-fill {
+  --liquid-core: #a7f6df;
+  --liquid-color: #7eeccd;
+  --liquid-edge: #5fd8bb;
+  --liquid-glow: rgba(126, 236, 205, 0.30);
+}
+
+.liquid-progress-fill--blue {
+  --liquid-core: rgba(179, 219, 255, 0.95);
+  --liquid-color: rgba(141, 196, 255, 0.88);
+  --liquid-edge: rgba(111, 145, 255, 0.62);
+  --liquid-glow: rgba(141, 196, 255, 0.28);
+}
+
+.glass-column-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 12px 12px 4px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.014) 30%, rgba(14, 18, 24, 0.14) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.10);
+}
+
+.glass-column-track::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.10) 0%, transparent 20%, transparent 80%, rgba(255, 255, 255, 0.08) 100%);
+  opacity: 0.26;
+}
+
+.glass-column-fill {
+  position: absolute;
+  inset-inline: 1px;
+  bottom: 1px;
+  border-radius: 10px 10px 3px 3px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, var(--liquid-core, rgba(179, 219, 255, 0.95)) 0%, var(--liquid-color, rgba(141, 196, 255, 0.88)) 50%, var(--liquid-edge, rgba(111, 145, 255, 0.62)) 100%);
+  box-shadow:
+    0 0 14px var(--liquid-glow, rgba(141, 196, 255, 0.22)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  filter: saturate(1.08);
+}
+
+.glass-column-fill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24), transparent 30%),
+    radial-gradient(22px 12px at 50% 16%, rgba(255, 255, 255, 0.30), transparent 68%),
+    radial-gradient(18px 10px at 40% 52%, rgba(255, 255, 255, 0.18), transparent 70%);
+  opacity: 0.62;
+  animation: liquidPulse 2.6s ease-in-out infinite;
+}
+
+.glass-column-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(14px 10px at 40% 40%, rgba(255, 255, 255, 0.24), transparent 70%),
+    radial-gradient(12px 8px at 70% 62%, rgba(255, 255, 255, 0.16), transparent 72%);
+  opacity: 0.46;
+  animation: liquidColumnDrift 4.2s linear infinite;
+}
+
+@keyframes liquidFlow {
+  0% { transform: translateX(-8%); }
+  100% { transform: translateX(8%); }
+}
+
+@keyframes liquidPulse {
+  0%, 100% { opacity: 0.48; }
+  50% { opacity: 0.72; }
+}
+
+@keyframes liquidColumnDrift {
+  0% { transform: translateY(6%); }
+  50% { transform: translateY(-4%); }
+  100% { transform: translateY(6%); }
 }
 
 .reading-surface {
@@ -609,23 +734,9 @@ body {
   --highlight-opacity: 0.05;
   --lens-opacity: 0;
   --surface-border: rgba(255, 255, 255, 0.06);
-  position: relative;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.05);
   box-shadow:
     inset 1px -1px 0 rgba(255, 255, 255, 0.08),
     inset -1px 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.list-row::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.08) 0%, transparent 24%, transparent 76%, rgba(255, 255, 255, 0.06) 100%);
-  opacity: 0.16;
 }
 
 .list-row:hover {
@@ -644,24 +755,6 @@ body {
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
-  position: relative;
-  overflow: hidden;
-  border: 1px double rgba(255, 255, 255, 0.06);
-  box-shadow:
-    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.10),
-    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
-    inset 0 0 1px rgba(0, 0, 0, 0.10);
-}
-
-.status-badge::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.12) 0%, transparent 24%, transparent 76%, rgba(255, 255, 255, 0.09) 100%);
-  opacity: 0.24;
 }
 
 .status-badge[data-state="on"] {
@@ -789,7 +882,7 @@ body {
   outline: none;
 }
 
-@media (prefers-color-scheme: light) and (hover: hover) and (pointer: fine) {
+@media (prefers-color-scheme: light) {
   :root {
     --bg-deep: #eef2f7;
     --bg-floor: #e7ebf2;
@@ -799,14 +892,14 @@ body {
     --bg-cloud-warm: rgba(208, 150, 128, 0.16);
     --bg-cloud-sky: rgba(157, 174, 208, 0.14);
     --bg-cloud-sage: rgba(157, 171, 146, 0.12);
-    --text: #17202c;
-    --text-soft: #374052;
-    --text-dim: #667189;
-    --text-faint: #818ca2;
-    --line: rgba(71, 82, 104, 0.12);
-    --line-strong: rgba(71, 82, 104, 0.22);
-    --surface-border: rgba(102, 114, 139, 0.16);
-    --surface-border-strong: rgba(102, 114, 139, 0.24);
+    --text: #101722;
+    --text-soft: #233045;
+    --text-dim: #43506a;
+    --text-faint: #64728b;
+    --line: rgba(48, 58, 78, 0.16);
+    --line-strong: rgba(48, 58, 78, 0.28);
+    --surface-border: rgba(79, 92, 118, 0.20);
+    --surface-border-strong: rgba(79, 92, 118, 0.30);
     --shadow-soft: 0 18px 40px rgba(119, 129, 149, 0.10);
     --shadow-deep: 0 22px 56px rgba(119, 129, 149, 0.14);
     --theme-chrome-light: #f3efed;
@@ -827,6 +920,62 @@ body {
       radial-gradient(940px 860px at 56% 76%, rgba(157, 171, 146, 0.08), transparent 58%),
       linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
     background-color: var(--theme-chrome-light);
+  }
+
+  .text-gradient {
+    background: linear-gradient(135deg, rgba(14, 22, 34, 0.98) 0%, rgba(32, 46, 66, 0.94) 56%, rgba(55, 77, 112, 0.90) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .material-surface,
+  .glass-card,
+  .glass-panel {
+    color: var(--text);
+  }
+
+  .material-surface .text-emerald-300 {
+    color: #0f9f72 !important;
+  }
+
+  .material-surface .text-rose-300 {
+    color: #c94f67 !important;
+  }
+
+  .material-surface .text-amber-300,
+  .material-surface .text-[var(--accent-2)] {
+    color: #996317 !important;
+  }
+
+  .material-surface .text-[var(--accent-3)] {
+    color: #285b94 !important;
+  }
+
+  .material-surface .text-[var(--accent)] {
+    color: #0d9878 !important;
+  }
+
+  .material-surface .text-white,
+  .material-surface .text-emerald-50,
+  .material-surface .text-amber-50,
+  .material-surface .text-rose-50,
+  .material-surface .text-sky-50 {
+    color: var(--text) !important;
+  }
+
+  .material-surface .font-mono {
+    color: inherit;
+  }
+
+  .status-badge[data-state="on"] {
+    color: #0f9f72;
+    border-color: rgba(15, 159, 114, 0.24);
+  }
+
+  .status-badge[data-state="off"] {
+    color: var(--text-dim);
+    border-color: rgba(67, 80, 106, 0.18);
   }
 }
 
