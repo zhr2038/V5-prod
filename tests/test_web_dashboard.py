@@ -1040,6 +1040,42 @@ def test_load_slippage_insights_reads_cost_events_and_calibrated_baseline(tmp_pa
     assert any(bin_item["label"] == "20~40" and bin_item["count"] == 1 for bin_item in summary["bins"])
 
 
+def test_load_slippage_insights_ignores_non_dated_event_files(tmp_path):
+    module = load_web_dashboard_module()
+    reports_dir = tmp_path / "reports"
+    events_dir = reports_dir / "cost_events"
+    orders_db = reports_dir / "orders.sqlite"
+    events_dir.mkdir(parents=True, exist_ok=True)
+
+    (events_dir / "20260410.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"event_type": "fill", "slippage_bps": 1.0, "ts": 1760000000}),
+                json.dumps({"event_type": "fill", "slippage_bps": 3.0, "ts": 1760000100}),
+            ]
+        ) + "\n",
+        encoding="utf-8",
+    )
+    (events_dir / "latest.jsonl").write_text(
+        json.dumps({"event_type": "fill", "slippage_bps": 99.0, "ts": 1760000200}) + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeRuntimePaths:
+        def __init__(self, db_path: Path):
+            self.orders_db = db_path
+
+    summary = module._load_slippage_insights(
+        runtime_paths=FakeRuntimePaths(orders_db),
+        cfg={},
+        lookback_days=1,
+    )
+
+    assert summary["sampleCount"] == 2
+    assert summary["actualAvgBps"] == pytest.approx(2.0)
+    assert summary["actualMaxBps"] == pytest.approx(3.0)
+
+
 def test_dashboard_api_degrades_when_child_endpoint_returns_error_tuple(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

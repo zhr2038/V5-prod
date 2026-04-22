@@ -2282,7 +2282,13 @@ def _load_slippage_insights(
 
     values: List[float] = []
     last_fill_ts = 0
-    event_files = sorted(events_dir.glob('*.jsonl'))[-max(1, int(lookback_days)):]
+    event_files = sorted(
+        (
+            path
+            for path in events_dir.glob('*.jsonl')
+            if re.fullmatch(r'\d{8}\.jsonl', path.name)
+        )
+    )[-max(1, int(lookback_days)):]
     for event_file in event_files:
         try:
             lines = event_file.read_text(encoding='utf-8').splitlines()
