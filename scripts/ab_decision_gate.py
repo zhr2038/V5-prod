@@ -102,6 +102,16 @@ def _resolve_ab_gate_output_path(reports_dir: Path) -> Path:
 def load_runs(runs_dir: Path, limit: int = 120):
     if not runs_dir.exists():
         return []
+    def _candidate_sort_epoch(run_dir: Path) -> float:
+        try:
+            return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+        except Exception:
+            audit_path = run_dir / "decision_audit.json"
+            try:
+                return audit_path.stat().st_mtime
+            except OSError:
+                return run_dir.stat().st_mtime
+
     def _sort_epoch(run_dir: Path) -> float:
         audit_path = run_dir / "decision_audit.json"
         try:
@@ -128,6 +138,8 @@ def load_runs(runs_dir: Path, limit: int = 120):
                 return run_dir.stat().st_mtime
 
     ds = [d for d in runs_dir.iterdir() if d.is_dir() and (d / "decision_audit.json").exists()]
+    ds.sort(key=_candidate_sort_epoch, reverse=True)
+    ds = ds[:limit]
     ds.sort(key=_sort_epoch, reverse=True)
     return ds[:limit]
 

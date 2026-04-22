@@ -108,3 +108,28 @@ def test_load_runs_prefers_run_id_epoch_when_file_mtime_is_misleading(tmp_path: 
     runs = ab_decision_gate.load_runs(runs_dir, limit=2)
 
     assert [run.name for run in runs] == ["20260408_02", "20260408_01"]
+
+
+def test_load_runs_limits_audit_file_reads_before_parsing(tmp_path: Path, monkeypatch) -> None:
+    runs_dir = tmp_path / "runs"
+    for hour in range(20):
+        run_dir = runs_dir / f"20260408_{hour:02d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps({"run_id": f"20260408_{hour:02d}"}),
+            encoding="utf-8",
+        )
+
+    original_loads = ab_decision_gate.json.loads
+    reads = {"decision_audit": 0}
+
+    def counting_loads(text: str, *args, **kwargs):
+        reads["decision_audit"] += 1
+        return original_loads(text, *args, **kwargs)
+
+    monkeypatch.setattr(ab_decision_gate.json, "loads", counting_loads)
+
+    runs = ab_decision_gate.load_runs(runs_dir, limit=4)
+
+    assert [run.name for run in runs] == ["20260408_19", "20260408_18", "20260408_17", "20260408_16"]
+    assert reads["decision_audit"] <= 4
