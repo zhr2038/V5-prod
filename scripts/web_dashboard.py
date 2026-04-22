@@ -562,8 +562,19 @@ def _iter_decision_audits(reports_dir: Path, scan_limit: Optional[int] = None) -
     if not runs_dir.exists():
         return []
 
+    def _candidate_sort_epoch(run_dir: Path) -> float:
+        epoch = _run_id_epoch(run_dir.name)
+        if epoch is not None:
+            return epoch
+        try:
+            return (run_dir / 'decision_audit.json').stat().st_mtime
+        except OSError:
+            return run_dir.stat().st_mtime
+
     run_dirs = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-    run_dirs.sort(key=lambda d: (d / 'decision_audit.json').stat().st_mtime, reverse=True)
+    run_dirs.sort(key=_candidate_sort_epoch, reverse=True)
+    if scan_limit is not None:
+        run_dirs = run_dirs[:scan_limit]
 
     audits: List[Dict[str, Any]] = []
     for run_dir in run_dirs:
