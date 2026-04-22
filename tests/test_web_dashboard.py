@@ -6396,6 +6396,7 @@ def test_api_cost_calibration_uses_suffixed_runtime_cost_events_dir(monkeypatch,
     payload = response.get_json()
     assert payload["data_source"] == "events"
     assert payload["total_days"] == 1
+    assert payload["event_files"] == 1
     assert payload["avg_slippage_bps"] == 1.0
     assert payload["avg_fee_bps"] == 0.5
     assert payload["avg_total_cost_bps"] == 1.5

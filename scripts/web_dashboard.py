@@ -4601,20 +4601,23 @@ def api_cost_calibration():
                     print(f"处理 {stats_file} 失败: {e}")
                     continue
         
-        # 如果没有stats数据，从cost_events原始数据计算
-        if total_days == 0 and events_dir.exists():
-            event_files = sorted(
+        dated_event_files = []
+        if events_dir.exists():
+            dated_event_files = sorted(
                 (
                     path
                     for path in events_dir.glob('*.jsonl')
                     if re.fullmatch(r'\d{8}\.jsonl', path.name)
                 )
             )
+
+        # 如果没有stats数据，从cost_events原始数据计算
+        if total_days == 0 and dated_event_files:
             
             # 按日期分组统计
             daily_stats = {}
             
-            for event_file in event_files[-30:]:  # 最近30天
+            for event_file in dated_event_files[-30:]:  # 最近30天
                 try:
                     # 从文件名提取日期 (YYYYMMDD.jsonl)
                     day = event_file.stem
@@ -4691,9 +4694,7 @@ def api_cost_calibration():
             avg_fee_bps /= total_days
         
         # 获取事件文件数
-        event_count = 0
-        if events_dir.exists():
-            event_count = len(list(events_dir.glob('*.jsonl')))
+        event_count = len(dated_event_files)
         
         return jsonify({
             'status': 'calibrated' if total_days >= 7 else 'calibrating',
