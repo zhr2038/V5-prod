@@ -6973,6 +6973,7 @@ def test_api_shadow_test_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert payload["proposed_params"]["deadband_sideways"] == 0.06
     assert payload["matrix"][0]["name"] == "A(当前)"
     assert payload["matrix"][0]["params"]["deadband_sideways"] == payload["current_params"]["deadband_sideways"]
+    assert payload["last_update"] == datetime.fromtimestamp(module._run_id_epoch("20260408_01")).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def test_api_shadow_test_prefers_sorted_epoch_over_file_mtime_when_limited_to_50_runs(monkeypatch, tmp_path):
@@ -7034,6 +7035,7 @@ def test_api_shadow_test_prefers_sorted_epoch_over_file_mtime_when_limited_to_50
     payload = response.get_json()
     assert payload["window_rounds"] == 50
     assert payload["comparison"]["current"]["avg_selected_per_round"] > 20
+    assert payload["last_update"] == datetime.fromtimestamp(module._run_id_epoch("20260409_00")).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def test_api_shadow_test_does_not_refresh_stale_ab_gate_in_request(monkeypatch, tmp_path):

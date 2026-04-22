@@ -5399,6 +5399,7 @@ def api_shadow_test():
 
         audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=50)
         recent_runs = [entry['run_dir'] for entry in audit_entries]
+        latest_update_epoch = float(audit_entries[0].get('sort_epoch', 0.0) or 0.0) if audit_entries else 0.0
         
         current_stats = {
             'rounds': 0,
@@ -5552,7 +5553,7 @@ def api_shadow_test():
             'ab_gate': ab_gate,
             'ab_gate_status': ab_gate_status,
             'ab_gate_age_sec': ab_gate_age_sec,
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': datetime.fromtimestamp(latest_update_epoch).strftime('%Y-%m-%d %H:%M:%S') if latest_update_epoch > 0 else ''
         }
         
         return jsonify(ab_report)
