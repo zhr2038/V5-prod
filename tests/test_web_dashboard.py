@@ -6314,6 +6314,7 @@ def test_api_cost_calibration_uses_prefixed_runtime_cost_stats_dir(monkeypatch, 
     assert payload["avg_fee_bps"] == 0.3
     assert payload["avg_total_cost_bps"] == 1.5
     assert payload["daily_stats"][0]["date"] == "20260408"
+    assert payload["last_update"] == "2026-04-08 00:00:00"
 
 
 def test_api_cost_calibration_ignores_non_dated_stats_files(monkeypatch, tmp_path):
@@ -6401,6 +6402,7 @@ def test_api_cost_calibration_uses_suffixed_runtime_cost_events_dir(monkeypatch,
     assert payload["avg_fee_bps"] == 0.5
     assert payload["avg_total_cost_bps"] == 1.5
     assert payload["daily_stats"][0]["date"] == "20260408"
+    assert payload["last_update"] == "2026-04-08 00:00:00"
 
 
 def test_api_cost_calibration_ignores_non_dated_event_files(monkeypatch, tmp_path):

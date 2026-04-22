@@ -4692,6 +4692,12 @@ def api_cost_calibration():
         if total_days > 0:
             avg_slippage_bps /= total_days
             avg_fee_bps /= total_days
+
+        latest_update = ''
+        if calibration_data:
+            latest_day = calibration_data[-1].get('date')
+            if isinstance(latest_day, str) and re.fullmatch(r'\d{8}', latest_day):
+                latest_update = datetime.strptime(latest_day, '%Y%m%d').strftime('%Y-%m-%d 00:00:00')
         
         # 获取事件文件数
         event_count = len(dated_event_files)
@@ -4707,7 +4713,7 @@ def api_cost_calibration():
             'daily_stats': calibration_data[-7:],  # 最近7天
             'progress_percent': min(100, int(total_days / 7 * 100)),
             'data_source': data_source,
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': latest_update,
         })
     except Exception as exc:
         return _json_internal_error_response(
