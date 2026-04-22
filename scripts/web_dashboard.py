@@ -5235,25 +5235,10 @@ def api_decision_chain():
                 # 提取决策链信息
                 run_id = run_dir.name
                 ts = data.get('now_ts') or data.get('window_start_ts')
-                if ts:
-                    # 判断是旧数据(UTC)还是新数据(CST)
-                    # 通过比较 run_id 小时和文件修改时间来判断
-                    import os
-                    mtime = os.path.getmtime(run_dir / 'decision_audit.json')
-                    mtime_dt = datetime.fromtimestamp(mtime)
-                    
-                    # 如果 run_id 小时与本地修改时间相差很大，说明是旧UTC数据
-                    run_hour = int(run_id.split('_')[-1]) if '_' in run_id else 0
-                    local_hour = mtime_dt.hour
-                    
-                    # UTC数据的特征：run_id小时 = 本地小时 - 8 (或 +16)
-                    hour_diff = (run_hour - local_hour) % 24
-                    if hour_diff >= 16:  # 相差16小时以上，说明是UTC命名的旧数据
-                        # 旧数据：时间戳是UTC，显式转为CST，避免在UTC+8主机上重复偏移。
-                        run_time = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
-                    else:
-                        # 新数据：时间戳已经是CST
-                        run_time = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+                epoch = _coerce_timestamp_epoch(ts)
+                if epoch is not None:
+                    # 决策时间展示统一按逻辑时间戳转成 CST，避免文件 mtime 被补写后误导旧/新数据判断。
+                    run_time = datetime.fromtimestamp(epoch, tz=timezone.utc).astimezone(CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
                 else:
                     run_time = run_id
 

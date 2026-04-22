@@ -6555,8 +6555,18 @@ def test_decision_chain_legacy_utc_run_time_is_not_double_shifted(monkeypatch, t
         ),
         encoding="utf-8",
     )
+    os.utime(legacy_run / "decision_audit.json", (0, 0))
     os.utime(legacy_run, (0, 0))
     monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+
+    class _UtcNaiveDateTime(datetime):
+        @classmethod
+        def fromtimestamp(cls, ts, tz=None):
+            if tz is None:
+                return cls.utcfromtimestamp(ts)
+            return super().fromtimestamp(ts, tz=tz)
+
+    monkeypatch.setattr(module, "datetime", _UtcNaiveDateTime)
 
     response = client.get("/api/decision_chain")
 
