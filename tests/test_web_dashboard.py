@@ -7425,6 +7425,7 @@ def test_api_positions_prefers_fresh_local_price_cache_before_public_ticker(monk
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
     monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.time, "time", lambda: datetime(2026, 4, 10, 0, 5).timestamp())
 
     db_path = tmp_path / "positions.sqlite"
     con = sqlite3.connect(str(db_path))
@@ -7457,6 +7458,7 @@ def test_api_positions_prefers_latest_cache_file_by_logical_suffix_timestamp(mon
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
     monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.time, "time", lambda: datetime(2026, 4, 12, 0, 5).timestamp())
 
     db_path = tmp_path / "positions.sqlite"
     con = sqlite3.connect(str(db_path))
@@ -7484,6 +7486,40 @@ def test_api_positions_prefers_latest_cache_file_by_logical_suffix_timestamp(mon
     assert payload["positions"][0]["symbol"] == "ETH"
     assert payload["positions"][0]["last_price"] == 222.22
     assert payload["positions"][0]["value_usdt"] == 444.44
+
+
+def test_api_positions_ignores_stale_cache_even_when_file_mtime_is_recent(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.time, "time", lambda: datetime(2026, 4, 22, 0, 5).timestamp())
+
+    db_path = tmp_path / "positions.sqlite"
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('ETH/USDT', 2.0, 100.0, 0.0)")
+    con.commit()
+    con.close()
+
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    stale_cache = cache_dir / "ETH_USDT_1H_20260410.csv"
+    stale_cache.write_text("ts,open,high,low,close,volume\n1,100,101,99,111.11,10\n", encoding="utf-8")
+    os.utime(stale_cache, (2_000_000_000, 2_000_000_000))
+
+    class _Response:
+        def json(self):
+            return {"code": "0", "data": [{"last": "234.56"}]}
+
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: _Response())
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    assert payload["positions"][0]["symbol"] == "ETH"
+    assert payload["positions"][0]["last_price"] == 234.56
 
 
 def test_api_positions_reuses_recent_public_ticker_cache(monkeypatch, tmp_path):

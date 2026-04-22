@@ -2976,8 +2976,8 @@ def api_positions():
                 files = list(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
                 if files:
                     latest_file = max(files, key=_ohlcv_cache_file_epoch)
-                    file_mtime = latest_file.stat().st_mtime
-                    if time.time() - file_mtime < 900:  # 15分钟内
+                    file_epoch = _ohlcv_cache_file_epoch(latest_file)
+                    if time.time() - file_epoch < 900:  # 15分钟内
                         df = pd.read_csv(latest_file)
                         if len(df) > 0 and 'close' in df.columns:
                             price = float(df.iloc[-1]['close'])
