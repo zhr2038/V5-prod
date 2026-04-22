@@ -5070,6 +5070,44 @@ def _api_ml_training_v2():
     latest_model_mtime = _latest_model_file_mtime(model_base_path)
     model_time = datetime.fromtimestamp(latest_model_mtime) if latest_model_mtime is not None else None
 
+    def _display_update_value(value: Any) -> Optional[str]:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(float(value)).strftime('%Y-%m-%d %H:%M:%S')
+        text = str(value or '').strip()
+        if not text:
+            return None
+        if text.endswith('Z'):
+            text = text[:-1]
+        if '+' in text:
+            text = text.split('+', 1)[0]
+        return text.replace('T', ' ')[:19]
+
+    structured_update_candidates = [
+        (
+            _coerce_timestamp_epoch(latest_history.get('timestamp')) if isinstance(latest_history, dict) else None,
+            _display_update_value(latest_history.get('timestamp')) if isinstance(latest_history, dict) else None,
+        ),
+        (
+            _coerce_timestamp_epoch(decision.get('ts')) if isinstance(decision, dict) else None,
+            _display_update_value(decision.get('ts')) if isinstance(decision, dict) else None,
+        ),
+        (
+            _coerce_timestamp_epoch(runtime.get('ts')) if isinstance(runtime, dict) else None,
+            _display_update_value(runtime.get('ts')) if isinstance(runtime, dict) else None,
+        ),
+    ]
+    valid_structured_updates = [(ts, display) for ts, display in structured_update_candidates if ts is not None and display]
+    latest_update_epoch = max((ts for ts, _ in valid_structured_updates), default=None)
+    latest_update_display = ''
+    if valid_structured_updates and latest_update_epoch is not None:
+        for ts, display in valid_structured_updates:
+            if ts == latest_update_epoch:
+                latest_update_display = display
+                break
+    elif latest_model_mtime is not None:
+        latest_update_epoch = float(latest_model_mtime)
+        latest_update_display = _display_update_value(latest_model_mtime) or ''
+
     active_model_base = model_base_path
     if pointer_path.exists():
         try:
@@ -5127,7 +5165,7 @@ def _api_ml_training_v2():
         'runtime_prediction_count': int(runtime.get('prediction_count') or 0),
         'model_path': str(model_base_path),
         'active_model_path': str(active_model_base) if pointer_path.exists() else None,
-        'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        'last_update': latest_update_display
     })
 
 

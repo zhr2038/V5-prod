@@ -3765,6 +3765,7 @@ def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
     }
     assert payload["latest_model"] in {"ml_factor_model.pkl", "ml_factor_model_config.json"}
     assert payload["runtime_prediction_count"] == 3
+    assert payload["last_update"] == "2026-03-10 01:00:00"
 
 
 def test_ml_training_api_prefers_model_artifact_over_newer_config_file(monkeypatch, tmp_path):
@@ -4026,6 +4027,7 @@ def test_ml_training_api_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
     assert payload["last_promotion_ts"] == "2026-03-10T12:45:00Z"
     assert payload["runtime_reason"] == "runtime-ok"
     assert payload["runtime_prediction_count"] == 7
+    assert payload["last_update"] == "2026-03-10 13:00:00"
 
 
 def test_ml_training_api_treats_legacy_default_ml_paths_as_runtime_paths(monkeypatch, tmp_path):
@@ -4332,6 +4334,7 @@ def test_ml_training_api_uses_suffixed_runtime_artifacts(monkeypatch, tmp_path):
     assert payload["last_promotion_ts"] == "2026-03-12T10:20:00Z"
     assert payload["runtime_reason"] == "accelerated-runtime"
     assert payload["runtime_prediction_count"] == 13
+    assert payload["last_update"] == "2026-03-12 10:40:00"
 
 
 def test_ml_training_api_prefers_latest_history_entry_by_timestamp_when_history_is_unsorted(monkeypatch, tmp_path):
