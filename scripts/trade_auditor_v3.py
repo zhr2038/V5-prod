@@ -151,6 +151,15 @@ class TradeAuditorV3:
                     for d in runs_dir.iterdir()
                     if d.is_dir() and (d / "decision_audit.json").exists()
                 ]
+                def _candidate_sort_epoch(run_dir: Path) -> float:
+                    try:
+                        return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
+                    except Exception:
+                        audit_path = run_dir / "decision_audit.json"
+                        try:
+                            return audit_path.stat().st_mtime
+                        except OSError:
+                            return run_dir.stat().st_mtime
                 def _sort_epoch(run_dir: Path) -> float:
                     audit_path = run_dir / "decision_audit.json"
                     try:
@@ -176,6 +185,8 @@ class TradeAuditorV3:
                         except OSError:
                             return run_dir.stat().st_mtime
 
+                run_dirs.sort(key=_candidate_sort_epoch, reverse=True)
+                run_dirs = run_dirs[:1]
                 run_dirs.sort(key=_sort_epoch, reverse=True)
                 if run_dirs:
                     return json.loads((run_dirs[0] / "decision_audit.json").read_text(encoding="utf-8"))

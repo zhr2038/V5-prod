@@ -157,3 +157,32 @@ def test_load_latest_decision_audit_prefers_run_id_epoch_when_file_mtime_is_misl
     auditor = trade_auditor_v2.SmartTradeAuditor(workspace=tmp_path)
 
     assert auditor._load_latest_decision_audit()["run_id"] == "20260408_02"
+
+
+def test_load_latest_decision_audit_limits_audit_file_reads_before_parsing(tmp_path: Path, monkeypatch) -> None:
+    runs_dir = tmp_path / "reports" / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    for hour in range(20):
+        run_dir = runs_dir / f"20260408_{hour:02d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps({"run_id": f"20260408_{hour:02d}"}),
+            encoding="utf-8",
+        )
+
+    original_loads = trade_auditor_v2.json.loads
+    reads = {"decision_audit": 0}
+
+    def counting_loads(text: str, *args, **kwargs):
+        reads["decision_audit"] += 1
+        return original_loads(text, *args, **kwargs)
+
+    monkeypatch.setattr(trade_auditor_v2.json, "loads", counting_loads)
+
+    auditor = trade_auditor_v2.SmartTradeAuditor(workspace=tmp_path)
+
+    data = auditor._load_latest_decision_audit()
+
+    assert data["run_id"] == "20260408_19"
+    assert reads["decision_audit"] <= 2
