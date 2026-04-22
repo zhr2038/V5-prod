@@ -2955,11 +2955,12 @@ def api_positions():
                 return price_cache[symbol]
             try:
                 cache_dir = WORKSPACE / 'data' / 'cache'
-                files = sorted(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
+                files = list(cache_dir.glob(f'{symbol}_USDT_1H_*.csv'))
                 if files:
-                    file_mtime = files[-1].stat().st_mtime
+                    latest_file = max(files, key=_ohlcv_cache_file_epoch)
+                    file_mtime = latest_file.stat().st_mtime
                     if time.time() - file_mtime < 900:  # 15分钟内
-                        df = pd.read_csv(files[-1])
+                        df = pd.read_csv(latest_file)
                         if len(df) > 0 and 'close' in df.columns:
                             price = float(df.iloc[-1]['close'])
                             price_cache[symbol] = price
@@ -3626,6 +3627,29 @@ def _load_market_vote_history(reports_dir: Path, hours: int = 24, max_points: in
         })
 
     return _downsample_history(points, max_points=max_points)
+
+
+def _ohlcv_cache_file_epoch(path: Path) -> float:
+    stem = path.stem
+    suffix = stem.split("_1H_", 1)[1] if "_1H_" in stem else stem
+
+    hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
+    if hourly_match:
+        try:
+            return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+        except Exception:
+            pass
+
+    date_tokens = re.findall(r"(20\d{2}-\d{2}-\d{2}|20\d{6})", suffix)
+    if date_tokens:
+        token = date_tokens[-1]
+        try:
+            fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
+            return datetime.strptime(token, fmt).timestamp()
+        except Exception:
+            pass
+
+    return path.stat().st_mtime
 
 
 def _signal_file_epoch(path: Path) -> float:
