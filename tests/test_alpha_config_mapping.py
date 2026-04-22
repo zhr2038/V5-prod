@@ -185,3 +185,18 @@ def test_alpha6_sentiment_factor_prefers_filename_timestamp_over_mtime(tmp_path)
     os.utime(newer, (1_000_000_000, 1_000_000_000))
 
     assert strategy._load_sentiment_factor("BTC/USDT") == pytest.approx(0.35)
+
+
+def test_alpha_engine_latest_model_artifact_mtime_ignores_newer_config_file(tmp_path):
+    base_path = tmp_path / "models" / "ml_factor_model"
+    base_path.parent.mkdir(parents=True, exist_ok=True)
+    model_file = Path(f"{base_path}.pkl")
+    config_file = Path(f"{base_path}_config.json")
+    model_file.write_bytes(b"model")
+    config_file.write_text("{}", encoding="utf-8")
+    os.utime(model_file, (1_000_000_000, 1_000_000_000))
+    os.utime(config_file, (2_000_000_000, 2_000_000_000))
+
+    latest_mtime_ns = AlphaEngine._latest_model_artifact_mtime_ns(base_path)
+
+    assert latest_mtime_ns == model_file.stat().st_mtime_ns

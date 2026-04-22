@@ -576,6 +576,15 @@ class AlphaEngine:
         return any(p.exists() for p in cls._ml_artifact_candidates(base_path))
 
     @classmethod
+    def _latest_model_artifact_mtime_ns(cls, base_path: Path) -> Optional[int]:
+        existing = [p for p in cls._ml_artifact_candidates(base_path) if p.exists()]
+        if not existing:
+            return None
+        model_files = [p for p in existing if not p.name.endswith("_config.json")]
+        preferred = model_files or existing
+        return max(p.stat().st_mtime_ns for p in preferred)
+
+    @classmethod
     def _ml_artifact_signature(cls, base_path: Path) -> Optional[str]:
         existing = [p for p in cls._ml_artifact_candidates(base_path) if p.exists()]
         if not existing:
@@ -907,9 +916,11 @@ class AlphaEngine:
             status["promotion_passed"] = True
             status["promotion_source"] = "latest_decision"
 
-        latest_mtime_ns = max(
-            p.stat().st_mtime_ns for p in self._ml_artifact_candidates(model_base_path) if p.exists()
-        )
+        latest_mtime_ns = self._latest_model_artifact_mtime_ns(model_base_path)
+        if latest_mtime_ns is None:
+            status["reason"] = "model_artifact_missing"
+            self._write_ml_runtime_status(status)
+            return {}, {}, status
         max_age_hours = float(getattr(ml_cfg, "max_model_age_hours", 72) or 72)
         model_age_hours = max(0.0, (datetime.now().timestamp() - (latest_mtime_ns / 1_000_000_000.0)) / 3600.0)
         status["model_age_hours"] = model_age_hours
