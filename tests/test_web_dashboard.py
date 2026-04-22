@@ -1546,6 +1546,7 @@ def test_api_scores_exposes_display_score_rank_and_raw_strength(monkeypatch, tmp
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["regime"] == "SIDEWAYS"
+    assert payload["last_update"] == datetime.strptime("20260311_01", "%Y%m%d_%H").isoformat()
     first = payload["scores"][0]
     assert first["symbol"] == "FLOW/USDT"
     assert first["rank"] == 1
@@ -1674,6 +1675,7 @@ def test_api_scores_falls_back_to_alpha_snapshot_when_runs_empty(monkeypatch, tm
         ),
         encoding="utf-8",
     )
+    os.utime(reports_dir / "alpha_snapshot.json", (1_710_100_000, 1_710_100_000))
     (reports_dir / "regime.json").write_text(
         json.dumps({"state": "Trending", "multiplier": 1.2, "votes": {}}, ensure_ascii=False),
         encoding="utf-8",
@@ -1687,6 +1689,7 @@ def test_api_scores_falls_back_to_alpha_snapshot_when_runs_empty(monkeypatch, tm
     payload = response.get_json()
     assert payload["current_run"] == "alpha_snapshot"
     assert payload["regime"] == "Trending"
+    assert payload["last_update"] == datetime.fromtimestamp(1_710_100_000).isoformat()
     assert [item["symbol"] for item in payload["scores"][:2]] == ["SOL/USDT", "BTC/USDT"]
 
 

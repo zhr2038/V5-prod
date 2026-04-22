@@ -695,7 +695,8 @@ def _load_regime_json_snapshot(reports_dir: Path) -> Dict[str, Any]:
 
 
 def _load_alpha_snapshot_scores(reports_dir: Path, limit: int = 20) -> Dict[str, Any]:
-    payload = _load_json_payload(reports_dir / 'alpha_snapshot.json')
+    alpha_snapshot_path = reports_dir / 'alpha_snapshot.json'
+    payload = _load_json_payload(alpha_snapshot_path)
     raw_scores = payload.get('scores', {})
     if not isinstance(raw_scores, dict) or not raw_scores:
         return {}
@@ -720,10 +721,15 @@ def _load_alpha_snapshot_scores(reports_dir: Path, limit: int = 20) -> Dict[str,
         return {}
 
     regime_snapshot = _load_regime_json_snapshot(reports_dir)
+    try:
+        snapshot_ts = alpha_snapshot_path.stat().st_mtime
+    except OSError:
+        snapshot_ts = None
     return {
         'regime': str(regime_snapshot.get('state') or 'Unknown'),
         'current_run': 'alpha_snapshot',
         'scores': items,
+        'timestamp': snapshot_ts,
     }
 
 # 生产环境显示的 timer 列表
@@ -3306,12 +3312,15 @@ def api_scores():
                 'run_id': entry['run_dir'].name,
                 'regime': str(entry['audit'].get('regime') or 'Unknown'),
                 'scores': items,
+                'sort_epoch': float(entry.get('sort_epoch', 0.0) or 0.0),
             })
 
+        current_run_epoch = None
         if usable_runs:
             current_run_id = usable_runs[0]['run_id']
             current_regime = usable_runs[0]['regime']
             current_scores = usable_runs[0]['scores']
+            current_run_epoch = float(usable_runs[0].get('sort_epoch', 0.0) or 0.0)
             if len(usable_runs) > 1:
                 previous_run_id = usable_runs[1]['run_id']
                 previous_scores = usable_runs[1]['scores']
@@ -3321,6 +3330,7 @@ def api_scores():
                 current_run_id = str(alpha_snapshot.get('current_run') or 'alpha_snapshot')
                 current_regime = str(alpha_snapshot.get('regime') or 'Unknown')
                 current_scores = alpha_snapshot.get('scores', [])
+                current_run_epoch = _coerce_timestamp_epoch(alpha_snapshot.get('timestamp'))
             else:
                 return jsonify({'regime': 'Unknown', 'scores': []})
 
@@ -3367,7 +3377,7 @@ def api_scores():
             'current_run': current_run_id,
             'previous_run': previous_run_id,
             'scores': scores_with_trend,
-            'last_update': datetime.now().isoformat()
+            'last_update': datetime.fromtimestamp(current_run_epoch).isoformat() if current_run_epoch is not None else ''
         })
     except Exception as e:
         return _json_internal_error_response(
@@ -4061,7 +4071,6 @@ def api_market_state():
             'Sideways': '震荡行情，正常仓位',
             'SIDEWAYS': '震荡行情，正常仓位',
         }
-
         return jsonify({
             'state': regime.upper().replace('-', '_'),
             'position_multiplier': multiplier,
