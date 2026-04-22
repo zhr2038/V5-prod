@@ -4481,6 +4481,40 @@ def test_api_reflection_reports_uses_suffixed_runtime_reflection_dir(monkeypatch
     assert payload["reports"][0]["trade_count"] == 4
 
 
+def test_api_reflection_reports_ignores_non_dated_name_precedence(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+
+    reports_dir = module.REPORTS_DIR
+    reflection_dir = reports_dir / "reflection"
+    reflection_dir.mkdir(parents=True, exist_ok=True)
+
+    (reflection_dir / "reflection_20260408_020000.json").write_text(
+        json.dumps({"summary": {"total_realized_pnl": 6.54, "total_trades": 4, "total_symbols": 1}, "alerts": [{"level": "warning"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reflection_dir / "reflection_latest.json").write_text(
+        json.dumps({"summary": {"total_realized_pnl": 999.0, "total_trades": 99, "total_symbols": 9}, "alerts": [{"level": "critical"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}},
+    )
+
+    response = client.get("/api/reflection_reports")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["reports"][0]["filename"] == "reflection_20260408_020000.json"
+    assert payload["reports"][0]["total_pnl"] == 6.54
+
+
 def test_reflection_reports_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()

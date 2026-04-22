@@ -1023,6 +1023,18 @@ def _sorted_risk_history_tail(history: Any, limit: int = 5) -> List[Dict[str, An
     return ordered[-max(1, int(limit)) :]
 
 
+def _reflection_report_sort_epoch(path: Path) -> float:
+    match = re.search(r"reflection_(\d{8}_\d{4,6})$", path.stem)
+    if match:
+        stamp = match.group(1)
+        for fmt in ("%Y%m%d_%H%M%S", "%Y%m%d_%H%M"):
+            try:
+                return datetime.strptime(stamp, fmt).timestamp()
+            except Exception:
+                continue
+    return path.stat().st_mtime
+
+
 def _run_id_epoch(run_id: str) -> Optional[float]:
     match = re.search(r'(\d{8})_(\d{2})(\d{2})?(\d{2})?$', str(run_id or '').strip())
     if not match:
@@ -5139,7 +5151,15 @@ def api_reflection_reports():
             return jsonify({'reports': [], 'message': '暂无反思报告'})
 
         reports = []
-        report_files = sorted(reflection_dir.glob('reflection_*.json'), reverse=True)
+        report_files = sorted(
+            (
+                path
+                for path in reflection_dir.glob('reflection_*.json')
+                if re.fullmatch(r"reflection_\d{8}_\d{4,6}\.json", path.name)
+            ),
+            key=_reflection_report_sort_epoch,
+            reverse=True,
+        )
 
         for report_file in report_files[:10]:
             try:
