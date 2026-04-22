@@ -6222,6 +6222,7 @@ def test_api_market_state_uses_active_runtime_reports_dir(monkeypatch, tmp_path)
         seen["history_24h"] = path
         return [
             {
+                "ts_ms": 1_710_000_000_000,
                 "label": "04-08 10:00",
                 "final": {"state": "TRENDING", "confidence": 0.6, "score": 0.4},
                 "votes": {
@@ -6249,6 +6250,7 @@ def test_api_market_state_uses_active_runtime_reports_dir(monkeypatch, tmp_path)
     payload = response.get_json()
     assert payload["state"] == "TRENDING"
     assert payload["history_24h"][0]["final"]["state"] == "TRENDING"
+    assert payload["last_update"] == datetime.fromtimestamp(1_710_000_000).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def test_market_state_error_response_hides_internal_paths(monkeypatch):

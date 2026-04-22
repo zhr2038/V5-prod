@@ -4089,6 +4089,12 @@ def api_market_state():
             'Sideways': '震荡行情，正常仓位',
             'SIDEWAYS': '震荡行情，正常仓位',
         }
+        latest_history_ts_ms = None
+        if history_24h:
+            try:
+                latest_history_ts_ms = int(history_24h[-1].get('ts_ms') or 0)
+            except Exception:
+                latest_history_ts_ms = None
         return jsonify({
             'state': regime.upper().replace('-', '_'),
             'position_multiplier': multiplier,
@@ -4105,7 +4111,7 @@ def api_market_state():
             'price': indicators['price'],
             'signal_health': signal_health,
             'history_24h': history_24h,
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'last_update': datetime.fromtimestamp(latest_history_ts_ms / 1000.0).strftime('%Y-%m-%d %H:%M:%S') if latest_history_ts_ms else '',
         })
     except Exception as exc:
         return _json_internal_error_response(
