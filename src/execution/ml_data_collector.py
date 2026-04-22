@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
+from datetime import datetime
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -516,6 +518,28 @@ class MLDataCollector:
     def _default_cache_dir(self) -> Path:
         return Path(self.db_path).resolve().parent.parent / "data" / "cache"
 
+    @staticmethod
+    def _cache_file_epoch(path: Path, *, prefix: str) -> float:
+        suffix = path.stem[len(prefix):] if path.stem.startswith(prefix) else path.stem
+
+        hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
+        if hourly_match:
+            try:
+                return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+            except Exception:
+                pass
+
+        date_tokens = re.findall(r"(20\d{2}-\d{2}-\d{2}|20\d{6})", suffix)
+        if date_tokens:
+            token = date_tokens[-1]
+            try:
+                fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
+                return datetime.strptime(token, fmt).timestamp()
+            except Exception:
+                pass
+
+        return path.stat().st_mtime
+
     @classmethod
     def _load_cache_ohlcv(
         cls,
@@ -526,7 +550,7 @@ class MLDataCollector:
         end_ms: Optional[int] = None,
     ) -> pd.DataFrame:
         prefix = str(symbol or "").replace("/", "_").replace("-", "_").strip()
-        files = sorted(cache_dir.glob(f"{prefix}_1H_*.csv"))
+        files = sorted(cache_dir.glob(f"{prefix}_1H_*.csv"), key=lambda path: cls._cache_file_epoch(path, prefix=f"{prefix}_1H_"))
         if not files:
             return cls._empty_ohlcv_frame()
 

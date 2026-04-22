@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pandas as pd
 import sqlite3
 from pathlib import Path
 
@@ -66,3 +67,38 @@ def test_export_training_data_resolves_relative_output_path_from_project_root(mo
     assert collector.export_training_data("reports/ml_training_data.csv", min_samples=1) is True
     assert (tmp_path / "reports" / "ml_training_data.csv").exists()
     collector._close_connection()
+
+
+def test_ml_data_collector_cache_ohlcv_prefers_logically_newer_file_for_duplicate_timestamp(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    (cache_dir / "BTC_USDT_1H_20260101.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume",
+                "2026-01-01 00:00:00,100,101,99,100,10",
+                "2026-01-01 01:00:00,101,102,100,101,11",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (cache_dir / "BTC_USDT_1H_2026-01-01_2026-01-02.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume",
+                "2026-01-01 01:00:00,101,102,100,999,11",
+                "2026-01-01 02:00:00,102,103,101,103,12",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ohlcv = collector_mod.MLDataCollector._load_cache_ohlcv(cache_dir, "BTC/USDT")
+
+    assert list(ohlcv["timestamp_ms"]) == [
+        collector_mod.MLDataCollector._parse_cache_timestamp_ms(pd.Series(["2026-01-01 00:00:00"])).iloc[0],
+        collector_mod.MLDataCollector._parse_cache_timestamp_ms(pd.Series(["2026-01-01 01:00:00"])).iloc[0],
+        collector_mod.MLDataCollector._parse_cache_timestamp_ms(pd.Series(["2026-01-01 02:00:00"])).iloc[0],
+    ]
+    assert list(ohlcv["close"]) == [100.0, 999.0, 103.0]
