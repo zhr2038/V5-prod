@@ -4962,6 +4962,12 @@ def _api_ml_training_v2():
         preferred = model_files or existing
         return max(preferred, key=lambda p: p.stat().st_mtime)
 
+    def _latest_model_file_mtime(base_path: Path) -> Optional[float]:
+        latest = _latest_model_file(base_path)
+        if latest is None:
+            return None
+        return latest.stat().st_mtime
+
     configured_enabled = False
     min_samples = 200
     model_base_path = WORKSPACE / 'models' / 'ml_factor_model'
@@ -5048,7 +5054,8 @@ def _api_ml_training_v2():
             runtime = {}
 
     latest_model = _latest_model_file(model_base_path)
-    model_time = datetime.fromtimestamp(latest_model.stat().st_mtime) if latest_model else None
+    latest_model_mtime = _latest_model_file_mtime(model_base_path)
+    model_time = datetime.fromtimestamp(latest_model_mtime) if latest_model_mtime is not None else None
 
     active_model_base = model_base_path
     if pointer_path.exists():

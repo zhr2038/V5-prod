@@ -3758,6 +3758,7 @@ def test_ml_training_api_prefers_model_artifact_over_newer_config_file(monkeypat
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["latest_model"] == "ml_factor_model.pkl"
+    assert payload["model_date"] == "2001-09-09 09:46"
 
 
 def test_ml_training_api_treats_string_false_flags_as_false(monkeypatch, tmp_path):
