@@ -118,14 +118,19 @@ def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPat
     if not runs_dir.exists():
         return runs
 
-    def _sort_epoch(run_dir: Path) -> float:
-        audit_file = run_dir / "decision_audit.json"
+    def _candidate_sort_epoch(run_dir: Path) -> float:
         try:
-            with open(audit_file, "r", encoding="utf-8") as f:
-                payload = json.load(f)
+            # Use the end of the run hour as a lightweight upper bound for cutoff filtering.
+            return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp() + 3600.0
         except Exception:
-            payload = {}
+            audit_file = run_dir / "decision_audit.json"
+            try:
+                return audit_file.stat().st_mtime
+            except Exception:
+                return 0.0
 
+    def _sort_epoch(run_dir: Path, payload: Dict) -> float:
+        audit_file = run_dir / "decision_audit.json"
         for key in ("timestamp", "now_ts", "window_start_ts"):
             value = payload.get(key) if isinstance(payload, dict) else None
             if value is None:
@@ -144,24 +149,32 @@ def load_recent_runs(hours: int = 24, *, runtime_paths: Optional[AutoRiskEvalPat
             except Exception:
                 return 0.0
 
-    for run_dir in sorted(runs_dir.iterdir(), key=_sort_epoch, reverse=True):
+    run_dirs = sorted(runs_dir.iterdir(), key=_candidate_sort_epoch, reverse=True)
+    run_entries: List[tuple[float, Dict]] = []
+    for run_dir in run_dirs:
         if not run_dir.is_dir():
             continue
         audit_file = run_dir / "decision_audit.json"
         if not audit_file.exists():
             continue
-        sort_dt = datetime.fromtimestamp(_sort_epoch(run_dir))
-        if sort_dt < cutoff:
+        if datetime.fromtimestamp(_candidate_sort_epoch(run_dir)) < cutoff:
             continue
 
         try:
             with open(audit_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            data["_run_id"] = run_dir.name
-            data["_mtime"] = sort_dt.isoformat()
-            runs.append(data)
         except Exception:
             continue
+        sort_epoch = _sort_epoch(run_dir, data)
+        sort_dt = datetime.fromtimestamp(sort_epoch)
+        if sort_dt < cutoff:
+            continue
+        data["_run_id"] = run_dir.name
+        data["_mtime"] = sort_dt.isoformat()
+        run_entries.append((sort_epoch, data))
+
+    run_entries.sort(key=lambda item: item[0], reverse=True)
+    runs = [data for _, data in run_entries]
 
     return runs
 

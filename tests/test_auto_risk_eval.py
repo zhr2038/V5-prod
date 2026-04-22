@@ -174,3 +174,40 @@ def test_load_recent_runs_prefers_run_id_epoch_when_file_mtime_is_misleading(tmp
 
     assert len(runs) == 2
     assert runs[0]["_run_id"] == newer_run_name
+
+
+def test_load_recent_runs_limits_audit_file_reads_before_parsing(tmp_path: Path, monkeypatch) -> None:
+    runtime = auto_risk_eval.AutoRiskEvalPaths(
+        reports_dir=(tmp_path / "reports").resolve(),
+        runs_dir=(tmp_path / "reports" / "runs").resolve(),
+        auto_risk_eval_path=(tmp_path / "reports" / "auto_risk_eval.json").resolve(),
+        positions_db=(tmp_path / "reports" / "positions.sqlite").resolve(),
+        auto_risk_guard_path=(tmp_path / "reports" / "auto_risk_guard.json").resolve(),
+        env_path=(tmp_path / ".env").resolve(),
+    )
+    runtime.runs_dir.mkdir(parents=True, exist_ok=True)
+
+    now = auto_risk_eval.datetime.now()
+    for offset in range(20):
+        run_name = (now - auto_risk_eval.timedelta(hours=19 - offset)).strftime("%Y%m%d_%H")
+        run_dir = runtime.runs_dir / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps({"run_id": run_name, "counts": {"selected": offset}}),
+            encoding="utf-8",
+        )
+
+    original_load = auto_risk_eval.json.load
+    reads = {"decision_audit": 0}
+
+    def counting_load(fp, *args, **kwargs):
+        reads["decision_audit"] += 1
+        return original_load(fp, *args, **kwargs)
+
+    monkeypatch.setattr(auto_risk_eval.json, "load", counting_load)
+
+    runs = auto_risk_eval.load_recent_runs(hours=4, runtime_paths=runtime)
+
+    assert len(runs) == 4
+    assert runs[0]["_run_id"] == now.strftime("%Y%m%d_%H")
+    assert reads["decision_audit"] <= 5
