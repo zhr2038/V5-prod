@@ -181,14 +181,18 @@ class SmartAlertEngine:
         if not runs_dir.exists():
             return []
 
-        def _sort_epoch(run_dir: Path) -> float:
-            audit_file = run_dir / "decision_audit.json"
+        def _candidate_sort_epoch(run_dir: Path) -> float:
             try:
-                with audit_file.open("r", encoding="utf-8") as f:
-                    payload = json.load(f)
+                return datetime.strptime(run_dir.name, "%Y%m%d_%H").timestamp()
             except Exception:
-                payload = {}
+                audit_file = run_dir / "decision_audit.json"
+                try:
+                    return audit_file.stat().st_mtime
+                except Exception:
+                    return 0.0
 
+        def _payload_sort_epoch(run_dir: Path, payload: dict[str, Any]) -> float:
+            audit_file = run_dir / "decision_audit.json"
             for key in ("timestamp", "now_ts", "window_start_ts"):
                 value = payload.get(key) if isinstance(payload, dict) else None
                 if value is None:
@@ -215,18 +219,21 @@ class SmartAlertEngine:
             run_dir
             for run_dir in runs_dir.iterdir()
             if run_dir.is_dir() and (run_dir / "decision_audit.json").exists()
-            and (cutoff_ts is None or _sort_epoch(run_dir) >= cutoff_ts)
+            and (cutoff_ts is None or _candidate_sort_epoch(run_dir) >= cutoff_ts)
         ]
-        run_dirs.sort(key=_sort_epoch, reverse=True)
+        run_dirs.sort(key=_candidate_sort_epoch, reverse=True)
+        run_dirs = run_dirs[:limit]
 
-        audits: list[dict[str, Any]] = []
-        for run_dir in run_dirs[:limit]:
+        audit_entries: list[tuple[float, dict[str, Any]]] = []
+        for run_dir in run_dirs:
             try:
                 with (run_dir / "decision_audit.json").open("r", encoding="utf-8") as f:
-                    audits.append(json.load(f))
+                    payload = json.load(f)
             except Exception:
                 continue
-        return audits
+            audit_entries.append((_payload_sort_epoch(run_dir, payload), payload))
+        audit_entries.sort(key=lambda item: item[0], reverse=True)
+        return [payload for _, payload in audit_entries]
 
     def _known_trade_blocked_symbol_count(self, audit: dict[str, Any]) -> int:
         counts = audit.get("counts", {}) or {}

@@ -175,6 +175,37 @@ def test_load_recent_run_audits_prefers_run_id_epoch_when_file_mtime_is_misleadi
     assert audits[0]["run_id"] == newer_run_name
 
 
+def test_load_recent_run_audits_limits_audit_file_reads_before_parsing(tmp_path: Path, monkeypatch) -> None:
+    engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
+    runs_dir = engine.paths.runs_dir
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    now = smart_alert_module.datetime.now()
+    for offset in range(20):
+        run_name = (now - smart_alert_module.timedelta(hours=19 - offset)).strftime("%Y%m%d_%H")
+        run_dir = runs_dir / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps({"run_id": run_name, "counts": {"selected": offset}}),
+            encoding="utf-8",
+        )
+
+    original_load = smart_alert_module.json.load
+    reads = {"decision_audit": 0}
+
+    def counting_load(fp, *args, **kwargs):
+        reads["decision_audit"] += 1
+        return original_load(fp, *args, **kwargs)
+
+    monkeypatch.setattr(smart_alert_module.json, "load", counting_load)
+
+    audits = engine._load_recent_run_audits(limit=4, max_age_hours=24)
+
+    assert len(audits) == 4
+    assert audits[0]["run_id"] == now.strftime("%Y%m%d_%H")
+    assert reads["decision_audit"] <= 4
+
+
 def test_check_signal_no_trade_ignores_known_policy_blockers(tmp_path: Path) -> None:
     engine = smart_alert_module.SmartAlertEngine(workspace=tmp_path)
     engine._load_recent_run_audits = lambda limit, max_age_hours=None: [
