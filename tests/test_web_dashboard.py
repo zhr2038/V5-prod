@@ -6209,6 +6209,7 @@ def test_api_market_state_uses_active_runtime_reports_dir(monkeypatch, tmp_path)
             "state": "TRENDING",
             "position_multiplier": 1.2,
             "method": "decision_audit",
+            "ts": 1_710_100_000.0,
             "votes": {"hmm": {"state": "TRENDING", "confidence": 0.7}},
             "alerts": [],
             "monitor": {},
@@ -6250,7 +6251,7 @@ def test_api_market_state_uses_active_runtime_reports_dir(monkeypatch, tmp_path)
     payload = response.get_json()
     assert payload["state"] == "TRENDING"
     assert payload["history_24h"][0]["final"]["state"] == "TRENDING"
-    assert payload["last_update"] == datetime.fromtimestamp(1_710_000_000).strftime("%Y-%m-%d %H:%M:%S")
+    assert payload["last_update"] == datetime.fromtimestamp(1_710_100_000).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def test_market_state_error_response_hides_internal_paths(monkeypatch):
@@ -6547,6 +6548,7 @@ def test_market_state_snapshot_falls_back_to_regime_json_after_failed_run(tmp_pa
         ),
         encoding="utf-8",
     )
+    os.utime(reports_dir / "regime.json", (1_710_200_000, 1_710_200_000))
     os.utime(failed_run, (2, 2))
 
     snapshot = module._load_market_state_snapshot(reports_dir)
@@ -6554,6 +6556,7 @@ def test_market_state_snapshot_falls_back_to_regime_json_after_failed_run(tmp_pa
     assert snapshot["state"] == "Trending"
     assert snapshot["method"] == "regime_json"
     assert snapshot["final_score"] == 0.42
+    assert snapshot["ts"] == 1_710_200_000
     assert snapshot["votes"]["hmm"]["state"] == "TRENDING"
 
 
@@ -6600,6 +6603,7 @@ def test_market_state_snapshot_limits_recent_decision_audit_scan(monkeypatch, tm
     assert snapshot["state"] == "TRENDING"
     assert snapshot["position_multiplier"] == 1.2
     assert snapshot["final_score"] == pytest.approx(0.19)
+    assert snapshot["ts"] == datetime.strptime("20260312_19", "%Y%m%d_%H").timestamp()
     assert reads["decision_audit"] <= 4
 
 

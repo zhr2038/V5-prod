@@ -683,7 +683,8 @@ def _has_usable_market_state(audit: Dict[str, Any]) -> bool:
 
 
 def _load_regime_json_snapshot(reports_dir: Path) -> Dict[str, Any]:
-    payload = _load_json_payload(reports_dir / 'regime.json')
+    regime_json_path = reports_dir / 'regime.json'
+    payload = _load_json_payload(regime_json_path)
     if not payload:
         return {}
 
@@ -694,11 +695,22 @@ def _load_regime_json_snapshot(reports_dir: Path) -> Dict[str, Any]:
     votes = payload.get('votes', {})
     alerts = payload.get('alerts', [])
     monitor = payload.get('monitor', {})
+    ts = (
+        _coerce_timestamp_epoch(payload.get('ts'))
+        or _coerce_timestamp_epoch(payload.get('timestamp'))
+        or _coerce_timestamp_epoch(payload.get('last_update'))
+    )
+    if ts is None:
+        try:
+            ts = regime_json_path.stat().st_mtime
+        except OSError:
+            ts = None
     return {
         'state': regime,
         'position_multiplier': float(payload.get('position_multiplier', payload.get('multiplier', 0.0)) or 0.0),
         'final_score': float(payload.get('final_score', 0.0) or 0.0),
         'method': 'regime_json',
+        'ts': ts,
         'votes': votes if isinstance(votes, dict) else {},
         'alerts': alerts if isinstance(alerts, list) else [],
         'monitor': monitor if isinstance(monitor, dict) else {},
@@ -3895,6 +3907,7 @@ def _load_latest_regime_history_snapshot(reports_dir: Path) -> Dict[str, Any]:
             'position_multiplier': float(row['multiplier'] or 0.0),
             'final_score': float(row['final_score'] or 0.0),
             'method': 'regime_history',
+            'ts': (float(row['ts_ms']) / 1000.0) if row['ts_ms'] is not None else None,
             'votes': {
                 'hmm': {
                     'state': row['hmm_state'],
@@ -3964,6 +3977,7 @@ def _load_market_state_snapshot(reports_dir: Path) -> Dict[str, Any]:
                     'position_multiplier': float(audit.get('regime_multiplier', details.get('multiplier', 0.0)) or 0.0),
                     'final_score': float(details.get('final_score', audit.get('final_score', 0.0)) or 0.0),
                     'method': str(details.get('method', 'decision_audit')),
+                    'ts': float(entry.get('sort_epoch', 0.0) or 0.0),
                     'votes': votes,
                     'alerts': alerts,
                     'monitor': details.get('monitor', {}) if isinstance(details.get('monitor', {}), dict) else {},
@@ -4106,6 +4120,7 @@ def api_market_state():
                 latest_history_ts_ms = int(history_24h[-1].get('ts_ms') or 0)
             except Exception:
                 latest_history_ts_ms = None
+        snapshot_ts_epoch = _coerce_timestamp_epoch(snapshot.get('ts'))
         return jsonify({
             'state': regime.upper().replace('-', '_'),
             'position_multiplier': multiplier,
@@ -4122,7 +4137,11 @@ def api_market_state():
             'price': indicators['price'],
             'signal_health': signal_health,
             'history_24h': history_24h,
-            'last_update': datetime.fromtimestamp(latest_history_ts_ms / 1000.0).strftime('%Y-%m-%d %H:%M:%S') if latest_history_ts_ms else '',
+            'last_update': (
+                datetime.fromtimestamp(snapshot_ts_epoch).strftime('%Y-%m-%d %H:%M:%S')
+                if snapshot_ts_epoch is not None
+                else datetime.fromtimestamp(latest_history_ts_ms / 1000.0).strftime('%Y-%m-%d %H:%M:%S') if latest_history_ts_ms else ''
+            ),
         })
     except Exception as exc:
         return _json_internal_error_response(
