@@ -5764,7 +5764,6 @@ def api_decision_audit():
                 if strategy_signals:
                     strategy_source_run = latest_run_dir.name
                     strategy_signal_source = 'strategy_file'
-                    ts = strategy_file.stat().st_mtime
             except Exception:
                 strategy_signals = []
 
@@ -5793,7 +5792,6 @@ def api_decision_audit():
                 strategy_signals = fallback_signals
                 strategy_source_run = stale_run_dir.name
                 strategy_signal_source = f'previous_run_{fallback_source}'
-                ts = fallback_ts if fallback_ts is not None else fallback_default_ts
                 break
 
         # Build actionable signal view: sell only for held symbols; buy only for non-held symbols.

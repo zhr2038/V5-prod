@@ -2290,6 +2290,57 @@ def test_api_decision_audit_falls_back_to_previous_run_strategy_signals(monkeypa
     assert payload["strategy_run_id"] == "20260313_14"
     assert payload["strategy_signals"][0]["strategy"] == "TrendFollowing"
     assert payload["fused_source_is_fallback"] is True
+    assert payload["timestamp"] == datetime.strptime("20260313_15", "%Y%m%d_%H").timestamp()
+
+
+def test_api_decision_audit_timestamp_stays_on_latest_run_when_strategy_file_mtime_is_newer(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    current_run = runs_dir / "20260313_15"
+    current_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+
+    (current_run / "decision_audit.json").write_text(
+        json.dumps(
+            {"run_id": "20260313_15", "regime": "TRENDING", "counts": {"selected": 1, "orders_rebalance": 0, "orders_exit": 0}},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    strategy_file = current_run / "strategy_signals.json"
+    strategy_file.write_text(
+        json.dumps(
+            {
+                "strategies": [
+                    {
+                        "strategy": "TrendFollowing",
+                        "allocation": 0.2,
+                        "total_signals": 1,
+                        "buy_signals": 1,
+                        "sell_signals": 0,
+                        "signals": [{"symbol": "BTC/USDT", "side": "buy", "score": 0.9}],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(strategy_file, (9_999_999_999, 9_999_999_999))
+
+    response = client.get("/api/decision_audit")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["strategy_signal_source"] == "strategy_file"
+    assert payload["strategy_run_id"] == "20260313_15"
+    assert payload["timestamp"] == datetime.strptime("20260313_15", "%Y%m%d_%H").timestamp()
 
 
 def test_api_decision_audit_tolerates_non_numeric_selected_order_notional(monkeypatch, tmp_path):
