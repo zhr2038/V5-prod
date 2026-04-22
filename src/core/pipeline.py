@@ -292,6 +292,10 @@ class V5Pipeline:
         self.auto_risk_guard = get_auto_risk_guard(
             derive_runtime_auto_risk_guard_path(order_store_path)
         )
+        self.market_impulse_probe_state_path = derive_runtime_named_json_path(
+            runtime_order_store_path,
+            "market_impulse_probe_state",
+        ).resolve()
 
         # 负期望标的自动冷却（根因级抑制高成本来回交易）
         neg_feedback_enabled = any(
@@ -712,6 +716,168 @@ class V5Pipeline:
         blocked_replacement_reasons[sym] = norm_reason
         if audit is not None:
             audit.record_count("replacement_blocked_count", symbol=sym)
+
+    def _load_market_impulse_probe_state(self) -> Dict[str, Any]:
+        try:
+            path = Path(self.market_impulse_probe_state_path)
+            if not path.exists():
+                return {}
+            obj = json.loads(path.read_text(encoding="utf-8"))
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+
+    def _write_market_impulse_probe_state(self, state: Dict[str, Any]) -> None:
+        path = Path(self.market_impulse_probe_state_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+
+    def _sync_market_impulse_probe_state_with_positions(self, positions: List[Position]) -> Dict[str, Any]:
+        state = self._load_market_impulse_probe_state()
+        if not state:
+            return {}
+        now_ms = int(self.clock.now().timestamp() * 1000)
+        held_symbols = {
+            str(getattr(position, "symbol", "") or "")
+            for position in (positions or [])
+            if float(getattr(position, "qty", 0.0) or 0.0) > 0.0
+        }
+        changed = False
+        for symbol in list(state.keys()):
+            payload = state.get(symbol)
+            if not isinstance(payload, dict):
+                state.pop(symbol, None)
+                changed = True
+                continue
+            cooldown_until_ms = int(payload.get("cooldown_until_ms") or 0)
+            if symbol not in held_symbols and cooldown_until_ms <= now_ms:
+                state.pop(symbol, None)
+                changed = True
+        if changed:
+            self._write_market_impulse_probe_state(state)
+        return state
+
+    def _market_impulse_probe_context(
+        self,
+        *,
+        strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
+        current_auto_risk_level: Optional[str],
+        regime_state_str: str,
+    ) -> Dict[str, Any]:
+        enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
+        if not enabled:
+            return {"active": False, "trend_buy_count": 0, "btc_trend_score": None, "candidates": []}
+
+        if bool(getattr(self.cfg.execution, "market_impulse_probe_only_in_protect", True)):
+            if str(current_auto_risk_level or "").upper() != "PROTECT":
+                return {"active": False, "trend_buy_count": 0, "btc_trend_score": None, "candidates": []}
+
+        if str(regime_state_str or "") in {"Risk-Off", "Risk_Off", "RiskOff"}:
+            return {"active": False, "trend_buy_count": 0, "btc_trend_score": None, "candidates": []}
+
+        trend_lookup = strategy_signal_lookup.get("TrendFollowing") or {}
+        min_symbol_trend_score = float(
+            getattr(self.cfg.execution, "market_impulse_probe_min_symbol_trend_score", 0.60) or 0.0
+        )
+        whitelist = list(self._live_symbol_whitelist or set(getattr(self.cfg, "symbols", []) or []))
+        allowed_symbols = {str(symbol) for symbol in whitelist if str(symbol).strip()}
+
+        trend_buy_candidates = []
+        btc_trend_score = None
+        btc_signal = trend_lookup.get("BTC/USDT")
+        btc_side = self._signal_side(btc_signal)
+        if btc_side == "buy":
+            btc_trend_score = self._signal_score(btc_signal)
+
+        for symbol, signal in trend_lookup.items():
+            if allowed_symbols and str(symbol) not in allowed_symbols:
+                continue
+            if self._signal_side(signal) != "buy":
+                continue
+            trend_score = self._signal_score(signal)
+            if trend_score is None or float(trend_score) < float(min_symbol_trend_score):
+                continue
+            trend_buy_candidates.append({"symbol": str(symbol), "trend_score": float(trend_score)})
+
+        if len(trend_buy_candidates) < int(getattr(self.cfg.execution, "market_impulse_probe_min_trend_buy_count", 3) or 3):
+            return {
+                "active": False,
+                "trend_buy_count": len(trend_buy_candidates),
+                "btc_trend_score": btc_trend_score,
+                "candidates": trend_buy_candidates,
+            }
+
+        if bool(getattr(self.cfg.execution, "market_impulse_probe_require_btc_trend_buy", True)):
+            min_btc_score = float(getattr(self.cfg.execution, "market_impulse_probe_min_btc_trend_score", 0.60) or 0.0)
+            if btc_side != "buy" or btc_trend_score is None or float(btc_trend_score) < float(min_btc_score):
+                return {
+                    "active": False,
+                    "trend_buy_count": len(trend_buy_candidates),
+                    "btc_trend_score": btc_trend_score,
+                    "candidates": trend_buy_candidates,
+                }
+
+        priority_order = {"BTC/USDT": 0, "ETH/USDT": 1, "SOL/USDT": 2, "BNB/USDT": 3}
+        trend_buy_candidates.sort(
+            key=lambda item: (
+                priority_order.get(str(item.get("symbol") or ""), 99),
+                -float(item.get("trend_score") or 0.0),
+                str(item.get("symbol") or ""),
+            )
+        )
+        return {
+            "active": True,
+            "trend_buy_count": len(trend_buy_candidates),
+            "btc_trend_score": btc_trend_score,
+            "candidates": trend_buy_candidates,
+        }
+
+    def _market_impulse_probe_negexp_gate(
+        self,
+        *,
+        symbol: str,
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        try:
+            if bool(getattr(self.cfg.execution, "market_impulse_probe_disallow_active_cooldown", True)):
+                blocked = self.negative_expectancy_cooldown.is_blocked(symbol)
+                if blocked:
+                    return False, "negative_expectancy_cooldown", None
+
+            stat = self.negative_expectancy_cooldown.get_symbol_stats(symbol) or {}
+            if bool(getattr(self.cfg.execution, "negative_expectancy_open_block_enabled", False)):
+                min_cycles = int(getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2)
+                floor_bps = float(_coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0))
+                if int(stat.get("closed_cycles") or 0) >= min_cycles and self._negative_expectancy_bps(stat) < floor_bps:
+                    return False, "negative_expectancy_open_block", None
+
+            if bool(getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_enabled", False)):
+                ff_min_cycles = int(
+                    getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_min_closed_cycles", 2) or 2
+                )
+                ff_floor_bps = float(
+                    getattr(self.cfg.execution, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0) or 0.0
+                )
+                ff_cycles = int(stat.get("fast_fail_closed_cycles") or 0)
+                ff_expectancy_bps = self._negative_expectancy_bps(stat, fast_fail=True)
+                if ff_cycles >= ff_min_cycles and ff_expectancy_bps < ff_floor_bps:
+                    allow_bypass = bool(
+                        getattr(self.cfg.execution, "market_impulse_probe_allow_single_fast_fail_bypass", True)
+                    )
+                    max_cycles = int(
+                        getattr(self.cfg.execution, "market_impulse_probe_max_fast_fail_cycles_to_bypass", 1) or 1
+                    )
+                    min_bypass_bps = float(
+                        getattr(self.cfg.execution, "market_impulse_probe_min_net_expectancy_bps_to_bypass", -80.0)
+                        or -80.0
+                    )
+                    if allow_bypass and ff_cycles <= max_cycles and ff_expectancy_bps >= min_bypass_bps:
+                        return True, None, "negative_expectancy_fast_fail_open_block"
+                    return False, "negative_expectancy_fast_fail_open_block", None
+        except Exception:
+            return True, None, None
+        return True, None, None
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         """按市值计价更新持仓
@@ -2143,6 +2309,8 @@ class V5Pipeline:
             hm = _holding_minutes(getattr(p, 'entry_ts', None), now_utc)
             if hm is not None:
                 held_minutes_by_symbol[p.symbol] = hm
+        probe_state = self._sync_market_impulse_probe_state_with_positions(positions)
+        current_auto_risk_level = self._load_current_auto_risk_level()
 
         # 4. Portfolio分配后审计
         portfolio = self.portfolio_engine.allocate(
@@ -2503,10 +2671,63 @@ class V5Pipeline:
                             },
                         )
                     )
-                    if audit:
-                        audit.add_note(
-                            f"Rank exit: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
-                        )
+                if audit:
+                    audit.add_note(
+                        f"Rank exit: {p.symbol} rank {current_rank}, {reason}, source={rank_source}"
+                    )
+
+        # Market impulse probe time-stop exits.
+        market_impulse_time_stop_orders: List[Order] = []
+        if probe_state:
+            probe_strategy_signal_lookup = self._resolve_strategy_signal_lookup(audit)
+            probe_context = self._market_impulse_probe_context(
+                strategy_signal_lookup=probe_strategy_signal_lookup,
+                current_auto_risk_level=current_auto_risk_level,
+                regime_state_str=str(regime.state.value if hasattr(regime.state, "value") else regime.state),
+            )
+            impulse_still_active = bool(probe_context.get("active"))
+            for p in positions:
+                probe_payload = probe_state.get(p.symbol)
+                if not isinstance(probe_payload, dict):
+                    continue
+                entry_ts_ms = int(probe_payload.get("entry_ts_ms") or 0)
+                if entry_ts_ms <= 0:
+                    continue
+                time_stop_hours = int(
+                    probe_payload.get("time_stop_hours")
+                    or getattr(self.cfg.execution, "market_impulse_probe_time_stop_hours", 4)
+                    or 4
+                )
+                held_hours = max(0.0, (int(now_utc.timestamp() * 1000) - entry_ts_ms) / 3_600_000.0)
+                if held_hours < float(time_stop_hours):
+                    continue
+                pnl_pct = float(getattr(p, "unrealized_pnl_pct", 0.0) or 0.0)
+                if pnl_pct > 0.0 and impulse_still_active:
+                    continue
+                current_price = float(prices.get(p.symbol, 0.0) or 0.0)
+                if current_price <= 0.0:
+                    continue
+                market_impulse_time_stop_orders.append(
+                    Order(
+                        symbol=p.symbol,
+                        side="sell",
+                        intent="CLOSE_LONG",
+                        notional_usdt=float(getattr(p, "qty", 0.0) or 0.0) * current_price,
+                        signal_price=current_price,
+                        meta={
+                            "reason": "market_impulse_probe_time_stop",
+                            "held_hours": held_hours,
+                            "time_stop_hours": float(time_stop_hours),
+                            "unrealized_pnl_pct": pnl_pct,
+                            "impulse_still_active": impulse_still_active,
+                        },
+                    )
+                )
+                if audit:
+                    audit.record_count("market_impulse_probe_time_stop_count", symbol=p.symbol)
+                    audit.add_note(
+                        f"Market impulse probe time stop: {p.symbol} held_hours={held_hours:.2f} pnl_pct={pnl_pct:.4f} impulse_active={impulse_still_active}"
+                    )
         
         # 4. Policy-based exits (if not already handled)
         exit_orders = self.exit_policy.evaluate(
@@ -2536,7 +2757,7 @@ class V5Pipeline:
             exit_orders = filtered_exit_orders
         
         # Merge all exit orders: profit first, then stop, then rank, then policy
-        exit_orders = profit_orders + fixed_stop_orders + ranking_exit_orders + exit_orders
+        exit_orders = profit_orders + fixed_stop_orders + ranking_exit_orders + market_impulse_time_stop_orders + exit_orders
 
         # Deduplicate: keep only one exit per symbol per round, priority: sell_all > dynamic_stop > fixed_stop > atr > partial
         if exit_orders:
@@ -2698,7 +2919,6 @@ class V5Pipeline:
         # Optional hard rule: require fused strategy signals for any buy order (disable alpha fallback buys).
         require_fused_buy = bool(getattr(self.cfg.execution, 'require_fused_signals_for_buy', False))
         fused_buy_symbols = set()
-        current_auto_risk_level = self._load_current_auto_risk_level()
         protect_entry_gate_active = str(current_auto_risk_level or "").upper() == "PROTECT"
         protect_entry_require_alpha6_confirmation = bool(
             getattr(self.cfg.execution, "protect_entry_require_alpha6_confirmation", True)
@@ -3537,6 +3757,142 @@ class V5Pipeline:
                         "bypass_turnover_cap_for_exit": bool(bypass_turnover_cap_for_exit),
                     }
                 )
+
+        market_impulse_probe_context = self._market_impulse_probe_context(
+            strategy_signal_lookup=strategy_signal_lookup,
+            current_auto_risk_level=current_auto_risk_level,
+            regime_state_str=regime_state_str,
+        )
+        if audit:
+            audit.counts["market_impulse_probe_candidate_count"] = int(
+                len(market_impulse_probe_context.get("candidates") or [])
+            )
+
+        if (
+            bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
+            and (not bool(getattr(self.cfg.execution, "market_impulse_probe_only_in_protect", True)) or protect_entry_gate_active)
+            and not is_risk_off_close_only
+            and not positions
+            and not any(str(getattr(order, "side", "")).lower() == "buy" for order in rebalance_orders)
+            and bool(market_impulse_probe_context.get("active"))
+        ):
+            probe_cooldown_until_ms = max(
+                [int((payload or {}).get("cooldown_until_ms") or 0) for payload in (probe_state or {}).values()]
+                or [0]
+            )
+            now_ms = int(now_utc.timestamp() * 1000)
+            if probe_cooldown_until_ms > now_ms:
+                if audit:
+                    audit.counts["market_impulse_probe_blocked_count"] = int(
+                        audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+                    ) + 1
+                    audit.add_note(
+                        f"Market impulse probe blocked by cooldown until {probe_cooldown_until_ms}"
+                    )
+            else:
+                selected_probe_symbols = 0
+                max_probe_symbols = int(getattr(self.cfg.execution, "market_impulse_probe_max_symbols", 1) or 1)
+                probe_target_w = float(getattr(self.cfg.execution, "market_impulse_probe_target_w", 0.06) or 0.0)
+                probe_cooldown_hours = int(getattr(self.cfg.execution, "market_impulse_probe_cooldown_hours", 8) or 0)
+                probe_time_stop_hours = int(getattr(self.cfg.execution, "market_impulse_probe_time_stop_hours", 4) or 4)
+                probe_candidates = list((market_impulse_probe_context.get("candidates") or [])[:max_probe_symbols])
+                for candidate in probe_candidates:
+                    if selected_probe_symbols >= max_probe_symbols:
+                        break
+                    sym = str(candidate.get("symbol") or "")
+                    trend_score = float(candidate.get("trend_score") or 0.0)
+                    allowed_probe, probe_block_reason, bypass_reason = self._market_impulse_probe_negexp_gate(symbol=sym)
+                    if not allowed_probe:
+                        if audit:
+                            audit.counts["market_impulse_probe_blocked_count"] = int(
+                                audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+                            ) + 1
+                            audit.add_note(
+                                f"Market impulse probe blocked: {sym} reason={probe_block_reason}"
+                            )
+                        continue
+
+                    probe_notional = float(probe_target_w) * float(equity)
+                    min_notional = float(self.cfg.budget.min_trade_notional_base)
+                    if probe_notional < min_notional:
+                        if audit:
+                            audit.counts["market_impulse_probe_blocked_count"] = int(
+                                audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+                            ) + 1
+                            audit.add_note(
+                                f"Market impulse probe blocked: {sym} reason=min_notional probe_notional={probe_notional:.4f}"
+                            )
+                        continue
+                    if probe_notional > cash_remaining:
+                        if audit:
+                            audit.counts["market_impulse_probe_blocked_count"] = int(
+                                audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+                            ) + 1
+                            audit.add_note(
+                                f"Market impulse probe blocked: {sym} reason=insufficient_cash probe_notional={probe_notional:.4f} cash_remaining={cash_remaining:.4f}"
+                            )
+                        continue
+
+                    px = float(prices.get(sym, 0.0) or 0.0)
+                    if px <= 0.0:
+                        continue
+                    cooldown_until_ms = now_ms + probe_cooldown_hours * 3600 * 1000
+                    meta = {
+                        "target_w": float(probe_target_w),
+                        "market_impulse_probe": True,
+                        "market_impulse_probe_target_w": float(probe_target_w),
+                        "market_impulse_probe_trend_buy_count": int(
+                            market_impulse_probe_context.get("trend_buy_count") or 0
+                        ),
+                        "market_impulse_probe_btc_trend_score": market_impulse_probe_context.get("btc_trend_score"),
+                        "market_impulse_probe_bypassed_negative_expectancy_reason": bypass_reason,
+                        "market_impulse_probe_cooldown_until_ms": int(cooldown_until_ms),
+                        "market_impulse_probe_cooldown_hours": int(probe_cooldown_hours),
+                        "market_impulse_probe_time_stop_hours": int(probe_time_stop_hours),
+                        "reason": "market_impulse_probe",
+                    }
+                    rebalance_orders.append(
+                        Order(
+                            symbol=sym,
+                            side="buy",
+                            intent="OPEN_LONG",
+                            notional_usdt=float(probe_notional),
+                            signal_price=px,
+                            meta=meta,
+                        )
+                    )
+                    selected_probe_symbols += 1
+                    cash_remaining -= float(probe_notional)
+                    if audit:
+                        audit.counts["market_impulse_probe_open_count"] = int(
+                            audit.counts.get("market_impulse_probe_open_count", 0) or 0
+                        ) + 1
+                        audit.add_note(
+                            "Market impulse probe open: "
+                            f"symbol={sym} trend_buy_count={int(market_impulse_probe_context.get('trend_buy_count') or 0)} "
+                            f"btc_trend_score={market_impulse_probe_context.get('btc_trend_score')} "
+                            f"target_w={probe_target_w:.4f} bypassed_negative_expectancy_reason={bypass_reason or ''} "
+                            f"cooldown_until={cooldown_until_ms}"
+                        )
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "create",
+                                "reason": "market_impulse_probe",
+                                "side": "buy",
+                                "intent": "OPEN_LONG",
+                                "notional": float(probe_notional),
+                                "cash_after": cash_remaining,
+                                "market_impulse_probe": True,
+                                "trend_buy_count": int(market_impulse_probe_context.get("trend_buy_count") or 0),
+                                "btc_trend_score": market_impulse_probe_context.get("btc_trend_score"),
+                                "selected_symbol": sym,
+                                "bypassed_negative_expectancy_reason": bypass_reason,
+                                "target_w": float(probe_target_w),
+                                "cooldown_until": int(cooldown_until_ms),
+                                "trend_score": trend_score,
+                            }
+                        )
 
         if pending_zero_target_close_candidates:
             replacement_candidate_symbols = set(replacement_open_candidates or set())

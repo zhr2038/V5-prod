@@ -1167,6 +1167,8 @@ class LiveExecutionEngine:
             payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
             req_store = dict(payload)
             req_store["_v5_reason"] = str(((o.meta or {}).get("reason")) or "")
+            if o.meta:
+                req_store["_v5_order_meta"] = dict(o.meta)
             if tob:
                 req_store["_meta"] = {"mid_px_at_submit": tob.get("mid"), "bid": tob.get("bid"), "ask": tob.get("ask"), "ts_ms": tob.get("ts_ms")}
         except ValueError as e:

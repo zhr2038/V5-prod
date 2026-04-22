@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -169,6 +170,63 @@ class FillReconciler:
         except Exception:
             pass
 
+    def _record_market_impulse_probe_fill(self, row, agg: FillAgg) -> None:
+        side = str(getattr(row, "side", "") or "").lower()
+        if side != "buy":
+            return
+        try:
+            raw = getattr(row, "req_json", None)
+            if not raw:
+                return
+            obj = json.loads(raw)
+            if not isinstance(obj, dict):
+                return
+            order_meta = obj.get("_v5_order_meta")
+            if not isinstance(order_meta, dict):
+                return
+            if not bool(order_meta.get("market_impulse_probe")):
+                return
+
+            symbol = str(getattr(row, "inst_id", "") or "").replace("-", "/")
+            if not symbol:
+                return
+
+            order_store_path = str(getattr(self.order_store, "path", "reports/orders.sqlite"))
+            state_path = derive_runtime_named_json_path(order_store_path, "market_impulse_probe_state")
+            state: Dict[str, Any] = {}
+            if state_path.exists():
+                try:
+                    loaded = json.loads(state_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        state = loaded
+                except Exception:
+                    state = {}
+
+            entry_ts_ms = int(getattr(agg, "max_ts_ms", 0) or 0)
+            cooldown_until_ms = int(order_meta.get("market_impulse_probe_cooldown_until_ms") or 0)
+            if cooldown_until_ms <= 0:
+                cooldown_hours = int(order_meta.get("market_impulse_probe_cooldown_hours") or 0)
+                cooldown_until_ms = entry_ts_ms + cooldown_hours * 3600 * 1000
+            payload = {
+                "symbol": symbol,
+                "entry_ts_ms": entry_ts_ms,
+                "entry_ts": datetime.fromtimestamp(entry_ts_ms / 1000.0, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+                "cooldown_until_ms": cooldown_until_ms,
+                "cooldown_until": datetime.fromtimestamp(cooldown_until_ms / 1000.0, tz=timezone.utc).isoformat().replace("+00:00", "Z") if cooldown_until_ms > 0 else None,
+                "time_stop_hours": int(order_meta.get("market_impulse_probe_time_stop_hours") or 0),
+                "target_w": float(order_meta.get("market_impulse_probe_target_w") or 0.0),
+                "trend_buy_count": int(order_meta.get("market_impulse_probe_trend_buy_count") or 0),
+                "btc_trend_score": order_meta.get("market_impulse_probe_btc_trend_score"),
+                "bypassed_negative_expectancy_reason": order_meta.get("market_impulse_probe_bypassed_negative_expectancy_reason"),
+                "source_cl_ord_id": str(getattr(row, "cl_ord_id", "") or ""),
+            }
+            state[symbol] = payload
+            tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+            tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(state_path)
+        except Exception:
+            pass
+
     def _load_unprocessed_fills(self, limit: int = 2000) -> List[Dict[str, Any]]:
         return self.fill_store.list_unprocessed(limit=limit)
 
@@ -303,6 +361,7 @@ class FillReconciler:
             if row_state_before != "FILLED":
                 self._apply_position_delta(row, a)
             self._record_reentry_cooldowns(row, total)
+            self._record_market_impulse_probe_fill(row, total)
             updated += 1
 
             # Confirm terminal state via get_order when possible

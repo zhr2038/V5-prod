@@ -702,6 +702,80 @@ class ExecutionConfig(BaseModel):
         le=10.0,
         description="Minimum held symbol score required to keep the current holding when replacement entries are all blocked",
     )
+    market_impulse_probe_enabled: bool = Field(
+        default=True,
+        description="Enable small beta probe entries during broad market impulse conditions",
+    )
+    market_impulse_probe_only_in_protect: bool = Field(
+        default=True,
+        description="Restrict market impulse probe entries to PROTECT risk level",
+    )
+    market_impulse_probe_min_trend_buy_count: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description="Minimum number of whitelist symbols with TrendFollowing buy required to activate market impulse probe",
+    )
+    market_impulse_probe_require_btc_trend_buy: bool = Field(
+        default=True,
+        description="Require BTC TrendFollowing buy confirmation before allowing market impulse probe",
+    )
+    market_impulse_probe_min_btc_trend_score: float = Field(
+        default=0.60,
+        ge=-10.0,
+        le=10.0,
+        description="Minimum BTC TrendFollowing score required for market impulse probe",
+    )
+    market_impulse_probe_min_symbol_trend_score: float = Field(
+        default=0.60,
+        ge=-10.0,
+        le=10.0,
+        description="Minimum per-symbol TrendFollowing score required for market impulse probe candidates",
+    )
+    market_impulse_probe_max_symbols: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description="Maximum number of simultaneous market impulse probe symbols",
+    )
+    market_impulse_probe_target_w: float = Field(
+        default=0.06,
+        ge=0.0,
+        le=1.0,
+        description="Target portfolio weight for a market impulse probe entry",
+    )
+    market_impulse_probe_cooldown_hours: int = Field(
+        default=8,
+        ge=0,
+        le=72,
+        description="Cooldown after a filled market impulse probe before another probe is allowed",
+    )
+    market_impulse_probe_allow_single_fast_fail_bypass: bool = Field(
+        default=True,
+        description="Allow market impulse probe to bypass a single fast-fail negative expectancy block",
+    )
+    market_impulse_probe_max_fast_fail_cycles_to_bypass: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description="Maximum fast-fail closed cycles that can be bypassed by market impulse probe",
+    )
+    market_impulse_probe_disallow_active_cooldown: bool = Field(
+        default=True,
+        description="Do not allow market impulse probe when a symbol has an active cooldown block",
+    )
+    market_impulse_probe_time_stop_hours: int = Field(
+        default=4,
+        ge=1,
+        le=48,
+        description="Maximum hold time for a market impulse probe before time-stop exit is evaluated",
+    )
+    market_impulse_probe_min_net_expectancy_bps_to_bypass: float = Field(
+        default=-80.0,
+        ge=-10000.0,
+        le=10000.0,
+        description="Minimum net expectancy required to bypass a single fast-fail block during market impulse probe",
+    )
 
     # Require fused strategy signal file for buy decisions. If missing, block buy orders.
     require_fused_signals_for_buy: bool = Field(default=False)

@@ -85,6 +85,7 @@ class PositionStore:
             derive_runtime_named_json_path(order_store_path, "stop_loss_state"),
             derive_runtime_named_json_path(order_store_path, "fixed_stop_loss_state"),
             derive_runtime_named_json_path(order_store_path, "profit_taking_state"),
+            derive_runtime_named_json_path(order_store_path, "market_impulse_probe_state"),
             self._highest_tracker_state_path(),
         ]
 
