@@ -316,3 +316,33 @@ def test_get_latest_run_data_prefers_run_id_epoch_when_file_mtime_is_misleading(
 
     assert data is not None
     assert data["run_id"] == "20260408_02"
+
+
+def test_get_latest_run_data_limits_audit_file_reads_before_parsing(tmp_path: Path, monkeypatch) -> None:
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    for hour in range(20):
+        run_dir = runs_dir / f"20260408_{hour:02d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps({"run_id": f"20260408_{hour:02d}"}),
+            encoding="utf-8",
+        )
+
+    original_loads = status_report.json.loads
+    reads = {"decision_audit": 0}
+
+    def counting_loads(text: str, *args, **kwargs):
+        reads["decision_audit"] += 1
+        return original_loads(text, *args, **kwargs)
+
+    monkeypatch.setattr(status_report.json, "loads", counting_loads)
+
+    cfg = {"execution": {"order_store_path": str((reports_dir / "orders.sqlite").resolve())}}
+    data = status_report.get_latest_run_data(cfg)
+
+    assert data is not None
+    assert data["run_id"] == "20260408_19"
+    assert reads["decision_audit"] <= 2
