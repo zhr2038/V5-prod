@@ -5200,10 +5200,14 @@ def api_reflection_reports():
             except Exception:
                 continue
 
+        latest_update = ''
+        if report_files:
+            latest_update = datetime.fromtimestamp(_reflection_report_sort_epoch(report_files[0])).strftime('%Y-%m-%d %H:%M:%S')
+
         return jsonify({
             'reports': reports,
             'total_reports': len(report_files),
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': latest_update,
         })
     except Exception as exc:
         return _json_internal_error_response(

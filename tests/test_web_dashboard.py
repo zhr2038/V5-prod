@@ -4456,6 +4456,7 @@ def test_api_reflection_reports_uses_active_runtime_reflection_dir(monkeypatch, 
     assert payload["reports"][0]["trade_count"] == 2
     assert payload["reports"][0]["high_priority"] == 0
     assert payload["reports"][0]["medium_priority"] == 1
+    assert payload["last_update"] == "2026-04-08 02:00:00"
 
 
 def test_api_reflection_reports_uses_prefixed_runtime_reflection_dir(monkeypatch, tmp_path):
@@ -4494,6 +4495,7 @@ def test_api_reflection_reports_uses_prefixed_runtime_reflection_dir(monkeypatch
     assert payload["reports"][0]["filename"] == "reflection_20260408_020000.json"
     assert payload["reports"][0]["total_pnl"] == 8.76
     assert payload["reports"][0]["trade_count"] == 3
+    assert payload["last_update"] == "2026-04-08 02:00:00"
 
 
 def test_api_reflection_reports_uses_suffixed_runtime_reflection_dir(monkeypatch, tmp_path):
@@ -4532,6 +4534,7 @@ def test_api_reflection_reports_uses_suffixed_runtime_reflection_dir(monkeypatch
     assert payload["reports"][0]["filename"] == "reflection_20260408_020000.json"
     assert payload["reports"][0]["total_pnl"] == 6.54
     assert payload["reports"][0]["trade_count"] == 4
+    assert payload["last_update"] == "2026-04-08 02:00:00"
 
 
 def test_api_reflection_reports_ignores_non_dated_name_precedence(monkeypatch, tmp_path):
@@ -4566,6 +4569,7 @@ def test_api_reflection_reports_ignores_non_dated_name_precedence(monkeypatch, t
     payload = response.get_json()
     assert payload["reports"][0]["filename"] == "reflection_20260408_020000.json"
     assert payload["reports"][0]["total_pnl"] == 6.54
+    assert payload["last_update"] == "2026-04-08 02:00:00"
 
 
 def test_reflection_reports_error_response_hides_internal_paths(monkeypatch):
