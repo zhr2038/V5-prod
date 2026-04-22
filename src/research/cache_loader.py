@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
@@ -23,9 +24,31 @@ def _cache_timeframe_token(timeframe: str) -> str:
     return f"{amount}{token}"
 
 
+def _cache_file_epoch(path: Path, *, prefix: str) -> float:
+    suffix = path.stem[len(prefix):] if path.stem.startswith(prefix) else path.stem
+
+    hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
+    if hourly_match:
+        try:
+            return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+        except Exception:
+            pass
+
+    date_tokens = re.findall(r"(20\d{2}-\d{2}-\d{2}|20\d{6})", suffix)
+    if date_tokens:
+        token = date_tokens[-1]
+        try:
+            fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
+            return datetime.strptime(token, fmt).timestamp()
+        except Exception:
+            pass
+
+    return path.stat().st_mtime
+
+
 def _load_symbol_cache_frame(cache_dir: Path, symbol: str, timeframe: str) -> pd.DataFrame:
     prefix = f"{str(symbol).replace('/', '_')}_{_cache_timeframe_token(timeframe)}_"
-    paths = sorted(cache_dir.glob(f"{prefix}*.csv"))
+    paths = sorted(cache_dir.glob(f"{prefix}*.csv"), key=lambda path: _cache_file_epoch(path, prefix=prefix))
     if not paths:
         raise FileNotFoundError(f"no cache files found for {symbol} in {cache_dir}")
 

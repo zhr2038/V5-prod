@@ -48,6 +48,37 @@ def test_load_cached_market_data_aligns_symbols_and_applies_limit(tmp_path) -> N
     assert summary["time_range"]["start_iso"] == "2026-01-01T02:00:00+00:00"
 
 
+def test_load_cached_market_data_prefers_logically_newer_cache_file_for_duplicate_timestamp(tmp_path) -> None:
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True)
+
+    # Lexicographically, the daily file sorts after the range file, but the range file is logically newer.
+    (cache_dir / "BTC_USDT_1H_20260101.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume,symbol",
+                "2026-01-01 00:00:00,100,101,99,100,10,BTC/USDT",
+                "2026-01-01 01:00:00,101,102,100,101,11,BTC/USDT",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (cache_dir / "BTC_USDT_1H_2026-01-01_2026-01-02.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume,symbol",
+                "2026-01-01 01:00:00,101,102,100,999,11,BTC/USDT",
+                "2026-01-01 02:00:00,102,103,101,103,12,BTC/USDT",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    market_data = load_cached_market_data(cache_dir, ["BTC/USDT"], "1h")
+
+    assert market_data["BTC/USDT"].close == [100.0, 999.0, 103.0]
+
+
 def test_run_walk_forward_task_supports_cache_provider(monkeypatch, tmp_path) -> None:
     project_root = tmp_path
     cache_dir = project_root / "data" / "cache"
