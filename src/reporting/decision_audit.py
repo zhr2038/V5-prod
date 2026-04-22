@@ -59,6 +59,8 @@ class DecisionAudit:
         "negative_expectancy_cooldown": 0,
         "negative_expectancy_open_block": 0,
         "negative_expectancy_fast_fail_open_block": 0,
+        "negative_expectancy_fast_fail_softened_count": 0,
+        "negative_expectancy_fast_fail_hard_block_count": 0,
     })
     
     # 详细数据

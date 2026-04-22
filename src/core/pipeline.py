@@ -765,9 +765,10 @@ class V5Pipeline:
         strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
         current_auto_risk_level: Optional[str],
         regime_state_str: str,
+        require_feature_enabled: bool = True,
     ) -> Dict[str, Any]:
         enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
-        if not enabled:
+        if require_feature_enabled and not enabled:
             return {"active": False, "trend_buy_count": 0, "btc_trend_score": None, "candidates": []}
 
         if bool(getattr(self.cfg.execution, "market_impulse_probe_only_in_protect", True)):
@@ -832,6 +833,59 @@ class V5Pipeline:
             "trend_buy_count": len(trend_buy_candidates),
             "btc_trend_score": btc_trend_score,
             "candidates": trend_buy_candidates,
+        }
+
+    def _should_soften_fast_fail_with_market_impulse(
+        self,
+        *,
+        symbol: str,
+        stat: Dict[str, Any],
+        strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
+        current_auto_risk_level: Optional[str],
+        regime_state_str: str,
+    ) -> tuple[bool, Dict[str, Any]]:
+        if not bool(getattr(self.cfg.execution, "negative_expectancy_fast_fail_market_aware", True)):
+            return False, {}
+        if not bool(getattr(self.cfg.execution, "negative_expectancy_fast_fail_bypass_when_market_impulse", True)):
+            return False, {}
+        if str(current_auto_risk_level or "").upper() != "PROTECT":
+            return False, {}
+        if str(regime_state_str or "") in {"Risk-Off", "Risk_Off", "RiskOff"}:
+            return False, {}
+        if self.negative_expectancy_cooldown.is_blocked(symbol):
+            return False, {}
+
+        closed_cycles = int((stat or {}).get("closed_cycles") or 0)
+        if closed_cycles >= 2:
+            return False, {}
+
+        ff_cycles = int((stat or {}).get("fast_fail_closed_cycles") or 0)
+        max_cycles = int(getattr(self.cfg.execution, "negative_expectancy_fast_fail_bypass_max_cycles", 1) or 1)
+        if ff_cycles <= 0 or ff_cycles > max_cycles:
+            return False, {}
+
+        net_expectancy_bps = self._negative_expectancy_bps(stat or {})
+        min_net_bps = float(
+            getattr(self.cfg.execution, "negative_expectancy_fast_fail_bypass_min_net_bps", -80.0) or -80.0
+        )
+        if net_expectancy_bps < min_net_bps:
+            return False, {}
+
+        impulse = self._market_impulse_probe_context(
+            strategy_signal_lookup=strategy_signal_lookup,
+            current_auto_risk_level=current_auto_risk_level,
+            regime_state_str=regime_state_str,
+            require_feature_enabled=False,
+        )
+        candidate_symbols = {str(item.get("symbol") or "") for item in (impulse.get("candidates") or [])}
+        if not bool(impulse.get("active")) or str(symbol) not in candidate_symbols:
+            return False, impulse
+
+        return True, {
+            "trend_buy_count": int(impulse.get("trend_buy_count") or 0),
+            "btc_trend_score": impulse.get("btc_trend_score"),
+            "net_expectancy_bps": float(net_expectancy_bps),
+            "fast_fail_closed_cycles": int(ff_cycles),
         }
 
     def _market_impulse_probe_negexp_gate(
@@ -1315,6 +1369,8 @@ class V5Pipeline:
         neg_cd_state: Dict[str, Any],
         *,
         positions: List[Position],
+        current_auto_risk_level: Optional[str] = None,
+        regime_state_str: Optional[str] = None,
         audit: Optional[DecisionAudit] = None,
     ) -> AlphaSnapshot:
         if not getattr(alpha, 'scores', None):
@@ -1330,6 +1386,10 @@ class V5Pipeline:
             for p in (positions or [])
             if float(getattr(p, 'qty', 0.0) or 0.0) > 0.0
         }
+        if current_auto_risk_level is None:
+            current_auto_risk_level = self._load_current_auto_risk_level()
+        regime_state = str(regime_state_str or (audit.regime if audit is not None else "") or "")
+        strategy_signal_lookup = self._resolve_strategy_signal_lookup(audit)
         adjusted_scores = dict(alpha.scores or {})
         if not adjusted_scores:
             return alpha
@@ -1379,10 +1439,32 @@ class V5Pipeline:
             if reason is None:
                 continue
 
+            if reason == "negative_expectancy_fast_fail_open_block":
+                soften, soften_ctx = self._should_soften_fast_fail_with_market_impulse(
+                    symbol=sym,
+                    stat=stat or {},
+                    strategy_signal_lookup=strategy_signal_lookup,
+                    current_auto_risk_level=current_auto_risk_level,
+                    regime_state_str=regime_state,
+                )
+                if soften:
+                    if audit:
+                        audit.record_count("negative_expectancy_fast_fail_softened_count", symbol=sym)
+                        audit.add_note(
+                            "negative_expectancy_fast_fail_softened_by_market_impulse: "
+                            f"{sym} trend_buy_count={int(soften_ctx.get('trend_buy_count') or 0)} "
+                            f"btc_trend_score={soften_ctx.get('btc_trend_score')} "
+                            f"fast_fail_closed_cycles={int(soften_ctx.get('fast_fail_closed_cycles') or 0)} "
+                            f"net_expectancy_bps={float(soften_ctx.get('net_expectancy_bps') or 0.0):.2f}"
+                        )
+                    continue
+
             demoted_score = min(float(raw_score) - 1.0, base_min_score - 0.05 - demote_index * 0.001)
             adjusted_scores[sym] = demoted_score
             demote_index += 1
             demoted.append((sym, float(raw_score), float(demoted_score), reason))
+            if reason == "negative_expectancy_fast_fail_open_block" and audit:
+                audit.record_count("negative_expectancy_fast_fail_hard_block_count", symbol=sym)
 
             raw_bucket = alpha.raw_factors.setdefault(sym, {})
             raw_bucket["negative_expectancy_rank_guard_reason"] = reason
@@ -2095,7 +2177,14 @@ class V5Pipeline:
             managed_symbols=list(alpha.scores.keys()),
         ) if neg_feedback_enabled else {}
         alpha = self._apply_negative_expectancy_score_penalty(alpha, neg_cd_state, audit=audit)
-        alpha = self._apply_negative_expectancy_rank_guard(alpha, neg_cd_state, positions=positions, audit=audit)
+        alpha = self._apply_negative_expectancy_rank_guard(
+            alpha,
+            neg_cd_state,
+            positions=positions,
+            current_auto_risk_level=self._load_current_auto_risk_level(),
+            regime_state_str=str(regime.state.value if hasattr(regime.state, "value") else regime.state),
+            audit=audit,
+        )
         
         # 3) 短线交易增强：Risk-Off 机会覆盖 (已禁用 - HMM标签已修复)
         # 当Alpha评分很高时，覆盖Risk-Off状态，允许短线交易
@@ -3369,28 +3458,49 @@ class V5Pipeline:
                 ff_expectancy_bps = self._negative_expectancy_bps(neg_stats or {}, fast_fail=True)
                 ff_avg_hold_minutes = float((neg_stats or {}).get("fast_fail_avg_hold_minutes") or 0.0)
                 if ff_closed_cycles >= ff_min_cycles and ff_expectancy_bps < ff_floor_bps:
-                    if intent == "OPEN_LONG":
-                        self._record_replacement_block(
-                            audit=audit,
-                            blocked_replacement_reasons=blocked_replacement_reasons,
-                            symbol=sym,
-                            reason="negative_expectancy_fast_fail_open_block",
-                        )
-                    if audit:
-                        audit.record_gate("negative_expectancy_fast_fail_open_block", symbol=sym)
-                        router_decisions.append(
-                            {
-                                "symbol": sym,
-                                "action": "skip",
-                                "reason": "negative_expectancy_fast_fail_open_block",
-                                "fast_fail_expectancy_bps": ff_expectancy_bps,
-                                "fast_fail_closed_cycles": ff_closed_cycles,
-                                "fast_fail_avg_hold_minutes": ff_avg_hold_minutes,
-                                "fast_fail_max_hold_minutes": ff_hold_minutes,
-                                "required_expectancy_bps": ff_floor_bps,
-                            }
-                        )
-                    continue
+                    soften_fast_fail, soften_ctx = self._should_soften_fast_fail_with_market_impulse(
+                        symbol=sym,
+                        stat=neg_stats or {},
+                        strategy_signal_lookup=strategy_signal_lookup,
+                        current_auto_risk_level=current_auto_risk_level,
+                        regime_state_str=regime_state_str,
+                    )
+                    if soften_fast_fail:
+                        if audit:
+                            audit.record_count("negative_expectancy_fast_fail_softened_count", symbol=sym)
+                            audit.add_note(
+                                "negative_expectancy_fast_fail_softened_by_market_impulse: "
+                                f"{sym} trend_buy_count={int(soften_ctx.get('trend_buy_count') or 0)} "
+                                f"btc_trend_score={soften_ctx.get('btc_trend_score')} "
+                                f"fast_fail_closed_cycles={int(soften_ctx.get('fast_fail_closed_cycles') or 0)} "
+                                f"net_expectancy_bps={float(soften_ctx.get('net_expectancy_bps') or 0.0):.2f}"
+                            )
+                        # keep score penalty path only; do not hard-block OPEN_LONG
+                        pass
+                    else:
+                        if intent == "OPEN_LONG":
+                            self._record_replacement_block(
+                                audit=audit,
+                                blocked_replacement_reasons=blocked_replacement_reasons,
+                                symbol=sym,
+                                reason="negative_expectancy_fast_fail_open_block",
+                            )
+                        if audit:
+                            audit.record_gate("negative_expectancy_fast_fail_open_block", symbol=sym)
+                            audit.record_count("negative_expectancy_fast_fail_hard_block_count", symbol=sym)
+                            router_decisions.append(
+                                {
+                                    "symbol": sym,
+                                    "action": "skip",
+                                    "reason": "negative_expectancy_fast_fail_open_block",
+                                    "fast_fail_expectancy_bps": ff_expectancy_bps,
+                                    "fast_fail_closed_cycles": ff_closed_cycles,
+                                    "fast_fail_avg_hold_minutes": ff_avg_hold_minutes,
+                                    "fast_fail_max_hold_minutes": ff_hold_minutes,
+                                    "required_expectancy_bps": ff_floor_bps,
+                                }
+                            )
+                        continue
             
             # Require fused signals for buys (no alpha-fallback buys).
             if side == "buy" and require_fused_buy:

@@ -336,6 +336,10 @@ execution:
   market_impulse_probe_disallow_active_cooldown: true
   market_impulse_probe_time_stop_hours: 4
   market_impulse_probe_min_net_expectancy_bps_to_bypass: -80
+  negative_expectancy_fast_fail_market_aware: true
+  negative_expectancy_fast_fail_bypass_when_market_impulse: true
+  negative_expectancy_fast_fail_bypass_max_cycles: 1
+  negative_expectancy_fast_fail_bypass_min_net_bps: -80
 
   # 当部分减仓触发 minSz dust 时，自动升级为整仓卖出（若整仓可交易）
   auto_upgrade_dust_sell_to_close: true

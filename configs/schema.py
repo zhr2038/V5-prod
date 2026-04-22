@@ -776,6 +776,26 @@ class ExecutionConfig(BaseModel):
         le=10000.0,
         description="Minimum net expectancy required to bypass a single fast-fail block during market impulse probe",
     )
+    negative_expectancy_fast_fail_market_aware: bool = Field(
+        default=True,
+        description="Enable market-impulse-aware softening for single fast-fail negative expectancy blocks",
+    )
+    negative_expectancy_fast_fail_bypass_when_market_impulse: bool = Field(
+        default=True,
+        description="When market impulse is active, allow a single fast-fail hard block to degrade into penalty-only behavior",
+    )
+    negative_expectancy_fast_fail_bypass_max_cycles: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description="Maximum fast-fail closed cycles eligible for market-impulse softening",
+    )
+    negative_expectancy_fast_fail_bypass_min_net_bps: float = Field(
+        default=-80.0,
+        ge=-10000.0,
+        le=10000.0,
+        description="Minimum net expectancy bps required to soften fast-fail hard blocks during market impulse",
+    )
 
     # Require fused strategy signal file for buy decisions. If missing, block buy orders.
     require_fused_signals_for_buy: bool = Field(default=False)
