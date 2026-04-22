@@ -6708,6 +6708,7 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_cooldown"] == 1
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_open_block"] == 2
     assert payload["rounds"][0]["execution_result"]["negative_expectancy_fast_fail_open_block"] == 3
+    assert payload["last_update"] == datetime.fromtimestamp(1_710_000_600).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def test_decision_chain_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
@@ -6769,6 +6770,7 @@ def test_decision_chain_scan_limit_prefers_sorted_epoch_over_file_mtime(monkeypa
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["rounds"][0]["run_id"] == "20260408_02"
+    assert payload["last_update"] == datetime.strptime("20260408_02", "%Y%m%d_%H").strftime("%Y-%m-%d %H:%M:%S")
 
 
 def test_decision_chain_prefers_sorted_epoch_over_file_mtime_without_scan_limit(monkeypatch, tmp_path):

@@ -5242,6 +5242,7 @@ def api_decision_chain():
         run_dirs = [entry['run_dir'] for entry in audit_entries]
         if not run_dirs:
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
+        latest_update_epoch = float(audit_entries[0].get('sort_epoch', 0.0) or 0.0) if audit_entries else 0.0
 
         rounds = []
         for run_dir in run_dirs[:5]:
@@ -5372,7 +5373,7 @@ def api_decision_chain():
 
         return jsonify({
             'rounds': rounds,
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': datetime.fromtimestamp(latest_update_epoch).strftime('%Y-%m-%d %H:%M:%S') if latest_update_epoch > 0 else ''
         })
     except Exception as exc:
         return _json_internal_error_response(exc, rounds=[], last_update='')
