@@ -5588,10 +5588,13 @@ def api_shadow_test():
         try:
             gate_path = derive_runtime_named_artifact_path(runtime_paths.orders_db, 'ab_gate_status', '.json')
             if gate_path.exists():
-                ab_gate_age_sec = max(0, int(datetime.now().timestamp() - gate_path.stat().st_mtime))
-                ab_gate_status = 'stale' if ab_gate_age_sec > 1800 else 'fresh'
                 with open(gate_path, 'r', encoding='utf-8') as f:
                     ab_gate = json.load(f)
+                gate_epoch = _coerce_timestamp_epoch((ab_gate or {}).get('ts')) if isinstance(ab_gate, dict) else None
+                if gate_epoch is None:
+                    gate_epoch = gate_path.stat().st_mtime
+                ab_gate_age_sec = max(0, int(datetime.now().timestamp() - gate_epoch))
+                ab_gate_status = 'stale' if ab_gate_age_sec > 1800 else 'fresh'
         except Exception:
             ab_gate = None
 

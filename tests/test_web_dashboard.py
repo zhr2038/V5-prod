@@ -7148,6 +7148,58 @@ def test_api_shadow_test_does_not_refresh_stale_ab_gate_in_request(monkeypatch, 
     assert payload["ab_gate_age_sec"] > 1800
 
 
+def test_api_shadow_test_prefers_ab_gate_ts_over_file_mtime_for_freshness(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_run = runtime_dir / "runs" / "20260408_01"
+    runtime_run.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (runtime_run / "decision_audit.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260408_01",
+                "counts": {"selected": 10, "orders_rebalance": 2, "orders_exit": 1},
+                "router_decisions": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    gate_path = runtime_dir / "ab_gate_status.json"
+    gate_path.write_text(
+        json.dumps(
+            {
+                "ts": "2026-04-08T10:00:00Z",
+                "window_runs": 1,
+                "decision": {"switch_recommended": False},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(gate_path, (1_999_999_999, 1_999_999_999))
+
+    response = client.get("/api/shadow_test")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ab_gate"]["window_runs"] == 1
+    assert payload["ab_gate_status"] == "stale"
+    assert payload["ab_gate_age_sec"] > 1800
+
+
 def test_api_shadow_test_uses_prefixed_runtime_ab_gate_file(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
