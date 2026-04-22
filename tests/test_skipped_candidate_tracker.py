@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import datetime
 from pathlib import Path
 
 from configs.schema import AppConfig
@@ -203,3 +204,40 @@ def test_tracker_disabled_writes_no_files(tmp_path: Path) -> None:
 
     assert result["enabled"] is False
     assert not (tmp_path / "reports" / "skipped_candidate_labels.jsonl").exists()
+
+
+def test_load_cache_ohlcv_prefers_logically_newer_file_for_duplicate_timestamp(tmp_path: Path) -> None:
+    from src.reporting.skipped_candidate_tracker import _load_cache_ohlcv
+
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    (cache_dir / "BTC_USDT_1H_20260101.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume",
+                "2026-01-01T00:00:00Z,100,100,100,100,1000",
+                "2026-01-01T01:00:00Z,101,101,101,101,1000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (cache_dir / "BTC_USDT_1H_2026-01-01_2026-01-02.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume",
+                "2026-01-01T01:00:00Z,999,999,999,999,1000",
+                "2026-01-01T02:00:00Z,103,103,103,103,1000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    series = _load_cache_ohlcv(cache_dir, "BTC/USDT")
+
+    assert [row["timestamp_ms"] for row in series] == [
+        int(datetime.fromisoformat("2026-01-01T00:00:00+00:00").timestamp() * 1000),
+        int(datetime.fromisoformat("2026-01-01T01:00:00+00:00").timestamp() * 1000),
+        int(datetime.fromisoformat("2026-01-01T02:00:00+00:00").timestamp() * 1000),
+    ]
+    assert [row["close"] for row in series] == [100.0, 999.0, 103.0]

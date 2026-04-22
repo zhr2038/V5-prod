@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,10 +56,32 @@ def _summaries_dir(reports_dir: Path) -> Path:
     return reports_dir / "summaries"
 
 
+def _cache_file_epoch(path: Path, *, prefix: str) -> float:
+    suffix = path.stem[len(prefix):] if path.stem.startswith(prefix) else path.stem
+
+    hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
+    if hourly_match:
+        try:
+            return datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+        except Exception:
+            pass
+
+    date_tokens = re.findall(r"(20\d{2}-\d{2}-\d{2}|20\d{6})", suffix)
+    if date_tokens:
+        token = date_tokens[-1]
+        try:
+            fmt = "%Y-%m-%d" if "-" in token else "%Y%m%d"
+            return datetime.strptime(token, fmt).timestamp()
+        except Exception:
+            pass
+
+    return path.stat().st_mtime
+
+
 def _load_cache_ohlcv(cache_dir: Path, symbol: str) -> list[dict[str, float | int]]:
     prefix = str(symbol or "").replace("/", "_").replace("-", "_").strip()
     rows: dict[int, dict[str, float | int]] = {}
-    for path in sorted(cache_dir.glob(f"{prefix}_1H_*.csv")):
+    for path in sorted(cache_dir.glob(f"{prefix}_1H_*.csv"), key=lambda path: _cache_file_epoch(path, prefix=f"{prefix}_1H_")):
         try:
             with path.open("r", encoding="utf-8") as handle:
                 reader = csv.DictReader(handle)
