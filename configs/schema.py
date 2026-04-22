@@ -967,6 +967,40 @@ class BudgetConfig(BaseModel):
     small_trade_median_threshold_equity_ratio: float = Field(default=0.0025, ge=0, le=1)
 
 
+class DiagnosticsConfig(BaseModel):
+    skipped_candidate_label_enabled: bool = Field(
+        default=True,
+        description="Enable read-only skipped candidate outcome tracking and follow-up summaries",
+    )
+    skipped_candidate_horizons_hours: List[int] = Field(
+        default_factory=lambda: [4, 8, 12, 24],
+        description="Forward-label horizons (hours) for skipped candidate outcome tracking",
+    )
+    skipped_candidate_roundtrip_cost_bps: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=10000.0,
+        description="Round-trip cost used when labeling skipped candidate outcomes",
+    )
+
+    @field_validator("skipped_candidate_horizons_hours")
+    @classmethod
+    def _validate_skipped_candidate_horizons_hours(cls, v: List[int]) -> List[int]:
+        out: List[int] = []
+        seen = set()
+        for raw in v or []:
+            value = int(raw)
+            if value <= 0:
+                raise ValueError("skipped_candidate_horizons_hours entries must be positive")
+            if value in seen:
+                continue
+            seen.add(value)
+            out.append(value)
+        if not out:
+            raise ValueError("skipped_candidate_horizons_hours cannot be empty")
+        return out
+
+
 class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
     timeframe_main: str = "1h"
@@ -980,6 +1014,7 @@ class AppConfig(BaseModel):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
 
     @field_validator("symbols")
     @classmethod

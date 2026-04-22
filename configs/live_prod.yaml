@@ -210,6 +210,11 @@ rebalance:
   close_only_deadband_multiplier: 0.25
   close_only_weight_eps: 0.001
 
+diagnostics:
+  skipped_candidate_label_enabled: true
+  skipped_candidate_horizons_hours: [4, 8, 12, 24]
+  skipped_candidate_roundtrip_cost_bps: 30
+
 execution:
   mode: live
   dry_run: false

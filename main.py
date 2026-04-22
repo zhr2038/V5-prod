@@ -1176,6 +1176,27 @@ def main() -> None:
     # 淇濆瓨DecisionAudit
     audit.save(str(runtime_run_dir))
 
+    # Read-only skipped-candidate outcome tracker.
+    try:
+        from src.reporting.skipped_candidate_tracker import update_skipped_candidate_tracker
+
+        tracker_result = update_skipped_candidate_tracker(
+            run_dir=str(runtime_run_dir),
+            audit=audit,
+            market_data_1h=md_1h,
+            cfg=cfg,
+            current_level=pipe._load_current_auto_risk_level(),
+            cache_dir=PROJECT_ROOT / "data" / "cache",
+        )
+        if tracker_result.get("enabled"):
+            log.info(
+                "SKIPPED_CANDIDATE_TRACKER new_records=%s total_records=%s",
+                int(tracker_result.get("new_records", 0) or 0),
+                int(tracker_result.get("total_records", 0) or 0),
+            )
+    except Exception as e:
+        log.warning(f"skipped candidate tracker failed: {e}")
+
     # Update account peak equity
     # (equity is logged inside pipeline; recompute here quickly)
     eq = float(acc.cash_usdt)
