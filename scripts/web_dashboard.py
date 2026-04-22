@@ -4164,12 +4164,22 @@ def api_market_state():
 def _load_equity_points(limit: int = 800, runtime_paths: Optional[DashboardRuntimePaths] = None):
     """从 reports/runs/*/equity.jsonl 聚合权益点（真实口径：cash+持仓市值）。"""
     runs_dir = (runtime_paths or _resolve_dashboard_runtime_paths()).runs_dir
-    points = []
     if not runs_dir.exists():
-        return points
+        return []
 
-    # Read older runs first so duplicate timestamps from newer runs override stale values.
-    run_dirs = list(reversed(_sorted_run_dirs_by_artifact_mtime(runs_dir, 'equity.jsonl')))
+    def _candidate_upper_epoch(run_dir: Path) -> Optional[float]:
+        run_epoch = _run_id_epoch(run_dir.name)
+        if run_epoch is not None:
+            return run_epoch + 3600.0
+        eq_file = run_dir / 'equity.jsonl'
+        try:
+            return eq_file.stat().st_mtime
+        except OSError:
+            return None
+
+    dedup: Dict[str, float] = {}
+    dedup_epoch: Dict[str, float] = {}
+    run_dirs = _sorted_run_dirs_by_artifact_mtime(runs_dir, 'equity.jsonl')
     for run_dir in run_dirs:
         eq_file = run_dir / 'equity.jsonl'
         try:
@@ -4184,16 +4194,23 @@ def _load_equity_points(limit: int = 800, runtime_paths: Optional[DashboardRunti
                         eq = row.get('equity')
                         if ts is None or eq is None:
                             continue
-                        points.append((str(ts), float(eq)))
+                        ts_str = str(ts)
+                        if ts_str in dedup:
+                            continue
+                        dedup[ts_str] = float(eq)
+                        ts_epoch = _coerce_timestamp_epoch(ts_str)
+                        if ts_epoch is not None:
+                            dedup_epoch[ts_str] = ts_epoch
                     except Exception:
                         continue
         except Exception:
             continue
 
-    # 去重并排序
-    dedup = {}
-    for ts, eq in points:
-        dedup[ts] = eq
+        if len(dedup) >= limit and len(dedup_epoch) >= limit:
+            candidate_upper = _candidate_upper_epoch(run_dir)
+            if candidate_upper is not None and candidate_upper <= min(dedup_epoch.values()):
+                break
+
     points = sorted(dedup.items(), key=lambda x: x[0])
     if len(points) > limit:
         points = points[-limit:]

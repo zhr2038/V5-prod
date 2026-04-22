@@ -5604,6 +5604,61 @@ def test_api_equity_history_prefers_logically_newer_run_for_duplicate_timestamp(
     assert payload == [{"timestamp": "2026-04-08T10:00:00", "value": 222.0}]
 
 
+def test_load_equity_points_limits_recent_equity_file_reads_before_parsing(tmp_path, monkeypatch):
+    module = load_web_dashboard_module()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    runtime_paths = module.DashboardRuntimePaths(
+        reports_dir=reports_dir,
+        orders_db=reports_dir / "orders.sqlite",
+        fills_db=reports_dir / "fills.sqlite",
+        positions_db=reports_dir / "positions.sqlite",
+        kill_switch_path=reports_dir / "kill_switch.json",
+        reconcile_status_path=reports_dir / "reconcile_status.json",
+        runs_dir=runs_dir,
+        auto_risk_guard_path=reports_dir / "auto_risk_guard.json",
+        auto_risk_eval_path=reports_dir / "auto_risk_eval.json",
+        telemetry_db=reports_dir / "api_telemetry.sqlite",
+    )
+
+    now = datetime.now()
+    recent_hours = {19, 18, 17, 16}
+    for hour in range(20):
+        day_offset = 0 if hour in recent_hours else 10
+        run_dt = now - timedelta(days=day_offset, hours=19 - hour)
+        run_name = run_dt.strftime("%Y%m%d_%H")
+        run_dir = runs_dir / run_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "equity.jsonl").write_text(
+            json.dumps(
+                {
+                    "ts": (run_dt + timedelta(minutes=30)).isoformat(),
+                    "equity": 100.0 + hour,
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    original_open = Path.open
+    reads = {"equity": 0}
+
+    def counting_open(self: Path, *args, **kwargs):
+        if self.name == "equity.jsonl":
+            reads["equity"] += 1
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counting_open)
+
+    points = module._load_equity_points(limit=4, runtime_paths=runtime_paths)
+
+    assert len(points) == 4
+    assert reads["equity"] <= 4
+
+
 def test_equity_history_error_response_preserves_list_shape(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
