@@ -162,9 +162,6 @@ class RiskAutoRecovery:
                         return run_dir.stat().st_mtime
 
             equity_files = []
-            legacy_equity_file = self.reports_dir / 'equity_history.jsonl'
-            if legacy_equity_file.exists():
-                equity_files.append(legacy_equity_file)
             if self.runs_dir.exists():
                 run_dirs = sorted(self.runs_dir.iterdir(), key=_candidate_sort_epoch, reverse=True)
                 for run_dir in run_dirs:
@@ -176,6 +173,9 @@ class RiskAutoRecovery:
                     if datetime.fromtimestamp(_candidate_sort_epoch(run_dir), tz=timezone.utc) <= cutoff:
                         continue
                     equity_files.append(equity_file)
+            legacy_equity_file = self.reports_dir / 'equity_history.jsonl'
+            if legacy_equity_file.exists():
+                equity_files.append(legacy_equity_file)
 
             if not equity_files:
                 return []

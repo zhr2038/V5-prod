@@ -190,6 +190,39 @@ def test_get_drawdown_history_prefers_newer_run_for_duplicate_timestamp(monkeypa
     assert points[0]["drawdown"] == 0.05
 
 
+def test_get_drawdown_history_prefers_runtime_run_over_legacy_equity_history(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path
+    now = datetime.now(timezone.utc)
+    run_name = (now - risk_auto_recovery.timedelta(hours=1)).strftime("%Y%m%d_%H")
+    runtime_runs_dir = workspace / "reports" / "shadow_runtime" / "runs" / run_name
+    runtime_runs_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        risk_auto_recovery.RiskAutoRecovery,
+        "_load_active_runtime_config",
+        lambda self: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    duplicate_ts = (now - risk_auto_recovery.timedelta(minutes=30)).isoformat().replace("+00:00", "Z")
+    (runtime_runs_dir / "equity.jsonl").write_text(
+        json.dumps({"ts": duplicate_ts, "equity": 120.0, "drawdown": 0.05}) + "\n",
+        encoding="utf-8",
+    )
+    legacy_equity = workspace / "reports" / "shadow_runtime" / "equity_history.jsonl"
+    legacy_equity.parent.mkdir(parents=True, exist_ok=True)
+    legacy_equity.write_text(
+        json.dumps({"ts": duplicate_ts, "equity": 80.0, "drawdown": 0.25}) + "\n",
+        encoding="utf-8",
+    )
+
+    manager = risk_auto_recovery.RiskAutoRecovery(workspace=workspace)
+    points = manager.get_drawdown_history(hours=24)
+
+    assert len(points) == 1
+    assert points[0]["equity"] == 120.0
+    assert points[0]["drawdown"] == 0.05
+
+
 def test_time_in_current_level_accepts_zulu_timestamp(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path
     monkeypatch.setattr(
