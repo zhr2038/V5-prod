@@ -194,12 +194,8 @@ def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
             except OSError:
                 return run_dir.stat().st_mtime
 
-    def _sort_epoch(run_dir: Path) -> float:
+    def _sort_epoch(run_dir: Path, payload: Dict[str, Any]) -> float:
         audit_path = run_dir / "decision_audit.json"
-        try:
-            payload = json.loads(audit_path.read_text(encoding="utf-8"))
-        except Exception:
-            payload = {}
 
         for key in ("timestamp", "now_ts", "window_start_ts"):
             value = payload.get(key) if isinstance(payload, dict) else None
@@ -221,9 +217,19 @@ def get_latest_run_data(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
 
     run_dirs.sort(key=_candidate_sort_epoch, reverse=True)
     run_dirs = run_dirs[:1]
-    latest_dir = max(run_dirs, key=_sort_epoch)
+    latest_entry = None
+    for run_dir in run_dirs:
+        try:
+            payload = json.loads((run_dir / "decision_audit.json").read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        latest_entry = (run_dir, payload, _sort_epoch(run_dir, payload))
+        break
+    if latest_entry is None:
+        return None
+    latest_dir, latest_payload, _ = latest_entry
     try:
-        return json.loads((latest_dir / "decision_audit.json").read_text(encoding="utf-8"))
+        return latest_payload
     except Exception:
         return None
 

@@ -345,4 +345,4 @@ def test_get_latest_run_data_limits_audit_file_reads_before_parsing(tmp_path: Pa
 
     assert data is not None
     assert data["run_id"] == "20260408_19"
-    assert reads["decision_audit"] <= 2
+    assert reads["decision_audit"] <= 1
