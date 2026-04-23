@@ -776,6 +776,22 @@ class ExecutionConfig(BaseModel):
         le=10000.0,
         description="Minimum net expectancy required to bypass a single fast-fail block during market impulse probe",
     )
+    market_impulse_probe_dynamic_sizing_enabled: bool = Field(
+        default=True,
+        description="Dynamically lift market impulse probe target weight to the minimum executable notional when feasible",
+    )
+    market_impulse_probe_min_executable_buffer: float = Field(
+        default=1.05,
+        ge=1.0,
+        le=2.0,
+        description="Safety buffer applied when converting minimum executable notional into probe target weight",
+    )
+    market_impulse_probe_max_target_w: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description="Maximum target weight allowed for dynamically sized market impulse probe entries",
+    )
     negative_expectancy_fast_fail_market_aware: bool = Field(
         default=True,
         description="Enable market-impulse-aware softening for single fast-fail negative expectancy blocks",
@@ -807,6 +823,7 @@ class ExecutionConfig(BaseModel):
     # (Optional / future) borrow prevention knobs (kept for config compatibility)
     borrow_prevention: bool = Field(default=False)
     check_fee_currency_balance: bool = Field(default=False)
+    min_trade_value_usdt: float = Field(default=0.0, ge=0.0)
     high_risk_blacklist_path: str = Field(default="configs/borrow_prevention_rules.json")
 
     # Last-arm safety env var (required for live)

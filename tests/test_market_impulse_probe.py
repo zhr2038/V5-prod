@@ -176,6 +176,10 @@ def _base_cfg(tmp_path: Path) -> AppConfig:
     cfg.execution.market_impulse_probe_target_w = 0.06
     cfg.execution.market_impulse_probe_max_symbols = 1
     cfg.execution.market_impulse_probe_time_stop_hours = 4
+    cfg.execution.market_impulse_probe_dynamic_sizing_enabled = True
+    cfg.execution.market_impulse_probe_min_executable_buffer = 1.05
+    cfg.execution.market_impulse_probe_max_target_w = 0.10
+    cfg.execution.min_trade_value_usdt = 0.0
     cfg.budget.min_trade_notional_base = 5.0
     return cfg
 
@@ -458,3 +462,102 @@ def test_market_impulse_probe_time_stop_generates_exit(tmp_path: Path) -> None:
 
     assert any((order.meta or {}).get("reason") == "market_impulse_probe_time_stop" for order in out.orders)
     assert audit.counts["market_impulse_probe_time_stop_count"] == 1
+
+
+def test_market_impulse_probe_dynamically_sizes_to_executable_notional(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.min_trade_value_usdt = 10.0
+    cfg.budget.min_trade_notional_base = 9.0
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.90, None),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-dynamic-sizing")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=106.96,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    order = out.orders[0]
+    assert order.notional_usdt > 10.0
+    assert (order.meta or {}).get("market_impulse_probe_target_w", 0.0) > 0.06
+    assert (order.meta or {}).get("market_impulse_probe_target_w", 0.0) <= 0.10
+
+
+def test_market_impulse_probe_skips_when_min_executable_target_exceeds_cap(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.min_trade_value_usdt = 10.0
+    cfg.budget.min_trade_notional_base = 9.0
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.90, None),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-unexecutable")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=90.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(d.get("reason") == "market_impulse_probe_unexecutable_notional" for d in audit.router_decisions)
+    assert audit.counts["market_impulse_probe_unexecutable_notional_count"] == 1
+
+
+def test_regular_non_probe_order_keeps_original_min_notional_behavior(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.market_impulse_probe_enabled = False
+    cfg.execution.min_trade_value_usdt = 10.0
+    cfg.budget.min_trade_notional_base = 9.0
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(
+        cfg,
+        tmp_path,
+        _strategy_payload({"BTC/USDT": ("buy", 0.90, {"side": "buy", "score": 0.60, "f4": 0.10, "f5": 0.50})}),
+    )
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 0.07},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="regular-min-notional")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(d.get("reason") == "min_notional" for d in audit.router_decisions)
+    assert not any(d.get("reason") == "market_impulse_probe_unexecutable_notional" for d in audit.router_decisions)

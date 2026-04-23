@@ -336,6 +336,9 @@ execution:
   market_impulse_probe_disallow_active_cooldown: true
   market_impulse_probe_time_stop_hours: 4
   market_impulse_probe_min_net_expectancy_bps_to_bypass: -80
+  market_impulse_probe_dynamic_sizing_enabled: true
+  market_impulse_probe_min_executable_buffer: 1.05
+  market_impulse_probe_max_target_w: 0.10
   negative_expectancy_fast_fail_market_aware: true
   negative_expectancy_fast_fail_bypass_when_market_impulse: true
   negative_expectancy_fast_fail_bypass_max_cycles: 1

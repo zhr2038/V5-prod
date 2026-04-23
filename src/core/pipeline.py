@@ -933,6 +933,58 @@ class V5Pipeline:
             return True, None, None
         return True, None, None
 
+    def _market_impulse_probe_sizing(
+        self,
+        *,
+        symbol: str,
+        px: float,
+        equity: float,
+    ) -> Dict[str, float]:
+        configured_target_w = float(getattr(self.cfg.execution, "market_impulse_probe_target_w", 0.06) or 0.0)
+        dynamic_enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_dynamic_sizing_enabled", True))
+        min_trade_value_usdt = float(getattr(self.cfg.execution, "min_trade_value_usdt", 0.0) or 0.0)
+        budget_min_notional = float(getattr(self.cfg.budget, "min_trade_notional_base", 0.0) or 0.0)
+        exchange_min_notional_with_slack = 0.0
+
+        if bool(getattr(self.cfg.budget, "exchange_min_notional_enabled", True)):
+            try:
+                from src.data.okx_instruments import OKXSpotInstrumentsCache
+
+                spec = OKXSpotInstrumentsCache().get_spec(str(symbol).replace("/", "-"))
+                if spec is not None:
+                    min_sz = float(spec.min_sz or 0.0)
+                    slack = float(getattr(self.cfg.budget, "exchange_min_notional_slack_multiplier", 1.05) or 1.05)
+                    if min_sz > 0.0 and float(px) > 0.0:
+                        exchange_min_notional_with_slack = float(min_sz) * float(px) * float(slack)
+            except Exception:
+                exchange_min_notional_with_slack = 0.0
+
+        min_executable_notional = max(
+            float(min_trade_value_usdt),
+            float(budget_min_notional),
+            float(exchange_min_notional_with_slack),
+        )
+        min_executable_buffer = float(
+            getattr(self.cfg.execution, "market_impulse_probe_min_executable_buffer", 1.05) or 1.05
+        )
+        min_executable_target_w = (
+            float(min_executable_notional) / float(equity) * float(min_executable_buffer)
+            if float(equity) > 0.0
+            else float("inf")
+        )
+        effective_probe_target_w = float(configured_target_w)
+        if dynamic_enabled:
+            effective_probe_target_w = max(float(configured_target_w), float(min_executable_target_w))
+
+        return {
+            "configured_target_w": float(configured_target_w),
+            "min_executable_notional": float(min_executable_notional),
+            "exchange_min_notional_with_slack": float(exchange_min_notional_with_slack),
+            "min_executable_target_w": float(min_executable_target_w),
+            "effective_probe_target_w": float(effective_probe_target_w),
+            "probe_notional": float(effective_probe_target_w) * float(equity),
+        }
+
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         """按市值计价更新持仓
         
@@ -3902,7 +3954,8 @@ class V5Pipeline:
             else:
                 selected_probe_symbols = 0
                 max_probe_symbols = int(getattr(self.cfg.execution, "market_impulse_probe_max_symbols", 1) or 1)
-                probe_target_w = float(getattr(self.cfg.execution, "market_impulse_probe_target_w", 0.06) or 0.0)
+                configured_probe_target_w = float(getattr(self.cfg.execution, "market_impulse_probe_target_w", 0.06) or 0.0)
+                max_probe_target_w = float(getattr(self.cfg.execution, "market_impulse_probe_max_target_w", 0.10) or 0.10)
                 probe_cooldown_hours = int(getattr(self.cfg.execution, "market_impulse_probe_cooldown_hours", 8) or 0)
                 probe_time_stop_hours = int(getattr(self.cfg.execution, "market_impulse_probe_time_stop_hours", 4) or 4)
                 probe_candidates = list((market_impulse_probe_context.get("candidates") or [])[:max_probe_symbols])
@@ -3922,15 +3975,42 @@ class V5Pipeline:
                             )
                         continue
 
-                    probe_notional = float(probe_target_w) * float(equity)
-                    min_notional = float(self.cfg.budget.min_trade_notional_base)
-                    if probe_notional < min_notional:
+                    px = float(prices.get(sym, 0.0) or 0.0)
+                    if px <= 0.0:
+                        continue
+                    sizing = self._market_impulse_probe_sizing(
+                        symbol=sym,
+                        px=float(px),
+                        equity=float(equity),
+                    )
+                    effective_probe_target_w = float(sizing.get("effective_probe_target_w") or 0.0)
+                    probe_notional = float(sizing.get("probe_notional") or 0.0)
+                    min_executable_notional = float(sizing.get("min_executable_notional") or 0.0)
+                    if effective_probe_target_w > float(max_probe_target_w):
                         if audit:
                             audit.counts["market_impulse_probe_blocked_count"] = int(
                                 audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
                             ) + 1
+                            audit.counts["market_impulse_probe_unexecutable_notional_count"] = int(
+                                audit.counts.get("market_impulse_probe_unexecutable_notional_count", 0) or 0
+                            ) + 1
+                            router_decisions.append(
+                                {
+                                    "symbol": sym,
+                                    "action": "skip",
+                                    "reason": "market_impulse_probe_unexecutable_notional",
+                                    "probe_notional": float(probe_notional),
+                                    "min_executable_notional": float(min_executable_notional),
+                                    "effective_probe_target_w": float(effective_probe_target_w),
+                                    "market_impulse_probe_max_target_w": float(max_probe_target_w),
+                                    "configured_target_w": float(configured_probe_target_w),
+                                    "min_executable_target_w": float(sizing.get("min_executable_target_w") or 0.0),
+                                }
+                            )
                             audit.add_note(
-                                f"Market impulse probe blocked: {sym} reason=min_notional probe_notional={probe_notional:.4f}"
+                                f"Market impulse probe blocked: {sym} reason=market_impulse_probe_unexecutable_notional "
+                                f"probe_notional={probe_notional:.4f} min_executable_notional={min_executable_notional:.4f} "
+                                f"effective_probe_target_w={effective_probe_target_w:.4f} max_target_w={max_probe_target_w:.4f}"
                             )
                         continue
                     if probe_notional > cash_remaining:
@@ -3942,15 +4022,14 @@ class V5Pipeline:
                                 f"Market impulse probe blocked: {sym} reason=insufficient_cash probe_notional={probe_notional:.4f} cash_remaining={cash_remaining:.4f}"
                             )
                         continue
-
-                    px = float(prices.get(sym, 0.0) or 0.0)
-                    if px <= 0.0:
-                        continue
                     cooldown_until_ms = now_ms + probe_cooldown_hours * 3600 * 1000
                     meta = {
-                        "target_w": float(probe_target_w),
+                        "target_w": float(effective_probe_target_w),
                         "market_impulse_probe": True,
-                        "market_impulse_probe_target_w": float(probe_target_w),
+                        "market_impulse_probe_target_w": float(effective_probe_target_w),
+                        "market_impulse_probe_configured_target_w": float(configured_probe_target_w),
+                        "market_impulse_probe_min_executable_notional": float(min_executable_notional),
+                        "market_impulse_probe_min_executable_target_w": float(sizing.get("min_executable_target_w") or 0.0),
                         "market_impulse_probe_trend_buy_count": int(
                             market_impulse_probe_context.get("trend_buy_count") or 0
                         ),
@@ -3981,7 +4060,9 @@ class V5Pipeline:
                             "Market impulse probe open: "
                             f"symbol={sym} trend_buy_count={int(market_impulse_probe_context.get('trend_buy_count') or 0)} "
                             f"btc_trend_score={market_impulse_probe_context.get('btc_trend_score')} "
-                            f"target_w={probe_target_w:.4f} bypassed_negative_expectancy_reason={bypass_reason or ''} "
+                            f"target_w={effective_probe_target_w:.4f} configured_target_w={configured_probe_target_w:.4f} "
+                            f"min_executable_notional={min_executable_notional:.4f} "
+                            f"bypassed_negative_expectancy_reason={bypass_reason or ''} "
                             f"cooldown_until={cooldown_until_ms}"
                         )
                         router_decisions.append(
@@ -3998,7 +4079,10 @@ class V5Pipeline:
                                 "btc_trend_score": market_impulse_probe_context.get("btc_trend_score"),
                                 "selected_symbol": sym,
                                 "bypassed_negative_expectancy_reason": bypass_reason,
-                                "target_w": float(probe_target_w),
+                                "target_w": float(effective_probe_target_w),
+                                "configured_target_w": float(configured_probe_target_w),
+                                "min_executable_notional": float(min_executable_notional),
+                                "effective_probe_target_w": float(effective_probe_target_w),
                                 "cooldown_until": int(cooldown_until_ms),
                                 "trend_score": trend_score,
                             }

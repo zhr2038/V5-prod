@@ -54,6 +54,7 @@ class DecisionAudit:
         "market_impulse_probe_candidate_count": 0,
         "market_impulse_probe_open_count": 0,
         "market_impulse_probe_blocked_count": 0,
+        "market_impulse_probe_unexecutable_notional_count": 0,
         "market_impulse_probe_time_stop_count": 0,
         "negative_expectancy_score_penalty": 0,
         "negative_expectancy_cooldown": 0,
