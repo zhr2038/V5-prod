@@ -458,16 +458,20 @@ class EventMonitor:
                 continue
 
             history = self.price_history.setdefault(sym, [])
-            existing = next(
-                (
-                    sample
-                    for sample in reversed(history)
-                    if int(sample.get('timestamp_ms', 0) or 0) == now_ms
-                ),
-                None,
-            )
-            if existing is not None:
-                existing['price'] = price
+            first_match_index = None
+            duplicate_indexes = []
+            for idx, sample in enumerate(history):
+                if int(sample.get('timestamp_ms', 0) or 0) != now_ms:
+                    continue
+                if first_match_index is None:
+                    first_match_index = idx
+                else:
+                    duplicate_indexes.append(idx)
+
+            if first_match_index is not None:
+                history[first_match_index]['price'] = price
+                for idx in reversed(duplicate_indexes):
+                    del history[idx]
             else:
                 history.append({'timestamp_ms': now_ms, 'price': price})
 
