@@ -257,4 +257,4 @@ def test_trade_auditor_v3_load_latest_decision_audit_limits_audit_file_reads_bef
     data = auditor._load_latest_decision_audit()
 
     assert data["run_id"] == "20260408_19"
-    assert reads["decision_audit"] <= 2
+    assert reads["decision_audit"] <= 1
