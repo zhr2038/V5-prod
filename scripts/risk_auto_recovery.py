@@ -212,7 +212,9 @@ class RiskAutoRecovery:
             points.sort(key=lambda item: item['ts'])
             dedup = {}
             for point in points:
-                dedup[point['ts'].isoformat()] = point
+                key = point['ts'].isoformat()
+                if key not in dedup:
+                    dedup[key] = point
             return list(dedup.values())
         except:
             return []
