@@ -6926,6 +6926,55 @@ def test_decision_chain_scan_limit_prefers_sorted_epoch_over_file_mtime(monkeypa
     assert payload["last_update"] == datetime.strptime("20260408_02", "%Y%m%d_%H").strftime("%Y-%m-%d %H:%M:%S")
 
 
+def test_decision_chain_uses_preloaded_audit_entries_without_reopening_files(monkeypatch, tmp_path):
+    import builtins
+
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    run_dir = runs_dir / "20260408_02"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(module, "load_config", lambda: {"execution": {"order_store_path": "reports/orders.sqlite"}})
+    monkeypatch.setattr(
+        module,
+        "_iter_decision_audits",
+        lambda reports_dir, scan_limit=None: [
+            {
+                "run_dir": run_dir,
+                "audit": {
+                    "run_id": "20260408_02",
+                    "now_ts": 1_710_000_000,
+                    "regime": "TRENDING",
+                    "counts": {"selected": 2, "orders_rebalance": 1, "orders_exit": 0},
+                    "top_scores": [{"symbol": "BTC/USDT", "score": 0.9, "rank": 1}],
+                    "router_decisions": [],
+                },
+                "sort_epoch": 1_710_000_000.0,
+            }
+        ],
+    )
+
+    original_open = builtins.open
+
+    def blocking_open(path, *args, **kwargs):
+        if str(path).endswith("decision_audit.json"):
+            raise AssertionError("api_decision_chain must reuse preloaded audit entries")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", blocking_open)
+
+    response = client.get("/api/decision_chain")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rounds"][0]["run_id"] == "20260408_02"
+
+
 def test_decision_chain_prefers_sorted_epoch_over_file_mtime_without_scan_limit(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -7191,6 +7240,59 @@ def test_api_shadow_test_prefers_sorted_epoch_over_file_mtime_when_limited_to_50
     assert payload["window_rounds"] == 50
     assert payload["comparison"]["current"]["avg_selected_per_round"] > 20
     assert payload["last_update"] == datetime.fromtimestamp(module._run_id_epoch("20260409_00")).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def test_api_shadow_test_uses_preloaded_audit_entries_without_reopening_files(monkeypatch, tmp_path):
+    import builtins
+
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runs_dir = runtime_dir / "runs"
+    run_dir = runs_dir / "20260408_01"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+    monkeypatch.setattr(
+        module,
+        "_iter_decision_audits",
+        lambda reports_dir, scan_limit=None: [
+            {
+                "run_dir": run_dir,
+                "audit": {
+                    "run_id": "20260408_01",
+                    "counts": {"selected": 10, "orders_rebalance": 2, "orders_exit": 1},
+                    "router_decisions": [],
+                },
+                "sort_epoch": module._run_id_epoch("20260408_01"),
+            }
+        ],
+    )
+
+    original_open = builtins.open
+
+    def blocking_open(path, *args, **kwargs):
+        if str(path).endswith("decision_audit.json"):
+            raise AssertionError("api_shadow_test must reuse preloaded audit entries")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", blocking_open)
+
+    response = client.get("/api/shadow_test")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["window_rounds"] == 1
+    assert payload["comparison"]["current"]["avg_selected_per_round"] == 10.0
 
 
 def test_api_shadow_test_does_not_refresh_stale_ab_gate_in_request(monkeypatch, tmp_path):

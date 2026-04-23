@@ -5354,16 +5354,17 @@ def api_decision_chain():
 
         decision_chain_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_CHAIN_SCAN_LIMIT')
         audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_chain_scan_limit)
-        run_dirs = [entry['run_dir'] for entry in audit_entries]
-        if not run_dirs:
+        if not audit_entries:
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
         latest_update_epoch = float(audit_entries[0].get('sort_epoch', 0.0) or 0.0) if audit_entries else 0.0
 
         rounds = []
-        for run_dir in run_dirs[:5]:
+        for entry in audit_entries[:5]:
             try:
-                with open(run_dir / 'decision_audit.json', 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                run_dir = entry['run_dir']
+                data = entry.get('audit')
+                if not isinstance(data, dict):
+                    continue
 
                 # 提取决策链信息
                 run_id = run_dir.name
@@ -5514,7 +5515,7 @@ def api_shadow_test():
             return jsonify({'status': 'no_data', 'message': '暂无运行数据'})
 
         audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=50)
-        recent_runs = [entry['run_dir'] for entry in audit_entries]
+        recent_entries = audit_entries[:50]
         latest_update_epoch = float(audit_entries[0].get('sort_epoch', 0.0) or 0.0) if audit_entries else 0.0
         
         current_stats = {
@@ -5544,10 +5545,11 @@ def api_shadow_test():
         
         deadband_skips = []
         
-        for run_dir in recent_runs:
+        for entry in recent_entries:
             try:
-                with open(run_dir / 'decision_audit.json', 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                data = entry.get('audit')
+                if not isinstance(data, dict):
+                    continue
                 
                 counts = data.get('counts', {})
                 current_stats['rounds'] += 1
