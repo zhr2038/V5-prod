@@ -331,6 +331,17 @@ def build_inference_frame_from_market_data(
         feature_names=feature_names,
     )
 
+    def _latest_timestamp_ms(values: Any) -> int | float | None:
+        if values is None:
+            return None
+        try:
+            series = pd.to_numeric(pd.Series(list(values)), errors="coerce").dropna()
+        except Exception:
+            return None
+        if series.empty:
+            return None
+        return float(series.max())
+
     for symbol, data in (market_data or {}).items():
         close_raw = _value_from_data(data, "close")
         ts_values = _value_from_data(data, "ts")
@@ -342,7 +353,7 @@ def build_inference_frame_from_market_data(
             high=_value_from_data(data, "high"),
             low=_value_from_data(data, "low"),
             volume=_value_from_data(data, "volume"),
-            timestamp_ms=(list(ts_values)[-1] if ts_values else None),
+            timestamp_ms=_latest_timestamp_ms(ts_values),
             feature_groups=groups,
             include_time_features=include_time_features,
         )
