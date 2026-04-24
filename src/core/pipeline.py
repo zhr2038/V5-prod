@@ -1035,7 +1035,7 @@ class V5Pipeline:
         try:
             from src.data.okx_instruments import OKXSpotInstrumentsCache
 
-            spec = OKXSpotInstrumentsCache().get_spec(symbol_to_inst_id(symbol))
+            spec = OKXSpotInstrumentsCache().get_spec(str(symbol).replace("/", "-"))
             if spec is None:
                 return 0.0
             min_sz = float(spec.min_sz or 0.0)
