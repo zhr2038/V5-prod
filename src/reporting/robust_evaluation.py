@@ -29,8 +29,10 @@ def purged_time_series_split(
     Returns:
         List of (train_indices, test_indices) tuples
     """
-    timestamps = sorted(timestamps)
-    n_samples = len(timestamps)
+    ordered = sorted(enumerate(timestamps), key=lambda item: int(item[1]))
+    sorted_timestamps = [int(ts) for _, ts in ordered]
+    sorted_to_original = [idx for idx, _ in ordered]
+    n_samples = len(sorted_timestamps)
     
     # 计算每个fold的大小
     fold_size = n_samples // n_splits
@@ -43,21 +45,21 @@ def purged_time_series_split(
         
         # 训练集：之前的所有fold（排除purge间隔）
         train_indices = []
-        test_indices = list(range(test_start, test_end))
+        test_indices = [sorted_to_original[idx] for idx in range(test_start, test_end)]
         
         # 计算purge边界
-        test_min_ts = timestamps[test_start]
-        test_max_ts = timestamps[test_end - 1]
+        test_min_ts = sorted_timestamps[test_start]
+        test_max_ts = sorted_timestamps[test_end - 1]
         
         purge_start = test_min_ts - (purge_gap_hours * 3600)
         purge_end = test_max_ts + (purge_gap_hours * 3600)
         
         # 选择训练样本（在purge间隔之外）
-        for idx, ts in enumerate(timestamps):
+        for idx, ts in enumerate(sorted_timestamps):
             if idx < test_start and ts < purge_start:
-                train_indices.append(idx)
+                train_indices.append(sorted_to_original[idx])
             elif idx >= test_end and ts > purge_end:
-                train_indices.append(idx)
+                train_indices.append(sorted_to_original[idx])
         
         # 添加embargo：移除测试集附近的训练样本
         embargo_start = test_max_ts
@@ -65,7 +67,7 @@ def purged_time_series_split(
         
         train_indices = [
             idx for idx in train_indices 
-            if not (timestamps[idx] > embargo_start and timestamps[idx] < embargo_end)
+            if not (int(timestamps[idx]) > embargo_start and int(timestamps[idx]) < embargo_end)
         ]
         
         splits.append((train_indices, test_indices))
