@@ -769,10 +769,17 @@ class Alpha6FactorStrategy(BaseStrategy):
     
     def _calculate_factors(self, df: pd.DataFrame, symbol: str) -> Dict[str, float]:
         """计算6个原始因子"""
-        close = df['close'].values
-        high = df['high'].values if 'high' in df.columns else close
-        low = df['low'].values if 'low' in df.columns else close
-        volume = df['volume'].values if 'volume' in df.columns else np.ones(len(close))
+        frame = df
+        ts_col = 'timestamp' if 'timestamp' in df.columns else 'ts' if 'ts' in df.columns else None
+        if ts_col is not None:
+            parsed_ts = pd.to_datetime(df[ts_col], errors='coerce', utc=False)
+            if parsed_ts.notna().any():
+                frame = df.assign(_parsed_ts=parsed_ts).sort_values('_parsed_ts', kind='mergesort')
+
+        close = frame['close'].values
+        high = frame['high'].values if 'high' in frame.columns else close
+        low = frame['low'].values if 'low' in frame.columns else close
+        volume = frame['volume'].values if 'volume' in frame.columns else np.ones(len(close))
 
         # f1: 5日动量 (5*24=120根1小时K线)
         f1 = (close[-1] - close[-min(120, len(close))]) / close[-min(120, len(close))]

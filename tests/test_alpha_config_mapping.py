@@ -200,3 +200,31 @@ def test_alpha_engine_latest_model_artifact_mtime_ignores_newer_config_file(tmp_
     latest_mtime_ns = AlphaEngine._latest_model_artifact_mtime_ns(base_path)
 
     assert latest_mtime_ns == model_file.stat().st_mtime_ns
+
+
+def test_alpha6_calculate_factors_prefers_latest_row_when_dataframe_is_unsorted():
+    strategy = Alpha6FactorStrategy(
+        config={
+            "alpha158_overlay": {"enabled": False},
+            "use_sentiment": False,
+        }
+    )
+    closes = [100.0 + float(i) for i in range(80)]
+    ordered = pd.DataFrame(
+        {
+            "symbol": ["BTC/USDT"] * len(closes),
+            "timestamp": pd.date_range("2026-04-01 00:00:00", periods=len(closes), freq="h"),
+            "close": closes,
+            "high": closes,
+            "low": closes,
+            "volume": [1000.0] * len(closes),
+        }
+    )
+    unsorted = pd.concat([ordered.iloc[[-1]], ordered.iloc[:-1]], ignore_index=True)
+
+    ordered_factors = strategy._calculate_factors(ordered, "BTC/USDT")
+    unsorted_factors = strategy._calculate_factors(unsorted, "BTC/USDT")
+
+    assert unsorted_factors["f1_mom_5d"] == pytest.approx(ordered_factors["f1_mom_5d"])
+    assert unsorted_factors["f2_mom_20d"] == pytest.approx(ordered_factors["f2_mom_20d"])
+    assert unsorted_factors["f3_vol_adj_ret"] == pytest.approx(ordered_factors["f3_vol_adj_ret"])
