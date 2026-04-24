@@ -2246,6 +2246,11 @@ class V5Pipeline:
                 if str(getattr(p, "symbol", "") or "").strip() in self._live_symbol_whitelist
             ]
 
+        market_data_1h = {
+            sym: _normalize_market_series(series)
+            for sym, series in (market_data_1h or {}).items()
+        }
+
         # 1) Regime detection (needed early if we want regime-aware alpha weights)
         # Regime检测后审计（显式处理空行情，避免 StopIteration）
         if not market_data_1h:
