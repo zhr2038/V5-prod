@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # 定义报告目录
@@ -143,6 +143,7 @@ from src.execution.fill_store import (
     derive_runtime_auto_risk_guard_path,
     derive_runtime_named_artifact_path,
     derive_runtime_named_json_path,
+    derive_runtime_runs_dir,
 )
 from src.execution.position_builder import PositionBuilder  # Phase 2: 分批建仓
 from src.execution.multi_level_stop_loss import MultiLevelStopLoss, StopLossConfig  # Phase 2: 动态止损
@@ -533,6 +534,10 @@ class V5Pipeline:
                 except Exception:
                     strategy_entries = []
 
+        return self._strategy_entries_to_lookup(strategy_entries)
+
+    @staticmethod
+    def _strategy_entries_to_lookup(strategy_entries: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str, Any]]]:
         lookup: Dict[str, Dict[str, Dict[str, Any]]] = {}
         for entry in strategy_entries:
             strategy_name = str((entry or {}).get("strategy", "") or "").strip()
@@ -546,6 +551,18 @@ class V5Pipeline:
                 sym_map[symbol] = dict(signal or {})
             lookup[strategy_name] = sym_map
         return lookup
+
+    @staticmethod
+    def _strategy_entries_from_obj(obj: Any) -> List[Dict[str, Any]]:
+        if not isinstance(obj, dict):
+            return []
+        entries = obj.get("strategy_signals")
+        if isinstance(entries, list) and entries:
+            return [dict(item or {}) for item in entries if isinstance(item, dict)]
+        entries = obj.get("strategies")
+        if isinstance(entries, list) and entries:
+            return [dict(item or {}) for item in entries if isinstance(item, dict)]
+        return []
 
     @staticmethod
     def _signal_score(signal: Optional[Dict[str, Any]]) -> Optional[float]:
@@ -604,12 +621,144 @@ class V5Pipeline:
                 continue
         return None
 
+    def _protect_entry_signal_values(self, signal: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        return {
+            "alpha6_score": self._signal_score(signal),
+            "alpha6_side": self._signal_side(signal),
+            "f4_volume_expansion": self._alpha6_volume_confirm(signal),
+            "f5_rsi_trend_confirm": self._alpha6_rsi_confirm(signal),
+        }
+
+    def _protect_entry_signal_meets_normal_confirmation(self, signal: Optional[Dict[str, Any]]) -> bool:
+        values = self._protect_entry_signal_values(signal)
+        if values.get("alpha6_side") != "buy":
+            return False
+        score = values.get("alpha6_score")
+        f5 = values.get("f5_rsi_trend_confirm")
+        f4 = values.get("f4_volume_expansion")
+        if score is None or f5 is None or f4 is None:
+            return False
+        alpha6_min_score = float(getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.40) or 0.0)
+        min_f5 = float(getattr(self.cfg.execution, "protect_entry_min_f5_rsi_trend_confirm", 0.30) or 0.0)
+        min_f4 = float(getattr(self.cfg.execution, "protect_entry_min_f4_volume_expansion", 0.0) or 0.0)
+        return float(score) >= alpha6_min_score and float(f5) >= min_f5 and float(f4) >= min_f4
+
+    def _protect_entry_signal_meets_strong_confirmation(self, signal: Optional[Dict[str, Any]]) -> bool:
+        values = self._protect_entry_signal_values(signal)
+        if values.get("alpha6_side") != "buy":
+            return False
+        score = values.get("alpha6_score")
+        f5 = values.get("f5_rsi_trend_confirm")
+        f4 = values.get("f4_volume_expansion")
+        if score is None or f5 is None or f4 is None:
+            return False
+        strong_score = float(
+            getattr(self.cfg.execution, "protect_entry_single_round_strong_alpha6_score", 0.55) or 0.0
+        )
+        strong_f5 = float(getattr(self.cfg.execution, "protect_entry_single_round_strong_f5", 0.45) or 0.0)
+        min_f4 = float(getattr(self.cfg.execution, "protect_entry_min_f4_volume_expansion", 0.0) or 0.0)
+        return float(score) >= strong_score and float(f5) >= strong_f5 and float(f4) >= min_f4
+
+    def _load_protect_entry_history_alpha6_signals(
+        self,
+        *,
+        symbol: str,
+        now_utc: datetime,
+        current_run_id: str,
+    ) -> List[Optional[Dict[str, Any]]]:
+        max_hours = int(getattr(self.cfg.execution, "protect_entry_confirm_memory_hours", 6) or 6)
+        cutoff = now_utc - timedelta(hours=max_hours)
+        try:
+            runs_dir = derive_runtime_runs_dir(getattr(self.cfg.execution, "order_store_path", "reports/orders.sqlite"))
+            run_dirs = [p for p in Path(runs_dir).iterdir() if p.is_dir()]
+        except Exception:
+            return []
+
+        def _run_time(run_dir: Path) -> datetime:
+            audit_path = run_dir / "decision_audit.json"
+            try:
+                if audit_path.exists():
+                    obj = json.loads(audit_path.read_text(encoding="utf-8"))
+                    for key in ("window_end_ts", "now_ts"):
+                        raw = obj.get(key)
+                        if raw is not None:
+                            value = float(raw)
+                            if value > 10_000_000_000:
+                                value /= 1000.0
+                            return datetime.fromtimestamp(value, tz=timezone.utc)
+            except Exception:
+                pass
+            try:
+                return datetime.fromtimestamp(float(run_dir.stat().st_mtime), tz=timezone.utc)
+            except Exception:
+                return datetime.fromtimestamp(0, tz=timezone.utc)
+
+        signals: List[Optional[Dict[str, Any]]] = []
+        for run_dir in sorted(run_dirs, key=_run_time, reverse=True):
+            if str(run_dir.name) == str(current_run_id):
+                continue
+            run_time = _run_time(run_dir)
+            if run_time < cutoff:
+                continue
+            entries: List[Dict[str, Any]] = []
+            for file_name in ("decision_audit.json", "strategy_signals.json"):
+                path = run_dir / file_name
+                if not path.exists():
+                    continue
+                try:
+                    entries = self._strategy_entries_from_obj(json.loads(path.read_text(encoding="utf-8")))
+                except Exception:
+                    entries = []
+                if entries:
+                    break
+            if not entries:
+                continue
+            alpha6_signal = (self._strategy_entries_to_lookup(entries).get("Alpha6Factor") or {}).get(symbol)
+            signals.append(alpha6_signal if isinstance(alpha6_signal, dict) else None)
+        return signals
+
+    def _evaluate_protect_entry_confirmation_debounce(
+        self,
+        *,
+        symbol: str,
+        alpha6_signal: Optional[Dict[str, Any]],
+        now_utc: datetime,
+        current_run_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        required_rounds = int(getattr(self.cfg.execution, "protect_entry_confirm_rounds", 2) or 2)
+        values = self._protect_entry_signal_values(alpha6_signal)
+        if required_rounds <= 1 or self._protect_entry_signal_meets_strong_confirmation(alpha6_signal):
+            return None
+
+        observed_rounds = 1 if self._protect_entry_signal_meets_normal_confirmation(alpha6_signal) else 0
+        for previous_signal in self._load_protect_entry_history_alpha6_signals(
+            symbol=symbol,
+            now_utc=now_utc,
+            current_run_id=current_run_id,
+        ):
+            if not self._protect_entry_signal_meets_normal_confirmation(previous_signal):
+                break
+            observed_rounds += 1
+            if observed_rounds >= required_rounds:
+                return None
+
+        return {
+            "reason": "protect_entry_confirmation_not_stable",
+            "current_alpha6_score": values.get("alpha6_score"),
+            "current_f5": values.get("f5_rsi_trend_confirm"),
+            "current_f4": values.get("f4_volume_expansion"),
+            "confirm_rounds_observed": int(observed_rounds),
+            "required_confirm_rounds": int(required_rounds),
+        }
+
     def _evaluate_protect_entry_gate(
         self,
         *,
         symbol: str,
         strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
         current_auto_risk_level: Optional[str],
+        now_utc: Optional[datetime] = None,
+        current_run_id: str = "",
     ) -> Optional[Dict[str, Any]]:
         if str(current_auto_risk_level or "").upper() != "PROTECT":
             return None
@@ -679,6 +828,24 @@ class V5Pipeline:
                     "f4_volume_expansion": volume_confirm,
                     "f5_rsi_trend_confirm": rsi_confirm,
                 }
+
+        debounce_block = self._evaluate_protect_entry_confirmation_debounce(
+            symbol=symbol,
+            alpha6_signal=alpha6_signal,
+            now_utc=now_utc or datetime.now(timezone.utc),
+            current_run_id=current_run_id,
+        )
+        if debounce_block is not None:
+            debounce_block.update(
+                {
+                    "trend_score": trend_score,
+                    "alpha6_score": alpha6_score,
+                    "alpha6_side": alpha6_side,
+                    "f4_volume_expansion": volume_confirm,
+                    "f5_rsi_trend_confirm": rsi_confirm,
+                }
+            )
+            return debounce_block
 
         return None
 
@@ -3509,6 +3676,8 @@ class V5Pipeline:
                     symbol=sym,
                     strategy_signal_lookup=strategy_signal_lookup,
                     current_auto_risk_level=current_auto_risk_level,
+                    now_utc=now_utc,
+                    current_run_id=run_id,
                 )
                 if protect_block is not None:
                     self._record_replacement_block(
@@ -3530,6 +3699,8 @@ class V5Pipeline:
                             audit.record_count("protect_entry_alpha6_rsi_block_count", symbol=sym)
                         if str(protect_block.get("reason") or "") == "protect_entry_alpha6_rsi_confirm_negative":
                             audit.record_count("protect_entry_alpha6_rsi_block_count", symbol=sym)
+                        if str(protect_block.get("reason") or "") == "protect_entry_confirmation_not_stable":
+                            audit.record_count("protect_entry_confirmation_not_stable_count", symbol=sym)
                         audit.record_gate(str(protect_block.get("reason") or "protect_entry_no_alpha6_confirmation"), symbol=sym)
                         router_decisions.append(
                             {
@@ -3541,6 +3712,11 @@ class V5Pipeline:
                                 "alpha6_side": protect_block.get("alpha6_side"),
                                 "f4_volume_expansion": protect_block.get("f4_volume_expansion"),
                                 "f5_rsi_trend_confirm": protect_block.get("f5_rsi_trend_confirm"),
+                                "current_alpha6_score": protect_block.get("current_alpha6_score"),
+                                "current_f5": protect_block.get("current_f5"),
+                                "current_f4": protect_block.get("current_f4"),
+                                "confirm_rounds_observed": protect_block.get("confirm_rounds_observed"),
+                                "required_confirm_rounds": protect_block.get("required_confirm_rounds"),
                                 "current_level": current_auto_risk_level,
                             }
                         )

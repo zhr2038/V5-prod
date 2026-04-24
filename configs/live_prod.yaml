@@ -319,6 +319,10 @@ execution:
   protect_entry_require_volume_confirm: true
   protect_entry_min_f4_volume_expansion: 0.0
   protect_entry_min_f5_rsi_trend_confirm: 0.30
+  protect_entry_confirm_rounds: 2
+  protect_entry_confirm_memory_hours: 6
+  protect_entry_single_round_strong_f5: 0.45
+  protect_entry_single_round_strong_alpha6_score: 0.55
   protect_hold_current_when_replacement_blocked: true
   protect_replacement_close_guard_enabled: true
   protect_replacement_hold_min_score: 0.10

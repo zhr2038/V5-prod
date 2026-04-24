@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +13,11 @@ from configs.schema import AppConfig, RegimeState
 from src.alpha.alpha_engine import AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.core.pipeline import V5Pipeline
-from src.execution.fill_store import derive_runtime_auto_risk_eval_path, derive_runtime_auto_risk_guard_path
+from src.execution.fill_store import (
+    derive_runtime_auto_risk_eval_path,
+    derive_runtime_auto_risk_guard_path,
+    derive_runtime_runs_dir,
+)
 from src.execution.position_store import Position
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
@@ -94,6 +99,24 @@ def _strategy_payload(*, trend_signal=None, alpha6_signal=None):
             }
         )
     return {"strategies": strategies}
+
+
+def _write_previous_alpha6_signal(
+    cfg: AppConfig,
+    run_id: str,
+    alpha6_signal: dict,
+    *,
+    hours_ago: float = 1.0,
+) -> None:
+    run_dir = derive_runtime_runs_dir(cfg.execution.order_store_path) / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    ts = int((datetime.now(timezone.utc) - timedelta(hours=hours_ago)).timestamp())
+    payload = {
+        "run_id": run_id,
+        "now_ts": ts,
+        "strategy_signals": _strategy_payload(alpha6_signal=alpha6_signal)["strategies"],
+    }
+    (run_dir / "decision_audit.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def _build_pipe(cfg: AppConfig, tmp_path: Path, strategy_payload: dict) -> V5Pipeline:
@@ -364,6 +387,11 @@ def test_protect_trend_plus_alpha6_buy_can_pass(tmp_path: Path) -> None:
             },
         },
     )
+    _write_previous_alpha6_signal(
+        cfg,
+        "previous-protect-alpha6-pass",
+        payload["strategies"][1]["signals"][0],
+    )
     pipe = _build_pipe(cfg, tmp_path, payload)
     pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
         target_weights={"BTC/USDT": 1.0},
@@ -386,6 +414,213 @@ def test_protect_trend_plus_alpha6_buy_can_pass(tmp_path: Path) -> None:
 
     assert len(out.orders) == 1
     assert out.orders[0].symbol == "BTC/USDT"
+    assert out.orders[0].intent == "OPEN_LONG"
+    assert not any(str(d.get("reason", "")).startswith("protect_entry_") for d in audit.router_decisions)
+
+
+def test_protect_confirmation_blocks_single_round_just_over_threshold(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    _write_previous_alpha6_signal(
+        cfg,
+        "previous-btc-weak-f5",
+        {
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "score": 0.47,
+            "raw_score": 0.47,
+            "metadata": {
+                "raw_factors": {
+                    "f4_volume_expansion": 0.10,
+                    "f5_rsi_trend_confirm": 0.186,
+                }
+            },
+        },
+    )
+
+    payload = _strategy_payload(
+        alpha6_signal={
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "score": 0.47,
+            "raw_score": 0.47,
+            "metadata": {
+                "raw_factors": {
+                    "f4_volume_expansion": 0.10,
+                    "f5_rsi_trend_confirm": 0.321,
+                }
+            },
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="protect-confirm-single-round")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "protect_entry_confirmation_not_stable")
+    assert decision["symbol"] == "BTC/USDT"
+    assert decision["current_alpha6_score"] == 0.47
+    assert decision["current_f5"] == 0.321
+    assert decision["current_f4"] == 0.10
+    assert decision["confirm_rounds_observed"] == 1
+    assert decision["required_confirm_rounds"] == 2
+    assert audit.counts["protect_entry_confirmation_not_stable_count"] == 1
+
+
+def test_protect_confirmation_allows_two_consecutive_rounds(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    previous_signal = {
+        "symbol": "BTC/USDT",
+        "side": "buy",
+        "score": 0.45,
+        "raw_score": 0.45,
+        "metadata": {
+            "raw_factors": {
+                "f4_volume_expansion": 0.10,
+                "f5_rsi_trend_confirm": 0.35,
+            }
+        },
+    }
+    _write_previous_alpha6_signal(cfg, "previous-btc-confirmed", previous_signal)
+
+    payload = _strategy_payload(
+        alpha6_signal={
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "score": 0.47,
+            "raw_score": 0.47,
+            "metadata": {
+                "raw_factors": {
+                    "f4_volume_expansion": 0.10,
+                    "f5_rsi_trend_confirm": 0.321,
+                }
+            },
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="protect-confirm-two-rounds")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].intent == "OPEN_LONG"
+    assert not any(d.get("reason") == "protect_entry_confirmation_not_stable" for d in audit.router_decisions)
+
+
+def test_protect_confirmation_allows_single_round_strong(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+
+    payload = _strategy_payload(
+        alpha6_signal={
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "score": 0.56,
+            "raw_score": 0.56,
+            "metadata": {
+                "raw_factors": {
+                    "f4_volume_expansion": 0.10,
+                    "f5_rsi_trend_confirm": 0.46,
+                }
+            },
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="protect-confirm-strong")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].intent == "OPEN_LONG"
+    assert not any(d.get("reason") == "protect_entry_confirmation_not_stable" for d in audit.router_decisions)
+
+
+def test_non_protect_does_not_require_confirmation_debounce(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "NEUTRAL")
+
+    payload = _strategy_payload(
+        alpha6_signal={
+            "symbol": "BTC/USDT",
+            "side": "buy",
+            "score": 0.47,
+            "raw_score": 0.47,
+            "metadata": {
+                "raw_factors": {
+                    "f4_volume_expansion": 0.10,
+                    "f5_rsi_trend_confirm": 0.321,
+                }
+            },
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="non-protect-no-confirm-debounce")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
     assert out.orders[0].intent == "OPEN_LONG"
     assert not any(str(d.get("reason", "")).startswith("protect_entry_") for d in audit.router_decisions)
 
@@ -623,17 +858,17 @@ def test_protect_candidate_with_strong_alpha6_rsi_and_volume_confirm_can_pass(tm
         alpha6_signal={
             "symbol": "BTC/USDT",
             "side": "buy",
-            "score": 0.45,
-            "raw_score": 0.45,
+            "score": 0.56,
+            "raw_score": 0.56,
             "confidence": 0.7,
             "metadata": {
                 "raw_factors": {
                     "f4_volume_expansion": 0.10,
-                    "f5_rsi_trend_confirm": 0.40,
+                    "f5_rsi_trend_confirm": 0.46,
                 },
                 "z_factors": {
                     "f4_volume_expansion": 0.20,
-                    "f5_rsi_trend_confirm": 0.40,
+                    "f5_rsi_trend_confirm": 0.46,
                 },
             },
         }
@@ -820,17 +1055,17 @@ def test_protect_allows_zero_target_close_when_replacement_buy_passes(tmp_path: 
         alpha6_signal={
             "symbol": "BNB/USDT",
             "side": "buy",
-            "score": 0.50,
-            "raw_score": 0.50,
+            "score": 0.56,
+            "raw_score": 0.56,
             "confidence": 0.8,
             "metadata": {
                 "raw_factors": {
                     "f4_volume_expansion": 0.20,
-                    "f5_rsi_trend_confirm": 0.40,
+                    "f5_rsi_trend_confirm": 0.46,
                 },
                 "z_factors": {
                     "f4_volume_expansion": 0.40,
-                    "f5_rsi_trend_confirm": 0.40,
+                    "f5_rsi_trend_confirm": 0.46,
                 },
             },
         }

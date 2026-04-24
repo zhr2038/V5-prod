@@ -688,6 +688,30 @@ class ExecutionConfig(BaseModel):
         le=10.0,
         description="Minimum Alpha6Factor f5_rsi_trend_confirm required for OPEN_LONG in PROTECT risk level",
     )
+    protect_entry_confirm_rounds: int = Field(
+        default=2,
+        ge=1,
+        le=12,
+        description="Consecutive confirmation rounds required for normal OPEN_LONG entries in PROTECT risk level",
+    )
+    protect_entry_confirm_memory_hours: int = Field(
+        default=6,
+        ge=1,
+        le=48,
+        description="Lookback window for PROTECT entry confirmation debounce",
+    )
+    protect_entry_single_round_strong_f5: float = Field(
+        default=0.45,
+        ge=-10.0,
+        le=10.0,
+        description="Single-round strong f5_rsi_trend_confirm threshold that bypasses debounce in PROTECT",
+    )
+    protect_entry_single_round_strong_alpha6_score: float = Field(
+        default=0.55,
+        ge=-10.0,
+        le=10.0,
+        description="Single-round strong Alpha6 score threshold that bypasses debounce in PROTECT",
+    )
     protect_hold_current_when_replacement_blocked: bool = Field(
         default=True,
         description="In PROTECT risk level, keep the current holding when all replacement OPEN_LONG candidates are blocked",

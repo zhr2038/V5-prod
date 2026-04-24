@@ -49,6 +49,7 @@ class DecisionAudit:
         "protect_entry_alpha6_score_too_low_count": 0,
         "protect_entry_volume_confirm_negative_count": 0,
         "protect_entry_rsi_confirm_too_weak_count": 0,
+        "protect_entry_confirmation_not_stable_count": 0,
         "hold_current_no_valid_replacement_count": 0,
         "replacement_blocked_count": 0,
         "market_impulse_probe_candidate_count": 0,
