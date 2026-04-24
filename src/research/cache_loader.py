@@ -65,7 +65,7 @@ def _load_symbol_cache_frame(cache_dir: Path, symbol: str, timeframe: str) -> pd
         frames.append(normalized)
 
     merged = pd.concat(frames, ignore_index=True)
-    merged = merged.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last")
+    merged = merged.sort_values("timestamp", kind="mergesort").drop_duplicates(subset=["timestamp"], keep="last")
     merged = merged.set_index("timestamp")[["open", "high", "low", "close", "volume"]]
     if merged.empty:
         raise ValueError(f"cache data is empty after merge for {symbol}")

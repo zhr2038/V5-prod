@@ -6,6 +6,7 @@ import pytest
 
 from src.research.cache_loader import load_cached_market_data, summarize_market_data
 from src.research.task_runner import run_walk_forward_task
+import src.research.cache_loader as cache_loader
 
 
 def test_load_cached_market_data_aligns_symbols_and_applies_limit(tmp_path) -> None:
@@ -76,6 +77,47 @@ def test_load_cached_market_data_prefers_logically_newer_cache_file_for_duplicat
 
     market_data = load_cached_market_data(cache_dir, ["BTC/USDT"], "1h")
 
+    assert market_data["BTC/USDT"].close == [100.0, 999.0, 103.0]
+
+
+def test_load_symbol_cache_frame_uses_stable_timestamp_sort_for_duplicate_rows(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True)
+
+    (cache_dir / "BTC_USDT_1H_20260101.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume,symbol",
+                "2026-01-01 00:00:00,100,101,99,100,10,BTC/USDT",
+                "2026-01-01 01:00:00,101,102,100,101,11,BTC/USDT",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (cache_dir / "BTC_USDT_1H_2026-01-01_2026-01-02.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume,symbol",
+                "2026-01-01 01:00:00,101,102,100,999,11,BTC/USDT",
+                "2026-01-01 02:00:00,102,103,101,103,12,BTC/USDT",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    original_sort_values = cache_loader.pd.DataFrame.sort_values
+    seen = {"stable": False}
+
+    def wrapped_sort_values(self, by, *args, **kwargs):
+        if by == "timestamp" and kwargs.get("kind") == "mergesort":
+            seen["stable"] = True
+        return original_sort_values(self, by, *args, **kwargs)
+
+    monkeypatch.setattr(cache_loader.pd.DataFrame, "sort_values", wrapped_sort_values)
+
+    market_data = load_cached_market_data(cache_dir, ["BTC/USDT"], "1h")
+
+    assert seen["stable"] is True
     assert market_data["BTC/USDT"].close == [100.0, 999.0, 103.0]
 
 
