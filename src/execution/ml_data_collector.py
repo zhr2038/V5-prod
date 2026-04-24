@@ -325,7 +325,7 @@ class MLDataCollector:
         out["timestamp"] = out["timestamp"].astype("int64")
         rows_before = int(len(out))
         out = (
-            out.sort_values(["timestamp", "symbol"])
+            out.sort_values(["timestamp", "symbol"], kind="mergesort")
             .drop_duplicates(subset=["timestamp", "symbol"], keep="last")
             .reset_index(drop=True)
         )

@@ -102,3 +102,21 @@ def test_ml_data_collector_cache_ohlcv_prefers_logically_newer_file_for_duplicat
         collector_mod.MLDataCollector._parse_cache_timestamp_ms(pd.Series(["2026-01-01 02:00:00"])).iloc[0],
     ]
     assert list(ohlcv["close"]) == [100.0, 999.0, 103.0]
+
+
+def test_align_export_cycles_keeps_latest_duplicate_row_for_same_hour_and_symbol() -> None:
+    df = pd.DataFrame(
+        [
+            {"timestamp": 3_600_000 + 1, "symbol": "BTC/USDT", "score": 1.0},
+            {"timestamp": 3_600_000 + 2, "symbol": "BTC/USDT", "score": 2.0},
+            {"timestamp": 3_600_000 + 3, "symbol": "ETH/USDT", "score": 3.0},
+        ]
+    )
+
+    out, meta = collector_mod.MLDataCollector._align_export_cycles(df)
+
+    assert meta["duplicates_removed"] == 1
+    assert len(out) == 2
+    btc_row = out.loc[out["symbol"] == "BTC/USDT"].iloc[0]
+    assert btc_row["timestamp"] == 3_600_000
+    assert btc_row["score"] == 2.0
