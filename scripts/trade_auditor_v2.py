@@ -247,7 +247,8 @@ class SmartTradeAuditor:
                 run_dirs.sort(key=_candidate_sort_epoch, reverse=True)
                 run_dirs = run_dirs[:1]
                 if run_dirs:
-                    return json.loads((run_dirs[0] / "decision_audit.json").read_text(encoding="utf-8"))
+                    audit_path = run_dirs[0] / "decision_audit.json"
+                    return json.loads(audit_path.read_text(encoding="utf-8"))
         except Exception:
             pass
         return {}
