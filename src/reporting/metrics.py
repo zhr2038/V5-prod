@@ -26,12 +26,15 @@ def read_equity_jsonl(path: str) -> List[Dict[str, Any]]:
     if not p.exists():
         return []
     out = []
-    for line in p.read_text(encoding="utf-8").splitlines():
+    for idx, line in enumerate(p.read_text(encoding="utf-8").splitlines()):
         line = line.strip()
         if not line:
             continue
         try:
-            out.append(json.loads(line))
+            row = json.loads(line)
+            if isinstance(row, dict):
+                row["_read_idx"] = idx
+            out.append(row)
         except Exception:
             continue
     def _sort_key(item: Dict[str, Any]) -> tuple[int, str]:
@@ -43,8 +46,17 @@ def read_equity_jsonl(path: str) -> List[Dict[str, Any]]:
             return (0, datetime.fromisoformat(normalized).isoformat())
         except Exception:
             return (1, raw_ts)
-    out.sort(key=_sort_key)
-    return out
+    out.sort(key=lambda item: (_sort_key(item), int(item.get("_read_idx", 0))))
+    dedup: Dict[str, Dict[str, Any]] = {}
+    for item in out:
+        key = str(item.get("ts") or "").strip()
+        if not key:
+            continue
+        cleaned = dict(item)
+        cleaned.pop("_read_idx", None)
+        dedup[key] = cleaned
+    ordered_keys = sorted(dedup.keys(), key=lambda raw_ts: _sort_key({"ts": raw_ts}))
+    return [dedup[key] for key in ordered_keys]
 
 
 def compute_equity_metrics(equity_rows: List[Dict[str, Any]], ann_factor: float = math.sqrt(24 * 365)) -> Dict[str, Any]:
