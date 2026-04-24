@@ -73,7 +73,7 @@ def _split_holdout_by_groups(
     holdout_fraction: float = 0.2,
     gap_groups: int = 0,
 ):
-    unique_groups = pd.Index(groups.drop_duplicates().tolist())
+    unique_groups = pd.Index(sorted(groups.drop_duplicates().tolist()))
     if len(unique_groups) < 2:
         raise ValueError("need at least 2 timestamp groups for holdout split")
 
@@ -453,7 +453,7 @@ def run_ml_training_task(
             )
             return {"exit_code": 1, "run_id": run.run_id}
 
-        unique_groups = pd.Index(groups.drop_duplicates().tolist())
+        unique_groups = pd.Index(sorted(groups.drop_duplicates().tolist()))
         prediction_horizon = int(dataset_cfg.get("prediction_horizon", 6))
         purge_gap = prediction_horizon
         X_train, X_valid, y_train, y_valid, train_groups, valid_groups = _split_holdout_by_groups(
