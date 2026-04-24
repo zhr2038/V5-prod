@@ -76,7 +76,7 @@ class GroupedTimeSeriesSplit(BaseCrossValidator):
             raise ValueError("GroupedTimeSeriesSplit requires groups")
 
         groups_s = pd.Series(groups).reset_index(drop=True)
-        unique_groups = pd.Index(groups_s.drop_duplicates().tolist())
+        unique_groups = pd.Index(sorted(groups_s.drop_duplicates().tolist()))
         n_groups = len(unique_groups)
         test_group_size = self.test_group_size or max(1, n_groups // (self.n_splits + 1))
 
