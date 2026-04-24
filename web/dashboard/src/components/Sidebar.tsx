@@ -178,21 +178,23 @@ export function Sidebar({
 
       <Section icon={BarChart3} title="因子排序" tone="tone-amber">
         <div className="flex flex-col gap-2 max-h-56 overflow-auto pr-1">
-          {alphaScores.slice(0, 10).map((s) => (
-            <div key={s.symbol} className="flex items-center gap-2 text-xs">
-              <span className="w-14 font-medium truncate">{s.symbol.replace('-USDT', '')}</span>
-              <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden relative">
-                <div
-                  className="absolute inset-y-0 left-1/2 bg-[var(--accent)] rounded-full"
-                  style={{
-                    width: `${Math.min(50, Math.abs(s.score) * 25)}%`,
-                    marginLeft: s.score >= 0 ? 0 : `-${Math.min(50, Math.abs(s.score) * 25)}%`,
-                  }}
-                />
+          {alphaScores.slice(0, 10).map((s) => {
+            const scoreWidth = Math.min(50, Math.abs(s.score) * 25);
+            const scoreSide = s.score >= 0 ? 'positive' : 'negative';
+            return (
+              <div key={s.symbol} className="flex items-center gap-2 text-xs">
+                <span className="w-14 font-medium truncate">{s.symbol.replace('-USDT', '')}</span>
+                <div className="score-progress-track glass-progress-track glass-progress-track--slim glass-progress-track--center flex-1">
+                  <span className="score-progress-zero" aria-hidden="true" />
+                  <div
+                    className={`score-progress-fill score-progress-fill--${scoreSide} liquid-progress-fill liquid-progress-fill--mint`}
+                    style={{ width: `${scoreWidth}%` }}
+                  />
+                </div>
+                <span className="w-10 text-right font-mono">{fmtNum(s.score, 2)}</span>
               </div>
-              <span className="w-10 text-right font-mono">{fmtNum(s.score, 2)}</span>
-            </div>
-          ))}
+            );
+          })}
           {!alphaScores.length && (
             <div className="text-xs text-[var(--text-dim)]">
               {deferredReady ? '无评分数据' : '加载中...'}

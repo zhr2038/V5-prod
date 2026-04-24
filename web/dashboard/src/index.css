@@ -572,6 +572,44 @@ body {
     linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018) 34%, rgba(14, 17, 23, 0.16) 100%);
 }
 
+.score-progress-track {
+  position: relative;
+}
+
+.score-progress-zero {
+  position: absolute;
+  z-index: 3;
+  top: 1px;
+  bottom: 1px;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 7px rgba(126, 236, 205, 0.16);
+  pointer-events: none;
+}
+
+.score-progress-track .score-progress-fill {
+  top: 1px;
+  bottom: 1px;
+  left: auto;
+  right: auto;
+  min-width: 2px;
+}
+
+.score-progress-track .score-progress-fill--positive {
+  left: 50%;
+  right: auto;
+  border-radius: 0 999px 999px 0;
+}
+
+.score-progress-track .score-progress-fill--negative {
+  left: auto;
+  right: 50%;
+  border-radius: 999px 0 0 999px;
+}
+
 .liquid-progress-fill,
 .ml-progress-fill {
   position: absolute;
