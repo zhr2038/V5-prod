@@ -5971,6 +5971,7 @@ def test_auto_risk_guard_api_prefers_latest_eval_history_ts_when_eval_history_is
     assert payload["current_level"] == "PROTECT"
     assert payload["config"]["max_positions"] == 1
     assert payload["reason"] == "newer eval history"
+    assert payload["last_update"] == "2026-04-19T15:05:00"
 
 
 def test_calculate_market_indicators_prefers_latest_cache_file_by_filename_timestamp(monkeypatch, tmp_path):
@@ -6068,6 +6069,8 @@ def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(
     assert payload["metrics"]["last_dd_pct"] == 0.25
     assert payload["reason"] == "runtime guard fallback"
     assert payload["last_update"] == "2026-04-19T13:05:00"
+
+    module._DASHBOARD_ROUTE_CACHE.clear()
 
     (runtime_dir / "auto_risk_guard.json").write_text(
         json.dumps(
@@ -6175,6 +6178,47 @@ def test_auto_risk_guard_api_prefers_latest_matching_history_ts_when_history_is_
     assert payload["current_level"] == "DEFENSE"
     assert payload["reason"] == "newest defense"
     assert payload["last_update"] == "2026-04-19T14:05:00"
+
+
+def test_auto_risk_guard_api_falls_back_to_latest_history_ts_when_guard_last_update_missing(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    runtime_dir = reports_dir / "shadow_runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {"execution": {"order_store_path": "reports/shadow_runtime/orders.sqlite"}},
+    )
+
+    (runtime_dir / "auto_risk_guard.json").write_text(
+        json.dumps(
+            {
+                "current_level": "DEFENSE",
+                "current_config": {"max_positions": 3},
+                "metrics": {"last_dd_pct": 0.12},
+                "history": [
+                    {"to": "PROTECT", "reason": "older protect", "ts": "2026-04-19T14:00:00"},
+                    {"to": "ATTACK", "reason": "newest transition", "ts": "2026-04-19T14:07:00"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/auto_risk_guard")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_level"] == "DEFENSE"
+    assert payload["last_update"] == "2026-04-19T14:07:00"
 
 
 def test_auto_risk_guard_api_sorts_history_tail_by_ts(monkeypatch, tmp_path):

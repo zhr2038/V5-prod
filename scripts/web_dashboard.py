@@ -1059,6 +1059,19 @@ def _sorted_risk_history_tail(history: Any, limit: int = 5) -> List[Dict[str, An
     return ordered[-max(1, int(limit)) :]
 
 
+def _latest_risk_history_ts(history: Any) -> str:
+    if not isinstance(history, list):
+        return ''
+    latest_history = max(
+        (item for item in history if isinstance(item, dict)),
+        key=lambda item: float(_coerce_timestamp_epoch(item.get('ts')) or float('-inf')),
+        default=None,
+    )
+    if not isinstance(latest_history, dict):
+        return ''
+    return str(latest_history.get('ts') or '').strip()
+
+
 def _reflection_report_sort_epoch(path: Path) -> float:
     match = re.search(r"reflection_(\d{8}_\d{4,6})$", path.stem)
     if match:
@@ -5747,14 +5760,15 @@ def api_auto_risk_guard():
             config = data.get('config')
             if not isinstance(config, dict):
                 config = asdict(risk_level)
+            eval_history = data.get('history')
 
             return jsonify({
                 'current_level': level,
                 'config': config,
-                'history': _sorted_risk_history_tail(data.get('history'), 5),
+                'history': _sorted_risk_history_tail(eval_history, 5),
                 'metrics': data.get('metrics', {}),
                 'reason': data.get('reason', ''),
-                'last_update': data.get('ts', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                'last_update': str(data.get('ts') or _latest_risk_history_ts(eval_history) or '').strip()
             })
 
         guard = AutoRiskGuard(state_path=str(runtime_paths.auto_risk_guard_path))
@@ -5763,6 +5777,7 @@ def api_auto_risk_guard():
         guard_metrics = guard.metrics
         guard_reason = ''
         guard_last_update = ''
+        latest_guard_history_ts = ''
 
         if isinstance(guard_state, dict):
             stored_config = guard_state.get('current_config')
@@ -5772,6 +5787,7 @@ def api_auto_risk_guard():
             stored_history = guard_state.get('history')
             if isinstance(stored_history, list):
                 guard_history = _sorted_risk_history_tail(stored_history, 5)
+                latest_guard_history_ts = _latest_risk_history_ts(stored_history)
                 latest_history = max(
                     (
                         item
@@ -5791,6 +5807,8 @@ def api_auto_risk_guard():
                 guard_metrics = stored_metrics
 
             guard_last_update = str(guard_state.get('last_update') or guard_last_update or '').strip()
+            if not guard_last_update:
+                guard_last_update = latest_guard_history_ts
 
         return jsonify({
             'current_level': guard.current_level,
@@ -5798,7 +5816,7 @@ def api_auto_risk_guard():
             'history': guard_history,
             'metrics': guard_metrics,
             'reason': guard_reason,
-            'last_update': guard_last_update or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'last_update': guard_last_update or ''
         })
     except Exception as exc:
         return _json_internal_error_response(
