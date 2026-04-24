@@ -3031,6 +3031,11 @@ def api_positions():
                     if time.time() - file_epoch < 900:  # 15分钟内
                         df = pd.read_csv(latest_file)
                         if len(df) > 0 and 'close' in df.columns:
+                            ts_col = 'timestamp' if 'timestamp' in df.columns else 'ts' if 'ts' in df.columns else None
+                            if ts_col is not None:
+                                parsed_ts = pd.to_datetime(df[ts_col], errors='coerce', utc=False)
+                                if parsed_ts.notna().any():
+                                    df = df.assign(_parsed_ts=parsed_ts).sort_values('_parsed_ts', kind='mergesort')
                             price = float(df.iloc[-1]['close'])
                             price_cache[symbol] = price
                             return price

@@ -7852,7 +7852,7 @@ def test_api_positions_prefers_fresh_local_price_cache_before_public_ticker(monk
 
     cache_dir = tmp_path / "data" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / "ETH_USDT_1H_20260410.csv"
+    cache_file = cache_dir / "ETH_USDT_1H_20260410_01.csv"
     cache_file.write_text("ts,open,high,low,close,volume\n1,100,101,99,123.45,10\n", encoding="utf-8")
 
     def fail_if_called(*args, **kwargs):
@@ -7889,6 +7889,48 @@ def test_api_positions_prefers_latest_cache_file_by_logical_suffix_timestamp(mon
     newer_range = cache_dir / "ETH_USDT_1H_2026-04-10_2026-04-12.csv"
     older_daily.write_text("ts,open,high,low,close,volume\n1,100,101,99,111.11,10\n", encoding="utf-8")
     newer_range.write_text("ts,open,high,low,close,volume\n1,100,101,99,222.22,10\n", encoding="utf-8")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("public ticker should not be called when fresh local cache is present")
+
+    monkeypatch.setattr(module.requests, "get", fail_if_called)
+
+    with module.app.app_context():
+        payload = module.api_positions().get_json()
+
+    assert payload["positions"][0]["symbol"] == "ETH"
+    assert payload["positions"][0]["last_price"] == 222.22
+    assert payload["positions"][0]["value_usdt"] == 444.44
+
+
+def test_api_positions_prefers_latest_row_in_unsorted_cache_file(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "_load_avg_cost_from_fills", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.time, "time", lambda: datetime(2026, 4, 10, 1, 5).timestamp())
+
+    db_path = tmp_path / "positions.sqlite"
+    con = sqlite3.connect(str(db_path))
+    cur = con.cursor()
+    cur.execute("CREATE TABLE positions (symbol TEXT, qty REAL, avg_px REAL, last_mark_px REAL)")
+    cur.execute("INSERT INTO positions VALUES ('ETH/USDT', 2.0, 100.0, 0.0)")
+    con.commit()
+    con.close()
+
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / "ETH_USDT_1H_20260410_01.csv"
+    cache_file.write_text(
+        "\n".join(
+            [
+                "timestamp,open,high,low,close,volume",
+                "2026-04-10T01:00:00,100,101,99,222.22,10",
+                "2026-04-10T00:00:00,100,101,99,111.11,10",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("public ticker should not be called when fresh local cache is present")
