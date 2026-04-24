@@ -23,6 +23,27 @@ class _BacktestClock:
         return self._now
 
 
+def _normalize_timestamp_ms(value: Any) -> int | None:
+    try:
+        ts_value = int(value)
+    except Exception:
+        return None
+    if abs(ts_value) < 10_000_000_000:
+        ts_value *= 1000
+    return ts_value
+
+
+def _series_timestamp_bounds(series: MarketSeries) -> tuple[int | None, int | None]:
+    ts_values = [
+        normalized
+        for normalized in (_normalize_timestamp_ms(value) for value in (series.ts or []))
+        if normalized is not None
+    ]
+    if not ts_values:
+        return None, None
+    return min(ts_values), max(ts_values)
+
+
 @dataclass
 class BacktestResult:
     """BacktestResult类"""
@@ -93,7 +114,7 @@ class BacktestEngine:
         if pipeline is None:
             if not cfg_provided:
                 cfg.execution.collect_ml_training_data = False
-            init_ts = int(market_data[syms[0]].ts[0]) if getattr(market_data[syms[0]], "ts", None) else None
+            init_ts, _ = _series_timestamp_bounds(market_data[syms[0]])
             clock = _BacktestClock(init_ts)
             pipeline = V5Pipeline(cfg, clock=clock, data_provider=data_provider)
 
@@ -125,7 +146,9 @@ class BacktestEngine:
             try:
                 clock = getattr(pipeline, "clock", None)
                 if clock is not None and hasattr(clock, "set_timestamp_ms"):
-                    clock.set_timestamp_ms(int(md_slice[syms[0]].ts[-1]))
+                    _, signal_ts = _series_timestamp_bounds(md_slice[syms[0]])
+                    if signal_ts is not None:
+                        clock.set_timestamp_ms(signal_ts)
             except Exception:
                 pass
 
