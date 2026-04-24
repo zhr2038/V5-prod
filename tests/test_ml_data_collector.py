@@ -120,3 +120,21 @@ def test_align_export_cycles_keeps_latest_duplicate_row_for_same_hour_and_symbol
     btc_row = out.loc[out["symbol"] == "BTC/USDT"].iloc[0]
     assert btc_row["timestamp"] == 3_600_000
     assert btc_row["score"] == 2.0
+
+
+def test_compute_future_return_from_candles_sorts_unsorted_rows_before_searchsorted() -> None:
+    candles = pd.DataFrame(
+        [
+            {"timestamp_ms": 1_710_021_600_000, "close": 110.0},  # +6h
+            {"timestamp_ms": 1_710_000_000_000, "close": 100.0},  # start
+            {"timestamp_ms": 1_710_043_200_000, "close": 120.0},  # +12h
+        ]
+    )
+
+    future_return = collector_mod.MLDataCollector._compute_future_return_from_candles(
+        candles,
+        start_timestamp=1_710_000_000_000,
+        hours=6,
+    )
+
+    assert future_return == 0.10

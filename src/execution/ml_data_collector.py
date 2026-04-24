@@ -769,6 +769,18 @@ class MLDataCollector:
         if candles.empty:
             return None
 
+        candles = candles[["timestamp_ms", "close"]].copy()
+        candles = candles.dropna(subset=["timestamp_ms", "close"])
+        candles["timestamp_ms"] = candles["timestamp_ms"].astype("int64")
+        candles["close"] = candles["close"].astype("float64")
+        candles = (
+            candles.drop_duplicates(subset=["timestamp_ms"], keep="last")
+            .sort_values("timestamp_ms", kind="mergesort")
+            .reset_index(drop=True)
+        )
+        if candles.empty:
+            return None
+
         end_timestamp = int(start_timestamp) + int(hours) * MLDataCollector.ONE_HOUR_MS
         ts = candles["timestamp_ms"].to_numpy(dtype=np.int64)
         close = candles["close"].to_numpy(dtype=np.float64)
