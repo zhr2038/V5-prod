@@ -356,26 +356,27 @@ def check_time_alignment(
     """
     errors = []
     warnings = []
+    ordered_price_times = sorted(int(ts) for ts in price_times)
     
     # 检查1: snapshot时间必须在价格时间之前
     for i, snap_ts in enumerate(snapshot_times):
         # 找到snapshot时间对应的价格时间
-        price_idx = np.searchsorted(price_times, snap_ts, side='right') - 1
+        price_idx = np.searchsorted(ordered_price_times, snap_ts, side='right') - 1
         
         if price_idx < 0:
             errors.append(f"Snapshot {i}: No price data before snapshot time {snap_ts}")
             continue
         
-        price_ts = price_times[price_idx]
+        price_ts = ordered_price_times[price_idx]
         
         # snapshot时间应该 >= 价格时间（使用该价格计算alpha）
         if snap_ts < price_ts:
             errors.append(f"Snapshot {i}: snapshot_ts={snap_ts} < price_ts={price_ts}")
         
         # 检查未来收益：必须使用snapshot时间之后的价格
-        future_price_idx = np.searchsorted(price_times, snap_ts + forward_horizon_hours * 3600)
+        future_price_idx = np.searchsorted(ordered_price_times, snap_ts + forward_horizon_hours * 3600)
         
-        if future_price_idx >= len(price_times):
+        if future_price_idx >= len(ordered_price_times):
             warnings.append(f"Snapshot {i}: Insufficient data for {forward_horizon_hours}h forward return")
     
     return {
