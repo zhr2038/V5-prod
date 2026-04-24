@@ -1106,7 +1106,7 @@ def _decision_audit_sort_epoch(run_dir: Path, audit: Dict[str, Any]) -> float:
 
 
 def _pick_latest_shadow_audit(reports_dir: Path) -> tuple[Optional[Path], Dict[str, Any]]:
-    entries = _iter_decision_audits(reports_dir)
+    entries = _iter_decision_audits(reports_dir, scan_limit=1)
     if not entries:
         return None, {}
     latest = entries[0]

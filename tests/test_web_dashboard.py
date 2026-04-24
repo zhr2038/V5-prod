@@ -3713,6 +3713,39 @@ def test_shadow_ml_overlay_timestamp_prefers_sort_epoch_over_file_mtime(monkeypa
     assert payload["timestamp"] == module._run_id_epoch("shadow_tuned_xgboost_20260404_14")
 
 
+def test_pick_latest_shadow_audit_limits_recent_decision_audit_scan(tmp_path, monkeypatch):
+    import scripts.web_dashboard as module
+
+    reports_dir = tmp_path / "reports"
+    runs_dir = reports_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    for hour in range(20):
+        run_dir = runs_dir / f"shadow_tuned_xgboost_20260408_{hour:02d}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "decision_audit.json").write_text(
+            json.dumps({"run_id": f"shadow_tuned_xgboost_20260408_{hour:02d}"}),
+            encoding="utf-8",
+        )
+
+    original_load_json_payload = module._load_json_payload
+    reads = {"decision_audit": 0}
+
+    def counting_load_json_payload(path):
+        if Path(path).name == "decision_audit.json":
+            reads["decision_audit"] += 1
+        return original_load_json_payload(path)
+
+    monkeypatch.setattr(module, "_load_json_payload", counting_load_json_payload)
+
+    run_dir, audit = module._pick_latest_shadow_audit(reports_dir)
+
+    assert run_dir is not None
+    assert run_dir.name == "shadow_tuned_xgboost_20260408_19"
+    assert audit["run_id"] == "shadow_tuned_xgboost_20260408_19"
+    assert reads["decision_audit"] <= 1
+
+
 def test_smart_alerts_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
