@@ -48,6 +48,50 @@ class ExitPolicy:
         except Exception:
             return None
 
+    @staticmethod
+    def _normalize_market_series(series: MarketSeries) -> MarketSeries:
+        points = []
+        for idx, values in enumerate(
+            zip(
+                series.ts or [],
+                series.open or [],
+                series.high or [],
+                series.low or [],
+                series.close or [],
+                series.volume or [],
+            )
+        ):
+            ts_value, open_px, high_px, low_px, close_px, volume = values
+            try:
+                ts_ms = int(ts_value)
+            except Exception:
+                continue
+            if abs(ts_ms) < 10_000_000_000:
+                ts_ms *= 1000
+            points.append((ts_ms, idx, open_px, high_px, low_px, close_px, volume))
+
+        if not points:
+            return MarketSeries(symbol=series.symbol, timeframe=series.timeframe, ts=[], open=[], high=[], low=[], close=[], volume=[])
+
+        points.sort(key=lambda item: (item[0], item[1]))
+        deduped = []
+        for point in points:
+            if deduped and deduped[-1][0] == point[0]:
+                deduped[-1] = point
+            else:
+                deduped.append(point)
+
+        return MarketSeries(
+            symbol=series.symbol,
+            timeframe=series.timeframe,
+            ts=[int(item[0]) for item in deduped],
+            open=[item[2] for item in deduped],
+            high=[item[3] for item in deduped],
+            low=[item[4] for item in deduped],
+            close=[float(item[5]) for item in deduped],
+            volume=[item[6] for item in deduped],
+        )
+
     def evaluate(
         self,
         positions: List[Position],
@@ -69,7 +113,9 @@ class ExitPolicy:
         # Regime exit (scaffold): if Risk-Off and enabled => close all
         if self.cfg.enable_regime_exit and str(regime_state) == "Risk-Off":
             for p in positions:
-                last = float(market_data.get(p.symbol).close[-1]) if market_data.get(p.symbol) else float(p.avg_px)
+                series = market_data.get(p.symbol)
+                normalized_series = self._normalize_market_series(series) if series is not None else None
+                last = float(normalized_series.close[-1]) if normalized_series and normalized_series.close else float(p.avg_px)
                 orders.append(
                     Order(
                         symbol=p.symbol,
@@ -87,6 +133,9 @@ class ExitPolicy:
         for p in positions:
             s = market_data.get(p.symbol)
             if not s or not s.close:
+                continue
+            s = self._normalize_market_series(s)
+            if not s.close:
                 continue
 
             last = float(s.close[-1])
