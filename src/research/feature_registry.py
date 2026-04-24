@@ -95,6 +95,48 @@ def _coerce_timestamp_series(values: Any, *, length: int) -> pd.Series:
     return pd.Series(arr)
 
 
+def _sort_ohlcv_by_timestamp(
+    *,
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    volume: pd.Series,
+    timestamps: pd.Series,
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
+    parsed_ts = pd.to_numeric(timestamps, errors="coerce")
+    if len(parsed_ts) != len(close) or parsed_ts.isna().any():
+        return (
+            close.reset_index(drop=True),
+            high.reset_index(drop=True),
+            low.reset_index(drop=True),
+            volume.reset_index(drop=True),
+            timestamps.reset_index(drop=True),
+        )
+
+    frame = pd.DataFrame(
+        {
+            "_ts": parsed_ts.astype("float64"),
+            "timestamp": timestamps.reset_index(drop=True),
+            "close": close.reset_index(drop=True),
+            "high": high.reset_index(drop=True),
+            "low": low.reset_index(drop=True),
+            "volume": volume.reset_index(drop=True),
+        }
+    )
+    frame = (
+        frame.sort_values("_ts", kind="mergesort")
+        .drop_duplicates(subset=["_ts"], keep="last")
+        .reset_index(drop=True)
+    )
+    return (
+        frame["close"],
+        frame["high"],
+        frame["low"],
+        frame["volume"],
+        frame["timestamp"],
+    )
+
+
 def _value_from_data(data: Any, key: str) -> Any:
     if isinstance(data, dict):
         return data.get(key)
@@ -251,6 +293,13 @@ def build_feature_frame_from_market_data(
         high = _coerce_numeric_series(_value_from_data(data, "high"), length=len(close), fallback=close)
         low = _coerce_numeric_series(_value_from_data(data, "low"), length=len(close), fallback=close)
         timestamps = _coerce_timestamp_series(_value_from_data(data, "ts"), length=len(close))
+        close, high, low, volume, timestamps = _sort_ohlcv_by_timestamp(
+            close=close,
+            high=high,
+            low=low,
+            volume=volume,
+            timestamps=timestamps,
+        )
 
         frame = pd.DataFrame({"symbol": [str(symbol)] * len(close), "timestamp": timestamps})
         if "classic" in groups:
@@ -347,12 +396,26 @@ def build_inference_frame_from_market_data(
         ts_values = _value_from_data(data, "ts")
         if close_raw is None or len(close_raw) < 2:
             continue
+        close = pd.Series(list(close_raw), dtype=float).replace([np.inf, -np.inf], np.nan)
+        volume = _coerce_numeric_series(_value_from_data(data, "volume"), length=len(close), default=0.0)
+        high = _coerce_numeric_series(_value_from_data(data, "high"), length=len(close), fallback=close)
+        low = _coerce_numeric_series(_value_from_data(data, "low"), length=len(close), fallback=close)
+        timestamps = _coerce_timestamp_series(ts_values, length=len(close))
+        close, high, low, volume, timestamps = _sort_ohlcv_by_timestamp(
+            close=close,
+            high=high,
+            low=low,
+            volume=volume,
+            timestamps=timestamps,
+        )
+        if len(close) < 2:
+            continue
         row = build_snapshot_feature_row(
             symbol=str(symbol),
-            close=list(close_raw),
-            high=_value_from_data(data, "high"),
-            low=_value_from_data(data, "low"),
-            volume=_value_from_data(data, "volume"),
+            close=close.tolist(),
+            high=high.tolist(),
+            low=low.tolist(),
+            volume=volume.tolist(),
             timestamp_ms=_latest_timestamp_ms(ts_values),
             feature_groups=groups,
             include_time_features=include_time_features,
