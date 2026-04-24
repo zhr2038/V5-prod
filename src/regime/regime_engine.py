@@ -40,6 +40,50 @@ def _atr_pct(series: MarketSeries, n: int = 14) -> float:
     return atr / last if last else 0.0
 
 
+def _normalize_market_series(series: MarketSeries) -> MarketSeries:
+    points = []
+    for idx, values in enumerate(
+        zip(
+            series.ts or [],
+            series.open or [],
+            series.high or [],
+            series.low or [],
+            series.close or [],
+            series.volume or [],
+        )
+    ):
+        ts_value, open_px, high_px, low_px, close_px, volume = values
+        try:
+            ts_ms = int(ts_value)
+        except Exception:
+            continue
+        if abs(ts_ms) < 10_000_000_000:
+            ts_ms *= 1000
+        points.append((ts_ms, idx, open_px, high_px, low_px, close_px, volume))
+
+    if not points:
+        return MarketSeries(symbol=series.symbol, timeframe=series.timeframe, ts=[], open=[], high=[], low=[], close=[], volume=[])
+
+    points.sort(key=lambda item: (item[0], item[1]))
+    deduped = []
+    for point in points:
+        if deduped and deduped[-1][0] == point[0]:
+            deduped[-1] = point
+        else:
+            deduped.append(point)
+
+    return MarketSeries(
+        symbol=series.symbol,
+        timeframe=series.timeframe,
+        ts=[int(item[0]) for item in deduped],
+        open=[item[2] for item in deduped],
+        high=[item[3] for item in deduped],
+        low=[item[4] for item in deduped],
+        close=[float(item[5]) for item in deduped],
+        volume=[item[6] for item in deduped],
+    )
+
+
 @dataclass
 class RegimeResult:
     state: RegimeState
@@ -239,6 +283,7 @@ class RegimeEngine:
         )
 
     def detect(self, btc_data: MarketSeries) -> RegimeResult:
+        btc_data = _normalize_market_series(btc_data)
         if self.use_hmm:
             hmm_result = self._detect_hmm(btc_data)
             if hmm_result is not None:
