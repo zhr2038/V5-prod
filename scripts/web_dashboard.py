@@ -386,18 +386,19 @@ def _normalize_dashboard_symbol(symbol: str) -> str:
 
 
 def _trim_market_series(series: MarketSeries, limit: int) -> MarketSeries:
+    normalized = _normalize_market_series(series)
     target = max(int(limit or 0), 0)
-    if target <= 0 or len(series.ts) <= target:
-        return series
+    if target <= 0 or len(normalized.ts) <= target:
+        return normalized
     return MarketSeries(
-        symbol=series.symbol,
-        timeframe=series.timeframe,
-        ts=series.ts[-target:],
-        open=series.open[-target:],
-        high=series.high[-target:],
-        low=series.low[-target:],
-        close=series.close[-target:],
-        volume=series.volume[-target:],
+        symbol=normalized.symbol,
+        timeframe=normalized.timeframe,
+        ts=normalized.ts[-target:],
+        open=normalized.open[-target:],
+        high=normalized.high[-target:],
+        low=normalized.low[-target:],
+        close=normalized.close[-target:],
+        volume=normalized.volume[-target:],
     )
 
 
@@ -434,6 +435,65 @@ def _frame_to_market_series(frame: pd.DataFrame, *, symbol: str, timeframe: str)
     )
 
 
+def _normalize_market_series(series: MarketSeries) -> MarketSeries:
+    points = []
+    for idx, values in enumerate(
+        zip(
+            series.ts or [],
+            series.open or [],
+            series.high or [],
+            series.low or [],
+            series.close or [],
+            series.volume or [],
+        )
+    ):
+        ts_ms, open_px, high_px, low_px, close_px, volume = values
+        try:
+            ts_value = int(ts_ms)
+        except (TypeError, ValueError):
+            continue
+        if abs(ts_value) < 10_000_000_000:
+            ts_value *= 1000
+        points.append((ts_value, idx, open_px, high_px, low_px, close_px, volume))
+
+    if not points:
+        return MarketSeries(symbol=series.symbol, timeframe=series.timeframe, ts=[], open=[], high=[], low=[], close=[], volume=[])
+
+    points.sort(key=lambda item: (item[0], item[1]))
+    deduped: List[tuple[int, int, Any, Any, Any, Any, Any]] = []
+    for point in points:
+        if deduped and deduped[-1][0] == point[0]:
+            deduped[-1] = point
+        else:
+            deduped.append(point)
+
+    return MarketSeries(
+        symbol=series.symbol,
+        timeframe=series.timeframe,
+        ts=[int(item[0]) for item in deduped],
+        open=[item[2] for item in deduped],
+        high=[item[3] for item in deduped],
+        low=[item[4] for item in deduped],
+        close=[item[5] for item in deduped],
+        volume=[item[6] for item in deduped],
+    )
+
+
+def _latest_market_series_ts_ms(series: Optional[MarketSeries]) -> Optional[int]:
+    if series is None or not series.ts:
+        return None
+    latest_ts_ms = None
+    for ts_ms in series.ts:
+        try:
+            ts_value = int(ts_ms)
+        except (TypeError, ValueError):
+            continue
+        if abs(ts_value) < 10_000_000_000:
+            ts_value *= 1000
+        latest_ts_ms = ts_value if latest_ts_ms is None else max(latest_ts_ms, ts_value)
+    return latest_ts_ms
+
+
 def _load_cached_position_market_series(symbol: str, timeframe: str, limit: int) -> Optional[MarketSeries]:
     tf_config = POSITION_KLINE_TIMEFRAMES[timeframe]
     source_timeframe = str(tf_config['source_timeframe'])
@@ -466,16 +526,11 @@ def _load_cached_position_market_series(symbol: str, timeframe: str, limit: int)
 
 
 def _position_market_series_is_fresh(series: Optional[MarketSeries], timeframe: str) -> bool:
-    if series is None or not series.ts:
-        return False
-    try:
-        last_ts = int(series.ts[-1] or 0)
-    except (TypeError, ValueError):
+    last_ts = _latest_market_series_ts_ms(series)
+    if last_ts is None:
         return False
     if last_ts <= 0:
         return False
-    if last_ts < 10_000_000_000:
-        last_ts *= 1000
     max_age_seconds = float(POSITION_KLINE_TIMEFRAMES.get(timeframe, {}).get('fresh_for_seconds') or 0)
     if max_age_seconds <= 0:
         return False
@@ -498,7 +553,7 @@ def _load_position_market_series(symbol: str, timeframe: str, limit: int) -> tup
         cached_series = _load_cached_position_market_series(normalized_symbol, timeframe, limit)
         if cached_series is not None and cached_series.ts:
             if _position_market_series_is_fresh(cached_series, timeframe):
-                return cached_series, 'cache'
+                return _trim_market_series(cached_series, limit), 'cache'
             stale_cached_series = cached_series
     except Exception:
         pass

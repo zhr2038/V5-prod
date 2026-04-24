@@ -1392,6 +1392,31 @@ def test_position_kline_api_normalizes_second_timestamps(monkeypatch):
     assert payload["candles"][0]["time"] == "2024-03-12 00:00"
 
 
+def test_position_kline_api_sorts_unsorted_series_before_summary(monkeypatch):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    series = module.MarketSeries(
+        symbol="BTC/USDT",
+        timeframe="1h",
+        ts=[1710205200000, 1710201600000],
+        open=[101.0, 100.0],
+        high=[105.0, 102.0],
+        low=[100.5, 99.5],
+        close=[103.0, 101.0],
+        volume=[12.0, 10.0],
+    )
+    monkeypatch.setattr(module, "_load_position_market_series", lambda symbol, timeframe, limit: (series, "okx"))
+
+    response = client.get("/api/position_kline?symbol=BTC&timeframe=1h&limit=2")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert [item["ts"] for item in payload["candles"]] == [1710201600000, 1710205200000]
+    assert payload["summary"]["close"] == 103.0
+    assert payload["summary"]["last_time"] == "2024-03-12 01:00"
+
+
 def test_position_kline_api_error_response_hides_internal_paths(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
@@ -1443,7 +1468,7 @@ def test_load_position_market_series_prefers_okx_when_cache_is_stale(monkeypatch
 
     monkeypatch.setattr(module, "_load_cached_position_market_series", lambda symbol, timeframe, limit: stale_series)
     monkeypatch.setattr(module, "_get_okx_public_provider", lambda: FakeProvider())
-    monkeypatch.setattr(module.time, "time", lambda: 1_776_000_000.0)
+    monkeypatch.setattr(module.time, "time", lambda: 1_775_920_000.0)
 
     series, source = module._load_position_market_series("BTC", "1h", 2)
 
@@ -1471,12 +1496,41 @@ def test_load_position_market_series_falls_back_to_stale_cache_when_okx_unavaila
 
     monkeypatch.setattr(module, "_load_cached_position_market_series", lambda symbol, timeframe, limit: stale_series)
     monkeypatch.setattr(module, "_get_okx_public_provider", lambda: BrokenProvider())
-    monkeypatch.setattr(module.time, "time", lambda: 1_776_000_000.0)
+    monkeypatch.setattr(module.time, "time", lambda: 1_775_920_000.0)
 
     series, source = module._load_position_market_series("BTC", "1h", 2)
 
     assert source == "cache_stale"
     assert series.close[-1] == 103.0
+
+
+def test_load_position_market_series_prefers_unsorted_cache_when_latest_bar_is_fresh(monkeypatch):
+    module = load_web_dashboard_module()
+
+    cached_series = module.MarketSeries(
+        symbol="BTC/USDT",
+        timeframe="1h",
+        ts=[1_775_904_000_000, 1_775_900_400_000],
+        open=[111.0, 110.0],
+        high=[115.0, 112.0],
+        low=[110.5, 109.5],
+        close=[113.0, 111.0],
+        volume=[16.0, 14.0],
+    )
+
+    class BrokenProvider:
+        def fetch_ohlcv(self, symbols, timeframe="1h", limit=0):
+            raise AssertionError("fresh unsorted cache should bypass OKX fetch")
+
+    monkeypatch.setattr(module, "_load_cached_position_market_series", lambda symbol, timeframe, limit: cached_series)
+    monkeypatch.setattr(module, "_get_okx_public_provider", lambda: BrokenProvider())
+    monkeypatch.setattr(module.time, "time", lambda: 1_775_920_000.0)
+
+    series, source = module._load_position_market_series("BTC", "1h", 2)
+
+    assert source == "cache"
+    assert series.ts[-1] == 1_775_904_000_000
+    assert series.close[-1] == 113.0
 
 
 def test_cache_json_response_ignores_cachebuster_query_param():
