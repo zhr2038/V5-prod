@@ -6000,6 +6000,30 @@ def test_calculate_market_indicators_prefers_latest_cache_file_by_filename_times
     assert indicators["price"] == 111
 
 
+def test_calculate_market_indicators_prefers_latest_row_in_unsorted_cache_file(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    cache_dir = tmp_path / "data" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_file = cache_dir / "BTC_USDT_1H_20260408_01.csv"
+    rows = ["timestamp,open,high,low,close,volume"]
+    start_dt = datetime(2026, 4, 8, 0, 0)
+    for idx in range(60):
+        base = 100 + idx
+        ts = (start_dt + timedelta(hours=idx)).isoformat()
+        close = 111 if idx == 59 else base
+        rows.append(f"{ts},{base},{base + 1},{base - 1},{close},1")
+    # Deliberately move the latest bar to the first data row so plain df.iloc[-1] would be wrong.
+    header, first_data, *middle, last_data = rows
+    cache_file.write_text("\n".join([header, last_data, *middle, first_data]), encoding="utf-8")
+
+    monkeypatch.setattr(module, "CACHE_DIR", cache_dir)
+
+    indicators = module.calculate_market_indicators()
+
+    assert indicators["price"] == 111
+
+
 def test_auto_risk_guard_api_falls_back_to_runtime_guard_path_when_eval_missing(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

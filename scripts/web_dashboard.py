@@ -3590,6 +3590,11 @@ def calculate_market_indicators():
 
         latest_file = max(btc_files, key=_sort_epoch)
         df = pd.read_csv(latest_file)
+        ts_col = 'timestamp' if 'timestamp' in df.columns else 'ts' if 'ts' in df.columns else None
+        if ts_col is not None:
+            parsed_ts = pd.to_datetime(df[ts_col], errors='coerce', utc=False)
+            if parsed_ts.notna().any():
+                df = df.assign(_parsed_ts=parsed_ts).sort_values('_parsed_ts', kind='mergesort')
         
         if len(df) < 60:
             return {'ma20': 0, 'ma60': 0, 'atr_percent': 1.0, 'price': 0}
