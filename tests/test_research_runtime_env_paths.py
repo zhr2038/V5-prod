@@ -109,6 +109,56 @@ def test_latest_signal_monitor_resolves_env_path_from_project_root(monkeypatch, 
     assert captured["env_path"] == str((tmp_path / ".env.runtime").resolve())
 
 
+def test_latest_signal_monitor_uses_min_max_series_timestamps_when_ts_is_unsorted(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    monkeypatch.setattr(
+        latest_signal_monitor,
+        "resolve_runtime_env_path",
+        lambda raw_env_path=None, project_root=None: str((tmp_path / ".env.runtime").resolve()),
+    )
+    monkeypatch.setattr(
+        latest_signal_monitor,
+        "_load_base_config_cached",
+        lambda base_config_path, env_path: type(
+            "Cfg", (), {"timeframe_main": "1h", "backtest": type("B", (), {"initial_equity_usdt": 100.0})(), "execution": type("E", (), {"collect_ml_training_data": False})()}
+        )(),
+    )
+    monkeypatch.setattr(latest_signal_monitor, "build_baseline_config", lambda base_cfg, project_root, research_symbols: base_cfg)
+    monkeypatch.setattr(latest_signal_monitor, "_apply_overrides", lambda cfg, overrides: None)
+    monkeypatch.setattr(
+        latest_signal_monitor,
+        "load_cached_market_data",
+        lambda cache_dir, symbols, timeframe, limit: {
+            "BTC/USDT": type("S", (), {"ts": [2_000, 1_000], "close": [1.0, 2.0]})()
+        },
+    )
+    monkeypatch.setattr(latest_signal_monitor, "seed_sandbox_read_only_artifacts", lambda *args, **kwargs: None)
+    monkeypatch.setattr(latest_signal_monitor, "_sandbox_reports_dir", lambda output_dir: __import__("contextlib").nullcontext(output_dir))
+    monkeypatch.setattr(latest_signal_monitor, "sandbox_working_directory", lambda output_dir: __import__("contextlib").nullcontext(output_dir))
+    monkeypatch.setattr(latest_signal_monitor, "V5Pipeline", lambda cfg, clock=None, data_provider=None: type("P", (), {"run": lambda self, *a, **k: type("O", (), {"regime": type("R", (), {"state": "SIDEWAYS", "multiplier": 1.0, "atr_pct": 0.0, "ma20": 0.0, "ma60": 0.0})(), "portfolio": type("Port", (), {"selected": [], "entry_candidates": [], "target_weights": {}})(), "orders": []})()})())
+    monkeypatch.setattr(
+        latest_signal_monitor,
+        "DecisionAudit",
+        lambda **kwargs: captured.update(kwargs) or type("A", (), {"top_scores": [], "counts": {}, "rejects": {}, "router_decisions": [], "notes": []})(),
+    )
+    monkeypatch.setattr(latest_signal_monitor, "RunLogger", lambda run_dir: object())
+
+    latest_signal_monitor.run_latest_signal_variant(
+        variant={"name": "baseline", "symbols": ["BTC/USDT"], "overrides": {}},
+        base_config_path=str(tmp_path / "configs" / "runtime.yaml"),
+        env_path=".env.runtime",
+        cache_dir=str(tmp_path / "data" / "cache"),
+        project_root=tmp_path,
+        output_dir=tmp_path / "out",
+        ohlcv_limit=10,
+        initial_equity_usdt=100.0,
+    )
+
+    assert captured["window_start_ts"] == 1_000
+    assert captured["window_end_ts"] == 2_000
+
+
 def test_walk_forward_optimizer_resolves_env_path_from_project_root(monkeypatch, tmp_path: Path) -> None:
     captured = {}
 

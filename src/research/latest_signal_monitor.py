@@ -159,10 +159,14 @@ def run_latest_signal_variant(
 
     market_data = load_cached_market_data(Path(cache_dir), symbols, cfg.timeframe_main, limit=int(ohlcv_limit))
     first_series = next(iter(market_data.values()))
-    signal_ts = int(first_series.ts[-1])
+    series_ts = [int(ts or 0) for ts in (first_series.ts or []) if int(ts or 0) > 0]
+    if not series_ts:
+        raise ValueError(f"cached market data for {symbols[0] if symbols else 'unknown'} is empty")
+    signal_ts = max(series_ts)
+    signal_start_ts = min(series_ts)
     audit = DecisionAudit(
         run_id=variant_name,
-        window_start_ts=int(first_series.ts[0]),
+        window_start_ts=signal_start_ts,
         window_end_ts=signal_ts,
     )
 
