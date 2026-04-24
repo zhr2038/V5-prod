@@ -318,16 +318,24 @@ def _collect_skipped_candidates(
         px = _normalize_float(decision.get("px"))
         ts_ms = 0
         series = market_data_1h.get(symbol)
-        if series and getattr(series, "close", None):
-            if px is None:
+        if series and getattr(series, "close", None) and getattr(series, "ts", None):
+            latest_idx = None
+            latest_ts = 0
+            for idx, raw_ts in enumerate(series.ts):
                 try:
-                    px = float(series.close[-1])
+                    candidate_ts = int(raw_ts or 0)
                 except Exception:
-                    px = None
-            try:
-                ts_ms = int(series.ts[-1])
-            except Exception:
-                ts_ms = 0
+                    continue
+                if candidate_ts >= latest_ts:
+                    latest_ts = candidate_ts
+                    latest_idx = idx
+            if latest_idx is not None:
+                ts_ms = latest_ts
+                if px is None and latest_idx < len(series.close):
+                    try:
+                        px = float(series.close[latest_idx])
+                    except Exception:
+                        px = None
         return px, ts_ms
 
     for rd in (audit.router_decisions or []):

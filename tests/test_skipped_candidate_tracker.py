@@ -206,6 +206,41 @@ def test_tracker_disabled_writes_no_files(tmp_path: Path) -> None:
     assert not (tmp_path / "reports" / "skipped_candidate_labels.jsonl").exists()
 
 
+def test_all_scores_below_threshold_uses_latest_market_bar_when_series_is_unsorted(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_04"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.alpha.min_score_threshold = 0.2
+
+    audit = DecisionAudit(run_id="20260421_04")
+    audit.regime = "Trending"
+    audit.top_scores = [{"symbol": "BTC/USDT", "score": 0.1}]
+    market_data = {
+        "BTC/USDT": _series(
+            "BTC/USDT",
+            [1_710_003_600_000, 1_710_000_000_000],
+            [120.0, 100.0],
+        )
+    }
+
+    result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="NEUTRAL",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    assert result["new_records"] == 1
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["skip_reason"] == "all_scores_below_threshold"
+    assert rows[0]["entry_px"] == 120.0
+    assert rows[0]["ts_utc"] == "2024-03-09T17:00:00Z"
+
+
 def test_load_cache_ohlcv_prefers_logically_newer_file_for_duplicate_timestamp(tmp_path: Path) -> None:
     from src.reporting.skipped_candidate_tracker import _load_cache_ohlcv
 
