@@ -63,6 +63,27 @@ def _append_jsonl(path: Path, payload: Any) -> Path:
     return path
 
 
+def _normalize_timestamp_ms(value: Any) -> int | None:
+    try:
+        ts_value = int(value)
+    except Exception:
+        return None
+    if abs(ts_value) < 10_000_000_000:
+        ts_value *= 1000
+    return ts_value
+
+
+def _series_timestamp_bounds(series: MarketSeries) -> tuple[int | None, int | None]:
+    ts_values = [
+        normalized
+        for normalized in (_normalize_timestamp_ms(value) for value in (series.ts or []))
+        if normalized is not None
+    ]
+    if not ts_values:
+        return None, None
+    return min(ts_values), max(ts_values)
+
+
 @contextmanager
 def _sandbox_reports_dir(path: Path):
     sandbox_reports = Path(path).resolve() / "reports"
@@ -307,7 +328,7 @@ def run_window_diagnostic(
         }
 
     cost_model, cost_meta = make_cost_model_from_cfg(cfg)
-    initial_ts = int(market_data[syms[0]].ts[0]) if market_data[syms[0]].ts else None
+    initial_ts, _ = _series_timestamp_bounds(market_data[syms[0]])
     clock = _BacktestClock(initial_ts)
     with _sandbox_reports_dir(output_dir):
         pipeline = V5Pipeline(cfg, clock=clock, data_provider=None)
@@ -361,13 +382,15 @@ def run_window_diagnostic(
                 )
                 for symbol in syms
             }
-            signal_ts = int(md_slice[syms[0]].ts[-1])
-            exec_ts = int(market_data[syms[0]].ts[i + 1])
+            window_start_ts, signal_ts = _series_timestamp_bounds(md_slice[syms[0]])
+            exec_ts = _normalize_timestamp_ms(market_data[syms[0]].ts[i + 1])
+            if window_start_ts is None or signal_ts is None or exec_ts is None:
+                raise ValueError("window diagnostics requires valid market timestamps")
             clock.set_timestamp_ms(signal_ts)
 
             audit = DecisionAudit(
                 run_id=f"{window_name}_bar_{i}",
-                window_start_ts=int(md_slice[syms[0]].ts[0]),
+                window_start_ts=window_start_ts,
                 window_end_ts=signal_ts,
             )
             out = pipeline.run(
