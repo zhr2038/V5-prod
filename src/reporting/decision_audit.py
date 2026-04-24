@@ -62,6 +62,8 @@ class DecisionAudit:
         "negative_expectancy_fast_fail_open_block": 0,
         "negative_expectancy_fast_fail_softened_count": 0,
         "negative_expectancy_fast_fail_hard_block_count": 0,
+        "dust_position_ignored_for_add_size_count": 0,
+        "dust_residual_no_close_order_count": 0,
     })
     
     # 详细数据

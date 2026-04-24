@@ -798,3 +798,187 @@ def test_rank_exit_audit_does_not_mislead_for_in_rank_position(tmp_path):
     notes = [str(n) for n in audit.notes]
     assert not any("Rank exit blocked by min-hold: XRP/USDT" in n for n in notes)
     assert not any("Rank exit strict mode: XRP/USDT" in n for n in notes)
+
+
+def test_dust_position_does_not_trigger_anti_chase_add_size(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.anti_chase_enabled = True
+    cfg.execution.anti_chase_max_add_notional_ratio = 1.0
+    cfg.execution.min_trade_value_usdt = 10.0
+    cfg.budget.min_trade_notional_base = 10.0
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 0.15},
+        selected=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="dust-anti-chase-open")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[
+            Position(
+                symbol="BTC/USDT",
+                qty=0.00000000892,
+                avg_px=50000.0,
+                entry_ts="2026-04-24T08:00:00Z",
+                highest_px=50000.0,
+                last_update_ts="2026-04-24T08:00:00Z",
+                last_mark_px=50000.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=106.96,
+        equity_peak_usdt=107.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert any(order.symbol == "BTC/USDT" and order.side == "buy" for order in out.orders)
+    order = next(order for order in out.orders if order.symbol == "BTC/USDT" and order.side == "buy")
+    assert order.intent == "OPEN_LONG"
+    assert not any(d.get("reason") == "anti_chase_add_size" for d in audit.router_decisions)
+    assert any(
+        d.get("symbol") == "BTC/USDT"
+        and d.get("dust_position_ignored_for_add_size") is True
+        and d.get("held_value_usdt") == pytest.approx(0.000446)
+        for d in audit.router_decisions
+    )
+    assert audit.counts["dust_position_ignored_for_add_size_count"] == 1
+
+
+def test_real_position_still_triggers_anti_chase_add_size(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.anti_chase_enabled = True
+    cfg.execution.anti_chase_max_add_notional_ratio = 1.0
+    cfg.execution.min_trade_value_usdt = 10.0
+    cfg.budget.min_trade_notional_base = 10.0
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 0.225},
+        selected=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="real-position-anti-chase")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[
+            Position(
+                symbol="BTC/USDT",
+                qty=0.00016,
+                avg_px=50000.0,
+                entry_ts="2026-04-24T08:00:00Z",
+                highest_px=50000.0,
+                last_update_ts="2026-04-24T08:00:00Z",
+                last_mark_px=50000.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=99.0,
+        equity_peak_usdt=107.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(
+        d.get("symbol") == "BTC/USDT"
+        and d.get("reason") == "anti_chase_add_size"
+        and d.get("held_value") == pytest.approx(8.0)
+        for d in audit.router_decisions
+    )
+
+
+def test_dust_residual_does_not_generate_close_order(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.min_trade_value_usdt = 10.0
+    cfg.budget.min_trade_notional_base = 10.0
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={},
+        selected=[],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="dust-no-close")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[
+            Position(
+                symbol="BTC/USDT",
+                qty=0.00000000892,
+                avg_px=50000.0,
+                entry_ts="2026-04-24T08:00:00Z",
+                highest_px=50000.0,
+                last_update_ts="2026-04-24T08:00:00Z",
+                last_mark_px=50000.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=106.96,
+        equity_peak_usdt=107.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(
+        d.get("symbol") == "BTC/USDT"
+        and d.get("reason") == "dust_residual_no_close_order"
+        and d.get("held_value_usdt") == pytest.approx(0.000446)
+        for d in audit.router_decisions
+    )
+    assert audit.counts["dust_residual_no_close_order_count"] == 1
+
+
+def test_non_dust_position_zero_target_close_unchanged(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.min_trade_value_usdt = 10.0
+    cfg.budget.min_trade_notional_base = 10.0
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={},
+        selected=[],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="non-dust-close")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0)},
+        positions=[
+            Position(
+                symbol="BTC/USDT",
+                qty=0.00024,
+                avg_px=50000.0,
+                entry_ts="2026-04-24T08:00:00Z",
+                highest_px=50000.0,
+                last_update_ts="2026-04-24T08:00:00Z",
+                last_mark_px=50000.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=95.0,
+        equity_peak_usdt=107.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert any(order.symbol == "BTC/USDT" and order.side == "sell" for order in out.orders)
+    assert not any(d.get("reason") == "dust_residual_no_close_order" for d in audit.router_decisions)

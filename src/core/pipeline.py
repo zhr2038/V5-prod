@@ -1029,6 +1029,38 @@ class V5Pipeline:
             "probe_notional": float(effective_probe_target_w) * float(equity),
         }
 
+    def _exchange_min_notional_with_slack(self, *, symbol: str, px: float) -> float:
+        if float(px) <= 0.0 or not bool(getattr(self.cfg.budget, "exchange_min_notional_enabled", True)):
+            return 0.0
+        try:
+            from src.data.okx_instruments import OKXSpotInstrumentsCache
+
+            spec = OKXSpotInstrumentsCache().get_spec(symbol_to_inst_id(symbol))
+            if spec is None:
+                return 0.0
+            min_sz = float(spec.min_sz or 0.0)
+            if min_sz <= 0.0:
+                return 0.0
+            slack = float(getattr(self.cfg.budget, "exchange_min_notional_slack_multiplier", 1.05) or 1.05)
+            return float(min_sz) * float(px) * float(slack)
+        except Exception:
+            return 0.0
+
+    def _dust_position_threshold_usdt(self, *, symbol: str, px: float) -> float:
+        dust_ignore = _coalesce(
+            getattr(self.cfg.execution, "dust_usdt_ignore", None),
+            getattr(self.cfg.execution, "reconcile_dust_usdt_ignore", None),
+        )
+        dust_value = _coalesce(getattr(self.cfg.execution, "dust_value_threshold", None), 0.5)
+        min_trade_value = float(getattr(self.cfg.execution, "min_trade_value_usdt", 0.0) or 0.0)
+        return max(
+            float(dust_ignore or 0.0),
+            float(dust_value or 0.0),
+            0.1 * float(min_trade_value),
+            1.0,
+            self._exchange_min_notional_with_slack(symbol=symbol, px=px),
+        )
+
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
         """按市值计价更新持仓
         
@@ -2984,6 +3016,34 @@ class V5Pipeline:
             exit_orders = [v[1] for v in best.values()]
 
         exit_router_decisions = []
+        if exit_orders:
+            filtered_exit_orders = []
+            for order in exit_orders:
+                px_exit = float(getattr(order, "signal_price", 0.0) or 0.0)
+                if px_exit <= 0.0:
+                    try:
+                        px_exit = float(prices.get(order.symbol, 0.0) or 0.0)
+                    except Exception:
+                        px_exit = 0.0
+                dust_threshold = self._dust_position_threshold_usdt(symbol=order.symbol, px=px_exit)
+                notional_exit = float(getattr(order, "notional_usdt", 0.0) or 0.0)
+                if str(getattr(order, "side", "")).lower() == "sell" and 0.0 < notional_exit < dust_threshold:
+                    if audit:
+                        audit.record_count("dust_residual_no_close_order_count", symbol=order.symbol)
+                        exit_router_decisions.append(
+                            {
+                                "symbol": order.symbol,
+                                "action": "skip",
+                                "reason": "dust_residual_no_close_order",
+                                "source_reason": (order.meta or {}).get("reason"),
+                                "held_value_usdt": float(notional_exit),
+                                "dust_threshold_usdt": float(dust_threshold),
+                            }
+                        )
+                    continue
+                filtered_exit_orders.append(order)
+            exit_orders = filtered_exit_orders
+
         for order in exit_orders:
             meta = dict(order.meta or {})
             meta["bypass_turnover_cap_for_exit"] = True
@@ -3075,11 +3135,11 @@ class V5Pipeline:
 
         # current weights (with dust filtering)
         current_w: Dict[str, float] = {}
+        dust_position_info_by_symbol: Dict[str, Dict[str, float]] = {}
         # Small-account-safe dust thresholds:
         # - value threshold is primary
         # - qty threshold only applies to tiny-value positions (to avoid wiping valid low-price holdings)
         DUST_QTY_THRESHOLD = float(_coalesce(getattr(self.cfg.execution, 'dust_qty_threshold', None), 1e-6))
-        DUST_VALUE_THRESHOLD = float(_coalesce(getattr(self.cfg.execution, 'dust_value_threshold', None), 0.5))
 
         if equity > 0:
             for p in positions:
@@ -3089,15 +3149,20 @@ class V5Pipeline:
 
                 qty = float(p.qty or 0.0)
                 position_value = qty * pxp
+                dust_threshold_usdt = self._dust_position_threshold_usdt(symbol=p.symbol, px=pxp)
 
                 # Treat as dust only when value is truly tiny.
                 # qty gate is secondary and only meaningful in tiny-value zone.
-                is_dust = (position_value < DUST_VALUE_THRESHOLD) and (qty < DUST_QTY_THRESHOLD or position_value < DUST_VALUE_THRESHOLD)
+                is_dust = position_value < dust_threshold_usdt
                 if is_dust:
+                    dust_position_info_by_symbol[p.symbol] = {
+                        "held_value_usdt": float(position_value),
+                        "dust_threshold_usdt": float(dust_threshold_usdt),
+                    }
                     if audit and qty > 0:
                         audit.add_note(
                             f"Dust filter: {p.symbol} qty={qty:.8f} value=${position_value:.4f} "
-                            f"(qty_th={DUST_QTY_THRESHOLD}, val_th={DUST_VALUE_THRESHOLD}) treated as 0"
+                            f"(qty_th={DUST_QTY_THRESHOLD}, value_th={dust_threshold_usdt:.4f}) treated as 0"
                         )
                     continue
 
@@ -3215,6 +3280,9 @@ class V5Pipeline:
             drift = float(tw) - cw
 
             held = next((p for p in positions if p.symbol == sym and float(getattr(p, 'qty', 0.0) or 0.0) > 0), None)
+            dust_position_info = dust_position_info_by_symbol.get(sym)
+            held_is_dust = held is not None and dust_position_info is not None
+            active_held = None if held_is_dust else held
 
             if sym in exit_symbols:
                 if audit:
@@ -3226,13 +3294,26 @@ class V5Pipeline:
                     })
                 continue
 
+            if held_is_dust and abs(float(tw)) <= target_hold_eps:
+                if audit:
+                    audit.record_count("dust_residual_no_close_order_count", symbol=sym)
+                    router_decisions.append({
+                        "symbol": sym,
+                        "action": "skip",
+                        "reason": "dust_residual_no_close_order",
+                        "held_value_usdt": float(dust_position_info.get("held_value_usdt") or 0.0),
+                        "dust_threshold_usdt": float(dust_position_info.get("dust_threshold_usdt") or 0.0),
+                        "target_w": float(tw),
+                    })
+                continue
+
             # User hard rule: if symbol is held but absent from scoring list, force CLOSE_LONG.
-            if force_close_unscored and held is not None and scored_symbols and sym not in scored_symbols:
+            if force_close_unscored and active_held is not None and scored_symbols and sym not in scored_symbols:
                 px_fs = float(prices.get(sym, 0.0) or 0.0)
                 if px_fs <= 0:
-                    px_fs = float(getattr(held, 'last_mark_px', 0.0) or 0.0)
+                    px_fs = float(getattr(active_held, 'last_mark_px', 0.0) or 0.0)
                 if px_fs > 0:
-                    notional_fs = max(0.0, float(getattr(held, 'qty', 0.0) or 0.0) * px_fs)
+                    notional_fs = max(0.0, float(getattr(active_held, 'qty', 0.0) or 0.0) * px_fs)
                     if notional_fs > 0:
                         rebalance_orders.append(
                             Order(
@@ -3249,7 +3330,7 @@ class V5Pipeline:
                             )
                         )
                         if audit:
-                            audit.add_note(f"Force close unscored: {sym} qty={float(getattr(held,'qty',0.0)):.8f}")
+                            audit.add_note(f"Force close unscored: {sym} qty={float(getattr(active_held,'qty',0.0)):.8f}")
                             router_decisions.append(
                                 {
                                     'symbol': sym,
@@ -3356,7 +3437,7 @@ class V5Pipeline:
             else:
                 # drift > 0，需要加仓
                 side = "buy"
-                intent = "OPEN_LONG" if held is None else "REBALANCE"
+                intent = "OPEN_LONG" if active_held is None else "REBALANCE"
                 # FIX: 按比例分配现金，而不是使用 drift * equity
                 # 这样可以避免第一个标的全额买入导致后续标的无法建仓
                 desired_notional = abs(float(drift)) * float(equity)
@@ -3377,12 +3458,12 @@ class V5Pipeline:
                 replacement_open_candidates.add(sym)
 
             bypass_turnover_cap_for_exit = bool(
-                side == "sell" and held is not None and abs(float(tw)) <= float(target_hold_eps)
+                side == "sell" and active_held is not None and abs(float(tw)) <= float(target_hold_eps)
             )
 
             if (
                 side == "sell"
-                and held is not None
+                and active_held is not None
                 and abs(float(tw)) <= float(target_hold_eps)
                 and protect_entry_gate_active
                 and protect_replacement_close_guard_enabled
@@ -3671,11 +3752,26 @@ class V5Pipeline:
                 except Exception:
                     pass
 
-            # Anti-chase for existing positions: avoid adding too high above own entry and avoid oversized add-ons.
-            if side == "buy" and held is not None and bool(getattr(self.cfg.execution, "anti_chase_enabled", False)):
+            dust_add_size_ignore_info: Dict[str, float] = {}
+            if side == "buy" and held_is_dust:
+                dust_add_size_ignore_info = {
+                    "dust_position_ignored_for_add_size": True,
+                    "held_value_usdt": float(dust_position_info.get("held_value_usdt") or 0.0),
+                    "dust_threshold_usdt": float(dust_position_info.get("dust_threshold_usdt") or 0.0),
+                }
+                if audit:
+                    audit.record_count("dust_position_ignored_for_add_size_count", symbol=sym)
+                    audit.add_note(
+                        "Dust residual ignored for anti_chase_add_size: "
+                        f"{sym} held_value=${float(dust_add_size_ignore_info['held_value_usdt']):.6f} "
+                        f"threshold=${float(dust_add_size_ignore_info['dust_threshold_usdt']):.4f}"
+                    )
+
+            # Anti-chase for existing positions: avoid buying far above own entry and avoid oversized add-ons.
+            if side == "buy" and active_held is not None and bool(getattr(self.cfg.execution, "anti_chase_enabled", False)):
                 try:
-                    entry_px = float(getattr(held, "avg_px", 0.0) or 0.0)
-                    held_qty = float(getattr(held, "qty", 0.0) or 0.0)
+                    entry_px = float(getattr(active_held, "avg_px", 0.0) or 0.0)
+                    held_qty = float(getattr(active_held, "qty", 0.0) or 0.0)
                     held_value = held_qty * float(px)
                     premium = (float(px) / entry_px - 1.0) if entry_px > 0 else 0.0
                     max_premium = float(
@@ -3920,6 +4016,8 @@ class V5Pipeline:
                 "dd_mult": dd_mult,
                 "score_rank": int(symbol_ranks.get(sym, 1_000_000)),
             }
+            if dust_add_size_ignore_info:
+                meta.update(dust_add_size_ignore_info)
             if side == "buy":
                 meta["clip_min_notional"] = float(clip_min_notional)
             if bypass_turnover_cap_for_exit:
@@ -3975,6 +4073,7 @@ class V5Pipeline:
                         "notional": notional,
                         "cash_after": cash_remaining,
                         "bypass_turnover_cap_for_exit": bool(bypass_turnover_cap_for_exit),
+                        **dust_add_size_ignore_info,
                     }
                 )
 
