@@ -1798,11 +1798,14 @@ class V5Pipeline:
         summary_path = self._resolve_ml_impact_path("impact_summary_path", "reports/ml_overlay_impact.json")
         top_n = int(getattr(ml_cfg, "impact_eval_top_n", 3) or 3)
 
-        closes = {
-            str(sym): float(series.close[-1])
-            for sym, series in (market_data_1h or {}).items()
-            if getattr(series, "close", None)
-        }
+        closes: Dict[str, float] = {}
+        for sym, series in (market_data_1h or {}).items():
+            if not getattr(series, "close", None):
+                continue
+            normalized_series = _normalize_market_series(series)
+            if not normalized_series.close:
+                continue
+            closes[str(sym)] = float(normalized_series.close[-1])
         base_rank = self._score_rank_map(base_scores)
         final_rank = self._score_rank_map(final_scores)
 
