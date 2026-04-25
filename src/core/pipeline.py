@@ -131,6 +131,95 @@ def _normalize_market_series(series: MarketSeries) -> MarketSeries:
     )
 
 
+def _float_or_none(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _config_float(config: Any, name: str) -> Optional[float]:
+    for section_name in ("execution", "budget"):
+        section = getattr(config, section_name, None)
+        if section is not None and hasattr(section, name):
+            parsed = _float_or_none(getattr(section, name, None))
+            if parsed is not None:
+                return parsed
+    if hasattr(config, name):
+        return _float_or_none(getattr(config, name, None))
+    return None
+
+
+def _exchange_min_notional_usdt(
+    symbol: str,
+    qty: float,
+    value_usdt: float,
+    exchange_rules: Any,
+) -> Optional[float]:
+    if exchange_rules is None:
+        return None
+
+    for name in ("exchange_min_notional_usdt", "min_notional_usdt", "min_notional", "min_notional_ex"):
+        raw = exchange_rules.get(name) if isinstance(exchange_rules, dict) else getattr(exchange_rules, name, None)
+        parsed = _float_or_none(raw)
+        if parsed is not None and parsed > 0:
+            return parsed
+
+    min_sz_raw = exchange_rules.get("min_sz") if isinstance(exchange_rules, dict) else getattr(exchange_rules, "min_sz", None)
+    min_sz = _float_or_none(min_sz_raw)
+    qty_abs = abs(float(qty or 0.0))
+    value_abs = abs(float(value_usdt or 0.0))
+    if min_sz is not None and min_sz > 0 and qty_abs > 0 and value_abs > 0:
+        return float(min_sz) * (value_abs / qty_abs)
+    return None
+
+
+def dust_position_threshold_usdt(
+    symbol: str,
+    qty: float,
+    value_usdt: float,
+    config: Any,
+    exchange_rules: Any = None,
+) -> float:
+    dust_value_threshold = max(0.0, float(_config_float(config, "dust_value_threshold") or 0.0))
+    dust_usdt_ignore = _config_float(config, "dust_usdt_ignore")
+    reconcile_dust = _config_float(config, "reconcile_dust_usdt_ignore")
+    dust_ignore = max(
+        0.0,
+        float(dust_usdt_ignore or 0.0),
+        float(reconcile_dust or 0.0),
+    )
+    min_trade_value = max(0.0, float(_config_float(config, "min_trade_value_usdt") or 0.0))
+    exchange_min_notional = _exchange_min_notional_usdt(symbol, qty, value_usdt, exchange_rules)
+    exchange_component = (
+        0.1 * float(exchange_min_notional)
+        if exchange_min_notional is not None and float(exchange_min_notional) > 0
+        else 1.0
+    )
+    return max(
+        float(dust_value_threshold),
+        float(dust_ignore),
+        0.1 * float(min_trade_value),
+        float(exchange_component),
+    )
+
+
+def is_dust_position(
+    symbol: str,
+    qty: float,
+    value_usdt: float,
+    config: Any,
+    exchange_rules: Any = None,
+) -> bool:
+    qty_abs = abs(float(qty or 0.0))
+    if qty_abs <= 0:
+        return False
+    threshold = dust_position_threshold_usdt(symbol, qty, value_usdt, config, exchange_rules)
+    return abs(float(value_usdt or 0.0)) < float(threshold)
+
+
 from configs.schema import AppConfig
 from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
@@ -1214,18 +1303,14 @@ class V5Pipeline:
             return 0.0
 
     def _dust_position_threshold_usdt(self, *, symbol: str, px: float) -> float:
-        dust_ignore = _coalesce(
-            getattr(self.cfg.execution, "dust_usdt_ignore", None),
-            getattr(self.cfg.execution, "reconcile_dust_usdt_ignore", None),
-        )
-        dust_value = _coalesce(getattr(self.cfg.execution, "dust_value_threshold", None), 0.5)
-        min_trade_value = float(getattr(self.cfg.execution, "min_trade_value_usdt", 0.0) or 0.0)
-        return max(
-            float(dust_ignore or 0.0),
-            float(dust_value or 0.0),
-            0.1 * float(min_trade_value),
-            1.0,
-            self._exchange_min_notional_with_slack(symbol=symbol, px=px),
+        exchange_min = self._exchange_min_notional_with_slack(symbol=symbol, px=px)
+        exchange_rules = {"min_notional_usdt": exchange_min} if float(exchange_min or 0.0) > 0.0 else None
+        return dust_position_threshold_usdt(
+            symbol=symbol,
+            qty=0.0,
+            value_usdt=0.0,
+            config=self.cfg,
+            exchange_rules=exchange_rules,
         )
 
     def mark_to_market(self, store, market_data_1h: Dict[str, MarketSeries]) -> None:
@@ -3204,6 +3289,8 @@ class V5Pipeline:
                                 "reason": "dust_residual_no_close_order",
                                 "source_reason": (order.meta or {}).get("reason"),
                                 "held_value_usdt": float(notional_exit),
+                                "raw_held_value_usdt": float(notional_exit),
+                                "effective_held_value_usdt": 0.0,
                                 "dust_threshold_usdt": float(dust_threshold),
                             }
                         )
@@ -3324,6 +3411,8 @@ class V5Pipeline:
                 if is_dust:
                     dust_position_info_by_symbol[p.symbol] = {
                         "held_value_usdt": float(position_value),
+                        "raw_held_value_usdt": float(position_value),
+                        "effective_held_value_usdt": 0.0,
                         "dust_threshold_usdt": float(dust_threshold_usdt),
                     }
                     if audit and qty > 0:
@@ -3469,6 +3558,8 @@ class V5Pipeline:
                         "action": "skip",
                         "reason": "dust_residual_no_close_order",
                         "held_value_usdt": float(dust_position_info.get("held_value_usdt") or 0.0),
+                        "raw_held_value_usdt": float(dust_position_info.get("raw_held_value_usdt") or dust_position_info.get("held_value_usdt") or 0.0),
+                        "effective_held_value_usdt": 0.0,
                         "dust_threshold_usdt": float(dust_position_info.get("dust_threshold_usdt") or 0.0),
                         "target_w": float(tw),
                     })
@@ -3933,6 +4024,8 @@ class V5Pipeline:
                 dust_add_size_ignore_info = {
                     "dust_position_ignored_for_add_size": True,
                     "held_value_usdt": float(dust_position_info.get("held_value_usdt") or 0.0),
+                    "raw_held_value_usdt": float(dust_position_info.get("raw_held_value_usdt") or dust_position_info.get("held_value_usdt") or 0.0),
+                    "effective_held_value_usdt": 0.0,
                     "dust_threshold_usdt": float(dust_position_info.get("dust_threshold_usdt") or 0.0),
                 }
                 if audit:
@@ -3983,6 +4076,7 @@ class V5Pipeline:
                                     "reason": "anti_chase_add_size",
                                     "notional": float(notional),
                                     "held_value": float(held_value),
+                                    "effective_held_value_usdt": float(held_value),
                                     "max_add_ratio": float(max_add_ratio),
                                 }
                             )

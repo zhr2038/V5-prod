@@ -632,6 +632,8 @@ class ExecutionConfig(BaseModel):
     # For small accounts, keep qty threshold tiny and rely on value threshold.
     dust_qty_threshold: float = Field(default=1e-6, ge=0)
     dust_value_threshold: float = Field(default=0.5, ge=0)
+    dust_usdt_ignore: Optional[float] = Field(default=None, ge=0)
+    min_trade_value_usdt: Optional[float] = Field(default=None, ge=0)
 
     # If partial REBALANCE sell falls below exchange minSz, optionally auto-upgrade
     # to full close (when full position itself is tradable) to avoid repeated DUST rejects.
