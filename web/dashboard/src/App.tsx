@@ -195,7 +195,7 @@ function App() {
   const focusSymbol = dashboard?.positions?.[0]?.symbol?.replace('-USDT', '') || '';
 
   return (
-    <div className="relative min-h-[100dvh] min-h-[100svh] min-h-screen">
+    <div className="app-viewport-shell relative min-h-[100dvh] min-h-[100svh] min-h-screen">
       <LiquidBg />
 
       <div className="relative z-10 pb-10">

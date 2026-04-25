@@ -13,6 +13,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="V5 看板" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-touch-fullscreen" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>V5 生产交易看板</title>
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -21,6 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <style>
       :root {
+        --app-viewport-height: 100vh;
         --boot-bg-top: #242833;
         --boot-bg-mid: #181c24;
         --boot-bg-bottom: #12151b;
@@ -30,14 +32,30 @@
       }
       html, body {
         margin: 0;
+        width: 100%;
+        height: 100%;
         min-height: 100vh;
         min-height: 100svh;
         min-height: 100dvh;
+        min-height: var(--app-viewport-height);
         background:
           radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
           radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
           radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
           linear-gradient(180deg, var(--boot-bg-top) 0%, var(--boot-bg-mid) 42%, var(--boot-bg-bottom) 100%);
+        background-color: var(--boot-bg-bottom);
+      }
+      html {
+        height: -webkit-fill-available;
+      }
+      body {
+        min-height: -webkit-fill-available;
+      }
+      #root {
+        min-height: 100vh;
+        min-height: 100svh;
+        min-height: 100dvh;
+        min-height: var(--app-viewport-height);
       }
       #boot-shell {
         position: fixed;
@@ -114,10 +132,10 @@
         }
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-CDpN8V0s.js"></script>
+    <script type="module" crossorigin src="/assets/index-Cxa43ZKK.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/createLucideIcon-Tf-EM3Sx.js">
     <link rel="modulepreload" crossorigin href="/assets/activity-mpZvjXV9.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-C9hQgz3U.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-jSVwTACh.css">
   </head>
   <body>
     <div id="boot-shell" aria-hidden="true">

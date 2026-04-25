@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  --app-viewport-height: 100dvh;
   --bg-deep: #171a20;
   --bg-floor: #11141a;
   --bg-top: #242833;
@@ -43,16 +44,21 @@ body,
   margin: 0;
   padding: 0;
   padding-top: 0;
+  width: 100%;
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
+  min-height: var(--app-viewport-height);
 }
 
 html {
+  height: -webkit-fill-available;
   background-color: var(--theme-chrome-dark);
+  overflow-x: hidden;
 }
 
 body {
+  min-height: -webkit-fill-available;
   font-family: var(--sans);
   color: var(--text);
   overflow-x: hidden;
@@ -69,6 +75,14 @@ body {
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
+  min-height: var(--app-viewport-height);
+}
+
+.app-viewport-shell {
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  min-height: var(--app-viewport-height);
 }
 
 .hero-safe-copy {
@@ -1019,6 +1033,17 @@ body {
 
 @supports (-webkit-touch-callout: none) {
   @media (hover: none) and (pointer: coarse) {
+    html,
+    body,
+    #root,
+    .app-viewport-shell {
+      min-height: var(--app-viewport-height);
+    }
+
+    body {
+      -webkit-text-size-adjust: 100%;
+    }
+
     .ambient-pane,
     .liquid-caustic,
     .liquid-orb,
