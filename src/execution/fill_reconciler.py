@@ -18,6 +18,7 @@ from src.execution.fill_store import FillStore, derive_runtime_named_json_path, 
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
+from src.execution.probe_metadata import probe_tags_from_order_meta
 
 
 log = logging.getLogger(__name__)
@@ -84,6 +85,20 @@ class FillReconciler:
         except Exception:
             return ""
 
+    @staticmethod
+    def _order_meta(row) -> Dict[str, Any]:
+        try:
+            raw = getattr(row, "req_json", None)
+            if not raw:
+                return {}
+            obj = json.loads(raw)
+            if not isinstance(obj, dict):
+                return {}
+            meta = obj.get("_v5_order_meta")
+            return dict(meta or {}) if isinstance(meta, dict) else {}
+        except Exception:
+            return {}
+
     def _apply_position_delta(self, row, agg: FillAgg) -> None:
         if self.position_store is None:
             return
@@ -105,7 +120,12 @@ class FillReconciler:
             fill_px = float(agg.vwap_px) if agg.vwap_px is not None else 0.0
             if fill_px <= 0:
                 return
-            self.position_store.upsert_buy(symbol, qty=float(delta_qty), px=fill_px)
+            self.position_store.upsert_buy(
+                symbol,
+                qty=float(delta_qty),
+                px=fill_px,
+                tags=probe_tags_from_order_meta(self._order_meta(row), entry_px=fill_px),
+            )
             return
 
         delta_qty = -agg.acc_fill_sz + base_fee

@@ -43,6 +43,9 @@ class PositionProfitState:
     rank_exit_streak: int = 0
     last_rank: Optional[int] = None
     last_rank_exit_time: Optional[datetime] = None
+    entry_reason: Optional[str] = None
+    probe_type: Optional[str] = None
+    target_w: Optional[float] = None
 
 
 class ProfitTakingManager:
@@ -127,9 +130,9 @@ class ProfitTakingManager:
                 triggered = [str(x) for x in (raw.get("triggered_actions") or []) if str(x)]
                 state = PositionProfitState(
                     symbol=str(raw.get("symbol") or sym),
-                    entry_price=float(raw["entry_price"]),
-                    entry_time=datetime.fromisoformat(raw["entry_time"]),
-                    highest_price=float(raw.get("highest_price") or raw["entry_price"]),
+                    entry_price=float(raw.get("entry_price", raw.get("entry_px"))),
+                    entry_time=datetime.fromisoformat(str(raw.get("entry_time") or raw.get("entry_ts"))),
+                    highest_price=float(raw.get("highest_price") or raw.get("entry_price", raw.get("entry_px"))),
                     profit_high=float(raw.get("profit_high", 0.0) or 0.0),
                     current_stop=float(raw.get("current_stop", 0.0) or 0.0),
                     current_action=str(raw.get("current_action", "hold") or "hold"),
@@ -139,6 +142,9 @@ class ProfitTakingManager:
                     rank_exit_streak=int(raw.get("rank_exit_streak", 0) or 0),
                     last_rank=int(raw["last_rank"]) if raw.get("last_rank") is not None else None,
                     last_rank_exit_time=datetime.fromisoformat(raw["last_rank_exit_time"]) if raw.get("last_rank_exit_time") else None,
+                    entry_reason=str(raw.get("entry_reason") or "") or None,
+                    probe_type=str(raw.get("probe_type") or "") or None,
+                    target_w=float(raw["target_w"]) if raw.get("target_w") is not None else None,
                 )
                 if state.partial_sold and not state.triggered_actions:
                     legacy_key = self._legacy_partial_action_key()
@@ -155,7 +161,9 @@ class ProfitTakingManager:
                 payload[sym] = {
                     "symbol": state.symbol,
                     "entry_price": state.entry_price,
+                    "entry_px": state.entry_price,
                     "entry_time": state.entry_time.isoformat(),
+                    "entry_ts": state.entry_time.isoformat(),
                     "highest_price": state.highest_price,
                     "profit_high": state.profit_high,
                     "current_stop": state.current_stop,
@@ -166,6 +174,9 @@ class ProfitTakingManager:
                     "rank_exit_streak": int(state.rank_exit_streak),
                     "last_rank": state.last_rank,
                     "last_rank_exit_time": state.last_rank_exit_time.isoformat() if state.last_rank_exit_time else None,
+                    "entry_reason": state.entry_reason,
+                    "probe_type": state.probe_type,
+                    "target_w": state.target_w,
                 }
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.state_file, "w", encoding="utf-8") as f:
@@ -179,6 +190,9 @@ class ProfitTakingManager:
         entry_price: float,
         current_price: float = None,
         highest_price_hint: float | None = None,
+        entry_reason: str | None = None,
+        probe_type: str | None = None,
+        target_w: float | None = None,
     ):
         if symbol in self.positions:
             old_entry = float(self.positions[symbol].entry_price or 0.0)
@@ -201,6 +215,12 @@ class ProfitTakingManager:
                 state.rank_exit_streak = 0
                 state.last_rank = None
                 state.last_rank_exit_time = None
+                if entry_reason is not None:
+                    state.entry_reason = str(entry_reason)
+                if probe_type is not None:
+                    state.probe_type = str(probe_type)
+                if target_w is not None:
+                    state.target_w = float(target_w)
                 if highest_price_hint is not None:
                     state.highest_price = max(float(highest_price_hint), state.highest_price)
                     if state.entry_price > 0:
@@ -212,6 +232,15 @@ class ProfitTakingManager:
             else:
                 state = self.positions[symbol]
                 changed = False
+                if entry_reason is not None and state.entry_reason != str(entry_reason):
+                    state.entry_reason = str(entry_reason)
+                    changed = True
+                if probe_type is not None and state.probe_type != str(probe_type):
+                    state.probe_type = str(probe_type)
+                    changed = True
+                if target_w is not None and state.target_w != float(target_w):
+                    state.target_w = float(target_w)
+                    changed = True
                 if highest_price_hint is not None:
                     synced_high = max(float(state.highest_price or 0.0), float(highest_price_hint or 0.0))
                     if synced_high > float(state.highest_price or 0.0):
@@ -240,6 +269,9 @@ class ProfitTakingManager:
             current_stop=entry_price * 0.95,
             profit_high=max(0.0, (float(highest_seed) - float(entry_price)) / float(entry_price)) if float(entry_price or 0.0) > 0 else 0.0,
             triggered_actions=[],
+            entry_reason=str(entry_reason) if entry_reason is not None else None,
+            probe_type=str(probe_type) if probe_type is not None else None,
+            target_w=float(target_w) if target_w is not None else None,
         )
         self._save_state()
         print(

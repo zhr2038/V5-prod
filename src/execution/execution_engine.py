@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
+from src.execution.probe_metadata import probe_tags_from_order_meta
 from src.execution.position_store import PositionStore
 from src.execution.account_store import AccountStore, AccountState
 from src.execution.fill_store import derive_runtime_cost_events_dir, derive_runtime_named_json_path
@@ -102,7 +103,12 @@ class ExecutionEngine:
                 if acc is not None:
                     acc.cash_usdt = float(acc.cash_usdt) - executed_notional - fee - slp
                 if qty > 0:
-                    self.position_store.upsert_buy(o.symbol, qty=qty, px=px)
+                    self.position_store.upsert_buy(
+                        o.symbol,
+                        qty=qty,
+                        px=px,
+                        tags=probe_tags_from_order_meta(o.meta or {}, entry_px=px, entry_ts=ts),
+                    )
 
             elif self.position_store and o.intent in {"CLOSE_LONG", "REBALANCE"} and o.side == "sell":
                 # Dry-run sells should mirror live semantics:
