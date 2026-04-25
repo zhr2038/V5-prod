@@ -312,6 +312,7 @@ def test_timer_endpoints_degrade_without_systemctl(monkeypatch):
     module = load_web_dashboard_module()
     client = module.app.test_client()
     monkeypatch.setattr(module, "SYSTEMCTL_BIN", None)
+    monkeypatch.setattr(module, "_dashboard_kill_switch_enabled", lambda _path: False)
 
     status_response = client.get("/api/status")
     timer_response = client.get("/api/timer")
@@ -3443,7 +3444,7 @@ def test_api_decision_audit_uses_active_runtime_paths(monkeypatch, tmp_path):
     assert [row["symbol"] for row in payload["actionable_signals"]["sell_candidates"]] == ["ETH/USDT"]
 
 
-def test_api_decision_audit_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
+def test_api_decision_audit_prefers_sorted_epoch_over_run_dir_mtime(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
 
@@ -3471,7 +3472,7 @@ def test_api_decision_audit_prefers_decision_audit_file_mtime_over_run_dir_mtime
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["run_id"] == "20260408_01"
+    assert payload["run_id"] == "20260408_02"
 
 
 def test_api_decision_audit_scan_limit_prefers_sorted_epoch_over_file_mtime(monkeypatch, tmp_path):
@@ -4362,6 +4363,7 @@ def test_ml_training_api_uses_prefixed_runtime_artifacts(monkeypatch, tmp_path):
     cur.execute("CREATE TABLE feature_snapshots(id INTEGER PRIMARY KEY, label_filled INTEGER NOT NULL)")
     cur.executemany("INSERT INTO feature_snapshots(label_filled) VALUES (?)", [(1,), (0,), (1,)])
     conn.commit()
+    cur.close()
     conn.close()
 
     (reports_dir / "shadow_ml_training_data.db").write_bytes(runtime_db_path.read_bytes())
@@ -7019,7 +7021,7 @@ def test_decision_chain_uses_active_runtime_runs_dir(monkeypatch, tmp_path):
     assert payload["last_update"] == datetime.fromtimestamp(1_710_000_600).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def test_decision_chain_prefers_decision_audit_file_mtime_over_run_dir_mtime(monkeypatch, tmp_path):
+def test_decision_chain_prefers_sorted_epoch_over_run_dir_mtime(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
 
@@ -7047,7 +7049,7 @@ def test_decision_chain_prefers_decision_audit_file_mtime_over_run_dir_mtime(mon
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["rounds"][0]["run_id"] == "20260408_01"
+    assert payload["rounds"][0]["run_id"] == "20260408_02"
 
 
 def test_decision_chain_scan_limit_prefers_sorted_epoch_over_file_mtime(monkeypatch, tmp_path):

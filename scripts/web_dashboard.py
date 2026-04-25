@@ -308,10 +308,17 @@ def _call_dashboard_api(api_func, *, default: Any, label: str, errors: Optional[
 
 
 def _dashboard_route_cache_key(name: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+    context = (
+        ('workspace', str(WORKSPACE)),
+        ('reports_dir', str(REPORTS_DIR)),
+        ('load_config_id', str(id(load_config))),
+        ('runtime_paths_id', str(id(_resolve_dashboard_runtime_paths))),
+        ('systemctl', str(SYSTEMCTL_BIN)),
+    )
     if not has_request_context():
-        return (name, ())
+        return (name, context)
     args = tuple(sorted((key, str(value)) for key, value in request.args.items() if key != '_'))
-    return (name, args)
+    return (name, context + args)
 
 
 def _cache_json_response(ttl_seconds):
@@ -327,7 +334,9 @@ def _cache_json_response(ttl_seconds):
             with _DASHBOARD_ROUTE_CACHE_LOCK:
                 cached = _DASHBOARD_ROUTE_CACHE.get(cache_key)
                 if cached and cached[0] > now:
-                    return jsonify(copy.deepcopy(cached[1])), int(cached[2])
+                    cached_response = jsonify(copy.deepcopy(cached[1]))
+                    cached_response.status_code = int(cached[2])
+                    return cached_response
 
             response = func(*args, **kwargs)
             payload, status_code = _extract_endpoint_json(response)
@@ -612,7 +621,12 @@ def _load_recent_scan_limit(env_name: str) -> Optional[int]:
     return value if value > 0 else None
 
 
-def _iter_decision_audits(reports_dir: Path, scan_limit: Optional[int] = None) -> List[Dict[str, Any]]:
+def _iter_decision_audits(
+    reports_dir: Path,
+    scan_limit: Optional[int] = None,
+    *,
+    include_parse_errors: bool = False,
+) -> List[Dict[str, Any]]:
     runs_dir = reports_dir / 'runs'
     if not runs_dir.exists():
         return []
@@ -633,8 +647,18 @@ def _iter_decision_audits(reports_dir: Path, scan_limit: Optional[int] = None) -
 
     audits: List[Dict[str, Any]] = []
     for run_dir in run_dirs:
-        audit = _load_json_payload(run_dir / 'decision_audit.json')
-        if not audit:
+        audit_path = run_dir / 'decision_audit.json'
+        try:
+            audit = json.loads(audit_path.read_text(encoding='utf-8'))
+        except Exception:
+            if not include_parse_errors:
+                continue
+            audit = {
+                'run_id': run_dir.name,
+                '_parse_error': True,
+                'error': 'internal parse error',
+            }
+        if not isinstance(audit, dict) or (not audit and not include_parse_errors):
             continue
         audits.append({
             'run_dir': run_dir,
@@ -1159,6 +1183,7 @@ def _decision_audit_sort_epoch(run_dir: Path, audit: Dict[str, Any]) -> float:
             if epoch is not None:
                 return epoch
 
+    if isinstance(audit, dict):
         epoch = _run_id_epoch(str(audit.get('run_id') or ''))
         if epoch is not None:
             return epoch
@@ -4387,7 +4412,6 @@ def api_dashboard():
         status_data = _call_dashboard_api(api_status, default={}, label='status', errors=errors)
         market_state_data = _call_dashboard_api(api_market_state, default={}, label='market_state', errors=errors)
         ml_training = _call_dashboard_api(api_ml_training, default={'status': 'unknown'}, label='ml_training', errors=errors)
-
         positions_data = positions_payload
         if isinstance(positions_payload, dict):
             positions_data = positions_payload.get('positions', positions_payload.get('data', []))
@@ -5431,7 +5455,14 @@ def api_decision_chain():
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
 
         decision_chain_scan_limit = _load_recent_scan_limit('V5_DASHBOARD_DECISION_CHAIN_SCAN_LIMIT')
-        audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_chain_scan_limit)
+        try:
+            audit_entries = _iter_decision_audits(
+                runtime_paths.reports_dir,
+                scan_limit=decision_chain_scan_limit,
+                include_parse_errors=True,
+            )
+        except TypeError:
+            audit_entries = _iter_decision_audits(runtime_paths.reports_dir, scan_limit=decision_chain_scan_limit)
         if not audit_entries:
             return jsonify({'rounds': [], 'message': '暂无决策记录'})
         latest_update_epoch = float(audit_entries[0].get('sort_epoch', 0.0) or 0.0) if audit_entries else 0.0
@@ -5442,6 +5473,26 @@ def api_decision_chain():
                 run_dir = entry['run_dir']
                 data = entry.get('audit')
                 if not isinstance(data, dict):
+                    continue
+                if data.get('_parse_error'):
+                    rounds.append({
+                        'run_id': run_dir.name,
+                        'time': run_dir.name,
+                        'strategy_signals': [],
+                        'risk_state': {'regime': 'Error'},
+                        'execution_result': {
+                            'selected': 0,
+                            'targets_pre_risk': 0,
+                            'orders_rebalance': 0,
+                            'orders_exit': 0,
+                            'negative_expectancy_cooldown': 0,
+                            'negative_expectancy_open_block': 0,
+                            'negative_expectancy_fast_fail_open_block': 0,
+                        },
+                        'block_reasons': {'parse_error': 1},
+                        'blocked_top': [],
+                        'error': 'internal parse error',
+                    })
                     continue
 
                 # 提取决策链信息
@@ -6568,7 +6619,6 @@ def api_shadow_ml_overlay():
 
 
 @app.route('/api/health')
-@_cache_json_response(15.0)
 def api_health():
     """系统健康检查API"""
     try:
