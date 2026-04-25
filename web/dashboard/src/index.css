@@ -1,11 +1,12 @@
 @import "tailwindcss";
 
 :root {
+  --page-bg-base: #141018;
   --bg-deep: #171a20;
   --bg-floor: #11141a;
   --bg-top: #242833;
   --bg-mid: #181c24;
-  --bg-bottom: #12151b;
+  --bg-bottom: #141018;
   --bg-cloud-warm: rgba(194, 112, 84, 0.22);
   --bg-cloud-sky: rgba(124, 147, 185, 0.18);
   --bg-cloud-sage: rgba(124, 144, 106, 0.16);
@@ -21,14 +22,42 @@
   --danger: #ff8ca0;
   --success: #7ce9b5;
   --warn: #ffcd87;
+  --kline-grid: rgba(255, 255, 255, 0.06);
+  --kline-grid-muted: rgba(255, 255, 255, 0.035);
+  --kline-axis: rgba(210, 218, 232, 0.76);
+  --kline-axis-muted: rgba(194, 204, 224, 0.66);
+  --kline-candle-up: #34d399;
+  --kline-candle-up-fill: rgba(52, 211, 153, 0.86);
+  --kline-candle-down: #fb7185;
+  --kline-candle-down-fill: rgba(251, 113, 133, 0.88);
+  --kline-volume-top: rgba(126, 236, 205, 0.62);
+  --kline-volume-bottom: rgba(126, 236, 205, 0.12);
+  --kline-ma7: rgba(141, 196, 255, 0.95);
+  --kline-ma20: rgba(255, 205, 120, 0.90);
+  --kline-last: #8dc4ff;
+  --kline-reference: rgba(255, 205, 120, 0.75);
+  --kline-marker: rgba(255, 255, 255, 0.32);
+  --kline-marker-muted: rgba(255, 255, 255, 0.28);
+  --kline-marker-text: rgba(255, 255, 255, 0.76);
+  --kline-marker-text-muted: rgba(255, 255, 255, 0.70);
+  --kline-label-bg: rgba(25, 35, 49, 0.90);
+  --kline-label-border: rgba(141, 196, 255, 0.44);
+  --kline-label-text: #9ad2ff;
+  --kline-reference-label-bg: rgba(48, 40, 18, 0.88);
+  --kline-reference-label-border: rgba(255, 205, 120, 0.40);
+  --kline-reference-label-text: #ffcb7f;
   --line: rgba(255, 255, 255, 0.10);
   --line-strong: rgba(255, 255, 255, 0.22);
   --surface-border: rgba(255, 255, 255, 0.13);
   --surface-border-strong: rgba(255, 255, 255, 0.20);
   --shadow-soft: 0 16px 40px rgba(8, 10, 16, 0.11);
   --shadow-deep: 0 24px 60px rgba(7, 9, 15, 0.16);
-  --theme-chrome-dark: #322f34;
+  --theme-chrome-dark: #141018;
   --theme-chrome-light: #f3efed;
+  --page-safe-top: calc(16px + env(safe-area-inset-top, 0px));
+  --page-safe-right: max(20px, env(safe-area-inset-right, 0px));
+  --page-safe-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  --page-safe-left: max(20px, env(safe-area-inset-left, 0px));
   --mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   --sans: "SF Pro Display", "MiSans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
@@ -42,41 +71,64 @@ body,
 #root {
   margin: 0;
   padding: 0;
-  padding-top: 0;
-  min-height: 100vh;
-  min-height: 100svh;
-  min-height: 100dvh;
+  width: 100%;
+  min-height: 100%;
 }
 
 html {
-  background-color: var(--theme-chrome-dark);
+  background: var(--page-bg-base);
+  overflow-x: clip;
+  overflow-y: auto;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
+  min-height: 100%;
   font-family: var(--sans);
   color: var(--text);
-  overflow-x: hidden;
-  overscroll-behavior-y: none;
-  background: transparent;
+  overflow-x: clip;
+  overflow-y: auto;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: auto;
+  background: var(--page-bg-base);
 }
 
 #root {
   width: 100%;
-  max-width: 1920px;
   margin: 0 auto;
-  background: transparent;
-  background-color: transparent;
+  background: var(--page-bg-base);
+  min-height: 100%;
+}
+
+.mobile-page-shell {
+  position: relative;
+  isolation: isolate;
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
+  background: var(--page-bg-base);
+  padding: var(--page-safe-top) var(--page-safe-right) 0 var(--page-safe-left);
+  scroll-snap-align: start;
+}
+
+.page-content {
+  min-height: calc(100vh + 240px);
+  min-height: calc(100svh + 240px);
+  min-height: calc(100dvh + 240px);
+  padding-bottom: var(--page-safe-bottom);
+}
+
+.dashboard-section {
+  scroll-snap-align: start;
+  scroll-margin-top: var(--page-safe-top);
 }
 
 .hero-safe-copy {
-  padding-top: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.35rem));
+  padding-top: 0;
 }
 
 .hero-safe-rail {
-  margin-top: max(0.2rem, calc(env(safe-area-inset-top, 0px) + 0.1rem));
+  margin-top: 0;
 }
 
 .liquid-filters {
@@ -86,18 +138,22 @@ body {
 }
 
 .liquid-bg {
-  position: fixed;
-  inset: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 0;
   pointer-events: none;
-  overflow: hidden;
+  min-height: 100%;
+  overflow: clip;
   isolation: isolate;
   background:
     radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
     radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
     radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
-  background-color: var(--theme-chrome-dark);
+  background-color: var(--page-bg-base);
 }
 
 .liquid-bg::before {
@@ -920,7 +976,7 @@ body {
   outline: none;
 }
 
-@media (prefers-color-scheme: light) {
+@media (prefers-color-scheme: light) and (hover: hover) and (pointer: fine) {
   :root {
     --bg-deep: #eef2f7;
     --bg-floor: #e7ebf2;
@@ -934,6 +990,30 @@ body {
     --text-soft: #233045;
     --text-dim: #43506a;
     --text-faint: #64728b;
+    --kline-grid: rgba(48, 58, 78, 0.17);
+    --kline-grid-muted: rgba(48, 58, 78, 0.11);
+    --kline-axis: rgba(35, 48, 69, 0.78);
+    --kline-axis-muted: rgba(67, 80, 106, 0.70);
+    --kline-candle-up: #047857;
+    --kline-candle-up-fill: rgba(5, 150, 105, 0.90);
+    --kline-candle-down: #be123c;
+    --kline-candle-down-fill: rgba(225, 29, 72, 0.90);
+    --kline-volume-top: rgba(5, 150, 105, 0.30);
+    --kline-volume-bottom: rgba(5, 150, 105, 0.08);
+    --kline-ma7: rgba(37, 99, 235, 0.95);
+    --kline-ma20: rgba(180, 83, 9, 0.95);
+    --kline-last: rgba(37, 99, 235, 0.86);
+    --kline-reference: rgba(180, 83, 9, 0.82);
+    --kline-marker: rgba(48, 58, 78, 0.42);
+    --kline-marker-muted: rgba(48, 58, 78, 0.36);
+    --kline-marker-text: rgba(35, 48, 69, 0.86);
+    --kline-marker-text-muted: rgba(35, 48, 69, 0.78);
+    --kline-label-bg: rgba(239, 246, 255, 0.96);
+    --kline-label-border: rgba(37, 99, 235, 0.36);
+    --kline-label-text: #1d4ed8;
+    --kline-reference-label-bg: rgba(255, 251, 235, 0.96);
+    --kline-reference-label-border: rgba(180, 83, 9, 0.34);
+    --kline-reference-label-text: #92400e;
     --line: rgba(48, 58, 78, 0.16);
     --line-strong: rgba(48, 58, 78, 0.28);
     --surface-border: rgba(79, 92, 118, 0.20);
@@ -977,20 +1057,36 @@ body {
     color: #0f9f72 !important;
   }
 
+  .material-surface .text-emerald-200 {
+    color: #047857 !important;
+  }
+
   .material-surface .text-rose-300 {
     color: #c94f67 !important;
   }
 
+  .material-surface .text-rose-200 {
+    color: #be123c !important;
+  }
+
   .material-surface .text-amber-300,
-  .material-surface .text-[var(--accent-2)] {
+  .material-surface .text-\[var\(--accent-2\)\] {
     color: #996317 !important;
   }
 
-  .material-surface .text-[var(--accent-3)] {
+  .material-surface .text-amber-200 {
+    color: #92400e !important;
+  }
+
+  .material-surface .text-sky-200 {
+    color: #1d4ed8 !important;
+  }
+
+  .material-surface .text-\[var\(--accent-3\)\] {
     color: #285b94 !important;
   }
 
-  .material-surface .text-[var(--accent)] {
+  .material-surface .text-\[var\(--accent\)\] {
     color: #0d9878 !important;
   }
 
@@ -1019,6 +1115,16 @@ body {
 
 @supports (-webkit-touch-callout: none) {
   @media (hover: none) and (pointer: coarse) {
+    html {
+      scroll-snap-type: y proximity;
+    }
+
+    html,
+    body {
+      overflow-x: hidden;
+      overflow-y: auto !important;
+    }
+
     .ambient-pane,
     .liquid-caustic,
     .liquid-orb,

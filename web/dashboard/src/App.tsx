@@ -172,7 +172,7 @@ function App() {
         globalThis.clearTimeout(timeoutId);
       }
     };
-  }, [loadInitialData, loadSecondary]);
+  }, [loadSecondary]);
 
   useEffect(() => {
     if (!showDeferredPanels) return;
@@ -195,10 +195,10 @@ function App() {
   const focusSymbol = dashboard?.positions?.[0]?.symbol?.replace('-USDT', '') || '';
 
   return (
-    <div className="relative min-h-[100dvh] min-h-[100svh] min-h-screen">
+    <main className="mobile-page-shell">
       <LiquidBg />
 
-      <div className="relative z-10 pb-10">
+      <div className="page-content relative z-10">
         <Hero
           marketState={marketState}
           riskGuard={riskGuard}
@@ -214,7 +214,7 @@ function App() {
 
         <MLBand mlTraining={dashboard?.mlTraining || null} />
 
-        <div className="px-6">
+        <div className="dashboard-section">
           <div className="max-w-[1780px] mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 flex flex-col gap-4">
               <PositionsPanel
@@ -248,7 +248,7 @@ function App() {
           </div>
         </div>
 
-        <div className="px-6 mt-4">
+        <div className="dashboard-section mt-4">
           <div className="max-w-[1780px] mx-auto">
             {showDeferredPanels ? (
               <Suspense fallback={<DeferredPanelFallback />}>
@@ -262,14 +262,14 @@ function App() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="fixed bottom-4 right-5 z-50 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-dim)]"
+            className="sticky bottom-4 z-50 ml-auto mt-4 flex w-fit items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-dim)]"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]/80" />
             <span>刷新中</span>
           </motion.div>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 

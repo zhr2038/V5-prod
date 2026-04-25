@@ -55,7 +55,7 @@ export function MLBand({ mlTraining }: MLBandProps) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.15 }}
-      className="relative z-10 px-6 pb-6"
+      className="dashboard-section relative z-10 pb-6"
     >
       <div className="max-w-[1780px] mx-auto material-surface material-regular tone-neutral p-5">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)] mb-4">
