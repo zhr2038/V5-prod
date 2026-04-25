@@ -24,6 +24,23 @@ def _series(symbol: str, timestamps_ms: list[int], closes: list[float]) -> Marke
     )
 
 
+class _FakeProvider:
+    def __init__(self, series_by_symbol: dict[str, MarketSeries]):
+        self.series_by_symbol = series_by_symbol
+        self.calls: list[dict[str, object]] = []
+
+    def fetch_ohlcv(self, symbols, timeframe="1h", limit=200, end_ts_ms=None):
+        self.calls.append(
+            {
+                "symbols": list(symbols or []),
+                "timeframe": timeframe,
+                "limit": int(limit),
+                "end_ts_ms": end_ts_ms,
+            }
+        )
+        return {symbol: self.series_by_symbol[symbol] for symbol in symbols if symbol in self.series_by_symbol}
+
+
 def _write_cache_csv(cache_dir: Path, symbol: str, rows: list[tuple[str, float]]) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / f"{symbol.replace('/', '_')}_1H_test.csv"
@@ -136,7 +153,67 @@ def test_cost_aware_edge_skip_gets_forward_label_when_horizon_available(tmp_path
     assert rows[0]["label_status"] == "complete"
 
 
-def test_unreached_horizon_stays_pending(tmp_path: Path) -> None:
+def test_existing_ts_utc_record_over_horizon_gets_labeled(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260422_00"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "data" / "cache"
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    labels_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+    cfg.diagnostics.skipped_candidate_roundtrip_cost_bps = 30.0
+
+    entry_ts_ms = int(datetime.fromisoformat("2026-04-21T14:00:00+00:00").timestamp() * 1000)
+    labels_path.write_text(
+        json.dumps(
+            {
+                "ts_utc": "2026-04-21T14:00:00Z",
+                "run_id": "20260421_14",
+                "symbol": "BTC/USDT",
+                "intended_side": "buy",
+                "skip_reason": "cost_aware_edge",
+                "entry_px": 100.0,
+                "rt_cost_bps": 30.0,
+                "label_status": "pending",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    audit = DecisionAudit(run_id="20260422_00")
+    audit.now_ts = int(datetime.fromisoformat("2026-04-22T00:00:00+00:00").timestamp())
+    market_data = {
+        "BTC/USDT": _series(
+            "BTC/USDT",
+            [
+                entry_ts_ms,
+                entry_ts_ms + 4 * 3600 * 1000,
+            ],
+            [100.0, 101.0],
+        )
+    }
+
+    update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="NEUTRAL",
+        cache_dir=cache_dir,
+    )
+
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["entry_ts_ms"] == entry_ts_ms
+    assert rows[0]["label_4h_status"] == "complete"
+    assert rows[0]["label_4h_gross_bps"] == 100.0
+    assert rows[0]["label_4h_net_bps"] == 70.0
+    assert rows[0]["label_status"] == "complete"
+
+
+def test_unreached_horizon_stays_pending_even_if_future_cache_exists(tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260421_02"
     run_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = tmp_path / "data" / "cache"
@@ -178,10 +255,152 @@ def test_unreached_horizon_stays_pending(tmp_path: Path) -> None:
 
     labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
     rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert rows[0]["label_4h_net_bps"] == 20.0
+    assert rows[0]["label_4h_net_bps"] is None
+    assert rows[0]["label_4h_status"] == "pending"
     assert rows[0]["label_8h_net_bps"] is None
     assert rows[0]["label_8h_status"] == "pending"
+    assert rows[0]["label_status"] == "pending"
+
+
+def test_matured_record_fetches_provider_ohlcv_when_local_cache_missing(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260422_00"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "data" / "cache"
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    labels_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+    cfg.diagnostics.skipped_candidate_roundtrip_cost_bps = 30.0
+
+    entry_ts_ms = int(datetime.fromisoformat("2026-04-21T14:00:00+00:00").timestamp() * 1000)
+    labels_path.write_text(
+        json.dumps(
+            {
+                "ts_utc": "2026-04-21T14:00:00Z",
+                "entry_ts_ms": entry_ts_ms,
+                "run_id": "20260421_14",
+                "symbol": "BTC/USDT",
+                "intended_side": "buy",
+                "skip_reason": "cost_aware_edge",
+                "entry_px": 100.0,
+                "rt_cost_bps": 30.0,
+                "label_status": "pending",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    audit = DecisionAudit(run_id="20260422_00")
+    audit.now_ts = int(datetime.fromisoformat("2026-04-22T00:00:00+00:00").timestamp())
+    provider = _FakeProvider(
+        {
+            "BTC/USDT": _series(
+                "BTC/USDT",
+                [entry_ts_ms, entry_ts_ms + 4 * 3600 * 1000],
+                [100.0, 102.0],
+            )
+        }
+    )
+
+    update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h={},
+        cfg=cfg,
+        current_level="NEUTRAL",
+        cache_dir=cache_dir,
+        ohlcv_provider=provider,
+    )
+
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(provider.calls) == 1
+    assert rows[0]["label_4h_status"] == "complete"
+    assert rows[0]["label_4h_gross_bps"] == 200.0
+    assert rows[0]["label_4h_net_bps"] == 170.0
     assert rows[0]["label_status"] == "complete"
+
+
+def test_4h_8h_12h_24h_horizons_mature_independently(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260422_16"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "data" / "cache"
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    labels_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4, 8, 12, 24]
+    cfg.diagnostics.skipped_candidate_roundtrip_cost_bps = 30.0
+
+    entry_ts_ms = int(datetime.fromisoformat("2026-04-21T14:00:00+00:00").timestamp() * 1000)
+    labels_path.write_text(
+        json.dumps(
+            {
+                "ts_utc": "2026-04-21T14:00:00Z",
+                "entry_ts_ms": entry_ts_ms,
+                "run_id": "20260421_14",
+                "symbol": "BTC/USDT",
+                "intended_side": "buy",
+                "skip_reason": "cost_aware_edge",
+                "entry_px": 100.0,
+                "rt_cost_bps": 30.0,
+                "label_status": "pending",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    audit = DecisionAudit(run_id="20260421_14")
+    audit.now_ts = int(datetime.fromisoformat("2026-04-22T16:00:00+00:00").timestamp())
+    market_data = {
+        "BTC/USDT": _series(
+            "BTC/USDT",
+            [
+                entry_ts_ms,
+                entry_ts_ms + 4 * 3600 * 1000,
+                entry_ts_ms + 8 * 3600 * 1000,
+                entry_ts_ms + 12 * 3600 * 1000,
+                entry_ts_ms + 24 * 3600 * 1000,
+            ],
+            [100.0, 101.0, 102.0, 103.0, 104.0],
+        )
+    }
+
+    update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="NEUTRAL",
+        cache_dir=cache_dir,
+    )
+
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    row = rows[0]
+    assert row["label_4h_status"] == "complete"
+    assert row["label_8h_status"] == "complete"
+    assert row["label_12h_status"] == "complete"
+    assert row["label_24h_status"] == "complete"
+    assert row["label_4h_net_bps"] == 70.0
+    assert row["label_8h_net_bps"] == 170.0
+    assert row["label_12h_net_bps"] == 270.0
+    assert row["label_24h_net_bps"] == 370.0
+
+    by_reason_path = tmp_path / "reports" / "summaries" / "skipped_candidate_outcomes_by_reason.csv"
+    with by_reason_path.open("r", encoding="utf-8") as f:
+        summary_rows = list(csv.DictReader(f))
+    assert summary_rows[0]["complete_count"] == "1"
+    assert summary_rows[0]["pending_count"] == "0"
+    assert summary_rows[0]["not_observable_count"] == "0"
+    assert float(summary_rows[0]["avg_4h_net_bps"]) == 70.0
+    assert float(summary_rows[0]["avg_8h_net_bps"]) == 170.0
+    assert float(summary_rows[0]["avg_12h_net_bps"]) == 270.0
+    assert float(summary_rows[0]["avg_24h_net_bps"]) == 370.0
+    assert float(summary_rows[0]["win_rate_4h"]) == 1.0
+    assert float(summary_rows[0]["win_rate_8h"]) == 1.0
+    assert float(summary_rows[0]["win_rate_12h"]) == 1.0
+    assert float(summary_rows[0]["win_rate_24h"]) == 1.0
 
 
 def test_matured_record_uses_current_market_data_when_cache_is_stale(tmp_path: Path) -> None:
