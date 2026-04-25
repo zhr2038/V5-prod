@@ -19,6 +19,7 @@ from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, r
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
+from src.execution.probe_metadata import probe_tags_from_order_meta
 from src.data.okx_instruments import OKXSpotInstrumentsCache, round_down_to_lot
 
 
@@ -57,6 +58,15 @@ def _load_json(path: str) -> Optional[Dict[str, Any]]:
 
 def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
+
+
+def _order_meta_from_row(row) -> Dict[str, Any]:
+    try:
+        obj = json.loads(getattr(row, "req_json", "") or "{}")
+        meta = obj.get("_v5_order_meta") if isinstance(obj, dict) else None
+        return dict(meta or {}) if isinstance(meta, dict) else {}
+    except Exception:
+        return {}
 
 
 def _to_bool(value: Any) -> bool:
@@ -1162,6 +1172,10 @@ class LiveExecutionEngine:
             payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
             req_store = dict(payload)
             req_store["_v5_reason"] = str(((o.meta or {}).get("reason")) or "")
+            req_store["_v5_order_meta"] = probe_tags_from_order_meta(
+                o.meta or {},
+                entry_px=float(o.signal_price or 0.0),
+            ) or {}
             if tob:
                 req_store["_meta"] = {"mid_px_at_submit": tob.get("mid"), "bid": tob.get("bid"), "ask": tob.get("ask"), "ts_ms": tob.get("ts_ms")}
         except ValueError as e:
@@ -1378,6 +1392,10 @@ class LiveExecutionEngine:
                                 str(row.inst_id).replace("-", "/"),
                                 qty=float(delta_buy_qty),
                                 px=float(avg_px or 0.0),
+                                tags=probe_tags_from_order_meta(
+                                    _order_meta_from_row(row),
+                                    entry_px=float(avg_px or 0.0),
+                                ),
                             )
                     elif str(row.side).lower() == "sell":
                         p = self.position_store.get(str(row.inst_id).replace("-", "/"))

@@ -46,6 +46,14 @@ class DecisionAudit:
         "negative_expectancy_fast_fail_open_block": 0,
         "dust_position_ignored_for_add_size_count": 0,
         "dust_residual_no_close_order_count": 0,
+        "btc_leadership_probe_candidate_count": 0,
+        "btc_leadership_probe_open_count": 0,
+        "btc_leadership_probe_blocked_count": 0,
+        "btc_leadership_probe_negative_expectancy_bypass_count": 0,
+        "probe_take_profit_count": 0,
+        "probe_stop_loss_count": 0,
+        "probe_trailing_stop_count": 0,
+        "probe_time_stop_count": 0,
     })
     
     # 详细数据

@@ -6,9 +6,10 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.execution.fill_store import derive_runtime_named_json_path
+from src.execution.probe_metadata import PROBE_POSITION_TYPES, probe_type_from_meta
 from src.utils.time import utc_now_iso
 
 log = logging.getLogger(__name__)
@@ -102,6 +103,75 @@ class PositionStore:
             tmp.replace(path)
         except Exception:
             pass
+
+    @staticmethod
+    def _load_tags(raw: str | None) -> Dict[str, Any]:
+        try:
+            obj = json.loads(str(raw or "{}"))
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+
+    def _upsert_probe_profit_state(
+        self,
+        *,
+        symbol: str,
+        px: float,
+        now_ts: str,
+        tags: Dict[str, Any],
+    ) -> None:
+        probe_type = probe_type_from_meta(tags)
+        if probe_type not in PROBE_POSITION_TYPES:
+            return
+        try:
+            path = derive_runtime_named_json_path(self._order_store_path(), "profit_taking_state")
+            if path.exists():
+                obj = json.loads(path.read_text(encoding="utf-8"))
+                payload = obj if isinstance(obj, dict) else {}
+            else:
+                payload = {}
+
+            current = payload.get(symbol) if isinstance(payload.get(symbol), dict) else {}
+            entry_px = float(tags.get("entry_px") or px or current.get("entry_price") or current.get("entry_px") or 0.0)
+            entry_ts = str(tags.get("entry_ts") or now_ts or current.get("entry_time") or current.get("entry_ts") or "")
+            highest = max(
+                float(current.get("highest_price") or 0.0),
+                float(px or 0.0),
+                entry_px,
+            )
+            profit_high = float(current.get("profit_high") or 0.0)
+            if entry_px > 0 and highest > 0:
+                profit_high = max(profit_high, (highest - entry_px) / entry_px)
+            state = dict(current)
+            state.update(
+                {
+                    "symbol": symbol,
+                    "entry_price": entry_px,
+                    "entry_px": entry_px,
+                    "entry_time": entry_ts,
+                    "entry_ts": entry_ts,
+                    "highest_price": highest,
+                    "profit_high": profit_high,
+                    "current_stop": float(current.get("current_stop") or entry_px * 0.95),
+                    "current_action": str(current.get("current_action") or "hold"),
+                    "partial_sold": bool(current.get("partial_sold", False)),
+                    "partial_sell_time": current.get("partial_sell_time"),
+                    "triggered_actions": list(current.get("triggered_actions") or []),
+                    "rank_exit_streak": int(current.get("rank_exit_streak") or 0),
+                    "last_rank": current.get("last_rank"),
+                    "last_rank_exit_time": current.get("last_rank_exit_time"),
+                    "entry_reason": str(tags.get("entry_reason") or probe_type),
+                    "probe_type": probe_type,
+                    "target_w": float(tags["target_w"]) if tags.get("target_w") is not None else current.get("target_w"),
+                }
+            )
+            payload[symbol] = state
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(path)
+        except Exception as e:
+            log.warning("Failed to upsert probe profit state for %s: %s", symbol, e)
 
     def prune_orphan_risk_state(self) -> Dict[str, int]:
         held_symbols = {str(p.symbol) for p in self.list() if float(getattr(p, "qty", 0.0) or 0.0) > 0}
@@ -211,7 +281,14 @@ class PositionStore:
             log.exception("Failed to get position for %s: %s", symbol, e)
             return None
 
-    def upsert_buy(self, symbol: str, qty: float, px: float, now_ts: Optional[str] = None) -> Position:
+    def upsert_buy(
+        self,
+        symbol: str,
+        qty: float,
+        px: float,
+        now_ts: Optional[str] = None,
+        tags: Optional[Dict[str, Any]] = None,
+    ) -> Position:
         """买入时更新或创建持仓
 
         Args:
@@ -226,6 +303,7 @@ class PositionStore:
         qty = float(qty)
         px = float(px)
         now = now_ts or utc_now_iso()
+        incoming_tags = dict(tags or {})
 
         cur_pos = self.get(symbol)
 
@@ -255,7 +333,7 @@ class PositionStore:
                 last_update_ts=now,
                 last_mark_px=px,
                 unrealized_pnl_pct=0.0,
-                tags_json="{}",
+                tags_json=json.dumps(incoming_tags, ensure_ascii=False) if incoming_tags else "{}",
             )
             # Update tracker with new position (force reset)
             if tracker:
@@ -271,6 +349,10 @@ class PositionStore:
                 hi = max(hi, tracked_high)
                 tracker.update(symbol, hi, avg, source="add_position")
             
+            merged_tags = self._load_tags(getattr(cur_pos, "tags_json", "{}"))
+            if incoming_tags:
+                merged_tags.update(incoming_tags)
+
             pos = Position(
                 symbol=symbol,
                 qty=new_qty,
@@ -280,10 +362,16 @@ class PositionStore:
                 last_update_ts=now,
                 last_mark_px=px,
                 unrealized_pnl_pct=float(cur_pos.unrealized_pnl_pct),
-                tags_json=cur_pos.tags_json,
+                tags_json=json.dumps(merged_tags, ensure_ascii=False) if merged_tags else "{}",
             )
 
         self.upsert_position(pos)
+        self._upsert_probe_profit_state(
+            symbol=symbol,
+            px=px,
+            now_ts=now,
+            tags=self._load_tags(pos.tags_json),
+        )
         return pos
 
     def mark_position(

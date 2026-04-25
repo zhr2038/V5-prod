@@ -670,6 +670,33 @@ class ExecutionConfig(BaseModel):
         le=10.0,
         description="Minimum Alpha6Factor signal score required for OPEN_LONG in PROTECT risk level",
     )
+    btc_leadership_probe_enabled: bool = Field(default=True)
+    btc_leadership_probe_only_in_protect: bool = Field(default=True)
+    btc_leadership_probe_target_w: float = Field(default=0.08, ge=0.0, le=1.0)
+    btc_leadership_probe_dynamic_sizing_enabled: bool = Field(default=True)
+    btc_leadership_probe_max_target_w: float = Field(default=0.10, ge=0.0, le=1.0)
+    btc_leadership_probe_cooldown_hours: int = Field(default=8, ge=0, le=24 * 30)
+    btc_leadership_probe_lookback_hours: int = Field(default=24, ge=1, le=24 * 30)
+    btc_leadership_probe_breakout_buffer_bps: float = Field(default=15.0, ge=0.0, le=10000.0)
+    btc_leadership_probe_min_alpha6_score: float = Field(default=0.30, ge=-10.0, le=10.0)
+    btc_leadership_probe_min_f5_rsi: float = Field(default=0.30, ge=-10.0, le=10.0)
+    btc_leadership_probe_min_f4_volume: float = Field(default=-0.10, ge=-10.0, le=10.0)
+    btc_leadership_probe_require_regime_not_risk_off: bool = Field(default=True)
+    btc_leadership_probe_allow_single_negative_cycle_bypass: bool = Field(default=True)
+    btc_leadership_probe_max_negative_cycles_to_bypass: int = Field(default=1, ge=0, le=10)
+    btc_leadership_probe_min_net_expectancy_bps_to_bypass: float = Field(
+        default=-120.0,
+        ge=-10000.0,
+        le=10000.0,
+    )
+    btc_leadership_probe_time_stop_hours: int = Field(default=4, ge=0, le=24 * 30)
+    probe_exit_enabled: bool = Field(default=True)
+    probe_take_profit_net_bps: float = Field(default=80.0, ge=-10000.0, le=10000.0)
+    probe_stop_loss_net_bps: float = Field(default=-50.0, ge=-10000.0, le=10000.0)
+    probe_trailing_enable_after_net_bps: float = Field(default=50.0, ge=-10000.0, le=10000.0)
+    probe_trailing_gap_bps: float = Field(default=25.0, ge=0.0, le=10000.0)
+    probe_time_stop_hours: int = Field(default=4, ge=0, le=24 * 30)
+    probe_time_stop_min_net_bps: float = Field(default=10.0, ge=-10000.0, le=10000.0)
 
     # Require fused strategy signal file for buy decisions. If missing, block buy orders.
     require_fused_signals_for_buy: bool = Field(default=False)
