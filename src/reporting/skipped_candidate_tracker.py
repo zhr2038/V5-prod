@@ -553,6 +553,20 @@ def _ensure_provider_series(
     return cached.get(symbol, [])
 
 
+def _default_ohlcv_provider_for_cfg(cfg: AppConfig) -> Any:
+    mode = str(getattr(getattr(cfg, "execution", None), "mode", "") or "").lower()
+    if mode != "live":
+        return None
+    try:
+        from src.data.okx_ccxt_provider import OKXCCXTProvider
+    except Exception:
+        return None
+    try:
+        return OKXCCXTProvider(rate_limit=True)
+    except Exception:
+        return None
+
+
 def _update_labels(
     *,
     records: list[dict[str, Any]],
@@ -701,6 +715,8 @@ def update_skipped_candidate_tracker(
                 for series in (market_data_1h or {}).values()
             ]
         )
+    if ohlcv_provider is None:
+        ohlcv_provider = _default_ohlcv_provider_for_cfg(cfg)
     _update_labels(
         records=records,
         cache_dir=cache_root,
