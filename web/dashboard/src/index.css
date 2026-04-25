@@ -22,6 +22,30 @@
   --danger: #ff8ca0;
   --success: #7ce9b5;
   --warn: #ffcd87;
+  --kline-grid: rgba(255, 255, 255, 0.06);
+  --kline-grid-muted: rgba(255, 255, 255, 0.035);
+  --kline-axis: rgba(210, 218, 232, 0.76);
+  --kline-axis-muted: rgba(194, 204, 224, 0.66);
+  --kline-candle-up: #34d399;
+  --kline-candle-up-fill: rgba(52, 211, 153, 0.86);
+  --kline-candle-down: #fb7185;
+  --kline-candle-down-fill: rgba(251, 113, 133, 0.88);
+  --kline-volume-top: rgba(126, 236, 205, 0.62);
+  --kline-volume-bottom: rgba(126, 236, 205, 0.12);
+  --kline-ma7: rgba(141, 196, 255, 0.95);
+  --kline-ma20: rgba(255, 205, 120, 0.90);
+  --kline-last: #8dc4ff;
+  --kline-reference: rgba(255, 205, 120, 0.75);
+  --kline-marker: rgba(255, 255, 255, 0.32);
+  --kline-marker-muted: rgba(255, 255, 255, 0.28);
+  --kline-marker-text: rgba(255, 255, 255, 0.76);
+  --kline-marker-text-muted: rgba(255, 255, 255, 0.70);
+  --kline-label-bg: rgba(25, 35, 49, 0.90);
+  --kline-label-border: rgba(141, 196, 255, 0.44);
+  --kline-label-text: #9ad2ff;
+  --kline-reference-label-bg: rgba(48, 40, 18, 0.88);
+  --kline-reference-label-border: rgba(255, 205, 120, 0.40);
+  --kline-reference-label-text: #ffcb7f;
   --line: rgba(255, 255, 255, 0.10);
   --line-strong: rgba(255, 255, 255, 0.22);
   --surface-border: rgba(255, 255, 255, 0.13);
@@ -948,6 +972,30 @@ body {
     --text-soft: #233045;
     --text-dim: #43506a;
     --text-faint: #64728b;
+    --kline-grid: rgba(48, 58, 78, 0.17);
+    --kline-grid-muted: rgba(48, 58, 78, 0.11);
+    --kline-axis: rgba(35, 48, 69, 0.78);
+    --kline-axis-muted: rgba(67, 80, 106, 0.70);
+    --kline-candle-up: #047857;
+    --kline-candle-up-fill: rgba(5, 150, 105, 0.90);
+    --kline-candle-down: #be123c;
+    --kline-candle-down-fill: rgba(225, 29, 72, 0.90);
+    --kline-volume-top: rgba(5, 150, 105, 0.30);
+    --kline-volume-bottom: rgba(5, 150, 105, 0.08);
+    --kline-ma7: rgba(37, 99, 235, 0.95);
+    --kline-ma20: rgba(180, 83, 9, 0.95);
+    --kline-last: rgba(37, 99, 235, 0.86);
+    --kline-reference: rgba(180, 83, 9, 0.82);
+    --kline-marker: rgba(48, 58, 78, 0.42);
+    --kline-marker-muted: rgba(48, 58, 78, 0.36);
+    --kline-marker-text: rgba(35, 48, 69, 0.86);
+    --kline-marker-text-muted: rgba(35, 48, 69, 0.78);
+    --kline-label-bg: rgba(239, 246, 255, 0.96);
+    --kline-label-border: rgba(37, 99, 235, 0.36);
+    --kline-label-text: #1d4ed8;
+    --kline-reference-label-bg: rgba(255, 251, 235, 0.96);
+    --kline-reference-label-border: rgba(180, 83, 9, 0.34);
+    --kline-reference-label-text: #92400e;
     --line: rgba(48, 58, 78, 0.16);
     --line-strong: rgba(48, 58, 78, 0.28);
     --surface-border: rgba(79, 92, 118, 0.20);
@@ -991,20 +1039,36 @@ body {
     color: #0f9f72 !important;
   }
 
+  .material-surface .text-emerald-200 {
+    color: #047857 !important;
+  }
+
   .material-surface .text-rose-300 {
     color: #c94f67 !important;
   }
 
+  .material-surface .text-rose-200 {
+    color: #be123c !important;
+  }
+
   .material-surface .text-amber-300,
-  .material-surface .text-[var(--accent-2)] {
+  .material-surface .text-\[var\(--accent-2\)\] {
     color: #996317 !important;
   }
 
-  .material-surface .text-[var(--accent-3)] {
+  .material-surface .text-amber-200 {
+    color: #92400e !important;
+  }
+
+  .material-surface .text-sky-200 {
+    color: #1d4ed8 !important;
+  }
+
+  .material-surface .text-\[var\(--accent-3\)\] {
     color: #285b94 !important;
   }
 
-  .material-surface .text-[var(--accent)] {
+  .material-surface .text-\[var\(--accent\)\] {
     color: #0d9878 !important;
   }
 

@@ -151,8 +151,8 @@ function CandlestickSvg({
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full">
       <defs>
         <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(126, 236, 205, 0.62)" />
-          <stop offset="100%" stopColor="rgba(126, 236, 205, 0.12)" />
+          <stop offset="0%" stopColor="var(--kline-volume-top)" />
+          <stop offset="100%" stopColor="var(--kline-volume-bottom)" />
         </linearGradient>
       </defs>
       {priceTicks.map((tick) => (
@@ -162,7 +162,7 @@ function CandlestickSvg({
           x2={w - pad.r}
           y1={y(tick)}
           y2={y(tick)}
-          stroke="rgba(255,255,255,0.06)"
+          stroke="var(--kline-grid)"
           strokeDasharray="4 4"
         />
       ))}
@@ -173,7 +173,7 @@ function CandlestickSvg({
           x2={x(index)}
           y1={pad.t}
           y2={volumeBaseY}
-          stroke="rgba(255,255,255,0.035)"
+          stroke="var(--kline-grid-muted)"
         />
       ))}
       {data.map((candle, index) => {
@@ -197,7 +197,7 @@ function CandlestickSvg({
         <path
           d={ma20Path}
           fill="none"
-          stroke="rgba(255, 205, 120, 0.9)"
+          stroke="var(--kline-ma20)"
           strokeWidth={1.5}
           strokeLinejoin="round"
           strokeLinecap="round"
@@ -207,7 +207,7 @@ function CandlestickSvg({
         <path
           d={ma7Path}
           fill="none"
-          stroke="rgba(141, 196, 255, 0.95)"
+          stroke="var(--kline-ma7)"
           strokeWidth={1.5}
           strokeLinejoin="round"
           strokeLinecap="round"
@@ -220,18 +220,21 @@ function CandlestickSvg({
         const yH = y(d.high);
         const yL = y(d.low);
         const up = d.close >= d.open;
-        const color = up ? '#34d399' : '#fb7185';
+        const color = up ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)';
+        const fill = up ? 'var(--kline-candle-up-fill)' : 'var(--kline-candle-down-fill)';
         const bodyH = Math.max(1, Math.abs(yC - yO));
         const bodyY = Math.min(yO, yC);
         return (
           <g key={i}>
-            <line x1={cx} x2={cx} y1={yH} y2={yL} stroke={color} strokeWidth={1} />
+            <line x1={cx} x2={cx} y1={yH} y2={yL} stroke={color} strokeWidth={1.2} />
             <rect
               x={cx - bodyWidth / 2}
               y={bodyY}
               width={bodyWidth}
               height={bodyH}
-              fill={color}
+              fill={fill}
+              stroke={color}
+              strokeWidth={0.7}
               rx={1}
             />
           </g>
@@ -242,7 +245,7 @@ function CandlestickSvg({
         x2={w - pad.r}
         y1={lastPriceLabelY}
         y2={lastPriceLabelY}
-        stroke="#8dc4ff"
+        stroke="var(--kline-last)"
         strokeWidth={1}
         strokeDasharray="6 4"
       />
@@ -252,7 +255,7 @@ function CandlestickSvg({
           x2={w - pad.r}
           y1={y(Number(referencePrice))}
           y2={y(Number(referencePrice))}
-          stroke="rgba(255, 205, 120, 0.75)"
+          stroke="var(--kline-reference)"
           strokeWidth={1}
           strokeDasharray="3 4"
         />
@@ -264,13 +267,13 @@ function CandlestickSvg({
             x2={Math.min(w - pad.r - 36, x(highestIndex) + 28)}
             y1={y(data[highestIndex].high)}
             y2={y(data[highestIndex].high)}
-            stroke="rgba(255,255,255,0.32)"
+            stroke="var(--kline-marker)"
             strokeWidth={1}
           />
           <text
             x={Math.min(w - pad.r - 32, x(highestIndex) + 32)}
             y={y(data[highestIndex].high) - 4}
-            fill="rgba(255,255,255,0.76)"
+            fill="var(--kline-marker-text)"
             fontSize="11"
             textAnchor="start"
           >
@@ -285,13 +288,13 @@ function CandlestickSvg({
             x2={Math.min(w - pad.r - 36, x(lowestIndex) + 28)}
             y1={y(data[lowestIndex].low)}
             y2={y(data[lowestIndex].low)}
-            stroke="rgba(255,255,255,0.28)"
+            stroke="var(--kline-marker-muted)"
             strokeWidth={1}
           />
           <text
             x={Math.min(w - pad.r - 32, x(lowestIndex) + 32)}
             y={y(data[lowestIndex].low) + 13}
-            fill="rgba(255,255,255,0.7)"
+            fill="var(--kline-marker-text-muted)"
             fontSize="11"
             textAnchor="start"
           >
@@ -304,7 +307,7 @@ function CandlestickSvg({
           key={`price-${tick}`}
           x={w - pad.r + 6}
           y={y(tick) + 4}
-          fill="rgba(210,218,232,0.76)"
+          fill="var(--kline-axis)"
           fontSize="11"
           textAnchor="start"
         >
@@ -316,7 +319,7 @@ function CandlestickSvg({
           key={`time-${index}`}
           x={x(index)}
           y={h - 8}
-          fill="rgba(194,204,224,0.66)"
+          fill="var(--kline-axis-muted)"
           fontSize="11"
           textAnchor={index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle'}
         >
@@ -329,13 +332,13 @@ function CandlestickSvg({
         width="52"
         height="18"
         rx="9"
-        fill="rgba(25, 35, 49, 0.9)"
-        stroke="rgba(141, 196, 255, 0.44)"
+        fill="var(--kline-label-bg)"
+        stroke="var(--kline-label-border)"
       />
       <text
         x={w - pad.r + 30}
         y={lastPriceLabelY + 3}
-        fill="#9ad2ff"
+        fill="var(--kline-label-text)"
         fontSize="11"
         textAnchor="middle"
       >
@@ -349,13 +352,13 @@ function CandlestickSvg({
             width="52"
             height="18"
             rx="9"
-            fill="rgba(48, 40, 18, 0.88)"
-            stroke="rgba(255, 205, 120, 0.4)"
+            fill="var(--kline-reference-label-bg)"
+            stroke="var(--kline-reference-label-border)"
           />
           <text
             x={w - pad.r + 30}
             y={y(Number(referencePrice)) + 3}
-            fill="#ffcb7f"
+            fill="var(--kline-reference-label-text)"
             fontSize="11"
             textAnchor="middle"
           >
@@ -365,7 +368,7 @@ function CandlestickSvg({
             <text
               x={w - pad.r - 42}
               y={y(Number(referencePrice)) - 14}
-              fill="rgba(255, 205, 120, 0.8)"
+              fill="var(--kline-reference-label-text)"
               fontSize="10"
               textAnchor="end"
             >
