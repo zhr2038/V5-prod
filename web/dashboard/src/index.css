@@ -1,11 +1,12 @@
 @import "tailwindcss";
 
 :root {
+  --page-bg-base: #141018;
   --bg-deep: #171a20;
   --bg-floor: #11141a;
   --bg-top: #242833;
   --bg-mid: #181c24;
-  --bg-bottom: #12151b;
+  --bg-bottom: #141018;
   --bg-cloud-warm: rgba(194, 112, 84, 0.22);
   --bg-cloud-sky: rgba(124, 147, 185, 0.18);
   --bg-cloud-sage: rgba(124, 144, 106, 0.16);
@@ -51,12 +52,12 @@
   --surface-border-strong: rgba(255, 255, 255, 0.20);
   --shadow-soft: 0 16px 40px rgba(8, 10, 16, 0.11);
   --shadow-deep: 0 24px 60px rgba(7, 9, 15, 0.16);
-  --theme-chrome-dark: #322f34;
+  --theme-chrome-dark: #141018;
   --theme-chrome-light: #f3efed;
-  --page-safe-top: max(24px, env(safe-area-inset-top, 0px));
-  --page-safe-right: max(24px, env(safe-area-inset-right, 0px));
-  --page-safe-bottom: max(24px, env(safe-area-inset-bottom, 0px));
-  --page-safe-left: max(24px, env(safe-area-inset-left, 0px));
+  --page-safe-top: calc(16px + env(safe-area-inset-top, 0px));
+  --page-safe-right: max(20px, env(safe-area-inset-right, 0px));
+  --page-safe-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  --page-safe-left: max(20px, env(safe-area-inset-left, 0px));
   --mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   --sans: "SF Pro Display", "MiSans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
@@ -70,46 +71,51 @@ body,
 #root {
   margin: 0;
   padding: 0;
-  padding-top: 0;
   width: 100%;
   min-height: 100%;
 }
 
 html {
-  background-color: var(--theme-chrome-dark);
-  overflow-x: hidden;
+  background: var(--page-bg-base);
+  overflow-x: clip;
   overflow-y: auto;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  min-height: 100vh;
-  min-height: 100svh;
-  min-height: 100dvh;
+  min-height: 100%;
   font-family: var(--sans);
   color: var(--text);
-  overflow-x: hidden;
+  overflow-x: clip;
   overflow-y: auto;
+  -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: auto;
-  background: transparent;
+  background: var(--page-bg-base);
 }
 
 #root {
   width: 100%;
-  max-width: 1920px;
   margin: 0 auto;
-  background: transparent;
-  background-color: transparent;
-  min-height: 100vh;
-  min-height: 100svh;
-  min-height: 100dvh;
+  background: var(--page-bg-base);
+  min-height: 100%;
 }
 
-.app-viewport-shell {
+.mobile-page-shell {
+  position: relative;
+  isolation: isolate;
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
-  padding: var(--page-safe-top) var(--page-safe-right) var(--page-safe-bottom) var(--page-safe-left);
+  background: var(--page-bg-base);
+  padding: var(--page-safe-top) var(--page-safe-right) 0 var(--page-safe-left);
   scroll-snap-align: start;
+}
+
+.page-content {
+  min-height: calc(100vh + 240px);
+  min-height: calc(100svh + 240px);
+  min-height: calc(100dvh + 240px);
+  padding-bottom: var(--page-safe-bottom);
 }
 
 .dashboard-section {
@@ -132,18 +138,22 @@ body {
 }
 
 .liquid-bg {
-  position: fixed;
-  inset: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 0;
   pointer-events: none;
-  overflow: hidden;
+  min-height: 100%;
+  overflow: clip;
   isolation: isolate;
   background:
     radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
     radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
     radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
-  background-color: var(--theme-chrome-dark);
+  background-color: var(--page-bg-base);
 }
 
 .liquid-bg::before {
@@ -966,7 +976,7 @@ body {
   outline: none;
 }
 
-@media (prefers-color-scheme: light) {
+@media (prefers-color-scheme: light) and (hover: hover) and (pointer: fine) {
   :root {
     --bg-deep: #eef2f7;
     --bg-floor: #e7ebf2;
@@ -1109,8 +1119,10 @@ body {
       scroll-snap-type: y proximity;
     }
 
+    html,
     body {
-      -webkit-text-size-adjust: 100%;
+      overflow-x: hidden;
+      overflow-y: auto !important;
     }
 
     .ambient-pane,
