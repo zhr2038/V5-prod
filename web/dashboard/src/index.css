@@ -1,7 +1,6 @@
 @import "tailwindcss";
 
 :root {
-  --app-viewport-height: 100dvh;
   --bg-deep: #171a20;
   --bg-floor: #11141a;
   --bg-top: #242833;
@@ -54,6 +53,10 @@
   --shadow-deep: 0 24px 60px rgba(7, 9, 15, 0.16);
   --theme-chrome-dark: #322f34;
   --theme-chrome-light: #f3efed;
+  --page-safe-top: max(24px, env(safe-area-inset-top, 0px));
+  --page-safe-right: max(24px, env(safe-area-inset-right, 0px));
+  --page-safe-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+  --page-safe-left: max(24px, env(safe-area-inset-left, 0px));
   --mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   --sans: "SF Pro Display", "MiSans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
@@ -69,24 +72,24 @@ body,
   padding: 0;
   padding-top: 0;
   width: 100%;
-  min-height: 100vh;
-  min-height: 100svh;
-  min-height: 100dvh;
-  min-height: var(--app-viewport-height);
+  min-height: 100%;
 }
 
 html {
-  height: -webkit-fill-available;
   background-color: var(--theme-chrome-dark);
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
 body {
-  min-height: -webkit-fill-available;
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
   font-family: var(--sans);
   color: var(--text);
   overflow-x: hidden;
-  overscroll-behavior-y: none;
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
   background: transparent;
 }
 
@@ -99,22 +102,27 @@ body {
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
-  min-height: var(--app-viewport-height);
 }
 
 .app-viewport-shell {
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
-  min-height: var(--app-viewport-height);
+  padding: var(--page-safe-top) var(--page-safe-right) var(--page-safe-bottom) var(--page-safe-left);
+  scroll-snap-align: start;
+}
+
+.dashboard-section {
+  scroll-snap-align: start;
+  scroll-margin-top: var(--page-safe-top);
 }
 
 .hero-safe-copy {
-  padding-top: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.35rem));
+  padding-top: 0;
 }
 
 .hero-safe-rail {
-  margin-top: max(0.2rem, calc(env(safe-area-inset-top, 0px) + 0.1rem));
+  margin-top: 0;
 }
 
 .liquid-filters {
@@ -1097,11 +1105,8 @@ body {
 
 @supports (-webkit-touch-callout: none) {
   @media (hover: none) and (pointer: coarse) {
-    html,
-    body,
-    #root,
-    .app-viewport-shell {
-      min-height: var(--app-viewport-height);
+    html {
+      scroll-snap-type: y proximity;
     }
 
     body {

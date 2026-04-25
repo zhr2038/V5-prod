@@ -69,7 +69,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
   ];
 
   return (
-    <div className="relative z-10 px-6 pb-6">
+    <div className="dashboard-section relative z-10 pb-6">
       <motion.div
         variants={container}
         initial="hidden"

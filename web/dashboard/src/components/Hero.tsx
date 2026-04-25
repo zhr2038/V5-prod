@@ -34,7 +34,7 @@ export function Hero({ marketState, riskGuard, systemStatus, updateTime }: HeroP
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
-      className="relative z-10 px-6 pb-4"
+      className="dashboard-section relative z-10 pb-4"
     >
       <div className="max-w-[1780px] mx-auto flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div className="hero-safe-copy">

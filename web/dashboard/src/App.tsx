@@ -172,7 +172,7 @@ function App() {
         globalThis.clearTimeout(timeoutId);
       }
     };
-  }, [loadInitialData, loadSecondary]);
+  }, [loadSecondary]);
 
   useEffect(() => {
     if (!showDeferredPanels) return;
@@ -195,10 +195,10 @@ function App() {
   const focusSymbol = dashboard?.positions?.[0]?.symbol?.replace('-USDT', '') || '';
 
   return (
-    <div className="app-viewport-shell relative min-h-[100dvh] min-h-[100svh] min-h-screen">
+    <div className="app-viewport-shell relative">
       <LiquidBg />
 
-      <div className="relative z-10 pb-10">
+      <div className="relative z-10">
         <Hero
           marketState={marketState}
           riskGuard={riskGuard}
@@ -214,7 +214,7 @@ function App() {
 
         <MLBand mlTraining={dashboard?.mlTraining || null} />
 
-        <div className="px-6">
+        <div className="dashboard-section">
           <div className="max-w-[1780px] mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 flex flex-col gap-4">
               <PositionsPanel
@@ -248,7 +248,7 @@ function App() {
           </div>
         </div>
 
-        <div className="px-6 mt-4">
+        <div className="dashboard-section mt-4">
           <div className="max-w-[1780px] mx-auto">
             {showDeferredPanels ? (
               <Suspense fallback={<DeferredPanelFallback />}>
