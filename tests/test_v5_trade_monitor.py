@@ -2,12 +2,48 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import shutil
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 import scripts.v5_trade_monitor as trade_monitor
+
+
+def _bash_bin() -> str:
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("bash is required for shell wrapper tests")
+    return bash
+
+
+def _bash_path(path: Path) -> str:
+    resolved = str(path.resolve())
+    if os.name != "nt":
+        return resolved
+    quoted = shlex.quote(resolved)
+    result = subprocess.run(
+        [
+            _bash_bin(),
+            "-lc",
+            f"if command -v wslpath >/dev/null 2>&1; then wslpath -u {quoted}; "
+            f"elif command -v cygpath >/dev/null 2>&1; then cygpath -u {quoted}; "
+            f"else printf '%s\\n' {quoted}; fi",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _chmod_executable(path: Path) -> None:
+    path.chmod(0o755)
+    if os.name == "nt":
+        subprocess.run([_bash_bin(), "-lc", f"chmod +x {shlex.quote(_bash_path(path))}"], check=True)
 
 
 def test_build_paths_uses_prefixed_runtime_alert_file(monkeypatch, tmp_path: Path) -> None:
@@ -68,19 +104,15 @@ def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatc
         raise AssertionError("expected FileNotFoundError")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="requires POSIX bash paths")
 def test_shell_wrapper_delegates_to_python_monitor(tmp_path: Path) -> None:
-    import os
-    import subprocess
-
     project_root = tmp_path
     scripts_dir = project_root / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
 
     wrapper_src = Path(__file__).resolve().parents[1] / "scripts" / "v5_trade_monitor.sh"
     wrapper_dst = scripts_dir / "v5_trade_monitor.sh"
-    wrapper_dst.write_text(wrapper_src.read_text(encoding="utf-8"), encoding="utf-8")
-    wrapper_dst.chmod(0o755)
+    wrapper_dst.write_text(wrapper_src.read_text(encoding="utf-8").replace("\r\n", "\n"), encoding="utf-8", newline="\n")
+    _chmod_executable(wrapper_dst)
 
     fake_python = project_root / "fake_python.sh"
     args_log = project_root / "args.log"
@@ -88,23 +120,28 @@ def test_shell_wrapper_delegates_to_python_monitor(tmp_path: Path) -> None:
         "#!/bin/bash\n"
         "printf '%s\\n' \"$@\" > \"$ARGS_LOG\"\n",
         encoding="utf-8",
+        newline="\n",
     )
-    fake_python.chmod(0o755)
+    _chmod_executable(fake_python)
 
-    env = {
-        **os.environ,
-        "V5_PYTHON_BIN": str(fake_python),
-        "ARGS_LOG": str(args_log),
-    }
     subprocess.run(
-        ["/bin/bash", str(wrapper_dst)],
-        cwd=project_root,
-        env=env,
+        [
+            _bash_bin(),
+            "-lc",
+            " ".join(
+                [
+                    "env",
+                    f"V5_PYTHON_BIN={shlex.quote(_bash_path(fake_python))}",
+                    f"ARGS_LOG={shlex.quote(_bash_path(args_log))}",
+                    shlex.quote(_bash_path(wrapper_dst)),
+                ]
+            ),
+        ],
         check=True,
     )
 
     args = args_log.read_text(encoding="utf-8").splitlines()
-    assert args[0] == str(project_root / "scripts" / "v5_trade_monitor.py")
+    assert args[0] == _bash_path(project_root / "scripts" / "v5_trade_monitor.py")
     assert args[1] == "--silent"
 
 
