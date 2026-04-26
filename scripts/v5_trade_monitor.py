@@ -489,7 +489,7 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     has_alert = check_and_alert()
-    if "--silent" in args:
+    if "--fail-on-alert" in args:
         return 1 if has_alert else 0
     return 0
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import pytest
 
 import scripts.v5_trade_monitor as trade_monitor
 
@@ -65,6 +68,7 @@ def test_load_active_config_fails_fast_when_runtime_config_is_missing(monkeypatc
         raise AssertionError("expected FileNotFoundError")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires POSIX bash paths")
 def test_shell_wrapper_delegates_to_python_monitor(tmp_path: Path) -> None:
     import os
     import subprocess
@@ -121,6 +125,18 @@ def test_send_telegram_alert_reports_runtime_alert_path(monkeypatch, tmp_path: P
 
     output = capsys.readouterr().out
     assert str(paths.alert_file) in output
+
+
+def test_main_silent_exits_zero_when_alert_is_sent(monkeypatch) -> None:
+    monkeypatch.setattr(trade_monitor, "check_and_alert", lambda: True)
+
+    assert trade_monitor.main(["--silent"]) == 0
+
+
+def test_main_fail_on_alert_keeps_nonzero_exit(monkeypatch) -> None:
+    monkeypatch.setattr(trade_monitor, "check_and_alert", lambda: True)
+
+    assert trade_monitor.main(["--fail-on-alert"]) == 1
 
 
 def test_get_current_risk_level_prefers_newer_guard_state(monkeypatch, tmp_path: Path) -> None:
