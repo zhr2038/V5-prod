@@ -135,7 +135,7 @@ class DecisionAudit:
     protect_entry_require_alpha6_confirmation: bool = True
     protect_entry_block_trend_only: bool = True
     protect_entry_require_alpha6_rsi_confirm_positive: bool = True
-    protect_entry_alpha6_min_score: float = 0.10
+    protect_entry_alpha6_min_score: float = 0.40
     
     def reject(self, reason: str) -> None:
         """记录拒绝原因"""
@@ -231,6 +231,6 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.protect_entry_require_alpha6_rsi_confirm_positive = bool(
         data.get("protect_entry_require_alpha6_rsi_confirm_positive", True)
     )
-    audit.protect_entry_alpha6_min_score = float(data.get("protect_entry_alpha6_min_score", 0.10) or 0.0)
+    audit.protect_entry_alpha6_min_score = float(data.get("protect_entry_alpha6_min_score", 0.40) or 0.0)
     
     return audit
