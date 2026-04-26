@@ -313,6 +313,57 @@ def test_check_and_alert_suppresses_missing_trade_time_warning_when_protect(monk
     assert sent == []
 
 
+def test_check_and_alert_suppresses_zero_fill_info_when_protect(monkeypatch, tmp_path: Path) -> None:
+    paths = trade_monitor.MonitorPaths(
+        project_root=tmp_path,
+        reports_dir=(tmp_path / "reports").resolve(),
+        logs_dir=(tmp_path / "logs").resolve(),
+        fills_db_path=(tmp_path / "reports" / "fills.sqlite").resolve(),
+        orders_db_path=(tmp_path / "reports" / "orders.sqlite").resolve(),
+        env_path=(tmp_path / ".env").resolve(),
+        alert_file=(tmp_path / "reports" / "monitor_alert.txt").resolve(),
+    )
+    sent: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(trade_monitor, "get_current_risk_level", lambda _paths=paths: "PROTECT")
+    monkeypatch.setattr(trade_monitor, "get_last_trade_time", lambda _paths=paths, service_unit=None: None)
+    monkeypatch.setattr(trade_monitor, "get_recent_trades_count", lambda service_unit=None: (6, 0))
+    monkeypatch.setattr(trade_monitor, "get_recent_errors", lambda service_unit=None: [])
+    monkeypatch.setattr(trade_monitor, "resolve_live_service_unit_name", lambda: "v5-prod.user.service")
+    monkeypatch.setattr(trade_monitor, "send_telegram_alert", lambda message, priority="normal", paths=paths: sent.append((message, priority)) or True)
+
+    alerted = trade_monitor.check_and_alert(paths)
+
+    assert alerted is False
+    assert sent == []
+
+
+def test_check_and_alert_keeps_zero_fill_info_outside_protect(monkeypatch, tmp_path: Path) -> None:
+    paths = trade_monitor.MonitorPaths(
+        project_root=tmp_path,
+        reports_dir=(tmp_path / "reports").resolve(),
+        logs_dir=(tmp_path / "logs").resolve(),
+        fills_db_path=(tmp_path / "reports" / "fills.sqlite").resolve(),
+        orders_db_path=(tmp_path / "reports" / "orders.sqlite").resolve(),
+        env_path=(tmp_path / ".env").resolve(),
+        alert_file=(tmp_path / "reports" / "monitor_alert.txt").resolve(),
+    )
+    sent: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(trade_monitor, "get_current_risk_level", lambda _paths=paths: "DEFENSE")
+    monkeypatch.setattr(trade_monitor, "get_last_trade_time", lambda _paths=paths, service_unit=None: datetime.now())
+    monkeypatch.setattr(trade_monitor, "get_recent_trades_count", lambda service_unit=None: (6, 0))
+    monkeypatch.setattr(trade_monitor, "get_recent_errors", lambda service_unit=None: [])
+    monkeypatch.setattr(trade_monitor, "resolve_live_service_unit_name", lambda: "v5-prod.user.service")
+    monkeypatch.setattr(trade_monitor, "send_telegram_alert", lambda message, priority="normal", paths=paths: sent.append((message, priority)) or True)
+
+    alerted = trade_monitor.check_and_alert(paths)
+
+    assert alerted is True
+    assert sent
+    assert "zero fills" in sent[0][0]
+
+
 def test_resolve_live_service_unit_name_ignores_retired_live_20u(monkeypatch) -> None:
     monkeypatch.setattr(trade_monitor.shutil, "which", lambda _: "/bin/systemctl")
     monkeypatch.setattr(

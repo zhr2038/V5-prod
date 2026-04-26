@@ -457,7 +457,7 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
 
     if trade_runs == 0:
         alerts.append("warning: no trade sync runs in the last 6 hours")
-    elif total_fills == 0:
+    elif total_fills == 0 and risk_level != "PROTECT":
         alerts.append(f"info: {trade_runs} sync runs in the last 6 hours but zero fills")
 
     errors = get_recent_errors(service_unit=service_unit)
