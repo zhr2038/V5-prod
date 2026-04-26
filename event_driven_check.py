@@ -579,17 +579,46 @@ def find_latest_decision_audit_file(runs_dir: Path, max_age_minutes: int = 90):
 def _load_fused_signal_states(sig_data: dict, tradeable_symbols: set[str]):
     signals = {}
     fused_signals = sig_data.get("fused", {})
+    rows = []
     for sym, data in (fused_signals or {}).items():
         if sym not in tradeable_symbols:
             continue
+        try:
+            score = float(data.get('score', 0) or 0)
+        except Exception:
+            score = 0.0
+        raw_rank = data.get('rank', 99)
+        rows.append((str(sym), data, score, raw_rank, normalize_signal_rank(raw_rank)))
+
+    ranks = [rank for _, _, _, _, rank in rows]
+    has_duplicate_ranks = len(set(ranks)) != len(ranks)
+    has_unreliable_rank = any(_is_unreliable_fused_rank(raw_rank) for _, _, _, raw_rank, _ in rows)
+    rank_lookup = {}
+    if len(rows) > 1 and (has_duplicate_ranks or has_unreliable_rank):
+        ranked_rows = sorted(rows, key=lambda row: (row[2], row[0]), reverse=True)
+        rank_lookup = {sym: idx + 1 for idx, (sym, *_rest) in enumerate(ranked_rows)}
+
+    timestamp_ms = int(datetime.now().timestamp() * 1000)
+    for sym, data, score, _raw_rank, rank in rows:
         signals[sym] = SignalState(
             symbol=sym,
             direction=data.get('direction', 'hold'),
-            score=data.get('score', 0),
-            rank=normalize_signal_rank(data.get('rank', 99)),
-            timestamp_ms=int(datetime.now().timestamp() * 1000)
+            score=score,
+            rank=int(rank_lookup.get(sym, rank)),
+            timestamp_ms=timestamp_ms
         )
     return signals
+
+
+def _is_unreliable_fused_rank(raw_rank) -> bool:
+    if raw_rank is None:
+        return True
+    if isinstance(raw_rank, str) and not raw_rank.strip():
+        return True
+    try:
+        return float(raw_rank) <= 0
+    except Exception:
+        return True
 
 
 def _load_decision_audit_signal_states(audit_data: dict, tradeable_symbols: set[str]):

@@ -37,6 +37,31 @@ def test_load_fused_signal_states_normalizes_zero_based_rank() -> None:
     assert signals["ETH/USDT"].rank == 1
 
 
+def test_load_fused_signal_states_derives_ranks_for_duplicate_legacy_zero_ranks() -> None:
+    signals = _load_fused_signal_states(
+        {
+            "fused": {
+                "ETH/USDT": {
+                    "symbol": "ETH/USDT",
+                    "direction": "buy",
+                    "score": 0.62,
+                    "rank": 0,
+                },
+                "BNB/USDT": {
+                    "symbol": "BNB/USDT",
+                    "direction": "buy",
+                    "score": 0.09,
+                    "rank": 0,
+                },
+            }
+        },
+        {"ETH/USDT", "BNB/USDT"},
+    )
+
+    assert signals["ETH/USDT"].rank == 1
+    assert signals["BNB/USDT"].rank == 2
+
+
 def test_event_driven_history_normalizes_zero_based_rank(tmp_path) -> None:
     trader = EventDrivenTrader(
         EventDrivenConfig(
