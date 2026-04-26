@@ -24,8 +24,15 @@ def _bash_path(path: Path) -> str:
     resolved = str(path.resolve())
     if os.name != "nt":
         return resolved
+    quoted = shlex.quote(resolved)
     result = subprocess.run(
-        [_bash_bin(), "-lc", f"wslpath -u {shlex.quote(resolved)}"],
+        [
+            _bash_bin(),
+            "-lc",
+            f"if command -v wslpath >/dev/null 2>&1; then wslpath -u {quoted}; "
+            f"elif command -v cygpath >/dev/null 2>&1; then cygpath -u {quoted}; "
+            f"else printf '%s\\n' {quoted}; fi",
+        ],
         capture_output=True,
         text=True,
         check=True,
