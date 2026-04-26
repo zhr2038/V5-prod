@@ -2,19 +2,54 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_SRC = REPO_ROOT / "deploy"
 
 
+def _bash_bin() -> str:
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("bash is required for systemd install wrapper tests")
+    return bash
+
+
+def _bash_path(path: Path) -> str:
+    resolved = str(path.resolve())
+    if os.name != "nt":
+        return resolved
+    result = subprocess.run(
+        [_bash_bin(), "-lc", f"wslpath -u {shlex.quote(resolved)}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _chmod_executable(path: Path) -> None:
+    path.chmod(0o755)
+    if os.name == "nt":
+        subprocess.run([_bash_bin(), "-lc", f"chmod +x {shlex.quote(_bash_path(path))}"], check=True)
+
+
 def _prepare_install_fixture(project_root: Path) -> Path:
     deploy_dir = project_root / "deploy"
     systemd_dir = deploy_dir / "systemd"
     systemd_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(DEPLOY_SRC / "install_systemd.sh", deploy_dir / "install_systemd.sh")
+    install_dst = deploy_dir / "install_systemd.sh"
+    install_dst.write_text(
+        (DEPLOY_SRC / "install_systemd.sh").read_text(encoding="utf-8").replace("\r\n", "\n"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    _chmod_executable(install_dst)
     shutil.copy2(DEPLOY_SRC / "render_systemd_units.py", deploy_dir / "render_systemd_units.py")
     shutil.copy2(DEPLOY_SRC / "prod_release.py", deploy_dir / "prod_release.py")
     (deploy_dir / "__init__.py").write_text("", encoding="utf-8")
@@ -35,8 +70,9 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
         "printf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n"
         "exit 0\n",
         encoding="utf-8",
+        newline="\n",
     )
-    fake_systemctl.chmod(0o755)
+    _chmod_executable(fake_systemctl)
 
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
@@ -44,24 +80,31 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
     env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
-    env["HOME"] = str(home)
-    env["XDG_RUNTIME_DIR"] = str(runtime_dir)
-    env["SYSTEMCTL_LOG"] = str(systemctl_log)
+    env["PATH"] = f"{_bash_path(fake_bin)}:{env.get('PATH', '')}"
+    env["HOME"] = _bash_path(home)
+    env["XDG_RUNTIME_DIR"] = _bash_path(runtime_dir)
+    env["SYSTEMCTL_LOG"] = _bash_path(systemctl_log)
 
-    subprocess.run(
+    command = " ".join(
         [
-            "bash",
-            str(script_path),
+            "env",
+            f"PATH={shlex.quote(_bash_path(fake_bin))}:\"$PATH\"",
+            f"HOME={shlex.quote(_bash_path(home))}",
+            f"XDG_RUNTIME_DIR={shlex.quote(_bash_path(runtime_dir))}",
+            f"SYSTEMCTL_LOG={shlex.quote(_bash_path(systemctl_log))}",
+            shlex.quote(_bash_path(script_path)),
             "--user",
             "--production-only",
             "--root",
-            str(project_root),
+            shlex.quote(_bash_path(project_root)),
             "--shadow-root",
             "/srv/shadow-runtime",
             "--enable-prod-timer",
             "--enable-event-driven-timer",
-        ],
+        ]
+    )
+    subprocess.run(
+        [_bash_bin(), "-lc", command],
         check=True,
         env=env,
         capture_output=True,
@@ -73,7 +116,7 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
     shadow_unit = (units_dir / "v5-shadow-tuned-xgboost.user.service").read_text(encoding="utf-8")
     systemctl_calls = systemctl_log.read_text(encoding="utf-8")
 
-    assert str(project_root) in spread_unit
+    assert _bash_path(project_root) in spread_unit
     assert "/srv/shadow-runtime" in shadow_unit
     assert "--user enable --now v5-spread-rollup.timer" in systemctl_calls
     assert "--user enable --now v5-shadow-tuned-xgboost.user.timer" in systemctl_calls

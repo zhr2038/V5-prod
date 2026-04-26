@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import tarfile
 from contextlib import redirect_stdout
 import pytest
@@ -42,7 +43,7 @@ def test_backup_manager_load_active_config_fails_fast_when_runtime_config_is_mis
 
     manager = backup_manager.BackupManager(workspace=tmp_path)
 
-    with pytest.raises(FileNotFoundError, match=str(missing)):
+    with pytest.raises(FileNotFoundError, match=re.escape(str(missing))):
         manager._load_active_config()
 
 
