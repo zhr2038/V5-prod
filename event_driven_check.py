@@ -270,32 +270,37 @@ def _load_positions_snapshot(
     source = 'missing'
 
     db_path = positions_db_path or (REPORTS_DIR / 'positions.sqlite')
-    try:
-        from src.execution.position_store import PositionStore
+    if db_path.exists():
+        source = 'position_store_empty'
+        try:
+            from src.execution.position_store import PositionStore
 
-        store = PositionStore(str(db_path))
-        for pos in store.list():
-            qty = float(getattr(pos, 'qty', 0.0) or 0.0)
-            if qty <= 0:
-                continue
-            sym = str(getattr(pos, 'symbol', '') or '')
-            if not sym:
-                continue
-            positions[sym] = {
-                'entry_price': float(getattr(pos, 'avg_px', 0.0) or 0.0),
-                'quantity': qty,
-            }
-            position_symbols.add(sym)
-        if positions:
-            _merge_runtime_stop_state(
-                positions,
-                stop_loss_state_path=stop_loss_state_path,
-                profit_taking_state_path=profit_taking_state_path,
-                fixed_stop_loss_state_path=fixed_stop_loss_state_path,
-            )
-            return positions, position_symbols, 'position_store'
-    except Exception as e:
-        logger.warning(f"Could not load positions from sqlite store: {e}")
+            store = PositionStore(str(db_path))
+            for pos in store.list():
+                qty = float(getattr(pos, 'qty', 0.0) or 0.0)
+                if qty <= 0:
+                    continue
+                sym = str(getattr(pos, 'symbol', '') or '')
+                if not sym:
+                    continue
+                positions[sym] = {
+                    'entry_price': float(getattr(pos, 'avg_px', 0.0) or 0.0),
+                    'quantity': qty,
+                }
+                position_symbols.add(sym)
+            if positions:
+                _merge_runtime_stop_state(
+                    positions,
+                    stop_loss_state_path=stop_loss_state_path,
+                    profit_taking_state_path=profit_taking_state_path,
+                    fixed_stop_loss_state_path=fixed_stop_loss_state_path,
+                )
+                return positions, position_symbols, 'position_store'
+        except Exception as e:
+            source = 'position_store_error'
+            logger.warning(f"Could not load positions from sqlite store: {e}")
+    else:
+        source = 'position_store_missing'
 
     legacy_portfolio_path = portfolio_path or (REPORTS_DIR / 'portfolio.json')
     if legacy_portfolio_path.exists():
@@ -322,6 +327,8 @@ def _load_positions_snapshot(
                     fixed_stop_loss_state_path=fixed_stop_loss_state_path,
                 )
                 source = 'portfolio_json'
+            elif source == 'position_store_missing':
+                source = 'portfolio_json_empty'
         except Exception as e:
             logger.warning(f"Could not load legacy portfolio.json positions: {e}")
 
