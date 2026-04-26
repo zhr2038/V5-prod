@@ -130,6 +130,7 @@ def test_run_hourly_live_window_uses_runtime_config_when_v5_config_unset(tmp_pat
         fake_bin_dir=fake_bin_dir,
         env_vars={
             "V5_PYTHON_BIN": _bash_path(fake_python),
+            "V5_LIVE_LOCK": _bash_path(project_root / "v5_live.lock"),
             "ARGS_LOG": _bash_path(args_log),
             "ENV_LOG": _bash_path(env_log),
         },
@@ -169,6 +170,7 @@ def test_run_hourly_live_window_preserves_explicit_v5_config(tmp_path: Path) -> 
         fake_bin_dir=fake_bin_dir,
         env_vars={
             "V5_PYTHON_BIN": _bash_path(fake_python),
+            "V5_LIVE_LOCK": _bash_path(project_root / "v5_live.lock"),
             "ARGS_LOG": _bash_path(args_log),
             "ENV_LOG": _bash_path(env_log),
             "V5_CONFIG": _bash_path(explicit_cfg),
@@ -204,6 +206,7 @@ def test_run_hourly_live_window_fails_fast_when_runtime_config_missing(tmp_path:
         fake_bin_dir=fake_bin_dir,
         env_vars={
             "V5_PYTHON_BIN": _bash_path(fake_python),
+            "V5_LIVE_LOCK": _bash_path(project_root / "v5_live.lock"),
             "ARGS_LOG": _bash_path(args_log),
             "ENV_LOG": _bash_path(env_log),
             "V5_CONFIG": _bash_path(missing_cfg),

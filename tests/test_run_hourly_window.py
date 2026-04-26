@@ -144,6 +144,7 @@ def test_run_hourly_window_skips_compare_when_v4_reports_missing(tmp_path: Path)
         fake_bin_dir=fake_bin_dir,
         env_vars={
             "V5_PYTHON_BIN": _bash_path(fake_python),
+            "V5_DRYRUN_LOCK": _bash_path(project_root / "v5_dryrun.lock"),
             "ARGS_LOG": _bash_path(args_log),
             "ENV_LOG": _bash_path(env_log),
         },
@@ -191,6 +192,7 @@ def test_run_hourly_window_uses_runtime_v4_reports_dir_when_present(tmp_path: Pa
         fake_bin_dir=fake_bin_dir,
         env_vars={
             "V5_PYTHON_BIN": _bash_path(fake_python),
+            "V5_DRYRUN_LOCK": _bash_path(project_root / "v5_dryrun.lock"),
             "V4_REPORTS_DIR": _bash_path(v4_dir),
             "ARGS_LOG": _bash_path(args_log),
             "ENV_LOG": _bash_path(env_log),
@@ -232,6 +234,7 @@ def test_run_hourly_window_fails_fast_when_runtime_config_missing(tmp_path: Path
         fake_bin_dir=fake_bin_dir,
         env_vars={
             "V5_PYTHON_BIN": _bash_path(fake_python),
+            "V5_DRYRUN_LOCK": _bash_path(project_root / "v5_dryrun.lock"),
             "V5_CONFIG": _bash_path(project_root / "configs" / "missing.yaml"),
             "ARGS_LOG": _bash_path(args_log),
             "ENV_LOG": _bash_path(env_log),
