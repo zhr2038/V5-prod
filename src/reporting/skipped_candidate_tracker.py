@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from configs.schema import AppConfig
+from configs.schema import AppConfig, DiagnosticsConfig
 from src.core.models import MarketSeries
 from src.reporting.decision_audit import DecisionAudit
 
@@ -29,6 +29,13 @@ FOCUS_SKIP_REASONS = {
     "hold_current_no_valid_replacement",
 }
 HORIZON_PREFIX = "label_"
+
+
+def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
+    diagnostics = getattr(cfg, "diagnostics", None)
+    if diagnostics is None:
+        return DiagnosticsConfig()
+    return diagnostics
 
 
 def _iso_from_ms(timestamp_ms: int) -> str:
@@ -349,6 +356,7 @@ def _build_record(
     if required_score is None and skip_reason == "protect_entry_alpha6_score_too_low":
         required_score = float(getattr(cfg.execution, "protect_entry_alpha6_min_score", 0.0) or 0.0)
 
+    diagnostics = _diagnostics_cfg(cfg)
     record = {
         "ts_utc": _iso_from_ms(entry_ts_ms),
         "run_id": str(audit.run_id),
@@ -365,11 +373,11 @@ def _build_record(
         "f4_volume_expansion": f4_volume_expansion,
         "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
         "entry_px": _normalize_float(entry_px),
-        "rt_cost_bps": float(getattr(cfg.diagnostics, "skipped_candidate_roundtrip_cost_bps", 30.0) or 30.0),
+        "rt_cost_bps": float(getattr(diagnostics, "skipped_candidate_roundtrip_cost_bps", 30.0) or 30.0),
         "entry_ts_ms": int(entry_ts_ms),
         "label_status": "pending",
     }
-    for horizon in getattr(cfg.diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24]:
+    for horizon in getattr(diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24]:
         h = int(horizon)
         record[f"{HORIZON_PREFIX}{h}h_gross_bps"] = None
         record[f"{HORIZON_PREFIX}{h}h_net_bps"] = None
@@ -708,13 +716,14 @@ def update_skipped_candidate_tracker(
     cache_dir: str | Path | None = None,
     ohlcv_provider: Any = None,
 ) -> dict[str, Any]:
-    if not bool(getattr(cfg.diagnostics, "skipped_candidate_label_enabled", True)):
+    diagnostics = _diagnostics_cfg(cfg)
+    if not bool(getattr(diagnostics, "skipped_candidate_label_enabled", True)):
         return {"enabled": False, "new_records": 0, "total_records": 0}
 
     reports_dir = _resolve_reports_dir(run_dir)
     labels_path = _skipped_candidate_labels_path(reports_dir)
     summaries_dir = _summaries_dir(reports_dir)
-    horizons = [int(value) for value in (getattr(cfg.diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24])]
+    horizons = [int(value) for value in (getattr(diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24])]
     cache_root = Path(cache_dir) if cache_dir is not None else (PROJECT_ROOT / "data" / "cache")
 
     records_by_key = _load_existing_records(labels_path)
