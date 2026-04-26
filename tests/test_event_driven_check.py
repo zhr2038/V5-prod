@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from event_driven_check import _load_positions_snapshot
+from event_driven_check import _load_fused_signal_states, _load_positions_snapshot
+from src.execution.event_driven_integration import EventDrivenConfig, EventDrivenTrader
 from src.execution.position_store import PositionStore
 
 
@@ -16,3 +17,50 @@ def test_load_positions_snapshot_reports_empty_position_store(tmp_path) -> None:
     assert positions == {}
     assert symbols == set()
     assert source == "position_store_empty"
+
+
+def test_load_fused_signal_states_normalizes_zero_based_rank() -> None:
+    signals = _load_fused_signal_states(
+        {
+            "fused": {
+                "ETH/USDT": {
+                    "symbol": "ETH/USDT",
+                    "direction": "sell",
+                    "score": 0.12,
+                    "rank": 0,
+                }
+            }
+        },
+        {"ETH/USDT"},
+    )
+
+    assert signals["ETH/USDT"].rank == 1
+
+
+def test_event_driven_history_normalizes_zero_based_rank(tmp_path) -> None:
+    trader = EventDrivenTrader(
+        EventDrivenConfig(
+            monitor_state_path=str(tmp_path / "event_monitor_state.json"),
+            cooldown_state_path=str(tmp_path / "cooldown_state.json"),
+        )
+    )
+
+    state = trader._build_market_state(
+        {
+            "timestamp_ms": 1,
+            "regime": "SIDEWAYS",
+            "prices": {},
+            "positions": {},
+            "signals": {
+                "ETH/USDT": {
+                    "symbol": "ETH/USDT",
+                    "direction": "sell",
+                    "score": 0.12,
+                    "rank": 0,
+                    "timestamp_ms": 1,
+                }
+            },
+        }
+    )
+
+    assert state.signals["ETH/USDT"].rank == 1

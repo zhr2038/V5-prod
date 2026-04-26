@@ -32,7 +32,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import event-driven components
 try:
-    from src.execution.event_types import MarketState, SignalState, top_selected_symbols
+    from src.execution.event_types import MarketState, SignalState, normalize_signal_rank, top_selected_symbols
     from src.execution.event_driven_integration import create_event_driven_trader
     from src.execution.event_action_bridge import persist_event_actions
     from src.execution.fill_store import (
@@ -468,7 +468,7 @@ def load_current_state(cfg=None, config_path: Path = None):
                             symbol=sym,
                             direction=direction,
                             score=abs(score),
-                            rank=max(1, min(99, rank)),
+                            rank=normalize_signal_rank(rank),
                             timestamp_ms=int(datetime.now().timestamp() * 1000)
                         )
                     logger.info(f"Loaded {len(signals)} signals from alpha snapshot (fallback)")
@@ -586,7 +586,7 @@ def _load_fused_signal_states(sig_data: dict, tradeable_symbols: set[str]):
             symbol=sym,
             direction=data.get('direction', 'hold'),
             score=data.get('score', 0),
-            rank=data.get('rank', 99),
+            rank=normalize_signal_rank(data.get('rank', 99)),
             timestamp_ms=int(datetime.now().timestamp() * 1000)
         )
     return signals
@@ -602,10 +602,7 @@ def _load_decision_audit_signal_states(audit_data: dict, tradeable_symbols: set[
             score = float(row.get('score', row.get('display_score', 0)) or 0)
         except Exception:
             score = 0.0
-        try:
-            rank = int(row.get('rank', 99) or 99)
-        except Exception:
-            rank = 99
+        rank = normalize_signal_rank(row.get('rank', 99))
         direction = 'buy' if score > 0 else 'sell' if score < 0 else 'hold'
         signals[sym] = SignalState(
             symbol=sym,

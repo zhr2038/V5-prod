@@ -117,9 +117,24 @@ class SignalState:
             symbol=d['symbol'],
             direction=d['direction'],
             score=d['score'],
-            rank=d['rank'],
+            rank=normalize_signal_rank(d.get('rank', 99)),
             timestamp_ms=d['timestamp_ms'],
         )
+
+
+def normalize_signal_rank(raw: Any, *, default: int = 99) -> int:
+    if raw is None or raw == "":
+        return int(default)
+    try:
+        rank = int(raw)
+    except Exception:
+        try:
+            rank = int(float(raw))
+        except Exception:
+            return int(default)
+    if rank <= 0:
+        return 1
+    return min(99, int(rank))
 
 
 @dataclass
@@ -151,11 +166,11 @@ def ordered_signal_symbols(signals: Dict[str, Any], limit: Optional[int] = None)
         if isinstance(sig, SignalState):
             direction = str(sig.direction or "hold").lower()
             score = float(sig.score or 0.0)
-            rank = int(sig.rank or 99)
+            rank = normalize_signal_rank(sig.rank)
         elif isinstance(sig, dict):
             direction = str(sig.get("direction", "hold") or "hold").lower()
             score = float(sig.get("score", 0.0) or 0.0)
-            rank = int(sig.get("rank", 99) or 99)
+            rank = normalize_signal_rank(sig.get("rank", 99))
         else:
             continue
 

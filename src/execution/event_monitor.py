@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
 from src.execution.event_types import (
-    EventType, TradingEvent, MarketState, SignalState
+    EventType, TradingEvent, MarketState, SignalState, normalize_signal_rank
 )
 
 logger = logging.getLogger(__name__)
@@ -294,20 +294,20 @@ class EventMonitor:
             if hasattr(last_sig, 'direction'):
                 last_dir = last_sig.direction
                 last_score = last_sig.score
-                last_rank = last_sig.rank
+                last_rank = normalize_signal_rank(last_sig.rank)
             else:
                 last_dir = last_sig.get('direction', 'hold')
                 last_score = last_sig.get('score', 0)
-                last_rank = last_sig.get('rank', 99)
+                last_rank = normalize_signal_rank(last_sig.get('rank', 99))
             
             if hasattr(curr_sig, 'direction'):
                 curr_dir = curr_sig.direction
                 curr_score = curr_sig.score
-                curr_rank = curr_sig.rank
+                curr_rank = normalize_signal_rank(curr_sig.rank)
             else:
                 curr_dir = curr_sig.get('direction', 'hold')
                 curr_score = curr_sig.get('score', 0)
-                curr_rank = curr_sig.get('rank', 99)
+                curr_rank = normalize_signal_rank(curr_sig.get('rank', 99))
             
             # Direction flip
             if last_dir != curr_dir:
@@ -542,7 +542,7 @@ class EventMonitor:
                             symbol=sig_data.get('symbol', sym),
                             direction=sig_data.get('direction', 'hold'),
                             score=float(sig_data.get('score', 0.0) or 0.0),
-                            rank=int(sig_data.get('rank', 99) or 99),
+                            rank=normalize_signal_rank(sig_data.get('rank', 99)),
                             timestamp_ms=int(sig_data.get('timestamp_ms', 0) or 0)
                         )
                     self.last_state = MarketState(

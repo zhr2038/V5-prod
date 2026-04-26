@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
-from src.execution.event_types import MarketState, SignalState, top_selected_symbols
+from src.execution.event_types import MarketState, SignalState, normalize_signal_rank, top_selected_symbols
 from src.execution.event_monitor import EventMonitor, EventMonitorConfig
 from src.execution.cooldown_manager import CooldownManager, CooldownConfig
 from src.execution.event_decision_engine import EventDecisionEngine
@@ -150,7 +150,7 @@ class EventDrivenTrader:
                     symbol=sig.get('symbol', sym),
                     direction=sig.get('direction', 'hold'),
                     score=float(sig.get('score', 0.0) or 0.0),
-                    rank=int(sig.get('rank', 99) or 99),
+                    rank=normalize_signal_rank(sig.get('rank', 99)),
                     timestamp_ms=int(sig.get('timestamp_ms', 0) or 0)
                 )
 
