@@ -189,7 +189,14 @@ class BillsStore:
         """Last bill"""
         con = sqlite3.connect(str(self.path))
         cur = con.cursor()
-        cur.execute("SELECT bill_id, ts_ms FROM bills ORDER BY ts_ms DESC LIMIT 1")
+        cur.execute(
+            """
+            SELECT bill_id, ts_ms
+            FROM bills
+            ORDER BY ts_ms DESC, length(bill_id) DESC, bill_id DESC
+            LIMIT 1
+            """
+        )
         row = cur.fetchone()
         con.close()
         if not row:
