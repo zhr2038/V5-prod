@@ -149,6 +149,10 @@ def test_non_whitelist_legacy_unknown_order_not_polled() -> None:
 
         assert rows == []
         assert okx.get_calls == 0
+        repaired = store.get("LEGACY1")
+        assert repaired is not None
+        assert repaired.state == "REJECTED"
+        assert repaired.last_error_code == "EXPIRED"
 
 
 def test_trade_auditor_v3_recent_orders_use_created_ts_not_updated_ts(tmp_path: Path) -> None:
