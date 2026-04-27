@@ -5,10 +5,10 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/admin/clawd/v5-prod
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/home/admin/clawd/v5-prod
-Environment=V5_WORKSPACE=/home/admin/clawd/v5-prod
+Environment=PYTHONPATH=/home/ubuntu/clawd/v5-prod
+Environment=V5_WORKSPACE=/home/ubuntu/clawd/v5-prod
 Environment=V5_CONFIG=configs/live_prod.yaml
 Environment=V5_ML_MIN_SAMPLES=200
 Environment=V5_ML_MIN_VALID_IC=0.00
@@ -25,8 +25,8 @@ Environment=V5_ML_FEATURE_SELECTOR=stable
 Environment=V5_ML_ROLLING_WINDOW_DAYS=10
 Environment=V5_ML_RECENCY_HALFLIFE_DAYS=5
 Environment=V5_ML_RECENCY_MAX_WEIGHT=3.0
-ExecStartPre=-/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/backfill_ml_multihorizon_labels.py'
-ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-prod && source .venv/bin/activate && python scripts/daily_ml_training.py'
+ExecStartPre=-/bin/bash -lc 'cd /home/ubuntu/clawd/v5-prod && source .venv/bin/activate && python scripts/backfill_ml_multihorizon_labels.py'
+ExecStart=/bin/bash -lc 'cd /home/ubuntu/clawd/v5-prod && source .venv/bin/activate && python scripts/daily_ml_training.py'
 
 [Install]
 WantedBy=default.target
