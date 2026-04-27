@@ -160,7 +160,10 @@ class EventDrivenTrader:
                     timestamp_ms=int(sig.get('timestamp_ms', 0) or 0)
                 )
 
-        if bool(state_dict.get('suppress_selected_symbols', False)):
+        suppress_entry_events = bool(state_dict.get('suppress_entry_events', False))
+        suppress_selected_symbols = bool(state_dict.get('suppress_selected_symbols', False) or suppress_entry_events)
+
+        if suppress_selected_symbols:
             selected = []
         else:
             selected = top_selected_symbols(
@@ -175,7 +178,8 @@ class EventDrivenTrader:
             prices=state_dict.get('prices', {}) or {},
             positions=state_dict.get('positions', {}) or {},
             signals=signals,
-            selected_symbols=selected
+            selected_symbols=selected,
+            suppress_entry_events=suppress_entry_events
         )
     
     def get_status(self) -> Dict[str, Any]:

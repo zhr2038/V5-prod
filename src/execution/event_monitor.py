@@ -84,11 +84,11 @@ class EventMonitor:
         # P1: Regime changes
         events.extend(self._check_regime_events(current_state))
 
-        risk_off_flat = self._is_risk_off_flat(current_state)
+        suppress_entry_events = self._should_suppress_entry_events(current_state)
 
-        # P2 entry-style signal changes are not actionable in flat Risk-Off.
-        if risk_off_flat:
-            logger.info("RISK_OFF flat state - suppressing signal-change events")
+        # P2 entry-style signal changes are not actionable in close-only Risk-Off.
+        if suppress_entry_events:
+            logger.info("suppress_entry_events=true - suppressing signal-change events")
         else:
             events.extend(self._check_signal_events(current_state))
 
@@ -110,9 +110,8 @@ class EventMonitor:
         return events
 
     @staticmethod
-    def _is_risk_off_flat(state: MarketState) -> bool:
-        regime = str(state.regime or "").upper().replace("-", "_")
-        return bool(regime == "RISK_OFF" and not (state.positions or {}))
+    def _should_suppress_entry_events(state: MarketState) -> bool:
+        return bool(getattr(state, "suppress_entry_events", False))
 
     def _check_risk_events(self, state: MarketState) -> List[TradingEvent]:
         """Check for risk events (stop loss, take profit, etc)."""
@@ -378,7 +377,7 @@ class EventMonitor:
         events = []
         now_ms = self._resolve_market_timestamp_ms(state)
         self._trim_price_history(now_ms)
-        suppress_events = self._is_risk_off_flat(state)
+        suppress_events = self._should_suppress_entry_events(state)
 
         # Check breakouts against the prior rolling window only.
         threshold = max(0.0, float(self.config.breakout_threshold_pct or 0.0)) / 100.0
@@ -566,7 +565,8 @@ class EventMonitor:
                         prices=last_state_data.get('prices', {}),
                         signals=signals,
                         positions=last_state_data.get('positions', {}),
-                        selected_symbols=last_state_data.get('selected_symbols', [])
+                        selected_symbols=last_state_data.get('selected_symbols', []),
+                        suppress_entry_events=bool(last_state_data.get('suppress_entry_events', False))
                     )
                 self._refresh_price_ranges()
         except Exception as e:
@@ -601,7 +601,8 @@ class EventMonitor:
                     'prices': self.last_state.prices,
                     'signals': signals_data,
                     'positions': self.last_state.positions,
-                    'selected_symbols': self.last_state.selected_symbols
+                    'selected_symbols': self.last_state.selected_symbols,
+                    'suppress_entry_events': bool(getattr(self.last_state, "suppress_entry_events", False))
                 }
 
             data = {

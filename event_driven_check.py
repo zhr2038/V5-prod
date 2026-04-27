@@ -667,7 +667,8 @@ def load_current_state(cfg=None, config_path: Path = None):
             'positions': positions,
             'signals': signals,
             'selected_symbols': selected,
-            'suppress_selected_symbols': suppress_selected
+            'suppress_selected_symbols': suppress_selected,
+            'suppress_entry_events': suppress_selected
         }
     
     except Exception as e:
@@ -1550,7 +1551,8 @@ def main():
                     'signals': last_data.get('signals', {}),
                     'positions': last_positions,
                     'selected_symbols': last_selected,
-                    'suppress_selected_symbols': last_suppress_selected
+                    'suppress_selected_symbols': last_suppress_selected,
+                    'suppress_entry_events': last_suppress_selected
                 }
                 logger.info(f"Loaded signal history from {last_data.get('timestamp', 0)}")
         except Exception as e:
@@ -1828,7 +1830,8 @@ def main():
                    for sym, sig in state['signals'].items()},
         'prices': state['prices'],
         'positions': state['positions'],
-        'regime': state['regime']
+        'regime': state['regime'],
+        'suppress_entry_events': bool(state.get('suppress_entry_events', False))
     }
     history_path.write_text(json.dumps(signal_history, indent=2))
     logger.info(f"Saved signal history ({len(signal_history['signals'])} signals)")

@@ -149,9 +149,41 @@ def test_risk_off_flat_collect_events_suppresses_signal_and_breakout_noise(tmp_p
         positions={},
         signals={"BTC/USDT": SignalState("BTC/USDT", "buy", 0.5, 1, 2_000)},
         selected_symbols=["BTC/USDT"],
+        suppress_entry_events=True,
     )
 
     events = monitor.collect_events(state)
 
     assert [event.type for event in events] == [EventType.REGIME_RISK_OFF]
     assert {"timestamp_ms": 2_000, "price": 99.0} in monitor.price_history["ETH/USDT"]
+
+
+def test_risk_off_flat_without_suppress_flag_keeps_entry_events(tmp_path) -> None:
+    monitor = EventMonitor(
+        EventMonitorConfig(
+            breakout_threshold_pct=0.3,
+            state_path=str(tmp_path / "event_monitor_state.json"),
+        )
+    )
+    monitor.last_state = MarketState(
+        timestamp_ms=1_000,
+        regime="RISK_OFF",
+        prices={"BTC/USDT": 100.0},
+        positions={},
+        signals={},
+        selected_symbols=[],
+    )
+    state = MarketState(
+        timestamp_ms=2_000,
+        regime="RISK_OFF",
+        prices={"BTC/USDT": 101.0},
+        positions={},
+        signals={"BTC/USDT": SignalState("BTC/USDT", "buy", 0.5, 1, 2_000)},
+        selected_symbols=["BTC/USDT"],
+        suppress_entry_events=False,
+    )
+
+    events = monitor.collect_events(state)
+
+    assert any(event.type == EventType.REGIME_RISK_OFF for event in events)
+    assert any(event.type == EventType.NEW_ENTRY for event in events)

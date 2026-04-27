@@ -287,11 +287,13 @@ def test_event_driven_market_state_honors_selected_symbol_suppression(tmp_path) 
             },
             "selected_symbols": ["BTC/USDT"],
             "suppress_selected_symbols": True,
+            "suppress_entry_events": True,
         }
     )
 
     assert "BTC/USDT" in state.signals
     assert state.selected_symbols == []
+    assert state.suppress_entry_events is True
 
 
 def test_load_current_auto_risk_level_prefers_newer_eval_snapshot(tmp_path) -> None:

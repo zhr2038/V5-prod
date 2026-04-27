@@ -179,6 +179,7 @@ def test_risk_off_suppresses_confirmed_signal_open_events(tmp_path) -> None:
         positions={},
         signals={"BTC/USDT": signal},
         selected_symbols=["BTC/USDT"],
+        suppress_entry_events=True,
     )
 
     result = engine.run(state, commit_execution_state=False)

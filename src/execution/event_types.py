@@ -147,6 +147,7 @@ class MarketState:
     signals: Dict = field(default_factory=dict)
     selected_symbols: list = field(default_factory=list)
     funding_rates: Dict[str, float] = field(default_factory=dict)
+    suppress_entry_events: bool = False
 
 
 def ordered_signal_symbols(signals: Dict[str, Any], limit: Optional[int] = None) -> list[str]:
