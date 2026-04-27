@@ -160,11 +160,14 @@ class EventDrivenTrader:
                     timestamp_ms=int(sig.get('timestamp_ms', 0) or 0)
                 )
 
-        selected = top_selected_symbols(
-            signals,
-            state_dict.get('selected_symbols', []) or None,
-            limit=5,
-        )
+        if bool(state_dict.get('suppress_selected_symbols', False)):
+            selected = []
+        else:
+            selected = top_selected_symbols(
+                signals,
+                state_dict.get('selected_symbols', []) or None,
+                limit=5,
+            )
 
         return MarketState(
             timestamp_ms=int(state_dict.get('timestamp_ms', 0) or 0),

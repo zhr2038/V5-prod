@@ -266,6 +266,39 @@ def _normalize_event_regime(value: object, *, default: str = 'SIDEWAYS') -> str:
     return aliases.get(normalized, default)
 
 
+def _cfg_section(cfg: object, section_name: str) -> object:
+    if isinstance(cfg, dict):
+        return cfg.get(section_name, {}) or {}
+    return getattr(cfg, section_name, None)
+
+
+def _cfg_value(section: object, key: str, default: object = None) -> object:
+    if isinstance(section, dict):
+        return section.get(key, default)
+    return getattr(section, key, default)
+
+
+def _is_close_only_risk_off(cfg: object, regime: object) -> bool:
+    if _normalize_event_regime(regime) != 'RISK_OFF':
+        return False
+
+    reg_cfg = _cfg_section(cfg, 'regime')
+    raw_mult = _cfg_value(reg_cfg, 'pos_mult_risk_off', None)
+    if raw_mult is None:
+        logger.warning("regime.pos_mult_risk_off missing; keeping event selected symbols")
+        return False
+    try:
+        risk_off_mult = float(raw_mult or 0.0)
+    except Exception:
+        logger.warning("Invalid regime.pos_mult_risk_off=%r; keeping event selected symbols", raw_mult)
+        return False
+    return risk_off_mult <= 0.0
+
+
+def _should_suppress_event_selected_symbols(cfg: object, regime: object, positions: dict) -> bool:
+    return bool(_is_close_only_risk_off(cfg, regime) and not (positions or {}))
+
+
 def _extract_event_regime(regime_data: object) -> str:
     if not isinstance(regime_data, dict):
         return 'SIDEWAYS'
@@ -619,17 +652,22 @@ def load_current_state(cfg=None, config_path: Path = None):
                             timestamp_ms=int(datetime.now().timestamp() * 1000)
                         )
                     logger.info(f"Loaded {len(signals)} signals from alpha snapshot (fallback)")
-        
+
         # Resolve selected symbols by actual rank/signal quality rather than dict order.
         selected = top_selected_symbols(signals, limit=5)
-        
+        suppress_selected = _should_suppress_event_selected_symbols(cfg, regime, positions)
+        if suppress_selected and selected:
+            logger.info("Risk-Off close-only flat state: suppressing event selected symbols")
+            selected = []
+
         return {
             'timestamp_ms': int(datetime.now().timestamp() * 1000),
             'regime': regime,
             'prices': prices,
             'positions': positions,
             'signals': signals,
-            'selected_symbols': selected
+            'selected_symbols': selected,
+            'suppress_selected_symbols': suppress_selected
         }
     
     except Exception as e:
@@ -1499,12 +1537,20 @@ def main():
         try:
             with open(history_path) as f:
                 last_data = json.load(f)
+                last_regime = last_data.get('regime', 'SIDEWAYS')
+                last_positions = last_data.get('positions', {}) or {}
+                last_selected = top_selected_symbols(last_data.get('signals', {}) or {}, limit=5)
+                last_suppress_selected = _should_suppress_event_selected_symbols(cfg, last_regime, last_positions)
+                if last_suppress_selected:
+                    last_selected = []
                 last_state = {
                     'timestamp_ms': last_data.get('timestamp', 0),
-                    'regime': last_data.get('regime', 'SIDEWAYS'),
+                    'regime': last_regime,
                     'prices': last_data.get('prices', {}),
                     'signals': last_data.get('signals', {}),
-                    'selected_symbols': top_selected_symbols(last_data.get('signals', {}) or {}, limit=5)
+                    'positions': last_positions,
+                    'selected_symbols': last_selected,
+                    'suppress_selected_symbols': last_suppress_selected
                 }
                 logger.info(f"Loaded signal history from {last_data.get('timestamp', 0)}")
         except Exception as e:
@@ -1778,9 +1824,10 @@ def main():
     history_path = paths.event_driven_signals_path
     signal_history = {
         'timestamp': int(datetime.now().timestamp() * 1000),
-        'signals': {sym: sig.to_dict() if hasattr(sig, 'to_dict') else sig 
+        'signals': {sym: sig.to_dict() if hasattr(sig, 'to_dict') else sig
                    for sym, sig in state['signals'].items()},
         'prices': state['prices'],
+        'positions': state['positions'],
         'regime': state['regime']
     }
     history_path.write_text(json.dumps(signal_history, indent=2))

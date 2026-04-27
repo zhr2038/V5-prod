@@ -12,6 +12,7 @@ from event_driven_check import (
     _filter_dust_positions,
     _load_fused_signal_states,
     _load_positions_snapshot,
+    _should_suppress_event_selected_symbols,
     compute_adaptive_event_cfg,
     filter_event_actions_for_auto_risk,
     load_current_auto_risk_level,
@@ -174,6 +175,16 @@ def test_extract_event_regime_prefers_regime_state_field() -> None:
     assert _extract_event_regime({"state": "unknown", "regime": "RISK_OFF"}) == "RISK_OFF"
 
 
+def test_suppress_event_selected_symbols_only_for_flat_close_only_risk_off() -> None:
+    cfg = {"regime": {"pos_mult_risk_off": 0.0}}
+
+    assert _should_suppress_event_selected_symbols(cfg, "Risk-Off", {}) is True
+    assert _should_suppress_event_selected_symbols(cfg, "Risk-Off", {"BTC/USDT": {"quantity": 0.001}}) is False
+    assert _should_suppress_event_selected_symbols({"regime": {"pos_mult_risk_off": 0.2}}, "Risk-Off", {}) is False
+    assert _should_suppress_event_selected_symbols({}, "Risk-Off", {}) is False
+    assert _should_suppress_event_selected_symbols(cfg, "SIDEWAYS", {}) is False
+
+
 def test_event_monitor_detects_risk_off_from_normalized_regime(tmp_path) -> None:
     trader = EventDrivenTrader(
         EventDrivenConfig(
@@ -249,6 +260,38 @@ def test_event_driven_history_normalizes_zero_based_rank(tmp_path) -> None:
     )
 
     assert state.signals["ETH/USDT"].rank == 1
+
+
+def test_event_driven_market_state_honors_selected_symbol_suppression(tmp_path) -> None:
+    trader = EventDrivenTrader(
+        EventDrivenConfig(
+            monitor_state_path=str(tmp_path / "event_monitor_state.json"),
+            cooldown_state_path=str(tmp_path / "cooldown_state.json"),
+        )
+    )
+
+    state = trader._build_market_state(
+        {
+            "timestamp_ms": 1,
+            "regime": "RISK_OFF",
+            "prices": {"BTC/USDT": 100.0},
+            "positions": {},
+            "signals": {
+                "BTC/USDT": {
+                    "symbol": "BTC/USDT",
+                    "direction": "buy",
+                    "score": 0.42,
+                    "rank": 1,
+                    "timestamp_ms": 1,
+                }
+            },
+            "selected_symbols": ["BTC/USDT"],
+            "suppress_selected_symbols": True,
+        }
+    )
+
+    assert "BTC/USDT" in state.signals
+    assert state.selected_symbols == []
 
 
 def test_load_current_auto_risk_level_prefers_newer_eval_snapshot(tmp_path) -> None:
