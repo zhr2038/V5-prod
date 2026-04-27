@@ -141,3 +141,50 @@ def test_risk_off_without_positions_does_not_warn_closing_positions(tmp_path, ca
 
     assert actions == []
     assert not any("Closing all positions" in record.getMessage() for record in caplog.records)
+
+
+def test_risk_off_blocks_confirmed_signal_open_actions(tmp_path) -> None:
+    monitor = EventMonitor(EventMonitorConfig(state_path=str(tmp_path / "event_monitor_state.json")))
+    monitor.last_state = MarketState(
+        timestamp_ms=1_000,
+        regime="SIDEWAYS",
+        prices={"BTC/USDT": 100.0},
+        positions={},
+        signals={},
+        selected_symbols=[],
+    )
+    signal = SignalState(
+        symbol="BTC/USDT",
+        direction="buy",
+        score=0.2,
+        rank=1,
+        timestamp_ms=2_000,
+    )
+    cooldown = CooldownManager(
+        CooldownConfig(
+            signal_confirmation_periods=2,
+            state_path=str(tmp_path / "cooldown_state.json"),
+        )
+    )
+    cooldown.pending_signals["BTC/USDT"] = {
+        "signal": signal.to_dict(),
+        "count": 1,
+        "first_seen_ms": 1,
+    }
+    engine = EventDecisionEngine(monitor, cooldown)
+    state = MarketState(
+        timestamp_ms=2_000,
+        regime="RISK_OFF",
+        prices={"BTC/USDT": 100.0},
+        positions={},
+        signals={"BTC/USDT": signal},
+        selected_symbols=["BTC/USDT"],
+    )
+
+    result = engine.run(state, commit_execution_state=False)
+
+    assert result.should_trade is False
+    assert result.actions == []
+    assert result.reason == "no_actionable_events"
+    assert any(event.type == EventType.REGIME_RISK_OFF for event in engine.last_events)
+    assert any(event.type == EventType.NEW_ENTRY for event in engine.last_events)

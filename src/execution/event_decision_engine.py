@@ -88,6 +88,16 @@ class EventDecisionEngine:
                 risk_actions = self._process_risk_events(p0_events, state)
                 actions.extend(risk_actions)
                 logger.info(f"P0 Risk: {len(risk_actions)} actions")
+                if any(event.type == EventType.REGIME_RISK_OFF for event in p0_events):
+                    if actions and self._commit_execution_state:
+                        self.monitor.update_last_trade_time()
+                    return DecisionResult(
+                        should_trade=len(actions) > 0,
+                        actions=actions,
+                        events_processed=len(events),
+                        events_blocked_by_cooldown=blocked_count,
+                        reason="processed" if actions else "no_actionable_events"
+                    )
 
             # 4. Process P1: Regime changes (immediate, no cooldown)
             if p1_events and not actions:  # Only if no risk actions (avoid conflict)
