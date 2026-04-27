@@ -1025,6 +1025,7 @@ def compute_adaptive_event_cfg(
     *,
     log_path: Path | None = None,
     adaptive_state_path: Path | None = None,
+    auto_risk_level: str | None = None,
 ):
     """Adaptive cooldown tuning for event-driven engine.
 
@@ -1059,20 +1060,24 @@ def compute_adaptive_event_cfg(
     block_ratio = (blocked / processed) if processed > 0 else 0.0
 
     regime = str((state or {}).get('regime', 'SIDEWAYS')).upper()
+    risk_level = str(auto_risk_level or "").strip().upper()
 
     out = dict(base)
     reason = []
 
-    if regime in ('SIDEWAYS', 'TRENDING', 'TRENDING_UP') and processed >= min_events_for_action and block_ratio >= high_block_ratio:
+    if risk_level in ('PROTECT', 'DEFENSE') or regime in ('RISK_OFF', 'RISK-OFF'):
+        out['global_cooldown_p2_minutes'] = min(p2_max, int(round(base['global_cooldown_p2_minutes'] * 1.2)))
+        out['symbol_cooldown_minutes'] = min(symbol_max, int(round(base['symbol_cooldown_minutes'] * 1.2)))
+        out['signal_confirmation_periods'] = min(confirm_max, int(base['signal_confirmation_periods']) + 1)
+        if risk_level in ('PROTECT', 'DEFENSE'):
+            reason.append(f"auto_risk_{risk_level.lower()}_harden")
+        elif regime in ('RISK_OFF', 'RISK-OFF'):
+            reason.append('risk_off_harden')
+    elif regime in ('SIDEWAYS', 'TRENDING', 'TRENDING_UP') and processed >= min_events_for_action and block_ratio >= high_block_ratio:
         out['global_cooldown_p2_minutes'] = max(p2_min, int(round(base['global_cooldown_p2_minutes'] * 0.5)))
         out['symbol_cooldown_minutes'] = max(symbol_min, int(round(base['symbol_cooldown_minutes'] * 0.5)))
         out['signal_confirmation_periods'] = max(confirm_min, int(base['signal_confirmation_periods']) - 1)
         reason.append('high_block_ratio_relax')
-    elif regime in ('RISK_OFF', 'RISK-OFF'):
-        out['global_cooldown_p2_minutes'] = min(p2_max, int(round(base['global_cooldown_p2_minutes'] * 1.2)))
-        out['symbol_cooldown_minutes'] = min(symbol_max, int(round(base['symbol_cooldown_minutes'] * 1.2)))
-        out['signal_confirmation_periods'] = min(confirm_max, int(base['signal_confirmation_periods']) + 1)
-        reason.append('risk_off_harden')
 
     # clamp
     out['global_cooldown_p2_minutes'] = max(p2_min, min(p2_max, int(out['global_cooldown_p2_minutes'])))
@@ -1085,6 +1090,7 @@ def compute_adaptive_event_cfg(
         'applied': applied,
         'reason': ','.join(reason) if reason else 'no_change',
         'regime': regime,
+        'auto_risk_level': risk_level or None,
         'lookback_runs': lookback,
         'recent_events_processed': processed,
         'recent_events_blocked': blocked,
@@ -1452,6 +1458,9 @@ def main():
 
     live_service_unit = resolve_live_service_unit(ev_cfg)
     logger.info(f"Live trigger service: {live_service_unit}")
+    auto_risk_level = load_current_auto_risk_level(paths.order_store_path)
+    if auto_risk_level:
+        logger.info(f"Auto-risk level: {auto_risk_level}")
 
     # No-trade period utilities: candidate watchlist + risk-off shadow + one-shot param scan
     watchlist = build_candidate_watchlist(
@@ -1491,6 +1500,7 @@ def main():
         state,
         log_path=paths.event_driven_log_path,
         adaptive_state_path=paths.event_adaptive_state_path,
+        auto_risk_level=auto_risk_level,
     )
     logger.info(
         f"Adaptive cooldown: applied={adaptive_meta.get('applied')} reason={adaptive_meta.get('reason')} "
@@ -1517,9 +1527,6 @@ def main():
     # Check if should trade (with last state for comparison)
     logger.info("Checking for trading events...")
     result = trader.should_trade(state, last_state, commit_execution_state=False)
-    auto_risk_level = load_current_auto_risk_level(paths.order_store_path)
-    if auto_risk_level:
-        logger.info(f"Auto-risk level: {auto_risk_level}")
     result = filter_event_actions_for_auto_risk(result, auto_risk_level)
     blocked_auto_risk_actions = list(result.get("auto_risk_blocked_actions") or [])
     if blocked_auto_risk_actions:

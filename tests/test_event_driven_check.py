@@ -9,6 +9,7 @@ from event_driven_check import (
     _filter_dust_positions,
     _load_fused_signal_states,
     _load_positions_snapshot,
+    compute_adaptive_event_cfg,
     filter_event_actions_for_auto_risk,
     load_current_auto_risk_level,
 )
@@ -230,6 +231,83 @@ def test_filter_event_actions_for_auto_risk_keeps_close_when_open_blocked() -> N
     assert filtered["actions"] == [close_action]
     assert filtered["auto_risk_blocked_actions"] == [open_action]
     assert filtered["events_blocked"] == 1
+
+
+def test_adaptive_cooldown_hardens_in_auto_risk_protect_despite_high_block_ratio(tmp_path) -> None:
+    log_path = tmp_path / "event_driven_log.jsonl"
+    log_path.write_text(
+        "\n".join(json.dumps({"events_processed": 1, "events_blocked": 1}) for _ in range(8)) + "\n",
+        encoding="utf-8",
+    )
+
+    adaptive, meta = compute_adaptive_event_cfg(
+        {
+            "global_cooldown_p2_minutes": 30,
+            "symbol_cooldown_minutes": 60,
+            "signal_confirmation_periods": 2,
+            "adaptive_cooldown": {
+                "enabled": True,
+                "lookback_runs": 12,
+                "high_block_ratio": 0.75,
+                "min_events_for_action": 8,
+                "p2_min_minutes": 8,
+                "p2_max_minutes": 60,
+                "symbol_min_minutes": 15,
+                "symbol_max_minutes": 120,
+                "confirm_min": 1,
+                "confirm_max": 4,
+            },
+        },
+        {"regime": "SIDEWAYS"},
+        log_path=log_path,
+        adaptive_state_path=tmp_path / "event_adaptive_state.json",
+        auto_risk_level="PROTECT",
+    )
+
+    assert adaptive["global_cooldown_p2_minutes"] == 36
+    assert adaptive["symbol_cooldown_minutes"] == 72
+    assert adaptive["signal_confirmation_periods"] == 3
+    assert meta["reason"] == "auto_risk_protect_harden"
+    assert meta["auto_risk_level"] == "PROTECT"
+    assert meta["recent_block_ratio"] == 1.0
+
+
+def test_adaptive_cooldown_relaxes_high_block_ratio_without_defensive_risk(tmp_path) -> None:
+    log_path = tmp_path / "event_driven_log.jsonl"
+    log_path.write_text(
+        "\n".join(json.dumps({"events_processed": 1, "events_blocked": 1}) for _ in range(8)) + "\n",
+        encoding="utf-8",
+    )
+
+    adaptive, meta = compute_adaptive_event_cfg(
+        {
+            "global_cooldown_p2_minutes": 30,
+            "symbol_cooldown_minutes": 60,
+            "signal_confirmation_periods": 2,
+            "adaptive_cooldown": {
+                "enabled": True,
+                "lookback_runs": 12,
+                "high_block_ratio": 0.75,
+                "min_events_for_action": 8,
+                "p2_min_minutes": 8,
+                "p2_max_minutes": 60,
+                "symbol_min_minutes": 15,
+                "symbol_max_minutes": 120,
+                "confirm_min": 1,
+                "confirm_max": 4,
+            },
+        },
+        {"regime": "SIDEWAYS"},
+        log_path=log_path,
+        adaptive_state_path=tmp_path / "event_adaptive_state.json",
+        auto_risk_level="NEUTRAL",
+    )
+
+    assert adaptive["global_cooldown_p2_minutes"] == 15
+    assert adaptive["symbol_cooldown_minutes"] == 30
+    assert adaptive["signal_confirmation_periods"] == 1
+    assert meta["reason"] == "high_block_ratio_relax"
+    assert meta["auto_risk_level"] == "NEUTRAL"
 
 
 def test_effective_event_log_excludes_active_throttled_actions() -> None:
