@@ -217,6 +217,8 @@ class AutoRiskGuard:
             })
             self._save_state()
             print(f"[AutoRiskGuard] {old_level} -> {new_level}: {'; '.join(reasons)}")
+        else:
+            self._save_state()
         
         return new_level, self.LEVELS[new_level], '; '.join(reasons) if reasons else '维持当前档位'
     
