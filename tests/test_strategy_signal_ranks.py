@@ -67,5 +67,6 @@ def test_strategy_signal_payload_writes_one_based_fused_ranks(tmp_path):
 
     path = tmp_path / "runs" / "rank-test" / "strategy_signals.json"
     persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["run_id"] == "rank-test"
     assert persisted["fused"]["ETH/USDT"]["rank"] == 1
     assert persisted["fused"]["BTC/USDT"]["rank"] == 2

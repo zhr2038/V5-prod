@@ -111,6 +111,17 @@ def _resolve_universe_cache_path(cfg) -> Path:
     return Path(raw_path)
 
 
+def _prime_pipeline_run_context(pipe: Any, run_id: str) -> None:
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_run_id:
+        return
+    for attr_name in ("alpha_engine", "portfolio_engine"):
+        engine = getattr(pipe, attr_name, None)
+        setter = getattr(engine, "set_run_id", None)
+        if callable(setter):
+            setter(normalized_run_id)
+
+
 def save_trend_cache(
     alpha_snapshot,
     regime_result,
@@ -864,6 +875,7 @@ def main() -> None:
     from src.core.pipeline import V5Pipeline
 
     pipe = V5Pipeline(cfg, data_provider=provider)
+    _prime_pipeline_run_context(pipe, run_id)
 
     alpha_market_data = {sym: md_1h[sym] for sym in scored_symbols if sym in md_1h}
 
