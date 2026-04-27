@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from types import SimpleNamespace
 
 import event_driven_check as edc
@@ -121,6 +122,47 @@ def test_load_fused_signal_states_derives_ranks_for_duplicate_legacy_zero_ranks(
 
     assert signals["ETH/USDT"].rank == 1
     assert signals["BNB/USDT"].rank == 2
+
+
+def test_find_latest_fused_signals_file_uses_live_run_id_order(tmp_path, monkeypatch) -> None:
+    runs_dir = tmp_path / "runs"
+    old_live = runs_dir / "20260427_18" / "strategy_signals.json"
+    latest_live = runs_dir / "20260427_19" / "strategy_signals.json"
+    research_file = runs_dir / "sweep_touch" / "strategy_signals.json"
+    for path in (old_live, latest_live, research_file):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"fused": {}}), encoding="utf-8")
+
+    os.utime(old_live, (2000, 2000))
+    os.utime(latest_live, (1000, 1000))
+    os.utime(research_file, (3000, 3000))
+    monkeypatch.setattr(edc.time, "time", lambda: 3600.0)
+
+    selected, meta = edc.find_latest_fused_signals_file(runs_dir, max_age_minutes=1000)
+
+    assert selected == latest_live
+    assert meta["count"] == 2
+    assert meta["ignored_dirs"] == 1
+
+
+def test_get_last_live_run_age_sec_uses_live_run_id_order(tmp_path, monkeypatch) -> None:
+    runs_dir = tmp_path / "runs"
+    old_live = runs_dir / "20260427_18" / "decision_audit.json"
+    latest_live = runs_dir / "20260427_19" / "decision_audit.json"
+    research_file = runs_dir / "manual_replay" / "decision_audit.json"
+    for path in (old_live, latest_live, research_file):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"top_scores": []}), encoding="utf-8")
+
+    os.utime(old_live, (3500, 3500))
+    os.utime(latest_live, (1000, 1000))
+    os.utime(research_file, (3900, 3900))
+    monkeypatch.setattr(edc.time, "time", lambda: 4000.0)
+
+    age_sec, run_id = edc.get_last_live_run_age_sec(runs_dir)
+
+    assert run_id == "20260427_19"
+    assert age_sec == 3000.0
 
 
 def test_event_driven_history_normalizes_zero_based_rank(tmp_path) -> None:

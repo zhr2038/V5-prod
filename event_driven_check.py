@@ -10,6 +10,7 @@ import os
 import json
 import time
 import logging
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -26,6 +27,7 @@ logger = logging.getLogger('event_driven_wrapper')
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 REPORTS_DIR = PROJECT_ROOT / 'reports'
+LIVE_RUN_ID_RE = re.compile(r'^\d{8}_\d{2}$')
 
 # Add project path
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -163,26 +165,73 @@ def resolve_live_service_unit(ev_cfg: dict) -> str:
     return 'v5-prod.user.service'
 
 
-def find_latest_fused_signals_file(runs_dir: Path, max_age_minutes: int = 90):
-    """Find newest strategy_signals.json under runs/ within freshness window."""
+def _parse_live_run_id(run_id: str) -> Optional[datetime]:
+    if not LIVE_RUN_ID_RE.match(str(run_id or '')):
+        return None
     try:
-        files = sorted(
-            [p for p in runs_dir.glob('*/strategy_signals.json') if p.is_file()],
-            key=lambda p: p.stat().st_mtime,
+        return datetime.strptime(str(run_id), '%Y%m%d_%H')
+    except ValueError:
+        return None
+
+
+def _live_run_artifact_candidates(runs_dir: Path, artifact_name: str) -> tuple[list[tuple[datetime, Path]], int]:
+    candidates = []
+    ignored_dirs = 0
+    for run_dir in runs_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+
+        run_dt = _parse_live_run_id(run_dir.name)
+        if run_dt is None:
+            ignored_dirs += 1
+            continue
+
+        artifact_path = run_dir / artifact_name
+        if artifact_path.is_file():
+            candidates.append((run_dt, artifact_path))
+
+    return candidates, ignored_dirs
+
+
+def _sort_live_artifact_paths(candidates: list[tuple[datetime, Path]]) -> list[Path]:
+    return [
+        path
+        for _run_dt, path in sorted(
+            candidates,
+            key=lambda item: (item[0], item[1].stat().st_mtime),
             reverse=True,
         )
+    ]
+
+
+def _latest_live_run_artifact_file(runs_dir: Path, artifact_name: str, max_age_minutes: int = 90):
+    try:
+        candidates, ignored_dirs = _live_run_artifact_candidates(runs_dir, artifact_name)
+        files = _sort_live_artifact_paths(candidates)
         if not files:
-            return None, None
+            return None, {'fresh': False, 'count': 0, 'ignored_dirs': ignored_dirs}
 
         newest = files[0]
         age_sec = max(0.0, time.time() - newest.stat().st_mtime)
         age_min = age_sec / 60.0
+        meta = {'path': str(newest), 'age_min': age_min, 'fresh': True, 'count': len(files), 'ignored_dirs': ignored_dirs}
         if age_min > float(max_age_minutes):
-            return None, {'path': str(newest), 'age_min': age_min, 'fresh': False, 'count': len(files)}
+            meta['fresh'] = False
+            return None, meta
 
-        return newest, {'path': str(newest), 'age_min': age_min, 'fresh': True, 'count': len(files)}
+        return newest, meta
     except Exception:
         return None, None
+
+
+def find_latest_fused_signals_file(runs_dir: Path, max_age_minutes: int = 90):
+    """Find latest production strategy_signals.json under runs/ within freshness window."""
+    return _latest_live_run_artifact_file(runs_dir, 'strategy_signals.json', max_age_minutes=max_age_minutes)
+
+
+def find_latest_decision_audit_file(runs_dir: Path, max_age_minutes: int = 90):
+    """Find latest production decision_audit.json under runs/ within freshness window."""
+    return _latest_live_run_artifact_file(runs_dir, 'decision_audit.json', max_age_minutes=max_age_minutes)
 
 
 def _load_json_mapping(path: Path) -> dict[str, Any]:
@@ -474,7 +523,11 @@ def load_current_state(cfg=None, config_path: Path = None):
             signals_path, meta = find_latest_fused_signals_file(runs_dir, max_age_minutes=int(max_age or 90))
 
             if signals_path is not None:
-                logger.info(f"Using fused signals file: {signals_path} (age={meta.get('age_min', 0):.1f}m, files={meta.get('count', 0)})")
+                logger.info(
+                    f"Using fused signals file: {signals_path} "
+                    f"(age={meta.get('age_min', 0):.1f}m, files={meta.get('count', 0)}, "
+                    f"ignored_non_live_dirs={meta.get('ignored_dirs', 0)})"
+                )
                 try:
                     with open(signals_path) as f:
                         sig_data = json.load(f)
@@ -494,7 +547,11 @@ def load_current_state(cfg=None, config_path: Path = None):
                         f"No fresh fused signals file (latest stale: {meta.get('path')}, age={meta.get('age_min', 0):.1f}m > {int(max_age or 90)}m)"
                     )
                 else:
-                    logger.warning("No strategy_signals.json found under runs/")
+                    ignored_dirs = meta.get('ignored_dirs', 0) if meta else 0
+                    logger.warning(
+                        f"No production strategy_signals.json found under live run dirs "
+                        f"(ignored_non_live_dirs={ignored_dirs})"
+                    )
 
             if not signals:
                 audit_path, audit_meta = find_latest_decision_audit_file(runs_dir, max_age_minutes=int(max_age or 90))
@@ -613,34 +670,13 @@ def get_last_live_run_age_sec(runs_dir: Path | None = None):
         runs_dir = runs_dir or (REPORTS_DIR / 'runs')
         if not runs_dir.exists():
             return None, None
-        cands = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        if not cands:
-            return None, None
-        latest = max(cands, key=lambda d: d.stat().st_mtime)
-        age = max(0.0, time.time() - latest.stat().st_mtime)
-        return age, latest.name
-    except Exception:
-        return None, None
-
-
-def find_latest_decision_audit_file(runs_dir: Path, max_age_minutes: int = 90):
-    """Find newest decision_audit.json under runs/ within freshness window."""
-    try:
-        files = sorted(
-            [p for p in runs_dir.glob('*/decision_audit.json') if p.is_file()],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
+        candidates, _ignored_dirs = _live_run_artifact_candidates(runs_dir, 'decision_audit.json')
+        files = _sort_live_artifact_paths(candidates)
         if not files:
             return None, None
-
-        newest = files[0]
-        age_sec = max(0.0, time.time() - newest.stat().st_mtime)
-        age_min = age_sec / 60.0
-        if age_min > float(max_age_minutes):
-            return None, {'path': str(newest), 'age_min': age_min, 'fresh': False, 'count': len(files)}
-
-        return newest, {'path': str(newest), 'age_min': age_min, 'fresh': True, 'count': len(files)}
+        latest = files[0]
+        age = max(0.0, time.time() - latest.stat().st_mtime)
+        return age, latest.parent.name
     except Exception:
         return None, None
 
