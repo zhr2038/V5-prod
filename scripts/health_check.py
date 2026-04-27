@@ -5,6 +5,7 @@ Operational health check for the V5 workspace.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -475,10 +476,22 @@ class HealthChecker:
         return result
 
 
-def main() -> int:
+def main(argv: List[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run V5 operational health checks.")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print the health check result as JSON instead of a human-readable report",
+    )
+    args = parser.parse_args(argv)
+
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     checker = HealthChecker()
-    result = checker.print_report()
+    if args.json:
+        result = checker.run_all_checks()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        result = checker.print_report()
     output_path = _resolve_health_output_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

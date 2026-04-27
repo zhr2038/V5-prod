@@ -297,3 +297,33 @@ def test_run_all_checks_promotes_risk_guard_warning_to_overall_warning(monkeypat
     result = checker.run_all_checks()
 
     assert result["overall_status"] == "warning"
+
+
+def test_main_json_outputs_machine_readable_payload(monkeypatch, tmp_path: Path, capsys) -> None:
+    result = {
+        "timestamp": "2026-04-28T00:00:00",
+        "workspace": str(tmp_path),
+        "overall_status": "healthy",
+        "checks": [{"name": "timers", "status": "healthy", "details": "ok"}],
+    }
+    output_path = tmp_path / "reports" / "health_status.json"
+
+    class FakeHealthChecker:
+        def run_all_checks(self):
+            return result
+
+        def print_report(self):
+            raise AssertionError("json mode must not print the human report")
+
+    monkeypatch.setattr(health_check, "HealthChecker", FakeHealthChecker)
+    monkeypatch.setattr(health_check, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(health_check, "_resolve_health_output_path", lambda: output_path)
+
+    exit_code = health_check.main(["--json"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert "V5 Health Check" not in captured.out
+    assert json.loads(captured.out) == result
+    assert json.loads(output_path.read_text(encoding="utf-8")) == result
