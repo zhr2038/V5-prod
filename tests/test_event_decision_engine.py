@@ -143,7 +143,7 @@ def test_risk_off_without_positions_does_not_warn_closing_positions(tmp_path, ca
     assert not any("Closing all positions" in record.getMessage() for record in caplog.records)
 
 
-def test_risk_off_blocks_confirmed_signal_open_actions(tmp_path) -> None:
+def test_risk_off_suppresses_confirmed_signal_open_events(tmp_path) -> None:
     monitor = EventMonitor(EventMonitorConfig(state_path=str(tmp_path / "event_monitor_state.json")))
     monitor.last_state = MarketState(
         timestamp_ms=1_000,
@@ -187,4 +187,4 @@ def test_risk_off_blocks_confirmed_signal_open_actions(tmp_path) -> None:
     assert result.actions == []
     assert result.reason == "no_actionable_events"
     assert any(event.type == EventType.REGIME_RISK_OFF for event in engine.last_events)
-    assert any(event.type == EventType.NEW_ENTRY for event in engine.last_events)
+    assert not any(event.type == EventType.NEW_ENTRY for event in engine.last_events)

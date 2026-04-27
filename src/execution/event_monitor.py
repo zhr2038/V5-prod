@@ -83,27 +83,37 @@ class EventMonitor:
         
         # P1: Regime changes
         events.extend(self._check_regime_events(current_state))
-        
-        # P2: Signal changes
-        events.extend(self._check_signal_events(current_state))
-        
+
+        risk_off_flat = self._is_risk_off_flat(current_state)
+
+        # P2 entry-style signal changes are not actionable in flat Risk-Off.
+        if risk_off_flat:
+            logger.info("RISK_OFF flat state - suppressing signal-change events")
+        else:
+            events.extend(self._check_signal_events(current_state))
+
         # P2: Breakout events
         events.extend(self._check_breakout_events(current_state))
-        
+
         # P3: Heartbeat can only create low-priority entry checks, so skip it in Risk-Off.
         regime = str(current_state.regime or "").upper().replace("-", "_")
         if regime != "RISK_OFF":
             events.extend(self._check_heartbeat())
-        
+
         # Sort by priority
         events.sort(key=lambda e: e.priority_value)
-        
+
         # Update state
         self.last_state = current_state
         self._save_state()
-        
+
         return events
-    
+
+    @staticmethod
+    def _is_risk_off_flat(state: MarketState) -> bool:
+        regime = str(state.regime or "").upper().replace("-", "_")
+        return bool(regime == "RISK_OFF" and not (state.positions or {}))
+
     def _check_risk_events(self, state: MarketState) -> List[TradingEvent]:
         """Check for risk events (stop loss, take profit, etc)."""
         events = []
@@ -368,6 +378,7 @@ class EventMonitor:
         events = []
         now_ms = self._resolve_market_timestamp_ms(state)
         self._trim_price_history(now_ms)
+        suppress_events = self._is_risk_off_flat(state)
 
         # Check breakouts against the prior rolling window only.
         threshold = max(0.0, float(self.config.breakout_threshold_pct or 0.0)) / 100.0
@@ -384,7 +395,7 @@ class EventMonitor:
                 continue
 
             # Breakout up: price clears the prior rolling high by the configured threshold.
-            if high > 0 and px >= high * (1 + threshold):
+            if not suppress_events and high > 0 and px >= high * (1 + threshold):
                 events.append(TradingEvent(
                     type=EventType.BREAKOUT_UP,
                     symbol=sym,
@@ -398,7 +409,7 @@ class EventMonitor:
                 logger.info(f"BREAKOUT UP: {sym} @ {px:.4f} (resistance {high:.4f})")
 
             # Breakdown: price clears the prior rolling low by the configured threshold.
-            elif low > 0 and px <= low * (1 - threshold):
+            elif not suppress_events and low > 0 and px <= low * (1 - threshold):
                 events.append(TradingEvent(
                     type=EventType.BREAKOUT_DOWN,
                     symbol=sym,

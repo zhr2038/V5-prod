@@ -124,3 +124,34 @@ def test_risk_off_collect_events_does_not_emit_heartbeat(tmp_path) -> None:
     events = monitor.collect_events(state)
 
     assert [event.type for event in events] == [EventType.REGIME_RISK_OFF]
+
+
+def test_risk_off_flat_collect_events_suppresses_signal_and_breakout_noise(tmp_path) -> None:
+    monitor = EventMonitor(
+        EventMonitorConfig(
+            breakout_threshold_pct=0.3,
+            state_path=str(tmp_path / "event_monitor_state.json"),
+        )
+    )
+    monitor.last_state = MarketState(
+        timestamp_ms=1_000,
+        regime="RISK_OFF",
+        prices={"BTC/USDT": 100.0},
+        positions={},
+        signals={},
+        selected_symbols=[],
+    )
+    monitor.price_history = {"ETH/USDT": [{"timestamp_ms": 1_000, "price": 100.0}]}
+    state = MarketState(
+        timestamp_ms=2_000,
+        regime="RISK_OFF",
+        prices={"ETH/USDT": 99.0},
+        positions={},
+        signals={"BTC/USDT": SignalState("BTC/USDT", "buy", 0.5, 1, 2_000)},
+        selected_symbols=["BTC/USDT"],
+    )
+
+    events = monitor.collect_events(state)
+
+    assert [event.type for event in events] == [EventType.REGIME_RISK_OFF]
+    assert {"timestamp_ms": 2_000, "price": 99.0} in monitor.price_history["ETH/USDT"]
