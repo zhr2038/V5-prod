@@ -305,6 +305,23 @@ def _sync_local_store_to_okx_snapshot(position_store, local_positions, okx_posit
     return stats
 
 
+def _local_position_qty_map(local_positions_list):
+    local_positions = {}
+    for pos in local_positions_list:
+        if hasattr(pos, 'symbol') and hasattr(pos, 'qty'):
+            sym = pos.symbol
+            qty = float(pos.qty or 0)
+        elif isinstance(pos, dict):
+            sym = pos.get('symbol')
+            qty = float(pos.get('qty', 0) or 0)
+        else:
+            continue
+        # Include tiny positive rows so the OKX snapshot can delete stale local dust.
+        if sym and qty > 0:
+            local_positions[str(sym)] = qty
+    return local_positions
+
+
 def main():
     """Auto-sync positions from OKX to local store."""
     logger.info("=" * 60)
@@ -353,19 +370,7 @@ def main():
             
             # Check current diff
             local_positions_list = position_store.list()
-            local_positions = {}
-            for pos in local_positions_list:
-                if hasattr(pos, 'symbol') and hasattr(pos, 'qty'):
-                    sym = pos.symbol
-                    qty = float(pos.qty or 0)
-                elif isinstance(pos, dict):
-                    sym = pos.get('symbol')
-                    qty = float(pos.get('qty', 0) or 0)
-                else:
-                    continue
-                # Ignore zero/dust records left in store history
-                if sym and abs(qty) > 1e-8:
-                    local_positions[sym] = qty
+            local_positions = _local_position_qty_map(local_positions_list)
 
             # Primary sync targets
             tracked_symbols = set(getattr(cfg, 'symbols', []) or [])

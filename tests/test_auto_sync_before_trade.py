@@ -57,3 +57,35 @@ def test_write_equity_validation_snapshot_refreshes_runtime_file(tmp_path: Path)
     assert written["calculated_total_eq"] == pytest.approx(106.8)
     assert written["positions"][0]["price"] == pytest.approx(6800.0)
     assert written["source"] == "auto_sync_before_trade"
+
+
+def test_local_position_qty_map_keeps_tiny_positive_rows_for_cleanup() -> None:
+    rows = [
+        SimpleNamespace(symbol="BTC/USDT", qty=5.43e-9),
+        {"symbol": "ETH/USDT", "qty": 0},
+    ]
+
+    positions = auto_sync_before_trade._local_position_qty_map(rows)
+
+    assert positions == {"BTC/USDT": pytest.approx(5.43e-9)}
+
+
+def test_sync_closes_local_dust_missing_from_okx_snapshot() -> None:
+    class Store:
+        def __init__(self) -> None:
+            self.closed = []
+
+        def close_long(self, symbol):
+            self.closed.append(symbol)
+            return True
+
+    store = Store()
+
+    stats = auto_sync_before_trade._sync_local_store_to_okx_snapshot(
+        store,
+        {"BTC/USDT": 5.43e-9},
+        {},
+    )
+
+    assert stats["closed"] == 1
+    assert store.closed == ["BTC/USDT"]
