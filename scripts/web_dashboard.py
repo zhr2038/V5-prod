@@ -2736,6 +2736,9 @@ def simple_dashboard():
 @app.route('/<path:filename>')
 def static_files(filename):
     """提供React静态文件"""
+    if str(filename or '').lstrip('/').startswith('api/'):
+        return jsonify({'error': 'api endpoint not found', 'path': f'/{filename}'}), 404
+
     file_path = _resolve_safe_react_asset(filename)
     if file_path is None:
         return 'Not found', 404
