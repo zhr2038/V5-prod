@@ -34,7 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 try:
     from src.execution.event_types import MarketState, SignalState, normalize_signal_rank, top_selected_symbols
     from src.execution.event_driven_integration import create_event_driven_trader
-    from src.execution.event_action_bridge import persist_event_actions
+    from src.execution.event_action_bridge import clear_event_actions, persist_event_actions
     from src.execution.fill_store import (
         derive_position_store_path,
         derive_runtime_named_artifact_path,
@@ -549,23 +549,32 @@ def load_current_state(cfg=None, config_path: Path = None):
         return None
 
 
+def get_live_execution_service_state(service_unit: str) -> str:
+    """Return systemd user unit activity state for the live service."""
+    st = subprocess.run(
+        ['systemctl', '--user', 'is-active', service_unit],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return (st.stdout or '').strip().lower()
+
+
+def live_execution_service_running(service_unit: str) -> bool:
+    return get_live_execution_service_state(service_unit) in ('active', 'activating')
+
+
 def trigger_live_execution_service(service_unit: str):
     """Start full live execution service (active mode)."""
     try:
         # Skip if service is already running/starting (avoid overlap starts)
-        st = subprocess.run(
-            ['systemctl', '--user', 'is-active', service_unit],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        state = (st.stdout or '').strip().lower()
+        state = get_live_execution_service_state(service_unit)
         if state in ('active', 'activating'):
             return {
-                'ok': True,
+                'ok': False,
                 'returncode': 0,
                 'stdout': state,
-                'stderr': '',
+                'stderr': f'{service_unit} already {state}',
                 'cmd': f'systemctl --user start {service_unit}',
                 'service_unit': service_unit,
                 'skipped_already_running': True,
@@ -1286,6 +1295,7 @@ def main():
         'live_service_ok': None,
         'live_service_returncode': None,
         'live_service_stderr': '',
+        'live_service_skipped_already_running': False,
         'trigger_reason': None,
         'last_run_age_sec': None,
         'last_run_id': None,
@@ -1319,6 +1329,7 @@ def main():
                 'live_service_ok': exec_res.get('ok'),
                 'live_service_returncode': exec_res.get('returncode'),
                 'live_service_stderr': exec_res.get('stderr', ''),
+                'live_service_skipped_already_running': bool(exec_res.get('skipped_already_running')),
                 'trigger_reason': 'force_full_run',
             })
             if exec_res.get('ok'):
@@ -1358,6 +1369,12 @@ def main():
                 execution.update({
                     'trigger_reason': f"active_throttled:{throttle['reason']}",
                 })
+            elif live_execution_service_running(live_service_unit):
+                logger.info(f"ACTIVE mode throttled: {live_service_unit} already running")
+                execution.update({
+                    'trigger_reason': 'active_throttled:live_service_running',
+                    'live_service_skipped_already_running': True,
+                })
             else:
                 persisted = persist_event_actions(
                     actions=result['actions'],
@@ -1376,12 +1393,18 @@ def main():
                     'live_service_ok': exec_res.get('ok'),
                     'live_service_returncode': exec_res.get('returncode'),
                     'live_service_stderr': exec_res.get('stderr', ''),
+                    'live_service_skipped_already_running': bool(exec_res.get('skipped_already_running')),
                     'trigger_reason': execution.get('trigger_reason') or 'event_actions',
                 })
                 if exec_res.get('ok'):
                     trader.commit_actions(result['actions'])
                     logger.info("ACTIVE mode: live service start request accepted")
                 else:
+                    if persisted:
+                        try:
+                            clear_event_actions(order_store_path=paths.order_store_path)
+                        except Exception as e:
+                            logger.warning(f"ACTIVE mode: failed to clear unaccepted event actions: {e}")
                     logger.error(
                         f"ACTIVE mode: failed to start live service rc={exec_res.get('returncode')} err={exec_res.get('stderr')}"
                     )

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import event_driven_check as edc
 from event_driven_check import (
     _build_effective_event_log_values,
     _filter_dust_positions,
     _load_fused_signal_states,
     _load_positions_snapshot,
 )
+from src.execution.event_action_bridge import clear_event_actions, persist_event_actions
 from src.execution.event_driven_integration import EventDrivenConfig, EventDrivenTrader
 from src.execution.position_store import PositionStore
 
@@ -195,3 +197,40 @@ def test_effective_event_log_keeps_accepted_active_actions() -> None:
     assert log_values["actions"] == result["actions"]
     assert log_values["events_processed"] == 1
     assert "candidate_actions" not in log_values
+
+
+def test_trigger_live_execution_service_rejects_already_running_unit(monkeypatch) -> None:
+    class Result:
+        returncode = 0
+        stdout = "active\n"
+        stderr = ""
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return Result()
+
+    monkeypatch.setattr(edc.subprocess, "run", fake_run)
+
+    result = edc.trigger_live_execution_service("v5-prod.user.service")
+
+    assert result["ok"] is False
+    assert result["skipped_already_running"] is True
+    assert "already active" in result["stderr"]
+    assert calls == [["systemctl", "--user", "is-active", "v5-prod.user.service"]]
+
+
+def test_clear_event_actions_removes_unaccepted_action_file(tmp_path) -> None:
+    action_path = tmp_path / "event_driven_actions.json"
+    persisted = persist_event_actions(
+        actions=[{"symbol": "BTC/USDT", "action": "close", "priority": 0}],
+        target_run_id="20260427_18",
+        path=str(action_path),
+    )
+
+    assert persisted is True
+    assert action_path.exists()
+    assert clear_event_actions(path=str(action_path)) is True
+    assert not action_path.exists()
+    assert clear_event_actions(path=str(action_path)) is False
