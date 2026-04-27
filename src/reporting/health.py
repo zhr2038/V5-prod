@@ -266,6 +266,21 @@ def _check_runtime_positions_db(path: Path) -> None:
         raise RuntimeError("missing positions/account_state tables")
 
 
+def _load_current_risk_state(health_paths: HealthPaths) -> tuple[str, dict]:
+    risk_eval_path = health_paths.auto_risk_eval_path or (REPORTS_DIR / "auto_risk_eval.json")
+    risk_eval = _load_json_safe(risk_eval_path)
+    risk_guard_path = health_paths.auto_risk_guard_path or (REPORTS_DIR / "auto_risk_guard.json")
+    risk_guard = _load_json_safe(risk_guard_path)
+    eval_level = extract_risk_level(risk_eval)
+    guard_level = extract_risk_level(risk_guard)
+    eval_epoch = _risk_state_epoch(risk_eval, primary_keys=("ts",))
+    guard_epoch = _risk_state_epoch(risk_guard, primary_keys=("last_update",))
+    risk = risk_eval
+    if not eval_level or (guard_level and guard_epoch is not None and (eval_epoch is None or guard_epoch > eval_epoch)):
+        risk = risk_guard
+    return extract_risk_level(risk) or "UNKNOWN", risk
+
+
 @health_bp.route("/health")
 def health_check():
     checks = {
@@ -312,44 +327,38 @@ def health_check():
     except Exception as exc:
         checks["checks"]["reconcile"] = {"status": "error", "error": str(exc)}
 
+    risk_level = "UNKNOWN"
+    try:
+        risk_level, risk = _load_current_risk_state(health_paths)
+        checks["checks"]["risk_guard"] = {
+            "status": "ok" if risk_level != "UNKNOWN" else "warning",
+            "level": risk_level,
+            "drawdown": risk.get("metrics", {}).get("dd_pct", risk.get("metrics", {}).get("last_dd_pct", 0)),
+        }
+        if risk_level == "UNKNOWN":
+            checks["status"] = _merge_health_status(checks["status"], "degraded")
+    except Exception as exc:
+        checks["checks"]["risk_guard"] = {"status": "error", "error": str(exc)}
+
     try:
         last_trade_ts = _load_last_trade_ts_ms()
         if last_trade_ts:
             age_min = (time.time() * 1000 - last_trade_ts) / 60000
+            stale_trade = age_min >= 120
+            protect_context = risk_level == "PROTECT"
             checks["checks"]["last_trade"] = {
-                "status": "ok" if age_min < 120 else "warning",
+                "status": "ok" if not stale_trade or protect_context else "warning",
                 "age_minutes": round(age_min, 1),
                 "last_ts": last_trade_ts,
             }
-            if age_min >= 120:
+            if stale_trade and protect_context:
+                checks["checks"]["last_trade"]["context"] = "risk_guard_protect"
+            elif stale_trade:
                 checks["status"] = _merge_health_status(checks["status"], "degraded")
         else:
             checks["checks"]["last_trade"] = {"status": "warning", "message": "No trades yet"}
     except Exception as exc:
         checks["checks"]["last_trade"] = {"status": "error", "error": str(exc)}
-
-    try:
-        risk_eval_path = health_paths.auto_risk_eval_path or (REPORTS_DIR / "auto_risk_eval.json")
-        risk_eval = _load_json_safe(risk_eval_path)
-        risk_guard_path = health_paths.auto_risk_guard_path or (REPORTS_DIR / "auto_risk_guard.json")
-        risk_guard = _load_json_safe(risk_guard_path)
-        eval_level = extract_risk_level(risk_eval)
-        guard_level = extract_risk_level(risk_guard)
-        eval_epoch = _risk_state_epoch(risk_eval, primary_keys=("ts",))
-        guard_epoch = _risk_state_epoch(risk_guard, primary_keys=("last_update",))
-        risk = risk_eval
-        if not eval_level or (guard_level and guard_epoch is not None and (eval_epoch is None or guard_epoch > eval_epoch)):
-            risk = risk_guard
-        level = extract_risk_level(risk) or "UNKNOWN"
-        checks["checks"]["risk_guard"] = {
-            "status": "ok" if level != "UNKNOWN" else "warning",
-            "level": level,
-            "drawdown": risk.get("metrics", {}).get("dd_pct", risk.get("metrics", {}).get("last_dd_pct", 0)),
-        }
-        if level == "UNKNOWN":
-            checks["status"] = _merge_health_status(checks["status"], "degraded")
-    except Exception as exc:
-        checks["checks"]["risk_guard"] = {"status": "error", "error": str(exc)}
 
     status_code = 200 if checks["status"] == "healthy" else 503
     return jsonify(checks), status_code
