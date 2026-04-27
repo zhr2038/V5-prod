@@ -343,6 +343,29 @@ execution:
   market_impulse_probe_dynamic_sizing_enabled: true
   market_impulse_probe_min_executable_buffer: 1.05
   market_impulse_probe_max_target_w: 0.10
+  btc_leadership_probe_enabled: true
+  btc_leadership_probe_only_in_protect: true
+  btc_leadership_probe_target_w: 0.08
+  btc_leadership_probe_dynamic_sizing_enabled: true
+  btc_leadership_probe_max_target_w: 0.10
+  btc_leadership_probe_cooldown_hours: 8
+  btc_leadership_probe_lookback_hours: 24
+  btc_leadership_probe_breakout_buffer_bps: 15
+  btc_leadership_probe_min_alpha6_score: 0.30
+  btc_leadership_probe_min_f5_rsi: 0.30
+  btc_leadership_probe_min_f4_volume: -0.10
+  btc_leadership_probe_require_regime_not_risk_off: true
+  btc_leadership_probe_allow_single_negative_cycle_bypass: true
+  btc_leadership_probe_max_negative_cycles_to_bypass: 1
+  btc_leadership_probe_min_net_expectancy_bps_to_bypass: -120
+  btc_leadership_probe_time_stop_hours: 8
+  probe_exit_enabled: true
+  probe_take_profit_net_bps: 80
+  probe_stop_loss_net_bps: -50
+  probe_trailing_enable_after_net_bps: 50
+  probe_trailing_gap_bps: 25
+  probe_time_stop_hours: 8
+  probe_time_stop_min_net_bps: 10
   negative_expectancy_fast_fail_market_aware: true
   negative_expectancy_fast_fail_bypass_when_market_impulse: true
   negative_expectancy_fast_fail_bypass_max_cycles: 1

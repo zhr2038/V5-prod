@@ -13,6 +13,9 @@ def probe_type_from_meta(meta: Any) -> Optional[str]:
     raw_probe_type = str(meta.get("probe_type") or "").strip()
     if raw_probe_type in PROBE_POSITION_TYPES:
         return raw_probe_type
+    raw_entry_reason = str(meta.get("entry_reason") or "").strip()
+    if raw_entry_reason in PROBE_POSITION_TYPES:
+        return raw_entry_reason
     for probe_type in PROBE_POSITION_TYPES:
         if bool(meta.get(probe_type, False)):
             return probe_type
@@ -53,6 +56,10 @@ def probe_tags_from_order_meta(
             out["target_w"] = float(target_w)
     except Exception:
         pass
+    try:
+        out["highest_net_bps"] = float(meta.get("highest_net_bps", 0.0) or 0.0)
+    except Exception:
+        out["highest_net_bps"] = 0.0
     for key in PROBE_POSITION_TYPES:
         if key in meta:
             out[key] = bool(meta.get(key))

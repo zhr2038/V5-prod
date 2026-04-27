@@ -151,7 +151,7 @@ execution:
     assert payload["execution"]["protect_entry_require_alpha6_confirmation"] is True
     assert payload["execution"]["protect_entry_block_trend_only"] is True
     assert payload["execution"]["protect_entry_require_alpha6_rsi_confirm_positive"] is True
-    assert payload["execution"]["protect_entry_alpha6_min_score"] == 0.10
+    assert payload["execution"]["protect_entry_alpha6_min_score"] == 0.40
 
 
 def test_decision_audit_records_protect_entry_gate_configuration_each_round(tmp_path: Path) -> None:

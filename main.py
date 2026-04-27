@@ -473,6 +473,55 @@ def _live_symbol_whitelist(cfg: AppConfig) -> list[str]:
     return list(dict.fromkeys(str(sym).strip() for sym in (cfg.symbols or []) if str(sym).strip()))
 
 
+BTC_LEADERSHIP_PROBE_CONFIG_KEYS = (
+    "btc_leadership_probe_enabled",
+    "btc_leadership_probe_only_in_protect",
+    "btc_leadership_probe_target_w",
+    "btc_leadership_probe_dynamic_sizing_enabled",
+    "btc_leadership_probe_max_target_w",
+    "btc_leadership_probe_cooldown_hours",
+    "btc_leadership_probe_lookback_hours",
+    "btc_leadership_probe_breakout_buffer_bps",
+    "btc_leadership_probe_min_alpha6_score",
+    "btc_leadership_probe_min_f5_rsi",
+    "btc_leadership_probe_min_f4_volume",
+    "btc_leadership_probe_require_regime_not_risk_off",
+    "btc_leadership_probe_allow_single_negative_cycle_bypass",
+    "btc_leadership_probe_max_negative_cycles_to_bypass",
+    "btc_leadership_probe_min_net_expectancy_bps_to_bypass",
+    "btc_leadership_probe_time_stop_hours",
+)
+
+
+PROBE_EXIT_CONFIG_KEYS = (
+    "probe_exit_enabled",
+    "probe_take_profit_net_bps",
+    "probe_stop_loss_net_bps",
+    "probe_trailing_enable_after_net_bps",
+    "probe_trailing_gap_bps",
+    "probe_time_stop_hours",
+    "probe_time_stop_min_net_bps",
+)
+
+
+def _btc_leadership_probe_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in BTC_LEADERSHIP_PROBE_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
+def _probe_exit_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in PROBE_EXIT_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
 def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
     return {
         "symbols": list(cfg.symbols or []),
@@ -520,6 +569,8 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             "protect_entry_alpha6_min_score": float(
                 getattr(cfg.execution, "protect_entry_alpha6_min_score", 0.10) or 0.0
             ),
+            **_btc_leadership_probe_effective_config(cfg),
+            **_probe_exit_effective_config(cfg),
         },
     }
 
@@ -1446,6 +1497,26 @@ def main() -> None:
                     log.info(f"LIVE_CASH_SYNC usdt={usdt_cash:.8f}")
         except Exception as e:
             log.warning(f"live cash sync failed: {e}")
+
+    # After execution/fill reconciliation, reread local positions and clear stale
+    # active lifecycle state when a close left only exchange dust.
+    try:
+        post_positions = store.list()
+        _, cleanup_decisions, _ = pipe.cleanup_stale_position_state_for_dust_positions(
+            post_positions,
+            prices=prices,
+            audit=audit,
+        )
+        if cleanup_decisions:
+            audit.router_decisions = list(audit.router_decisions or []) + list(cleanup_decisions)
+            audit.save(str(runtime_run_dir))
+            log.info(
+                "POSITION_STATE_CLEANUP_AFTER_EXECUTION cleared=%d symbols=%s",
+                len(cleanup_decisions),
+                [str(d.get("symbol") or "") for d in cleanup_decisions],
+            )
+    except Exception as e:
+        log.warning(f"post-close position lifecycle cleanup failed: {e}")
     
     # 鏇存柊 alpha 鍘嗗彶鏁版嵁涓殑浜ゆ槗淇℃伅
     if collector and hasattr(report, 'orders') and report.orders:

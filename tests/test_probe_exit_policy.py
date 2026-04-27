@@ -60,16 +60,18 @@ def _probe_position(
     entry_ts: str = "2026-04-25T07:00:00Z",
     highest_px: float = 100.0,
     probe: bool = True,
+    probe_type: str = "btc_leadership_probe",
 ) -> Position:
     tags = {}
     if probe:
         tags = {
-            "entry_reason": "btc_leadership_probe",
+            "entry_reason": probe_type,
             "entry_ts": entry_ts,
             "entry_px": 100.0,
-            "probe_type": "btc_leadership_probe",
+            "probe_type": probe_type,
             "target_w": 0.08,
-            "btc_leadership_probe": True,
+            "highest_net_bps": 0.0,
+            probe_type: True,
         }
     return Position(
         symbol="BTC/USDT",
@@ -95,6 +97,7 @@ def _cfg(tmp_path: Path) -> AppConfig:
     cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
     cfg.execution.fee_bps = 0.0
     cfg.execution.slippage_bps = 0.0
+    cfg.execution.probe_time_stop_hours = 8
     cfg.alpha.use_fused_score_for_weighting = False
     return cfg
 
@@ -168,16 +171,74 @@ def test_probe_trailing_after_60_bps_retraces_25_bps(tmp_path: Path) -> None:
     order = _single_exit(out)
     assert order.meta["reason"] == "probe_trailing_stop"
     assert round(order.meta["high_net_bps"], 6) == 60.0
+    assert round(order.meta["highest_net_bps"], 6) == 60.0
     assert audit.counts["probe_trailing_stop_count"] == 1
 
 
-def test_probe_time_stop_after_4h_below_10_net_bps(tmp_path: Path) -> None:
-    position = _probe_position(entry_ts="2026-04-25T03:30:00Z")
+def test_probe_time_stop_after_8h_below_10_net_bps(tmp_path: Path) -> None:
+    position = _probe_position(entry_ts="2026-04-24T23:30:00Z")
     out, audit = _run_exit_case(tmp_path, position, _series(100.05))
 
     order = _single_exit(out)
     assert order.meta["reason"] == "probe_time_stop"
     assert audit.counts["probe_time_stop_count"] == 1
+
+
+def test_probe_time_stop_does_not_fire_before_8h(tmp_path: Path) -> None:
+    position = _probe_position(entry_ts="2026-04-25T03:30:00Z")
+    out, audit = _run_exit_case(tmp_path, position, _series(100.05))
+
+    assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
+    assert audit.counts["probe_time_stop_count"] == 0
+
+
+def test_market_impulse_probe_uses_probe_exit_policy(tmp_path: Path) -> None:
+    out, audit = _run_exit_case(
+        tmp_path,
+        _probe_position(probe_type="market_impulse_probe"),
+        _series(100.80),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "probe_take_profit"
+    assert order.meta["probe_type"] == "market_impulse_probe"
+    assert audit.counts["probe_take_profit_count"] == 1
+
+
+def test_market_impulse_probe_metadata_skips_legacy_4h_time_stop(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.execution.market_impulse_probe_time_stop_hours = 4
+    cfg.execution.probe_time_stop_hours = 8
+    pipe = _build_pipe(cfg, tmp_path)
+    state_path = derive_runtime_named_json_path(cfg.execution.order_store_path, "market_impulse_probe_state")
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "BTC/USDT": {
+                    "entry_ts_ms": int(datetime(2026, 4, 25, 3, 0, tzinfo=timezone.utc).timestamp() * 1000),
+                    "cooldown_until_ms": int(datetime(2026, 4, 25, 16, 0, tzinfo=timezone.utc).timestamp() * 1000),
+                    "time_stop_hours": 4,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    audit = DecisionAudit(run_id="probe-exit-legacy-time-stop-skip")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series(100.05)},
+        positions=[_probe_position(entry_ts="2026-04-25T03:00:00Z", probe_type="market_impulse_probe")],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
+    assert audit.counts["market_impulse_probe_time_stop_count"] == 0
+    assert audit.counts["probe_time_stop_count"] == 0
 
 
 def test_non_probe_position_is_not_affected(tmp_path: Path) -> None:
@@ -217,6 +278,7 @@ def test_probe_open_records_position_and_profit_state(tmp_path: Path) -> None:
     assert tags["probe_type"] == "btc_leadership_probe"
     assert tags["entry_px"] == 100.0
     assert tags["target_w"] == 0.08
+    assert tags["highest_net_bps"] == 0.0
 
     state_path = derive_runtime_named_json_path(cfg.execution.order_store_path, "profit_taking_state")
     state = json.loads(state_path.read_text(encoding="utf-8"))["BTC/USDT"]
@@ -224,3 +286,4 @@ def test_probe_open_records_position_and_profit_state(tmp_path: Path) -> None:
     assert state["probe_type"] == "btc_leadership_probe"
     assert state["entry_px"] == 100.0
     assert state["target_w"] == 0.08
+    assert state["highest_net_bps"] == 0.0

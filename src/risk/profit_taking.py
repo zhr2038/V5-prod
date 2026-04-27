@@ -46,6 +46,7 @@ class PositionProfitState:
     entry_reason: Optional[str] = None
     probe_type: Optional[str] = None
     target_w: Optional[float] = None
+    highest_net_bps: float = 0.0
 
 
 class ProfitTakingManager:
@@ -112,6 +113,18 @@ class ProfitTakingManager:
             return None
         return f"take_profit_{self._pct_token(self.take_profit_sell_all_pct)}"
 
+    @staticmethod
+    def _parse_entry_time(entry_ts: str | None) -> Optional[datetime]:
+        try:
+            raw = str(entry_ts or "").strip()
+            if not raw:
+                return None
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            return datetime.fromisoformat(raw)
+        except Exception:
+            return None
+
     def _legacy_partial_action_key(self) -> Optional[str]:
         for level in self.profit_levels:
             if level.action == "partial_sell":
@@ -145,6 +158,7 @@ class ProfitTakingManager:
                     entry_reason=str(raw.get("entry_reason") or "") or None,
                     probe_type=str(raw.get("probe_type") or "") or None,
                     target_w=float(raw["target_w"]) if raw.get("target_w") is not None else None,
+                    highest_net_bps=float(raw.get("highest_net_bps", 0.0) or 0.0),
                 )
                 if state.partial_sold and not state.triggered_actions:
                     legacy_key = self._legacy_partial_action_key()
@@ -177,6 +191,7 @@ class ProfitTakingManager:
                     "entry_reason": state.entry_reason,
                     "probe_type": state.probe_type,
                     "target_w": state.target_w,
+                    "highest_net_bps": float(state.highest_net_bps or 0.0),
                 }
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.state_file, "w", encoding="utf-8") as f:
@@ -193,6 +208,8 @@ class ProfitTakingManager:
         entry_reason: str | None = None,
         probe_type: str | None = None,
         target_w: float | None = None,
+        highest_net_bps: float | None = None,
+        entry_ts: str | None = None,
     ):
         if symbol in self.positions:
             old_entry = float(self.positions[symbol].entry_price or 0.0)
@@ -204,7 +221,7 @@ class ProfitTakingManager:
                 )
                 state = self.positions[symbol]
                 state.entry_price = entry_price
-                state.entry_time = datetime.now()
+                state.entry_time = self._parse_entry_time(entry_ts) or datetime.now()
                 state.highest_price = current_price or entry_price
                 state.profit_high = 0.0
                 state.current_stop = entry_price * 0.95
@@ -215,6 +232,7 @@ class ProfitTakingManager:
                 state.rank_exit_streak = 0
                 state.last_rank = None
                 state.last_rank_exit_time = None
+                state.highest_net_bps = float(highest_net_bps or 0.0)
                 if entry_reason is not None:
                     state.entry_reason = str(entry_reason)
                 if probe_type is not None:
@@ -241,6 +259,14 @@ class ProfitTakingManager:
                 if target_w is not None and state.target_w != float(target_w):
                     state.target_w = float(target_w)
                     changed = True
+                if highest_net_bps is not None:
+                    synced_highest_net_bps = max(
+                        float(state.highest_net_bps or 0.0),
+                        float(highest_net_bps or 0.0),
+                    )
+                    if synced_highest_net_bps > float(state.highest_net_bps or 0.0):
+                        state.highest_net_bps = synced_highest_net_bps
+                        changed = True
                 if highest_price_hint is not None:
                     synced_high = max(float(state.highest_price or 0.0), float(highest_price_hint or 0.0))
                     if synced_high > float(state.highest_price or 0.0):
@@ -264,7 +290,7 @@ class ProfitTakingManager:
         self.positions[symbol] = PositionProfitState(
             symbol=symbol,
             entry_price=entry_price,
-            entry_time=datetime.now(),
+            entry_time=self._parse_entry_time(entry_ts) or datetime.now(),
             highest_price=highest_seed,
             current_stop=entry_price * 0.95,
             profit_high=max(0.0, (float(highest_seed) - float(entry_price)) / float(entry_price)) if float(entry_price or 0.0) > 0 else 0.0,
@@ -272,6 +298,7 @@ class ProfitTakingManager:
             entry_reason=str(entry_reason) if entry_reason is not None else None,
             probe_type=str(probe_type) if probe_type is not None else None,
             target_w=float(target_w) if target_w is not None else None,
+            highest_net_bps=float(highest_net_bps or 0.0),
         )
         self._save_state()
         print(

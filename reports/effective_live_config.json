@@ -1,0 +1,49 @@
+{
+  "symbols": [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "BNB/USDT"
+  ],
+  "universe": {
+    "enabled": false,
+    "use_universe_symbols": false
+  },
+  "alpha": {
+    "alpha158_overlay": {
+      "enabled": false
+    },
+    "long_top_pct": 0.5,
+    "min_score_threshold": 0.1
+  },
+  "execution": {
+    "fee_bps": 10.0,
+    "cost_aware_roundtrip_cost_bps": 30.0,
+    "rank_exit_max_rank": 5,
+    "rank_exit_confirm_rounds": 3,
+    "rank_exit_strict_mode": false,
+    "min_hold_minutes_before_rank_exit": 180,
+    "min_hold_minutes_before_regime_exit": 240,
+    "max_rebalance_turnover_per_cycle": 0.15,
+    "protect_entry_require_alpha6_confirmation": true,
+    "protect_entry_block_trend_only": true,
+    "protect_entry_require_alpha6_rsi_confirm_positive": true,
+    "protect_entry_alpha6_min_score": 0.4,
+    "btc_leadership_probe_enabled": true,
+    "btc_leadership_probe_only_in_protect": true,
+    "btc_leadership_probe_target_w": 0.08,
+    "btc_leadership_probe_dynamic_sizing_enabled": true,
+    "btc_leadership_probe_max_target_w": 0.1,
+    "btc_leadership_probe_cooldown_hours": 8,
+    "btc_leadership_probe_lookback_hours": 24,
+    "btc_leadership_probe_breakout_buffer_bps": 15.0,
+    "btc_leadership_probe_min_alpha6_score": 0.3,
+    "btc_leadership_probe_min_f5_rsi": 0.3,
+    "btc_leadership_probe_min_f4_volume": -0.1,
+    "btc_leadership_probe_require_regime_not_risk_off": true,
+    "btc_leadership_probe_allow_single_negative_cycle_bypass": true,
+    "btc_leadership_probe_max_negative_cycles_to_bypass": 1,
+    "btc_leadership_probe_min_net_expectancy_bps_to_bypass": -120.0,
+    "btc_leadership_probe_time_stop_hours": 8
+  }
+}

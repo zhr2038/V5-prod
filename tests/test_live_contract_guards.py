@@ -246,6 +246,52 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["min_hold_minutes_before_rank_exit"] == 180
     assert payload["execution"]["min_hold_minutes_before_regime_exit"] == 240
     assert payload["execution"]["max_rebalance_turnover_per_cycle"] == pytest.approx(0.15)
+    for key in main_module.BTC_LEADERSHIP_PROBE_CONFIG_KEYS:
+        assert key in payload["execution"]
+    for key in main_module.PROBE_EXIT_CONFIG_KEYS:
+        assert key in payload["execution"]
+    assert payload["execution"]["btc_leadership_probe_enabled"] is True
+    assert payload["execution"]["btc_leadership_probe_min_alpha6_score"] == pytest.approx(0.30)
+    assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
+    assert payload["execution"]["probe_exit_enabled"] is True
+    assert payload["execution"]["probe_time_stop_hours"] == 8
+
+
+def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_keys(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.mode = "live"
+    cfg.execution.order_store_path = str((tmp_path / "reports" / "orders.sqlite").resolve())
+
+    out_path = main_module._write_effective_live_config(cfg)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+
+    for key in main_module.BTC_LEADERSHIP_PROBE_CONFIG_KEYS:
+        assert key in payload["execution"]
+    for key in main_module.PROBE_EXIT_CONFIG_KEYS:
+        assert key in payload["execution"]
+    assert payload["execution"]["btc_leadership_probe_enabled"] is True
+    assert payload["execution"]["btc_leadership_probe_only_in_protect"] is True
+    assert payload["execution"]["btc_leadership_probe_target_w"] == pytest.approx(0.08)
+    assert payload["execution"]["btc_leadership_probe_dynamic_sizing_enabled"] is True
+    assert payload["execution"]["btc_leadership_probe_max_target_w"] == pytest.approx(0.10)
+    assert payload["execution"]["btc_leadership_probe_cooldown_hours"] == 8
+    assert payload["execution"]["btc_leadership_probe_lookback_hours"] == 24
+    assert payload["execution"]["btc_leadership_probe_breakout_buffer_bps"] == pytest.approx(15.0)
+    assert payload["execution"]["btc_leadership_probe_min_alpha6_score"] == pytest.approx(0.30)
+    assert payload["execution"]["btc_leadership_probe_min_f5_rsi"] == pytest.approx(0.30)
+    assert payload["execution"]["btc_leadership_probe_min_f4_volume"] == pytest.approx(-0.10)
+    assert payload["execution"]["btc_leadership_probe_require_regime_not_risk_off"] is True
+    assert payload["execution"]["btc_leadership_probe_allow_single_negative_cycle_bypass"] is True
+    assert payload["execution"]["btc_leadership_probe_max_negative_cycles_to_bypass"] == 1
+    assert payload["execution"]["btc_leadership_probe_min_net_expectancy_bps_to_bypass"] == pytest.approx(-120.0)
+    assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
+    assert payload["execution"]["probe_exit_enabled"] is True
+    assert payload["execution"]["probe_take_profit_net_bps"] == pytest.approx(80.0)
+    assert payload["execution"]["probe_stop_loss_net_bps"] == pytest.approx(-50.0)
+    assert payload["execution"]["probe_trailing_enable_after_net_bps"] == pytest.approx(50.0)
+    assert payload["execution"]["probe_trailing_gap_bps"] == pytest.approx(25.0)
+    assert payload["execution"]["probe_time_stop_hours"] == 8
+    assert payload["execution"]["probe_time_stop_min_net_bps"] == pytest.approx(10.0)
 
 
 def test_main_live_preflight_blocks_before_provider_and_order_generation(

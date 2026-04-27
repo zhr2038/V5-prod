@@ -73,6 +73,8 @@ class DecisionAudit:
         "probe_stop_loss_count": 0,
         "probe_trailing_stop_count": 0,
         "probe_time_stop_count": 0,
+        "position_state_cleared_after_close_count": 0,
+        "stale_position_state_detected_count": 0,
     })
     
     # 详细数据

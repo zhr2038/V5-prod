@@ -28,7 +28,19 @@ FOCUS_SKIP_REASONS = {
     "all_scores_below_threshold",
     "hold_current_no_valid_replacement",
 }
+BTC_LEADERSHIP_PROBE_SKIP_PREFIX = "btc_leadership_probe_"
 HORIZON_PREFIX = "label_"
+BTC_LEADERSHIP_PROBE_FIELDS = [
+    "rolling_high",
+    "breakout_buffer_bps",
+    "breakout_met",
+    "min_alpha6_score",
+    "min_f4_volume",
+    "min_f5_rsi",
+    "negative_expectancy_bypassed",
+    "closed_cycles",
+    "net_expectancy_bps",
+]
 
 
 def _iso_from_ms(timestamp_ms: int) -> str:
@@ -42,6 +54,33 @@ def _normalize_float(value: Any) -> Optional[float]:
         return float(value)
     except Exception:
         return None
+
+
+def _normalize_int(value: Any) -> Optional[int]:
+    parsed = _normalize_float(value)
+    if parsed is None:
+        return None
+    try:
+        return int(parsed)
+    except Exception:
+        return None
+
+
+def _normalize_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if value is None or value == "":
+        return None
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    return None
+
+
+def _is_btc_leadership_probe_skip_reason(reason: str) -> bool:
+    return str(reason or "").startswith(BTC_LEADERSHIP_PROBE_SKIP_PREFIX)
 
 
 def _resolve_reports_dir(run_dir: str | Path) -> Path:
@@ -329,6 +368,8 @@ def _build_record(
 
     alpha6_score = _normalize_float(router_decision.get("alpha6_score"))
     if alpha6_score is None:
+        alpha6_score = _normalize_float(router_decision.get("actual_alpha6_score"))
+    if alpha6_score is None:
         alpha6_score = _signal_score(alpha6_signal)
 
     trend_score = _normalize_float(router_decision.get("trend_score"))
@@ -337,9 +378,13 @@ def _build_record(
 
     f4_volume_expansion = _normalize_float(router_decision.get("f4_volume_expansion"))
     if f4_volume_expansion is None:
+        f4_volume_expansion = _normalize_float(router_decision.get("actual_f4_volume"))
+    if f4_volume_expansion is None:
         f4_volume_expansion = _signal_factor(alpha6_signal, "f4_volume_expansion")
 
     f5_rsi_trend_confirm = _normalize_float(router_decision.get("f5_rsi_trend_confirm"))
+    if f5_rsi_trend_confirm is None:
+        f5_rsi_trend_confirm = _normalize_float(router_decision.get("actual_f5_rsi"))
     if f5_rsi_trend_confirm is None:
         f5_rsi_trend_confirm = _signal_factor(alpha6_signal, "f5_rsi_trend_confirm")
 
@@ -348,6 +393,28 @@ def _build_record(
         required_score = float(getattr(cfg.alpha, "min_score_threshold", 0.0) or 0.0)
     if required_score is None and skip_reason == "protect_entry_alpha6_score_too_low":
         required_score = float(getattr(cfg.execution, "protect_entry_alpha6_min_score", 0.0) or 0.0)
+
+    min_alpha6_score = _normalize_float(router_decision.get("min_alpha6_score"))
+    if min_alpha6_score is None and _is_btc_leadership_probe_skip_reason(skip_reason):
+        min_alpha6_score = float(getattr(cfg.execution, "btc_leadership_probe_min_alpha6_score", 0.0) or 0.0)
+    min_f4_volume = _normalize_float(router_decision.get("min_f4_volume"))
+    if min_f4_volume is None and _is_btc_leadership_probe_skip_reason(skip_reason):
+        min_f4_volume = float(getattr(cfg.execution, "btc_leadership_probe_min_f4_volume", 0.0) or 0.0)
+    min_f5_rsi = _normalize_float(router_decision.get("min_f5_rsi"))
+    if min_f5_rsi is None and _is_btc_leadership_probe_skip_reason(skip_reason):
+        min_f5_rsi = float(getattr(cfg.execution, "btc_leadership_probe_min_f5_rsi", 0.0) or 0.0)
+
+    negative_expectancy_bypassed = _normalize_bool(router_decision.get("negative_expectancy_bypassed"))
+    if negative_expectancy_bypassed is None:
+        negative_expectancy_bypassed = _normalize_bool(router_decision.get("bypassed_negative_expectancy"))
+    if negative_expectancy_bypassed is None and _is_btc_leadership_probe_skip_reason(skip_reason):
+        negative_expectancy_bypassed = False
+
+    net_expectancy_bps = _normalize_float(router_decision.get("net_expectancy_bps"))
+    if net_expectancy_bps is None:
+        net_expectancy_bps = _normalize_float(router_decision.get("expectancy_bps"))
+    if net_expectancy_bps is None:
+        net_expectancy_bps = _normalize_float(router_decision.get("fast_fail_expectancy_bps"))
 
     record = {
         "ts_utc": _iso_from_ms(entry_ts_ms),
@@ -364,6 +431,15 @@ def _build_record(
         "trend_score": trend_score,
         "f4_volume_expansion": f4_volume_expansion,
         "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
+        "rolling_high": _normalize_float(router_decision.get("rolling_high")),
+        "breakout_buffer_bps": _normalize_float(router_decision.get("breakout_buffer_bps")),
+        "breakout_met": _normalize_bool(router_decision.get("breakout_met")),
+        "min_alpha6_score": min_alpha6_score,
+        "min_f4_volume": min_f4_volume,
+        "min_f5_rsi": min_f5_rsi,
+        "negative_expectancy_bypassed": negative_expectancy_bypassed,
+        "closed_cycles": _normalize_int(router_decision.get("closed_cycles")),
+        "net_expectancy_bps": net_expectancy_bps,
         "entry_px": _normalize_float(entry_px),
         "rt_cost_bps": float(getattr(cfg.diagnostics, "skipped_candidate_roundtrip_cost_bps", 30.0) or 30.0),
         "entry_ts_ms": int(entry_ts_ms),
@@ -398,6 +474,11 @@ def _collect_skipped_candidates(
     def _entry_context(symbol: str, router_decision: Mapping[str, Any] | None) -> tuple[Optional[float], int]:
         decision = router_decision or {}
         px = _normalize_float(decision.get("px"))
+        if px is None:
+            for px_key in ("entry_px", "latest_px", "last_px", "signal_price"):
+                px = _normalize_float(decision.get(px_key))
+                if px is not None:
+                    break
         ts_ms = 0
         series = market_data_1h.get(symbol)
         if series and getattr(series, "close", None) and getattr(series, "ts", None):
@@ -421,13 +502,17 @@ def _collect_skipped_candidates(
         if str(rd.get("action") or "").lower() != "skip":
             continue
         symbol = str(rd.get("symbol") or rd.get("held_symbol") or "").strip()
+        reason = str(rd.get("reason") or "").strip()
+        is_btc_probe_skip = _is_btc_leadership_probe_skip_reason(reason)
+        if is_btc_probe_skip and not symbol:
+            symbol = "BTC/USDT"
         if not symbol:
             continue
-        reason = str(rd.get("reason") or "").strip()
         if reason == "target_zero_no_order":
             zero_reason = str(rd.get("target_zero_reason") or "").strip()
             reason = zero_reason if zero_reason == "risk_off_pos_mult_zero" else "target_zero_no_order"
-        if reason not in FOCUS_SKIP_REASONS:
+        is_btc_probe_skip = _is_btc_leadership_probe_skip_reason(reason)
+        if reason not in FOCUS_SKIP_REASONS and not is_btc_probe_skip:
             continue
         key = (symbol, reason)
         if key in captured_keys:
@@ -436,8 +521,8 @@ def _collect_skipped_candidates(
         entry_px, entry_ts_ms = _entry_context(symbol, rd)
         if entry_ts_ms <= 0:
             continue
-        intended_side = "hold" if reason == "hold_current_no_valid_replacement" else "buy"
-        target_w = rd.get("target_w", (audit.targets_post_risk or {}).get(symbol))
+        intended_side = "buy" if is_btc_probe_skip else ("hold" if reason == "hold_current_no_valid_replacement" else "buy")
+        target_w = rd.get("effective_target_w", rd.get("target_w", (audit.targets_post_risk or {}).get(symbol)))
         records.append(
             _build_record(
                 audit=audit,
@@ -732,7 +817,18 @@ def update_skipped_candidate_tracker(
             records_by_key[key] = record
         else:
             existing = records_by_key[key]
-            for preserve_key in ("entry_px", "score", "required_score", "alpha6_score", "trend_score", "f4_volume_expansion", "f5_rsi_trend_confirm", "target_w", "current_level"):
+            for preserve_key in (
+                "entry_px",
+                "score",
+                "required_score",
+                "alpha6_score",
+                "trend_score",
+                "f4_volume_expansion",
+                "f5_rsi_trend_confirm",
+                "target_w",
+                "current_level",
+                *BTC_LEADERSHIP_PROBE_FIELDS,
+            ):
                 if existing.get(preserve_key) in (None, "") and record.get(preserve_key) not in (None, ""):
                     existing[preserve_key] = record.get(preserve_key)
 
@@ -791,6 +887,7 @@ def update_skipped_candidate_tracker(
         "trend_score",
         "f4_volume_expansion",
         "f5_rsi_trend_confirm",
+        *BTC_LEADERSHIP_PROBE_FIELDS,
         "entry_px",
         "rt_cost_bps",
         *horizon_fields,
@@ -821,6 +918,28 @@ def update_skipped_candidate_tracker(
         *[f"win_rate_{int(h)}h" for h in horizons],
     ]
     _write_csv(summaries_dir / "skipped_candidate_outcomes_by_symbol.csv", by_symbol, by_symbol_fields)
+
+    btc_probe_rows = [
+        row
+        for row in full_rows
+        if _is_btc_leadership_probe_skip_reason(str(row.get("skip_reason") or ""))
+    ]
+    _write_csv(summaries_dir / "btc_leadership_probe_blocked_outcomes.csv", btc_probe_rows, base_fields)
+
+    btc_probe_by_reason = _aggregate_records(
+        [
+            row
+            for row in records
+            if _is_btc_leadership_probe_skip_reason(str(row.get("skip_reason") or ""))
+        ],
+        key_field="skip_reason",
+        horizons=horizons,
+    )
+    _write_csv(
+        summaries_dir / "btc_leadership_probe_blocked_outcomes_by_reason.csv",
+        btc_probe_by_reason,
+        by_reason_fields,
+    )
 
     return {
         "enabled": True,

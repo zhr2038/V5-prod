@@ -5,9 +5,12 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from configs.loader import load_config
 from configs.schema import AppConfig, RegimeState
 from src.alpha.alpha_engine import AlphaSnapshot
 from src.core.models import MarketSeries
@@ -16,6 +19,32 @@ from src.execution.fill_store import derive_runtime_auto_risk_eval_path
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
 import src.core.pipeline as pipeline_module
+
+
+BTC_PROBE_AUDIT_KEYS = {
+    "btc_leadership_probe",
+    "enabled",
+    "rolling_high",
+    "latest_px",
+    "breakout_buffer_bps",
+    "breakout_met",
+    "min_alpha6_score",
+    "actual_alpha6_score",
+    "min_f4_volume",
+    "actual_f4_volume",
+    "min_f5_rsi",
+    "actual_f5_rsi",
+    "blocked_reason",
+    "configured_target_w",
+    "effective_target_w",
+    "max_target_w",
+}
+
+
+def _write_config(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path
 
 
 def _ms(ts_s: int) -> int:
@@ -167,13 +196,92 @@ def test_btc_breakout_in_protect_opens_small_probe(tmp_path: Path) -> None:
     assert audit.counts["btc_leadership_probe_candidate_count"] == 1
     assert audit.counts["btc_leadership_probe_open_count"] == 1
     assert not any(d.get("reason") == "anti_chase_add_size" for d in audit.router_decisions)
+    create = next(d for d in audit.router_decisions if d.get("action") == "create" and d.get("btc_leadership_probe"))
+    assert BTC_PROBE_AUDIT_KEYS.issubset(create.keys())
+    assert create["enabled"] is True
+    assert create["latest_px"] == 78120.0
+    assert create["breakout_met"] is True
+    assert create["min_alpha6_score"] == pytest.approx(0.30)
+    assert create["actual_alpha6_score"] == pytest.approx(0.35)
+    assert create["configured_target_w"] == pytest.approx(0.08)
+    assert create["effective_target_w"] == pytest.approx(0.08)
+    assert create["max_target_w"] == pytest.approx(0.10)
+    assert create["blocked_reason"] is None
+
+
+def test_btc_probe_disabled_in_yaml_does_not_trigger(tmp_path: Path) -> None:
+    cfg_path = _write_config(
+        tmp_path / "configs" / "btc_probe_disabled.yaml",
+        f"""
+symbols:
+  - BTC/USDT
+execution:
+  mode: live
+  order_store_path: {str((tmp_path / 'reports' / 'orders.sqlite').resolve())}
+  btc_leadership_probe_enabled: false
+""".strip()
+        + "\n",
+    )
+    cfg = load_config(str(cfg_path), env_path=None)
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.budget.exchange_min_notional_enabled = False
+    cfg.execution.negative_expectancy_cooldown_enabled = False
+    cfg.execution.negative_expectancy_score_penalty_enabled = False
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
+
+    out, audit, _ = _run_probe(tmp_path, cfg=cfg)
+
+    assert not out.orders
+    assert audit.counts["btc_leadership_probe_candidate_count"] == 0
+    assert not any(d.get("btc_leadership_probe") for d in audit.router_decisions)
+
+
+def test_btc_probe_min_alpha6_score_from_yaml_is_used_at_runtime(tmp_path: Path) -> None:
+    cfg_path = _write_config(
+        tmp_path / "configs" / "btc_probe_min_score.yaml",
+        f"""
+symbols:
+  - BTC/USDT
+execution:
+  mode: live
+  order_store_path: {str((tmp_path / 'reports' / 'orders.sqlite').resolve())}
+  btc_leadership_probe_min_alpha6_score: 0.30
+""".strip()
+        + "\n",
+    )
+    cfg = load_config(str(cfg_path), env_path=None)
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.budget.exchange_min_notional_enabled = False
+    cfg.execution.negative_expectancy_cooldown_enabled = False
+    cfg.execution.negative_expectancy_score_penalty_enabled = False
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
+
+    out, audit, _ = _run_probe(
+        tmp_path,
+        cfg=cfg,
+        payload=_strategy_payload(_alpha6_signal(score=0.29)),
+    )
+
+    assert not out.orders
+    blocked = next(
+        d for d in audit.router_decisions if d.get("reason") == "btc_leadership_probe_alpha6_score_too_low"
+    )
+    assert BTC_PROBE_AUDIT_KEYS.issubset(blocked.keys())
+    assert blocked["min_alpha6_score"] == pytest.approx(0.30)
+    assert blocked["actual_alpha6_score"] == pytest.approx(0.29)
+    assert blocked["blocked_reason"] == "btc_leadership_probe_alpha6_score_too_low"
 
 
 def test_btc_without_rolling_high_breakout_does_not_probe(tmp_path: Path) -> None:
     out, audit, _ = _run_probe(tmp_path, series=_btc_series(latest=78050.0))
 
     assert not out.orders
-    assert any(d.get("reason") == "btc_leadership_probe_no_breakout" for d in audit.router_decisions)
+    blocked = next(d for d in audit.router_decisions if d.get("reason") == "btc_leadership_probe_no_breakout")
+    assert BTC_PROBE_AUDIT_KEYS.issubset(blocked.keys())
+    assert blocked["breakout_met"] is False
+    assert blocked["blocked_reason"] == "btc_leadership_probe_no_breakout"
     assert audit.counts["btc_leadership_probe_blocked_count"] == 1
 
 

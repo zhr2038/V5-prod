@@ -100,6 +100,224 @@ def test_protect_entry_trend_only_skip_is_written(tmp_path: Path) -> None:
     assert rows[0]["label_status"] == "pending"
 
 
+def test_btc_leadership_probe_alpha6_score_too_low_skip_is_written(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_05"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+
+    entry_ts_ms = 1_710_000_000_000
+    audit = DecisionAudit(run_id="20260421_05")
+    audit.now_ts = entry_ts_ms // 1000
+    audit.regime = "Trending"
+    audit.router_decisions = [
+        {
+            "symbol": "BTC/USDT",
+            "action": "skip",
+            "reason": "btc_leadership_probe_alpha6_score_too_low",
+            "latest_px": 100.0,
+            "rolling_high": 99.0,
+            "breakout_buffer_bps": 15.0,
+            "breakout_met": True,
+            "alpha6_score": 0.29,
+            "f4_volume_expansion": 0.05,
+            "f5_rsi_trend_confirm": 0.40,
+            "min_alpha6_score": 0.30,
+            "min_f4_volume": -0.10,
+            "min_f5_rsi": 0.30,
+            "closed_cycles": 1,
+            "net_expectancy_bps": -100.0,
+        }
+    ]
+    market_data = {"BTC/USDT": _series("BTC/USDT", [entry_ts_ms], [100.0])}
+
+    result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    assert result["new_records"] == 1
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    row = rows[0]
+    assert row["symbol"] == "BTC/USDT"
+    assert row["intended_side"] == "buy"
+    assert row["skip_reason"] == "btc_leadership_probe_alpha6_score_too_low"
+    assert row["entry_px"] == 100.0
+    assert row["current_level"] == "PROTECT"
+    assert row["regime"] == "Trending"
+    assert row["rolling_high"] == 99.0
+    assert row["breakout_buffer_bps"] == 15.0
+    assert row["breakout_met"] is True
+    assert row["alpha6_score"] == 0.29
+    assert row["f4_volume_expansion"] == 0.05
+    assert row["f5_rsi_trend_confirm"] == 0.40
+    assert row["min_alpha6_score"] == 0.30
+    assert row["min_f4_volume"] == -0.10
+    assert row["min_f5_rsi"] == 0.30
+    assert row["negative_expectancy_bypassed"] is False
+    assert row["closed_cycles"] == 1
+    assert row["net_expectancy_bps"] == -100.0
+
+    assert (tmp_path / "reports" / "summaries" / "btc_leadership_probe_blocked_outcomes.csv").exists()
+    assert (tmp_path / "reports" / "summaries" / "btc_leadership_probe_blocked_outcomes_by_reason.csv").exists()
+
+
+def test_btc_leadership_probe_no_alpha6_buy_skip_is_written(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_06"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+
+    entry_ts_ms = 1_710_000_000_000
+    audit = DecisionAudit(run_id="20260421_06")
+    audit.now_ts = entry_ts_ms // 1000
+    audit.regime = "Trending"
+    audit.router_decisions = [
+        {
+            "symbol": "BTC/USDT",
+            "action": "skip",
+            "reason": "btc_leadership_probe_no_alpha6_buy",
+            "latest_px": 100.0,
+            "rolling_high": 99.0,
+            "breakout_buffer_bps": 15.0,
+            "breakout_met": True,
+            "alpha6_side": "hold",
+            "actual_alpha6_score": 0.12,
+            "actual_f4_volume": 0.01,
+            "actual_f5_rsi": 0.35,
+            "min_alpha6_score": 0.30,
+            "min_f4_volume": -0.10,
+            "min_f5_rsi": 0.30,
+        }
+    ]
+    market_data = {"BTC/USDT": _series("BTC/USDT", [entry_ts_ms], [100.0])}
+
+    update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["skip_reason"] == "btc_leadership_probe_no_alpha6_buy"
+    assert rows[0]["intended_side"] == "buy"
+    assert rows[0]["alpha6_score"] == 0.12
+    assert rows[0]["f4_volume_expansion"] == 0.01
+    assert rows[0]["f5_rsi_trend_confirm"] == 0.35
+
+
+def test_btc_leadership_probe_blocked_label_matures_forward_bps(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_07"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "data" / "cache"
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+    cfg.diagnostics.skipped_candidate_roundtrip_cost_bps = 30.0
+
+    entry_ts_ms = 1_710_000_000_000
+    audit = DecisionAudit(run_id="20260421_07")
+    audit.now_ts = (entry_ts_ms // 1000) + 8 * 3600
+    audit.regime = "Trending"
+    audit.router_decisions = [
+        {
+            "symbol": "BTC/USDT",
+            "action": "skip",
+            "reason": "btc_leadership_probe_no_alpha6_buy",
+            "latest_px": 100.0,
+            "rolling_high": 99.0,
+            "breakout_buffer_bps": 15.0,
+            "breakout_met": True,
+        }
+    ]
+    market_data = {"BTC/USDT": _series("BTC/USDT", [entry_ts_ms], [100.0])}
+    _write_cache_csv(
+        cache_dir,
+        "BTC/USDT",
+        [
+            ("2024-03-09T16:00:00Z", 100.0),
+            ("2024-03-09T20:00:00Z", 101.0),
+        ],
+    )
+
+    update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+    )
+
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    row = rows[0]
+    assert row["label_4h_gross_bps"] == 100.0
+    assert row["label_4h_net_bps"] == 70.0
+    assert row["label_4h_would_have_won_net"] is True
+    assert row["label_4h_status"] == "complete"
+    assert row["label_status"] == "complete"
+
+    by_reason_path = tmp_path / "reports" / "summaries" / "btc_leadership_probe_blocked_outcomes_by_reason.csv"
+    with by_reason_path.open("r", encoding="utf-8") as f:
+        summary_rows = list(csv.DictReader(f))
+    assert summary_rows[0]["skip_reason"] == "btc_leadership_probe_no_alpha6_buy"
+    assert summary_rows[0]["complete_count"] == "1"
+    assert float(summary_rows[0]["avg_4h_net_bps"]) == 70.0
+    assert float(summary_rows[0]["win_rate_4h"]) == 1.0
+
+
+def test_btc_leadership_probe_blocked_label_stays_pending_before_horizon(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_08"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+
+    entry_ts_ms = 1_710_000_000_000
+    audit = DecisionAudit(run_id="20260421_08")
+    audit.now_ts = entry_ts_ms // 1000
+    audit.regime = "Trending"
+    audit.router_decisions = [
+        {
+            "symbol": "BTC/USDT",
+            "action": "skip",
+            "reason": "btc_leadership_probe_alpha6_score_too_low",
+            "latest_px": 100.0,
+            "rolling_high": 99.0,
+            "breakout_buffer_bps": 15.0,
+            "breakout_met": True,
+            "alpha6_score": 0.29,
+        }
+    ]
+    market_data = {"BTC/USDT": _series("BTC/USDT", [entry_ts_ms], [100.0])}
+
+    update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[0]["label_4h_gross_bps"] is None
+    assert rows[0]["label_4h_net_bps"] is None
+    assert rows[0]["label_4h_would_have_won_net"] is None
+    assert rows[0]["label_4h_status"] == "pending"
+    assert rows[0]["label_status"] == "pending"
+
+
 def test_cost_aware_edge_skip_gets_forward_label_when_horizon_available(tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260421_01"
     run_dir.mkdir(parents=True, exist_ok=True)

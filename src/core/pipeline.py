@@ -826,6 +826,11 @@ class V5Pipeline:
         target_w = _float_or_none(tags.get("target_w"))
         if target_w is None and state is not None:
             target_w = _float_or_none(getattr(state, "target_w", None))
+        highest_net_bps = _float_or_none(tags.get("highest_net_bps"))
+        if state is not None:
+            state_highest_net_bps = _float_or_none(getattr(state, "highest_net_bps", None))
+            if state_highest_net_bps is not None:
+                highest_net_bps = max(float(highest_net_bps or 0.0), float(state_highest_net_bps))
 
         return {
             "probe_type": probe_type,
@@ -833,6 +838,7 @@ class V5Pipeline:
             "entry_px": float(entry_px),
             "entry_ts": entry_ts,
             "target_w": target_w,
+            "highest_net_bps": float(highest_net_bps or 0.0),
         }
 
     def _probe_net_bps(self, *, entry_px: float, current_px: float) -> float:
@@ -1166,6 +1172,230 @@ class V5Pipeline:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
+
+    @staticmethod
+    def _json_state_file_has_symbol(path: str | Path, symbol: str) -> bool:
+        try:
+            p = Path(path)
+            if not p.exists():
+                return False
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            return isinstance(obj, dict) and str(symbol) in obj
+        except Exception:
+            return False
+
+    @staticmethod
+    def _remove_symbol_from_json_state_file(path: str | Path, symbol: str) -> bool:
+        try:
+            p = Path(path)
+            if not p.exists():
+                return False
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(obj, dict) or str(symbol) not in obj:
+                return False
+            obj.pop(str(symbol), None)
+            tmp = p.with_suffix(p.suffix + ".tmp")
+            tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(p)
+            return True
+        except Exception:
+            return False
+
+    def _highest_px_state_path(self) -> Path:
+        try:
+            from src.execution.highest_px_tracker import derive_tracker_state_path
+
+            return derive_tracker_state_path(derive_position_store_path(self._runtime_order_store_path))
+        except Exception:
+            path = Path(self._runtime_order_store_path)
+            if path.name == "orders.sqlite":
+                return path.with_name("highest_px_state.json")
+            if "orders" in path.stem:
+                return path.with_name(path.name.replace("orders", "highest_px_state", 1)).with_suffix(".json")
+            return path.with_name("highest_px_state.json")
+
+    def _market_impulse_probe_state_has_active_position(self, symbol: str) -> bool:
+        payload = self._load_market_impulse_probe_state().get(str(symbol))
+        if not isinstance(payload, dict):
+            return False
+        has_active_fields = bool(
+            int(payload.get("entry_ts_ms") or 0) > 0
+            or str(payload.get("entry_ts") or "").strip()
+            or str(payload.get("source_cl_ord_id") or "").strip()
+        )
+        if payload.get("active_position") is False and not has_active_fields:
+            return False
+        return bool(has_active_fields)
+
+    def _deactivate_market_impulse_probe_active_state(self, symbol: str) -> bool:
+        state = self._load_market_impulse_probe_state()
+        payload = state.get(str(symbol))
+        if not isinstance(payload, dict):
+            return False
+        had_active = self._market_impulse_probe_state_has_active_position(str(symbol))
+        if not had_active:
+            return False
+
+        now_ms = int(self.clock.now().timestamp() * 1000)
+        cooldown_until_ms = int(payload.get("cooldown_until_ms") or 0)
+        if cooldown_until_ms > now_ms:
+            next_payload: Dict[str, Any] = {
+                "symbol": str(payload.get("symbol") or symbol),
+                "active_position": False,
+                "closed_ts_ms": now_ms,
+                "cooldown_until_ms": cooldown_until_ms,
+            }
+            if payload.get("cooldown_until") is not None:
+                next_payload["cooldown_until"] = payload.get("cooldown_until")
+            state[str(symbol)] = next_payload
+        else:
+            state.pop(str(symbol), None)
+        self._write_market_impulse_probe_state(state)
+        return True
+
+    def _symbol_has_active_position_state(self, symbol: str) -> bool:
+        sym = str(symbol)
+        try:
+            if sym in (getattr(self.profit_taking, "positions", {}) or {}):
+                return True
+        except Exception:
+            pass
+        try:
+            if sym in (getattr(self.stop_loss_manager, "positions", {}) or {}):
+                return True
+        except Exception:
+            pass
+        try:
+            if sym in (getattr(self.fixed_stop_loss, "entry_prices", {}) or {}):
+                return True
+        except Exception:
+            pass
+        try:
+            if self._json_state_file_has_symbol(self._highest_px_state_path(), sym):
+                return True
+        except Exception:
+            pass
+        return self._market_impulse_probe_state_has_active_position(sym)
+
+    def _clear_active_position_state_for_symbol(self, symbol: str) -> List[str]:
+        sym = str(symbol)
+        cleared: List[str] = []
+
+        profit_state_path = getattr(self.profit_taking, "state_file", None)
+        had_profit = sym in (getattr(self.profit_taking, "positions", {}) or {}) or (
+            profit_state_path is not None and self._json_state_file_has_symbol(profit_state_path, sym)
+        )
+        if had_profit:
+            try:
+                self.profit_taking.clear_position(sym)
+            except Exception:
+                self._remove_symbol_from_json_state_file(profit_state_path, sym)
+            if profit_state_path is not None:
+                self._remove_symbol_from_json_state_file(profit_state_path, sym)
+            cleared.append("profit_taking_state")
+
+        stop_state_path = getattr(self.stop_loss_manager, "state_file", None)
+        had_stop = sym in (getattr(self.stop_loss_manager, "positions", {}) or {}) or (
+            stop_state_path is not None and self._json_state_file_has_symbol(stop_state_path, sym)
+        )
+        if had_stop:
+            try:
+                self.stop_loss_manager.remove_position(sym)
+            except Exception:
+                self._remove_symbol_from_json_state_file(stop_state_path, sym)
+            if stop_state_path is not None:
+                self._remove_symbol_from_json_state_file(stop_state_path, sym)
+            cleared.append("stop_loss_state")
+
+        fixed_state_path = getattr(self.fixed_stop_loss, "state_file", None)
+        had_fixed = sym in (getattr(self.fixed_stop_loss, "entry_prices", {}) or {}) or (
+            fixed_state_path is not None and self._json_state_file_has_symbol(fixed_state_path, sym)
+        )
+        if had_fixed:
+            try:
+                self.fixed_stop_loss.clear_position(sym)
+            except Exception:
+                self._remove_symbol_from_json_state_file(fixed_state_path, sym)
+            if fixed_state_path is not None:
+                self._remove_symbol_from_json_state_file(fixed_state_path, sym)
+            cleared.append("fixed_stop_loss_state")
+
+        highest_state_path = self._highest_px_state_path()
+        if self._json_state_file_has_symbol(highest_state_path, sym):
+            try:
+                from src.execution.highest_px_tracker import get_highest_price_tracker
+
+                get_highest_price_tracker(highest_state_path).clear_symbol(sym)
+            except Exception:
+                self._remove_symbol_from_json_state_file(highest_state_path, sym)
+            cleared.append("highest_px_state")
+
+        if self._deactivate_market_impulse_probe_active_state(sym):
+            cleared.append("market_impulse_probe_state_active")
+
+        return cleared
+
+    def _position_value_for_cleanup(self, position: Position, prices: Dict[str, float]) -> tuple[float, float]:
+        px = float(prices.get(position.symbol, 0.0) or 0.0)
+        if px <= 0.0:
+            px = float(getattr(position, "last_mark_px", 0.0) or 0.0)
+        if px <= 0.0:
+            px = float(getattr(position, "avg_px", 0.0) or 0.0)
+        qty = float(getattr(position, "qty", 0.0) or 0.0)
+        return px, max(0.0, qty * px)
+
+    def cleanup_stale_position_state_for_dust_positions(
+        self,
+        positions: List[Position],
+        *,
+        prices: Dict[str, float],
+        audit: Optional[DecisionAudit] = None,
+    ) -> tuple[List[Position], List[Dict[str, Any]], set[str]]:
+        active_positions: List[Position] = []
+        router_decisions: List[Dict[str, Any]] = []
+        dust_flat_symbols: set[str] = set()
+
+        for position in positions or []:
+            qty = float(getattr(position, "qty", 0.0) or 0.0)
+            if qty <= 0.0:
+                continue
+            px, remaining_value = self._position_value_for_cleanup(position, prices)
+            if px <= 0.0:
+                active_positions.append(position)
+                continue
+
+            dust_threshold = self._dust_position_threshold_usdt(symbol=position.symbol, px=px)
+            if remaining_value >= float(dust_threshold):
+                active_positions.append(position)
+                continue
+
+            dust_flat_symbols.add(str(position.symbol))
+            cleared_keys = self._clear_active_position_state_for_symbol(position.symbol)
+            if not cleared_keys:
+                continue
+
+            if audit:
+                audit.record_count("stale_position_state_detected_count", symbol=position.symbol)
+                audit.record_count("position_state_cleared_after_close_count", symbol=position.symbol)
+                audit.add_note(
+                    "Position state cleared after close: "
+                    f"{position.symbol} remaining_value={remaining_value:.8f} "
+                    f"dust_threshold={float(dust_threshold):.6f} cleared={cleared_keys}"
+                )
+
+            router_decisions.append(
+                {
+                    "symbol": position.symbol,
+                    "action": "state_cleanup",
+                    "reason": "position_state_cleared_after_close",
+                    "position_state_cleared_after_close": True,
+                    "remaining_value_usdt": float(remaining_value),
+                    "dust_threshold_usdt": float(dust_threshold),
+                    "cleared_state_keys": list(cleared_keys),
+                }
+            )
+
+        return active_positions, router_decisions, dust_flat_symbols
 
     def _sync_market_impulse_probe_state_with_positions(self, positions: List[Position]) -> Dict[str, Any]:
         state = self._load_market_impulse_probe_state()
@@ -2917,15 +3147,22 @@ class V5Pipeline:
 
         # Define prices early for use in minSz filtering and later logic
         prices = {s: float(market_data_1h[s].close[-1]) for s in market_data_1h.keys() if market_data_1h[s].close}
+        active_positions, position_state_cleanup_router_decisions, dust_flat_symbols = (
+            self.cleanup_stale_position_state_for_dust_positions(
+                positions,
+                prices=prices,
+                audit=audit,
+            )
+        )
 
         # qlib hold-threshold migration: compute holding minutes once (best effort).
         now_utc = self.clock.now().astimezone(timezone.utc)
         held_minutes_by_symbol: Dict[str, float] = {}
-        for p in positions:
+        for p in active_positions:
             hm = _holding_minutes(getattr(p, 'entry_ts', None), now_utc)
             if hm is not None:
                 held_minutes_by_symbol[p.symbol] = hm
-        probe_state = self._sync_market_impulse_probe_state_with_positions(positions)
+        probe_state = self._sync_market_impulse_probe_state_with_positions(active_positions)
         current_auto_risk_level = self._load_current_auto_risk_level()
 
         # 4. Portfolio分配后审计
@@ -3046,6 +3283,24 @@ class V5Pipeline:
         btc_leadership_probe_router_decisions: List[Dict[str, Any]] = []
         protect_entry_gate_active = str(current_auto_risk_level or "").upper() == "PROTECT"
         btc_probe_enabled = bool(getattr(self.cfg.execution, "btc_leadership_probe_enabled", True))
+        btc_probe_configured_target_w = float(
+            _coalesce(getattr(self.cfg.execution, "btc_leadership_probe_target_w", 0.08), 0.08)
+        )
+        btc_probe_max_target_w = float(
+            _coalesce(getattr(self.cfg.execution, "btc_leadership_probe_max_target_w", 0.10), 0.10)
+        )
+        btc_probe_breakout_buffer_bps = float(
+            _coalesce(getattr(self.cfg.execution, "btc_leadership_probe_breakout_buffer_bps", 15.0), 15.0)
+        )
+        btc_probe_min_alpha6_score = float(
+            _coalesce(getattr(self.cfg.execution, "btc_leadership_probe_min_alpha6_score", 0.30), 0.30)
+        )
+        btc_probe_min_f5_rsi = float(
+            _coalesce(getattr(self.cfg.execution, "btc_leadership_probe_min_f5_rsi", 0.30), 0.30)
+        )
+        btc_probe_min_f4_volume = float(
+            _coalesce(getattr(self.cfg.execution, "btc_leadership_probe_min_f4_volume", -0.10), -0.10)
+        )
         strategy_signal_lookup = (
             self._resolve_strategy_signal_lookup(audit)
             if protect_entry_gate_active or btc_probe_enabled
@@ -3069,6 +3324,27 @@ class V5Pipeline:
                     return True
             return False
 
+        def _btc_probe_audit_fields(**fields: Any) -> Dict[str, Any]:
+            payload = {
+                "enabled": bool(btc_probe_enabled),
+                "rolling_high": None,
+                "latest_px": None,
+                "breakout_buffer_bps": float(btc_probe_breakout_buffer_bps),
+                "breakout_met": False,
+                "min_alpha6_score": float(btc_probe_min_alpha6_score),
+                "actual_alpha6_score": None,
+                "min_f4_volume": float(btc_probe_min_f4_volume),
+                "actual_f4_volume": None,
+                "min_f5_rsi": float(btc_probe_min_f5_rsi),
+                "actual_f5_rsi": None,
+                "blocked_reason": None,
+                "configured_target_w": float(btc_probe_configured_target_w),
+                "effective_target_w": None,
+                "max_target_w": float(btc_probe_max_target_w),
+            }
+            payload.update(fields)
+            return payload
+
         def _btc_probe_block(reason: str, **fields: Any) -> None:
             if not audit:
                 return
@@ -3082,7 +3358,9 @@ class V5Pipeline:
                 "reason": str(reason),
                 "btc_leadership_probe": True,
             }
-            decision.update(fields)
+            block_fields = dict(fields)
+            block_fields["blocked_reason"] = str(reason)
+            decision.update(_btc_probe_audit_fields(**block_fields))
             btc_leadership_probe_router_decisions.append(decision)
 
         if btc_probe_enabled:
@@ -3134,37 +3412,32 @@ class V5Pipeline:
                     lookback_hours,
                 )
                 last_px = float(prices.get(btc_symbol, 0.0) or 0.0)
-                breakout_buffer_bps = float(
-                    _coalesce(
-                        getattr(self.cfg.execution, "btc_leadership_probe_breakout_buffer_bps", 15.0),
-                        15.0,
-                    )
+                breakout_buffer_bps = float(btc_probe_breakout_buffer_bps)
+                min_alpha6_score = float(btc_probe_min_alpha6_score)
+                min_f5_rsi = float(btc_probe_min_f5_rsi)
+                min_f4_volume = float(btc_probe_min_f4_volume)
+                breakout_price = None
+                breakout_met = False
+                if rolling_high is not None and last_px > 0:
+                    breakout_price = float(rolling_high) * (1.0 + float(breakout_buffer_bps) / 10000.0)
+                    breakout_met = float(last_px) >= float(breakout_price)
+                base_probe_fields = _btc_probe_audit_fields(
+                    rolling_high=_float_or_none(rolling_high),
+                    latest_px=float(last_px),
+                    last_px=float(last_px),
+                    breakout_buffer_bps=float(breakout_buffer_bps),
+                    breakout_price=breakout_price,
+                    breakout_met=bool(breakout_met),
+                    min_alpha6_score=float(min_alpha6_score),
+                    actual_alpha6_score=_float_or_none(alpha6_score),
+                    alpha6_score=alpha6_score,
+                    min_f4_volume=float(min_f4_volume),
+                    actual_f4_volume=_float_or_none(f4_volume),
+                    f4_volume_expansion=f4_volume,
+                    min_f5_rsi=float(min_f5_rsi),
+                    actual_f5_rsi=_float_or_none(f5_rsi),
+                    f5_rsi_trend_confirm=f5_rsi,
                 )
-                min_alpha6_score = float(
-                    _coalesce(
-                        getattr(self.cfg.execution, "btc_leadership_probe_min_alpha6_score", 0.30),
-                        0.30,
-                    )
-                )
-                min_f5_rsi = float(
-                    _coalesce(
-                        getattr(self.cfg.execution, "btc_leadership_probe_min_f5_rsi", 0.30),
-                        0.30,
-                    )
-                )
-                min_f4_volume = float(
-                    _coalesce(
-                        getattr(self.cfg.execution, "btc_leadership_probe_min_f4_volume", -0.10),
-                        -0.10,
-                    )
-                )
-                base_probe_fields = {
-                    "rolling_high": rolling_high,
-                    "breakout_buffer_bps": float(breakout_buffer_bps),
-                    "alpha6_score": alpha6_score,
-                    "f4_volume_expansion": f4_volume,
-                    "f5_rsi_trend_confirm": f5_rsi,
-                }
 
                 if active_neg_cooldown:
                     if audit:
@@ -3190,46 +3463,30 @@ class V5Pipeline:
                     _btc_probe_block(
                         "btc_leadership_probe_alpha6_score_too_low",
                         **base_probe_fields,
-                        min_alpha6_score=float(min_alpha6_score),
                     )
                 elif f5_rsi is None or float(f5_rsi) < min_f5_rsi:
                     _btc_probe_block(
                         "btc_leadership_probe_f5_rsi_too_low",
                         **base_probe_fields,
-                        min_f5_rsi=float(min_f5_rsi),
                     )
                 elif f4_volume is None or float(f4_volume) < min_f4_volume:
                     _btc_probe_block(
                         "btc_leadership_probe_f4_volume_too_low",
                         **base_probe_fields,
-                        min_f4_volume=float(min_f4_volume),
                     )
                 elif rolling_high is None or last_px <= 0:
                     _btc_probe_block(
                         "btc_leadership_probe_missing_rolling_high",
                         **base_probe_fields,
-                        last_px=float(last_px),
                     )
-                elif float(last_px) < float(rolling_high) * (1.0 + float(breakout_buffer_bps) / 10000.0):
+                elif not bool(breakout_met):
                     _btc_probe_block(
                         "btc_leadership_probe_no_breakout",
                         **base_probe_fields,
-                        last_px=float(last_px),
-                        breakout_price=float(rolling_high) * (1.0 + float(breakout_buffer_bps) / 10000.0),
                     )
                 else:
-                    target_w = float(
-                        _coalesce(
-                            getattr(self.cfg.execution, "btc_leadership_probe_target_w", 0.08),
-                            0.08,
-                        )
-                    )
-                    max_target_w = float(
-                        _coalesce(
-                            getattr(self.cfg.execution, "btc_leadership_probe_max_target_w", 0.10),
-                            0.10,
-                        )
-                    )
+                    target_w = float(btc_probe_configured_target_w)
+                    max_target_w = float(btc_probe_max_target_w)
                     target_w = min(float(target_w), float(max_target_w))
                     required_notional = max(
                         float(getattr(self.cfg.budget, "min_trade_notional_base", 0.0) or 0.0),
@@ -3239,19 +3496,24 @@ class V5Pipeline:
                         if equity_raw > 0 and required_notional > 0:
                             target_w = max(float(target_w), float(required_notional) / float(equity_raw))
                         target_w = min(float(target_w), float(max_target_w))
+                    sized_probe_fields = dict(base_probe_fields)
+                    sized_probe_fields.update(
+                        {
+                            "effective_target_w": float(target_w),
+                            "target_w": float(target_w),
+                            "max_target_w": float(max_target_w),
+                        }
+                    )
 
                     if target_w <= 0:
                         _btc_probe_block(
                             "btc_leadership_probe_zero_target",
-                            **base_probe_fields,
-                            target_w=float(target_w),
+                            **sized_probe_fields,
                         )
                     elif equity_raw > 0 and required_notional > 0 and float(target_w) * float(equity_raw) < float(required_notional):
                         _btc_probe_block(
                             "btc_leadership_probe_min_notional_unreachable",
-                            **base_probe_fields,
-                            target_w=float(target_w),
-                            max_target_w=float(max_target_w),
+                            **sized_probe_fields,
                             required_notional_usdt=float(required_notional),
                             target_notional_usdt=float(target_w) * float(equity_raw),
                         )
@@ -3262,15 +3524,17 @@ class V5Pipeline:
                             "btc_leadership_probe": True,
                             "entry_reason": "btc_leadership_probe",
                             "probe_type": "btc_leadership_probe",
+                            **sized_probe_fields,
                             "rolling_high": float(rolling_high),
                             "breakout_buffer_bps": float(breakout_buffer_bps),
                             "alpha6_score": float(alpha6_score),
                             "f4_volume_expansion": float(f4_volume),
                             "f5_rsi_trend_confirm": float(f5_rsi),
+                            "blocked_reason": None,
                             "bypassed_negative_expectancy": False,
                             "target_w": float(target_w),
                             "btc_leadership_probe_time_stop_hours": int(
-                                getattr(self.cfg.execution, "btc_leadership_probe_time_stop_hours", 4) or 0
+                                getattr(self.cfg.execution, "btc_leadership_probe_time_stop_hours", 8) or 0
                             ),
                         }
                         if audit:
@@ -3282,7 +3546,7 @@ class V5Pipeline:
                             audit.targets_post_risk = target
 
         # 4.4 确保已有持仓都注册到止损/利润管理（避免重启后状态丢失）
-        for p in positions:
+        for p in active_positions:
             if float(p.qty) <= 0:
                 continue
             px = float(prices.get(p.symbol, 0.0) or 0.0)
@@ -3299,7 +3563,12 @@ class V5Pipeline:
                 {
                     "entry_reason": probe_state_meta.get("entry_reason"),
                     "probe_type": probe_state_meta.get("probe_type"),
+                    "entry_ts": probe_state_meta.get("entry_ts"),
                     "target_w": probe_state_meta.get("target_w"),
+                    "highest_net_bps": self._probe_net_bps(
+                        entry_px=float(probe_state_meta.get("entry_px") or 0.0),
+                        current_px=max(float(getattr(p, 'highest_px', 0.0) or 0.0), candle_high, px),
+                    ),
                 }
                 if probe_state_meta is not None
                 else {}
@@ -3319,16 +3588,16 @@ class V5Pipeline:
         profit_symbols = set()  # Track symbols already handled by profit-taking
 
         if bool(getattr(self.cfg.execution, "probe_exit_enabled", True)):
-            take_profit_bps = float(getattr(self.cfg.execution, "probe_take_profit_net_bps", 80.0) or 80.0)
-            stop_loss_bps = float(getattr(self.cfg.execution, "probe_stop_loss_net_bps", -50.0) or -50.0)
+            take_profit_bps = float(_coalesce(getattr(self.cfg.execution, "probe_take_profit_net_bps", None), 80.0))
+            stop_loss_bps = float(_coalesce(getattr(self.cfg.execution, "probe_stop_loss_net_bps", None), -50.0))
             trailing_enable_bps = float(
-                getattr(self.cfg.execution, "probe_trailing_enable_after_net_bps", 50.0) or 50.0
+                _coalesce(getattr(self.cfg.execution, "probe_trailing_enable_after_net_bps", None), 50.0)
             )
-            trailing_gap_bps = float(getattr(self.cfg.execution, "probe_trailing_gap_bps", 25.0) or 25.0)
-            time_stop_hours = float(getattr(self.cfg.execution, "probe_time_stop_hours", 4) or 4)
-            time_stop_min_bps = float(getattr(self.cfg.execution, "probe_time_stop_min_net_bps", 10.0) or 10.0)
+            trailing_gap_bps = float(_coalesce(getattr(self.cfg.execution, "probe_trailing_gap_bps", None), 25.0))
+            time_stop_hours = float(_coalesce(getattr(self.cfg.execution, "probe_time_stop_hours", None), 8))
+            time_stop_min_bps = float(_coalesce(getattr(self.cfg.execution, "probe_time_stop_min_net_bps", None), 10.0))
 
-            for p in positions:
+            for p in active_positions:
                 if float(getattr(p, "qty", 0.0) or 0.0) <= 0:
                     continue
                 probe_meta = self._probe_metadata_for_position(p)
@@ -3351,6 +3620,7 @@ class V5Pipeline:
                     float(getattr(state, "highest_price", 0.0) or 0.0) if state is not None else 0.0,
                 )
                 high_net_bps = self._probe_net_bps(entry_px=entry_px, current_px=highest_price)
+                highest_net_bps = max(float(high_net_bps), float(probe_meta.get("highest_net_bps") or 0.0))
                 entry_dt = _parse_iso_utc(str(probe_meta.get("entry_ts") or ""))
                 held_hours = (
                     max(0.0, (now_utc - entry_dt).total_seconds() / 3600.0)
@@ -3363,7 +3633,7 @@ class V5Pipeline:
                     reason = "probe_take_profit"
                 elif net_bps <= stop_loss_bps:
                     reason = "probe_stop_loss"
-                elif high_net_bps >= trailing_enable_bps and (high_net_bps - net_bps) >= trailing_gap_bps:
+                elif highest_net_bps >= trailing_enable_bps and (highest_net_bps - net_bps) >= trailing_gap_bps:
                     reason = "probe_trailing_stop"
                 elif held_hours is not None and held_hours >= time_stop_hours and net_bps < time_stop_min_bps:
                     reason = "probe_time_stop"
@@ -3388,6 +3658,7 @@ class V5Pipeline:
                             "target_w": probe_meta.get("target_w"),
                             "net_bps": float(net_bps),
                             "high_net_bps": float(high_net_bps),
+                            "highest_net_bps": float(highest_net_bps),
                             "held_hours": held_hours,
                             "probe_take_profit_net_bps": float(take_profit_bps),
                             "probe_stop_loss_net_bps": float(stop_loss_bps),
@@ -3408,7 +3679,7 @@ class V5Pipeline:
                         f"high={high_net_bps:.2f}bps held_hours={held_hours}"
                     )
         
-        for p in positions:
+        for p in active_positions:
             if p.symbol in profit_symbols:
                 continue
             s = market_data_1h.get(p.symbol)
@@ -3554,7 +3825,7 @@ class V5Pipeline:
                     f"buffer_positions={rank_exit_buffer_positions}"
                 )
 
-            for p in positions:
+            for p in active_positions:
                 if p.qty <= 0 or p.symbol in profit_symbols:
                     continue  # Skip if already handled by profit-taking or stop loss
 
@@ -3645,7 +3916,9 @@ class V5Pipeline:
                 regime_state_str=str(regime.state.value if hasattr(regime.state, "value") else regime.state),
             )
             impulse_still_active = bool(probe_context.get("active"))
-            for p in positions:
+            for p in active_positions:
+                if bool(getattr(self.cfg.execution, "probe_exit_enabled", True)) and self._probe_metadata_for_position(p) is not None:
+                    continue
                 probe_payload = probe_state.get(p.symbol)
                 if not isinstance(probe_payload, dict):
                     continue
@@ -3690,7 +3963,7 @@ class V5Pipeline:
         
         # 4. Policy-based exits (if not already handled)
         exit_orders = self.exit_policy.evaluate(
-            positions=positions,
+            positions=active_positions,
             market_data=market_data_1h,
             regime_state=str(regime.state.value if hasattr(regime.state, 'value') else regime.state),
         )
@@ -3823,7 +4096,11 @@ class V5Pipeline:
 
         # 7. Rebalance orders生成（deadband + 拒绝原因审计）
         rebalance_orders: List[Order] = []
-        router_decisions = list(exit_router_decisions) + list(btc_leadership_probe_router_decisions)
+        router_decisions = (
+            list(exit_router_decisions)
+            + list(position_state_cleanup_router_decisions)
+            + list(btc_leadership_probe_router_decisions)
+        )
         invalid_price_warnings: List[Dict] = []  # 记录价格无效的告警
 
         # Risk-Off 下是否进入 close-only：
@@ -4032,7 +4309,7 @@ class V5Pipeline:
                 continue
 
             if held_is_dust and abs(float(tw)) <= target_hold_eps:
-                if audit:
+                if audit and self._symbol_has_active_position_state(sym):
                     audit.record_count("dust_residual_no_close_order_count", symbol=sym)
                     router_decisions.append({
                         "symbol": sym,
@@ -4297,6 +4574,7 @@ class V5Pipeline:
                         }
                         if btc_probe_meta is not None:
                             decision.update(btc_probe_meta)
+                            decision["blocked_reason"] = str(decision.get("reason") or "")
                         router_decisions.append(decision)
                     continue
 
@@ -4378,6 +4656,7 @@ class V5Pipeline:
                             }
                             if btc_probe_meta is not None:
                                 decision.update(btc_probe_meta)
+                                decision["blocked_reason"] = "negative_expectancy_open_block"
                             router_decisions.append(decision)
                         continue
 
@@ -4469,6 +4748,7 @@ class V5Pipeline:
                                 }
                                 if btc_probe_meta is not None:
                                     decision.update(btc_probe_meta)
+                                    decision["blocked_reason"] = "negative_expectancy_fast_fail_open_block"
                                 router_decisions.append(decision)
                             continue
             
@@ -4892,7 +5172,7 @@ class V5Pipeline:
             bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
             and (not bool(getattr(self.cfg.execution, "market_impulse_probe_only_in_protect", True)) or protect_entry_gate_active)
             and not is_risk_off_close_only
-            and not positions
+            and not active_positions
             and not any(str(getattr(order, "side", "")).lower() == "buy" for order in rebalance_orders)
             and bool(market_impulse_probe_context.get("active"))
         ):

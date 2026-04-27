@@ -86,9 +86,11 @@ class PositionStore:
             derive_runtime_named_json_path(order_store_path, "stop_loss_state"),
             derive_runtime_named_json_path(order_store_path, "fixed_stop_loss_state"),
             derive_runtime_named_json_path(order_store_path, "profit_taking_state"),
-            derive_runtime_named_json_path(order_store_path, "market_impulse_probe_state"),
             self._highest_tracker_state_path(),
         ]
+
+    def _market_impulse_probe_state_path(self) -> Path:
+        return derive_runtime_named_json_path(self._order_store_path(), "market_impulse_probe_state")
 
     @staticmethod
     def _remove_symbol_from_state_file(path: Path, symbol: str) -> None:
@@ -99,6 +101,35 @@ class PositionStore:
             if not isinstance(obj, dict) or symbol not in obj:
                 return
             del obj[symbol]
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(path)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _deactivate_market_impulse_probe_state(path: Path, symbol: str) -> None:
+        try:
+            if not path.exists():
+                return
+            obj = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(obj, dict):
+                return
+            payload = obj.get(symbol)
+            if not isinstance(payload, dict):
+                return
+
+            cooldown_until_ms = int(payload.get("cooldown_until_ms") or 0)
+            next_payload: Dict[str, Any] = {
+                "symbol": str(payload.get("symbol") or symbol),
+                "active_position": False,
+            }
+            if cooldown_until_ms > 0:
+                next_payload["cooldown_until_ms"] = cooldown_until_ms
+                if payload.get("cooldown_until") is not None:
+                    next_payload["cooldown_until"] = payload.get("cooldown_until")
+
+            obj[symbol] = next_payload
             tmp = path.with_suffix(path.suffix + ".tmp")
             tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp.replace(path)
@@ -143,6 +174,11 @@ class PositionStore:
             profit_high = float(current.get("profit_high") or 0.0)
             if entry_px > 0 and highest > 0:
                 profit_high = max(profit_high, (highest - entry_px) / entry_px)
+            highest_net_bps = max(
+                0.0,
+                float(tags.get("highest_net_bps") or 0.0),
+                float(current.get("highest_net_bps") or 0.0),
+            )
             state = dict(current)
             state.update(
                 {
@@ -164,6 +200,7 @@ class PositionStore:
                     "entry_reason": str(tags.get("entry_reason") or probe_type),
                     "probe_type": probe_type,
                     "target_w": float(tags["target_w"]) if tags.get("target_w") is not None else current.get("target_w"),
+                    "highest_net_bps": float(highest_net_bps),
                 }
             )
             payload[symbol] = state
@@ -529,6 +566,7 @@ class PositionStore:
 
             for state_path in self._runtime_risk_state_paths():
                 self._remove_symbol_from_state_file(state_path, symbol)
+            self._deactivate_market_impulse_probe_state(self._market_impulse_probe_state_path(), symbol)
 
             log.info("Position closed: %s", symbol)
             return True
