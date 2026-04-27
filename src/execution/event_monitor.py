@@ -205,8 +205,11 @@ class EventMonitor:
                 data={'regime': state.regime},
                 timestamp_ms=now_ms
             ))
-            logger.warning("RISK_OFF regime detected - clearing positions")
-        
+            if state.positions:
+                logger.warning("RISK_OFF regime detected - clearing positions")
+            else:
+                logger.info("RISK_OFF regime detected - no positions to clear")
+
         return events
     
     def _check_regime_events(self, state: MarketState) -> List[TradingEvent]:

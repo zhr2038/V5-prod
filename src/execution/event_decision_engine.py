@@ -194,7 +194,10 @@ class EventDecisionEngine:
                         'priority': 0,
                         'event_type': event.type.name
                     })
-                logger.warning("RISK_OFF: Closing all positions")
+                if actions:
+                    logger.warning("RISK_OFF: Closing all positions")
+                else:
+                    logger.info("RISK_OFF: No positions to close")
                 break  # One risk_off is enough
             
             elif event.symbol and event.symbol in state.positions:

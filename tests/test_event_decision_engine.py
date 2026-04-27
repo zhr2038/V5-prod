@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from src.execution.cooldown_manager import CooldownConfig, CooldownManager
 from src.execution.event_decision_engine import EventDecisionEngine
 from src.execution.event_monitor import EventMonitor, EventMonitorConfig
-from src.execution.event_types import MarketState, SignalState
+from src.execution.event_types import EventType, MarketState, SignalState, TradingEvent
 
 
 def _heartbeat_engine(tmp_path):
@@ -119,3 +120,24 @@ def test_expired_pending_signal_does_not_confirm_immediately(tmp_path) -> None:
 
     assert confirmed is False
     assert manager.pending_signals["BTC/USDT"]["count"] == 1
+
+
+def test_risk_off_without_positions_does_not_warn_closing_positions(tmp_path, caplog) -> None:
+    monitor = EventMonitor(EventMonitorConfig(state_path=str(tmp_path / "event_monitor_state.json")))
+    cooldown = CooldownManager(CooldownConfig(state_path=str(tmp_path / "cooldown_state.json")))
+    engine = EventDecisionEngine(monitor, cooldown)
+    state = MarketState(
+        timestamp_ms=1_000,
+        regime="RISK_OFF",
+        prices={},
+        positions={},
+        signals={},
+        selected_symbols=[],
+    )
+    event = TradingEvent(type=EventType.REGIME_RISK_OFF, symbol=None, data={"regime": "RISK_OFF"})
+
+    caplog.set_level(logging.WARNING)
+    actions = engine._process_risk_events([event], state)
+
+    assert actions == []
+    assert not any("Closing all positions" in record.getMessage() for record in caplog.records)

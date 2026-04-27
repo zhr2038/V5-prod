@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from src.execution.event_monitor import EventMonitor, EventMonitorConfig
 from src.execution.event_types import EventType, MarketState, SignalState
 
@@ -82,3 +84,21 @@ def test_zero_based_rank_does_not_emit_repeated_rank_jump(tmp_path) -> None:
     events = monitor._check_signal_events(current)
 
     assert not any(event.type == EventType.SIGNAL_RANK_JUMP for event in events)
+
+
+def test_risk_off_without_positions_does_not_warn_clearing_positions(tmp_path, caplog) -> None:
+    monitor = EventMonitor(EventMonitorConfig(state_path=str(tmp_path / "event_monitor_state.json")))
+    state = MarketState(
+        timestamp_ms=1_000,
+        regime="RISK_OFF",
+        prices={},
+        positions={},
+        signals={},
+        selected_symbols=[],
+    )
+
+    caplog.set_level(logging.WARNING)
+    events = monitor._check_risk_events(state)
+
+    assert [event.type for event in events] == [EventType.REGIME_RISK_OFF]
+    assert not any("clearing positions" in record.getMessage() for record in caplog.records)
