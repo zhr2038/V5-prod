@@ -499,9 +499,8 @@ class EventMonitor:
             return []
         
         hours_since_trade = (now_ms - self.last_trade_time_ms) / 3600000
-        
+
         if hours_since_trade >= self.config.heartbeat_interval_hours:
-            self.last_trade_time_ms = now_ms
             return [TradingEvent(
                 type=EventType.HEARTBEAT,
                 symbol=None,

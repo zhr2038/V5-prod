@@ -1225,7 +1225,7 @@ def main():
     
     # Check if should trade (with last state for comparison)
     logger.info("Checking for trading events...")
-    result = trader.should_trade(state, last_state)
+    result = trader.should_trade(state, last_state, commit_execution_state=False)
     
     logger.info(f"Should trade: {result['should_trade']}")
     logger.info(f"Reason: {result['reason']}")
@@ -1342,6 +1342,7 @@ def main():
                     'trigger_reason': execution.get('trigger_reason') or 'event_actions',
                 })
                 if exec_res.get('ok'):
+                    trader.commit_actions(result['actions'])
                     logger.info("ACTIVE mode: live service start request accepted")
                 else:
                     logger.error(

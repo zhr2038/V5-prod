@@ -93,9 +93,11 @@ class EventDrivenTrader:
         
         logger.info("Event-driven trader initialized")
     
-    def should_trade(self, 
+    def should_trade(self,
                      current_state: Dict[str, Any],
-                     last_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                     last_state: Optional[Dict[str, Any]] = None,
+                     *,
+                     commit_execution_state: bool = True) -> Dict[str, Any]:
         """
         Check if trading should occur based on event detection.
         
@@ -122,7 +124,7 @@ class EventDrivenTrader:
             self.monitor.last_state = self._build_market_state(last_state)
         
         # Run decision engine
-        result = self.engine.run(market_state)
+        result = self.engine.run(market_state, commit_execution_state=commit_execution_state)
         
         return {
             'should_trade': result.should_trade,
@@ -132,6 +134,10 @@ class EventDrivenTrader:
             'reason': result.reason,
             'use_default': False
         }
+
+    def commit_actions(self, actions) -> None:
+        """Commit cooldown and heartbeat state after execution is accepted."""
+        self.engine.commit_actions(actions or [])
     
     def _build_market_state(self, state_dict: Dict[str, Any]) -> MarketState:
         """Build MarketState from dictionary.
