@@ -50,3 +50,10 @@ def test_prod_systemd_mapping_sources_are_safe_for_ubuntu_install() -> None:
         assert "\nGroup=admin" not in text, unit
         if "WorkingDirectory=" in text:
             assert "/home/ubuntu/clawd/v5-prod" in text, unit
+
+
+def test_trade_monitor_timer_runs_after_hourly_live_window() -> None:
+    timer = (PROJECT_ROOT / "deploy" / "systemd" / "v5-trade-monitor.timer").read_text(encoding="utf-8")
+
+    assert "OnCalendar=*-*-* *:07:00" in timer
+    assert "Unit=v5-trade-monitor.service" in timer
