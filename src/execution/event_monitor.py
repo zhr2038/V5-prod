@@ -90,8 +90,10 @@ class EventMonitor:
         # P2: Breakout events
         events.extend(self._check_breakout_events(current_state))
         
-        # P3: Heartbeat
-        events.extend(self._check_heartbeat())
+        # P3: Heartbeat can only create low-priority entry checks, so skip it in Risk-Off.
+        regime = str(current_state.regime or "").upper().replace("-", "_")
+        if regime != "RISK_OFF":
+            events.extend(self._check_heartbeat())
         
         # Sort by priority
         events.sort(key=lambda e: e.priority_value)

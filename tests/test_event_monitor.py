@@ -102,3 +102,25 @@ def test_risk_off_without_positions_does_not_warn_clearing_positions(tmp_path, c
 
     assert [event.type for event in events] == [EventType.REGIME_RISK_OFF]
     assert not any("clearing positions" in record.getMessage() for record in caplog.records)
+
+
+def test_risk_off_collect_events_does_not_emit_heartbeat(tmp_path) -> None:
+    monitor = EventMonitor(
+        EventMonitorConfig(
+            heartbeat_interval_hours=0,
+            state_path=str(tmp_path / "event_monitor_state.json"),
+        )
+    )
+    monitor.last_trade_time_ms = 1
+    state = MarketState(
+        timestamp_ms=1_000,
+        regime="RISK_OFF",
+        prices={},
+        positions={},
+        signals={},
+        selected_symbols=[],
+    )
+
+    events = monitor.collect_events(state)
+
+    assert [event.type for event in events] == [EventType.REGIME_RISK_OFF]
