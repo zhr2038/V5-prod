@@ -195,6 +195,24 @@ def test_check_okx_api_warns_with_runtime_env_filename(monkeypatch, tmp_path: Pa
     assert result["details"] == "API credentials missing in runtime env file: live.env"
 
 
+def test_check_okx_api_reports_latency_when_credentials_are_available(monkeypatch, tmp_path: Path) -> None:
+    class Response:
+        status_code = 200
+
+    times = iter([100.0, 100.123])
+
+    monkeypatch.setattr(health_check, "_resolve_health_env_path", lambda: tmp_path / "missing.env")
+    monkeypatch.setenv("EXCHANGE_API_KEY", "key")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "secret")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "passphrase")
+    monkeypatch.setattr(health_check.time, "time", lambda: next(times))
+    monkeypatch.setattr(health_check.requests, "get", lambda url, timeout=10: Response())
+
+    result = health_check.HealthChecker().check_okx_api()
+
+    assert result == {"name": "okx_api", "status": "healthy", "details": {"latency_ms": 123.0}}
+
+
 def test_check_risk_guard_prefers_newer_guard_state_over_eval(monkeypatch, tmp_path: Path) -> None:
     eval_path = tmp_path / "reports" / "shadow_runtime" / "auto_risk_eval.json"
     guard_path = tmp_path / "reports" / "shadow_runtime" / "auto_risk_guard.json"
