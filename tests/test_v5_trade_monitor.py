@@ -145,6 +145,30 @@ def test_shell_wrapper_delegates_to_python_monitor(tmp_path: Path) -> None:
     assert args[1] == "--silent"
 
 
+def test_get_recent_trades_count_counts_live_completions_when_fill_sync_marker_absent(monkeypatch) -> None:
+    journal = "\n".join(
+        [
+            "Apr 27 15:00:52 qyun flock[1]: 2026-04-27 15:00:52,110 INFO v5 - V5 live run completed",
+            "Apr 27 16:00:52 qyun flock[2]: 2026-04-27 16:00:52,104 INFO v5 - V5 live run completed",
+        ]
+    )
+    monkeypatch.setattr(trade_monitor, "run_command", lambda cmd: journal)
+
+    assert trade_monitor.get_recent_trades_count(service_unit="v5-prod.user.service") == (2, 0)
+
+
+def test_get_recent_trades_count_uses_fill_sync_count_when_available(monkeypatch) -> None:
+    journal = "\n".join(
+        [
+            "Apr 27 15:00:35 qyun flock[1]: FILLS_SYNC new_fills=3 total=10",
+            "Apr 27 15:00:52 qyun flock[1]: 2026-04-27 15:00:52,110 INFO v5 - V5 live run completed",
+        ]
+    )
+    monkeypatch.setattr(trade_monitor, "run_command", lambda cmd: journal)
+
+    assert trade_monitor.get_recent_trades_count(service_unit="v5-prod.user.service") == (1, 3)
+
+
 def test_send_telegram_alert_reports_runtime_alert_path(monkeypatch, tmp_path: Path, capsys) -> None:
     paths = trade_monitor.MonitorPaths(
         project_root=tmp_path,

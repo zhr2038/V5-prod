@@ -40,6 +40,7 @@ ALERT_THRESHOLDS = {
     "no_trade_critical": 12,
 }
 FILL_SYNC_RE = re.compile(r"new_fills=(\d+)")
+LIVE_RUN_COMPLETED_MARKER = "V5 live run completed"
 JOURNAL_TS_RE = re.compile(r"^(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+(?P<clock>\d{2}:\d{2}:\d{2})")
 
 
@@ -366,15 +367,18 @@ def get_recent_trades_count(*, service_unit: str | None = None) -> tuple[int, in
         print(f"[ERROR] failed to inspect trade journal: {exc}")
         return 0, 0
 
-    trade_runs = 0
+    fill_sync_runs = 0
+    completed_runs = 0
     total_fills = 0
     for line in output.splitlines():
-        if "FILLS_SYNC new_fills=" not in line:
-            continue
-        trade_runs += 1
-        match = FILL_SYNC_RE.search(line)
-        if match:
-            total_fills += int(match.group(1))
+        if LIVE_RUN_COMPLETED_MARKER in line:
+            completed_runs += 1
+        if "FILLS_SYNC new_fills=" in line:
+            fill_sync_runs += 1
+            match = FILL_SYNC_RE.search(line)
+            if match:
+                total_fills += int(match.group(1))
+    trade_runs = max(fill_sync_runs, completed_runs)
     return trade_runs, total_fills
 
 
