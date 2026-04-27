@@ -438,6 +438,17 @@ def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPa
         return False
 
 
+def clear_stale_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
+    try:
+        if paths.alert_file.exists():
+            paths.alert_file.unlink()
+            print(f"[INFO] stale alert cleared: {paths.alert_file}")
+        return True
+    except Exception as exc:
+        print(f"[ERROR] failed to clear stale alert {paths.alert_file}: {exc}")
+        return False
+
+
 def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
     alerts: list[str] = []
     priority = "normal"
@@ -487,6 +498,7 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
         return True
 
     print(f"[OK] {datetime.now().strftime('%H:%M')} monitor check passed")
+    clear_stale_alert(paths)
     return False
 
 
