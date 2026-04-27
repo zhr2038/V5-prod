@@ -31,3 +31,25 @@ def test_prime_pipeline_run_context_ignores_empty_run_id() -> None:
     main._prime_pipeline_run_context(pipe, " ")
 
     assert alpha_engine.run_id == ""
+
+
+def test_skipped_candidate_tracker_skips_flat_close_only_risk_off() -> None:
+    cfg = SimpleNamespace(regime=SimpleNamespace(pos_mult_risk_off=0.0))
+    state = SimpleNamespace(name="RISK_OFF", value="Risk-Off")
+
+    assert main._should_update_skipped_candidate_tracker(cfg, state, []) is False
+
+
+def test_skipped_candidate_tracker_runs_when_risk_off_still_has_positions() -> None:
+    cfg = SimpleNamespace(regime=SimpleNamespace(pos_mult_risk_off=0.0))
+    state = SimpleNamespace(name="RISK_OFF", value="Risk-Off")
+    positions = [SimpleNamespace(symbol="BTC/USDT", qty=0.001)]
+
+    assert main._should_update_skipped_candidate_tracker(cfg, state, positions) is True
+
+
+def test_skipped_candidate_tracker_runs_outside_close_only_risk_off() -> None:
+    cfg = SimpleNamespace(regime=SimpleNamespace(pos_mult_risk_off=0.0))
+    state = SimpleNamespace(name="SIDEWAYS", value="Sideways")
+
+    assert main._should_update_skipped_candidate_tracker(cfg, state, []) is True

@@ -122,6 +122,28 @@ def _prime_pipeline_run_context(pipe: Any, run_id: str) -> None:
             setter(normalized_run_id)
 
 
+def _is_close_only_risk_off(cfg: Any, regime_state: Any) -> bool:
+    name = str(getattr(regime_state, "name", "") or "").strip().upper()
+    value = str(getattr(regime_state, "value", regime_state) or "").strip()
+    normalized = value.lower().replace("_", "-").replace(" ", "-")
+    is_risk_off = (
+        name == "RISK_OFF"
+        or normalized in {"risk-off", "riskoff", "regimestate.risk-off"}
+        or normalized.endswith(".risk-off")
+    )
+    try:
+        risk_off_mult = float(getattr(getattr(cfg, "regime", None), "pos_mult_risk_off", 0.0) or 0.0)
+    except Exception:
+        risk_off_mult = 0.0
+    return bool(is_risk_off and risk_off_mult <= 0.0)
+
+
+def _should_update_skipped_candidate_tracker(cfg: Any, regime_state: Any, positions: Any) -> bool:
+    if not _is_close_only_risk_off(cfg, regime_state):
+        return True
+    return any(float(getattr(pos, "qty", 0.0) or 0.0) > 0.0 for pos in (positions or []))
+
+
 def save_trend_cache(
     alpha_snapshot,
     regime_result,
@@ -1192,14 +1214,16 @@ def main() -> None:
     try:
         from src.reporting.skipped_candidate_tracker import update_skipped_candidate_tracker
 
-        tracker_result = update_skipped_candidate_tracker(
-            run_dir=str(runtime_run_dir),
-            audit=audit,
-            market_data_1h=md_1h,
-            cfg=cfg,
-            current_level=pipe._load_current_auto_risk_level(),
-            cache_dir=PROJECT_ROOT / "data" / "cache",
-        )
+        tracker_result = {"enabled": False, "new_records": 0, "total_records": 0}
+        if _should_update_skipped_candidate_tracker(cfg, out.regime.state, held):
+            tracker_result = update_skipped_candidate_tracker(
+                run_dir=str(runtime_run_dir),
+                audit=audit,
+                market_data_1h=md_1h,
+                cfg=cfg,
+                current_level=pipe._load_current_auto_risk_level(),
+                cache_dir=PROJECT_ROOT / "data" / "cache",
+            )
         if tracker_result.get("enabled"):
             log.info(
                 "SKIPPED_CANDIDATE_TRACKER new_records=%s total_records=%s",
