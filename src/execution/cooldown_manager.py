@@ -26,6 +26,7 @@ class CooldownConfig:
     global_cooldown_p3_seconds: int = 3600   # P3: 60 minutes
     symbol_cooldown_seconds: int = 3600      # Per-symbol: 60 minutes
     signal_confirmation_periods: int = 2     # Confirm for N periods
+    pending_signal_max_age_seconds: int = 21600  # Drop unconfirmed signals after 6 hours
     state_path: str = "reports/cooldown_state.json"
 
 
@@ -137,7 +138,16 @@ class CooldownManager:
             return False
         
         pending = self.pending_signals[symbol]
-        
+        if self._pending_signal_expired(pending):
+            logger.info(f"{symbol}: Pending signal expired, resetting confirmation")
+            self.pending_signals[symbol] = {
+                'signal': new_signal,
+                'count': 1,
+                'first_seen_ms': int(time.time() * 1000)
+            }
+            self._save_state()
+            return False
+
         # Check if same signal
         if self._signals_equal(pending['signal'], new_signal):
             pending['count'] += 1
@@ -202,7 +212,32 @@ class CooldownManager:
             EventPriority.P3_HEARTBEAT: self.config.global_cooldown_p3_seconds,
         }
         return cooldowns.get(priority, 1800) * 1000
-    
+
+    def _pending_signal_expired(self, pending: Dict, now_ms: Optional[int] = None) -> bool:
+        max_age_sec = max(0, int(self.config.pending_signal_max_age_seconds or 0))
+        if max_age_sec <= 0:
+            return False
+        try:
+            first_seen_ms = int(float(pending.get('first_seen_ms', 0) or 0))
+        except Exception:
+            first_seen_ms = 0
+        if first_seen_ms <= 0:
+            return True
+        now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+        return now_ms - first_seen_ms > max_age_sec * 1000
+
+    def _prune_expired_pending_signals(self) -> int:
+        if not self.pending_signals:
+            return 0
+        now_ms = int(time.time() * 1000)
+        expired = [
+            symbol for symbol, pending in self.pending_signals.items()
+            if self._pending_signal_expired(pending, now_ms=now_ms)
+        ]
+        for symbol in expired:
+            self.pending_signals.pop(symbol, None)
+        return len(expired)
+
     def _signals_equal(self, sig1: Dict, sig2: Dict) -> bool:
         """Check if two signals are equivalent."""
         # Compare direction and approximate score
@@ -222,6 +257,10 @@ class CooldownManager:
                 self.last_global_trade_ms = data.get('last_global_trade_ms', 0)
                 self.last_symbol_trade_ms = data.get('symbol_cooldowns', {})
                 self.pending_signals = data.get('pending_signals', {})
+                pruned = self._prune_expired_pending_signals()
+                if pruned:
+                    self._save_state()
+                    logger.info(f"Pruned expired pending signals: {pruned}")
                 logger.info(f"Loaded cooldown state: {len(self.last_symbol_trade_ms)} symbols")
             else:
                 self.last_global_trade_ms = 0
