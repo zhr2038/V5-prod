@@ -1252,9 +1252,13 @@ def _build_effective_event_log_values(result: dict, execution: dict) -> dict:
     return out
 
 
-def _no_event_actions_message(state: dict) -> str:
+def _no_event_actions_message(state: dict, result: dict | None = None) -> str:
     """Return an operator-facing reason when no event action is accepted."""
     state = state or {}
+    result = result or {}
+    result_reason = str(result.get('reason') or '').strip()
+    if result_reason == 'auto_risk_protect_open_block':
+        return "No event-driven actions - open actions blocked by auto-risk PROTECT"
     regime = str(state.get('regime', '') or '').upper().replace('-', '_')
     if bool(state.get('suppress_entry_events', False)):
         return "No event-driven actions - entry events suppressed by close-only Risk-Off"
@@ -1693,6 +1697,8 @@ def main():
         'current_target_run_id': get_current_live_window_run_id(),
     }
 
+    no_action_message = None
+
     if force_full_mode:
         age_sec, last_run_id = get_last_live_run_age_sec(paths.runs_dir)
         execution['last_run_age_sec'] = age_sec
@@ -1802,7 +1808,8 @@ def main():
         else:
             logger.info("PASSIVE mode: actions logged only, no execution")
     else:
-        logger.info(_no_event_actions_message(state))
+        no_action_message = _no_event_actions_message(state, result)
+        logger.info(no_action_message)
 
     # Log to file for monitoring
     effective_log = _build_effective_event_log_values(result, execution)
@@ -1822,6 +1829,8 @@ def main():
         'auto_risk_blocked_actions': blocked_auto_risk_actions,
         'execution': execution,
     }
+    if no_action_message:
+        log_entry['no_action_message'] = no_action_message
     if 'candidate_actions' in effective_log:
         log_entry.update({
             'candidate_should_trade': effective_log['candidate_should_trade'],
