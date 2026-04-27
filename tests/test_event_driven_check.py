@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from types import SimpleNamespace
 
@@ -193,6 +194,32 @@ def test_event_monitor_detects_risk_off_from_normalized_regime(tmp_path) -> None
     events = trader.monitor._check_risk_events(state)
 
     assert [event.type.name for event in events] == ["REGIME_RISK_OFF"]
+
+
+def test_run_event_param_scan_suppresses_candidate_warning_logs(caplog) -> None:
+    state = {
+        "timestamp_ms": 1,
+        "regime": "RISK_OFF",
+        "prices": {},
+        "positions": {},
+        "signals": {},
+        "selected_symbols": [],
+    }
+    last_state = {
+        "timestamp_ms": 0,
+        "regime": "SIDEWAYS",
+        "prices": {},
+        "signals": {},
+        "selected_symbols": [],
+    }
+    caplog.set_level(logging.WARNING)
+
+    scan = edc.run_event_param_scan(state, last_state, {})
+
+    assert scan["count"] == 72
+    messages = [record.getMessage() for record in caplog.records]
+    assert not any("RISK_OFF regime detected" in message for message in messages)
+    assert not any("RISK_OFF: Closing all positions" in message for message in messages)
 
 
 def test_event_driven_history_normalizes_zero_based_rank(tmp_path) -> None:

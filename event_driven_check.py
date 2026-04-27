@@ -1370,7 +1370,7 @@ def run_event_param_scan(state: dict, last_state: dict, ev_cfg: dict):
     for n in noisy_names:
         lg = logging.getLogger(n)
         old_levels[n] = lg.level
-        lg.setLevel(logging.WARNING)
+        lg.setLevel(logging.ERROR)
 
     try:
         with tempfile.TemporaryDirectory(prefix="v5_event_param_scan_") as temp_dir:
