@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import scripts.health_check as health_check
@@ -126,6 +127,52 @@ def test_resolve_live_timer_unit_name_ignores_retired_live_20u(monkeypatch) -> N
     )
 
     assert health_check.resolve_live_timer_unit_name() == "v5-prod.user.timer"
+
+
+def test_parse_timer_show_output_accepts_systemd_duration_monotonic() -> None:
+    props, last_trigger_text, last_trigger_at = health_check.HealthChecker._parse_timer_show_output(
+        "\n".join(
+            [
+                "LoadState=loaded",
+                "ActiveState=active",
+                "UnitFileState=enabled",
+                "LastTriggerUSec=Tue 2026-04-28 00:10:12 CST",
+                "LastTriggerUSecMonotonic=2w 6d 9h 28min 54.785116s",
+            ]
+        )
+    )
+
+    assert props["LoadState"] == "loaded"
+    assert last_trigger_text == "Tue 2026-04-28 00:10:12 CST"
+    assert last_trigger_at == datetime(2026, 4, 28, 0, 10, 12)
+
+
+def test_check_timer_health_uses_wallclock_trigger_when_monotonic_is_duration(monkeypatch) -> None:
+    class Result:
+        returncode = 0
+
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    now = datetime.now()
+    timer_stdout = "\n".join(
+        [
+            "LoadState=loaded",
+            "ActiveState=active",
+            "UnitFileState=enabled",
+            f"LastTriggerUSec=Tue {now:%Y-%m-%d %H:%M:%S} CST",
+            "LastTriggerUSecMonotonic=2w 6d 9h 28min 54.785116s",
+        ]
+    )
+
+    monkeypatch.setattr(health_check.shutil, "which", lambda _: "/bin/systemctl")
+    monkeypatch.setattr(health_check, "resolve_live_timer_unit_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(health_check.subprocess, "run", lambda *args, **kwargs: Result(timer_stdout))
+
+    result = health_check.HealthChecker().check_timer_health()
+
+    assert result["status"] == "healthy"
+    assert result["details"] == "all timers healthy"
 
 
 def test_check_okx_api_warns_with_runtime_env_filename(monkeypatch, tmp_path: Path) -> None:
