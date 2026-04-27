@@ -9,6 +9,8 @@ from event_driven_check import (
     _filter_dust_positions,
     _load_fused_signal_states,
     _load_positions_snapshot,
+    filter_event_actions_for_auto_risk,
+    load_current_auto_risk_level,
 )
 from src.execution.event_action_bridge import clear_event_actions, persist_event_actions
 from src.execution.event_driven_integration import EventDrivenConfig, EventDrivenTrader
@@ -147,6 +149,87 @@ def test_event_driven_history_normalizes_zero_based_rank(tmp_path) -> None:
     )
 
     assert state.signals["ETH/USDT"].rank == 1
+
+
+def test_load_current_auto_risk_level_prefers_newer_eval_snapshot(tmp_path) -> None:
+    order_store = tmp_path / "orders.sqlite"
+    (tmp_path / "auto_risk_guard.json").write_text(
+        json.dumps(
+            {
+                "current_level": "DEFENSE",
+                "last_update": "2026-04-27T10:00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "auto_risk_eval.json").write_text(
+        json.dumps(
+            {
+                "current_level": "PROTECT",
+                "ts": "2026-04-27T10:01:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_current_auto_risk_level(order_store) == "PROTECT"
+
+
+def test_filter_event_actions_for_auto_risk_blocks_protect_open_actions() -> None:
+    result = {
+        "should_trade": True,
+        "reason": "processed",
+        "actions": [{"symbol": "BTC/USDT", "action": "open", "reason": "heartbeat_entry"}],
+        "events_processed": 1,
+        "events_blocked": 0,
+    }
+
+    filtered = filter_event_actions_for_auto_risk(result, "PROTECT")
+
+    assert filtered["should_trade"] is False
+    assert filtered["reason"] == "auto_risk_protect_open_block"
+    assert filtered["actions"] == []
+    assert filtered["events_processed"] == 1
+    assert filtered["events_blocked"] == 1
+    assert filtered["auto_risk_level"] == "PROTECT"
+    assert filtered["auto_risk_blocked_actions"] == result["actions"]
+
+
+def test_filter_event_actions_for_auto_risk_keeps_protect_close_actions() -> None:
+    close_action = {"symbol": "BTC/USDT", "action": "close", "reason": "stop_loss", "priority": 0}
+    result = {
+        "should_trade": True,
+        "reason": "processed",
+        "actions": [close_action],
+        "events_processed": 1,
+        "events_blocked": 0,
+    }
+
+    filtered = filter_event_actions_for_auto_risk(result, "PROTECT")
+
+    assert filtered is result
+    assert filtered["actions"] == [close_action]
+    assert filtered["should_trade"] is True
+
+
+def test_filter_event_actions_for_auto_risk_keeps_close_when_open_blocked() -> None:
+    close_action = {"symbol": "ETH/USDT", "action": "close", "reason": "rank_exit_6", "priority": 0}
+    open_action = {"symbol": "BTC/USDT", "action": "open", "reason": "signal_rank_jump", "priority": 2}
+    result = {
+        "should_trade": True,
+        "reason": "processed",
+        "actions": [close_action, open_action],
+        "events_processed": 2,
+        "events_blocked": 0,
+    }
+
+    filtered = filter_event_actions_for_auto_risk(result, "PROTECT")
+
+    assert filtered["should_trade"] is True
+    assert filtered["reason"] == "auto_risk_protect_open_block_partial"
+    assert filtered["actions"] == [close_action]
+    assert filtered["auto_risk_blocked_actions"] == [open_action]
+    assert filtered["events_blocked"] == 1
 
 
 def test_effective_event_log_excludes_active_throttled_actions() -> None:

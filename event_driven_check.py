@@ -37,11 +37,14 @@ try:
     from src.execution.event_action_bridge import clear_event_actions, persist_event_actions
     from src.execution.fill_store import (
         derive_position_store_path,
+        derive_runtime_auto_risk_eval_path,
+        derive_runtime_auto_risk_guard_path,
         derive_runtime_named_artifact_path,
         derive_runtime_named_json_path,
         derive_runtime_reports_dir,
         derive_runtime_runs_dir,
     )
+    from src.risk.auto_risk_guard import extract_risk_level
     from configs.runtime_config import resolve_runtime_path
     logger.info("✅ Event-driven modules loaded")
 except Exception as e:
@@ -823,6 +826,112 @@ def estimate_live_equity(eq_file: Path | None = None) -> float:
     return 0.0
 
 
+def _coerce_timestamp_epoch(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _risk_state_epoch(payload: object, *, primary_keys: tuple[str, ...]) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in primary_keys:
+        epoch = _coerce_timestamp_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+    history = payload.get("history")
+    if isinstance(history, list):
+        latest_history = max(
+            (item for item in history if isinstance(item, dict)),
+            key=lambda item: float(_coerce_timestamp_epoch(item.get("ts")) or float("-inf")),
+            default=None,
+        )
+        if isinstance(latest_history, dict):
+            epoch = _coerce_timestamp_epoch(latest_history.get("ts"))
+            if epoch is not None:
+                return epoch
+    return None
+
+
+def _load_json_state_with_warning(path: Path, *, label: str) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(f"Failed to load {label} state from {path}: {exc}")
+        return {}
+    if not isinstance(payload, dict):
+        logger.warning(f"Ignoring invalid {label} state from {path}: expected object")
+        return {}
+    return payload
+
+
+def load_current_auto_risk_level(order_store_path: Path) -> str:
+    eval_path = derive_runtime_auto_risk_eval_path(order_store_path).resolve()
+    guard_path = derive_runtime_auto_risk_guard_path(order_store_path).resolve()
+
+    eval_state = _load_json_state_with_warning(eval_path, label="auto_risk_eval")
+    guard_state = _load_json_state_with_warning(guard_path, label="auto_risk_guard")
+    eval_level = extract_risk_level(eval_state)
+    guard_level = extract_risk_level(guard_state)
+    eval_epoch = _risk_state_epoch(eval_state, primary_keys=("ts",))
+    guard_epoch = _risk_state_epoch(guard_state, primary_keys=("last_update",))
+
+    if eval_level and (not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):
+        return eval_level
+    if guard_level:
+        return guard_level
+
+    logger.warning(
+        "Auto-risk level is UNKNOWN; event-driven PROTECT open-action guard cannot be applied "
+        f"(eval={eval_path}, guard={guard_path})"
+    )
+    return ""
+
+
+def _is_event_open_action(action: object) -> bool:
+    if not isinstance(action, dict):
+        return False
+    return str(action.get("action") or "").strip().lower() == "open"
+
+
+def filter_event_actions_for_auto_risk(result: dict, risk_level: str) -> dict:
+    """Block event-driven entries while auto-risk is in PROTECT; keep exits."""
+    normalized_level = str(risk_level or "").strip().upper()
+    if normalized_level != "PROTECT":
+        return result
+
+    actions = list((result or {}).get("actions") or [])
+    blocked = [action for action in actions if _is_event_open_action(action)]
+    if not blocked:
+        return result
+
+    allowed = [action for action in actions if not _is_event_open_action(action)]
+    filtered = dict(result or {})
+    filtered["actions"] = allowed
+    filtered["auto_risk_level"] = normalized_level
+    filtered["auto_risk_blocked_actions"] = blocked
+    filtered["events_blocked"] = int(filtered.get("events_blocked", 0) or 0) + len(blocked)
+
+    if allowed:
+        filtered["should_trade"] = True
+        filtered["reason"] = "auto_risk_protect_open_block_partial"
+    else:
+        filtered["should_trade"] = False
+        filtered["reason"] = "auto_risk_protect_open_block"
+
+    return filtered
+
+
 def build_riskoff_shadow_plan(state: dict, cfg: dict, watchlist: list, *, equity_file: Path | None = None):
     """Build shadow plan for Risk-Off probe scenarios (no execution)."""
     regime = str(state.get('regime', 'SIDEWAYS'))
@@ -1408,12 +1517,22 @@ def main():
     # Check if should trade (with last state for comparison)
     logger.info("Checking for trading events...")
     result = trader.should_trade(state, last_state, commit_execution_state=False)
-    
+    auto_risk_level = load_current_auto_risk_level(paths.order_store_path)
+    if auto_risk_level:
+        logger.info(f"Auto-risk level: {auto_risk_level}")
+    result = filter_event_actions_for_auto_risk(result, auto_risk_level)
+    blocked_auto_risk_actions = list(result.get("auto_risk_blocked_actions") or [])
+    if blocked_auto_risk_actions:
+        logger.warning(
+            "Auto-risk PROTECT blocked event-driven open actions: "
+            f"{[action.get('symbol') for action in blocked_auto_risk_actions if isinstance(action, dict)]}"
+        )
+
     logger.info(f"Should trade: {result['should_trade']}")
     logger.info(f"Reason: {result['reason']}")
     logger.info(f"Events processed: {result.get('events_processed', 0)}")
     logger.info(f"Events blocked: {result.get('events_blocked', 0)}")
-    
+
     if result['actions']:
         logger.info(f"Actions ({len(result['actions'])}):")
         for action in result['actions']:
@@ -1426,6 +1545,8 @@ def main():
         'force_full_min_interval_minutes': force_full_min_interval_minutes,
         'active_min_interval_minutes': active_min_interval_minutes,
         'adaptive_cooldown': adaptive_meta,
+        'auto_risk_level': auto_risk_level or None,
+        'auto_risk_blocked_actions': blocked_auto_risk_actions,
         'live_service_unit': live_service_unit,
         'live_service_triggered': False,
         'live_service_ok': None,
@@ -1561,6 +1682,8 @@ def main():
         'events_blocked': effective_log['events_blocked'],
         'watchlist_top3': watchlist[:3],
         'param_scan_best': (param_scan or {}).get('best'),
+        'auto_risk_level': result.get('auto_risk_level') or auto_risk_level or None,
+        'auto_risk_blocked_actions': blocked_auto_risk_actions,
         'execution': execution,
     }
     if 'candidate_actions' in effective_log:
