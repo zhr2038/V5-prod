@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import event_driven_check as edc
 from event_driven_check import (
     _build_effective_event_log_values,
+    _extract_event_regime,
     _filter_dust_positions,
     _load_fused_signal_states,
     _load_positions_snapshot,
@@ -163,6 +164,35 @@ def test_get_last_live_run_age_sec_uses_live_run_id_order(tmp_path, monkeypatch)
 
     assert run_id == "20260427_19"
     assert age_sec == 3000.0
+
+
+def test_extract_event_regime_prefers_regime_state_field() -> None:
+    assert _extract_event_regime({"state": "Risk-Off", "regime": "SIDEWAYS"}) == "RISK_OFF"
+    assert _extract_event_regime({"state": "Sideways"}) == "SIDEWAYS"
+    assert _extract_event_regime({"state": "Trending"}) == "TRENDING"
+    assert _extract_event_regime({"state": "unknown", "regime": "RISK_OFF"}) == "RISK_OFF"
+
+
+def test_event_monitor_detects_risk_off_from_normalized_regime(tmp_path) -> None:
+    trader = EventDrivenTrader(
+        EventDrivenConfig(
+            monitor_state_path=str(tmp_path / "event_monitor_state.json"),
+            cooldown_state_path=str(tmp_path / "cooldown_state.json"),
+        )
+    )
+    state = trader._build_market_state(
+        {
+            "timestamp_ms": 1,
+            "regime": _extract_event_regime({"state": "Risk-Off"}),
+            "prices": {},
+            "positions": {},
+            "signals": {},
+        }
+    )
+
+    events = trader.monitor._check_risk_events(state)
+
+    assert [event.type.name for event in events] == ["REGIME_RISK_OFF"]
 
 
 def test_event_driven_history_normalizes_zero_based_rank(tmp_path) -> None:

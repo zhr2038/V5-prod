@@ -246,6 +246,36 @@ def _load_json_mapping(path: Path) -> dict[str, Any]:
     return {}
 
 
+def _normalize_event_regime(value: object, *, default: str = 'SIDEWAYS') -> str:
+    text = str(value or '').strip()
+    if not text:
+        return default
+
+    normalized = text.upper().replace('-', '_').replace(' ', '_')
+    aliases = {
+        'RISKOFF': 'RISK_OFF',
+        'RISK_OFF': 'RISK_OFF',
+        'SIDEWAY': 'SIDEWAYS',
+        'SIDEWAYS': 'SIDEWAYS',
+        'TRENDING': 'TRENDING',
+        'TRENDING_UP': 'TRENDING_UP',
+        'TRENDINGUP': 'TRENDING_UP',
+        'TRENDING_DOWN': 'TRENDING_DOWN',
+        'TRENDINGDOWN': 'TRENDING_DOWN',
+    }
+    return aliases.get(normalized, default)
+
+
+def _extract_event_regime(regime_data: object) -> str:
+    if not isinstance(regime_data, dict):
+        return 'SIDEWAYS'
+    for key in ('state', 'regime'):
+        normalized = _normalize_event_regime(regime_data.get(key), default='')
+        if normalized:
+            return normalized
+    return 'SIDEWAYS'
+
+
 def _merge_runtime_stop_state(
     positions: dict[str, dict],
     *,
@@ -450,7 +480,7 @@ def load_current_state(cfg=None, config_path: Path = None):
         if regime_path.exists():
             with open(regime_path) as f:
                 regime_data = json.load(f)
-                regime = regime_data.get('regime', 'SIDEWAYS')
+                regime = _extract_event_regime(regime_data)
         
         # Load live positions from sqlite first; fallback to legacy portfolio.json only when needed
         positions, position_symbols, position_source = _load_positions_snapshot(
