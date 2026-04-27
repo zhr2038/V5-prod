@@ -12,6 +12,7 @@ from event_driven_check import (
     _filter_dust_positions,
     _load_fused_signal_states,
     _load_positions_snapshot,
+    _no_event_actions_message,
     _should_suppress_event_selected_symbols,
     compute_adaptive_event_cfg,
     filter_event_actions_for_auto_risk,
@@ -503,6 +504,30 @@ def test_effective_event_log_keeps_accepted_active_actions() -> None:
     assert log_values["actions"] == result["actions"]
     assert log_values["events_processed"] == 1
     assert "candidate_actions" not in log_values
+
+
+def test_no_event_actions_message_names_suppressed_risk_off_entries() -> None:
+    message = _no_event_actions_message(
+        {
+            "regime": "RISK_OFF",
+            "signals": {"BTC/USDT": {"direction": "buy"}},
+            "suppress_entry_events": True,
+        }
+    )
+
+    assert message == "No event-driven actions - entry events suppressed by close-only Risk-Off"
+
+
+def test_no_event_actions_message_does_not_blame_missing_signals_when_signals_exist() -> None:
+    message = _no_event_actions_message(
+        {
+            "regime": "SIDEWAYS",
+            "signals": {"BTC/USDT": {"direction": "buy"}},
+            "suppress_entry_events": False,
+        }
+    )
+
+    assert message == "No event-driven actions - no actionable events"
 
 
 def test_trigger_live_execution_service_rejects_already_running_unit(monkeypatch) -> None:

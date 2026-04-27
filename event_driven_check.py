@@ -1252,6 +1252,19 @@ def _build_effective_event_log_values(result: dict, execution: dict) -> dict:
     return out
 
 
+def _no_event_actions_message(state: dict) -> str:
+    """Return an operator-facing reason when no event action is accepted."""
+    state = state or {}
+    regime = str(state.get('regime', '') or '').upper().replace('-', '_')
+    if bool(state.get('suppress_entry_events', False)):
+        return "No event-driven actions - entry events suppressed by close-only Risk-Off"
+    if regime == "RISK_OFF":
+        return "No event-driven actions - Risk-Off produced no actionable exits"
+    if state.get('signals'):
+        return "No event-driven actions - no actionable events"
+    return "No event-driven actions - standard V5 may skip if no signals"
+
+
 def _event_log_timestamp_ms(entry: dict) -> Optional[int]:
     try:
         raw = str((entry or {}).get('timestamp') or '')
@@ -1789,7 +1802,7 @@ def main():
         else:
             logger.info("PASSIVE mode: actions logged only, no execution")
     else:
-        logger.info("No event-driven actions - standard V5 may skip if no signals")
+        logger.info(_no_event_actions_message(state))
 
     # Log to file for monitoring
     effective_log = _build_effective_event_log_values(result, execution)
@@ -1799,6 +1812,8 @@ def main():
         'reason': effective_log['reason'],
         'actions': effective_log['actions'],
         'regime': state['regime'],
+        'selected_symbols': list(state.get('selected_symbols') or []),
+        'suppress_entry_events': bool(state.get('suppress_entry_events', False)),
         'events_processed': effective_log['events_processed'],
         'events_blocked': effective_log['events_blocked'],
         'watchlist_top3': watchlist[:3],
