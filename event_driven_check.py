@@ -1032,6 +1032,135 @@ def _build_effective_event_log_values(result: dict, execution: dict) -> dict:
     return out
 
 
+def _event_log_timestamp_ms(entry: dict) -> Optional[int]:
+    try:
+        raw = str((entry or {}).get('timestamp') or '')
+        if not raw:
+            return None
+        return int(datetime.fromisoformat(raw).timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def _state_ts_matches_event(ts_ms, event_ms: int, *, tolerance_ms: int) -> bool:
+    try:
+        ts = int(float(ts_ms or 0))
+    except Exception:
+        return False
+    if ts <= 0:
+        return False
+    return abs(ts - int(event_ms)) <= max(0, int(tolerance_ms))
+
+
+def repair_unaccepted_event_execution_state(
+    *,
+    event_log_path: Path,
+    cooldown_state_path: Path,
+    monitor_state_path: Path,
+    tolerance_ms: int = 10000,
+) -> dict:
+    """Remove cooldown/heartbeat timestamps written by unaccepted event candidates."""
+    meta = {
+        'changed': False,
+        'cooldown_repaired': False,
+        'monitor_repaired': False,
+        'matched_unaccepted_events': 0,
+        'rewind_to_ms': 0,
+        'symbols_repaired': [],
+    }
+    if not event_log_path.exists():
+        return meta
+
+    accepted_ms = 0
+    accepted_symbol_ms = {}
+    unaccepted = []
+    try:
+        rows = event_log_path.read_text(encoding='utf-8').splitlines()
+    except Exception as e:
+        logger.warning(f"Could not read event log for execution state repair: {e}")
+        return meta
+
+    for raw in rows:
+        try:
+            entry = json.loads(raw)
+        except Exception:
+            continue
+        ts_ms = _event_log_timestamp_ms(entry)
+        if ts_ms is None:
+            continue
+        execution = entry.get('execution') or {}
+        actions = list(entry.get('actions') or [])
+        candidate_actions = list(entry.get('candidate_actions') or [])
+        if actions and execution.get('live_service_ok') is True:
+            accepted_ms = max(accepted_ms, ts_ms)
+            for action in actions:
+                symbol = str((action or {}).get('symbol') or '').strip()
+                if symbol:
+                    accepted_symbol_ms[symbol] = max(accepted_symbol_ms.get(symbol, 0), ts_ms)
+        if candidate_actions and execution.get('live_service_ok') is not True:
+            unaccepted.append({
+                'ts_ms': ts_ms,
+                'symbols': {
+                    str((action or {}).get('symbol') or '').strip()
+                    for action in candidate_actions
+                    if str((action or {}).get('symbol') or '').strip()
+                },
+            })
+
+    if not unaccepted:
+        return meta
+    meta['matched_unaccepted_events'] = len(unaccepted)
+    meta['rewind_to_ms'] = accepted_ms
+
+    try:
+        if cooldown_state_path.exists() and cooldown_state_path.stat().st_size > 0:
+            cooldown = json.loads(cooldown_state_path.read_text(encoding='utf-8'))
+            cooldown_changed = False
+            last_global = cooldown.get('last_global_trade_ms')
+            if any(_state_ts_matches_event(last_global, item['ts_ms'], tolerance_ms=tolerance_ms) for item in unaccepted):
+                cooldown['last_global_trade_ms'] = accepted_ms
+                cooldown_changed = True
+            symbol_cooldowns = dict(cooldown.get('symbol_cooldowns') or {})
+            for symbol, ts_ms in list(symbol_cooldowns.items()):
+                if not any(
+                    symbol in item['symbols']
+                    and _state_ts_matches_event(ts_ms, item['ts_ms'], tolerance_ms=tolerance_ms)
+                    for item in unaccepted
+                ):
+                    continue
+                previous = accepted_symbol_ms.get(symbol, 0)
+                if previous > 0:
+                    symbol_cooldowns[symbol] = previous
+                else:
+                    symbol_cooldowns.pop(symbol, None)
+                meta['symbols_repaired'].append(symbol)
+                cooldown_changed = True
+            if cooldown_changed:
+                cooldown['symbol_cooldowns'] = symbol_cooldowns
+                cooldown['repaired_unaccepted_event_state_at_ms'] = int(time.time() * 1000)
+                cooldown_state_path.write_text(json.dumps(cooldown, ensure_ascii=False, indent=2), encoding='utf-8')
+                meta['cooldown_repaired'] = True
+                meta['changed'] = True
+    except Exception as e:
+        logger.warning(f"Failed to repair unaccepted cooldown state: {e}")
+
+    try:
+        if monitor_state_path.exists() and monitor_state_path.stat().st_size > 0:
+            monitor = json.loads(monitor_state_path.read_text(encoding='utf-8'))
+            last_trade = monitor.get('last_trade_time_ms')
+            if any(_state_ts_matches_event(last_trade, item['ts_ms'], tolerance_ms=tolerance_ms) for item in unaccepted):
+                monitor['last_trade_time_ms'] = accepted_ms
+                monitor['repaired_unaccepted_event_state_at_ms'] = int(time.time() * 1000)
+                monitor_state_path.write_text(json.dumps(monitor, ensure_ascii=False, indent=2), encoding='utf-8')
+                meta['monitor_repaired'] = True
+                meta['changed'] = True
+    except Exception as e:
+        logger.warning(f"Failed to repair unaccepted event monitor state: {e}")
+
+    meta['symbols_repaired'] = sorted(set(meta['symbols_repaired']))
+    return meta
+
+
 def run_event_param_scan(state: dict, last_state: dict, ev_cfg: dict):
     """Run lightweight one-shot parameter scan on current snapshot pair."""
     base = {
@@ -1174,7 +1303,14 @@ def main():
         return 0
 
     paths = build_paths(cfg)
-    
+    repair_meta = repair_unaccepted_event_execution_state(
+        event_log_path=paths.event_driven_log_path,
+        cooldown_state_path=derive_runtime_named_json_path(paths.order_store_path, "cooldown_state").resolve(),
+        monitor_state_path=derive_runtime_named_json_path(paths.order_store_path, "event_monitor_state").resolve(),
+    )
+    if repair_meta.get('changed'):
+        logger.warning(f"Repaired unaccepted event execution state: {repair_meta}")
+
     # Load last signal history for comparison
     last_state = None
     history_path = paths.event_driven_signals_path

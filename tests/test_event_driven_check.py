@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import event_driven_check as edc
@@ -234,3 +235,90 @@ def test_clear_event_actions_removes_unaccepted_action_file(tmp_path) -> None:
     assert clear_event_actions(path=str(action_path)) is True
     assert not action_path.exists()
     assert clear_event_actions(path=str(action_path)) is False
+
+
+def test_repair_unaccepted_event_execution_state_rewinds_matching_state(tmp_path) -> None:
+    event_log = tmp_path / "event_driven_log.jsonl"
+    cooldown_state = tmp_path / "cooldown_state.json"
+    monitor_state = tmp_path / "event_monitor_state.json"
+    accepted = {
+        "timestamp": "2026-04-27T10:00:00",
+        "actions": [{"symbol": "BTC/USDT", "action": "open"}],
+        "execution": {"live_service_ok": True},
+    }
+    unaccepted = {
+        "timestamp": "2026-04-27T17:15:04",
+        "should_trade": False,
+        "actions": [],
+        "candidate_actions": [{"symbol": "BTC/USDT", "action": "open"}],
+        "execution": {
+            "live_service_ok": None,
+            "trigger_reason": "active_throttled:same_window_already_ran",
+        },
+    }
+    accepted_ms = edc._event_log_timestamp_ms(accepted)
+    unaccepted_ms = edc._event_log_timestamp_ms(unaccepted)
+    event_log.write_text(
+        "\n".join(json.dumps(item) for item in [accepted, unaccepted]) + "\n",
+        encoding="utf-8",
+    )
+    cooldown_state.write_text(
+        json.dumps(
+            {
+                "last_global_trade_ms": unaccepted_ms,
+                "symbol_cooldowns": {
+                    "BTC/USDT": unaccepted_ms,
+                    "ETH/USDT": 12345,
+                },
+                "pending_signals": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monitor_state.write_text(
+        json.dumps({"last_trade_time_ms": unaccepted_ms, "price_history": {}}),
+        encoding="utf-8",
+    )
+
+    meta = edc.repair_unaccepted_event_execution_state(
+        event_log_path=event_log,
+        cooldown_state_path=cooldown_state,
+        monitor_state_path=monitor_state,
+    )
+
+    cooldown = json.loads(cooldown_state.read_text(encoding="utf-8"))
+    monitor = json.loads(monitor_state.read_text(encoding="utf-8"))
+    assert meta["changed"] is True
+    assert meta["cooldown_repaired"] is True
+    assert meta["monitor_repaired"] is True
+    assert cooldown["last_global_trade_ms"] == accepted_ms
+    assert cooldown["symbol_cooldowns"]["BTC/USDT"] == accepted_ms
+    assert cooldown["symbol_cooldowns"]["ETH/USDT"] == 12345
+    assert monitor["last_trade_time_ms"] == accepted_ms
+
+
+def test_repair_unaccepted_event_execution_state_leaves_unmatched_state(tmp_path) -> None:
+    event_log = tmp_path / "event_driven_log.jsonl"
+    cooldown_state = tmp_path / "cooldown_state.json"
+    monitor_state = tmp_path / "event_monitor_state.json"
+    unaccepted = {
+        "timestamp": "2026-04-27T17:15:04",
+        "candidate_actions": [{"symbol": "BTC/USDT", "action": "open"}],
+        "execution": {"live_service_ok": None},
+    }
+    event_log.write_text(json.dumps(unaccepted) + "\n", encoding="utf-8")
+    cooldown_state.write_text(
+        json.dumps({"last_global_trade_ms": 999, "symbol_cooldowns": {}, "pending_signals": {}}),
+        encoding="utf-8",
+    )
+    monitor_state.write_text(json.dumps({"last_trade_time_ms": 999}), encoding="utf-8")
+
+    meta = edc.repair_unaccepted_event_execution_state(
+        event_log_path=event_log,
+        cooldown_state_path=cooldown_state,
+        monitor_state_path=monitor_state,
+    )
+
+    assert meta["changed"] is False
+    assert json.loads(cooldown_state.read_text(encoding="utf-8"))["last_global_trade_ms"] == 999
+    assert json.loads(monitor_state.read_text(encoding="utf-8"))["last_trade_time_ms"] == 999
