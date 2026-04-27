@@ -57,3 +57,11 @@ def test_trade_monitor_timer_runs_after_hourly_live_window() -> None:
 
     assert "OnCalendar=*-*-* *:07:00" in timer
     assert "Unit=v5-trade-monitor.service" in timer
+
+
+def test_event_driven_timer_is_offset_from_hourly_live_and_auto_risk_writes() -> None:
+    timer = (PROJECT_ROOT / "deploy" / "systemd" / "v5-event-driven.timer").read_text(encoding="utf-8")
+
+    assert "OnCalendar=*:02/15:00" in timer
+    assert "OnCalendar=*:0/15:00" not in timer
+    assert "AccuracySec=30s" in timer
