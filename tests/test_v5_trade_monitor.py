@@ -188,6 +188,31 @@ def test_send_telegram_alert_reports_runtime_alert_path(monkeypatch, tmp_path: P
     assert str(paths.alert_file) in output
 
 
+def test_send_telegram_alert_persists_local_file_when_telegram_succeeds(monkeypatch, tmp_path: Path) -> None:
+    paths = trade_monitor.MonitorPaths(
+        project_root=tmp_path,
+        reports_dir=(tmp_path / "reports").resolve(),
+        logs_dir=(tmp_path / "logs").resolve(),
+        fills_db_path=(tmp_path / "reports" / "fills.sqlite").resolve(),
+        orders_db_path=(tmp_path / "reports" / "orders.sqlite").resolve(),
+        env_path=(tmp_path / ".env").resolve(),
+        alert_file=(tmp_path / "reports" / "monitor_alert.txt").resolve(),
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setattr(trade_monitor.request, "urlopen", lambda req, timeout=10: Response())
+
+    assert trade_monitor.send_telegram_alert("fresh alert", paths=paths) is True
+    assert "fresh alert" in paths.alert_file.read_text(encoding="utf-8")
+
+
 def test_main_silent_exits_zero_when_alert_is_sent(monkeypatch) -> None:
     monkeypatch.setattr(trade_monitor, "check_and_alert", lambda: True)
 

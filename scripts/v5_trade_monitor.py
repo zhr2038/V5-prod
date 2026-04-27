@@ -412,6 +412,15 @@ def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPa
         f"time: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     )
 
+    file_ok = False
+    try:
+        paths.alert_file.parent.mkdir(parents=True, exist_ok=True)
+        paths.alert_file.write_text(full_message, encoding="utf-8")
+        print(f"[INFO] alert written to {paths.alert_file}")
+        file_ok = True
+    except Exception as exc:
+        print(f"[ERROR] failed to persist alert: {exc}")
+
     bot_token, chat_id = _load_telegram_settings(paths)
     if bot_token:
         try:
@@ -428,14 +437,7 @@ def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPa
         except Exception as exc:
             print(f"[ERROR] failed to send Telegram alert: {exc}")
 
-    try:
-        paths.alert_file.parent.mkdir(parents=True, exist_ok=True)
-        paths.alert_file.write_text(full_message, encoding="utf-8")
-        print(f"[INFO] alert written to {paths.alert_file}")
-        return True
-    except Exception as exc:
-        print(f"[ERROR] failed to persist alert: {exc}")
-        return False
+    return file_ok
 
 
 def clear_stale_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
