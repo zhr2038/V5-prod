@@ -1,8 +1,26 @@
 from __future__ import annotations
 
-from event_driven_check import _load_fused_signal_states, _load_positions_snapshot
+from types import SimpleNamespace
+
+from event_driven_check import (
+    _filter_dust_positions,
+    _load_fused_signal_states,
+    _load_positions_snapshot,
+)
 from src.execution.event_driven_integration import EventDrivenConfig, EventDrivenTrader
 from src.execution.position_store import PositionStore
+
+
+def _dust_cfg():
+    return SimpleNamespace(
+        execution=SimpleNamespace(
+            dust_value_threshold=0.5,
+            dust_usdt_ignore=1.0,
+            reconcile_dust_usdt_ignore=1.0,
+            min_trade_value_usdt=10.0,
+        ),
+        budget=SimpleNamespace(),
+    )
 
 
 def test_load_positions_snapshot_reports_empty_position_store(tmp_path) -> None:
@@ -17,6 +35,42 @@ def test_load_positions_snapshot_reports_empty_position_store(tmp_path) -> None:
     assert positions == {}
     assert symbols == set()
     assert source == "position_store_empty"
+
+
+def test_filter_dust_positions_drops_residual_notional() -> None:
+    positions = {
+        "BTC/USDT": {
+            "entry_price": 78021.7,
+            "quantity": 5.43e-9,
+        }
+    }
+
+    filtered, dust_symbols = _filter_dust_positions(
+        positions,
+        {"BTC/USDT": 77630.7},
+        _dust_cfg(),
+    )
+
+    assert filtered == {}
+    assert dust_symbols == {"BTC/USDT"}
+
+
+def test_filter_dust_positions_keeps_executable_position() -> None:
+    positions = {
+        "BTC/USDT": {
+            "entry_price": 78021.7,
+            "quantity": 0.001,
+        }
+    }
+
+    filtered, dust_symbols = _filter_dust_positions(
+        positions,
+        {"BTC/USDT": 77630.7},
+        _dust_cfg(),
+    )
+
+    assert filtered == positions
+    assert dust_symbols == set()
 
 
 def test_load_fused_signal_states_normalizes_zero_based_rank() -> None:

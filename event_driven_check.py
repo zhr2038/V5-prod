@@ -335,6 +335,52 @@ def _load_positions_snapshot(
     return positions, position_symbols, source
 
 
+def _position_mark_price(symbol: str, position: dict, prices: dict[str, float]) -> float:
+    for key in (symbol, symbol.replace('/', '-'), symbol.replace('-', '/')):
+        try:
+            px = float(prices.get(key, 0.0) or 0.0)
+        except Exception:
+            px = 0.0
+        if px > 0.0:
+            return px
+    try:
+        return float(position.get('entry_price', 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _filter_dust_positions(positions: dict[str, dict], prices: dict[str, float], cfg=None):
+    """Drop residual dust from event-driven active positions."""
+    if not positions:
+        return positions, set()
+
+    try:
+        from src.core.pipeline import is_dust_position
+    except Exception as e:
+        logger.warning(f"Could not load dust position helper; keeping all positions: {e}")
+        return positions, set()
+
+    filtered: dict[str, dict] = {}
+    dust_symbols: set[str] = set()
+    for symbol, position in positions.items():
+        try:
+            qty = float(position.get('quantity', position.get('qty', 0.0)) or 0.0)
+        except Exception:
+            filtered[symbol] = position
+            continue
+
+        px = _position_mark_price(symbol, position, prices)
+        if qty > 0.0 and px > 0.0 and is_dust_position(symbol, qty, qty * px, cfg):
+            dust_symbols.add(symbol)
+            logger.info(
+                f"Ignored dust position {symbol}: qty={qty:.12g}, value_usdt={qty * px:.8f}"
+            )
+            continue
+        filtered[symbol] = position
+
+    return filtered, dust_symbols
+
+
 def load_current_state(cfg=None, config_path: Path = None):
     """Load current market state from V5 reports."""
     try:
@@ -383,6 +429,7 @@ def load_current_state(cfg=None, config_path: Path = None):
             logger.warning(f"Could not load universe cache, fallback to cfg.symbols: {e}")
 
         # Always keep current holdings inside event-driven watch scope so existing positions remain manageable.
+        base_tradeable_symbols = set(tradeable_symbols)
         tradeable_symbols.update(position_symbols)
 
         # Load prices from OKX API (filtered to tradeable universe only)
@@ -399,7 +446,17 @@ def load_current_state(cfg=None, config_path: Path = None):
 
         if not prices:
             logger.warning("No prices available in tradeable universe - breakout detection disabled")
-        
+
+        positions, dust_symbols = _filter_dust_positions(positions, prices, cfg)
+        if dust_symbols:
+            position_symbols.difference_update(dust_symbols)
+            tradeable_symbols = set(base_tradeable_symbols)
+            tradeable_symbols.update(position_symbols)
+            prices = {sym: px for sym, px in prices.items() if sym in tradeable_symbols}
+            logger.info(
+                f"Ignored {len(dust_symbols)} dust positions in event-driven state: {sorted(dust_symbols)}"
+            )
+
         # Load signals - PRIORITY: fused signals > alpha snapshot
         signals = {}
         
