@@ -453,6 +453,7 @@ def clear_stale_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
 
 def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
     alerts: list[str] = []
+    context_notes: list[str] = []
     priority = "normal"
     service_unit = resolve_live_service_unit_name()
     risk_level = get_current_risk_level(paths)
@@ -489,12 +490,12 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
             regime = json.loads(regime_file.read_text(encoding="utf-8"))
             state = str(regime.get("state") or "unknown")
             if state == "Risk-Off":
-                alerts.append("info: current market regime is Risk-Off")
+                context_notes.append("info: current market regime is Risk-Off")
         except Exception:
             pass
 
     if alerts:
-        summary = "\n".join(alerts)
+        summary = "\n".join([*alerts, *context_notes])
         summary += f"\n\nstats: last 6 hours trade_runs={trade_runs}, fills={total_fills}"
         send_telegram_alert(summary, priority=priority, paths=paths)
         return True
