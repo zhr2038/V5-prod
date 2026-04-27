@@ -986,6 +986,43 @@ def compute_adaptive_event_cfg(
     return out, meta
 
 
+def _build_effective_event_log_values(result: dict, execution: dict) -> dict:
+    """Return event log fields that reflect accepted execution, not only detection."""
+    actions = list((result or {}).get('actions') or [])
+    out = {
+        'should_trade': bool((result or {}).get('should_trade', False)),
+        'reason': (result or {}).get('reason'),
+        'actions': actions,
+        'events_processed': int((result or {}).get('events_processed', 0) or 0),
+        'events_blocked': int((result or {}).get('events_blocked', 0) or 0),
+    }
+    if not out['should_trade'] or not actions:
+        return out
+
+    execution = execution or {}
+    if not bool(execution.get('active_mode', False)):
+        return out
+
+    accepted = bool(execution.get('live_service_triggered')) and bool(execution.get('live_service_ok'))
+    if accepted:
+        return out
+
+    trigger_reason = execution.get('trigger_reason') or 'execution_not_accepted'
+    out.update({
+        'should_trade': False,
+        'reason': trigger_reason,
+        'actions': [],
+        'events_processed': 0,
+        'events_blocked': 0,
+        'candidate_should_trade': bool((result or {}).get('should_trade', False)),
+        'candidate_reason': (result or {}).get('reason'),
+        'candidate_actions': actions,
+        'candidate_events_processed': int((result or {}).get('events_processed', 0) or 0),
+        'candidate_events_blocked': int((result or {}).get('events_blocked', 0) or 0),
+    })
+    return out
+
+
 def run_event_param_scan(state: dict, last_state: dict, ev_cfg: dict):
     """Run lightweight one-shot parameter scan on current snapshot pair."""
     base = {
@@ -1354,18 +1391,27 @@ def main():
         logger.info("No event-driven actions - standard V5 may skip if no signals")
 
     # Log to file for monitoring
+    effective_log = _build_effective_event_log_values(result, execution)
     log_entry = {
         'timestamp': datetime.now().isoformat(),
-        'should_trade': result['should_trade'],
-        'reason': result['reason'],
-        'actions': result['actions'],
+        'should_trade': effective_log['should_trade'],
+        'reason': effective_log['reason'],
+        'actions': effective_log['actions'],
         'regime': state['regime'],
-        'events_processed': result.get('events_processed', 0),
-        'events_blocked': result.get('events_blocked', 0),
+        'events_processed': effective_log['events_processed'],
+        'events_blocked': effective_log['events_blocked'],
         'watchlist_top3': watchlist[:3],
         'param_scan_best': (param_scan or {}).get('best'),
         'execution': execution,
     }
+    if 'candidate_actions' in effective_log:
+        log_entry.update({
+            'candidate_should_trade': effective_log['candidate_should_trade'],
+            'candidate_reason': effective_log['candidate_reason'],
+            'candidate_actions': effective_log['candidate_actions'],
+            'candidate_events_processed': effective_log['candidate_events_processed'],
+            'candidate_events_blocked': effective_log['candidate_events_blocked'],
+        })
     
     log_path = paths.event_driven_log_path
     log_path.parent.mkdir(parents=True, exist_ok=True)

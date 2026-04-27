@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from event_driven_check import (
+    _build_effective_event_log_values,
     _filter_dust_positions,
     _load_fused_signal_states,
     _load_positions_snapshot,
@@ -143,3 +144,54 @@ def test_event_driven_history_normalizes_zero_based_rank(tmp_path) -> None:
     )
 
     assert state.signals["ETH/USDT"].rank == 1
+
+
+def test_effective_event_log_excludes_active_throttled_actions() -> None:
+    result = {
+        "should_trade": True,
+        "reason": "processed",
+        "actions": [{"symbol": "BTC/USDT", "action": "open"}],
+        "events_processed": 1,
+        "events_blocked": 0,
+    }
+    execution = {
+        "active_mode": True,
+        "live_service_triggered": False,
+        "live_service_ok": None,
+        "trigger_reason": "active_throttled:same_window_already_ran",
+    }
+
+    log_values = _build_effective_event_log_values(result, execution)
+
+    assert log_values["should_trade"] is False
+    assert log_values["reason"] == "active_throttled:same_window_already_ran"
+    assert log_values["actions"] == []
+    assert log_values["events_processed"] == 0
+    assert log_values["events_blocked"] == 0
+    assert log_values["candidate_should_trade"] is True
+    assert log_values["candidate_actions"] == result["actions"]
+    assert log_values["candidate_events_processed"] == 1
+
+
+def test_effective_event_log_keeps_accepted_active_actions() -> None:
+    result = {
+        "should_trade": True,
+        "reason": "processed",
+        "actions": [{"symbol": "BTC/USDT", "action": "open"}],
+        "events_processed": 1,
+        "events_blocked": 0,
+    }
+    execution = {
+        "active_mode": True,
+        "live_service_triggered": True,
+        "live_service_ok": True,
+        "trigger_reason": "event_actions",
+    }
+
+    log_values = _build_effective_event_log_values(result, execution)
+
+    assert log_values["should_trade"] is True
+    assert log_values["reason"] == "processed"
+    assert log_values["actions"] == result["actions"]
+    assert log_values["events_processed"] == 1
+    assert "candidate_actions" not in log_values
