@@ -67,6 +67,15 @@ def _prepare_install_fixture(project_root: Path) -> Path:
 def test_install_systemd_user_production_only_supports_shadow_root_and_required_units(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     script_path = _prepare_install_fixture(project_root)
+    prod_service = project_root / "deploy" / "systemd" / "v5-prod.user.service"
+    prod_service.write_text(
+        prod_service.read_text(encoding="utf-8").replace(
+            "[Service]\nType=oneshot\n",
+            "[Service]\nType=oneshot\nUser=admin\n",
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True, exist_ok=True)
@@ -120,10 +129,12 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
 
     units_dir = home / ".config" / "systemd" / "user"
     spread_unit = (units_dir / "v5-spread-rollup.service").read_text(encoding="utf-8")
+    prod_unit = (units_dir / "v5-prod.user.service").read_text(encoding="utf-8")
     shadow_unit = (units_dir / "v5-shadow-tuned-xgboost.user.service").read_text(encoding="utf-8")
     systemctl_calls = systemctl_log.read_text(encoding="utf-8")
 
     assert _bash_path(project_root) in spread_unit
+    assert "User=admin" not in prod_unit
     assert "/srv/shadow-runtime" in shadow_unit
     assert "--user enable --now v5-spread-rollup.timer" in systemctl_calls
     assert "--user enable --now v5-shadow-tuned-xgboost.user.timer" in systemctl_calls
