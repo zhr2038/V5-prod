@@ -1,8 +1,11 @@
 [Unit]
 Description=V5 spread rollup (yesterday UTC)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/admin/clawd/v5-trading-bot
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash -lc 'cd /home/admin/clawd/v5-trading-bot && /home/admin/clawd/v5-trading-bot/.venv/bin/python scripts/rollup_spreads.py --day $(date -u -d "yesterday" +%%Y%%m%%d)'
+SyslogIdentifier=v5-spread-rollup
+ExecStart=/usr/bin/flock -n /tmp/v5_spread_rollup.lock -c "/bin/bash -lc '/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/rollup_spreads.py --day $(date -u -d \"yesterday\" +%%Y%%m%%d)'"
