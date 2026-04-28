@@ -11,6 +11,7 @@ from src.execution.fill_store import derive_fill_store_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
+RELEASE_START_NOT_OBSERVABLE = "not_observable"
 
 
 @dataclass
@@ -74,6 +75,20 @@ class NegativeExpectancyCooldown:
         except Exception:
             pass
         return {"symbols": {}, "updated_ts_ms": 0}
+
+    @staticmethod
+    def _coerce_release_start_ts(raw: Any) -> Optional[int]:
+        if raw is None or raw == "" or str(raw).strip() == RELEASE_START_NOT_OBSERVABLE:
+            return None
+        try:
+            value = int(float(raw))
+        except Exception:
+            return None
+        return value if value > 0 else None
+
+    @staticmethod
+    def _release_warning(code: str, detail: str = "") -> str:
+        return f"{code}: {detail}" if detail else code
 
     def _save_state(self) -> None:
         p = Path(self.cfg.state_path)
@@ -578,7 +593,10 @@ class NegativeExpectancyCooldown:
         cached_fp = str(self._cache.get("config_fingerprint") or "").strip()
         current_fp = str(self._scope_metadata.get("config_fingerprint") or "").strip()
         legacy_state_present = bool((self._cache.get("stats") or {}) or cached_symbols)
-        release_start_ts = int(self._cache.get("release_start_ts") or 0)
+        release_start_ts = self._coerce_release_start_ts(self._cache.get("release_start_ts"))
+        release_start_ts_out: Any = release_start_ts if release_start_ts is not None else RELEASE_START_NOT_OBSERVABLE
+        release_start_ts_status = "ok" if release_start_ts is not None else "not_observable"
+        warnings: list[str] = []
         if current_fp and cached_fp != current_fp:
             if cached_fp or legacy_state_present:
                 logger.warning(
@@ -587,10 +605,41 @@ class NegativeExpectancyCooldown:
                     current_fp,
                 )
                 symbols = {}
-                release_start_ts = now_ms
+            release_start_ts = now_ms
+            release_start_ts_out = now_ms
+            release_start_ts_status = "ok"
+        elif current_fp:
+            if release_start_ts is None:
+                warnings.append(
+                    self._release_warning(
+                        "negative_expectancy_release_start_ts_not_observable",
+                        "config_fingerprint unchanged but cached release_start_ts is missing or zero",
+                    )
+                )
+        else:
+            if release_start_ts is not None:
+                release_start_ts_out = release_start_ts
+                release_start_ts_status = "legacy"
+                warnings.append(
+                    self._release_warning(
+                        "negative_expectancy_release_start_ts_legacy_scope",
+                        "config_fingerprint is missing; release scope cannot be tied to a config fingerprint",
+                    )
+                )
+            else:
+                warnings.append(
+                    self._release_warning(
+                        "negative_expectancy_release_start_ts_not_observable",
+                        "config_fingerprint is missing",
+                    )
+                )
+
+        for warning in warnings:
+            logger.warning("NegativeExpectancy %s", warning)
+
         lookback_ms = int(self.cfg.lookback_hours) * 3600 * 1000
         since_ms = int(now_ms - max(0, lookback_ms))
-        if release_start_ts > 0:
+        if release_start_ts is not None and release_start_ts > 0:
             since_ms = max(since_ms, release_start_ts)
 
         stats = self._scan_expectancy(
@@ -663,7 +712,9 @@ class NegativeExpectancyCooldown:
             "fills_db_path": str(self.cfg.fills_db_path),
             "orders_db_path": str(self.cfg.orders_db_path),
             "config_fingerprint": current_fp,
-            "release_start_ts": int(release_start_ts or 0),
+            "release_start_ts": release_start_ts_out,
+            "release_start_ts_status": release_start_ts_status,
+            "warnings": warnings,
             "whitelist_symbols": list(self._scope_metadata.get("whitelist_symbols") or []),
             "managed_symbols": list(self._scope_metadata.get("managed_symbols") or []),
             "scope_symbols": list(self._scope_metadata.get("scope_symbols") or []),

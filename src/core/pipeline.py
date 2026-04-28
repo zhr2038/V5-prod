@@ -1989,12 +1989,29 @@ class V5Pipeline:
             if audit:
                 blocked_n = len((state.get('symbols') or {}))
                 stats_n = len((state.get('stats') or {}))
+                release_start_ts = state.get("release_start_ts", "not_observable")
+                release_warnings = [
+                    str(item)
+                    for item in (state.get("warnings") or [])
+                    if str(item).strip()
+                ]
+                audit.negative_expectancy_state = {
+                    "config_fingerprint": str(state.get("config_fingerprint") or ""),
+                    "release_start_ts": release_start_ts,
+                    "release_start_ts_status": str(state.get("release_start_ts_status") or ""),
+                    "release_start_ts_warning": "; ".join(release_warnings),
+                    "state_path": str(getattr(self.negative_expectancy_cooldown.cfg, "state_path", "") or ""),
+                    "stats_count": stats_n,
+                    "cooldown_active_count": blocked_n,
+                }
                 audit.add_note(
                     "NegativeExpectancy refresh: "
                     f"stats={stats_n}, cooldown_active={blocked_n}, "
                     f"scope={len((state.get('scope_symbols') or []))}, "
-                    f"release_start_ts={int(state.get('release_start_ts') or 0)}"
+                    f"release_start_ts={release_start_ts}"
                 )
+                for warning in release_warnings:
+                    audit.add_note(f"NegativeExpectancy warning: {warning}")
             return state
         except Exception as e:
             if audit:

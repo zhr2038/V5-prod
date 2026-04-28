@@ -189,6 +189,43 @@ def test_pipeline_negative_expectancy_refresh_sets_live_scope(tmp_path: Path) ->
     assert calls["force"] is False
 
 
+def test_negative_expectancy_refresh_writes_release_start_to_decision_audit(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.mode = "live"
+    pipe = _build_pipe(cfg, tmp_path)
+
+    class _DummyCooldown:
+        cfg = SimpleNamespace(state_path=str(tmp_path / "negative_expectancy_state.json"))
+
+        def set_scope(self, **kwargs):
+            pass
+
+        def refresh(self, force: bool = False):
+            return {
+                "config_fingerprint": "scope-fp",
+                "release_start_ts": 1_776_000_000_000,
+                "release_start_ts_status": "ok",
+                "warnings": [],
+                "symbols": {},
+                "stats": {},
+                "scope_symbols": ["BTC/USDT"],
+            }
+
+    pipe.negative_expectancy_cooldown = _DummyCooldown()
+    audit = DecisionAudit(run_id="negexp-release")
+
+    pipe._refresh_negative_expectancy_state_with_scope(
+        positions=[],
+        managed_symbols=["BTC/USDT"],
+        audit=audit,
+    )
+
+    assert audit.negative_expectancy_state["config_fingerprint"] == "scope-fp"
+    assert audit.negative_expectancy_state["release_start_ts"] == 1_776_000_000_000
+    assert audit.negative_expectancy_state["release_start_ts_status"] == "ok"
+    assert any("release_start_ts=1776000000000" in note for note in audit.notes)
+
+
 def test_decision_audit_record_gate_dedupes_symbol_reason() -> None:
     audit = DecisionAudit(run_id="negexp-dedupe")
 
@@ -228,6 +265,20 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     cfg.execution.min_hold_minutes_before_rank_exit = 180
     cfg.execution.min_hold_minutes_before_regime_exit = 240
     cfg.execution.max_rebalance_turnover_per_cycle = 0.15
+    state_path = tmp_path / "reports" / "negative_expectancy_cooldown.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "scope-fp",
+                "release_start_ts": 1_776_000_000_000,
+                "release_start_ts_status": "ok",
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     out_path = main_module._write_effective_live_config(cfg)
     payload = json.loads(out_path.read_text(encoding="utf-8"))
@@ -255,6 +306,9 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_exit_enabled"] is True
     assert payload["execution"]["probe_time_stop_hours"] == 8
+    assert payload["execution"]["negative_expectancy_release_start_ts"] == 1_776_000_000_000
+    assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
+    assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""
 
 
 def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_keys(tmp_path: Path) -> None:
@@ -292,6 +346,9 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["probe_trailing_gap_bps"] == pytest.approx(25.0)
     assert payload["execution"]["probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_time_stop_min_net_bps"] == pytest.approx(10.0)
+    assert payload["execution"]["negative_expectancy_release_start_ts"] == "not_observable"
+    assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "not_observable"
+    assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == "negative_expectancy_state_missing"
 
 
 def test_main_live_preflight_blocks_before_provider_and_order_generation(

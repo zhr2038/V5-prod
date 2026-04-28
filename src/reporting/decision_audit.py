@@ -133,6 +133,7 @@ class DecisionAudit:
     # 多策略信号详情
     strategy_signals: List[Dict[str, Any]] = field(default_factory=list)
     ml_signal_overview: Dict[str, Any] = field(default_factory=dict)
+    negative_expectancy_state: Dict[str, Any] = field(default_factory=dict)
     protect_entry_gate_active: bool = False
     protect_entry_require_alpha6_confirmation: bool = True
     protect_entry_block_trend_only: bool = True
@@ -225,6 +226,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.regime_details = data.get("regime_details", {})
     audit.strategy_signals = data.get("strategy_signals", [])
     audit.ml_signal_overview = data.get("ml_signal_overview", {})
+    audit.negative_expectancy_state = data.get("negative_expectancy_state", {})
     audit.protect_entry_gate_active = bool(data.get("protect_entry_gate_active", False))
     audit.protect_entry_require_alpha6_confirmation = bool(
         data.get("protect_entry_require_alpha6_confirmation", True)

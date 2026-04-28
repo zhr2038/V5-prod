@@ -522,6 +522,60 @@ def _probe_exit_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     }
 
 
+def _negative_expectancy_state_path_for_config(cfg: AppConfig) -> Path:
+    execution = getattr(cfg, "execution", None)
+    order_store_path = str(getattr(execution, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite")
+    raw_state_path = str(
+        getattr(execution, "negative_expectancy_state_path", "reports/negative_expectancy_cooldown.json")
+        or ""
+    ).strip()
+    if not raw_state_path or raw_state_path == "reports/negative_expectancy_cooldown.json":
+        return derive_runtime_named_json_path(order_store_path, "negative_expectancy_cooldown").resolve()
+    state_path = Path(raw_state_path)
+    if not state_path.is_absolute():
+        state_path = (PROJECT_ROOT / state_path).resolve()
+    return state_path
+
+
+def _negative_expectancy_release_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    state_path = _negative_expectancy_state_path_for_config(cfg)
+    base: Dict[str, Any] = {
+        "negative_expectancy_state_path": str(state_path),
+        "negative_expectancy_release_start_ts": "not_observable",
+        "negative_expectancy_release_start_ts_status": "not_observable",
+        "negative_expectancy_release_start_ts_warning": "negative_expectancy_state_missing",
+    }
+    if not state_path.exists():
+        return base
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        base["negative_expectancy_release_start_ts_warning"] = f"negative_expectancy_state_read_error: {exc}"
+        return base
+    if not isinstance(payload, dict):
+        base["negative_expectancy_release_start_ts_warning"] = "negative_expectancy_state_not_object"
+        return base
+
+    release_start_ts = payload.get("release_start_ts")
+    if isinstance(release_start_ts, str) and release_start_ts.strip() == "not_observable":
+        base["negative_expectancy_release_start_ts_warning"] = "; ".join(
+            [str(item) for item in (payload.get("warnings") or []) if str(item).strip()]
+        ) or "negative_expectancy_release_start_ts_not_observable"
+        return base
+    try:
+        release_start_ts_int = int(float(release_start_ts))
+    except Exception:
+        release_start_ts_int = 0
+    if release_start_ts_int > 0:
+        base["negative_expectancy_release_start_ts"] = release_start_ts_int
+        base["negative_expectancy_release_start_ts_status"] = str(payload.get("release_start_ts_status") or "ok")
+        base["negative_expectancy_release_start_ts_warning"] = ""
+        return base
+
+    base["negative_expectancy_release_start_ts_warning"] = "negative_expectancy_release_start_ts_missing_or_zero"
+    return base
+
+
 def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
     return {
         "symbols": list(cfg.symbols or []),
@@ -571,6 +625,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             ),
             **_btc_leadership_probe_effective_config(cfg),
             **_probe_exit_effective_config(cfg),
+            **_negative_expectancy_release_effective_config(cfg),
         },
     }
 
