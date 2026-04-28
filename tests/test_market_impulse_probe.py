@@ -405,6 +405,7 @@ def test_market_impulse_probe_not_active_in_risk_off(tmp_path: Path) -> None:
 
 def test_market_impulse_probe_time_stop_generates_exit(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
+    cfg.execution.probe_exit_enabled = False
     _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
     payload = _strategy_payload(
         {

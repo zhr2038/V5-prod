@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Mapping
 
 import hashlib
 import json
@@ -799,19 +799,33 @@ class V5Pipeline:
         except Exception:
             return {}
 
-    def _probe_metadata_for_position(self, position: Position) -> Optional[Dict[str, Any]]:
+    def _probe_metadata_for_position(
+        self,
+        position: Position,
+        *,
+        probe_state: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         tags = self._position_tags(position)
         state = (getattr(self.profit_taking, "positions", {}) or {}).get(getattr(position, "symbol", ""))
+        market_probe_payload = None
+        if probe_state is not None:
+            candidate_payload = probe_state.get(getattr(position, "symbol", ""))
+            if isinstance(candidate_payload, dict):
+                market_probe_payload = candidate_payload
         state_probe_type = str(getattr(state, "probe_type", "") or "").strip() if state is not None else ""
         probe_type = probe_type_from_meta(tags)
         if probe_type is None and state_probe_type in PROBE_POSITION_TYPES:
             probe_type = state_probe_type
+        if probe_type is None and market_probe_payload is not None:
+            probe_type = "market_impulse_probe"
         if probe_type is None:
             return None
 
         entry_px = _float_or_none(tags.get("entry_px"))
         if entry_px is None and state is not None:
             entry_px = _float_or_none(getattr(state, "entry_price", None))
+        if entry_px is None and market_probe_payload is not None:
+            entry_px = _float_or_none(market_probe_payload.get("entry_px"))
         if entry_px is None:
             entry_px = _float_or_none(getattr(position, "avg_px", None))
         if entry_px is None or entry_px <= 0:
@@ -820,17 +834,30 @@ class V5Pipeline:
         entry_ts = str(tags.get("entry_ts") or "").strip()
         if not entry_ts and state is not None and getattr(state, "entry_time", None) is not None:
             entry_ts = getattr(state, "entry_time").isoformat()
+        if not entry_ts and market_probe_payload is not None:
+            entry_ts = str(market_probe_payload.get("entry_ts") or "").strip()
+            if not entry_ts:
+                entry_ts_ms = int(market_probe_payload.get("entry_ts_ms") or 0)
+                if entry_ts_ms > 0:
+                    entry_ts = datetime.fromtimestamp(
+                        entry_ts_ms / 1000.0,
+                        tz=timezone.utc,
+                    ).isoformat().replace("+00:00", "Z")
         if not entry_ts:
             entry_ts = str(getattr(position, "entry_ts", "") or "").strip()
 
         target_w = _float_or_none(tags.get("target_w"))
         if target_w is None and state is not None:
             target_w = _float_or_none(getattr(state, "target_w", None))
+        if target_w is None and market_probe_payload is not None:
+            target_w = _float_or_none(market_probe_payload.get("target_w"))
         highest_net_bps = _float_or_none(tags.get("highest_net_bps"))
         if state is not None:
             state_highest_net_bps = _float_or_none(getattr(state, "highest_net_bps", None))
             if state_highest_net_bps is not None:
                 highest_net_bps = max(float(highest_net_bps or 0.0), float(state_highest_net_bps))
+        if highest_net_bps is None and market_probe_payload is not None:
+            highest_net_bps = _float_or_none(market_probe_payload.get("highest_net_bps"))
 
         return {
             "probe_type": probe_type,
@@ -3558,7 +3585,7 @@ class V5Pipeline:
             if p.symbol not in self.fixed_stop_loss.entry_prices:
                 self.fixed_stop_loss.register_position(p.symbol, entry_ref)
             # profit_taking 自带“入场价漂移>1%自动重置”逻辑，需每轮同步一次
-            probe_state_meta = self._probe_metadata_for_position(p)
+            probe_state_meta = self._probe_metadata_for_position(p, probe_state=probe_state)
             probe_register_kwargs = (
                 {
                     "entry_reason": probe_state_meta.get("entry_reason"),
@@ -3600,7 +3627,7 @@ class V5Pipeline:
             for p in active_positions:
                 if float(getattr(p, "qty", 0.0) or 0.0) <= 0:
                     continue
-                probe_meta = self._probe_metadata_for_position(p)
+                probe_meta = self._probe_metadata_for_position(p, probe_state=probe_state)
                 if probe_meta is None:
                     continue
                 s = market_data_1h.get(p.symbol)
@@ -3629,10 +3656,10 @@ class V5Pipeline:
                 )
 
                 reason = None
-                if net_bps >= take_profit_bps:
-                    reason = "probe_take_profit"
-                elif net_bps <= stop_loss_bps:
+                if net_bps <= stop_loss_bps:
                     reason = "probe_stop_loss"
+                elif net_bps >= take_profit_bps:
+                    reason = "probe_take_profit"
                 elif highest_net_bps >= trailing_enable_bps and (highest_net_bps - net_bps) >= trailing_gap_bps:
                     reason = "probe_trailing_stop"
                 elif held_hours is not None and held_hours >= time_stop_hours and net_bps < time_stop_min_bps:
@@ -3650,7 +3677,9 @@ class V5Pipeline:
                         signal_price=current_price,
                         meta={
                             "reason": reason,
+                            "exit_reason": reason,
                             "probe_exit": True,
+                            "probe_exit_policy_active": True,
                             "probe_type": probe_meta.get("probe_type"),
                             "entry_reason": probe_meta.get("entry_reason"),
                             "entry_px": float(entry_px),
@@ -3660,6 +3689,7 @@ class V5Pipeline:
                             "high_net_bps": float(high_net_bps),
                             "highest_net_bps": float(highest_net_bps),
                             "held_hours": held_hours,
+                            "hold_hours": held_hours,
                             "probe_take_profit_net_bps": float(take_profit_bps),
                             "probe_stop_loss_net_bps": float(stop_loss_bps),
                             "probe_trailing_enable_after_net_bps": float(trailing_enable_bps),
@@ -3908,7 +3938,7 @@ class V5Pipeline:
 
         # Market impulse probe time-stop exits.
         market_impulse_time_stop_orders: List[Order] = []
-        if probe_state:
+        if probe_state and not bool(getattr(self.cfg.execution, "probe_exit_enabled", True)):
             probe_strategy_signal_lookup = self._resolve_strategy_signal_lookup(audit)
             probe_context = self._market_impulse_probe_context(
                 strategy_signal_lookup=probe_strategy_signal_lookup,
@@ -3917,8 +3947,6 @@ class V5Pipeline:
             )
             impulse_still_active = bool(probe_context.get("active"))
             for p in active_positions:
-                if bool(getattr(self.cfg.execution, "probe_exit_enabled", True)) and self._probe_metadata_for_position(p) is not None:
-                    continue
                 probe_payload = probe_state.get(p.symbol)
                 if not isinstance(probe_payload, dict):
                     continue
@@ -4056,18 +4084,29 @@ class V5Pipeline:
             meta["bypass_turnover_cap_for_exit"] = True
             meta["turnover_cap_bypass_reason"] = "exit_signal_priority"
             order.meta = meta
-            exit_router_decisions.append(
-                {
-                    "symbol": order.symbol,
-                    "action": "create",
-                    "reason": "exit_signal_priority",
-                    "source_reason": meta.get("reason"),
-                    "side": order.side,
-                    "intent": order.intent,
-                    "notional": float(order.notional_usdt or 0.0),
-                    "bypass_turnover_cap_for_exit": True,
-                }
-            )
+            router_payload = {
+                "symbol": order.symbol,
+                "action": "create",
+                "reason": "exit_signal_priority",
+                "source_reason": meta.get("reason"),
+                "side": order.side,
+                "intent": order.intent,
+                "notional": float(order.notional_usdt or 0.0),
+                "bypass_turnover_cap_for_exit": True,
+            }
+            if bool(meta.get("probe_exit", False)):
+                router_payload.update(
+                    {
+                        "probe_exit_policy_active": True,
+                        "probe_type": meta.get("probe_type"),
+                        "entry_reason": meta.get("entry_reason"),
+                        "net_bps": meta.get("net_bps"),
+                        "highest_net_bps": meta.get("highest_net_bps"),
+                        "hold_hours": meta.get("hold_hours", meta.get("held_hours")),
+                        "exit_reason": meta.get("exit_reason", meta.get("reason")),
+                    }
+                )
+            exit_router_decisions.append(router_payload)
         exit_symbols = {o.symbol for o in exit_orders}
         
         if audit:
@@ -4090,6 +4129,12 @@ class V5Pipeline:
                         "atr_n": meta.get("atr_n"),
                         "bypass_turnover_cap_for_exit": bool(meta.get("bypass_turnover_cap_for_exit", False)),
                         "turnover_cap_bypass_reason": meta.get("turnover_cap_bypass_reason"),
+                        "probe_exit_policy_active": bool(meta.get("probe_exit_policy_active", False)),
+                        "probe_type": meta.get("probe_type"),
+                        "net_bps": meta.get("net_bps"),
+                        "highest_net_bps": meta.get("highest_net_bps"),
+                        "hold_hours": meta.get("hold_hours", meta.get("held_hours")),
+                        "exit_reason": meta.get("exit_reason", meta.get("reason")),
                     }
                 )
             audit.exit_signals = xs

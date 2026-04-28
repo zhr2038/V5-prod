@@ -147,12 +147,57 @@ def _single_exit(out) -> Order:
     return exits[0]
 
 
+def _single_probe_exit_decision(audit: DecisionAudit) -> dict:
+    decisions = [
+        decision
+        for decision in (audit.router_decisions or [])
+        if decision.get("probe_exit_policy_active") is True
+    ]
+    assert len(decisions) == 1
+    return decisions[0]
+
+
+def _write_market_impulse_probe_state(
+    cfg: AppConfig,
+    *,
+    symbol: str = "BTC/USDT",
+    entry_ts: str = "2026-04-25T03:00:00Z",
+    time_stop_hours: int = 4,
+    target_w: float = 0.06,
+) -> None:
+    entry_dt = datetime.fromisoformat(entry_ts.replace("Z", "+00:00"))
+    state_path = derive_runtime_named_json_path(cfg.execution.order_store_path, "market_impulse_probe_state")
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                symbol: {
+                    "symbol": symbol,
+                    "entry_ts_ms": int(entry_dt.timestamp() * 1000),
+                    "entry_ts": entry_ts,
+                    "cooldown_until_ms": int(datetime(2026, 4, 25, 16, 0, tzinfo=timezone.utc).timestamp() * 1000),
+                    "time_stop_hours": time_stop_hours,
+                    "target_w": target_w,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_probe_take_profit_at_80_net_bps(tmp_path: Path) -> None:
     out, audit = _run_exit_case(tmp_path, _probe_position(), _series(100.80))
 
     order = _single_exit(out)
     assert order.meta["reason"] == "probe_take_profit"
+    assert order.meta["exit_reason"] == "probe_take_profit"
+    assert order.meta["probe_exit_policy_active"] is True
     assert order.meta["bypass_turnover_cap_for_exit"] is True
+    decision = _single_probe_exit_decision(audit)
+    assert decision["exit_reason"] == "probe_take_profit"
+    assert decision["probe_type"] == "btc_leadership_probe"
+    assert round(decision["net_bps"], 6) == 80.0
     assert audit.counts["probe_take_profit_count"] == 1
 
 
@@ -161,6 +206,10 @@ def test_probe_stop_loss_at_minus_50_net_bps(tmp_path: Path) -> None:
 
     order = _single_exit(out)
     assert order.meta["reason"] == "probe_stop_loss"
+    assert order.meta["probe_exit_policy_active"] is True
+    decision = _single_probe_exit_decision(audit)
+    assert decision["exit_reason"] == "probe_stop_loss"
+    assert round(decision["net_bps"], 6) == -50.0
     assert audit.counts["probe_stop_loss_count"] == 1
 
 
@@ -172,6 +221,9 @@ def test_probe_trailing_after_60_bps_retraces_25_bps(tmp_path: Path) -> None:
     assert order.meta["reason"] == "probe_trailing_stop"
     assert round(order.meta["high_net_bps"], 6) == 60.0
     assert round(order.meta["highest_net_bps"], 6) == 60.0
+    decision = _single_probe_exit_decision(audit)
+    assert decision["exit_reason"] == "probe_trailing_stop"
+    assert round(decision["highest_net_bps"], 6) == 60.0
     assert audit.counts["probe_trailing_stop_count"] == 1
 
 
@@ -181,6 +233,11 @@ def test_probe_time_stop_after_8h_below_10_net_bps(tmp_path: Path) -> None:
 
     order = _single_exit(out)
     assert order.meta["reason"] == "probe_time_stop"
+    assert order.meta["probe_time_stop_hours"] == 8.0
+    assert order.meta["hold_hours"] >= 8.0
+    decision = _single_probe_exit_decision(audit)
+    assert decision["exit_reason"] == "probe_time_stop"
+    assert decision["hold_hours"] >= 8.0
     assert audit.counts["probe_time_stop_count"] == 1
 
 
@@ -238,6 +295,79 @@ def test_market_impulse_probe_metadata_skips_legacy_4h_time_stop(tmp_path: Path)
 
     assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
     assert audit.counts["market_impulse_probe_time_stop_count"] == 0
+    assert audit.counts["probe_time_stop_count"] == 0
+
+
+def test_state_only_market_impulse_probe_skips_legacy_4h_time_stop_when_policy_enabled(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.execution.market_impulse_probe_time_stop_hours = 4
+    cfg.execution.probe_time_stop_hours = 8
+    _write_market_impulse_probe_state(cfg, entry_ts="2026-04-25T03:00:00Z", time_stop_hours=4)
+    pipe = _build_pipe(cfg, tmp_path)
+    audit = DecisionAudit(run_id="probe-exit-state-only-legacy-skip")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series(100.05)},
+        positions=[_probe_position(entry_ts="2026-04-25T03:00:00Z", probe=False, probe_type="market_impulse_probe")],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
+    assert audit.counts["market_impulse_probe_time_stop_count"] == 0
+    assert audit.counts["probe_time_stop_count"] == 0
+
+
+def test_state_only_market_impulse_probe_uses_probe_8h_time_stop_when_policy_enabled(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.execution.market_impulse_probe_time_stop_hours = 4
+    cfg.execution.probe_time_stop_hours = 8
+    _write_market_impulse_probe_state(cfg, entry_ts="2026-04-24T23:00:00Z", time_stop_hours=4)
+    pipe = _build_pipe(cfg, tmp_path)
+    audit = DecisionAudit(run_id="probe-exit-state-only-probe-time-stop")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series(100.05)},
+        positions=[_probe_position(entry_ts="2026-04-24T23:00:00Z", probe=False, probe_type="market_impulse_probe")],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "probe_time_stop"
+    assert order.meta["probe_type"] == "market_impulse_probe"
+    assert order.meta["probe_time_stop_hours"] == 8.0
+    assert audit.counts["probe_time_stop_count"] == 1
+    assert audit.counts["market_impulse_probe_time_stop_count"] == 0
+
+
+def test_probe_exit_disabled_allows_legacy_market_impulse_time_stop_fallback(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.execution.probe_exit_enabled = False
+    cfg.execution.market_impulse_probe_time_stop_hours = 4
+    _write_market_impulse_probe_state(cfg, entry_ts="2026-04-25T03:00:00Z", time_stop_hours=4)
+    pipe = _build_pipe(cfg, tmp_path)
+    audit = DecisionAudit(run_id="probe-exit-disabled-legacy-fallback")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series(100.05)},
+        positions=[_probe_position(entry_ts="2026-04-25T03:00:00Z", probe=False, probe_type="market_impulse_probe")],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "market_impulse_probe_time_stop"
+    assert audit.counts["market_impulse_probe_time_stop_count"] == 1
     assert audit.counts["probe_time_stop_count"] == 0
 
 
