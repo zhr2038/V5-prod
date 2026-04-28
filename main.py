@@ -474,6 +474,14 @@ def _coalesce(value, default):
     return default if value is None else value
 
 
+def _log_order_arbitration_summary(log, cfg: AppConfig, message: str) -> None:
+    mode = str(getattr(getattr(cfg, "execution", None), "mode", "dry_run") or "dry_run").lower()
+    if mode == "live":
+        log.warning(message)
+    else:
+        log.info(message)
+
+
 def _resolve_runtime_run_paths(cfg: AppConfig, run_id: str) -> dict[str, Path]:
     order_store_path = str(
         getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite")
@@ -1289,7 +1297,7 @@ def main() -> None:
         blocked_n = len([d for d in (arb_decisions or []) if d.get("action") == "blocked"])
         if blocked_n > 0:
             msg = f"ORDER_ARBITRATION: before={orders_before} after={len(orders)} blocked={blocked_n}"
-            log.warning(msg)
+            _log_order_arbitration_summary(log, cfg, msg)
             try:
                 audit.add_note(msg)
                 # Keep only first N decision details to control artifact size

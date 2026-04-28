@@ -53,3 +53,29 @@ def test_skipped_candidate_tracker_runs_outside_close_only_risk_off() -> None:
     state = SimpleNamespace(name="SIDEWAYS", value="Sideways")
 
     assert main._should_update_skipped_candidate_tracker(cfg, state, []) is True
+
+
+def test_order_arbitration_summary_warns_in_live_mode() -> None:
+    calls: list[tuple[str, str]] = []
+    log = SimpleNamespace(
+        warning=lambda message: calls.append(("warning", message)),
+        info=lambda message: calls.append(("info", message)),
+    )
+    cfg = SimpleNamespace(execution=SimpleNamespace(mode="live"))
+
+    main._log_order_arbitration_summary(log, cfg, "ORDER_ARBITRATION: before=2 after=1 blocked=1")
+
+    assert calls == [("warning", "ORDER_ARBITRATION: before=2 after=1 blocked=1")]
+
+
+def test_order_arbitration_summary_is_info_in_dry_run_mode() -> None:
+    calls: list[tuple[str, str]] = []
+    log = SimpleNamespace(
+        warning=lambda message: calls.append(("warning", message)),
+        info=lambda message: calls.append(("info", message)),
+    )
+    cfg = SimpleNamespace(execution=SimpleNamespace(mode="dry_run"))
+
+    main._log_order_arbitration_summary(log, cfg, "ORDER_ARBITRATION: before=2 after=1 blocked=1")
+
+    assert calls == [("info", "ORDER_ARBITRATION: before=2 after=1 blocked=1")]
