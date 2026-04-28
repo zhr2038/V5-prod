@@ -165,6 +165,20 @@ def test_static_files_serves_assets_and_spa_fallback(monkeypatch, tmp_path):
     assert fallback_response.get_data(as_text=True) == "INDEX"
 
 
+def test_static_files_does_not_spa_fallback_for_missing_assets(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    build_root = tmp_path / "web" / "dist"
+    build_root.mkdir(parents=True)
+    (build_root / "index.html").write_text("INDEX", encoding="utf-8")
+    monkeypatch.setattr(module, "REACT_BUILD_PATH", build_root)
+    client = module.app.test_client()
+
+    response = client.get("/assets/missing.js")
+
+    assert response.status_code == 404
+    assert response.get_data(as_text=True) == "Not found"
+
+
 def test_static_files_does_not_spa_fallback_for_unknown_api(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     build_root = tmp_path / "web" / "dist"
