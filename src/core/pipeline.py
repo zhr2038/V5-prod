@@ -1732,11 +1732,16 @@ class V5Pipeline:
             if audit:
                 blocked_n = len((state.get('symbols') or {}))
                 stats_n = len((state.get('stats') or {}))
+                raw_release_start_ts = state.get("release_start_ts")
+                try:
+                    release_start_ts = str(int(float(raw_release_start_ts or 0)))
+                except Exception:
+                    release_start_ts = str(raw_release_start_ts or "not_observable")
                 audit.add_note(
                     "NegativeExpectancy refresh: "
                     f"stats={stats_n}, cooldown_active={blocked_n}, "
                     f"scope={len((state.get('scope_symbols') or []))}, "
-                    f"release_start_ts={int(state.get('release_start_ts') or 0)}"
+                    f"release_start_ts={release_start_ts}"
                 )
             return state
         except Exception as e:

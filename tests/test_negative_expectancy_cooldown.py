@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 import sys
@@ -192,6 +193,59 @@ def test_negative_expectancy_fingerprint_change_resets_legacy_state_scope(tmp_pa
 
     assert state["config_fingerprint"] == "new-scope-fp"
     assert state["release_start_ts"] == 2_000_000_000
+    assert state["release_start_ts_status"] == "ok"
     assert state["whitelist_symbols"] == ["BTC/USDT"]
     assert state["symbols"] == {}
     assert state["stats"] == {}
+
+
+def test_negative_expectancy_not_observable_marker_does_not_log_every_refresh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    state_path = tmp_path / "negative_expectancy_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "updated_ts_ms": 1_999_000_000,
+                "config_fingerprint": "scope-fp",
+                "release_start_ts": "not_observable",
+                "release_start_ts_status": "not_observable",
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("src.risk.negative_expectancy_cooldown.time.time", lambda: 2_000_000.0)
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=24,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(tmp_path / "orders.sqlite"),
+            fills_db_path=str(tmp_path / "fills.sqlite"),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=120,
+        )
+    )
+    cooldown.set_scope(
+        whitelist_symbols=["BTC/USDT"],
+        config_fingerprint="scope-fp",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="src.risk.negative_expectancy_cooldown"):
+        state = cooldown.refresh(force=True)
+
+    assert state["release_start_ts"] == "not_observable"
+    assert state["release_start_ts_status"] == "not_observable"
+    assert any("negative_expectancy_release_start_ts_not_observable" in item for item in state["warnings"])
+    assert not [
+        record
+        for record in caplog.records
+        if "negative_expectancy_release_start_ts_not_observable" in record.getMessage()
+    ]

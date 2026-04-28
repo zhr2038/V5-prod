@@ -189,6 +189,35 @@ def test_pipeline_negative_expectancy_refresh_sets_live_scope(tmp_path: Path) ->
     assert calls["force"] is False
 
 
+def test_pipeline_negative_expectancy_refresh_logs_not_observable_release_start(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.mode = "live"
+    pipe = _build_pipe(cfg, tmp_path)
+
+    class _DummyCooldown:
+        def set_scope(self, **kwargs):
+            pass
+
+        def refresh(self, force: bool = False):
+            return {
+                "symbols": {},
+                "stats": {},
+                "scope_symbols": ["BTC/USDT"],
+                "release_start_ts": "not_observable",
+            }
+
+    pipe.negative_expectancy_cooldown = _DummyCooldown()
+    audit = DecisionAudit(run_id="negexp-refresh")
+
+    pipe._refresh_negative_expectancy_state_with_scope(
+        positions=[],
+        managed_symbols=[],
+        audit=audit,
+    )
+
+    assert any("release_start_ts=not_observable" in note for note in audit.notes)
+
+
 def test_decision_audit_record_gate_dedupes_symbol_reason() -> None:
     audit = DecisionAudit(run_id="negexp-dedupe")
 
