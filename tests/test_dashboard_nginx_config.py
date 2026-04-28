@@ -8,3 +8,4 @@ def test_dashboard_nginx_clears_upstream_connection_header() -> None:
     config = config_path.read_text(encoding="utf-8")
 
     assert 'proxy_set_header Connection "";' in config
+    assert "keepalive_timeout 0;" in config
