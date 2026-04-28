@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.reporting.probe_lifecycle import build_probe_lifecycle_reports
+from src.reporting.btc_leadership_label_consistency import update_btc_leadership_label_issues
 
 
 def _parse_asof(raw: str | None) -> datetime | None:
@@ -46,6 +47,7 @@ def main() -> None:
         hours=int(args.hours),
         asof=_parse_asof(args.asof),
     )
+    result["btc_leadership_label_consistency"] = update_btc_leadership_label_issues(Path(args.bundle_root))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

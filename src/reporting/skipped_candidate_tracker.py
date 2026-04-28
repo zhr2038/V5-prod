@@ -41,6 +41,7 @@ BTC_LEADERSHIP_PROBE_FIELDS = [
     "closed_cycles",
     "net_expectancy_bps",
 ]
+BTC_LEADERSHIP_PROBE_LABEL_KEY_FIELDS = ("run_id", "symbol", "skip_reason", "ts_utc")
 
 
 def _iso_from_ms(timestamp_ms: int) -> str:
@@ -273,6 +274,8 @@ def _signal_factor(signal: Optional[Mapping[str, Any]], name: str) -> Optional[f
 
 
 def _record_key(record: Mapping[str, Any]) -> str:
+    if _is_btc_leadership_probe_skip_reason(str(record.get("skip_reason") or "")):
+        return btc_leadership_probe_label_key(record)
     return "|".join(
         [
             str(record.get("run_id") or ""),
@@ -282,6 +285,46 @@ def _record_key(record: Mapping[str, Any]) -> str:
             str(_record_entry_ts_ms(record) or ""),
         ]
     )
+
+
+def btc_leadership_probe_label_key(record: Mapping[str, Any]) -> str:
+    ts_utc = str(record.get("ts_utc") or "").strip()
+    if not ts_utc:
+        entry_ts_ms = _record_entry_ts_ms(record)
+        ts_utc = _iso_from_ms(entry_ts_ms) if entry_ts_ms > 0 else ""
+    return "|".join(
+        [
+            str(record.get("run_id") or ""),
+            str(record.get("symbol") or "BTC/USDT"),
+            str(record.get("skip_reason") or ""),
+            ts_utc,
+        ]
+    )
+
+
+def _label_status_priority(status: Any) -> int:
+    text = str(status or "").strip()
+    if text == "complete":
+        return 3
+    if text == "pending":
+        return 2
+    if text == "not_observable":
+        return 1
+    return 0
+
+
+def _merge_record(existing: dict[str, Any], incoming: Mapping[str, Any]) -> dict[str, Any]:
+    incoming_dict = dict(incoming)
+    if _label_status_priority(incoming_dict.get("label_status")) > _label_status_priority(existing.get("label_status")):
+        base = incoming_dict
+        other = existing
+    else:
+        base = dict(existing)
+        other = incoming_dict
+    for key, value in other.items():
+        if base.get(key) in (None, "") and value not in (None, ""):
+            base[key] = value
+    return base
 
 
 def _load_existing_records(path: Path) -> dict[str, dict[str, Any]]:
@@ -297,7 +340,11 @@ def _load_existing_records(path: Path) -> dict[str, dict[str, Any]]:
         except Exception:
             continue
         if isinstance(payload, dict):
-            records[_record_key(payload)] = payload
+            key = _record_key(payload)
+            if key in records:
+                records[key] = _merge_record(records[key], payload)
+            else:
+                records[key] = payload
     return records
 
 
@@ -444,6 +491,7 @@ def _build_record(
         "rt_cost_bps": float(getattr(cfg.diagnostics, "skipped_candidate_roundtrip_cost_bps", 30.0) or 30.0),
         "entry_ts_ms": int(entry_ts_ms),
         "label_status": "pending",
+        "label_not_observable_reason": "",
     }
     for horizon in getattr(cfg.diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24]:
         h = int(horizon)
@@ -468,7 +516,7 @@ def _collect_skipped_candidates(
         for item in (audit.top_scores or [])
         if str(item.get("symbol") or "").strip()
     }
-    captured_keys: set[tuple[str, str]] = set()
+    captured_keys: set[Any] = set()
     records: list[dict[str, Any]] = []
 
     def _entry_context(symbol: str, router_decision: Mapping[str, Any] | None) -> tuple[Optional[float], int]:
@@ -496,6 +544,13 @@ def _collect_skipped_candidates(
                         px = float(series.close[latest_idx])
                     except Exception:
                         px = None
+        if ts_ms <= 0:
+            for ts_key in ("ts_ms", "timestamp_ms", "timestamp", "ts", "now_ts"):
+                ts_ms = int(_coerce_epoch_ms(decision.get(ts_key)) or 0)
+                if ts_ms > 0:
+                    break
+        if ts_ms <= 0:
+            ts_ms = int(_coerce_epoch_ms(getattr(audit, "now_ts", 0)) or 0)
         return px, ts_ms
 
     for rd in (audit.router_decisions or []):
@@ -514,31 +569,32 @@ def _collect_skipped_candidates(
         is_btc_probe_skip = _is_btc_leadership_probe_skip_reason(reason)
         if reason not in FOCUS_SKIP_REASONS and not is_btc_probe_skip:
             continue
-        key = (symbol, reason)
-        if key in captured_keys:
-            continue
-        captured_keys.add(key)
         entry_px, entry_ts_ms = _entry_context(symbol, rd)
+        if entry_ts_ms <= 0 and is_btc_probe_skip:
+            entry_ts_ms = int(_coerce_epoch_ms(getattr(audit, "now_ts", 0)) or 0)
         if entry_ts_ms <= 0:
             continue
         intended_side = "buy" if is_btc_probe_skip else ("hold" if reason == "hold_current_no_valid_replacement" else "buy")
         target_w = rd.get("effective_target_w", rd.get("target_w", (audit.targets_post_risk or {}).get(symbol)))
-        records.append(
-            _build_record(
-                audit=audit,
-                cfg=cfg,
-                current_level=current_level,
-                strategy_lookup=strategy_lookup,
-                top_scores=top_scores,
-                symbol=symbol,
-                skip_reason=reason,
-                intended_side=intended_side,
-                target_w=target_w,
-                entry_px=entry_px,
-                entry_ts_ms=entry_ts_ms,
-                router_decision=rd,
-            )
+        record = _build_record(
+            audit=audit,
+            cfg=cfg,
+            current_level=current_level,
+            strategy_lookup=strategy_lookup,
+            top_scores=top_scores,
+            symbol=symbol,
+            skip_reason=reason,
+            intended_side=intended_side,
+            target_w=target_w,
+            entry_px=entry_px,
+            entry_ts_ms=entry_ts_ms,
+            router_decision=rd,
         )
+        key = _record_key(record) if is_btc_probe_skip else "|".join([symbol, reason])
+        if key in captured_keys:
+            continue
+        captured_keys.add(key)
+        records.append(record)
 
     if int((audit.counts or {}).get("selected", 0) or 0) == 0 and audit.top_scores:
         threshold = float(getattr(cfg.alpha, "min_score_threshold", 0.0) or 0.0)
@@ -711,11 +767,18 @@ def _update_labels(
                 record["ts_utc"] = _iso_from_ms(entry_ts_ms)
         rt_cost_bps = float(record.get("rt_cost_bps") or 0.0)
         if entry_px is None or entry_px <= 0 or entry_ts_ms <= 0 or ts_mismatch_reason:
+            if ts_mismatch_reason:
+                not_observable_reason = ts_mismatch_reason
+            elif entry_ts_ms <= 0:
+                not_observable_reason = "missing_entry_ts"
+            else:
+                not_observable_reason = "missing_entry_px"
             for horizon in horizons:
                 h = int(horizon)
                 record[f"{HORIZON_PREFIX}{h}h_status"] = "not_observable"
-                record[f"{HORIZON_PREFIX}{h}h_reason"] = ts_mismatch_reason or "missing_entry_context"
+                record[f"{HORIZON_PREFIX}{h}h_reason"] = not_observable_reason
             record["label_status"] = "not_observable"
+            record["label_not_observable_reason"] = not_observable_reason
             continue
 
         latest_ts = _latest_series_ts(series)
@@ -892,6 +955,7 @@ def update_skipped_candidate_tracker(
         "rt_cost_bps",
         *horizon_fields,
         "label_status",
+        "label_not_observable_reason",
     ]
     _write_csv(summaries_dir / "skipped_candidate_outcomes.csv", full_rows, base_fields)
 

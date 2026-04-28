@@ -318,6 +318,163 @@ def test_btc_leadership_probe_blocked_label_stays_pending_before_horizon(tmp_pat
     assert rows[0]["label_status"] == "pending"
 
 
+def test_btc_leadership_probe_duplicate_skip_in_same_run_writes_one_label(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_09"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+
+    entry_ts_ms = 1_710_000_000_000
+    decision = {
+        "symbol": "BTC/USDT",
+        "action": "skip",
+        "reason": "btc_leadership_probe_alpha6_score_too_low",
+        "latest_px": 100.0,
+        "rolling_high": 99.0,
+        "breakout_buffer_bps": 15.0,
+        "breakout_met": True,
+        "alpha6_score": 0.29,
+        "min_alpha6_score": 0.30,
+    }
+    audit = DecisionAudit(run_id="20260421_09")
+    audit.now_ts = entry_ts_ms // 1000
+    audit.regime = "Trending"
+    audit.router_decisions = [dict(decision), dict(decision)]
+    market_data = {"BTC/USDT": _series("BTC/USDT", [entry_ts_ms], [100.0])}
+
+    result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    assert result["new_records"] == 1
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+
+    btc_summary_path = tmp_path / "reports" / "summaries" / "btc_leadership_probe_blocked_outcomes.csv"
+    with btc_summary_path.open("r", encoding="utf-8") as f:
+        summary_rows = list(csv.DictReader(f))
+    assert len(summary_rows) == 1
+
+
+def test_btc_leadership_probe_not_observable_not_flat_and_cooldown_dedupe(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_10"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+
+    entry_ts_ms = 1_710_000_000_000
+    audit = DecisionAudit(run_id="20260421_10")
+    audit.now_ts = entry_ts_ms // 1000
+    audit.regime = "Trending"
+    audit.router_decisions = [
+        {"symbol": "BTC/USDT", "action": "skip", "reason": "btc_leadership_probe_not_flat"},
+        {"symbol": "BTC/USDT", "action": "skip", "reason": "btc_leadership_probe_not_flat"},
+        {"symbol": "BTC/USDT", "action": "skip", "reason": "btc_leadership_probe_cooldown"},
+        {"symbol": "BTC/USDT", "action": "skip", "reason": "btc_leadership_probe_cooldown"},
+    ]
+
+    update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h={},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert [row["skip_reason"] for row in rows] == [
+        "btc_leadership_probe_cooldown",
+        "btc_leadership_probe_not_flat",
+    ]
+    assert all(row["label_status"] == "not_observable" for row in rows)
+    assert all(row["label_not_observable_reason"] == "missing_entry_px" for row in rows)
+    assert all(row["label_4h_reason"] == "missing_entry_px" for row in rows)
+
+    btc_summary_path = tmp_path / "reports" / "summaries" / "btc_leadership_probe_blocked_outcomes.csv"
+    with btc_summary_path.open("r", encoding="utf-8") as f:
+        summary_rows = list(csv.DictReader(f))
+    assert len(summary_rows) == 2
+    assert all(row["label_not_observable_reason"] == "missing_entry_px" for row in summary_rows)
+
+
+def test_btc_leadership_alpha6_and_no_alpha6_labels_all_horizons(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_11"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "data" / "cache"
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4, 8, 12, 24]
+    cfg.diagnostics.skipped_candidate_roundtrip_cost_bps = 30.0
+
+    entry_ts_ms = 1_710_000_000_000
+    audit = DecisionAudit(run_id="20260421_11")
+    audit.now_ts = (entry_ts_ms // 1000) + 25 * 3600
+    audit.regime = "Trending"
+    audit.router_decisions = [
+        {
+            "symbol": "BTC/USDT",
+            "action": "skip",
+            "reason": "btc_leadership_probe_alpha6_score_too_low",
+            "latest_px": 100.0,
+            "alpha6_score": 0.29,
+            "min_alpha6_score": 0.30,
+        },
+        {
+            "symbol": "BTC/USDT",
+            "action": "skip",
+            "reason": "btc_leadership_probe_no_alpha6_buy",
+            "latest_px": 100.0,
+            "actual_alpha6_score": 0.10,
+            "min_alpha6_score": 0.30,
+        },
+    ]
+    market_data = {"BTC/USDT": _series("BTC/USDT", [entry_ts_ms], [100.0])}
+    _write_cache_csv(
+        cache_dir,
+        "BTC/USDT",
+        [
+            ("2024-03-09T16:00:00Z", 100.0),
+            ("2024-03-09T20:00:00Z", 101.0),
+            ("2024-03-10T00:00:00Z", 102.0),
+            ("2024-03-10T04:00:00Z", 103.0),
+            ("2024-03-10T16:00:00Z", 104.0),
+        ],
+    )
+
+    update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+    )
+
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert {row["skip_reason"] for row in rows} == {
+        "btc_leadership_probe_alpha6_score_too_low",
+        "btc_leadership_probe_no_alpha6_buy",
+    }
+    for row in rows:
+        assert row["label_status"] == "complete"
+        assert row["label_4h_status"] == "complete"
+        assert row["label_8h_status"] == "complete"
+        assert row["label_12h_status"] == "complete"
+        assert row["label_24h_status"] == "complete"
+        assert row["label_4h_net_bps"] == 70.0
+        assert row["label_8h_net_bps"] == 170.0
+        assert row["label_12h_net_bps"] == 270.0
+        assert row["label_24h_net_bps"] == 370.0
+
+
 def test_cost_aware_edge_skip_gets_forward_label_when_horizon_available(tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260421_01"
     run_dir.mkdir(parents=True, exist_ok=True)
