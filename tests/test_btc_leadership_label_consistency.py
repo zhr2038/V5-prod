@@ -161,7 +161,7 @@ def test_btc_leadership_missing_label_writes_high_issue_with_unique_key(tmp_path
     assert result["missing_btc_leadership_labels"] == 1
     issues = json.loads((bundle / "summaries" / "issues_to_fix.json").read_text(encoding="utf-8"))
     issue = next(issue for issue in issues["issues"] if issue.get("code") == ISSUE_CODE)
-    assert issue["evidence"]["unique_key_fields"] == ["run_id", "symbol", "skip_reason", "ts_utc"]
+    assert issue["evidence"]["unique_key_fields"] == ["run_id", "ts_utc", "symbol", "skip_reason"]
     assert issue["evidence"]["run_id"] == run_id
     assert issue["evidence"]["symbol"] == "BTC/USDT"
     assert issue["evidence"]["skip_reason"] == "btc_leadership_probe_no_alpha6_buy"
@@ -210,3 +210,69 @@ def test_btc_leadership_blocked_outcomes_summary_is_deduped_by_same_key(tmp_path
         rows = list(csv.DictReader(handle))
     assert len(rows) == 1
     assert rows[0]["skip_reason"] == "btc_leadership_probe_cooldown"
+
+
+def test_btc_leadership_duplicate_labels_are_deduped_by_unique_key(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    labels_path = bundle / "raw" / "reports" / "skipped_candidate_labels.jsonl"
+    labels_path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "ts_utc": "2026-04-21T14:00:00Z",
+        "run_id": "20260421_14",
+        "symbol": "BTC/USDT",
+        "skip_reason": "btc_leadership_probe_alpha6_score_too_low",
+        "entry_px": 100.0,
+        "label_status": "pending",
+    }
+    labels_path.write_text(
+        json.dumps(row, sort_keys=True) + "\n" + json.dumps(row, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    result = update_btc_leadership_label_issues(bundle)
+
+    assert result["label_duplicate_rows_removed"] == 1
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+
+
+def test_btc_leadership_not_flat_without_entry_px_is_not_observable_not_high_issue(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    run_id = "20260421_16"
+    _write_audit(
+        bundle,
+        run_id,
+        now_ts=1_776_787_200,
+        decisions=[
+            {
+                "symbol": "BTC/USDT",
+                "action": "skip",
+                "reason": "btc_leadership_probe_not_flat",
+            },
+            {
+                "symbol": "BTC/USDT",
+                "action": "skip",
+                "reason": "btc_leadership_probe_not_flat",
+            },
+        ],
+    )
+
+    result = update_btc_leadership_label_issues(bundle)
+
+    assert result["total_blocked"] == 1
+    assert result["missing_btc_leadership_labels"] == 0
+    assert result["unlabeled_high_issue_count"] == 0
+    assert result["not_observable"] == 1
+    issues = json.loads((bundle / "summaries" / "issues_to_fix.json").read_text(encoding="utf-8"))
+    assert not any(issue.get("code") == ISSUE_CODE for issue in issues["issues"])
+    outcome_path = bundle / "summaries" / "btc_leadership_probe_blocked_outcomes.csv"
+    with outcome_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    assert rows[0]["label_status"] == "not_observable"
+    assert rows[0]["label_not_observable_reason"] == "btc_leadership_probe_not_flat_entry_px_not_observable"
+
+    summary = json.loads((bundle / "summaries" / "btc_leadership_probe_blocked_label_summary.json").read_text(encoding="utf-8"))
+    assert summary["total_blocked"] == 1
+    assert summary["not_observable"] == 1
+    assert summary["unlabeled_high_issue_count"] == 0

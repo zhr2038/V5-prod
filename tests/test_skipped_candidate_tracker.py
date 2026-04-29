@@ -396,14 +396,16 @@ def test_btc_leadership_probe_not_observable_not_flat_and_cooldown_dedupe(tmp_pa
         "btc_leadership_probe_not_flat",
     ]
     assert all(row["label_status"] == "not_observable" for row in rows)
-    assert all(row["label_not_observable_reason"] == "missing_entry_px" for row in rows)
-    assert all(row["label_4h_reason"] == "missing_entry_px" for row in rows)
+    reason_by_skip = {row["skip_reason"]: row["label_not_observable_reason"] for row in rows}
+    assert reason_by_skip["btc_leadership_probe_cooldown"] == "btc_leadership_probe_cooldown_entry_px_not_observable"
+    assert reason_by_skip["btc_leadership_probe_not_flat"] == "btc_leadership_probe_not_flat_entry_px_not_observable"
+    assert all(str(row["label_4h_reason"]).endswith("_entry_px_not_observable") for row in rows)
 
     btc_summary_path = tmp_path / "reports" / "summaries" / "btc_leadership_probe_blocked_outcomes.csv"
     with btc_summary_path.open("r", encoding="utf-8") as f:
         summary_rows = list(csv.DictReader(f))
     assert len(summary_rows) == 2
-    assert all(row["label_not_observable_reason"] == "missing_entry_px" for row in summary_rows)
+    assert all(str(row["label_not_observable_reason"]).endswith("_entry_px_not_observable") for row in summary_rows)
 
 
 def test_btc_leadership_alpha6_and_no_alpha6_labels_all_horizons(tmp_path: Path) -> None:

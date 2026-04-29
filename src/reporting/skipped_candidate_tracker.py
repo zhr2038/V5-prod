@@ -41,7 +41,11 @@ BTC_LEADERSHIP_PROBE_FIELDS = [
     "closed_cycles",
     "net_expectancy_bps",
 ]
-BTC_LEADERSHIP_PROBE_LABEL_KEY_FIELDS = ("run_id", "symbol", "skip_reason", "ts_utc")
+BTC_LEADERSHIP_PROBE_LABEL_KEY_FIELDS = ("run_id", "ts_utc", "symbol", "skip_reason")
+BTC_LEADERSHIP_PROBE_NOT_OBSERVABLE_SKIP_REASONS = {
+    "btc_leadership_probe_not_flat",
+    "btc_leadership_probe_cooldown",
+}
 
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
@@ -302,9 +306,9 @@ def btc_leadership_probe_label_key(record: Mapping[str, Any]) -> str:
     return "|".join(
         [
             str(record.get("run_id") or ""),
+            ts_utc,
             str(record.get("symbol") or "BTC/USDT"),
             str(record.get("skip_reason") or ""),
-            ts_utc,
         ]
     )
 
@@ -775,7 +779,12 @@ def _update_labels(
                 record["ts_utc"] = _iso_from_ms(entry_ts_ms)
         rt_cost_bps = float(record.get("rt_cost_bps") or 0.0)
         if entry_px is None or entry_px <= 0 or entry_ts_ms <= 0 or ts_mismatch_reason:
-            if ts_mismatch_reason:
+            skip_reason = str(record.get("skip_reason") or "")
+            if (
+                entry_px is None or entry_px <= 0
+            ) and skip_reason in BTC_LEADERSHIP_PROBE_NOT_OBSERVABLE_SKIP_REASONS:
+                not_observable_reason = f"{skip_reason}_entry_px_not_observable"
+            elif ts_mismatch_reason:
                 not_observable_reason = ts_mismatch_reason
             elif entry_ts_ms <= 0:
                 not_observable_reason = "missing_entry_ts"
