@@ -1,4 +1,4 @@
-import { Suspense, lazy, startTransition, useEffect, useEffectEvent, useState, useCallback } from 'react';
+import { Suspense, lazy, startTransition, useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { LiquidBg } from './components/LiquidBg';
 import { Hero } from './components/Hero';
@@ -141,12 +141,8 @@ function App() {
     });
   }, []);
 
-  const loadInitialData = useEffectEvent(() => {
-    void loadPrimary();
-  });
-
   useEffect(() => {
-    loadInitialData();
+    void loadPrimary();
     let timeoutId: number | null = null;
     let idleId: number | null = null;
     const idleWindow = window as IdleWindow;
@@ -172,7 +168,7 @@ function App() {
         globalThis.clearTimeout(timeoutId);
       }
     };
-  }, [loadInitialData, loadSecondary]);
+  }, [loadPrimary, loadSecondary]);
 
   useEffect(() => {
     if (!showDeferredPanels) return;

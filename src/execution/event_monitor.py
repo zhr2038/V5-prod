@@ -122,7 +122,7 @@ class EventMonitor:
                 stop_px = entry_px * 0.95
                 stop_source = 'fallback_fixed_pct'
 
-            if stop_px > 0:
+            if stop_px > 0 and entry_px > 0:
                 if current_px <= stop_px:
                     events.append(TradingEvent(
                         type=EventType.RISK_STOP_LOSS,
@@ -138,6 +138,8 @@ class EventMonitor:
                     ))
                     logger.warning(f"STOP LOSS triggered: {symbol} @ {current_px:.4f}")
                     continue
+            elif stop_px > 0:
+                logger.warning("Skipping stop loss for %s: invalid entry_price=%s", symbol, entry_px)
             
             # Trailing stop (ATR-based)
             highest_px = pos.get('highest_price', entry_px)
@@ -183,7 +185,11 @@ class EventMonitor:
                             break
             
             # Rank exit
-            current_rank = state.signals.get(symbol, SignalState(symbol, 'hold', 0, 99, 0)).rank
+            signal = state.signals.get(symbol)
+            if signal is None:
+                logger.warning("Skipping rank exit for %s: signal missing from current state", symbol)
+                continue
+            current_rank = signal.rank if hasattr(signal, 'rank') else int(signal.get('rank', 99) or 99)
             max_rank = 3  # Configurable
             if current_rank > max_rank:
                 events.append(TradingEvent(
@@ -242,9 +248,7 @@ class EventMonitor:
             # First run - record signals but don't trade
             return events
         
-        last_signals = self.last_state.signatures if hasattr(self.last_state, 'signatures') else {}
-        if not last_signals:
-            last_signals = self.last_state.signals
+        last_signals = self.last_state.signals
         
         current_signals = state.signals
         now_ms = int(time.time() * 1000)

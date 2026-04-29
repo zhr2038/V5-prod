@@ -238,6 +238,7 @@ export interface MLTrainingData {
   labeled_samples?: number;
   samples_needed?: number;
   last_training_ts?: string;
+  last_promotion_ts?: string;
   promotion_fail_reasons?: string[];
   last_runtime_ts?: string;
   last_ic?: number;

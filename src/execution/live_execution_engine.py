@@ -7,7 +7,7 @@ import time
 
 import requests
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -376,6 +376,10 @@ def _parse_okx_order_ack(ack_data: Any) -> Tuple[bool, Optional[str], Optional[s
     return False, None, err_code, err_msg
 
 
+class SafetyReject(ValueError):
+    """Expected policy or exchange-safety rejection before submitting an order."""
+
+
 class DustOrderSkip(Exception):
     """DustOrderSkip类"""
     def __init__(self, symbol: str, *, qty: float, qty_rounded: float, min_sz: float, lot_sz: float):
@@ -687,12 +691,12 @@ class LiveExecutionEngine:
             if fail_open:
                 log.warning("ENTRY_GUARD skip (no top-of-book): %s", inst_id)
                 return
-            raise ValueError(f"ENTRY_GUARD_NO_TOB: {inst_id}")
+            raise SafetyReject(f"ENTRY_GUARD_NO_TOB: {inst_id}")
 
         max_premium = float(_coalesce(getattr(self.cfg, "open_long_max_signal_premium_pct", None), 0.006))
         premium = float(ref_px / signal_px - 1.0)
         if premium > max_premium:
-            raise ValueError(
+            raise SafetyReject(
                 f"ENTRY_GUARD_PREMIUM: {inst_id} ask_or_mid={ref_px:.8f} signal={signal_px:.8f} "
                 f"premium={premium:.4%} > max={max_premium:.4%}"
             )
@@ -701,7 +705,7 @@ class LiveExecutionEngine:
             spread_bps = float((ask - bid) / mid * 10000.0)
             max_spread_bps = float(_coalesce(getattr(self.cfg, "open_long_max_spread_bps", None), 35.0))
             if spread_bps > max_spread_bps:
-                raise ValueError(
+                raise SafetyReject(
                     f"ENTRY_GUARD_SPREAD: {inst_id} spread_bps={spread_bps:.2f} > max={max_spread_bps:.2f}"
                 )
 
@@ -723,13 +727,11 @@ class LiveExecutionEngine:
         # STRICT NO-BORROW ENFORCEMENT
         # Ensure we're using pure spot mode, no margin/borrow
         if td_mode != "cash":
-            raise ValueError(f"Safety violation: tdMode must be 'cash' (no borrow), got '{td_mode}'")
+            raise SafetyReject(f"Safety violation: tdMode must be 'cash' (no borrow), got '{td_mode}'")
         
         notional = float(o.notional_usdt)
         
         # Log trade intent for audit
-        import logging
-        log = logging.getLogger(__name__)
         meta = o.meta or {}
         reason = None
         try:
@@ -754,7 +756,6 @@ class LiveExecutionEngine:
         if side == "buy":
             # Spot market buy: submit quote notional in USDT
             # OKX expects plain decimal string
-            from decimal import Decimal
             buy_budget_allowed: Optional[float] = None
             buy_budget_avail_quote: Optional[float] = None
             buy_budget_reserve = 0.0
@@ -771,7 +772,7 @@ class LiveExecutionEngine:
                     )
                     if remain_ms > 0:
                         remain_sec = remain_ms / 1000.0
-                        raise ValueError(
+                        raise SafetyReject(
                             f"RANK_EXIT_REENTRY_COOLDOWN: {o.symbol} remain={remain_sec:.1f}s (<{cooldown_min}m)"
                         )
             # Profit-taking cooldown should block any subsequent buy, including
@@ -786,7 +787,7 @@ class LiveExecutionEngine:
                     )
                     if remain_ms > 0:
                         remain_sec = remain_ms / 1000.0
-                        raise ValueError(
+                        raise SafetyReject(
                             f"TAKE_PROFIT_REENTRY_COOLDOWN: {o.symbol} remain={remain_sec:.1f}s (<{take_profit_cooldown_min}m)"
                         )
 
@@ -811,16 +812,16 @@ class LiveExecutionEngine:
                                     liab_quote = float(d.get("liab") or 0.0)
                                     break
                     except Exception as e:
-                        raise ValueError(f"NO_BORROW_BUY_BLOCK: quote balance query failed: {e}")
+                        raise SafetyReject(f"NO_BORROW_BUY_BLOCK: quote balance query failed: {e}")
 
                     liab_eps = float(_coalesce(getattr(self.cfg, "borrow_liab_eps", None), 1e-6))
                     if liab_quote > liab_eps:
-                        raise ValueError(
+                        raise SafetyReject(
                             f"NO_BORROW_BUY_BLOCK: existing {quote_ccy} liability={liab_quote:.8f}"
                         )
 
                     if avail_quote is None:
-                        raise ValueError("NO_BORROW_BUY_BLOCK: unavailable quote balance")
+                        raise SafetyReject("NO_BORROW_BUY_BLOCK: unavailable quote balance")
 
                     reserve = float(getattr(self.cfg, "buy_quote_reserve_usdt", 0.5) or 0.0)
                     slack = float(getattr(self.cfg, "buy_quote_slack_ratio", 0.001) or 0.0)
@@ -833,7 +834,7 @@ class LiveExecutionEngine:
                     buy_budget_avail_quote = float(avail_quote)
                     buy_budget_reserve = float(reserve)
                     if float(notional) > buy_budget_allowed * (1.0 + max(0.0, slack)):
-                        raise ValueError(
+                        raise SafetyReject(
                             f"NO_BORROW_BUY_BLOCK: notional={float(notional):.6f} exceeds "
                             f"quote_budget={buy_budget_allowed:.6f} {quote_ccy}"
                         )
@@ -869,7 +870,7 @@ class LiveExecutionEngine:
             # 1. Check local position store
             p = self.position_store.get(o.symbol)
             if not p or float(p.qty) <= 0:
-                raise ValueError(f"NO_BORROW_SAFETY: No position qty available for sell: {o.symbol}. "
+                raise SafetyReject(f"NO_BORROW_SAFETY: No position qty available for sell: {o.symbol}. "
                                f"Would trigger borrow. Aborting.")
             
             # 2. Double-check with OKX balance before selling (best-effort).
@@ -891,19 +892,19 @@ class LiveExecutionEngine:
 
                 if okx_base_eq is not None:
                     if okx_base_eq < 0:
-                        raise ValueError(
+                        raise SafetyReject(
                             f"NO_BORROW_SAFETY: OKX shows NEGATIVE balance for {o.symbol}: {okx_base_eq}. "
                             f"Would increase borrow. Aborting."
                         )
 
                     if okx_base_avail is not None and okx_base_avail <= 0:
-                        raise ValueError(
+                        raise SafetyReject(
                             f"NO_BORROW_SAFETY: OKX available balance ({okx_base_avail}) <= 0 "
                             f"for {o.symbol}. Risk of borrow. Aborting."
                         )
 
                     if okx_base_eq <= 0 and (okx_base_avail is None or okx_base_avail <= 0):
-                        raise ValueError(
+                        raise SafetyReject(
                             f"NO_BORROW_SAFETY: OKX balance ({okx_base_eq}) <= 0 "
                             f"for {o.symbol}. Risk of borrow. Aborting."
                         )
@@ -920,8 +921,6 @@ class LiveExecutionEngine:
             # - CLOSE_LONG: sell full local position
             # - REBALANCE: sell partial by requested notional (capped by local qty)
             # CRITICAL: 全程使用Decimal避免精度丢失
-            from decimal import Decimal
-            
             sellable_qty = float(p.qty)
             if okx_base_avail is not None:
                 sellable_qty = min(sellable_qty, max(0.0, float(okx_base_avail)))
@@ -936,7 +935,7 @@ class LiveExecutionEngine:
                 sellable_qty = min(sellable_qty, max(0.0, float(cached_budget)))
 
             if sellable_qty <= 0:
-                raise ValueError(
+                raise SafetyReject(
                     f"NO_BORROW_SAFETY: no sellable balance on OKX for {o.symbol}. "
                     f"local={p.qty} okx_eq={okx_base_eq} okx_avail={okx_base_avail}"
                 )
@@ -958,7 +957,7 @@ class LiveExecutionEngine:
                 px_ref = float(getattr(o, "signal_price", 0.0) or 0.0)
                 if px_ref <= 0:
                     # Safety: for REBALANCE sells, missing signal price must NOT degrade to full liquidation.
-                    raise ValueError(
+                    raise SafetyReject(
                         f"REBALANCE_SAFETY: missing signal_price for {o.symbol}, refusing fallback full-qty sell"
                     )
                 # 使用Decimal计算: min(qty_full, notional / px_ref)
@@ -1014,8 +1013,6 @@ class LiveExecutionEngine:
 
             # OKX rejects scientific notation (e.g. 5e-05) with 51000 Parameter sz error.
             # Always send plain decimal string and avoid float->str exponent.
-            from decimal import Decimal, ROUND_DOWN
-
             lot = float(specs.lot_sz) if specs is not None and specs.lot_sz is not None else 0.0
             if lot and lot > 0:
                 lot_dec = Decimal(str(lot))
@@ -1110,7 +1107,9 @@ class LiveExecutionEngine:
                     since_ts=since_ts,
                 )
                 if latest is not None:
-                    latest_event_ts = int(latest.updated_ts) if int(latest.updated_ts) > 0 else int(latest.created_ts)
+                    latest_updated_ts = int(latest.updated_ts or 0)
+                    latest_created_ts = int(latest.created_ts or 0)
+                    latest_event_ts = latest_updated_ts if latest_updated_ts > 0 else latest_created_ts
                     elapsed_sec = max(0.0, (now_ms - latest_event_ts) / 1000.0)
                     remain_sec = max(0.0, cooldown_min * 60.0 - elapsed_sec)
                     self.order_store.upsert_new(
@@ -1130,7 +1129,7 @@ class LiveExecutionEngine:
                             "cooldown_minutes": cooldown_min,
                             "latest_filled_cl_ord_id": str(latest.cl_ord_id),
                             "latest_filled_run_id": str(latest.run_id),
-                            "latest_filled_updated_ts": int(latest.updated_ts),
+                            "latest_filled_updated_ts": latest_updated_ts,
                             "latest_filled_event_ts": latest_event_ts,
                             "elapsed_sec": float(round(elapsed_sec, 3)),
                             "remain_sec": float(round(remain_sec, 3)),
@@ -1164,7 +1163,7 @@ class LiveExecutionEngine:
             req_store["_v5_reason"] = str(((o.meta or {}).get("reason")) or "")
             if tob:
                 req_store["_meta"] = {"mid_px_at_submit": tob.get("mid"), "bid": tob.get("bid"), "ask": tob.get("ask"), "ts_ms": tob.get("ts_ms")}
-        except ValueError as e:
+        except SafetyReject as e:
             # Policy/safety reject without touching the exchange.
             self.order_store.upsert_new(
                 cl_ord_id=clid,
