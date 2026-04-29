@@ -1,4 +1,4 @@
-import { Suspense, lazy, startTransition, useEffect, useEffectEvent, useState, useCallback } from 'react';
+import { Suspense, lazy, startTransition, useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { LiquidBg } from './components/LiquidBg';
 import { Hero } from './components/Hero';
@@ -20,7 +20,7 @@ const ShadowMLPanel = lazy(() =>
 );
 
 function DeferredPanelFallback() {
-  return <div className="material-surface material-reading reading-frame h-40" />;
+  return <div className="liquid-glass-inset tone-neutral reading-frame h-40" />;
 }
 
 type IdleWindow = Window & {
@@ -141,12 +141,8 @@ function App() {
     });
   }, []);
 
-  const loadInitialData = useEffectEvent(() => {
-    void loadPrimary();
-  });
-
   useEffect(() => {
-    loadInitialData();
+    void loadPrimary();
     let timeoutId: number | null = null;
     let idleId: number | null = null;
     const idleWindow = window as IdleWindow;
@@ -172,7 +168,7 @@ function App() {
         globalThis.clearTimeout(timeoutId);
       }
     };
-  }, [loadSecondary]);
+  }, [loadPrimary, loadSecondary]);
 
   useEffect(() => {
     if (!showDeferredPanels) return;
@@ -195,10 +191,10 @@ function App() {
   const focusSymbol = dashboard?.positions?.[0]?.symbol?.replace('-USDT', '') || '';
 
   return (
-    <main className="mobile-page-shell">
+    <div className="relative min-h-[100dvh] min-h-[100svh] min-h-screen">
       <LiquidBg />
 
-      <div className="page-content relative z-10">
+      <div className="relative z-10 pb-10">
         <Hero
           marketState={marketState}
           riskGuard={riskGuard}
@@ -214,7 +210,7 @@ function App() {
 
         <MLBand mlTraining={dashboard?.mlTraining || null} />
 
-        <div className="dashboard-section">
+        <div className="px-6">
           <div className="max-w-[1780px] mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 flex flex-col gap-4">
               <PositionsPanel
@@ -248,7 +244,7 @@ function App() {
           </div>
         </div>
 
-        <div className="dashboard-section mt-4">
+        <div className="px-6 mt-4">
           <div className="max-w-[1780px] mx-auto">
             {showDeferredPanels ? (
               <Suspense fallback={<DeferredPanelFallback />}>
@@ -262,14 +258,14 @@ function App() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="sticky bottom-4 z-50 ml-auto mt-4 flex w-fit items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-dim)]"
+            className="fixed bottom-4 right-5 z-50 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-dim)]"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]/80" />
             <span>刷新中</span>
           </motion.div>
         )}
       </div>
-    </main>
+    </div>
   );
 }
 

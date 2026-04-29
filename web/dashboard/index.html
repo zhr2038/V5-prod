@@ -2,18 +2,17 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <meta name="color-scheme" content="dark light" />
-    <meta id="theme-color-dynamic" name="theme-color" content="#141018" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141018" />
-    <meta name="theme-color" media="(prefers-color-scheme: light) and (hover: hover) and (pointer: fine)" content="#f3efed" />
+    <meta id="theme-color-dynamic" name="theme-color" content="#322f34" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#322f34" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f3efed" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="V5 看板" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-touch-fullscreen" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>V5 生产交易看板</title>
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -22,58 +21,30 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <style>
       :root {
-        --boot-bg-base: #141018;
         --boot-bg-top: #242833;
         --boot-bg-mid: #181c24;
-        --boot-bg-bottom: #141018;
+        --boot-bg-bottom: #12151b;
         --boot-card: rgba(255, 255, 255, 0.08);
         --boot-card-strong: rgba(255, 255, 255, 0.12);
         --boot-line: rgba(255, 255, 255, 0.18);
-        --boot-safe-top: calc(16px + env(safe-area-inset-top, 0px));
-        --boot-safe-right: max(20px, env(safe-area-inset-right, 0px));
-        --boot-safe-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
-        --boot-safe-left: max(20px, env(safe-area-inset-left, 0px));
       }
       html, body {
         margin: 0;
-        padding: 0;
-        width: 100%;
-        min-height: 100%;
+        min-height: 100vh;
+        min-height: 100svh;
+        min-height: 100dvh;
         background:
           radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
           radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
           radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
           linear-gradient(180deg, var(--boot-bg-top) 0%, var(--boot-bg-mid) 42%, var(--boot-bg-bottom) 100%);
-        background-color: var(--boot-bg-base);
-      }
-      html {
-        overflow-x: clip;
-        overflow-y: auto;
-        -webkit-text-size-adjust: 100%;
-      }
-      body {
-        min-height: 100%;
-        overflow-x: clip;
-        overflow-y: auto;
-        -webkit-font-smoothing: antialiased;
-        overscroll-behavior-y: auto;
-      }
-      #root {
-        min-height: 100%;
-        background: var(--boot-bg-base);
       }
       #boot-shell {
-        position: absolute;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        left: 0;
+        position: fixed;
+        inset: 0;
         z-index: 20;
         pointer-events: none;
-        min-height: 100vh;
-        min-height: 100svh;
-        min-height: 100dvh;
-        padding: var(--boot-safe-top) var(--boot-safe-right) var(--boot-safe-bottom) var(--boot-safe-left);
+        padding: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.5rem)) 1rem 1.25rem;
         background: inherit;
         transition: opacity .22s ease;
       }

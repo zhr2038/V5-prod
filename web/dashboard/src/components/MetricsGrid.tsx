@@ -30,7 +30,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
       value: fmtUsd(account?.totalEquity),
       sub: `盈亏 ${fmtUsd(account?.totalPnl)} (${fmtPct(account?.totalPnlPercent)})`,
       tone: (account?.totalPnlPercent || 0) >= 0 ? 'text-emerald-300' : 'text-rose-300',
-      surface: 'material-surface material-regular tone-coral surface-lift',
+      surface: 'liquid-glass tone-coral',
     },
     {
       icon: PieChart,
@@ -40,7 +40,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
         ? `${((account.cash / account.totalEquity) * 100).toFixed(1)}% 现金`
         : '--',
       tone: 'text-[var(--accent-3)]',
-      surface: 'material-surface material-regular tone-sky surface-lift',
+      surface: 'liquid-glass tone-sky',
     },
     {
       icon: TrendingUp,
@@ -48,7 +48,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
       value: fmtUsd(account?.positionsValue),
       sub: `初始 ${fmtUsd(account?.initialCapital)}`,
       tone: 'text-[var(--accent-2)]',
-      surface: 'material-surface material-regular tone-amber surface-lift',
+      surface: 'liquid-glass tone-amber',
     },
     {
       icon: Activity,
@@ -56,7 +56,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
       value: systemStatus?.isRunning ? '运行中' : '停止',
       sub: systemStatus?.errors?.length ? `${systemStatus.errors.length} 个告警` : '无异常',
       tone: systemStatus?.isRunning ? 'text-emerald-300' : 'text-rose-300',
-      surface: 'material-surface material-regular tone-sage surface-lift',
+      surface: 'liquid-glass tone-sage',
     },
     {
       icon: Target,
@@ -64,12 +64,12 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
       value: focusSymbol || '—',
       sub: '持仓聚焦',
       tone: 'text-[var(--accent)]',
-      surface: 'material-surface material-clear tone-plum surface-lift',
+      surface: 'liquid-glass tone-plum',
     },
   ];
 
   return (
-    <div className="dashboard-section relative z-10 pb-6">
+    <div className="relative z-10 px-6 pb-6">
       <motion.div
         variants={container}
         initial="hidden"

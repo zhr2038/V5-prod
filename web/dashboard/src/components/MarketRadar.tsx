@@ -50,7 +50,7 @@ function VoteCard({
     : [];
 
   return (
-    <div className={`material-surface material-clear clear-control surface-lift ${surfaceTone} p-4 flex flex-col gap-3`}>
+    <div className={`liquid-glass-thin ${surfaceTone} p-4 flex flex-col gap-3`}>
       <div className="flex items-center justify-between">
         <span className="text-sm text-[var(--text-dim)]">{title}</span>
         <span className={`text-xs px-2 py-0.5 rounded-full border ${stateBg[state] || 'bg-white/8 border-white/12'}`}>
@@ -62,9 +62,9 @@ function VoteCard({
           {rows.map((r) => (
             <div key={r.label} className="flex items-center gap-2 text-xs">
               <span className="w-10 text-[var(--text-dim)]">{r.label}</span>
-              <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div className="glass-progress-track glass-progress-track--slim flex-1">
                 <div
-                  className="h-full rounded-full bg-[var(--accent)]"
+                  className="liquid-progress-fill liquid-progress-fill--mint absolute inset-y-[1px] left-[1px] rounded-full"
                   style={{ width: `${Math.max(0, Math.min(100, r.value * 100))}%` }}
                 />
               </div>
@@ -84,7 +84,7 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
   const alerts = marketState?.alerts || [];
 
   return (
-    <div className="material-surface material-regular tone-smoke reading-frame p-5 flex flex-col gap-4">
+    <div className="liquid-glass-thick tone-smoke reading-frame p-5 flex flex-col gap-4">
       <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
         <Radar className="w-4 h-4" />
         <span>市场雷达</span>
@@ -106,7 +106,7 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
         </div>
       )}
 
-      <div className="material-surface material-reading reading-block tone-neutral px-3 py-3">
+      <div className="liquid-glass-inset tone-neutral px-3 py-3">
         <div className="text-xs text-[var(--text-dim)] mb-2">24h 投票轨迹</div>
         <div className="flex items-center gap-1 flex-wrap">
           {history.map((h, i) => {

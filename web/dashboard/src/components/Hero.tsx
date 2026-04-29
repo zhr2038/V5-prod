@@ -3,16 +3,16 @@ import { stateLabels, riskLabels, modeLabels, fmtNum, fmtPct } from '../lib/form
 import type { MarketStateData, RiskGuardData, SystemStatus } from '../types';
 
 const stateClasses: Record<string, string> = {
-  TRENDING: 'material-surface material-clear clear-chip tone-sage surface-lift text-emerald-50 border-emerald-300/18',
-  SIDEWAYS: 'material-surface material-clear clear-chip tone-amber surface-lift text-amber-50 border-amber-300/18',
-  RISK_OFF: 'material-surface material-clear clear-chip tone-rose surface-lift text-rose-50 border-rose-300/20',
+  TRENDING: 'liquid-glass-thin clear-chip tone-sage text-emerald-50',
+  SIDEWAYS: 'liquid-glass-thin clear-chip tone-amber text-amber-50',
+  RISK_OFF: 'liquid-glass-thin clear-chip tone-rose text-rose-50',
 };
 
 const riskClasses: Record<string, string> = {
-  ATTACK: 'material-surface material-clear clear-chip tone-sage surface-lift text-emerald-50 border-emerald-300/18',
-  NEUTRAL: 'material-surface material-clear clear-chip tone-sky surface-lift text-sky-50 border-sky-300/18',
-  DEFENSE: 'material-surface material-clear clear-chip tone-amber surface-lift text-amber-50 border-amber-300/18',
-  PROTECT: 'material-surface material-clear clear-chip tone-rose surface-lift text-rose-50 border-rose-300/20',
+  ATTACK: 'liquid-glass-thin clear-chip tone-sage text-emerald-50',
+  NEUTRAL: 'liquid-glass-thin clear-chip tone-sky text-sky-50',
+  DEFENSE: 'liquid-glass-thin clear-chip tone-amber text-amber-50',
+  PROTECT: 'liquid-glass-thin clear-chip tone-rose text-rose-50',
 };
 
 interface HeroProps {
@@ -34,7 +34,7 @@ export function Hero({ marketState, riskGuard, systemStatus, updateTime }: HeroP
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
-      className="dashboard-section relative z-10 pb-4"
+      className="relative z-10 px-6 pb-4"
     >
       <div className="max-w-[1780px] mx-auto flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div className="hero-safe-copy">
@@ -49,17 +49,17 @@ export function Hero({ marketState, riskGuard, systemStatus, updateTime }: HeroP
           </h1>
         </div>
 
-        <div className="material-surface material-clear tone-pearl control-rail hero-safe-rail self-start md:self-auto">
-          <div className={`control-pill ${stateClasses[state] || stateClasses.SIDEWAYS}`}>
+        <div className="liquid-glass-thin tone-pearl control-rail hero-safe-rail self-start md:self-auto">
+          <div className={`control-pill liquid-glass-thin ${stateClasses[state] || stateClasses.SIDEWAYS}`}>
             市场: {stateLabels[state] || state}
           </div>
-          <div className={`control-pill ${riskClasses[level] || riskClasses.NEUTRAL}`}>
+          <div className={`control-pill liquid-glass-thin ${riskClasses[level] || riskClasses.NEUTRAL}`}>
             风险: {riskLabels[level] || level}
           </div>
-          <div className="material-surface material-clear clear-chip tone-sky control-pill surface-lift" data-emphasis="soft">
+          <div className="liquid-glass-thin clear-chip tone-sky control-pill" data-emphasis="soft">
             仓位倍数 <span className="font-mono text-[var(--accent)]">{fmtNum(multiplier, 2)}x</span>
           </div>
-          <div className="material-surface material-clear clear-chip tone-coral control-pill surface-lift" data-emphasis="soft">
+          <div className="liquid-glass-thin clear-chip tone-coral control-pill" data-emphasis="soft">
             回撤 <span className="font-mono">{dd == null ? '--' : fmtPct(dd, 1)}</span>
           </div>
         </div>

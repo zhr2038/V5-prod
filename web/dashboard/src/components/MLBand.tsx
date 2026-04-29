@@ -55,9 +55,9 @@ export function MLBand({ mlTraining }: MLBandProps) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.15 }}
-      className="dashboard-section relative z-10 pb-6"
+      className="relative z-10 px-6 pb-6"
     >
-      <div className="max-w-[1780px] mx-auto material-surface material-regular tone-neutral p-5">
+      <div className="max-w-[1780px] mx-auto liquid-glass-thick tone-neutral p-5">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)] mb-4">
           <Brain className="w-4 h-4" />
           <span>ML 训练链路</span>
@@ -83,7 +83,7 @@ export function MLBand({ mlTraining }: MLBandProps) {
             return (
               <div
                 key={stage.key}
-                className={`material-surface material-clear clear-control surface-lift ${stageTone[stage.key] || 'tone-neutral'} px-3 py-3 flex flex-col gap-1`}
+                className={`liquid-glass-thin ${stageTone[stage.key] || 'tone-neutral'} px-3 py-3 flex flex-col gap-1`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-[var(--text-soft)]">{stage.title}</span>

@@ -151,8 +151,8 @@ function CandlestickSvg({
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full">
       <defs>
         <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--kline-volume-top)" />
-          <stop offset="100%" stopColor="var(--kline-volume-bottom)" />
+          <stop offset="0%" stopColor="rgba(126, 236, 205, 0.62)" />
+          <stop offset="100%" stopColor="rgba(126, 236, 205, 0.12)" />
         </linearGradient>
       </defs>
       {priceTicks.map((tick) => (
@@ -162,7 +162,7 @@ function CandlestickSvg({
           x2={w - pad.r}
           y1={y(tick)}
           y2={y(tick)}
-          stroke="var(--kline-grid)"
+          stroke="rgba(255,255,255,0.06)"
           strokeDasharray="4 4"
         />
       ))}
@@ -173,7 +173,7 @@ function CandlestickSvg({
           x2={x(index)}
           y1={pad.t}
           y2={volumeBaseY}
-          stroke="var(--kline-grid-muted)"
+          stroke="rgba(255,255,255,0.035)"
         />
       ))}
       {data.map((candle, index) => {
@@ -197,7 +197,7 @@ function CandlestickSvg({
         <path
           d={ma20Path}
           fill="none"
-          stroke="var(--kline-ma20)"
+          stroke="rgba(255, 205, 120, 0.9)"
           strokeWidth={1.5}
           strokeLinejoin="round"
           strokeLinecap="round"
@@ -207,7 +207,7 @@ function CandlestickSvg({
         <path
           d={ma7Path}
           fill="none"
-          stroke="var(--kline-ma7)"
+          stroke="rgba(141, 196, 255, 0.95)"
           strokeWidth={1.5}
           strokeLinejoin="round"
           strokeLinecap="round"
@@ -220,21 +220,18 @@ function CandlestickSvg({
         const yH = y(d.high);
         const yL = y(d.low);
         const up = d.close >= d.open;
-        const color = up ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)';
-        const fill = up ? 'var(--kline-candle-up-fill)' : 'var(--kline-candle-down-fill)';
+        const color = up ? '#34d399' : '#fb7185';
         const bodyH = Math.max(1, Math.abs(yC - yO));
         const bodyY = Math.min(yO, yC);
         return (
           <g key={i}>
-            <line x1={cx} x2={cx} y1={yH} y2={yL} stroke={color} strokeWidth={1.2} />
+            <line x1={cx} x2={cx} y1={yH} y2={yL} stroke={color} strokeWidth={1} />
             <rect
               x={cx - bodyWidth / 2}
               y={bodyY}
               width={bodyWidth}
               height={bodyH}
-              fill={fill}
-              stroke={color}
-              strokeWidth={0.7}
+              fill={color}
               rx={1}
             />
           </g>
@@ -245,7 +242,7 @@ function CandlestickSvg({
         x2={w - pad.r}
         y1={lastPriceLabelY}
         y2={lastPriceLabelY}
-        stroke="var(--kline-last)"
+        stroke="#8dc4ff"
         strokeWidth={1}
         strokeDasharray="6 4"
       />
@@ -255,7 +252,7 @@ function CandlestickSvg({
           x2={w - pad.r}
           y1={y(Number(referencePrice))}
           y2={y(Number(referencePrice))}
-          stroke="var(--kline-reference)"
+          stroke="rgba(255, 205, 120, 0.75)"
           strokeWidth={1}
           strokeDasharray="3 4"
         />
@@ -267,13 +264,13 @@ function CandlestickSvg({
             x2={Math.min(w - pad.r - 36, x(highestIndex) + 28)}
             y1={y(data[highestIndex].high)}
             y2={y(data[highestIndex].high)}
-            stroke="var(--kline-marker)"
+            stroke="rgba(255,255,255,0.32)"
             strokeWidth={1}
           />
           <text
             x={Math.min(w - pad.r - 32, x(highestIndex) + 32)}
             y={y(data[highestIndex].high) - 4}
-            fill="var(--kline-marker-text)"
+            fill="rgba(255,255,255,0.76)"
             fontSize="11"
             textAnchor="start"
           >
@@ -288,13 +285,13 @@ function CandlestickSvg({
             x2={Math.min(w - pad.r - 36, x(lowestIndex) + 28)}
             y1={y(data[lowestIndex].low)}
             y2={y(data[lowestIndex].low)}
-            stroke="var(--kline-marker-muted)"
+            stroke="rgba(255,255,255,0.28)"
             strokeWidth={1}
           />
           <text
             x={Math.min(w - pad.r - 32, x(lowestIndex) + 32)}
             y={y(data[lowestIndex].low) + 13}
-            fill="var(--kline-marker-text-muted)"
+            fill="rgba(255,255,255,0.7)"
             fontSize="11"
             textAnchor="start"
           >
@@ -307,7 +304,7 @@ function CandlestickSvg({
           key={`price-${tick}`}
           x={w - pad.r + 6}
           y={y(tick) + 4}
-          fill="var(--kline-axis)"
+          fill="rgba(210,218,232,0.76)"
           fontSize="11"
           textAnchor="start"
         >
@@ -319,7 +316,7 @@ function CandlestickSvg({
           key={`time-${index}`}
           x={x(index)}
           y={h - 8}
-          fill="var(--kline-axis-muted)"
+          fill="rgba(194,204,224,0.66)"
           fontSize="11"
           textAnchor={index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle'}
         >
@@ -332,13 +329,13 @@ function CandlestickSvg({
         width="52"
         height="18"
         rx="9"
-        fill="var(--kline-label-bg)"
-        stroke="var(--kline-label-border)"
+        fill="rgba(25, 35, 49, 0.9)"
+        stroke="rgba(141, 196, 255, 0.44)"
       />
       <text
         x={w - pad.r + 30}
         y={lastPriceLabelY + 3}
-        fill="var(--kline-label-text)"
+        fill="#9ad2ff"
         fontSize="11"
         textAnchor="middle"
       >
@@ -352,13 +349,13 @@ function CandlestickSvg({
             width="52"
             height="18"
             rx="9"
-            fill="var(--kline-reference-label-bg)"
-            stroke="var(--kline-reference-label-border)"
+            fill="rgba(48, 40, 18, 0.88)"
+            stroke="rgba(255, 205, 120, 0.4)"
           />
           <text
             x={w - pad.r + 30}
             y={y(Number(referencePrice)) + 3}
-            fill="var(--kline-reference-label-text)"
+            fill="#ffcb7f"
             fontSize="11"
             textAnchor="middle"
           >
@@ -368,7 +365,7 @@ function CandlestickSvg({
             <text
               x={w - pad.r - 42}
               y={y(Number(referencePrice)) - 14}
-              fill="var(--kline-reference-label-text)"
+              fill="rgba(255, 205, 120, 0.8)"
               fontSize="10"
               textAnchor="end"
             >
@@ -519,7 +516,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
   }, activeSymbol ? 10000 : null);
 
   return (
-    <div className="material-surface material-regular tone-sky reading-frame p-5 flex flex-col gap-5">
+    <div className="liquid-glass-thick tone-sky reading-frame p-5 flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <CandlestickChart className="w-4 h-4" />
@@ -559,19 +556,19 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
           {spotlightPosition ? (
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
+                <div className="liquid-glass-thin metric-pill tone-sky px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">市值</div>
                   <div className="text-lg font-semibold">{fmtUsd(spotlightPosition.value)}</div>
                 </div>
-                <div className="material-surface material-clear clear-control metric-pill tone-sage px-4 py-3">
+                <div className="liquid-glass-thin metric-pill tone-sage px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">数量</div>
                   <div className="text-lg font-mono">{fmtNum(spotlightPosition.qty, 4)}</div>
                 </div>
-                <div className="material-surface material-clear clear-control metric-pill tone-amber px-4 py-3">
+                <div className="liquid-glass-thin metric-pill tone-amber px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">均价</div>
                   <div className="text-lg font-mono">{fmtUsd(displayAvgPrice)}</div>
                 </div>
-                <div className="material-surface material-clear clear-control metric-pill tone-coral px-4 py-3">
+                <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">现价</div>
                   <div className="text-lg font-mono">{fmtUsd(displayCurrentPrice)}</div>
                 </div>
@@ -583,23 +580,23 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
             </div>
           ) : fallbackTrade ? (
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
+              <div className="liquid-glass-thin metric-pill tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">状态</div>
                 <div className="text-lg font-semibold">最近成交</div>
               </div>
-              <div className="material-surface material-clear clear-control metric-pill tone-sage px-4 py-3">
+              <div className="liquid-glass-thin metric-pill tone-sage px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">方向</div>
                 <div className="text-lg font-medium">{sideLabels[fallbackTrade.side] || fallbackTrade.side || '--'}</div>
               </div>
-              <div className="material-surface material-clear clear-control metric-pill tone-amber px-4 py-3">
+              <div className="liquid-glass-thin metric-pill tone-amber px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">成交单价</div>
                 <div className="text-lg font-mono">{fmtUsd(fallbackTrade.price)}</div>
               </div>
-              <div className="material-surface material-clear clear-control metric-pill tone-coral px-4 py-3">
+              <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">成交数量</div>
                 <div className="text-lg font-mono">{fmtNum(fallbackTrade.qty, 6)}</div>
               </div>
-              <div className="material-surface material-clear clear-control metric-pill tone-plum px-4 py-3">
+              <div className="liquid-glass-thin metric-pill tone-plum px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">时间</div>
                 <div className="text-sm font-medium">{fallbackTrade.timestamp || '--'}</div>
                 <div className="text-[11px] text-[var(--text-dim)] mt-1">额 {fmtUsd(fallbackTrade.value)}</div>
@@ -615,7 +612,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                     <button
                       key={t.key}
                       onClick={() => setTf(t.key)}
-                      className={`material-surface material-clear clear-chip control-pill px-3 py-1.5 text-xs transition ${
+                      className={`liquid-glass-thin clear-chip control-pill px-3 py-1.5 text-xs transition ${
                         tf === t.key
                           ? 'tone-sky text-white border-white/20'
                           : 'tone-pearl text-[var(--text-dim)] surface-lift'
@@ -633,31 +630,31 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2">
-                <div className="material-surface material-reading reading-block tone-neutral px-3 py-2">
+                <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">Open</div>
                   <div className="mt-1 text-sm font-mono text-white">
                     {fmtUsd(Number(chartSummary?.open || latestCandle?.open || 0))}
                   </div>
                 </div>
-                <div className="material-surface material-reading reading-block tone-neutral px-3 py-2">
+                <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">High</div>
                   <div className="mt-1 text-sm font-mono text-emerald-200">
                     {fmtUsd(Number(chartSummary?.high || latestCandle?.high || 0))}
                   </div>
                 </div>
-                <div className="material-surface material-reading reading-block tone-neutral px-3 py-2">
+                <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">Low</div>
                   <div className="mt-1 text-sm font-mono text-rose-200">
                     {fmtUsd(Number(chartSummary?.low || latestCandle?.low || 0))}
                   </div>
                 </div>
-                <div className="material-surface material-reading reading-block tone-neutral px-3 py-2">
+                <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">Close</div>
                   <div className="mt-1 text-sm font-mono text-white">
                     {fmtUsd(Number(chartSummary?.close || latestCandle?.close || 0))}
                   </div>
                 </div>
-                <div className="material-surface material-reading reading-block tone-neutral px-3 py-2">
+                <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">振幅 / 量能</div>
                   <div className="mt-1 text-sm font-mono text-white">
                     {fmtPct(sessionRangePct)}
@@ -666,7 +663,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                     Vol {formatCompactVolume(Number(chartSummary?.volume || 0))}
                   </div>
                 </div>
-                <div className="material-surface material-reading reading-block tone-neutral px-3 py-2">
+                <div className="liquid-glass-inset tone-neutral px-3 py-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--text-dim)]">本根变化</div>
                   <div className={`mt-1 text-sm font-mono ${periodChange >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                     {fmtUsd(periodChange)}
@@ -677,7 +674,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                 </div>
               </div>
 
-              <div className="material-surface material-reading reading-surface tone-neutral w-full p-3">
+              <div className="liquid-glass-inset tone-neutral w-full p-3">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-3">
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                     <span className="text-[var(--text-dim)]">MA7 <span className="ml-1 font-mono text-sky-200">{ma7Value ? fmtUsd(ma7Value) : '--'}</span></span>
@@ -709,7 +706,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
 
       <div className="mt-2">
         <div className="text-sm text-[var(--text-dim)] mb-3">持仓清单</div>
-        <div className="material-surface material-reading reading-block tone-neutral overflow-x-auto px-3 py-2">
+        <div className="liquid-glass-inset tone-neutral overflow-x-auto px-3 py-2">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-[var(--text-dim)] text-xs border-b border-white/10">

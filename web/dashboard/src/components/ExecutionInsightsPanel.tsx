@@ -44,7 +44,7 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
     : slippageInsights?.baselineLabel || '回测基线';
 
   return (
-    <div className={`material-surface material-regular reading-frame p-5 flex flex-col gap-4 ${toneClass(slippageInsights?.status)}`}>
+    <div className={`liquid-glass-thick reading-frame p-5 flex flex-col gap-4 ${toneClass(slippageInsights?.status)}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <Activity className="w-4 h-4" />
@@ -56,25 +56,25 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="material-surface material-clear clear-control metric-pill tone-coral px-4 py-3">
+        <div className="liquid-glass-thin metric-pill tone-coral px-4 py-3">
           <div className="text-xs text-[var(--text-dim)]">样本数</div>
           <div className="text-lg font-semibold">{fmtNum(slippageInsights?.sampleCount, 0)}</div>
         </div>
-        <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
+        <div className="liquid-glass-thin metric-pill tone-sky px-4 py-3">
           <div className="text-xs text-[var(--text-dim)]">实测均值</div>
           <div className="text-lg font-semibold">{fmtBps(slippageInsights?.actualAvgBps)}</div>
         </div>
-        <div className="material-surface material-clear clear-control metric-pill tone-amber px-4 py-3">
+        <div className="liquid-glass-thin metric-pill tone-amber px-4 py-3">
           <div className="text-xs text-[var(--text-dim)]">P90 / P95</div>
           <div className="text-lg font-semibold">{fmtBps(slippageInsights?.actualP90Bps)} / {fmtBps(slippageInsights?.actualP95Bps)}</div>
         </div>
-        <div className="material-surface material-clear clear-control metric-pill tone-plum px-4 py-3">
+        <div className="liquid-glass-thin metric-pill tone-plum px-4 py-3">
           <div className="text-xs text-[var(--text-dim)]">回测基线</div>
           <div className="text-lg font-semibold">{fmtBps(slippageInsights?.baselineBps)}</div>
         </div>
       </div>
 
-      <div className="material-surface material-reading reading-surface tone-neutral p-4">
+      <div className="liquid-glass-inset tone-neutral p-4">
         <div className="flex items-center justify-between text-xs text-[var(--text-dim)]">
           <span>实测滑点分布</span>
           <span>{baselineLabel}</span>
@@ -101,11 +101,13 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
               const height = maxCount > 0 ? Math.max((count / maxCount) * 100, count > 0 ? 8 : 0) : 0;
               return (
                 <div key={bin.label} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
-                  <div
-                    className="w-full rounded-t-md border border-white/12 bg-[linear-gradient(180deg,rgba(141,196,255,0.88),rgba(111,145,255,0.34))]"
-                    style={{ height: `${height}%` }}
-                    title={`${bin.label}: ${count}`}
-                  />
+                  <div className="glass-column-track">
+                    <div
+                      className="glass-column-fill"
+                      style={{ height: `${height}%` }}
+                      title={`${bin.label}: ${count}`}
+                    />
+                  </div>
                 </div>
               );
             })}
@@ -121,11 +123,11 @@ export function ExecutionInsightsPanel({ slippageInsights }: ExecutionInsightsPa
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-xs">
-        <div className="material-surface material-clear clear-control list-row tone-pearl px-3 py-2 flex items-center justify-between">
+        <div className="liquid-glass-thin list-row tone-pearl px-3 py-2 flex items-center justify-between">
           <span className="text-[var(--text-dim)]">最近成交</span>
           <span className="text-[var(--text-soft)]">{slippageInsights?.lastFillAt ? slippageInsights.lastFillAt.slice(5, 16).replace('T', ' ') : '—'}</span>
         </div>
-        <div className="material-surface material-clear clear-control list-row tone-pearl px-3 py-2 flex items-center justify-between">
+        <div className="liquid-glass-thin list-row tone-pearl px-3 py-2 flex items-center justify-between">
           <span className="text-[var(--text-dim)]">范围</span>
           <span className="text-[var(--text-soft)]">{fmtBps(slippageInsights?.actualMinBps)} ~ {fmtBps(slippageInsights?.actualMaxBps)}</span>
         </div>

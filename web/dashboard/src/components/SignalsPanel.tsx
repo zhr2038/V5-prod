@@ -11,7 +11,7 @@ export function SignalsPanel({ decisionAudit }: SignalsPanelProps) {
   const runId = decisionAudit?.run_id;
 
   return (
-    <div className="material-surface material-regular tone-plum reading-frame p-5 flex flex-col gap-4">
+    <div className="liquid-glass-thick tone-plum reading-frame p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <Signal className="w-4 h-4" />
@@ -21,11 +21,11 @@ export function SignalsPanel({ decisionAudit }: SignalsPanelProps) {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="material-surface material-clear clear-control tone-sage p-3 text-center">
+        <div className="liquid-glass-thin tone-sage p-3 text-center">
           <div className="text-xs text-[var(--text-dim)]">入池</div>
           <div className="text-xl font-semibold">{counts.selected || 0}</div>
         </div>
-        <div className="material-surface material-clear clear-control tone-sky p-3 text-center">
+        <div className="liquid-glass-thin tone-sky p-3 text-center">
           <div className="text-xs text-[var(--text-dim)]">订单</div>
           <div className="text-xl font-semibold">{(counts.orders_rebalance || 0) + (counts.orders_exit || 0)}</div>
         </div>
@@ -33,7 +33,7 @@ export function SignalsPanel({ decisionAudit }: SignalsPanelProps) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {strategies.map((s, idx) => (
-          <div key={idx} className="material-surface material-clear clear-control list-row tone-pearl surface-lift p-3 flex flex-col gap-1">
+          <div key={idx} className="liquid-glass-thin list-row tone-pearl p-3 flex flex-col gap-1">
             <div className="text-sm font-medium">{s.strategy || '策略'}</div>
             <div className="text-xs text-[var(--text-soft)]">
               {s.total_signals || 0} 个信号 · 买 {s.buy_signals || 0} / 卖 {s.sell_signals || 0}
