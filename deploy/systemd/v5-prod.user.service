@@ -11,5 +11,5 @@ Environment=V5_CONFIG=configs/live_prod.yaml
 Environment=V5_DATA_PROVIDER=okx
 Environment=V5_LIVE_ARM=YES
 Environment=V5_WORKSPACE=/home/ubuntu/clawd/v5-prod
-ExecStartPre=-/bin/bash -lc 'cd /home/ubuntu/clawd/v5-prod && PYTHONPATH=. /home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/auto_sync_before_trade.py'
+ExecStartPre=/bin/bash -lc 'cd /home/ubuntu/clawd/v5-prod && PYTHONPATH=. /home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/auto_sync_before_trade.py'
 ExecStart=/usr/bin/flock -n /tmp/v5_live_prod_hourly.lock -c "/bin/bash -lc '/home/ubuntu/clawd/v5-prod/scripts/run_hourly_live_window.sh'"

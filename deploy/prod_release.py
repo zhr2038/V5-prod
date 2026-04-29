@@ -53,6 +53,8 @@ PRODUCTION_USER_UNIT_MAPPINGS = (
     ("v5-event-driven.service", "v5-event-driven.service"),
     ("v5-event-driven.timer", "v5-event-driven.timer"),
     ("v5-web-dashboard.service", "v5-web-dashboard.service"),
+    ("v5-trade-monitor.service", "v5-trade-monitor.service"),
+    ("v5-trade-monitor.timer", "v5-trade-monitor.timer"),
     ("v5-sentiment-collect.service", "v5-sentiment-collect.service"),
     ("v5-sentiment-collect.timer", "v5-sentiment-collect.timer"),
     ("v5-auto-risk-eval.service", "v5-auto-risk-eval.service"),

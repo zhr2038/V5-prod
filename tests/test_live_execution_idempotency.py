@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import tempfile
 
@@ -326,6 +327,40 @@ def test_poll_open_uses_fill_store_derived_from_order_store(monkeypatch) -> None
         assert captured["reconciler_fill_path"] == str(Path(td) / "shadow_fills.sqlite")
         assert captured["order_store_path"] == str(Path(td) / "shadow_orders.sqlite")
         assert captured["reconcile_called"] == (2000, 20)
+
+
+def test_poll_open_logs_fill_reconcile_failure(monkeypatch, caplog) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/shadow_orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+        )
+
+        class DummyFillStore:
+            def __init__(self, path: str) -> None:
+                self.path = Path(path)
+
+        class FailingReconciler:
+            def __init__(self, *, fill_store, order_store, okx, position_store) -> None:
+                pass
+
+            def reconcile(self, limit: int, max_get_order_per_run: int) -> None:
+                raise RuntimeError("reconcile boom")
+
+        monkeypatch.setattr("src.execution.fill_store.FillStore", DummyFillStore)
+        monkeypatch.setattr("src.execution.fill_reconciler.FillReconciler", FailingReconciler)
+
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        with caplog.at_level(logging.WARNING, logger="src.execution.live_execution_engine"):
+            out = eng.poll_open(limit=5)
+
+        assert out == []
+        assert "live fill reconciliation skipped in poll_open: reconcile boom" in caplog.text
 
 
 def test_live_execution_engine_defaults_position_store_from_order_store_path() -> None:

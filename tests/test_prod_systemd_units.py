@@ -59,6 +59,14 @@ def test_trade_monitor_timer_runs_after_hourly_live_window() -> None:
     assert "Unit=v5-trade-monitor.service" in timer
 
 
+def test_live_prod_service_fails_when_pre_trade_auto_sync_fails() -> None:
+    service = (PROJECT_ROOT / "deploy" / "systemd" / "v5-prod.user.service").read_text(encoding="utf-8")
+
+    assert "scripts/auto_sync_before_trade.py" in service
+    assert "ExecStartPre=-" not in service
+    assert "ExecStartPre=/bin/bash" in service
+
+
 def test_event_driven_timer_is_offset_from_hourly_live_and_auto_risk_writes() -> None:
     timer = (PROJECT_ROOT / "deploy" / "systemd" / "v5-event-driven.timer").read_text(encoding="utf-8")
 

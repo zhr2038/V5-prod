@@ -236,6 +236,12 @@ def test_production_unit_mappings_include_spread_rollup() -> None:
     assert mappings["v5-spread-rollup.timer"] == "v5-spread-rollup.timer"
 
 
+def test_production_unit_mappings_include_trade_monitor() -> None:
+    mappings = dict(PRODUCTION_USER_UNIT_MAPPINGS)
+    assert mappings["v5-trade-monitor.service"] == "v5-trade-monitor.service"
+    assert mappings["v5-trade-monitor.timer"] == "v5-trade-monitor.timer"
+
+
 def test_shadow_sync_items_cover_shadow_runtime_without_dashboard_payload() -> None:
     assert "main.py" in SHADOW_SYNC_ITEMS
     assert "configs" in SHADOW_SYNC_ITEMS

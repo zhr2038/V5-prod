@@ -130,12 +130,17 @@ def test_install_systemd_user_production_only_supports_shadow_root_and_required_
     units_dir = home / ".config" / "systemd" / "user"
     spread_unit = (units_dir / "v5-spread-rollup.service").read_text(encoding="utf-8")
     prod_unit = (units_dir / "v5-prod.user.service").read_text(encoding="utf-8")
+    trade_monitor_unit = (units_dir / "v5-trade-monitor.service").read_text(encoding="utf-8")
+    trade_monitor_timer = (units_dir / "v5-trade-monitor.timer").read_text(encoding="utf-8")
     shadow_unit = (units_dir / "v5-shadow-tuned-xgboost.user.service").read_text(encoding="utf-8")
     systemctl_calls = systemctl_log.read_text(encoding="utf-8")
 
     assert _bash_path(project_root) in spread_unit
     assert "User=admin" not in prod_unit
+    assert _bash_path(project_root) in trade_monitor_unit
+    assert "Unit=v5-trade-monitor.service" in trade_monitor_timer
     assert "/srv/shadow-runtime" in shadow_unit
+    assert "--user enable --now v5-trade-monitor.timer" in systemctl_calls
     assert "--user enable --now v5-spread-rollup.timer" in systemctl_calls
     assert "--user enable --now v5-shadow-tuned-xgboost.user.timer" in systemctl_calls
     assert "--user enable --now v5-prod.user.timer" in systemctl_calls

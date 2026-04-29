@@ -1563,8 +1563,8 @@ def main() -> None:
                         position_store=getattr(exec_engine, "position_store", None),
                     )
                     rec.reconcile(limit=2000, max_get_order_per_run=10)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(f"live fill reconciliation failed after fills sync: {e}", exc_info=True)
 
                 if total_new > 0:
                     log.info(f"FILLS_SYNC new_fills={total_new} total={fs.count()}")

@@ -1436,8 +1436,8 @@ class LiveExecutionEngine:
             fs = FillStore(path=str(derive_fill_store_path(self.order_store.path)))
             rec = FillReconciler(fill_store=fs, order_store=self.order_store, okx=self.okx, position_store=self.position_store)
             rec.reconcile(limit=2000, max_get_order_per_run=20)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("live fill reconciliation skipped in poll_open: %s", exc, exc_info=True)
 
         try:
             ttl_sec = max(1, int(self._legacy_order_poll_policy.legacy_order_poll_max_age_hours)) * 3600
