@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +16,8 @@ sys.path.insert(0, str(ROOT))
 
 from configs.loader import load_config
 from src.alpha.alpha_engine import AlphaEngine
+from src.execution.account_store import AccountState, AccountStore
+from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
 import src.strategy.multi_strategy_system as multi_strategy_system
 from src.strategy.multi_strategy_system import Alpha6FactorStrategy
 
@@ -95,6 +99,33 @@ alpha:
     engine = AlphaEngine(cfg.alpha)
     assert engine.alpha6_strategy is not None
     assert engine.alpha6_strategy.factor_weights["f3_vol_adj_ret"] == pytest.approx(0.30)
+
+
+def test_alpha_engine_ignores_stale_equity_snapshot_and_uses_account_store(tmp_path, monkeypatch):
+    order_store = tmp_path / "reports" / "orders.sqlite"
+    positions_db = derive_position_store_path(order_store)
+    AccountStore(path=str(positions_db)).set(
+        AccountState(cash_usdt=106.8, equity_peak_usdt=132.0, scale_basis_usdt=0.0)
+    )
+    equity_file = derive_runtime_named_json_path(order_store, "equity_validation")
+    equity_file.parent.mkdir(parents=True, exist_ok=True)
+    equity_file.write_text(
+        json.dumps(
+            {
+                "timestamp": 1,
+                "okx_total_eq": 134.94,
+                "calculated_total_eq": 134.94,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    engine = AlphaEngine.__new__(AlphaEngine)
+    engine.cfg = SimpleNamespace()
+    engine.repo_root = tmp_path
+    monkeypatch.setattr(engine, "_resolve_runtime_order_store_path", lambda: order_store)
+
+    assert engine._resolve_total_capital_usdt() == pytest.approx(106.8)
 
 
 def test_alpha158_overlay_disabled_skips_compute_and_blend(monkeypatch):

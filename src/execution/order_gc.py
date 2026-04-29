@@ -49,7 +49,7 @@ def gc_unknown_orders(*, db_path: str = "reports/orders.sqlite", ttl_sec: int = 
     Pure local operation (no network). Intended to keep OrderStore health signals clean.
 
     Rules (conservative):
-    - candidate: state=UNKNOWN and updated_ts older than ttl_sec
+    - candidate: state=UNKNOWN and first submit timestamp older than ttl_sec
     - if last_query indicates NOT_FOUND (51603), mark REJECTED/NOT_FOUND
     - else if ack_json empty and no ord_id, mark REJECTED/EXPIRED
     """
@@ -63,10 +63,11 @@ def gc_unknown_orders(*, db_path: str = "reports/orders.sqlite", ttl_sec: int = 
     cutoff = _now_ms() - int(ttl_sec) * 1000
     cur.execute(
         """
-        SELECT cl_ord_id, ord_id, ack_json, last_query_json, updated_ts
+        SELECT cl_ord_id, ord_id, ack_json, last_query_json, created_ts, updated_ts
         FROM orders
-        WHERE state='UNKNOWN' AND updated_ts < ?
-        ORDER BY updated_ts ASC
+        WHERE state='UNKNOWN'
+          AND COALESCE(NULLIF(created_ts, 0), updated_ts) < ?
+        ORDER BY COALESCE(NULLIF(created_ts, 0), updated_ts) ASC
         LIMIT ?
         """,
         (int(cutoff), int(limit)),
@@ -74,17 +75,18 @@ def gc_unknown_orders(*, db_path: str = "reports/orders.sqlite", ttl_sec: int = 
     rows = cur.fetchall()
     con.close()
 
-    for clid, ord_id, ack_json, last_query_json, updated_ts in rows:
+    for clid, ord_id, ack_json, last_query_json, created_ts, updated_ts in rows:
         st.scanned += 1
         ack = (ack_json or "{}").strip()
         lq = (last_query_json or "{}").strip()
+        age_ref_ts = int(created_ts or updated_ts or 0)
 
         if _looks_not_found(lq):
             store.update_state(
                 str(clid),
                 new_state="REJECTED",
                 last_error_code="NOT_FOUND",
-                last_error_msg=f"UNKNOWN_TTL: last_query=51603 updated_ts={updated_ts}",
+                last_error_msg=f"UNKNOWN_TTL: last_query=51603 created_ts={age_ref_ts} updated_ts={updated_ts}",
                 event_type="UNKNOWN_TTL_REJECTED",
             )
             st.gc_rejected += 1
@@ -95,7 +97,7 @@ def gc_unknown_orders(*, db_path: str = "reports/orders.sqlite", ttl_sec: int = 
                 str(clid),
                 new_state="REJECTED",
                 last_error_code="EXPIRED",
-                last_error_msg=f"UNKNOWN_TTL: no_ack_no_ord_id updated_ts={updated_ts}",
+                last_error_msg=f"UNKNOWN_TTL: no_ack_no_ord_id created_ts={age_ref_ts} updated_ts={updated_ts}",
                 event_type="UNKNOWN_TTL_REJECTED",
             )
             st.gc_rejected += 1

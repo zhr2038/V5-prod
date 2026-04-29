@@ -593,7 +593,8 @@ class NegativeExpectancyCooldown:
         cached_fp = str(self._cache.get("config_fingerprint") or "").strip()
         current_fp = str(self._scope_metadata.get("config_fingerprint") or "").strip()
         legacy_state_present = bool((self._cache.get("stats") or {}) or cached_symbols)
-        release_start_ts = self._coerce_release_start_ts(self._cache.get("release_start_ts"))
+        raw_release_start_ts = self._cache.get("release_start_ts")
+        release_start_ts = self._coerce_release_start_ts(raw_release_start_ts)
         release_start_ts_out: Any = release_start_ts if release_start_ts is not None else RELEASE_START_NOT_OBSERVABLE
         release_start_ts_status = "ok" if release_start_ts is not None else "not_observable"
         warnings: list[str] = []
@@ -634,8 +635,10 @@ class NegativeExpectancyCooldown:
                     )
                 )
 
+        should_log_not_observable = str(raw_release_start_ts or "").strip() != RELEASE_START_NOT_OBSERVABLE
         for warning in warnings:
-            logger.warning("NegativeExpectancy %s", warning)
+            if "negative_expectancy_release_start_ts_not_observable" not in warning or should_log_not_observable:
+                logger.warning("NegativeExpectancy %s", warning)
 
         lookback_ms = int(self.cfg.lookback_hours) * 3600 * 1000
         since_ms = int(now_ms - max(0, lookback_ms))

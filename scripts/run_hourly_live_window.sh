@@ -11,7 +11,7 @@ START_EPOCH=$(( END_EPOCH - 3600 ))
 
 echo "[V5-LIVE] WIN_ID=${WIN_ID} window=[${START_EPOCH}, ${END_EPOCH}) CST"
 
-LOCK="/tmp/v5_live.lock"
+LOCK="${V5_LIVE_LOCK:-/tmp/v5_live.lock}"
 exec 9>"$LOCK"
 flock -n 9 || exit 0
 

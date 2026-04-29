@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import time
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -137,7 +138,7 @@ def test_non_whitelist_legacy_unknown_order_not_polled() -> None:
         )
         store.update_state("LEGACY1", new_state="UNKNOWN")
         old_ts = int((time.time() - 96 * 3600) * 1000)
-        with sqlite3.connect(str(Path(td) / "orders.sqlite")) as con:
+        with closing(sqlite3.connect(str(Path(td) / "orders.sqlite"))) as con:
             con.execute(
                 "UPDATE orders SET created_ts=?, updated_ts=?, last_poll_ts=? WHERE cl_ord_id=?",
                 (old_ts, int(time.time() * 1000), int(time.time() * 1000), "LEGACY1"),
@@ -148,6 +149,10 @@ def test_non_whitelist_legacy_unknown_order_not_polled() -> None:
 
         assert rows == []
         assert okx.get_calls == 0
+        repaired = store.get("LEGACY1")
+        assert repaired is not None
+        assert repaired.state == "REJECTED"
+        assert repaired.last_error_code == "EXPIRED"
 
 
 def test_trade_auditor_v3_recent_orders_use_created_ts_not_updated_ts(tmp_path: Path) -> None:

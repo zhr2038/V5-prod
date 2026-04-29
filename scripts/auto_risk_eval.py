@@ -67,6 +67,9 @@ def _resolve_runtime_paths(
 ) -> AutoRiskEvalPaths:
     config_path = Path(resolve_runtime_config_path(raw_config_path=raw_config_path, project_root=PROJECT_ROOT))
     if not config_path.exists():
+        requested = str(raw_config_path).strip() if raw_config_path is not None else str(config_path)
+        if requested and requested != str(config_path):
+            raise FileNotFoundError(f"runtime config not found: {requested} (resolved: {config_path})")
         raise FileNotFoundError(f"runtime config not found: {config_path}")
 
     cfg = load_runtime_config(raw_config_path, project_root=PROJECT_ROOT)

@@ -1153,8 +1153,25 @@ class StrategyOrchestrator:
                 'confidence': float(s.confidence),
                 'strategy': s.strategy,
                 'metadata': s.metadata,
-                'rank': 0,  # Will be calculated later
+                'rank': 0,
             })
+
+        ranked_fused = sorted(
+            fused_audit,
+            key=lambda item: (
+                float(item.get('score', 0.0) or 0.0),
+                str(item.get('symbol', '') or ''),
+            ),
+            reverse=True,
+        )
+        fused_rank_by_symbol = {
+            str(item.get('symbol', '') or ''): idx + 1
+            for idx, item in enumerate(ranked_fused)
+            if item.get('symbol')
+        }
+        for item in fused_audit:
+            symbol = str(item.get('symbol', '') or '')
+            item['rank'] = int(fused_rank_by_symbol.get(symbol, len(fused_audit) + 1))
 
         payload = {
             'timestamp': datetime.now().isoformat(),

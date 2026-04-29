@@ -165,6 +165,50 @@ def test_static_files_serves_assets_and_spa_fallback(monkeypatch, tmp_path):
     assert fallback_response.get_data(as_text=True) == "INDEX"
 
 
+def test_static_files_does_not_spa_fallback_for_missing_assets(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    build_root = tmp_path / "web" / "dist"
+    build_root.mkdir(parents=True)
+    (build_root / "index.html").write_text("INDEX", encoding="utf-8")
+    monkeypatch.setattr(module, "REACT_BUILD_PATH", build_root)
+    client = module.app.test_client()
+
+    response = client.get("/assets/missing.js")
+
+    assert response.status_code == 404
+    assert response.get_data(as_text=True) == "Not found"
+
+
+def test_static_files_does_not_spa_fallback_for_unknown_api(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    build_root = tmp_path / "web" / "dist"
+    build_root.mkdir(parents=True)
+    (build_root / "index.html").write_text("INDEX", encoding="utf-8")
+    monkeypatch.setattr(module, "REACT_BUILD_PATH", build_root)
+    client = module.app.test_client()
+
+    response = client.get("/api/not-real")
+
+    assert response.status_code == 404
+    assert response.headers["Content-Type"].startswith("application/json")
+    assert response.get_json() == {"error": "api endpoint not found", "path": "/api/not-real"}
+
+
+def test_static_files_does_not_spa_fallback_for_api_root(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    build_root = tmp_path / "web" / "dist"
+    build_root.mkdir(parents=True)
+    (build_root / "index.html").write_text("INDEX", encoding="utf-8")
+    monkeypatch.setattr(module, "REACT_BUILD_PATH", build_root)
+    client = module.app.test_client()
+
+    response = client.get("/api")
+
+    assert response.status_code == 404
+    assert response.headers["Content-Type"].startswith("application/json")
+    assert response.get_json() == {"error": "api endpoint not found", "path": "/api"}
+
+
 def test_metrics_route_returns_prometheus_payload(monkeypatch):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "render_prometheus_metrics", lambda workspace=None, config=None: "v5_metrics_exporter_up 1\n")

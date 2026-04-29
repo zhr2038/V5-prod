@@ -219,20 +219,21 @@ class ReconcileEngine:
                 is_universe = (ccy.upper() in bases) if bases else True
                 enforce = True if (mode == "all") else is_universe
 
-                if enforce and abs(float(delta)) > float(self.thresholds.abs_base_tol):
-                    if estimated_delta_usdt is not None and estimated_delta_usdt < dust_ignore:
-                        ignored_as_dust = True
-                        ignored_dust_usdt_total += float(estimated_delta_usdt)
-                        ignored_dust_ccys.append(
-                            {
-                                "ccy": ccy,
-                                "delta": f"{float(delta):.12g}",
-                                "estimated_delta_usdt": f"{float(estimated_delta_usdt):.12g}",
-                            }
-                        )
-                    else:
-                        ok = False
-                        reason = reason or "base_mismatch"
+                base_delta_exceeds_tol = abs(float(delta)) > float(self.thresholds.abs_base_tol)
+                dust_within_ignore = estimated_delta_usdt is not None and estimated_delta_usdt < dust_ignore
+                if base_delta_exceeds_tol and dust_within_ignore:
+                    ignored_as_dust = True
+                    ignored_dust_usdt_total += float(estimated_delta_usdt)
+                    ignored_dust_ccys.append(
+                        {
+                            "ccy": ccy,
+                            "delta": f"{float(delta):.12g}",
+                            "estimated_delta_usdt": f"{float(estimated_delta_usdt):.12g}",
+                        }
+                    )
+                elif enforce and base_delta_exceeds_tol:
+                    ok = False
+                    reason = reason or "base_mismatch"
 
             diffs.append(
                 {

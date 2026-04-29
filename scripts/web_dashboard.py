@@ -25,7 +25,7 @@ import copy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
 
 # Ensure repo-local imports work even when the script is launched outside the repo root.
@@ -2715,6 +2715,15 @@ def _send_react_asset(path: str):
     return send_from_directory(str(REACT_BUILD_PATH), path)
 
 
+def _is_static_asset_request(filename: str) -> bool:
+    normalized = str(filename or '').lstrip('/')
+    if not normalized:
+        return False
+    if normalized.startswith(('assets/', 'static/')):
+        return True
+    return bool(PurePosixPath(normalized).suffix)
+
+
 @app.route('/')
 def index():
     """主页面 - 新版监控面板"""
@@ -2736,6 +2745,10 @@ def simple_dashboard():
 @app.route('/<path:filename>')
 def static_files(filename):
     """提供React静态文件"""
+    normalized_path = str(filename or '').lstrip('/')
+    if normalized_path == 'api' or normalized_path.startswith('api/'):
+        return jsonify({'error': 'api endpoint not found', 'path': f'/{filename}'}), 404
+
     file_path = _resolve_safe_react_asset(filename)
     if file_path is None:
         return 'Not found', 404
@@ -2745,6 +2758,9 @@ def static_files(filename):
         rel_path = file_path.relative_to(REACT_BUILD_PATH.resolve()).as_posix()
         return _send_react_asset(rel_path)
     
+    if _is_static_asset_request(normalized_path):
+        return 'Not found', 404
+
     # 如果文件不存在，返回index.html（支持React Router）
     index_path = REACT_BUILD_PATH / 'index.html'
     if index_path.exists():

@@ -19,6 +19,7 @@ from src.execution.legacy_order_polling import (
     legacy_order_poll_skip_reason,
     load_legacy_order_poll_policy,
 )
+from src.execution.order_gc import gc_unknown_orders
 from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, record_api_request
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
@@ -1437,6 +1438,15 @@ class LiveExecutionEngine:
             rec.reconcile(limit=2000, max_get_order_per_run=20)
         except Exception:
             pass
+
+        try:
+            ttl_sec = max(1, int(self._legacy_order_poll_policy.legacy_order_poll_max_age_hours)) * 3600
+            gc_result = gc_unknown_orders(db_path=str(self.order_store.path), ttl_sec=ttl_sec, limit=limit)
+            gc_stats = (gc_result or {}).get("stats") or {}
+            if int(gc_stats.get("gc_rejected", 0) or 0) > 0:
+                log.warning("stale UNKNOWN orders garbage-collected: %s", gc_stats)
+        except Exception as exc:
+            log.warning("stale UNKNOWN order garbage-collection skipped: %s", exc)
 
         out: List[LiveExecutionResult] = []
         skipped_legacy_polls = 0

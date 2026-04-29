@@ -1396,11 +1396,12 @@ class V5Pipeline:
                 active_positions.append(position)
                 continue
 
-            dust_flat_symbols.add(str(position.symbol))
             cleared_keys = self._clear_active_position_state_for_symbol(position.symbol)
             if not cleared_keys:
+                active_positions.append(position)
                 continue
 
+            dust_flat_symbols.add(str(position.symbol))
             if audit:
                 audit.record_count("stale_position_state_detected_count", symbol=position.symbol)
                 audit.record_count("position_state_cleared_after_close_count", symbol=position.symbol)

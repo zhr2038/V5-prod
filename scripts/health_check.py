@@ -5,8 +5,10 @@ Operational health check for the V5 workspace.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -201,10 +203,23 @@ class HealthChecker:
         self.checks: List[Dict[str, Any]] = []
 
     @staticmethod
-    def _parse_timer_show_output(stdout: str) -> tuple[dict[str, str], str | None, int | None]:
+    def _parse_systemd_wallclock_timestamp(value: str | None) -> datetime | None:
+        text = str(value or "").strip()
+        if not text or text == "n/a":
+            return None
+        match = re.search(r"\b(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\b", text)
+        if not match:
+            return None
+        try:
+            return datetime.strptime(f"{match.group(1)} {match.group(2)}", "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _parse_timer_show_output(stdout: str) -> tuple[dict[str, str], str | None, datetime | None]:
         props: dict[str, str] = {}
         last_trigger_text: str | None = None
-        last_trigger_monotonic_usec: int | None = None
+        last_trigger_at: datetime | None = None
         for line in stdout.splitlines():
             if "=" not in line:
                 continue
@@ -215,15 +230,8 @@ class HealthChecker:
             if key == "LastTriggerUSec":
                 if value and value != "n/a":
                     last_trigger_text = value
-            elif key == "LastTriggerUSecMonotonic":
-                if value and value != "n/a":
-                    try:
-                        parsed = int(value)
-                    except ValueError:
-                        parsed = None
-                    if parsed and parsed > 0:
-                        last_trigger_monotonic_usec = parsed
-        return props, last_trigger_text, last_trigger_monotonic_usec
+                    last_trigger_at = HealthChecker._parse_systemd_wallclock_timestamp(value)
+        return props, last_trigger_text, last_trigger_at
 
     def check_timer_health(self) -> Dict[str, Any]:
         if shutil.which("systemctl") is None:
@@ -258,7 +266,7 @@ class HealthChecker:
                     text=True,
                     timeout=5,
                 )
-                props, last_trigger_text, last_trigger_monotonic_usec = self._parse_timer_show_output(result.stdout)
+                props, last_trigger_text, last_trigger_at = self._parse_timer_show_output(result.stdout)
                 load_state = props.get("LoadState", "")
                 active_state = props.get("ActiveState", "")
                 unit_file_state = props.get("UnitFileState", "")
@@ -285,11 +293,11 @@ class HealthChecker:
                     )
                     continue
 
-                if last_trigger_monotonic_usec is None:
+                if last_trigger_at is None:
                     issues.append({"timer": timer_name, "status": "unknown", "detail": "no trigger time"})
                     continue
 
-                delay = max(0.0, (time.monotonic() * 1_000_000 - last_trigger_monotonic_usec) / 60_000_000)
+                delay = max(0.0, (datetime.now() - last_trigger_at).total_seconds() / 60)
                 if delay > max_delay_min:
                     issues.append(
                         {
@@ -468,10 +476,22 @@ class HealthChecker:
         return result
 
 
-def main() -> int:
+def main(argv: List[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run V5 operational health checks.")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print the health check result as JSON instead of a human-readable report",
+    )
+    args = parser.parse_args(argv)
+
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     checker = HealthChecker()
-    result = checker.print_report()
+    if args.json:
+        result = checker.run_all_checks()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        result = checker.print_report()
     output_path = _resolve_health_output_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

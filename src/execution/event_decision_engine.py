@@ -42,8 +42,9 @@ class EventDecisionEngine:
         self.cooldown = cooldown_manager
         self.executor = executor
         self.last_events: List[TradingEvent] = []
-    
-    def run(self, state: MarketState) -> DecisionResult:
+        self._commit_execution_state = True
+
+    def run(self, state: MarketState, *, commit_execution_state: bool = True) -> DecisionResult:
         """
         Run the decision engine on current market state.
         
@@ -53,69 +54,109 @@ class EventDecisionEngine:
         Returns:
             DecisionResult with trade actions
         """
-        # 1. Collect all events
-        events = self.monitor.collect_events(state)
-        self.last_events = events
-        
-        if not events:
+        previous_commit = self._commit_execution_state
+        self._commit_execution_state = bool(commit_execution_state)
+        try:
+            # 1. Collect all events
+            events = self.monitor.collect_events(state)
+            self.last_events = events
+
+            if not events:
+                return DecisionResult(
+                    should_trade=False,
+                    actions=[],
+                    events_processed=0,
+                    events_blocked_by_cooldown=0,
+                    reason="no_events"
+                )
+
+            logger.info(f"Decision engine: {len(events)} events detected")
+            for e in events:
+                logger.info(f"  [{e.priority.name}] {e.type.name}: {e.symbol}")
+
+            # 2. Group by priority
+            p0_events = [e for e in events if e.priority == EventPriority.P0_RISK]
+            p1_events = [e for e in events if e.priority == EventPriority.P1_REGIME]
+            p2_events = [e for e in events if e.priority == EventPriority.P2_SIGNAL]
+            p3_events = [e for e in events if e.priority == EventPriority.P3_HEARTBEAT]
+
+            actions = []
+            blocked_count = 0
+
+            # 3. Process P0: Risk events (immediate, no cooldown)
+            if p0_events:
+                risk_actions = self._process_risk_events(p0_events, state)
+                actions.extend(risk_actions)
+                logger.info(f"P0 Risk: {len(risk_actions)} actions")
+                if any(event.type == EventType.REGIME_RISK_OFF for event in p0_events):
+                    if actions and self._commit_execution_state:
+                        self.monitor.update_last_trade_time()
+                    return DecisionResult(
+                        should_trade=len(actions) > 0,
+                        actions=actions,
+                        events_processed=len(events),
+                        events_blocked_by_cooldown=blocked_count,
+                        reason="processed" if actions else "no_actionable_events"
+                    )
+
+            # 4. Process P1: Regime changes (immediate, no cooldown)
+            if p1_events and not actions:  # Only if no risk actions (avoid conflict)
+                regime_actions = self._process_regime_events(p1_events, state)
+                actions.extend(regime_actions)
+                logger.info(f"P1 Regime: {len(regime_actions)} actions")
+
+            # 5. Process P2: Signal changes (check cooldown)
+            if p2_events:
+                signal_actions, blocked = self._process_signal_events(p2_events, state)
+                actions.extend(signal_actions)
+                blocked_count += blocked
+                logger.info(f"P2 Signal: {len(signal_actions)} actions, {blocked} blocked by cooldown")
+
+            # 6. Process P3: Heartbeat (lowest priority, check cooldown)
+            if p3_events and not actions:  # Only if nothing else triggered
+                hb_actions, blocked = self._process_heartbeat(p3_events, state)
+                actions.extend(hb_actions)
+                blocked_count += blocked
+                logger.info(f"P3 Heartbeat: {len(hb_actions)} actions")
+
+            # Update monitor's last trade time only when action generation is the committed execution point.
+            if actions and self._commit_execution_state:
+                self.monitor.update_last_trade_time()
+
             return DecisionResult(
-                should_trade=False,
-                actions=[],
-                events_processed=0,
-                events_blocked_by_cooldown=0,
-                reason="no_events"
+                should_trade=len(actions) > 0,
+                actions=actions,
+                events_processed=len(events),
+                events_blocked_by_cooldown=blocked_count,
+                reason="processed" if actions else "no_actionable_events"
             )
-        
-        logger.info(f"Decision engine: {len(events)} events detected")
-        for e in events:
-            logger.info(f"  [{e.priority.name}] {e.type.name}: {e.symbol}")
-        
-        # 2. Group by priority
-        p0_events = [e for e in events if e.priority == EventPriority.P0_RISK]
-        p1_events = [e for e in events if e.priority == EventPriority.P1_REGIME]
-        p2_events = [e for e in events if e.priority == EventPriority.P2_SIGNAL]
-        p3_events = [e for e in events if e.priority == EventPriority.P3_HEARTBEAT]
-        
-        actions = []
-        blocked_count = 0
-        
-        # 3. Process P0: Risk events (immediate, no cooldown)
-        if p0_events:
-            risk_actions = self._process_risk_events(p0_events, state)
-            actions.extend(risk_actions)
-            logger.info(f"P0 Risk: {len(risk_actions)} actions")
-        
-        # 4. Process P1: Regime changes (immediate, no cooldown)
-        if p1_events and not actions:  # Only if no risk actions (avoid conflict)
-            regime_actions = self._process_regime_events(p1_events, state)
-            actions.extend(regime_actions)
-            logger.info(f"P1 Regime: {len(regime_actions)} actions")
-        
-        # 5. Process P2: Signal changes (check cooldown)
-        if p2_events:
-            signal_actions, blocked = self._process_signal_events(p2_events, state)
-            actions.extend(signal_actions)
-            blocked_count += blocked
-            logger.info(f"P2 Signal: {len(signal_actions)} actions, {blocked} blocked by cooldown")
-        
-        # 6. Process P3: Heartbeat (lowest priority, check cooldown)
-        if p3_events and not actions:  # Only if nothing else triggered
-            hb_actions, blocked = self._process_heartbeat(p3_events, state)
-            actions.extend(hb_actions)
-            blocked_count += blocked
-            logger.info(f"P3 Heartbeat: {len(hb_actions)} actions")
-        
-        # Update monitor's last trade time
-        if actions:
+        finally:
+            self._commit_execution_state = previous_commit
+
+    def commit_actions(self, actions: List[Dict]) -> None:
+        """Record cooldown and heartbeat state after actions are accepted for execution."""
+        committed = False
+        for action in actions or []:
+            try:
+                priority = EventPriority(int(action.get('priority', EventPriority.P2_SIGNAL.value)))
+            except Exception:
+                priority = EventPriority.P2_SIGNAL
+            symbol = action.get('symbol')
+            self.cooldown.record_trade(symbol, priority)
+            if priority == EventPriority.P2_SIGNAL and symbol:
+                self.cooldown.clear_pending_signal(symbol)
+            committed = True
+
+        if committed:
             self.monitor.update_last_trade_time()
-        
-        return DecisionResult(
-            should_trade=len(actions) > 0,
-            actions=actions,
-            events_processed=len(events),
-            events_blocked_by_cooldown=blocked_count,
-            reason="processed" if actions else "no_actionable_events"
-        )
+
+    def _record_trade(self, symbol: Optional[str], priority: EventPriority) -> None:
+        if self._commit_execution_state:
+            self.cooldown.record_trade(symbol, priority)
+
+    def _clear_pending_signal(self, symbol: str) -> None:
+        if self._commit_execution_state:
+            self.cooldown.clear_pending_signal(symbol)
 
     def _should_defer_take_profit_close(self, symbol: str, state: MarketState) -> bool:
         """
@@ -163,7 +204,10 @@ class EventDecisionEngine:
                         'priority': 0,
                         'event_type': event.type.name
                     })
-                logger.warning("RISK_OFF: Closing all positions")
+                if actions:
+                    logger.warning("RISK_OFF: Closing all positions")
+                else:
+                    logger.info("RISK_OFF: No positions to close")
                 break  # One risk_off is enough
             
             elif event.symbol and event.symbol in state.positions:
@@ -217,7 +261,7 @@ class EventDecisionEngine:
         
         # Record trades (risk events don't trigger cooldown but we track them)
         for action in actions:
-            self.cooldown.record_trade(action['symbol'], EventPriority.P0_RISK)
+            self._record_trade(action['symbol'], EventPriority.P0_RISK)
         
         return actions
     
@@ -259,7 +303,7 @@ class EventDecisionEngine:
                 
                 # Record trades
                 for action in actions:
-                    self.cooldown.record_trade(action['symbol'], EventPriority.P1_REGIME)
+                    self._record_trade(action['symbol'], EventPriority.P1_REGIME)
             
             elif to_regime == 'SIDEWAYS' and from_regime == 'TRENDING_UP':
                 # Trend ending - can reduce positions or hold
@@ -316,8 +360,8 @@ class EventDecisionEngine:
                     'score': signal_dict.get('score'),
                     'event_type': ','.join(e.type.name for e in sym_events)
                 })
-                self.cooldown.record_trade(symbol, EventPriority.P2_SIGNAL)
-                self.cooldown.clear_pending_signal(symbol)
+                self._record_trade(symbol, EventPriority.P2_SIGNAL)
+                self._clear_pending_signal(symbol)
             
             elif direction == 'sell' and symbol in state.positions:
                 actions.append({
@@ -328,8 +372,8 @@ class EventDecisionEngine:
                     'score': signal_dict.get('score'),
                     'event_type': ','.join(e.type.name for e in sym_events)
                 })
-                self.cooldown.record_trade(symbol, EventPriority.P2_SIGNAL)
-                self.cooldown.clear_pending_signal(symbol)
+                self._record_trade(symbol, EventPriority.P2_SIGNAL)
+                self._clear_pending_signal(symbol)
         
         return actions, blocked
     
@@ -363,7 +407,7 @@ class EventDecisionEngine:
                                 'score': signal_dict.get('score'),
                                 'event_type': 'HEARTBEAT'
                             })
-                            self.cooldown.record_trade(sym, EventPriority.P3_HEARTBEAT)
+                            self._record_trade(sym, EventPriority.P3_HEARTBEAT)
         
         return actions, blocked
     

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -35,5 +36,5 @@ def test_resolve_active_config_path_fails_fast_when_runtime_config_is_missing(mo
         lambda raw_config_path=None, project_root=None: str(missing),
     )
 
-    with pytest.raises(FileNotFoundError, match=str(missing)):
+    with pytest.raises(FileNotFoundError, match=re.escape(str(missing))):
         bills_sync._resolve_active_config_path()

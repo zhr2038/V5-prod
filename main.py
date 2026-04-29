@@ -111,6 +111,39 @@ def _resolve_universe_cache_path(cfg) -> Path:
     return Path(raw_path)
 
 
+def _prime_pipeline_run_context(pipe: Any, run_id: str) -> None:
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_run_id:
+        return
+    for attr_name in ("alpha_engine", "portfolio_engine"):
+        engine = getattr(pipe, attr_name, None)
+        setter = getattr(engine, "set_run_id", None)
+        if callable(setter):
+            setter(normalized_run_id)
+
+
+def _is_close_only_risk_off(cfg: Any, regime_state: Any) -> bool:
+    name = str(getattr(regime_state, "name", "") or "").strip().upper()
+    value = str(getattr(regime_state, "value", regime_state) or "").strip()
+    normalized = value.lower().replace("_", "-").replace(" ", "-")
+    is_risk_off = (
+        name == "RISK_OFF"
+        or normalized in {"risk-off", "riskoff", "regimestate.risk-off"}
+        or normalized.endswith(".risk-off")
+    )
+    try:
+        risk_off_mult = float(getattr(getattr(cfg, "regime", None), "pos_mult_risk_off", 0.0) or 0.0)
+    except Exception:
+        risk_off_mult = 0.0
+    return bool(is_risk_off and risk_off_mult <= 0.0)
+
+
+def _should_update_skipped_candidate_tracker(cfg: Any, regime_state: Any, positions: Any) -> bool:
+    if not _is_close_only_risk_off(cfg, regime_state):
+        return True
+    return any(float(getattr(pos, "qty", 0.0) or 0.0) > 0.0 for pos in (positions or []))
+
+
 def save_trend_cache(
     alpha_snapshot,
     regime_result,
@@ -439,6 +472,14 @@ def _utc_now() -> datetime:
 
 def _coalesce(value, default):
     return default if value is None else value
+
+
+def _log_order_arbitration_summary(log, cfg: AppConfig, message: str) -> None:
+    mode = str(getattr(getattr(cfg, "execution", None), "mode", "dry_run") or "dry_run").lower()
+    if mode == "live":
+        log.warning(message)
+    else:
+        log.info(message)
 
 
 def _resolve_runtime_run_paths(cfg: AppConfig, run_id: str) -> dict[str, Path]:
@@ -970,6 +1011,7 @@ def main() -> None:
     from src.core.pipeline import V5Pipeline
 
     pipe = V5Pipeline(cfg, data_provider=provider)
+    _prime_pipeline_run_context(pipe, run_id)
 
     alpha_market_data = {sym: md_1h[sym] for sym in scored_symbols if sym in md_1h}
 
@@ -1286,14 +1328,16 @@ def main() -> None:
     try:
         from src.reporting.skipped_candidate_tracker import update_skipped_candidate_tracker
 
-        tracker_result = update_skipped_candidate_tracker(
-            run_dir=str(runtime_run_dir),
-            audit=audit,
-            market_data_1h=md_1h,
-            cfg=cfg,
-            current_level=pipe._load_current_auto_risk_level(),
-            cache_dir=PROJECT_ROOT / "data" / "cache",
-        )
+        tracker_result = {"enabled": False, "new_records": 0, "total_records": 0}
+        if _should_update_skipped_candidate_tracker(cfg, out.regime.state, held):
+            tracker_result = update_skipped_candidate_tracker(
+                run_dir=str(runtime_run_dir),
+                audit=audit,
+                market_data_1h=md_1h,
+                cfg=cfg,
+                current_level=pipe._load_current_auto_risk_level(),
+                cache_dir=PROJECT_ROOT / "data" / "cache",
+            )
         if tracker_result.get("enabled"):
             log.info(
                 "SKIPPED_CANDIDATE_TRACKER new_records=%s total_records=%s",
@@ -1359,7 +1403,7 @@ def main() -> None:
         blocked_n = len([d for d in (arb_decisions or []) if d.get("action") == "blocked"])
         if blocked_n > 0:
             msg = f"ORDER_ARBITRATION: before={orders_before} after={len(orders)} blocked={blocked_n}"
-            log.warning(msg)
+            _log_order_arbitration_summary(log, cfg, msg)
             try:
                 audit.add_note(msg)
                 # Keep only first N decision details to control artifact size

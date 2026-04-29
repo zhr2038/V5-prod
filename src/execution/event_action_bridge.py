@@ -81,6 +81,18 @@ def persist_event_actions(
     return True
 
 
+def clear_event_actions(
+    *,
+    path: str = DEFAULT_EVENT_ACTIONS_PATH,
+    order_store_path: str | Path | None = None,
+) -> bool:
+    action_path = _resolve_event_actions_path(path=path, order_store_path=order_store_path)
+    if not action_path.exists():
+        return False
+    action_path.unlink(missing_ok=True)
+    return True
+
+
 def consume_event_actions_for_run(
     *,
     run_id: str,

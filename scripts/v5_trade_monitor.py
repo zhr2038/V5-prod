@@ -40,6 +40,7 @@ ALERT_THRESHOLDS = {
     "no_trade_critical": 12,
 }
 FILL_SYNC_RE = re.compile(r"new_fills=(\d+)")
+LIVE_RUN_COMPLETED_MARKER = "V5 live run completed"
 JOURNAL_TS_RE = re.compile(r"^(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+(?P<clock>\d{2}:\d{2}:\d{2})")
 
 
@@ -366,15 +367,18 @@ def get_recent_trades_count(*, service_unit: str | None = None) -> tuple[int, in
         print(f"[ERROR] failed to inspect trade journal: {exc}")
         return 0, 0
 
-    trade_runs = 0
+    fill_sync_runs = 0
+    completed_runs = 0
     total_fills = 0
     for line in output.splitlines():
-        if "FILLS_SYNC new_fills=" not in line:
-            continue
-        trade_runs += 1
-        match = FILL_SYNC_RE.search(line)
-        if match:
-            total_fills += int(match.group(1))
+        if LIVE_RUN_COMPLETED_MARKER in line:
+            completed_runs += 1
+        if "FILLS_SYNC new_fills=" in line:
+            fill_sync_runs += 1
+            match = FILL_SYNC_RE.search(line)
+            if match:
+                total_fills += int(match.group(1))
+    trade_runs = max(fill_sync_runs, completed_runs)
     return trade_runs, total_fills
 
 
@@ -408,6 +412,15 @@ def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPa
         f"time: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     )
 
+    file_ok = False
+    try:
+        paths.alert_file.parent.mkdir(parents=True, exist_ok=True)
+        paths.alert_file.write_text(full_message, encoding="utf-8")
+        print(f"[INFO] alert written to {paths.alert_file}")
+        file_ok = True
+    except Exception as exc:
+        print(f"[ERROR] failed to persist alert: {exc}")
+
     bot_token, chat_id = _load_telegram_settings(paths)
     if bot_token:
         try:
@@ -424,18 +437,23 @@ def send_telegram_alert(message: str, priority: str = "normal", paths: MonitorPa
         except Exception as exc:
             print(f"[ERROR] failed to send Telegram alert: {exc}")
 
+    return file_ok
+
+
+def clear_stale_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
     try:
-        paths.alert_file.parent.mkdir(parents=True, exist_ok=True)
-        paths.alert_file.write_text(full_message, encoding="utf-8")
-        print(f"[INFO] alert written to {paths.alert_file}")
+        if paths.alert_file.exists():
+            paths.alert_file.unlink()
+            print(f"[INFO] stale alert cleared: {paths.alert_file}")
         return True
     except Exception as exc:
-        print(f"[ERROR] failed to persist alert: {exc}")
+        print(f"[ERROR] failed to clear stale alert {paths.alert_file}: {exc}")
         return False
 
 
 def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
     alerts: list[str] = []
+    context_notes: list[str] = []
     priority = "normal"
     service_unit = resolve_live_service_unit_name()
     risk_level = get_current_risk_level(paths)
@@ -457,7 +475,7 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
 
     if trade_runs == 0:
         alerts.append("warning: no trade sync runs in the last 6 hours")
-    elif total_fills == 0:
+    elif total_fills == 0 and risk_level != "PROTECT":
         alerts.append(f"info: {trade_runs} sync runs in the last 6 hours but zero fills")
 
     errors = get_recent_errors(service_unit=service_unit)
@@ -472,24 +490,25 @@ def check_and_alert(paths: MonitorPaths = DEFAULT_PATHS) -> bool:
             regime = json.loads(regime_file.read_text(encoding="utf-8"))
             state = str(regime.get("state") or "unknown")
             if state == "Risk-Off":
-                alerts.append("info: current market regime is Risk-Off")
+                context_notes.append("info: current market regime is Risk-Off")
         except Exception:
             pass
 
     if alerts:
-        summary = "\n".join(alerts)
+        summary = "\n".join([*alerts, *context_notes])
         summary += f"\n\nstats: last 6 hours trade_runs={trade_runs}, fills={total_fills}"
         send_telegram_alert(summary, priority=priority, paths=paths)
         return True
 
     print(f"[OK] {datetime.now().strftime('%H:%M')} monitor check passed")
+    clear_stale_alert(paths)
     return False
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     has_alert = check_and_alert()
-    if "--silent" in args:
+    if "--fail-on-alert" in args:
         return 1 if has_alert else 0
     return 0
 

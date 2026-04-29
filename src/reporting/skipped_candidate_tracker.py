@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from configs.schema import AppConfig
+from configs.schema import AppConfig, DiagnosticsConfig
 from src.core.models import MarketSeries
 from src.reporting.decision_audit import DecisionAudit
 
@@ -42,6 +42,13 @@ BTC_LEADERSHIP_PROBE_FIELDS = [
     "net_expectancy_bps",
 ]
 BTC_LEADERSHIP_PROBE_LABEL_KEY_FIELDS = ("run_id", "symbol", "skip_reason", "ts_utc")
+
+
+def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
+    diagnostics = getattr(cfg, "diagnostics", None)
+    if diagnostics is None:
+        return DiagnosticsConfig()
+    return diagnostics
 
 
 def _iso_from_ms(timestamp_ms: int) -> str:
@@ -463,6 +470,7 @@ def _build_record(
     if net_expectancy_bps is None:
         net_expectancy_bps = _normalize_float(router_decision.get("fast_fail_expectancy_bps"))
 
+    diagnostics = _diagnostics_cfg(cfg)
     record = {
         "ts_utc": _iso_from_ms(entry_ts_ms),
         "run_id": str(audit.run_id),
@@ -488,12 +496,12 @@ def _build_record(
         "closed_cycles": _normalize_int(router_decision.get("closed_cycles")),
         "net_expectancy_bps": net_expectancy_bps,
         "entry_px": _normalize_float(entry_px),
-        "rt_cost_bps": float(getattr(cfg.diagnostics, "skipped_candidate_roundtrip_cost_bps", 30.0) or 30.0),
+        "rt_cost_bps": float(getattr(diagnostics, "skipped_candidate_roundtrip_cost_bps", 30.0) or 30.0),
         "entry_ts_ms": int(entry_ts_ms),
         "label_status": "pending",
         "label_not_observable_reason": "",
     }
-    for horizon in getattr(cfg.diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24]:
+    for horizon in getattr(diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24]:
         h = int(horizon)
         record[f"{HORIZON_PREFIX}{h}h_gross_bps"] = None
         record[f"{HORIZON_PREFIX}{h}h_net_bps"] = None
@@ -856,13 +864,14 @@ def update_skipped_candidate_tracker(
     cache_dir: str | Path | None = None,
     ohlcv_provider: Any = None,
 ) -> dict[str, Any]:
-    if not bool(getattr(cfg.diagnostics, "skipped_candidate_label_enabled", True)):
+    diagnostics = _diagnostics_cfg(cfg)
+    if not bool(getattr(diagnostics, "skipped_candidate_label_enabled", True)):
         return {"enabled": False, "new_records": 0, "total_records": 0}
 
     reports_dir = _resolve_reports_dir(run_dir)
     labels_path = _skipped_candidate_labels_path(reports_dir)
     summaries_dir = _summaries_dir(reports_dir)
-    horizons = [int(value) for value in (getattr(cfg.diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24])]
+    horizons = [int(value) for value in (getattr(diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24])]
     cache_root = Path(cache_dir) if cache_dir is not None else (PROJECT_ROOT / "data" / "cache")
 
     records_by_key = _load_existing_records(labels_path)

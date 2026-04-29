@@ -10,6 +10,7 @@ import os
 import json
 import time
 import logging
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -26,22 +27,26 @@ logger = logging.getLogger('event_driven_wrapper')
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 REPORTS_DIR = PROJECT_ROOT / 'reports'
+LIVE_RUN_ID_RE = re.compile(r'^\d{8}_\d{2}$')
 
 # Add project path
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import event-driven components
 try:
-    from src.execution.event_types import MarketState, SignalState, top_selected_symbols
+    from src.execution.event_types import MarketState, SignalState, normalize_signal_rank, top_selected_symbols
     from src.execution.event_driven_integration import create_event_driven_trader
-    from src.execution.event_action_bridge import persist_event_actions
+    from src.execution.event_action_bridge import clear_event_actions, persist_event_actions
     from src.execution.fill_store import (
         derive_position_store_path,
+        derive_runtime_auto_risk_eval_path,
+        derive_runtime_auto_risk_guard_path,
         derive_runtime_named_artifact_path,
         derive_runtime_named_json_path,
         derive_runtime_reports_dir,
         derive_runtime_runs_dir,
     )
+    from src.risk.auto_risk_guard import extract_risk_level
     from configs.runtime_config import resolve_runtime_path
     logger.info("✅ Event-driven modules loaded")
 except Exception as e:
@@ -160,26 +165,73 @@ def resolve_live_service_unit(ev_cfg: dict) -> str:
     return 'v5-prod.user.service'
 
 
-def find_latest_fused_signals_file(runs_dir: Path, max_age_minutes: int = 90):
-    """Find newest strategy_signals.json under runs/ within freshness window."""
+def _parse_live_run_id(run_id: str) -> Optional[datetime]:
+    if not LIVE_RUN_ID_RE.match(str(run_id or '')):
+        return None
     try:
-        files = sorted(
-            [p for p in runs_dir.glob('*/strategy_signals.json') if p.is_file()],
-            key=lambda p: p.stat().st_mtime,
+        return datetime.strptime(str(run_id), '%Y%m%d_%H')
+    except ValueError:
+        return None
+
+
+def _live_run_artifact_candidates(runs_dir: Path, artifact_name: str) -> tuple[list[tuple[datetime, Path]], int]:
+    candidates = []
+    ignored_dirs = 0
+    for run_dir in runs_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+
+        run_dt = _parse_live_run_id(run_dir.name)
+        if run_dt is None:
+            ignored_dirs += 1
+            continue
+
+        artifact_path = run_dir / artifact_name
+        if artifact_path.is_file():
+            candidates.append((run_dt, artifact_path))
+
+    return candidates, ignored_dirs
+
+
+def _sort_live_artifact_paths(candidates: list[tuple[datetime, Path]]) -> list[Path]:
+    return [
+        path
+        for _run_dt, path in sorted(
+            candidates,
+            key=lambda item: (item[0], item[1].stat().st_mtime),
             reverse=True,
         )
+    ]
+
+
+def _latest_live_run_artifact_file(runs_dir: Path, artifact_name: str, max_age_minutes: int = 90):
+    try:
+        candidates, ignored_dirs = _live_run_artifact_candidates(runs_dir, artifact_name)
+        files = _sort_live_artifact_paths(candidates)
         if not files:
-            return None, None
+            return None, {'fresh': False, 'count': 0, 'ignored_dirs': ignored_dirs}
 
         newest = files[0]
         age_sec = max(0.0, time.time() - newest.stat().st_mtime)
         age_min = age_sec / 60.0
+        meta = {'path': str(newest), 'age_min': age_min, 'fresh': True, 'count': len(files), 'ignored_dirs': ignored_dirs}
         if age_min > float(max_age_minutes):
-            return None, {'path': str(newest), 'age_min': age_min, 'fresh': False, 'count': len(files)}
+            meta['fresh'] = False
+            return None, meta
 
-        return newest, {'path': str(newest), 'age_min': age_min, 'fresh': True, 'count': len(files)}
+        return newest, meta
     except Exception:
         return None, None
+
+
+def find_latest_fused_signals_file(runs_dir: Path, max_age_minutes: int = 90):
+    """Find latest production strategy_signals.json under runs/ within freshness window."""
+    return _latest_live_run_artifact_file(runs_dir, 'strategy_signals.json', max_age_minutes=max_age_minutes)
+
+
+def find_latest_decision_audit_file(runs_dir: Path, max_age_minutes: int = 90):
+    """Find latest production decision_audit.json under runs/ within freshness window."""
+    return _latest_live_run_artifact_file(runs_dir, 'decision_audit.json', max_age_minutes=max_age_minutes)
 
 
 def _load_json_mapping(path: Path) -> dict[str, Any]:
@@ -192,6 +244,69 @@ def _load_json_mapping(path: Path) -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"Could not load state mapping from {path}: {e}")
     return {}
+
+
+def _normalize_event_regime(value: object, *, default: str = 'SIDEWAYS') -> str:
+    text = str(value or '').strip()
+    if not text:
+        return default
+
+    normalized = text.upper().replace('-', '_').replace(' ', '_')
+    aliases = {
+        'RISKOFF': 'RISK_OFF',
+        'RISK_OFF': 'RISK_OFF',
+        'SIDEWAY': 'SIDEWAYS',
+        'SIDEWAYS': 'SIDEWAYS',
+        'TRENDING': 'TRENDING',
+        'TRENDING_UP': 'TRENDING_UP',
+        'TRENDINGUP': 'TRENDING_UP',
+        'TRENDING_DOWN': 'TRENDING_DOWN',
+        'TRENDINGDOWN': 'TRENDING_DOWN',
+    }
+    return aliases.get(normalized, default)
+
+
+def _cfg_section(cfg: object, section_name: str) -> object:
+    if isinstance(cfg, dict):
+        return cfg.get(section_name, {}) or {}
+    return getattr(cfg, section_name, None)
+
+
+def _cfg_value(section: object, key: str, default: object = None) -> object:
+    if isinstance(section, dict):
+        return section.get(key, default)
+    return getattr(section, key, default)
+
+
+def _is_close_only_risk_off(cfg: object, regime: object) -> bool:
+    if _normalize_event_regime(regime) != 'RISK_OFF':
+        return False
+
+    reg_cfg = _cfg_section(cfg, 'regime')
+    raw_mult = _cfg_value(reg_cfg, 'pos_mult_risk_off', None)
+    if raw_mult is None:
+        logger.warning("regime.pos_mult_risk_off missing; keeping event selected symbols")
+        return False
+    try:
+        risk_off_mult = float(raw_mult or 0.0)
+    except Exception:
+        logger.warning("Invalid regime.pos_mult_risk_off=%r; keeping event selected symbols", raw_mult)
+        return False
+    return risk_off_mult <= 0.0
+
+
+def _should_suppress_event_selected_symbols(cfg: object, regime: object, positions: dict) -> bool:
+    return bool(_is_close_only_risk_off(cfg, regime) and not (positions or {}))
+
+
+def _extract_event_regime(regime_data: object) -> str:
+    if not isinstance(regime_data, dict):
+        return 'SIDEWAYS'
+    for key in ('state', 'regime'):
+        normalized = _normalize_event_regime(regime_data.get(key), default='')
+        if normalized:
+            return normalized
+    return 'SIDEWAYS'
 
 
 def _merge_runtime_stop_state(
@@ -270,32 +385,37 @@ def _load_positions_snapshot(
     source = 'missing'
 
     db_path = positions_db_path or (REPORTS_DIR / 'positions.sqlite')
-    try:
-        from src.execution.position_store import PositionStore
+    if db_path.exists():
+        source = 'position_store_empty'
+        try:
+            from src.execution.position_store import PositionStore
 
-        store = PositionStore(str(db_path))
-        for pos in store.list():
-            qty = float(getattr(pos, 'qty', 0.0) or 0.0)
-            if qty <= 0:
-                continue
-            sym = str(getattr(pos, 'symbol', '') or '')
-            if not sym:
-                continue
-            positions[sym] = {
-                'entry_price': float(getattr(pos, 'avg_px', 0.0) or 0.0),
-                'quantity': qty,
-            }
-            position_symbols.add(sym)
-        if positions:
-            _merge_runtime_stop_state(
-                positions,
-                stop_loss_state_path=stop_loss_state_path,
-                profit_taking_state_path=profit_taking_state_path,
-                fixed_stop_loss_state_path=fixed_stop_loss_state_path,
-            )
-            return positions, position_symbols, 'position_store'
-    except Exception as e:
-        logger.warning(f"Could not load positions from sqlite store: {e}")
+            store = PositionStore(str(db_path))
+            for pos in store.list():
+                qty = float(getattr(pos, 'qty', 0.0) or 0.0)
+                if qty <= 0:
+                    continue
+                sym = str(getattr(pos, 'symbol', '') or '')
+                if not sym:
+                    continue
+                positions[sym] = {
+                    'entry_price': float(getattr(pos, 'avg_px', 0.0) or 0.0),
+                    'quantity': qty,
+                }
+                position_symbols.add(sym)
+            if positions:
+                _merge_runtime_stop_state(
+                    positions,
+                    stop_loss_state_path=stop_loss_state_path,
+                    profit_taking_state_path=profit_taking_state_path,
+                    fixed_stop_loss_state_path=fixed_stop_loss_state_path,
+                )
+                return positions, position_symbols, 'position_store'
+        except Exception as e:
+            source = 'position_store_error'
+            logger.warning(f"Could not load positions from sqlite store: {e}")
+    else:
+        source = 'position_store_missing'
 
     legacy_portfolio_path = portfolio_path or (REPORTS_DIR / 'portfolio.json')
     if legacy_portfolio_path.exists():
@@ -322,10 +442,58 @@ def _load_positions_snapshot(
                     fixed_stop_loss_state_path=fixed_stop_loss_state_path,
                 )
                 source = 'portfolio_json'
+            elif source == 'position_store_missing':
+                source = 'portfolio_json_empty'
         except Exception as e:
             logger.warning(f"Could not load legacy portfolio.json positions: {e}")
 
     return positions, position_symbols, source
+
+
+def _position_mark_price(symbol: str, position: dict, prices: dict[str, float]) -> float:
+    for key in (symbol, symbol.replace('/', '-'), symbol.replace('-', '/')):
+        try:
+            px = float(prices.get(key, 0.0) or 0.0)
+        except Exception:
+            px = 0.0
+        if px > 0.0:
+            return px
+    try:
+        return float(position.get('entry_price', 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _filter_dust_positions(positions: dict[str, dict], prices: dict[str, float], cfg=None):
+    """Drop residual dust from event-driven active positions."""
+    if not positions:
+        return positions, set()
+
+    try:
+        from src.core.pipeline import is_dust_position
+    except Exception as e:
+        logger.warning(f"Could not load dust position helper; keeping all positions: {e}")
+        return positions, set()
+
+    filtered: dict[str, dict] = {}
+    dust_symbols: set[str] = set()
+    for symbol, position in positions.items():
+        try:
+            qty = float(position.get('quantity', position.get('qty', 0.0)) or 0.0)
+        except Exception:
+            filtered[symbol] = position
+            continue
+
+        px = _position_mark_price(symbol, position, prices)
+        if qty > 0.0 and px > 0.0 and is_dust_position(symbol, qty, qty * px, cfg):
+            dust_symbols.add(symbol)
+            logger.info(
+                f"Ignored dust position {symbol}: qty={qty:.12g}, value_usdt={qty * px:.8f}"
+            )
+            continue
+        filtered[symbol] = position
+
+    return filtered, dust_symbols
 
 
 def load_current_state(cfg=None, config_path: Path = None):
@@ -345,7 +513,7 @@ def load_current_state(cfg=None, config_path: Path = None):
         if regime_path.exists():
             with open(regime_path) as f:
                 regime_data = json.load(f)
-                regime = regime_data.get('regime', 'SIDEWAYS')
+                regime = _extract_event_regime(regime_data)
         
         # Load live positions from sqlite first; fallback to legacy portfolio.json only when needed
         positions, position_symbols, position_source = _load_positions_snapshot(
@@ -376,6 +544,7 @@ def load_current_state(cfg=None, config_path: Path = None):
             logger.warning(f"Could not load universe cache, fallback to cfg.symbols: {e}")
 
         # Always keep current holdings inside event-driven watch scope so existing positions remain manageable.
+        base_tradeable_symbols = set(tradeable_symbols)
         tradeable_symbols.update(position_symbols)
 
         # Load prices from OKX API (filtered to tradeable universe only)
@@ -392,7 +561,17 @@ def load_current_state(cfg=None, config_path: Path = None):
 
         if not prices:
             logger.warning("No prices available in tradeable universe - breakout detection disabled")
-        
+
+        positions, dust_symbols = _filter_dust_positions(positions, prices, cfg)
+        if dust_symbols:
+            position_symbols.difference_update(dust_symbols)
+            tradeable_symbols = set(base_tradeable_symbols)
+            tradeable_symbols.update(position_symbols)
+            prices = {sym: px for sym, px in prices.items() if sym in tradeable_symbols}
+            logger.info(
+                f"Ignored {len(dust_symbols)} dust positions in event-driven state: {sorted(dust_symbols)}"
+            )
+
         # Load signals - PRIORITY: fused signals > alpha snapshot
         signals = {}
         
@@ -407,7 +586,11 @@ def load_current_state(cfg=None, config_path: Path = None):
             signals_path, meta = find_latest_fused_signals_file(runs_dir, max_age_minutes=int(max_age or 90))
 
             if signals_path is not None:
-                logger.info(f"Using fused signals file: {signals_path} (age={meta.get('age_min', 0):.1f}m, files={meta.get('count', 0)})")
+                logger.info(
+                    f"Using fused signals file: {signals_path} "
+                    f"(age={meta.get('age_min', 0):.1f}m, files={meta.get('count', 0)}, "
+                    f"ignored_non_live_dirs={meta.get('ignored_dirs', 0)})"
+                )
                 try:
                     with open(signals_path) as f:
                         sig_data = json.load(f)
@@ -427,7 +610,11 @@ def load_current_state(cfg=None, config_path: Path = None):
                         f"No fresh fused signals file (latest stale: {meta.get('path')}, age={meta.get('age_min', 0):.1f}m > {int(max_age or 90)}m)"
                     )
                 else:
-                    logger.warning("No strategy_signals.json found under runs/")
+                    ignored_dirs = meta.get('ignored_dirs', 0) if meta else 0
+                    logger.warning(
+                        f"No production strategy_signals.json found under live run dirs "
+                        f"(ignored_non_live_dirs={ignored_dirs})"
+                    )
 
             if not signals:
                 audit_path, audit_meta = find_latest_decision_audit_file(runs_dir, max_age_minutes=int(max_age or 90))
@@ -461,21 +648,27 @@ def load_current_state(cfg=None, config_path: Path = None):
                             symbol=sym,
                             direction=direction,
                             score=abs(score),
-                            rank=max(1, min(99, rank)),
+                            rank=normalize_signal_rank(rank),
                             timestamp_ms=int(datetime.now().timestamp() * 1000)
                         )
                     logger.info(f"Loaded {len(signals)} signals from alpha snapshot (fallback)")
-        
+
         # Resolve selected symbols by actual rank/signal quality rather than dict order.
         selected = top_selected_symbols(signals, limit=5)
-        
+        suppress_selected = _should_suppress_event_selected_symbols(cfg, regime, positions)
+        if suppress_selected and selected:
+            logger.info("Risk-Off close-only flat state: suppressing event selected symbols")
+            selected = []
+
         return {
             'timestamp_ms': int(datetime.now().timestamp() * 1000),
             'regime': regime,
             'prices': prices,
             'positions': positions,
             'signals': signals,
-            'selected_symbols': selected
+            'selected_symbols': selected,
+            'suppress_selected_symbols': suppress_selected,
+            'suppress_entry_events': suppress_selected
         }
     
     except Exception as e:
@@ -485,23 +678,32 @@ def load_current_state(cfg=None, config_path: Path = None):
         return None
 
 
+def get_live_execution_service_state(service_unit: str) -> str:
+    """Return systemd user unit activity state for the live service."""
+    st = subprocess.run(
+        ['systemctl', '--user', 'is-active', service_unit],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return (st.stdout or '').strip().lower()
+
+
+def live_execution_service_running(service_unit: str) -> bool:
+    return get_live_execution_service_state(service_unit) in ('active', 'activating')
+
+
 def trigger_live_execution_service(service_unit: str):
     """Start full live execution service (active mode)."""
     try:
         # Skip if service is already running/starting (avoid overlap starts)
-        st = subprocess.run(
-            ['systemctl', '--user', 'is-active', service_unit],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        state = (st.stdout or '').strip().lower()
+        state = get_live_execution_service_state(service_unit)
         if state in ('active', 'activating'):
             return {
-                'ok': True,
+                'ok': False,
                 'returncode': 0,
                 'stdout': state,
-                'stderr': '',
+                'stderr': f'{service_unit} already {state}',
                 'cmd': f'systemctl --user start {service_unit}',
                 'service_unit': service_unit,
                 'skipped_already_running': True,
@@ -537,34 +739,13 @@ def get_last_live_run_age_sec(runs_dir: Path | None = None):
         runs_dir = runs_dir or (REPORTS_DIR / 'runs')
         if not runs_dir.exists():
             return None, None
-        cands = [d for d in runs_dir.iterdir() if d.is_dir() and (d / 'decision_audit.json').exists()]
-        if not cands:
-            return None, None
-        latest = max(cands, key=lambda d: d.stat().st_mtime)
-        age = max(0.0, time.time() - latest.stat().st_mtime)
-        return age, latest.name
-    except Exception:
-        return None, None
-
-
-def find_latest_decision_audit_file(runs_dir: Path, max_age_minutes: int = 90):
-    """Find newest decision_audit.json under runs/ within freshness window."""
-    try:
-        files = sorted(
-            [p for p in runs_dir.glob('*/decision_audit.json') if p.is_file()],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
+        candidates, _ignored_dirs = _live_run_artifact_candidates(runs_dir, 'decision_audit.json')
+        files = _sort_live_artifact_paths(candidates)
         if not files:
             return None, None
-
-        newest = files[0]
-        age_sec = max(0.0, time.time() - newest.stat().st_mtime)
-        age_min = age_sec / 60.0
-        if age_min > float(max_age_minutes):
-            return None, {'path': str(newest), 'age_min': age_min, 'fresh': False, 'count': len(files)}
-
-        return newest, {'path': str(newest), 'age_min': age_min, 'fresh': True, 'count': len(files)}
+        latest = files[0]
+        age = max(0.0, time.time() - latest.stat().st_mtime)
+        return age, latest.parent.name
     except Exception:
         return None, None
 
@@ -572,17 +753,46 @@ def find_latest_decision_audit_file(runs_dir: Path, max_age_minutes: int = 90):
 def _load_fused_signal_states(sig_data: dict, tradeable_symbols: set[str]):
     signals = {}
     fused_signals = sig_data.get("fused", {})
+    rows = []
     for sym, data in (fused_signals or {}).items():
         if sym not in tradeable_symbols:
             continue
+        try:
+            score = float(data.get('score', 0) or 0)
+        except Exception:
+            score = 0.0
+        raw_rank = data.get('rank', 99)
+        rows.append((str(sym), data, score, raw_rank, normalize_signal_rank(raw_rank)))
+
+    ranks = [rank for _, _, _, _, rank in rows]
+    has_duplicate_ranks = len(set(ranks)) != len(ranks)
+    has_unreliable_rank = any(_is_unreliable_fused_rank(raw_rank) for _, _, _, raw_rank, _ in rows)
+    rank_lookup = {}
+    if len(rows) > 1 and (has_duplicate_ranks or has_unreliable_rank):
+        ranked_rows = sorted(rows, key=lambda row: (row[2], row[0]), reverse=True)
+        rank_lookup = {sym: idx + 1 for idx, (sym, *_rest) in enumerate(ranked_rows)}
+
+    timestamp_ms = int(datetime.now().timestamp() * 1000)
+    for sym, data, score, _raw_rank, rank in rows:
         signals[sym] = SignalState(
             symbol=sym,
             direction=data.get('direction', 'hold'),
-            score=data.get('score', 0),
-            rank=data.get('rank', 99),
-            timestamp_ms=int(datetime.now().timestamp() * 1000)
+            score=score,
+            rank=int(rank_lookup.get(sym, rank)),
+            timestamp_ms=timestamp_ms
         )
     return signals
+
+
+def _is_unreliable_fused_rank(raw_rank) -> bool:
+    if raw_rank is None:
+        return True
+    if isinstance(raw_rank, str) and not raw_rank.strip():
+        return True
+    try:
+        return float(raw_rank) <= 0
+    except Exception:
+        return True
 
 
 def _load_decision_audit_signal_states(audit_data: dict, tradeable_symbols: set[str]):
@@ -595,10 +805,7 @@ def _load_decision_audit_signal_states(audit_data: dict, tradeable_symbols: set[
             score = float(row.get('score', row.get('display_score', 0)) or 0)
         except Exception:
             score = 0.0
-        try:
-            rank = int(row.get('rank', 99) or 99)
-        except Exception:
-            rank = 99
+        rank = normalize_signal_rank(row.get('rank', 99))
         direction = 'buy' if score > 0 else 'sell' if score < 0 else 'hold'
         signals[sym] = SignalState(
             symbol=sym,
@@ -724,6 +931,112 @@ def estimate_live_equity(eq_file: Path | None = None) -> float:
     return 0.0
 
 
+def _coerce_timestamp_epoch(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _risk_state_epoch(payload: object, *, primary_keys: tuple[str, ...]) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in primary_keys:
+        epoch = _coerce_timestamp_epoch(payload.get(key))
+        if epoch is not None:
+            return epoch
+    history = payload.get("history")
+    if isinstance(history, list):
+        latest_history = max(
+            (item for item in history if isinstance(item, dict)),
+            key=lambda item: float(_coerce_timestamp_epoch(item.get("ts")) or float("-inf")),
+            default=None,
+        )
+        if isinstance(latest_history, dict):
+            epoch = _coerce_timestamp_epoch(latest_history.get("ts"))
+            if epoch is not None:
+                return epoch
+    return None
+
+
+def _load_json_state_with_warning(path: Path, *, label: str) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(f"Failed to load {label} state from {path}: {exc}")
+        return {}
+    if not isinstance(payload, dict):
+        logger.warning(f"Ignoring invalid {label} state from {path}: expected object")
+        return {}
+    return payload
+
+
+def load_current_auto_risk_level(order_store_path: Path) -> str:
+    eval_path = derive_runtime_auto_risk_eval_path(order_store_path).resolve()
+    guard_path = derive_runtime_auto_risk_guard_path(order_store_path).resolve()
+
+    eval_state = _load_json_state_with_warning(eval_path, label="auto_risk_eval")
+    guard_state = _load_json_state_with_warning(guard_path, label="auto_risk_guard")
+    eval_level = extract_risk_level(eval_state)
+    guard_level = extract_risk_level(guard_state)
+    eval_epoch = _risk_state_epoch(eval_state, primary_keys=("ts",))
+    guard_epoch = _risk_state_epoch(guard_state, primary_keys=("last_update",))
+
+    if eval_level and (not guard_level or guard_epoch is None or (eval_epoch is not None and eval_epoch >= guard_epoch)):
+        return eval_level
+    if guard_level:
+        return guard_level
+
+    logger.warning(
+        "Auto-risk level is UNKNOWN; event-driven PROTECT open-action guard cannot be applied "
+        f"(eval={eval_path}, guard={guard_path})"
+    )
+    return ""
+
+
+def _is_event_open_action(action: object) -> bool:
+    if not isinstance(action, dict):
+        return False
+    return str(action.get("action") or "").strip().lower() == "open"
+
+
+def filter_event_actions_for_auto_risk(result: dict, risk_level: str) -> dict:
+    """Block event-driven entries while auto-risk is in PROTECT; keep exits."""
+    normalized_level = str(risk_level or "").strip().upper()
+    if normalized_level != "PROTECT":
+        return result
+
+    actions = list((result or {}).get("actions") or [])
+    blocked = [action for action in actions if _is_event_open_action(action)]
+    if not blocked:
+        return result
+
+    allowed = [action for action in actions if not _is_event_open_action(action)]
+    filtered = dict(result or {})
+    filtered["actions"] = allowed
+    filtered["auto_risk_level"] = normalized_level
+    filtered["auto_risk_blocked_actions"] = blocked
+    filtered["events_blocked"] = int(filtered.get("events_blocked", 0) or 0) + len(blocked)
+
+    if allowed:
+        filtered["should_trade"] = True
+        filtered["reason"] = "auto_risk_protect_open_block_partial"
+    else:
+        filtered["should_trade"] = False
+        filtered["reason"] = "auto_risk_protect_open_block"
+
+    return filtered
+
+
 def build_riskoff_shadow_plan(state: dict, cfg: dict, watchlist: list, *, equity_file: Path | None = None):
     """Build shadow plan for Risk-Off probe scenarios (no execution)."""
     regime = str(state.get('regime', 'SIDEWAYS'))
@@ -817,6 +1130,7 @@ def compute_adaptive_event_cfg(
     *,
     log_path: Path | None = None,
     adaptive_state_path: Path | None = None,
+    auto_risk_level: str | None = None,
 ):
     """Adaptive cooldown tuning for event-driven engine.
 
@@ -851,20 +1165,24 @@ def compute_adaptive_event_cfg(
     block_ratio = (blocked / processed) if processed > 0 else 0.0
 
     regime = str((state or {}).get('regime', 'SIDEWAYS')).upper()
+    risk_level = str(auto_risk_level or "").strip().upper()
 
     out = dict(base)
     reason = []
 
-    if regime in ('SIDEWAYS', 'TRENDING', 'TRENDING_UP') and processed >= min_events_for_action and block_ratio >= high_block_ratio:
+    if risk_level in ('PROTECT', 'DEFENSE') or regime in ('RISK_OFF', 'RISK-OFF'):
+        out['global_cooldown_p2_minutes'] = min(p2_max, int(round(base['global_cooldown_p2_minutes'] * 1.2)))
+        out['symbol_cooldown_minutes'] = min(symbol_max, int(round(base['symbol_cooldown_minutes'] * 1.2)))
+        out['signal_confirmation_periods'] = min(confirm_max, int(base['signal_confirmation_periods']) + 1)
+        if risk_level in ('PROTECT', 'DEFENSE'):
+            reason.append(f"auto_risk_{risk_level.lower()}_harden")
+        elif regime in ('RISK_OFF', 'RISK-OFF'):
+            reason.append('risk_off_harden')
+    elif regime in ('SIDEWAYS', 'TRENDING', 'TRENDING_UP') and processed >= min_events_for_action and block_ratio >= high_block_ratio:
         out['global_cooldown_p2_minutes'] = max(p2_min, int(round(base['global_cooldown_p2_minutes'] * 0.5)))
         out['symbol_cooldown_minutes'] = max(symbol_min, int(round(base['symbol_cooldown_minutes'] * 0.5)))
         out['signal_confirmation_periods'] = max(confirm_min, int(base['signal_confirmation_periods']) - 1)
         reason.append('high_block_ratio_relax')
-    elif regime in ('RISK_OFF', 'RISK-OFF'):
-        out['global_cooldown_p2_minutes'] = min(p2_max, int(round(base['global_cooldown_p2_minutes'] * 1.2)))
-        out['symbol_cooldown_minutes'] = min(symbol_max, int(round(base['symbol_cooldown_minutes'] * 1.2)))
-        out['signal_confirmation_periods'] = min(confirm_max, int(base['signal_confirmation_periods']) + 1)
-        reason.append('risk_off_harden')
 
     # clamp
     out['global_cooldown_p2_minutes'] = max(p2_min, min(p2_max, int(out['global_cooldown_p2_minutes'])))
@@ -877,6 +1195,7 @@ def compute_adaptive_event_cfg(
         'applied': applied,
         'reason': ','.join(reason) if reason else 'no_change',
         'regime': regime,
+        'auto_risk_level': risk_level or None,
         'lookback_runs': lookback,
         'recent_events_processed': processed,
         'recent_events_blocked': blocked,
@@ -894,6 +1213,189 @@ def compute_adaptive_event_cfg(
         pass
 
     return out, meta
+
+
+def _build_effective_event_log_values(result: dict, execution: dict) -> dict:
+    """Return event log fields that reflect accepted execution, not only detection."""
+    actions = list((result or {}).get('actions') or [])
+    out = {
+        'should_trade': bool((result or {}).get('should_trade', False)),
+        'reason': (result or {}).get('reason'),
+        'actions': actions,
+        'events_processed': int((result or {}).get('events_processed', 0) or 0),
+        'events_blocked': int((result or {}).get('events_blocked', 0) or 0),
+    }
+    if not out['should_trade'] or not actions:
+        return out
+
+    execution = execution or {}
+    if not bool(execution.get('active_mode', False)):
+        return out
+
+    accepted = bool(execution.get('live_service_triggered')) and bool(execution.get('live_service_ok'))
+    if accepted:
+        return out
+
+    trigger_reason = execution.get('trigger_reason') or 'execution_not_accepted'
+    out.update({
+        'should_trade': False,
+        'reason': trigger_reason,
+        'actions': [],
+        'events_processed': 0,
+        'events_blocked': 0,
+        'candidate_should_trade': bool((result or {}).get('should_trade', False)),
+        'candidate_reason': (result or {}).get('reason'),
+        'candidate_actions': actions,
+        'candidate_events_processed': int((result or {}).get('events_processed', 0) or 0),
+        'candidate_events_blocked': int((result or {}).get('events_blocked', 0) or 0),
+    })
+    return out
+
+
+def _no_event_actions_message(state: dict, result: dict | None = None) -> str:
+    """Return an operator-facing reason when no event action is accepted."""
+    state = state or {}
+    result = result or {}
+    result_reason = str(result.get('reason') or '').strip()
+    if result_reason == 'auto_risk_protect_open_block':
+        return "No event-driven actions - open actions blocked by auto-risk PROTECT"
+    regime = str(state.get('regime', '') or '').upper().replace('-', '_')
+    if bool(state.get('suppress_entry_events', False)):
+        return "No event-driven actions - entry events suppressed by close-only Risk-Off"
+    if regime == "RISK_OFF":
+        return "No event-driven actions - Risk-Off produced no actionable exits"
+    if state.get('signals'):
+        return "No event-driven actions - no actionable events"
+    return "No event-driven actions - standard V5 may skip if no signals"
+
+
+def _event_log_timestamp_ms(entry: dict) -> Optional[int]:
+    try:
+        raw = str((entry or {}).get('timestamp') or '')
+        if not raw:
+            return None
+        return int(datetime.fromisoformat(raw).timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def _state_ts_matches_event(ts_ms, event_ms: int, *, tolerance_ms: int) -> bool:
+    try:
+        ts = int(float(ts_ms or 0))
+    except Exception:
+        return False
+    if ts <= 0:
+        return False
+    return abs(ts - int(event_ms)) <= max(0, int(tolerance_ms))
+
+
+def repair_unaccepted_event_execution_state(
+    *,
+    event_log_path: Path,
+    cooldown_state_path: Path,
+    monitor_state_path: Path,
+    tolerance_ms: int = 10000,
+) -> dict:
+    """Remove cooldown/heartbeat timestamps written by unaccepted event candidates."""
+    meta = {
+        'changed': False,
+        'cooldown_repaired': False,
+        'monitor_repaired': False,
+        'matched_unaccepted_events': 0,
+        'rewind_to_ms': 0,
+        'symbols_repaired': [],
+    }
+    if not event_log_path.exists():
+        return meta
+
+    accepted_ms = 0
+    accepted_symbol_ms = {}
+    unaccepted = []
+    try:
+        rows = event_log_path.read_text(encoding='utf-8').splitlines()
+    except Exception as e:
+        logger.warning(f"Could not read event log for execution state repair: {e}")
+        return meta
+
+    for raw in rows:
+        try:
+            entry = json.loads(raw)
+        except Exception:
+            continue
+        ts_ms = _event_log_timestamp_ms(entry)
+        if ts_ms is None:
+            continue
+        execution = entry.get('execution') or {}
+        actions = list(entry.get('actions') or [])
+        candidate_actions = list(entry.get('candidate_actions') or [])
+        if actions and execution.get('live_service_ok') is True:
+            accepted_ms = max(accepted_ms, ts_ms)
+            for action in actions:
+                symbol = str((action or {}).get('symbol') or '').strip()
+                if symbol:
+                    accepted_symbol_ms[symbol] = max(accepted_symbol_ms.get(symbol, 0), ts_ms)
+        if candidate_actions and execution.get('live_service_ok') is not True:
+            unaccepted.append({
+                'ts_ms': ts_ms,
+                'symbols': {
+                    str((action or {}).get('symbol') or '').strip()
+                    for action in candidate_actions
+                    if str((action or {}).get('symbol') or '').strip()
+                },
+            })
+
+    if not unaccepted:
+        return meta
+    meta['matched_unaccepted_events'] = len(unaccepted)
+    meta['rewind_to_ms'] = accepted_ms
+
+    try:
+        if cooldown_state_path.exists() and cooldown_state_path.stat().st_size > 0:
+            cooldown = json.loads(cooldown_state_path.read_text(encoding='utf-8'))
+            cooldown_changed = False
+            last_global = cooldown.get('last_global_trade_ms')
+            if any(_state_ts_matches_event(last_global, item['ts_ms'], tolerance_ms=tolerance_ms) for item in unaccepted):
+                cooldown['last_global_trade_ms'] = accepted_ms
+                cooldown_changed = True
+            symbol_cooldowns = dict(cooldown.get('symbol_cooldowns') or {})
+            for symbol, ts_ms in list(symbol_cooldowns.items()):
+                if not any(
+                    symbol in item['symbols']
+                    and _state_ts_matches_event(ts_ms, item['ts_ms'], tolerance_ms=tolerance_ms)
+                    for item in unaccepted
+                ):
+                    continue
+                previous = accepted_symbol_ms.get(symbol, 0)
+                if previous > 0:
+                    symbol_cooldowns[symbol] = previous
+                else:
+                    symbol_cooldowns.pop(symbol, None)
+                meta['symbols_repaired'].append(symbol)
+                cooldown_changed = True
+            if cooldown_changed:
+                cooldown['symbol_cooldowns'] = symbol_cooldowns
+                cooldown['repaired_unaccepted_event_state_at_ms'] = int(time.time() * 1000)
+                cooldown_state_path.write_text(json.dumps(cooldown, ensure_ascii=False, indent=2), encoding='utf-8')
+                meta['cooldown_repaired'] = True
+                meta['changed'] = True
+    except Exception as e:
+        logger.warning(f"Failed to repair unaccepted cooldown state: {e}")
+
+    try:
+        if monitor_state_path.exists() and monitor_state_path.stat().st_size > 0:
+            monitor = json.loads(monitor_state_path.read_text(encoding='utf-8'))
+            last_trade = monitor.get('last_trade_time_ms')
+            if any(_state_ts_matches_event(last_trade, item['ts_ms'], tolerance_ms=tolerance_ms) for item in unaccepted):
+                monitor['last_trade_time_ms'] = accepted_ms
+                monitor['repaired_unaccepted_event_state_at_ms'] = int(time.time() * 1000)
+                monitor_state_path.write_text(json.dumps(monitor, ensure_ascii=False, indent=2), encoding='utf-8')
+                meta['monitor_repaired'] = True
+                meta['changed'] = True
+    except Exception as e:
+        logger.warning(f"Failed to repair unaccepted event monitor state: {e}")
+
+    meta['symbols_repaired'] = sorted(set(meta['symbols_repaired']))
+    return meta
 
 
 def run_event_param_scan(state: dict, last_state: dict, ev_cfg: dict):
@@ -924,7 +1426,7 @@ def run_event_param_scan(state: dict, last_state: dict, ev_cfg: dict):
     for n in noisy_names:
         lg = logging.getLogger(n)
         old_levels[n] = lg.level
-        lg.setLevel(logging.WARNING)
+        lg.setLevel(logging.ERROR)
 
     try:
         with tempfile.TemporaryDirectory(prefix="v5_event_param_scan_") as temp_dir:
@@ -1038,7 +1540,14 @@ def main():
         return 0
 
     paths = build_paths(cfg)
-    
+    repair_meta = repair_unaccepted_event_execution_state(
+        event_log_path=paths.event_driven_log_path,
+        cooldown_state_path=derive_runtime_named_json_path(paths.order_store_path, "cooldown_state").resolve(),
+        monitor_state_path=derive_runtime_named_json_path(paths.order_store_path, "event_monitor_state").resolve(),
+    )
+    if repair_meta.get('changed'):
+        logger.warning(f"Repaired unaccepted event execution state: {repair_meta}")
+
     # Load last signal history for comparison
     last_state = None
     history_path = paths.event_driven_signals_path
@@ -1046,12 +1555,21 @@ def main():
         try:
             with open(history_path) as f:
                 last_data = json.load(f)
+                last_regime = last_data.get('regime', 'SIDEWAYS')
+                last_positions = last_data.get('positions', {}) or {}
+                last_selected = top_selected_symbols(last_data.get('signals', {}) or {}, limit=5)
+                last_suppress_selected = _should_suppress_event_selected_symbols(cfg, last_regime, last_positions)
+                if last_suppress_selected:
+                    last_selected = []
                 last_state = {
                     'timestamp_ms': last_data.get('timestamp', 0),
-                    'regime': last_data.get('regime', 'SIDEWAYS'),
+                    'regime': last_regime,
                     'prices': last_data.get('prices', {}),
                     'signals': last_data.get('signals', {}),
-                    'selected_symbols': top_selected_symbols(last_data.get('signals', {}) or {}, limit=5)
+                    'positions': last_positions,
+                    'selected_symbols': last_selected,
+                    'suppress_selected_symbols': last_suppress_selected,
+                    'suppress_entry_events': last_suppress_selected
                 }
                 logger.info(f"Loaded signal history from {last_data.get('timestamp', 0)}")
         except Exception as e:
@@ -1071,6 +1589,9 @@ def main():
 
     live_service_unit = resolve_live_service_unit(ev_cfg)
     logger.info(f"Live trigger service: {live_service_unit}")
+    auto_risk_level = load_current_auto_risk_level(paths.order_store_path)
+    if auto_risk_level:
+        logger.info(f"Auto-risk level: {auto_risk_level}")
 
     # No-trade period utilities: candidate watchlist + risk-off shadow + one-shot param scan
     watchlist = build_candidate_watchlist(
@@ -1110,6 +1631,7 @@ def main():
         state,
         log_path=paths.event_driven_log_path,
         adaptive_state_path=paths.event_adaptive_state_path,
+        auto_risk_level=auto_risk_level,
     )
     logger.info(
         f"Adaptive cooldown: applied={adaptive_meta.get('applied')} reason={adaptive_meta.get('reason')} "
@@ -1135,13 +1657,20 @@ def main():
     
     # Check if should trade (with last state for comparison)
     logger.info("Checking for trading events...")
-    result = trader.should_trade(state, last_state)
-    
+    result = trader.should_trade(state, last_state, commit_execution_state=False)
+    result = filter_event_actions_for_auto_risk(result, auto_risk_level)
+    blocked_auto_risk_actions = list(result.get("auto_risk_blocked_actions") or [])
+    if blocked_auto_risk_actions:
+        logger.warning(
+            "Auto-risk PROTECT blocked event-driven open actions: "
+            f"{[action.get('symbol') for action in blocked_auto_risk_actions if isinstance(action, dict)]}"
+        )
+
     logger.info(f"Should trade: {result['should_trade']}")
     logger.info(f"Reason: {result['reason']}")
     logger.info(f"Events processed: {result.get('events_processed', 0)}")
     logger.info(f"Events blocked: {result.get('events_blocked', 0)}")
-    
+
     if result['actions']:
         logger.info(f"Actions ({len(result['actions'])}):")
         for action in result['actions']:
@@ -1154,16 +1683,21 @@ def main():
         'force_full_min_interval_minutes': force_full_min_interval_minutes,
         'active_min_interval_minutes': active_min_interval_minutes,
         'adaptive_cooldown': adaptive_meta,
+        'auto_risk_level': auto_risk_level or None,
+        'auto_risk_blocked_actions': blocked_auto_risk_actions,
         'live_service_unit': live_service_unit,
         'live_service_triggered': False,
         'live_service_ok': None,
         'live_service_returncode': None,
         'live_service_stderr': '',
+        'live_service_skipped_already_running': False,
         'trigger_reason': None,
         'last_run_age_sec': None,
         'last_run_id': None,
         'current_target_run_id': get_current_live_window_run_id(),
     }
+
+    no_action_message = None
 
     if force_full_mode:
         age_sec, last_run_id = get_last_live_run_age_sec(paths.runs_dir)
@@ -1192,6 +1726,7 @@ def main():
                 'live_service_ok': exec_res.get('ok'),
                 'live_service_returncode': exec_res.get('returncode'),
                 'live_service_stderr': exec_res.get('stderr', ''),
+                'live_service_skipped_already_running': bool(exec_res.get('skipped_already_running')),
                 'trigger_reason': 'force_full_run',
             })
             if exec_res.get('ok'):
@@ -1231,6 +1766,12 @@ def main():
                 execution.update({
                     'trigger_reason': f"active_throttled:{throttle['reason']}",
                 })
+            elif live_execution_service_running(live_service_unit):
+                logger.info(f"ACTIVE mode throttled: {live_service_unit} already running")
+                execution.update({
+                    'trigger_reason': 'active_throttled:live_service_running',
+                    'live_service_skipped_already_running': True,
+                })
             else:
                 persisted = persist_event_actions(
                     actions=result['actions'],
@@ -1249,47 +1790,71 @@ def main():
                     'live_service_ok': exec_res.get('ok'),
                     'live_service_returncode': exec_res.get('returncode'),
                     'live_service_stderr': exec_res.get('stderr', ''),
+                    'live_service_skipped_already_running': bool(exec_res.get('skipped_already_running')),
                     'trigger_reason': execution.get('trigger_reason') or 'event_actions',
                 })
                 if exec_res.get('ok'):
+                    trader.commit_actions(result['actions'])
                     logger.info("ACTIVE mode: live service start request accepted")
                 else:
+                    if persisted:
+                        try:
+                            clear_event_actions(order_store_path=paths.order_store_path)
+                        except Exception as e:
+                            logger.warning(f"ACTIVE mode: failed to clear unaccepted event actions: {e}")
                     logger.error(
                         f"ACTIVE mode: failed to start live service rc={exec_res.get('returncode')} err={exec_res.get('stderr')}"
                     )
         else:
             logger.info("PASSIVE mode: actions logged only, no execution")
     else:
-        logger.info("No event-driven actions - standard V5 may skip if no signals")
-
+        no_action_message = _no_event_actions_message(state, result)
+        logger.info(no_action_message)
     # Log to file for monitoring
+    effective_log = _build_effective_event_log_values(result, execution)
     log_entry = {
         'timestamp': datetime.now().isoformat(),
-        'should_trade': result['should_trade'],
-        'reason': result['reason'],
-        'actions': result['actions'],
+        'should_trade': effective_log['should_trade'],
+        'reason': effective_log['reason'],
+        'actions': effective_log['actions'],
         'regime': state['regime'],
-        'events_processed': result.get('events_processed', 0),
-        'events_blocked': result.get('events_blocked', 0),
+        'selected_symbols': list(state.get('selected_symbols') or []),
+        'suppress_entry_events': bool(state.get('suppress_entry_events', False)),
+        'events_processed': effective_log['events_processed'],
+        'events_blocked': effective_log['events_blocked'],
         'watchlist_top3': watchlist[:3],
         'param_scan_best': (param_scan or {}).get('best'),
+        'auto_risk_level': result.get('auto_risk_level') or auto_risk_level or None,
+        'auto_risk_blocked_actions': blocked_auto_risk_actions,
         'execution': execution,
     }
-    
+    if no_action_message:
+        log_entry['no_action_message'] = no_action_message
+    if 'candidate_actions' in effective_log:
+        log_entry.update({
+            'candidate_should_trade': effective_log['candidate_should_trade'],
+            'candidate_reason': effective_log['candidate_reason'],
+            'candidate_actions': effective_log['candidate_actions'],
+            'candidate_events_processed': effective_log['candidate_events_processed'],
+            'candidate_events_blocked': effective_log['candidate_events_blocked'],
+        })
+
     log_path = paths.event_driven_log_path
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     with open(log_path, 'a') as f:
         f.write(json.dumps(log_entry) + '\n')
-    
+
     # Save signal history for next comparison
     history_path = paths.event_driven_signals_path
     signal_history = {
         'timestamp': int(datetime.now().timestamp() * 1000),
-        'signals': {sym: sig.to_dict() if hasattr(sig, 'to_dict') else sig 
+        'signals': {sym: sig.to_dict() if hasattr(sig, 'to_dict') else sig
                    for sym, sig in state['signals'].items()},
         'prices': state['prices'],
-        'regime': state['regime']
+        'positions': state['positions'],
+        'regime': state['regime'],
+        'suppress_entry_events': bool(state.get('suppress_entry_events', False))
     }
     history_path.write_text(json.dumps(signal_history, indent=2))
     logger.info(f"Saved signal history ({len(signal_history['signals'])} signals)")

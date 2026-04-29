@@ -192,6 +192,60 @@ def _balance_details(balance_resp):
         return []
 
 
+def _balance_account(balance_resp):
+    """Normalize OKX balance payload to the account-level object."""
+    try:
+        payload = balance_resp.data if hasattr(balance_resp, 'data') else (balance_resp or {})
+        data_arr = payload.get('data') if isinstance(payload, dict) else None
+        if isinstance(data_arr, list) and data_arr and isinstance(data_arr[0], dict):
+            return data_arr[0]
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_equity_validation_snapshot(
+    *,
+    equity_file: Path,
+    okx_total_eq: float,
+    usdt_balance: float,
+    total_position_value: float,
+    okx_positions: dict,
+) -> dict:
+    calculated_total_eq = float(usdt_balance) + float(total_position_value)
+    reported_total_eq = float(okx_total_eq) if float(okx_total_eq or 0.0) > 0.0 else calculated_total_eq
+    positions = []
+    for sym, meta in sorted((okx_positions or {}).items()):
+        qty = _okx_qty(meta)
+        value = _as_float(meta.get('eq_usd')) if isinstance(meta, dict) else 0.0
+        price = value / qty if qty > 0.0 and value > 0.0 else 0.0
+        positions.append(
+            {
+                'symbol': sym,
+                'ccy': str(sym).split('/')[0],
+                'qty': qty,
+                'price': price,
+                'value': value,
+                'value_pct': (value / reported_total_eq * 100.0) if reported_total_eq > 0.0 else 0.0,
+            }
+        )
+
+    equity_data = {
+        'timestamp': int(time.time()),
+        'okx_total_eq': reported_total_eq,
+        'calculated_total_eq': calculated_total_eq,
+        'difference': abs(calculated_total_eq - reported_total_eq),
+        'usdt_balance': float(usdt_balance),
+        'positions_value': float(total_position_value),
+        'positions_count': len(positions),
+        'positions': positions,
+        'source': 'auto_sync_before_trade',
+    }
+    equity_file.parent.mkdir(parents=True, exist_ok=True)
+    equity_file.write_text(json.dumps(equity_data, indent=2), encoding='utf-8')
+    return equity_data
+
+
 def _sync_local_store_to_okx_snapshot(position_store, local_positions, okx_positions, logger=None):
     """Apply an incremental OKX snapshot to the local position store.
 
@@ -251,6 +305,23 @@ def _sync_local_store_to_okx_snapshot(position_store, local_positions, okx_posit
     return stats
 
 
+def _local_position_qty_map(local_positions_list):
+    local_positions = {}
+    for pos in local_positions_list:
+        if hasattr(pos, 'symbol') and hasattr(pos, 'qty'):
+            sym = pos.symbol
+            qty = float(pos.qty or 0)
+        elif isinstance(pos, dict):
+            sym = pos.get('symbol')
+            qty = float(pos.get('qty', 0) or 0)
+        else:
+            continue
+        # Include tiny positive rows so the OKX snapshot can delete stale local dust.
+        if sym and qty > 0:
+            local_positions[str(sym)] = qty
+    return local_positions
+
+
 def main():
     """Auto-sync positions from OKX to local store."""
     logger.info("=" * 60)
@@ -282,6 +353,7 @@ def main():
             # Get OKX balance
             logger.info("Fetching OKX balance...")
             balance = client.get_balance()
+            balance_account = _balance_account(balance)
             balance_details = _balance_details(balance)
             logger.info(f"Balance details loaded: {len(balance_details)} assets")
 
@@ -292,24 +364,13 @@ def main():
                 project_root=WORKSPACE,
             )
             positions_db_path = derive_position_store_path(order_store_path)
+            equity_file_path = derive_runtime_named_json_path(order_store_path, 'equity_validation')
             position_store = PositionStore(path=positions_db_path)
             account_store = AccountStore(path=positions_db_path)
             
             # Check current diff
             local_positions_list = position_store.list()
-            local_positions = {}
-            for pos in local_positions_list:
-                if hasattr(pos, 'symbol') and hasattr(pos, 'qty'):
-                    sym = pos.symbol
-                    qty = float(pos.qty or 0)
-                elif isinstance(pos, dict):
-                    sym = pos.get('symbol')
-                    qty = float(pos.get('qty', 0) or 0)
-                else:
-                    continue
-                # Ignore zero/dust records left in store history
-                if sym and abs(qty) > 1e-8:
-                    local_positions[sym] = qty
+            local_positions = _local_position_qty_map(local_positions_list)
 
             # Primary sync targets
             tracked_symbols = set(getattr(cfg, 'symbols', []) or [])
@@ -438,6 +499,7 @@ def main():
             )
 
             # Update cash / peak equity
+            cash_synced = None
             for detail in balance_details:
                 if str(detail.get('ccy') or '').upper() == 'USDT':
                     cash = max(
@@ -445,6 +507,7 @@ def main():
                         _as_float(detail.get('availBal')),
                         _as_float(detail.get('eq')),
                     )
+                    cash_synced = float(cash)
                     try:
                         st = account_store.get()
                         synced_total_equity = float(cash) + float(total_position_equity)
@@ -462,9 +525,25 @@ def main():
                     except Exception as e:
                         logger.warning(f"  Could not sync cash: {e}")
                     break
-            
+            if cash_synced is None:
+                logger.warning("  Could not find USDT balance detail; equity snapshot not updated")
+            else:
+                equity_data = _write_equity_validation_snapshot(
+                    equity_file=Path(equity_file_path),
+                    okx_total_eq=_as_float(balance_account.get('totalEq')),
+                    usdt_balance=float(cash_synced),
+                    total_position_value=float(total_position_equity),
+                    okx_positions=okx_positions,
+                )
+                logger.info(
+                    "  Equity validation refreshed: "
+                    f"okx_total_eq={equity_data['okx_total_eq']:.4f}, "
+                    f"calculated_total_eq={equity_data['calculated_total_eq']:.4f}, "
+                    f"path={equity_file_path}"
+                )
+
             logger.info("✅ Auto-sync completed successfully")
-            
+
             execution_cfg = getattr(cfg, 'execution', None)
 
             # Clear failure state

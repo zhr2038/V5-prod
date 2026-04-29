@@ -81,7 +81,11 @@ render_units() {
   local dst="$1"
   local render_root="$2"
   shift 2
-  "$PYTHON_BIN" "$RENDERER" --src-dir "$SRC" --dst-dir "$dst" --root "$render_root" "$@"
+  local render_args=()
+  if [[ "$USER_MODE" == "1" ]]; then
+    render_args+=(--user-mode)
+  fi
+  "$PYTHON_BIN" "$RENDERER" --src-dir "$SRC" --dst-dir "$dst" --root "$render_root" "${render_args[@]}" "$@"
 }
 
 if [[ "$USER_MODE" == "1" ]]; then

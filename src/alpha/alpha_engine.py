@@ -9,6 +9,7 @@ from io import StringIO
 from decimal import Decimal
 import os
 import json
+import time
 import numpy as np
 import pandas as pd
 
@@ -18,7 +19,12 @@ from src.utils.math import safe_pct_change, zscore_cross_section
 from configs.schema import AlphaConfig, normalize_alpha_base_factor_mapping
 from src.reporting.alpha_evaluation import robust_zscore_cross_section, compute_quote_volume
 from src.alpha.qlib_factors import compute_alpha158_style_factors
-from src.execution.fill_store import derive_runtime_named_artifact_path, derive_runtime_reports_dir
+from src.execution.fill_store import (
+    derive_position_store_path,
+    derive_runtime_named_artifact_path,
+    derive_runtime_named_json_path,
+    derive_runtime_reports_dir,
+)
 
 # 多策略集成
 try:
@@ -315,14 +321,95 @@ class AlphaEngine:
             long_mean = _nested_mean("ic_long")
         return short_mean, long_mean
 
+    def _resolve_equity_validation_path(self) -> Path:
+        try:
+            return derive_runtime_named_json_path(
+                self._resolve_runtime_order_store_path(),
+                "equity_validation",
+            ).resolve()
+        except Exception:
+            return self._resolve_repo_path("reports/equity_validation.json", "reports/equity_validation.json")
+
+    def _equity_snapshot_is_fresh(self, obj: Dict[str, Any], path: Path) -> bool:
+        try:
+            max_age_sec = float(os.getenv("V5_MULTI_STRATEGY_EQUITY_MAX_AGE_SEC", "7200") or 7200)
+        except Exception:
+            max_age_sec = 7200.0
+        if max_age_sec <= 0:
+            return True
+
+        raw_ts = obj.get("timestamp", obj.get("ts"))
+        ts = None
+        try:
+            if raw_ts is not None:
+                ts = float(raw_ts)
+                if ts > 1_000_000_000_000:
+                    ts = ts / 1000.0
+        except Exception:
+            ts = None
+        if ts is None:
+            try:
+                ts = float(path.stat().st_mtime)
+            except Exception:
+                return False
+
+        age = time.time() - float(ts)
+        if age > max_age_sec:
+            print(
+                f"[AlphaEngine] stale equity snapshot ignored: {path} age={age:.0f}s > {max_age_sec:.0f}s"
+            )
+            return False
+        return True
+
+    def _resolve_fresh_equity_snapshot_usdt(self) -> Optional[float]:
+        try:
+            p = self._resolve_equity_validation_path()
+            if not p.exists():
+                return None
+            obj = json.loads(p.read_text(encoding='utf-8'))
+            if not isinstance(obj, dict) or not self._equity_snapshot_is_fresh(obj, p):
+                return None
+            for key in ('okx_total_eq', 'calculated_total_eq'):
+                v = obj.get(key)
+                if v is not None:
+                    v = float(v)
+                    if v > 0:
+                        return v
+        except Exception:
+            return None
+        return None
+
+    def _resolve_account_store_equity_usdt(self) -> Optional[float]:
+        try:
+            from src.execution.account_store import AccountStore
+            from src.execution.position_store import PositionStore
+
+            positions_db = derive_position_store_path(self._resolve_runtime_order_store_path()).resolve()
+            acc = AccountStore(path=str(positions_db)).get()
+            equity = float(acc.cash_usdt or 0.0)
+            for pos in PositionStore(path=str(positions_db)).list():
+                qty = float(getattr(pos, 'qty', 0.0) or 0.0)
+                if qty <= 0.0:
+                    continue
+                px = float(getattr(pos, 'last_mark_px', 0.0) or getattr(pos, 'avg_px', 0.0) or 0.0)
+                if px > 0.0:
+                    equity += qty * px
+            if equity > 0.0:
+                print(f"[AlphaEngine] using account store equity fallback: {equity:.4f} USDT")
+                return equity
+        except Exception:
+            return None
+        return None
+
     def _resolve_total_capital_usdt(self) -> float:
         """Resolve dynamic capital base for multi-strategy sizing.
 
         Priority:
         1) ENV override: V5_MULTI_STRATEGY_CAP_USDT
-        2) reports/equity_validation.json (okx_total_eq / calculated_total_eq)
-        3) legacy config fields (for compatibility)
-        4) fallback 20.0
+        2) fresh runtime equity_validation.json (okx_total_eq / calculated_total_eq)
+        3) account store equity fallback
+        4) legacy config fields (for compatibility)
+        5) fallback 20.0
         """
         # 1) ENV override
         env_cap = os.getenv('V5_MULTI_STRATEGY_CAP_USDT', '').strip()
@@ -334,21 +421,17 @@ class AlphaEngine:
             except Exception:
                 pass
 
-        # 2) live equity snapshot
-        try:
-            p = self._resolve_repo_path("reports/equity_validation.json", "reports/equity_validation.json")
-            if p.exists():
-                obj = json.loads(p.read_text(encoding='utf-8'))
-                for key in ('okx_total_eq', 'calculated_total_eq'):
-                    v = obj.get(key)
-                    if v is not None:
-                        v = float(v)
-                        if v > 0:
-                            return v
-        except Exception:
-            pass
+        # 2) fresh live equity snapshot
+        snapshot_equity = self._resolve_fresh_equity_snapshot_usdt()
+        if snapshot_equity is not None:
+            return snapshot_equity
 
-        # 3) compatibility paths
+        # 3) account store fallback
+        account_equity = self._resolve_account_store_equity_usdt()
+        if account_equity is not None:
+            return account_equity
+
+        # 4) compatibility paths
         try:
             if hasattr(self.cfg, 'live_equity_cap_usdt') and self.cfg.live_equity_cap_usdt:
                 v = float(self.cfg.live_equity_cap_usdt)

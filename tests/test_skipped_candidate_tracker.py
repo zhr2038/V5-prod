@@ -4,6 +4,7 @@ import csv
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from configs.schema import AppConfig
 from src.core.models import MarketSeries
@@ -969,6 +970,38 @@ def test_all_scores_below_threshold_uses_latest_market_bar_when_series_is_unsort
     assert rows[0]["skip_reason"] == "all_scores_below_threshold"
     assert rows[0]["entry_px"] == 120.0
     assert rows[0]["ts_utc"] == "2024-03-09T17:00:00Z"
+
+
+def test_tracker_uses_default_diagnostics_when_config_lacks_diagnostics(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_05"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = SimpleNamespace(
+        alpha=SimpleNamespace(min_score_threshold=0.2),
+        execution=SimpleNamespace(mode="paper", protect_entry_alpha6_min_score=0.0),
+    )
+
+    entry_ts_ms = 1_710_000_000_000
+    audit = DecisionAudit(run_id="20260421_05")
+    audit.now_ts = entry_ts_ms // 1000
+    audit.regime = "Trending"
+    audit.top_scores = [{"symbol": "BTC/USDT", "score": 0.1}]
+    market_data = {"BTC/USDT": _series("BTC/USDT", [entry_ts_ms], [100.0])}
+
+    result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="NEUTRAL",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    assert result["new_records"] == 1
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[0]["rt_cost_bps"] == 30.0
+    assert rows[0]["label_4h_status"] == "pending"
+    assert rows[0]["label_24h_status"] == "pending"
 
 
 def test_load_cache_ohlcv_prefers_logically_newer_file_for_duplicate_timestamp(tmp_path: Path) -> None:

@@ -24,6 +24,29 @@ from configs.runtime_config import resolve_runtime_env_path
 from src.factors.deepseek_sentiment_factor import DeepSeekSentimentFactor
 
 
+RSS_SOURCES = [
+    {
+        'name': 'CoinDesk',
+        'url': 'https://www.coindesk.com/arc/outboundfeeds/rss/',
+        'weight': 1.0,
+        'enabled': True,
+    },
+    {
+        'name': 'Cointelegraph',
+        'url': 'https://cointelegraph.com/rss',
+        'weight': 1.0,
+        'enabled': True,
+    },
+    {
+        'name': 'TheBlock',
+        'url': 'https://www.theblock.co/rss.xml',
+        'weight': 0.8,
+        # The production host currently receives Cloudflare 403 responses.
+        'enabled': False,
+    },
+]
+
+
 def get_cache_dir(project_root: Path | None = None) -> Path:
     return (project_root or PROJECT_ROOT).resolve() / "data" / "sentiment_cache"
 
@@ -134,23 +157,7 @@ def collect_rss_sentiment(*, env_path: str = ".env", project_root: Path | None =
     resolved_env_path = resolve_runtime_env_path(env_path, project_root=root)
     
     # RSS源配置
-    rss_sources = [
-        {
-            'name': 'CoinDesk',
-            'url': 'https://www.coindesk.com/arc/outboundfeeds/rss/',
-            'weight': 1.0
-        },
-        {
-            'name': 'Cointelegraph',
-            'url': 'https://cointelegraph.com/rss',
-            'weight': 1.0
-        },
-        {
-            'name': 'TheBlock',
-            'url': 'https://www.theblock.co/rss.xml',
-            'weight': 0.8
-        }
-    ]
+    rss_sources = [source for source in RSS_SOURCES if source.get('enabled', True)]
     
     cache_dir = get_cache_dir(root)
     cache_dir.mkdir(parents=True, exist_ok=True)

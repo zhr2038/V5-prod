@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
-from src.execution.event_types import MarketState, SignalState, top_selected_symbols
+from src.execution.event_types import MarketState, SignalState, normalize_signal_rank, top_selected_symbols
 from src.execution.event_monitor import EventMonitor, EventMonitorConfig
 from src.execution.cooldown_manager import CooldownManager, CooldownConfig
 from src.execution.event_decision_engine import EventDecisionEngine
@@ -93,9 +93,11 @@ class EventDrivenTrader:
         
         logger.info("Event-driven trader initialized")
     
-    def should_trade(self, 
+    def should_trade(self,
                      current_state: Dict[str, Any],
-                     last_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                     last_state: Optional[Dict[str, Any]] = None,
+                     *,
+                     commit_execution_state: bool = True) -> Dict[str, Any]:
         """
         Check if trading should occur based on event detection.
         
@@ -122,7 +124,7 @@ class EventDrivenTrader:
             self.monitor.last_state = self._build_market_state(last_state)
         
         # Run decision engine
-        result = self.engine.run(market_state)
+        result = self.engine.run(market_state, commit_execution_state=commit_execution_state)
         
         return {
             'should_trade': result.should_trade,
@@ -132,6 +134,10 @@ class EventDrivenTrader:
             'reason': result.reason,
             'use_default': False
         }
+
+    def commit_actions(self, actions) -> None:
+        """Commit cooldown and heartbeat state after execution is accepted."""
+        self.engine.commit_actions(actions or [])
     
     def _build_market_state(self, state_dict: Dict[str, Any]) -> MarketState:
         """Build MarketState from dictionary.
@@ -150,15 +156,21 @@ class EventDrivenTrader:
                     symbol=sig.get('symbol', sym),
                     direction=sig.get('direction', 'hold'),
                     score=float(sig.get('score', 0.0) or 0.0),
-                    rank=int(sig.get('rank', 99) or 99),
+                    rank=normalize_signal_rank(sig.get('rank', 99)),
                     timestamp_ms=int(sig.get('timestamp_ms', 0) or 0)
                 )
 
-        selected = top_selected_symbols(
-            signals,
-            state_dict.get('selected_symbols', []) or None,
-            limit=5,
-        )
+        suppress_entry_events = bool(state_dict.get('suppress_entry_events', False))
+        suppress_selected_symbols = bool(state_dict.get('suppress_selected_symbols', False) or suppress_entry_events)
+
+        if suppress_selected_symbols:
+            selected = []
+        else:
+            selected = top_selected_symbols(
+                signals,
+                state_dict.get('selected_symbols', []) or None,
+                limit=5,
+            )
 
         return MarketState(
             timestamp_ms=int(state_dict.get('timestamp_ms', 0) or 0),
@@ -166,7 +178,8 @@ class EventDrivenTrader:
             prices=state_dict.get('prices', {}) or {},
             positions=state_dict.get('positions', {}) or {},
             signals=signals,
-            selected_symbols=selected
+            selected_symbols=selected,
+            suppress_entry_events=suppress_entry_events
         )
     
     def get_status(self) -> Dict[str, Any]:

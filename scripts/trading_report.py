@@ -5,6 +5,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from contextlib import closing
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -235,7 +236,7 @@ class TradingReportGenerator:
         cutoff_ts = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
 
         if self.paths.fills_db.exists():
-            with sqlite3.connect(str(self.paths.fills_db)) as conn:
+            with closing(sqlite3.connect(str(self.paths.fills_db))) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -276,7 +277,7 @@ class TradingReportGenerator:
         if not self.paths.orders_db.exists():
             return []
 
-        with sqlite3.connect(str(self.paths.orders_db)) as conn:
+        with closing(sqlite3.connect(str(self.paths.orders_db))) as conn:
             cursor = conn.cursor()
             try:
                 cursor.execute(
@@ -334,11 +335,13 @@ class TradingReportGenerator:
 
         if self.paths.runs_dir.exists():
             run_dirs = sorted(self.paths.runs_dir.iterdir(), key=_candidate_sort_epoch, reverse=True)
+            skipped_candidates: list[Path] = []
             for run_dir in run_dirs:
                 audit_file = run_dir / "decision_audit.json"
                 if not audit_file.exists():
                     continue
                 if datetime.fromtimestamp(_candidate_sort_epoch(run_dir)) <= cutoff:
+                    skipped_candidates.append(run_dir)
                     continue
                 try:
                     data = json.loads(audit_file.read_text(encoding="utf-8"))
@@ -354,6 +357,23 @@ class TradingReportGenerator:
                         "multiplier": float(data.get("regime_multiplier", 0.6) or 0.6),
                     }
                 )
+            if not regimes:
+                for run_dir in skipped_candidates:
+                    audit_file = run_dir / "decision_audit.json"
+                    try:
+                        data = json.loads(audit_file.read_text(encoding="utf-8"))
+                        modified_at = datetime.fromtimestamp(_decision_audit_sort_epoch(run_dir, data))
+                        if modified_at <= cutoff:
+                            continue
+                    except Exception:
+                        continue
+                    regimes.append(
+                        {
+                            "ts": modified_at,
+                            "regime": data.get("regime", "Unknown"),
+                            "multiplier": float(data.get("regime_multiplier", 0.6) or 0.6),
+                        }
+                    )
 
         regimes.sort(key=lambda item: item["ts"])
         return regimes
