@@ -19,6 +19,7 @@ from src.execution.fill_store import derive_runtime_named_json_path
 from src.execution.position_store import Position, PositionStore
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
+from src.risk.profit_taking import PositionProfitState
 import src.core.pipeline as pipeline_module
 
 
@@ -194,10 +195,13 @@ def test_probe_take_profit_at_80_net_bps(tmp_path: Path) -> None:
     assert order.meta["exit_reason"] == "probe_take_profit"
     assert order.meta["probe_exit_policy_active"] is True
     assert order.meta["bypass_turnover_cap_for_exit"] is True
+    assert order.meta["turnover_cap_bypass_reason"] == "probe_exit"
     decision = _single_probe_exit_decision(audit)
     assert decision["exit_reason"] == "probe_take_profit"
     assert decision["probe_type"] == "btc_leadership_probe"
     assert round(decision["net_bps"], 6) == 80.0
+    assert decision["probe_exit_policy_active"] is True
+    assert decision["hold_hours"] is not None
     assert audit.counts["probe_take_profit_count"] == 1
 
 
@@ -343,6 +347,42 @@ def test_state_only_market_impulse_probe_uses_probe_8h_time_stop_when_policy_ena
     assert order.meta["reason"] == "probe_time_stop"
     assert order.meta["probe_type"] == "market_impulse_probe"
     assert order.meta["probe_time_stop_hours"] == 8.0
+    assert audit.counts["probe_time_stop_count"] == 1
+    assert audit.counts["market_impulse_probe_time_stop_count"] == 0
+
+
+def test_profit_state_entry_reason_only_uses_probe_exit_policy(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.execution.market_impulse_probe_time_stop_hours = 4
+    cfg.execution.probe_time_stop_hours = 8
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.profit_taking.positions["BTC/USDT"] = PositionProfitState(
+        symbol="BTC/USDT",
+        entry_price=100.0,
+        entry_time=datetime(2026, 4, 24, 23, 0, tzinfo=timezone.utc),
+        highest_price=100.0,
+        entry_reason="market_impulse_probe",
+        probe_type=None,
+        target_w=0.06,
+        highest_net_bps=0.0,
+    )
+    audit = DecisionAudit(run_id="probe-exit-entry-reason-only")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series(100.05)},
+        positions=[_probe_position(entry_ts="2026-04-24T23:00:00Z", probe=False)],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "probe_time_stop"
+    assert order.meta["probe_type"] == "market_impulse_probe"
+    assert order.meta["entry_reason"] == "market_impulse_probe"
+    assert order.meta["turnover_cap_bypass_reason"] == "probe_exit"
     assert audit.counts["probe_time_stop_count"] == 1
     assert audit.counts["market_impulse_probe_time_stop_count"] == 0
 

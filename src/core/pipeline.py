@@ -813,9 +813,15 @@ class V5Pipeline:
             if isinstance(candidate_payload, dict):
                 market_probe_payload = candidate_payload
         state_probe_type = str(getattr(state, "probe_type", "") or "").strip() if state is not None else ""
+        state_entry_reason = str(getattr(state, "entry_reason", "") or "").strip() if state is not None else ""
+        payload_probe_type = probe_type_from_meta(market_probe_payload) if market_probe_payload is not None else None
         probe_type = probe_type_from_meta(tags)
         if probe_type is None and state_probe_type in PROBE_POSITION_TYPES:
             probe_type = state_probe_type
+        if probe_type is None and state_entry_reason in PROBE_POSITION_TYPES:
+            probe_type = state_entry_reason
+        if probe_type is None and payload_probe_type in PROBE_POSITION_TYPES:
+            probe_type = payload_probe_type
         if probe_type is None and market_probe_payload is not None:
             probe_type = "market_impulse_probe"
         if probe_type is None:
@@ -859,9 +865,19 @@ class V5Pipeline:
         if highest_net_bps is None and market_probe_payload is not None:
             highest_net_bps = _float_or_none(market_probe_payload.get("highest_net_bps"))
 
+        payload_entry_reason = (
+            str(market_probe_payload.get("entry_reason") or "").strip()
+            if market_probe_payload is not None
+            else ""
+        )
         return {
             "probe_type": probe_type,
-            "entry_reason": str(tags.get("entry_reason") or getattr(state, "entry_reason", None) or probe_type),
+            "entry_reason": str(
+                tags.get("entry_reason")
+                or getattr(state, "entry_reason", None)
+                or payload_entry_reason
+                or probe_type
+            ),
             "entry_px": float(entry_px),
             "entry_ts": entry_ts,
             "target_w": target_w,
@@ -4100,7 +4116,7 @@ class V5Pipeline:
         for order in exit_orders:
             meta = dict(order.meta or {})
             meta["bypass_turnover_cap_for_exit"] = True
-            meta["turnover_cap_bypass_reason"] = "exit_signal_priority"
+            meta.setdefault("turnover_cap_bypass_reason", "exit_signal_priority")
             order.meta = meta
             router_payload = {
                 "symbol": order.symbol,
