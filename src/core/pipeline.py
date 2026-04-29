@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any, Mapping
 
-import hashlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -255,6 +254,7 @@ from src.risk.auto_risk_guard import AutoRiskGuard, extract_risk_level, get_auto
 from src.risk.negative_expectancy_cooldown import (
     NegativeExpectancyCooldown,
     NegativeExpectancyConfig,
+    negative_expectancy_config_fingerprint,
 )
 from src.core.models import PositionState
 from src.reporting.decision_audit import DecisionAudit
@@ -1884,84 +1884,7 @@ class V5Pipeline:
         )
 
     def _negative_expectancy_config_fingerprint(self) -> str:
-        execution_cfg = getattr(self.cfg, "execution", None)
-        payload = {
-            "symbols": [str(sym) for sym in (getattr(self.cfg, "symbols", None) or []) if str(sym).strip()],
-            "universe": {
-                "enabled": bool(getattr(getattr(self.cfg, "universe", None), "enabled", False)),
-                "use_universe_symbols": bool(
-                    getattr(getattr(self.cfg, "universe", None), "use_universe_symbols", False)
-                ),
-            },
-            "alpha": {
-                "alpha158_overlay": {
-                    "enabled": bool(
-                        getattr(
-                            getattr(getattr(self.cfg, "alpha", None), "alpha158_overlay", None),
-                            "enabled",
-                            False,
-                        )
-                    ),
-                },
-            },
-            "execution": {
-                "prefer_net_from_fills": bool(getattr(execution_cfg, "prefer_net_from_fills", True)),
-                "negative_expectancy_cooldown_enabled": bool(
-                    getattr(execution_cfg, "negative_expectancy_cooldown_enabled", False)
-                ),
-                "negative_expectancy_lookback_hours": int(
-                    getattr(execution_cfg, "negative_expectancy_lookback_hours", 24) or 24
-                ),
-                "negative_expectancy_min_closed_cycles": int(
-                    getattr(execution_cfg, "negative_expectancy_min_closed_cycles", 4) or 4
-                ),
-                "negative_expectancy_threshold_bps": getattr(execution_cfg, "negative_expectancy_threshold_bps", None),
-                "negative_expectancy_threshold_usdt": float(
-                    getattr(execution_cfg, "negative_expectancy_threshold_usdt", 0.0) or 0.0
-                ),
-                "negative_expectancy_cooldown_hours": int(
-                    getattr(execution_cfg, "negative_expectancy_cooldown_hours", 24) or 24
-                ),
-                "negative_expectancy_score_penalty_enabled": bool(
-                    getattr(execution_cfg, "negative_expectancy_score_penalty_enabled", False)
-                ),
-                "negative_expectancy_score_penalty_min_closed_cycles": int(
-                    getattr(execution_cfg, "negative_expectancy_score_penalty_min_closed_cycles", 2) or 2
-                ),
-                "negative_expectancy_score_penalty_floor_bps": float(
-                    getattr(execution_cfg, "negative_expectancy_score_penalty_floor_bps", 5.0) or 0.0
-                ),
-                "negative_expectancy_score_penalty_per_bps": float(
-                    getattr(execution_cfg, "negative_expectancy_score_penalty_per_bps", 0.015) or 0.0
-                ),
-                "negative_expectancy_score_penalty_max": float(
-                    getattr(execution_cfg, "negative_expectancy_score_penalty_max", 0.60) or 0.0
-                ),
-                "negative_expectancy_open_block_enabled": bool(
-                    getattr(execution_cfg, "negative_expectancy_open_block_enabled", False)
-                ),
-                "negative_expectancy_open_block_min_closed_cycles": int(
-                    getattr(execution_cfg, "negative_expectancy_open_block_min_closed_cycles", 2) or 2
-                ),
-                "negative_expectancy_open_block_floor_bps": float(
-                    getattr(execution_cfg, "negative_expectancy_open_block_floor_bps", 5.0) or 0.0
-                ),
-                "negative_expectancy_fast_fail_max_hold_minutes": int(
-                    getattr(execution_cfg, "negative_expectancy_fast_fail_max_hold_minutes", 120) or 120
-                ),
-                "negative_expectancy_fast_fail_open_block_enabled": bool(
-                    getattr(execution_cfg, "negative_expectancy_fast_fail_open_block_enabled", False)
-                ),
-                "negative_expectancy_fast_fail_open_block_min_closed_cycles": int(
-                    getattr(execution_cfg, "negative_expectancy_fast_fail_open_block_min_closed_cycles", 2) or 2
-                ),
-                "negative_expectancy_fast_fail_open_block_floor_bps": float(
-                    getattr(execution_cfg, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0) or 0.0
-                ),
-            },
-        }
-        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return negative_expectancy_config_fingerprint(self.cfg)
 
     def _refresh_negative_expectancy_state_with_scope(
         self,

@@ -33,6 +33,7 @@ from src.execution.fill_store import (
 from src.execution.position_store import PositionStore
 from src.reporting.reporting import dump_run_artifacts
 from src.core.models import MarketSeries, Order, PositionState
+from src.risk.negative_expectancy_cooldown import negative_expectancy_config_fingerprint
 from src.risk.risk_engine import RiskEngine
 
 # 棰勭畻闄愬埗锛?0 USDT纭檺鍒讹級
@@ -578,14 +579,103 @@ def _negative_expectancy_state_path_for_config(cfg: AppConfig) -> Path:
     return state_path
 
 
+def _coerce_release_start_ts(raw: Any) -> Optional[int]:
+    if raw is None or raw == "" or str(raw).strip() == "not_observable":
+        return None
+    try:
+        value = int(float(raw))
+    except Exception:
+        return None
+    return value if value > 0 else None
+
+
+def _negative_expectancy_feedback_enabled(cfg: AppConfig) -> bool:
+    execution = getattr(cfg, "execution", None)
+    return any(
+        [
+            bool(getattr(execution, "negative_expectancy_cooldown_enabled", False)),
+            bool(getattr(execution, "negative_expectancy_score_penalty_enabled", False)),
+            bool(getattr(execution, "negative_expectancy_open_block_enabled", False)),
+            bool(getattr(execution, "negative_expectancy_fast_fail_open_block_enabled", False)),
+        ]
+    )
+
+
+def _ensure_negative_expectancy_release_start_ts(cfg: AppConfig, state_path: Path) -> Dict[str, Any]:
+    if not _negative_expectancy_feedback_enabled(cfg):
+        return {}
+
+    current_fp = negative_expectancy_config_fingerprint(cfg)
+    if not current_fp:
+        return {
+            "warnings": [
+                "negative_expectancy_release_start_ts_not_observable: config_fingerprint is missing"
+            ]
+        }
+
+    payload: Dict[str, Any] = {}
+    if state_path.exists():
+        try:
+            loaded = json.loads(state_path.read_text(encoding="utf-8"))
+            payload = loaded if isinstance(loaded, dict) else {}
+        except Exception as exc:
+            return {"warnings": [f"negative_expectancy_state_read_error: {exc}"]}
+
+    cached_fp = str(payload.get("config_fingerprint") or "").strip()
+    release_start_ts = _coerce_release_start_ts(payload.get("release_start_ts"))
+    warnings = [
+        str(item)
+        for item in (payload.get("warnings") or [])
+        if str(item).strip()
+        and "negative_expectancy_release_start_ts_not_observable" not in str(item)
+    ]
+    now_ms = int(time.time() * 1000)
+    changed = False
+
+    if cached_fp != current_fp:
+        payload["config_fingerprint"] = current_fp
+        payload["release_start_ts"] = now_ms
+        payload["release_start_ts_status"] = "ok"
+        payload["symbols"] = {}
+        payload["stats"] = {}
+        changed = True
+    elif release_start_ts is None:
+        warnings.append(
+            "negative_expectancy_release_start_ts_recovered: "
+            "cached release_start_ts is missing, zero, or not_observable; initialized before effective config write"
+        )
+        payload["release_start_ts"] = now_ms
+        payload["release_start_ts_status"] = "recovered"
+        payload["symbols"] = {}
+        payload["stats"] = {}
+        changed = True
+
+    if changed:
+        payload["updated_ts_ms"] = now_ms
+        payload["lookback_hours"] = int(getattr(cfg.execution, "negative_expectancy_lookback_hours", 24) or 24)
+        payload["cooldown_hours"] = int(getattr(cfg.execution, "negative_expectancy_cooldown_hours", 24) or 24)
+        payload["warnings"] = warnings
+        payload.setdefault("symbols", {})
+        payload.setdefault("stats", {})
+        _atomic_write_json(state_path, payload)
+
+    return payload
+
+
 def _negative_expectancy_release_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     state_path = _negative_expectancy_state_path_for_config(cfg)
+    ensured_payload = _ensure_negative_expectancy_release_start_ts(cfg, state_path)
     base: Dict[str, Any] = {
         "negative_expectancy_state_path": str(state_path),
         "negative_expectancy_release_start_ts": "not_observable",
         "negative_expectancy_release_start_ts_status": "not_observable",
         "negative_expectancy_release_start_ts_warning": "negative_expectancy_state_missing",
     }
+    if ensured_payload and not state_path.exists():
+        base["negative_expectancy_release_start_ts_warning"] = "; ".join(
+            [str(item) for item in (ensured_payload.get("warnings") or []) if str(item).strip()]
+        ) or "negative_expectancy_state_missing"
+        return base
     if not state_path.exists():
         return base
     try:
@@ -610,7 +700,9 @@ def _negative_expectancy_release_effective_config(cfg: AppConfig) -> Dict[str, A
     if release_start_ts_int > 0:
         base["negative_expectancy_release_start_ts"] = release_start_ts_int
         base["negative_expectancy_release_start_ts_status"] = str(payload.get("release_start_ts_status") or "ok")
-        base["negative_expectancy_release_start_ts_warning"] = ""
+        base["negative_expectancy_release_start_ts_warning"] = "; ".join(
+            [str(item) for item in (payload.get("warnings") or []) if str(item).strip()]
+        )
         return base
 
     base["negative_expectancy_release_start_ts_warning"] = "negative_expectancy_release_start_ts_missing_or_zero"

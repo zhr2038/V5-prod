@@ -304,7 +304,7 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     state_path.write_text(
         json.dumps(
             {
-                "config_fingerprint": "scope-fp",
+                "config_fingerprint": main_module.negative_expectancy_config_fingerprint(cfg),
                 "release_start_ts": 1_776_000_000_000,
                 "release_start_ts_status": "ok",
                 "symbols": {},
@@ -345,10 +345,14 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""
 
 
-def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_keys(tmp_path: Path) -> None:
+def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = AppConfig(symbols=["BTC/USDT"])
     cfg.execution.mode = "live"
     cfg.execution.order_store_path = str((tmp_path / "reports" / "orders.sqlite").resolve())
+    monkeypatch.setattr(main_module.time, "time", lambda: 2_000_000.0)
 
     out_path = main_module._write_effective_live_config(cfg)
     payload = json.loads(out_path.read_text(encoding="utf-8"))
@@ -380,9 +384,45 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["probe_trailing_gap_bps"] == pytest.approx(25.0)
     assert payload["execution"]["probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_time_stop_min_net_bps"] == pytest.approx(10.0)
-    assert payload["execution"]["negative_expectancy_release_start_ts"] == "not_observable"
-    assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "not_observable"
-    assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == "negative_expectancy_state_missing"
+    assert payload["execution"]["negative_expectancy_release_start_ts"] == 2_000_000_000
+    assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
+    assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""
+
+
+def test_write_effective_live_config_recovers_not_observable_release_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.mode = "live"
+    cfg.execution.order_store_path = str((tmp_path / "reports" / "orders.sqlite").resolve())
+    state_path = tmp_path / "reports" / "negative_expectancy_cooldown.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": main_module.negative_expectancy_config_fingerprint(cfg),
+                "release_start_ts": "not_observable",
+                "release_start_ts_status": "not_observable",
+                "symbols": {"BTC/USDT": {"cooldown_until_ms": 9999999999999}},
+                "stats": {"BTC/USDT": {"closed_cycles": 3}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main_module.time, "time", lambda: 2_000_000.0)
+
+    out_path = main_module._write_effective_live_config(cfg)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert payload["execution"]["negative_expectancy_release_start_ts"] == 2_000_000_000
+    assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "recovered"
+    assert "negative_expectancy_release_start_ts_recovered" in payload["execution"]["negative_expectancy_release_start_ts_warning"]
+    assert state["release_start_ts"] == 2_000_000_000
+    assert state["release_start_ts_status"] == "recovered"
+    assert state["symbols"] == {}
+    assert state["stats"] == {}
 
 
 def test_main_live_preflight_blocks_before_provider_and_order_generation(

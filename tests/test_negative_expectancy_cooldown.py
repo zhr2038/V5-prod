@@ -282,7 +282,11 @@ def test_negative_expectancy_same_fingerprint_keeps_release_start_ts(tmp_path: P
     assert state["release_start_ts_status"] == "ok"
 
 
-def test_negative_expectancy_zero_release_start_ts_writes_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_negative_expectancy_zero_release_start_ts_recovers_with_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     state_path = tmp_path / "negative_expectancy_state.json"
     state_path.write_text(
         json.dumps(
@@ -311,15 +315,19 @@ def test_negative_expectancy_zero_release_start_ts_writes_warning(tmp_path: Path
     )
     cooldown.set_scope(whitelist_symbols=["BTC/USDT"], config_fingerprint="same-scope-fp")
 
-    state = cooldown.refresh(force=True)
+    with caplog.at_level(logging.WARNING, logger="src.risk.negative_expectancy_cooldown"):
+        state = cooldown.refresh(force=True)
 
     assert state["config_fingerprint"] == "same-scope-fp"
-    assert state["release_start_ts"] == "not_observable"
-    assert state["release_start_ts_status"] == "not_observable"
-    assert any("negative_expectancy_release_start_ts_not_observable" in warning for warning in state["warnings"])
+    assert state["release_start_ts"] == 2_000_000_000
+    assert state["release_start_ts_status"] == "recovered"
+    assert state["symbols"] == {}
+    assert state["stats"] == {}
+    assert any("negative_expectancy_release_start_ts_recovered" in warning for warning in state["warnings"])
+    assert any("negative_expectancy_release_start_ts_recovered" in record.getMessage() for record in caplog.records)
 
 
-def test_negative_expectancy_not_observable_marker_does_not_log_every_refresh(
+def test_negative_expectancy_not_observable_marker_recovers_then_stays_quiet(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -361,11 +369,19 @@ def test_negative_expectancy_not_observable_marker_does_not_log_every_refresh(
     with caplog.at_level(logging.WARNING, logger="src.risk.negative_expectancy_cooldown"):
         state = cooldown.refresh(force=True)
 
-    assert state["release_start_ts"] == "not_observable"
-    assert state["release_start_ts_status"] == "not_observable"
-    assert any("negative_expectancy_release_start_ts_not_observable" in item for item in state["warnings"])
+    assert state["release_start_ts"] == 2_000_000_000
+    assert state["release_start_ts_status"] == "recovered"
+    assert any("negative_expectancy_release_start_ts_recovered" in item for item in state["warnings"])
+    assert any("negative_expectancy_release_start_ts_recovered" in record.getMessage() for record in caplog.records)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="src.risk.negative_expectancy_cooldown"):
+        state = cooldown.refresh(force=True)
+
+    assert state["release_start_ts"] == 2_000_000_000
+    assert state["warnings"] == []
     assert not [
         record
         for record in caplog.records
-        if "negative_expectancy_release_start_ts_not_observable" in record.getMessage()
+        if "negative_expectancy_release_start_ts" in record.getMessage()
     ]

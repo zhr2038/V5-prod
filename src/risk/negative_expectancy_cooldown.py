@@ -3,6 +3,7 @@ import json
 import logging
 import sqlite3
 import time
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, Optional, Iterable, Set
@@ -12,6 +13,87 @@ from src.execution.fill_store import derive_fill_store_path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
 RELEASE_START_NOT_OBSERVABLE = "not_observable"
+
+
+def negative_expectancy_config_fingerprint(config: Any) -> str:
+    execution_cfg = getattr(config, "execution", None)
+    payload = {
+        "symbols": [str(sym) for sym in (getattr(config, "symbols", None) or []) if str(sym).strip()],
+        "universe": {
+            "enabled": bool(getattr(getattr(config, "universe", None), "enabled", False)),
+            "use_universe_symbols": bool(
+                getattr(getattr(config, "universe", None), "use_universe_symbols", False)
+            ),
+        },
+        "alpha": {
+            "alpha158_overlay": {
+                "enabled": bool(
+                    getattr(
+                        getattr(getattr(config, "alpha", None), "alpha158_overlay", None),
+                        "enabled",
+                        False,
+                    )
+                ),
+            },
+        },
+        "execution": {
+            "prefer_net_from_fills": bool(getattr(execution_cfg, "prefer_net_from_fills", True)),
+            "negative_expectancy_cooldown_enabled": bool(
+                getattr(execution_cfg, "negative_expectancy_cooldown_enabled", False)
+            ),
+            "negative_expectancy_lookback_hours": int(
+                getattr(execution_cfg, "negative_expectancy_lookback_hours", 24) or 24
+            ),
+            "negative_expectancy_min_closed_cycles": int(
+                getattr(execution_cfg, "negative_expectancy_min_closed_cycles", 4) or 4
+            ),
+            "negative_expectancy_threshold_bps": getattr(execution_cfg, "negative_expectancy_threshold_bps", None),
+            "negative_expectancy_threshold_usdt": float(
+                getattr(execution_cfg, "negative_expectancy_threshold_usdt", 0.0) or 0.0
+            ),
+            "negative_expectancy_cooldown_hours": int(
+                getattr(execution_cfg, "negative_expectancy_cooldown_hours", 24) or 24
+            ),
+            "negative_expectancy_score_penalty_enabled": bool(
+                getattr(execution_cfg, "negative_expectancy_score_penalty_enabled", False)
+            ),
+            "negative_expectancy_score_penalty_min_closed_cycles": int(
+                getattr(execution_cfg, "negative_expectancy_score_penalty_min_closed_cycles", 2) or 2
+            ),
+            "negative_expectancy_score_penalty_floor_bps": float(
+                getattr(execution_cfg, "negative_expectancy_score_penalty_floor_bps", 5.0) or 0.0
+            ),
+            "negative_expectancy_score_penalty_per_bps": float(
+                getattr(execution_cfg, "negative_expectancy_score_penalty_per_bps", 0.015) or 0.0
+            ),
+            "negative_expectancy_score_penalty_max": float(
+                getattr(execution_cfg, "negative_expectancy_score_penalty_max", 0.60) or 0.0
+            ),
+            "negative_expectancy_open_block_enabled": bool(
+                getattr(execution_cfg, "negative_expectancy_open_block_enabled", False)
+            ),
+            "negative_expectancy_open_block_min_closed_cycles": int(
+                getattr(execution_cfg, "negative_expectancy_open_block_min_closed_cycles", 2) or 2
+            ),
+            "negative_expectancy_open_block_floor_bps": float(
+                getattr(execution_cfg, "negative_expectancy_open_block_floor_bps", 5.0) or 0.0
+            ),
+            "negative_expectancy_fast_fail_max_hold_minutes": int(
+                getattr(execution_cfg, "negative_expectancy_fast_fail_max_hold_minutes", 120) or 120
+            ),
+            "negative_expectancy_fast_fail_open_block_enabled": bool(
+                getattr(execution_cfg, "negative_expectancy_fast_fail_open_block_enabled", False)
+            ),
+            "negative_expectancy_fast_fail_open_block_min_closed_cycles": int(
+                getattr(execution_cfg, "negative_expectancy_fast_fail_open_block_min_closed_cycles", 2) or 2
+            ),
+            "negative_expectancy_fast_fail_open_block_floor_bps": float(
+                getattr(execution_cfg, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0) or 0.0
+            ),
+        },
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass
@@ -613,10 +695,17 @@ class NegativeExpectancyCooldown:
             if release_start_ts is None:
                 warnings.append(
                     self._release_warning(
-                        "negative_expectancy_release_start_ts_not_observable",
-                        "config_fingerprint unchanged but cached release_start_ts is missing or zero",
+                        "negative_expectancy_release_start_ts_recovered",
+                        "cached release_start_ts is missing, zero, or not_observable; initialized at current refresh",
                     )
                 )
+                symbols = {}
+                release_start_ts = now_ms
+                release_start_ts_out = now_ms
+                release_start_ts_status = "recovered"
+            else:
+                release_start_ts_out = release_start_ts
+                release_start_ts_status = str(self._cache.get("release_start_ts_status") or "ok")
         else:
             if release_start_ts is not None:
                 release_start_ts_out = release_start_ts
