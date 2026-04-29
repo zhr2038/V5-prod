@@ -582,7 +582,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
               </div>
             </div>
           ) : fallbackTrade ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
               <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">状态</div>
                 <div className="text-lg font-semibold">最近成交</div>
@@ -599,7 +599,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                 <div className="text-xs text-[var(--text-dim)]">成交数量</div>
                 <div className="text-lg font-mono">{fmtNum(fallbackTrade.qty, 6)}</div>
               </div>
-              <div className="material-surface material-clear clear-control metric-pill tone-plum px-4 py-3">
+              <div className="material-surface material-clear clear-control metric-pill tone-plum col-span-2 xl:col-span-1 px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">时间</div>
                 <div className="text-sm font-medium">{fallbackTrade.timestamp || '--'}</div>
                 <div className="text-[11px] text-[var(--text-dim)] mt-1">额 {fmtUsd(fallbackTrade.value)}</div>
