@@ -505,7 +505,6 @@ body {
 }
 
 .surface-lift:hover {
-  transform: translateY(-1px);
   border-color: var(--surface-border-strong);
   box-shadow:
     var(--surface-shadow-hover),
@@ -872,7 +871,7 @@ body {
 }
 
 .list-row:hover {
-  transform: translateY(-1px);
+  border-color: var(--surface-border-strong);
 }
 
 .status-badge {
