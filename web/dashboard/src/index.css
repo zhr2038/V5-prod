@@ -36,6 +36,11 @@
   --kline-ma20: rgba(255, 205, 120, 0.90);
   --kline-last: #8dc4ff;
   --kline-reference: rgba(255, 205, 120, 0.75);
+  --kline-crosshair: rgba(142, 240, 211, 0.72);
+  --kline-hover-band: rgba(142, 240, 211, 0.075);
+  --kline-tooltip-bg: rgba(18, 22, 31, 0.88);
+  --kline-tooltip-border: rgba(142, 240, 211, 0.34);
+  --kline-tooltip-text: rgba(245, 248, 255, 0.94);
   --kline-marker: rgba(255, 255, 255, 0.32);
   --kline-marker-muted: rgba(255, 255, 255, 0.28);
   --kline-marker-text: rgba(255, 255, 255, 0.76);
@@ -1043,6 +1048,11 @@ body {
     --kline-ma20: rgba(180, 83, 9, 0.95);
     --kline-last: rgba(37, 99, 235, 0.86);
     --kline-reference: rgba(180, 83, 9, 0.82);
+    --kline-crosshair: rgba(13, 148, 136, 0.72);
+    --kline-hover-band: rgba(13, 148, 136, 0.075);
+    --kline-tooltip-bg: rgba(248, 250, 252, 0.96);
+    --kline-tooltip-border: rgba(13, 148, 136, 0.30);
+    --kline-tooltip-text: rgba(17, 24, 39, 0.92);
     --kline-marker: rgba(48, 58, 78, 0.42);
     --kline-marker-muted: rgba(48, 58, 78, 0.36);
     --kline-marker-text: rgba(35, 48, 69, 0.86);

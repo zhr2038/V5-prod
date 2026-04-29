@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type PointerEvent } from 'react';
 // import { motion } from 'framer-motion';
 import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, sideLabels } from '../lib/format';
@@ -82,6 +82,16 @@ function buildSeriesPath(
   return path;
 }
 
+type ChartHover = {
+  index: number;
+  y: number;
+  price: number;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function CandlestickSvg({
   data,
   timeframe,
@@ -146,15 +156,66 @@ function CandlestickSvg({
     Number(referencePrice) >= min;
   const ma7Path = buildSeriesPath(ma7, x, y);
   const ma20Path = buildSeriesPath(ma20, x, y);
+  const [hover, setHover] = useState<ChartHover | null>(null);
+  const hoveredCandle = hover && data[hover.index] ? data[hover.index] : null;
+  const hoverX = hover ? x(hover.index) : 0;
+  const hoverY = hover?.y || 0;
+  const hoverPrice = hover?.price || 0;
+  const hoverTime = hoveredCandle ? formatChartTime(candleTimestamp(hoveredCandle), timeframe) : '';
+  const hoverChange = hoveredCandle ? hoveredCandle.close - hoveredCandle.open : 0;
+  const hoverChangePct = hoveredCandle?.open ? hoverChange / hoveredCandle.open : 0;
+  const hoverUp = hoverChange >= 0;
+  const hoverBodyTop = hoveredCandle ? Math.min(y(hoveredCandle.open), y(hoveredCandle.close)) : 0;
+  const hoverBodyHeight = hoveredCandle ? Math.max(1, Math.abs(y(hoveredCandle.close) - y(hoveredCandle.open))) : 0;
+  const hoverTooltipX = hoverX < w * 0.55 ? w - pad.r - 238 : pad.l + 8;
+  const hoverTooltipY = pad.t + 8;
+  const hoverTimeLabelWidth = timeframe === '1d' ? 60 : 78;
+  const hoverTimeLabelX = clamp(hoverX - hoverTimeLabelWidth / 2, pad.l, w - pad.r - hoverTimeLabelWidth);
+
+  const handlePointerMove = (event: PointerEvent<SVGSVGElement>) => {
+    const svg = event.currentTarget;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return;
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const local = point.matrixTransform(matrix.inverse());
+    if (local.x < pad.l || local.x > w - pad.r || local.y < pad.t || local.y > volumeBaseY) {
+      setHover(null);
+      return;
+    }
+
+    const ratio = clamp((local.x - pad.l) / chartW, 0, 1);
+    const index = clamp(Math.round(ratio * Math.max(data.length - 1, 1)), 0, data.length - 1);
+    const priceY = clamp(local.y, pad.t, pad.t + priceH);
+    const price = max - ((priceY - pad.t) / priceH) * range;
+    setHover({ index, y: priceY, price });
+  };
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full">
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="w-full h-full cursor-crosshair select-none"
+      onPointerMove={handlePointerMove}
+      onPointerLeave={() => setHover(null)}
+      role="img"
+      aria-label="Interactive candlestick chart"
+    >
       <defs>
         <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="var(--kline-volume-top)" />
           <stop offset="100%" stopColor="var(--kline-volume-bottom)" />
         </linearGradient>
       </defs>
+      {hoveredCandle ? (
+        <rect
+          x={hoverX - candleBand / 2}
+          y={pad.t}
+          width={candleBand}
+          height={volumeBaseY - pad.t}
+          fill="var(--kline-hover-band)"
+        />
+      ) : null}
       {priceTicks.map((tick) => (
         <line
           key={tick}
@@ -240,6 +301,18 @@ function CandlestickSvg({
           </g>
         );
       })}
+      {hoveredCandle ? (
+        <rect
+          x={hoverX - bodyWidth / 2 - 2}
+          y={hoverBodyTop - 2}
+          width={bodyWidth + 4}
+          height={hoverBodyHeight + 4}
+          fill="none"
+          stroke={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}
+          strokeWidth={1.2}
+          rx={2}
+        />
+      ) : null}
       <line
         x1={pad.l}
         x2={w - pad.r}
@@ -375,6 +448,101 @@ function CandlestickSvg({
               {referenceLabel}
             </text>
           ) : null}
+        </>
+      ) : null}
+      {hoveredCandle ? (
+        <>
+          <line
+            x1={hoverX}
+            x2={hoverX}
+            y1={pad.t}
+            y2={volumeBaseY}
+            stroke="var(--kline-crosshair)"
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+          <line
+            x1={pad.l}
+            x2={w - pad.r}
+            y1={hoverY}
+            y2={hoverY}
+            stroke="var(--kline-crosshair)"
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+          <circle
+            cx={hoverX}
+            cy={y(hoveredCandle.close)}
+            r={3.4}
+            fill="var(--kline-tooltip-bg)"
+            stroke={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}
+            strokeWidth={1.4}
+          />
+          <rect
+            x={w - pad.r + 4}
+            y={hoverY - 10}
+            width="52"
+            height="18"
+            rx="9"
+            fill="var(--kline-tooltip-bg)"
+            stroke="var(--kline-tooltip-border)"
+          />
+          <text
+            x={w - pad.r + 30}
+            y={hoverY + 3}
+            fill="var(--kline-tooltip-text)"
+            fontSize="11"
+            textAnchor="middle"
+          >
+            {formatAxisPrice(hoverPrice)}
+          </text>
+          <rect
+            x={hoverTimeLabelX}
+            y={h - 28}
+            width={hoverTimeLabelWidth}
+            height="18"
+            rx="9"
+            fill="var(--kline-tooltip-bg)"
+            stroke="var(--kline-tooltip-border)"
+          />
+          <text
+            x={hoverTimeLabelX + hoverTimeLabelWidth / 2}
+            y={h - 15}
+            fill="var(--kline-tooltip-text)"
+            fontSize="11"
+            textAnchor="middle"
+          >
+            {hoverTime}
+          </text>
+          <g>
+            <rect
+              x={hoverTooltipX}
+              y={hoverTooltipY}
+              width="230"
+              height="82"
+              rx="14"
+              fill="var(--kline-tooltip-bg)"
+              stroke="var(--kline-tooltip-border)"
+            />
+            <text x={hoverTooltipX + 12} y={hoverTooltipY + 18} fill="var(--kline-tooltip-text)" fontSize="11" fontWeight="600">
+              {hoverTime}
+            </text>
+            <text x={hoverTooltipX + 12} y={hoverTooltipY + 38} fill="var(--kline-axis-muted)" fontSize="10">
+              O <tspan fill="var(--kline-tooltip-text)">{formatAxisPrice(hoveredCandle.open)}</tspan>
+              <tspan dx="10">H </tspan><tspan fill="var(--kline-candle-up)">{formatAxisPrice(hoveredCandle.high)}</tspan>
+            </text>
+            <text x={hoverTooltipX + 12} y={hoverTooltipY + 56} fill="var(--kline-axis-muted)" fontSize="10">
+              L <tspan fill="var(--kline-candle-down)">{formatAxisPrice(hoveredCandle.low)}</tspan>
+              <tspan dx="10">C </tspan><tspan fill="var(--kline-tooltip-text)">{formatAxisPrice(hoveredCandle.close)}</tspan>
+            </text>
+            <text x={hoverTooltipX + 12} y={hoverTooltipY + 74} fill="var(--kline-axis-muted)" fontSize="10">
+              Vol <tspan fill="var(--kline-tooltip-text)">{formatCompactVolume(Number(hoveredCandle.volume || 0))}</tspan>
+              <tspan dx="10">Chg </tspan>
+              <tspan fill={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}>
+                {fmtPct(hoverChangePct, 2)}
+              </tspan>
+            </text>
+          </g>
         </>
       ) : null}
     </svg>
