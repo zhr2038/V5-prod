@@ -519,8 +519,8 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
   }, activeSymbol ? 10000 : null);
 
   return (
-    <div className="material-surface material-regular tone-sky reading-frame p-5 flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+    <div className="material-surface material-regular tone-sky reading-frame p-4 sm:p-5 flex flex-col gap-4 sm:gap-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <CandlestickChart className="w-4 h-4" />
           <span>持仓聚焦</span>
@@ -558,7 +558,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
         <>
           {spotlightPosition ? (
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">市值</div>
                   <div className="text-lg font-semibold">{fmtUsd(spotlightPosition.value)}</div>
@@ -582,7 +582,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
               </div>
             </div>
           ) : fallbackTrade ? (
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
               <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">状态</div>
                 <div className="text-lg font-semibold">最近成交</div>
@@ -689,7 +689,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                     最近收盘 <span className="ml-1 font-mono text-white">{fmtUsd(Number(chartSummary?.close || latestCandle?.close || 0))}</span>
                   </div>
                 </div>
-                <div className="mt-3 h-[19rem]">
+                <div className="mt-3 h-[16rem] sm:h-[19rem]">
                   <CandlestickSvg
                     data={chartCandles}
                     timeframe={tf}
@@ -702,7 +702,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
           ) : null}
         </>
       ) : (
-        <div className="h-56 flex items-center justify-center text-[var(--text-dim)] text-sm">
+        <div className="min-h-[5.5rem] sm:min-h-[7rem] flex items-center justify-center px-4 text-center text-[var(--text-dim)] text-sm">
           当前无持仓
         </div>
       )}

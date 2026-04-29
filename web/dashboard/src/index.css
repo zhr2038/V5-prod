@@ -588,6 +588,7 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
   padding: 7px;
   border-radius: 999px;
   box-shadow:
@@ -597,6 +598,7 @@ body {
 }
 
 .control-pill {
+  min-width: 0;
   padding: 9px 14px;
   border-radius: 999px;
   font-size: 0.875rem;
@@ -1229,6 +1231,19 @@ body {
   .glass-card,
   .glass-panel {
     border-radius: 24px;
+  }
+}
+
+@media (max-width: 520px) {
+  .control-rail {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .control-rail .control-pill {
+    flex: 1 1 calc(50% - 4px);
+    padding-right: 10px;
+    padding-left: 10px;
   }
 }
 

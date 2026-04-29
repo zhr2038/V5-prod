@@ -20,7 +20,17 @@ const ShadowMLPanel = lazy(() =>
 );
 
 function DeferredPanelFallback() {
-  return <div className="material-surface material-reading reading-frame h-40" />;
+  return (
+    <div className="material-surface material-reading reading-frame p-5" aria-hidden="true">
+      <div className="flex flex-col gap-3">
+        <div className="h-3 w-32 rounded-full bg-white/[0.10]" />
+        <div className="grid grid-cols-2 gap-3">
+          <div className="h-12 rounded-2xl bg-white/[0.055]" />
+          <div className="h-12 rounded-2xl bg-white/[0.045]" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 type IdleWindow = Window & {
@@ -215,8 +225,8 @@ function App() {
         <MLBand mlTraining={dashboard?.mlTraining || null} />
 
         <div className="dashboard-section">
-          <div className="max-w-[1780px] mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 flex flex-col gap-4">
+          <div className="max-w-[1780px] mx-auto grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.42fr)] gap-4 lg:gap-5 items-start">
+            <div className="min-w-0 flex flex-col gap-4 lg:gap-5">
               <PositionsPanel
                 positions={dashboard?.positions || []}
                 trades={dashboard?.trades || []}
@@ -234,7 +244,7 @@ function App() {
                 )
               ) : null}
             </div>
-            <div className="lg:col-span-1">
+            <div className="min-w-0">
               <Sidebar
                 timers={dashboard?.timers || null}
                 alphaScores={dashboard?.alphaScores || []}
