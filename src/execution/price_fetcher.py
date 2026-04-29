@@ -49,10 +49,10 @@ class PriceFetcher:
             self._prices = prices
             logger.info(f"Fetched {len(prices)} prices from OKX")
             return prices
-            
+
         except Exception as e:
             logger.error(f"Failed to fetch prices: {e}")
-            return self._prices
+            return {}
     
     def get_price(self, symbol: str) -> Optional[float]:
         """Get price for a specific symbol."""

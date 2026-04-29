@@ -552,12 +552,16 @@ def load_current_state(cfg=None, config_path: Path = None):
         try:
             from src.execution.price_fetcher import fetch_prices
             all_prices = fetch_prices()
+            if not all_prices:
+                logger.error("Price fetch returned empty result - cannot proceed without prices")
+                return None
             prices = {sym: px for sym, px in all_prices.items() if sym in tradeable_symbols}
             logger.info(f"Loaded {len(prices)}/{len(all_prices)} prices (tradeable universe)")
             for sym, px in list(prices.items())[:5]:
                 logger.info(f"  {sym}: {px}")
         except Exception as e:
             logger.error(f"Failed to fetch prices: {e}")
+            return None
 
         if not prices:
             logger.warning("No prices available in tradeable universe - breakout detection disabled")

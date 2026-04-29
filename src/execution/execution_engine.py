@@ -50,22 +50,21 @@ class ExecutionEngine:
 
     def _init_db(self) -> None:
         try:
-            con = sqlite3.connect(str(self.db_path))
-            cur = con.cursor()
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS slippage (
-                    ts TEXT,
-                    symbol TEXT,
-                    side TEXT,
-                    signal_price REAL,
-                    execution_price REAL,
-                    slippage_bps REAL
+            with sqlite3.connect(str(self.db_path)) as con:
+                cur = con.cursor()
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS slippage (
+                        ts TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        signal_price REAL,
+                        execution_price REAL,
+                        slippage_bps REAL
+                    )
+                    """
                 )
-                """
-            )
-            con.commit()
-            con.close()
+                con.commit()
         except Exception as e:
             log.exception("Failed to initialize slippage database: %s", e)
             raise
@@ -276,13 +275,12 @@ class ExecutionEngine:
             sp = float(signal_price)
             ep = float(execution_price)
             bps = ((ep - sp) / sp) * 10_000.0 if sp else 0.0
-            con = sqlite3.connect(str(self.db_path))
-            cur = con.cursor()
-            cur.execute(
-                "INSERT INTO slippage(ts, symbol, side, signal_price, execution_price, slippage_bps) VALUES (?,?,?,?,?,?)",
-                (utc_now_iso(), symbol, side, sp, ep, float(bps)),
-            )
-            con.commit()
-            con.close()
+            with sqlite3.connect(str(self.db_path)) as con:
+                cur = con.cursor()
+                cur.execute(
+                    "INSERT INTO slippage(ts, symbol, side, signal_price, execution_price, slippage_bps) VALUES (?,?,?,?,?,?)",
+                    (utc_now_iso(), symbol, side, sp, ep, float(bps)),
+                )
+                con.commit()
         except Exception as e:
             log.warning("Failed to record slippage: %s", e)

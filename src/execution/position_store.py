@@ -235,45 +235,43 @@ class PositionStore:
         return removed_counts
 
     def _init_db(self) -> None:
-        con = sqlite3.connect(str(self.path))
-        cur = con.cursor()
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS positions (
-              symbol TEXT PRIMARY KEY,
-              qty REAL NOT NULL,
-              avg_px REAL NOT NULL,
-              entry_ts TEXT NOT NULL,
-              highest_px REAL NOT NULL,
-              last_update_ts TEXT NOT NULL DEFAULT '',
-              last_mark_px REAL NOT NULL DEFAULT 0,
-              unrealized_pnl_pct REAL NOT NULL DEFAULT 0,
-              tags_json TEXT NOT NULL
+        with sqlite3.connect(str(self.path)) as con:
+            cur = con.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS positions (
+                  symbol TEXT PRIMARY KEY,
+                  qty REAL NOT NULL,
+                  avg_px REAL NOT NULL,
+                  entry_ts TEXT NOT NULL,
+                  highest_px REAL NOT NULL,
+                  last_update_ts TEXT NOT NULL DEFAULT '',
+                  last_mark_px REAL NOT NULL DEFAULT 0,
+                  unrealized_pnl_pct REAL NOT NULL DEFAULT 0,
+                  tags_json TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
-        con.commit()
-        con.close()
+            con.commit()
         self._migrate_add_columns()
 
     def _migrate_add_columns(self) -> None:
         """Add new columns to existing DBs (safe best-effort)."""
         try:
-            con = sqlite3.connect(str(self.path))
-            cur = con.cursor()
-            cur.execute("PRAGMA table_info(positions)")
-            cols = {str(r[1]) for r in cur.fetchall()}
-            adds = []
-            if "last_update_ts" not in cols:
-                adds.append("ALTER TABLE positions ADD COLUMN last_update_ts TEXT NOT NULL DEFAULT ''")
-            if "last_mark_px" not in cols:
-                adds.append("ALTER TABLE positions ADD COLUMN last_mark_px REAL NOT NULL DEFAULT 0")
-            if "unrealized_pnl_pct" not in cols:
-                adds.append("ALTER TABLE positions ADD COLUMN unrealized_pnl_pct REAL NOT NULL DEFAULT 0")
-            for sql in adds:
-                cur.execute(sql)
-            con.commit()
-            con.close()
+            with sqlite3.connect(str(self.path)) as con:
+                cur = con.cursor()
+                cur.execute("PRAGMA table_info(positions)")
+                cols = {str(r[1]) for r in cur.fetchall()}
+                adds = []
+                if "last_update_ts" not in cols:
+                    adds.append("ALTER TABLE positions ADD COLUMN last_update_ts TEXT NOT NULL DEFAULT ''")
+                if "last_mark_px" not in cols:
+                    adds.append("ALTER TABLE positions ADD COLUMN last_mark_px REAL NOT NULL DEFAULT 0")
+                if "unrealized_pnl_pct" not in cols:
+                    adds.append("ALTER TABLE positions ADD COLUMN unrealized_pnl_pct REAL NOT NULL DEFAULT 0")
+                for sql in adds:
+                    cur.execute(sql)
+                con.commit()
         except Exception as e:
             log.warning("Failed to migrate position columns: %s", e)
 
@@ -284,14 +282,13 @@ class PositionStore:
             持仓列表
         """
         try:
-            con = sqlite3.connect(str(self.path))
-            cur = con.cursor()
-            cur.execute(
-                "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE qty > 0"
-            )
-            rows = cur.fetchall()
-            con.close()
-            return [Position(*r) for r in rows]
+            with sqlite3.connect(str(self.path)) as con:
+                cur = con.cursor()
+                cur.execute(
+                    "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE qty > 0"
+                )
+                rows = cur.fetchall()
+                return [Position(*r) for r in rows]
         except Exception as e:
             log.exception("Failed to list positions: %s", e)
             return []
@@ -306,15 +303,14 @@ class PositionStore:
             持仓对象，如果不存在返回None
         """
         try:
-            con = sqlite3.connect(str(self.path))
-            cur = con.cursor()
-            cur.execute(
-                "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE symbol=?",
-                (symbol,),
-            )
-            row = cur.fetchone()
-            con.close()
-            return Position(*row) if row else None
+            with sqlite3.connect(str(self.path)) as con:
+                cur = con.cursor()
+                cur.execute(
+                    "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE symbol=?",
+                    (symbol,),
+                )
+                row = cur.fetchone()
+                return Position(*row) if row else None
         except Exception as e:
             log.exception("Failed to get position for %s: %s", symbol, e)
             return None
@@ -482,27 +478,26 @@ class PositionStore:
             pos: 持仓对象
         """
         try:
-            con = sqlite3.connect(str(self.path))
-            c = con.cursor()
-            c.execute(
-                "INSERT INTO positions(symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json) "
-                "VALUES (?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(symbol) DO UPDATE SET qty=excluded.qty, avg_px=excluded.avg_px, entry_ts=excluded.entry_ts, highest_px=excluded.highest_px, "
-                "last_update_ts=excluded.last_update_ts, last_mark_px=excluded.last_mark_px, unrealized_pnl_pct=excluded.unrealized_pnl_pct, tags_json=excluded.tags_json",
-                (
-                    pos.symbol,
-                    float(pos.qty),
-                    float(pos.avg_px),
-                    str(pos.entry_ts),
-                    float(pos.highest_px),
-                    str(pos.last_update_ts),
-                    float(pos.last_mark_px),
-                    float(pos.unrealized_pnl_pct),
-                    str(pos.tags_json),
-                ),
-            )
-            con.commit()
-            con.close()
+            with sqlite3.connect(str(self.path)) as con:
+                c = con.cursor()
+                c.execute(
+                    "INSERT INTO positions(symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json) "
+                    "VALUES (?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(symbol) DO UPDATE SET qty=excluded.qty, avg_px=excluded.avg_px, entry_ts=excluded.entry_ts, highest_px=excluded.highest_px, "
+                    "last_update_ts=excluded.last_update_ts, last_mark_px=excluded.last_mark_px, unrealized_pnl_pct=excluded.unrealized_pnl_pct, tags_json=excluded.tags_json",
+                    (
+                        pos.symbol,
+                        float(pos.qty),
+                        float(pos.avg_px),
+                        str(pos.entry_ts),
+                        float(pos.highest_px),
+                        str(pos.last_update_ts),
+                        float(pos.last_mark_px),
+                        float(pos.unrealized_pnl_pct),
+                        str(pos.tags_json),
+                    ),
+                )
+                con.commit()
         except Exception as e:
             log.exception("Failed to upsert position: %s", e)
             raise
@@ -550,19 +545,17 @@ class PositionStore:
             bool: True表示成功关闭，False表示持仓不存在
         """
         try:
-            con = sqlite3.connect(str(self.path))
-            c = con.cursor()
-            
-            # 先检查持仓是否存在
-            c.execute("SELECT symbol FROM positions WHERE symbol=?", (symbol,))
-            if not c.fetchone():
-                con.close()
-                log.warning("Attempted to close non-existent position: %s", symbol)
-                return False
-            
-            c.execute("DELETE FROM positions WHERE symbol=?", (symbol,))
-            con.commit()
-            con.close()
+            with sqlite3.connect(str(self.path)) as con:
+                c = con.cursor()
+
+                # 先检查持仓是否存在
+                c.execute("SELECT symbol FROM positions WHERE symbol=?", (symbol,))
+                if not c.fetchone():
+                    log.warning("Attempted to close non-existent position: %s", symbol)
+                    return False
+
+                c.execute("DELETE FROM positions WHERE symbol=?", (symbol,))
+                con.commit()
 
             for state_path in self._runtime_risk_state_paths():
                 self._remove_symbol_from_state_file(state_path, symbol)

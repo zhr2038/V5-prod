@@ -881,11 +881,11 @@ class LiveExecutionEngine:
             
             # 2. Double-check with OKX balance before selling (best-effort).
             # If OKX explicitly reports negative balance or insufficient base, abort.
+            okx_base_eq = None
+            okx_base_avail = None
             try:
                 balance_resp = self.okx.get_balance()
                 base_ccy = o.symbol.split('/')[0]
-                okx_base_eq = None
-                okx_base_avail = None
 
                 rows = (balance_resp.data or {}).get("data") if isinstance(balance_resp.data, dict) else None
                 details = ((rows[0] if isinstance(rows, list) and rows else {}) or {}).get("details")
