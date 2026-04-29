@@ -28,11 +28,11 @@ class PriceFetcher:
             url = "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
             response = requests.get(url, timeout=10)
             data = response.json()
-            
+
             if data.get('code') != '0':
                 logger.error(f"OKX API error: {data}")
-                return self._prices
-            
+                return {}
+
             prices = {}
             for ticker in data.get('data', []):
                 inst_id = ticker.get('instId', '')

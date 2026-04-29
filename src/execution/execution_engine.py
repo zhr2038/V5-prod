@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -50,7 +51,7 @@ class ExecutionEngine:
 
     def _init_db(self) -> None:
         try:
-            with sqlite3.connect(str(self.db_path)) as con:
+            with closing(sqlite3.connect(str(self.db_path))) as con:
                 cur = con.cursor()
                 cur.execute(
                     """
@@ -275,7 +276,7 @@ class ExecutionEngine:
             sp = float(signal_price)
             ep = float(execution_price)
             bps = ((ep - sp) / sp) * 10_000.0 if sp else 0.0
-            with sqlite3.connect(str(self.db_path)) as con:
+            with closing(sqlite3.connect(str(self.db_path))) as con:
                 cur = con.cursor()
                 cur.execute(
                     "INSERT INTO slippage(ts, symbol, side, signal_price, execution_price, slippage_bps) VALUES (?,?,?,?,?,?)",

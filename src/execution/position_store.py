@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -235,7 +236,7 @@ class PositionStore:
         return removed_counts
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self.path)) as con:
+        with closing(sqlite3.connect(str(self.path))) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -258,7 +259,7 @@ class PositionStore:
     def _migrate_add_columns(self) -> None:
         """Add new columns to existing DBs (safe best-effort)."""
         try:
-            with sqlite3.connect(str(self.path)) as con:
+            with closing(sqlite3.connect(str(self.path))) as con:
                 cur = con.cursor()
                 cur.execute("PRAGMA table_info(positions)")
                 cols = {str(r[1]) for r in cur.fetchall()}
@@ -282,7 +283,7 @@ class PositionStore:
             持仓列表
         """
         try:
-            with sqlite3.connect(str(self.path)) as con:
+            with closing(sqlite3.connect(str(self.path))) as con:
                 cur = con.cursor()
                 cur.execute(
                     "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE qty > 0"
@@ -303,7 +304,7 @@ class PositionStore:
             持仓对象，如果不存在返回None
         """
         try:
-            with sqlite3.connect(str(self.path)) as con:
+            with closing(sqlite3.connect(str(self.path))) as con:
                 cur = con.cursor()
                 cur.execute(
                     "SELECT symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json FROM positions WHERE symbol=?",
@@ -478,7 +479,7 @@ class PositionStore:
             pos: 持仓对象
         """
         try:
-            with sqlite3.connect(str(self.path)) as con:
+            with closing(sqlite3.connect(str(self.path))) as con:
                 c = con.cursor()
                 c.execute(
                     "INSERT INTO positions(symbol, qty, avg_px, entry_ts, highest_px, last_update_ts, last_mark_px, unrealized_pnl_pct, tags_json) "
@@ -545,7 +546,7 @@ class PositionStore:
             bool: True表示成功关闭，False表示持仓不存在
         """
         try:
-            with sqlite3.connect(str(self.path)) as con:
+            with closing(sqlite3.connect(str(self.path))) as con:
                 c = con.cursor()
 
                 # 先检查持仓是否存在

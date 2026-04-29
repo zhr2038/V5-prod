@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -124,7 +125,7 @@ class OrderStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self.path)) as con:
+        with closing(sqlite3.connect(str(self.path))) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -228,7 +229,7 @@ class OrderStore:
             submit_gate: 提交网关
         """
         now = _now_ms()
-        with sqlite3.connect(str(self.path)) as con:
+        with closing(sqlite3.connect(str(self.path))) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -293,7 +294,7 @@ class OrderStore:
         Returns:
             订单对象，不存在返回None
         """
-        with sqlite3.connect(str(self.path)) as con:
+        with closing(sqlite3.connect(str(self.path))) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -323,7 +324,7 @@ class OrderStore:
         Returns:
             订单对象，不存在返回None
         """
-        with sqlite3.connect(str(self.path)) as con:
+        with closing(sqlite3.connect(str(self.path))) as con:
             cur = con.cursor()
             cur.execute(
                 """
@@ -377,7 +378,7 @@ class OrderStore:
         new_state_u = str(new_state).upper()
         now = _now_ms()
 
-        with sqlite3.connect(str(self.path)) as con:
+        with closing(sqlite3.connect(str(self.path))) as con:
             cur = con.cursor()
             cur.execute("SELECT state FROM orders WHERE cl_ord_id=?", (str(cl_ord_id),))
             r = cur.fetchone()
@@ -478,7 +479,7 @@ class OrderStore:
 
         sql.append(f" ORDER BY {event_ts_expr} DESC LIMIT 1")
 
-        with sqlite3.connect(str(self.path)) as con:
+        with closing(sqlite3.connect(str(self.path))) as con:
             cur = con.cursor()
             cur.execute("".join(sql), params)
             row = cur.fetchone()
@@ -493,7 +494,7 @@ class OrderStore:
         Returns:
             未完成订单列表
         """
-        with sqlite3.connect(str(self.path)) as con:
+        with closing(sqlite3.connect(str(self.path))) as con:
             cur = con.cursor()
             cur.execute(
                 """
