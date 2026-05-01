@@ -841,6 +841,13 @@ class ExecutionConfig(BaseModel):
     probe_trailing_gap_bps: float = Field(default=25.0, ge=0.0, le=10000.0)
     probe_time_stop_hours: int = Field(default=8, ge=0, le=24 * 30)
     probe_time_stop_min_net_bps: float = Field(default=10.0, ge=-10000.0, le=10000.0)
+    protect_profit_lock_enabled: bool = Field(default=True)
+    protect_profit_lock_min_net_bps: float = Field(default=100.0, ge=0.0, le=10000.0)
+    protect_profit_lock_breakeven_plus_bps: float = Field(default=20.0, ge=-10000.0, le=10000.0)
+    protect_profit_lock_trailing_start_net_bps: float = Field(default=150.0, ge=-10000.0, le=10000.0)
+    protect_profit_lock_trailing_gap_bps: float = Field(default=60.0, ge=0.0, le=10000.0)
+    protect_profit_lock_strong_start_net_bps: float = Field(default=200.0, ge=-10000.0, le=10000.0)
+    protect_profit_lock_strong_trailing_gap_bps: float = Field(default=50.0, ge=0.0, le=10000.0)
     negative_expectancy_fast_fail_market_aware: bool = Field(
         default=True,
         description="Enable market-impulse-aware softening for single fast-fail negative expectancy blocks",

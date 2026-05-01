@@ -335,11 +335,16 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
         assert key in payload["execution"]
     for key in main_module.PROBE_EXIT_CONFIG_KEYS:
         assert key in payload["execution"]
+    for key in main_module.PROTECT_PROFIT_LOCK_CONFIG_KEYS:
+        assert key in payload["execution"]
     assert payload["execution"]["btc_leadership_probe_enabled"] is True
     assert payload["execution"]["btc_leadership_probe_min_alpha6_score"] == pytest.approx(0.30)
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_exit_enabled"] is True
     assert payload["execution"]["probe_time_stop_hours"] == 8
+    assert payload["execution"]["protect_profit_lock_enabled"] is True
+    assert payload["execution"]["protect_profit_lock_min_net_bps"] == pytest.approx(100.0)
+    assert payload["execution"]["protect_profit_lock_trailing_gap_bps"] == pytest.approx(60.0)
     assert payload["execution"]["negative_expectancy_release_start_ts"] == 1_776_000_000_000
     assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""
@@ -360,6 +365,8 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     for key in main_module.BTC_LEADERSHIP_PROBE_CONFIG_KEYS:
         assert key in payload["execution"]
     for key in main_module.PROBE_EXIT_CONFIG_KEYS:
+        assert key in payload["execution"]
+    for key in main_module.PROTECT_PROFIT_LOCK_CONFIG_KEYS:
         assert key in payload["execution"]
     assert payload["execution"]["btc_leadership_probe_enabled"] is True
     assert payload["execution"]["btc_leadership_probe_only_in_protect"] is True
@@ -384,6 +391,13 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["probe_trailing_gap_bps"] == pytest.approx(25.0)
     assert payload["execution"]["probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_time_stop_min_net_bps"] == pytest.approx(10.0)
+    assert payload["execution"]["protect_profit_lock_enabled"] is True
+    assert payload["execution"]["protect_profit_lock_min_net_bps"] == pytest.approx(100.0)
+    assert payload["execution"]["protect_profit_lock_breakeven_plus_bps"] == pytest.approx(20.0)
+    assert payload["execution"]["protect_profit_lock_trailing_start_net_bps"] == pytest.approx(150.0)
+    assert payload["execution"]["protect_profit_lock_trailing_gap_bps"] == pytest.approx(60.0)
+    assert payload["execution"]["protect_profit_lock_strong_start_net_bps"] == pytest.approx(200.0)
+    assert payload["execution"]["protect_profit_lock_strong_trailing_gap_bps"] == pytest.approx(50.0)
     assert payload["execution"]["negative_expectancy_release_start_ts"] == 2_000_000_000
     assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""

@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -140,6 +142,31 @@ def _run_exit_case(tmp_path: Path, position: Position, series: MarketSeries):
         precomputed_regime=_regime(),
     )
     return out, audit
+
+
+def _run_protect_profit_lock_case(
+    tmp_path: Path,
+    position: Position,
+    series: MarketSeries,
+    *,
+    level: str = "PROTECT",
+    probe_exit_enabled: bool = True,
+):
+    cfg = _cfg(tmp_path)
+    cfg.execution.probe_exit_enabled = probe_exit_enabled
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe._load_current_auto_risk_level = lambda: level
+    audit = DecisionAudit(run_id="protect-profit-lock")
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": series},
+        positions=[position],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+    return out, audit, pipe
 
 
 def _single_exit(out) -> Order:
@@ -419,6 +446,115 @@ def test_non_probe_position_is_not_affected(tmp_path: Path) -> None:
     assert audit.counts["probe_stop_loss_count"] == 0
     assert audit.counts["probe_trailing_stop_count"] == 0
     assert audit.counts["probe_time_stop_count"] == 0
+
+
+def test_protect_profit_lock_raises_stop_at_120_net_bps(tmp_path: Path) -> None:
+    out, audit, pipe = _run_protect_profit_lock_case(
+        tmp_path,
+        _probe_position(probe=False),
+        _series(101.20),
+    )
+
+    assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
+    state = pipe.profit_taking.positions["BTC/USDT"]
+    assert state.current_action == "protect_profit_lock"
+    assert state.current_stop == pytest.approx(100.20)
+    decision = next(
+        decision
+        for decision in audit.router_decisions
+        if decision.get("reason") == "protect_profit_lock_stop_raised"
+    )
+    assert decision["protect_profit_lock_active"] is True
+    assert decision["entry_px"] == pytest.approx(100.0)
+    assert decision["current_px"] == pytest.approx(101.20)
+    assert decision["net_bps"] == pytest.approx(120.0)
+    assert decision["effective_stop_px"] == pytest.approx(100.20)
+    assert audit.counts["protect_profit_lock_active_count"] == 1
+    assert audit.counts["protect_profit_lock_stop_raised_count"] == 1
+    assert audit.counts["protect_profit_lock_trailing_exit_count"] == 0
+
+
+def test_protect_profit_lock_trailing_exit_after_170_high_retraces_60_bps(tmp_path: Path) -> None:
+    out, audit, _pipe = _run_protect_profit_lock_case(
+        tmp_path,
+        _probe_position(probe=False, highest_px=101.70),
+        _series(101.10, high=101.70),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "protect_profit_lock_trailing"
+    assert order.meta["turnover_cap_bypass_reason"] == "protect_profit_lock"
+    assert order.meta["protect_profit_lock_active"] is True
+    assert order.meta["trailing_mode"] == "normal"
+    assert order.meta["net_bps"] == pytest.approx(110.0)
+    assert order.meta["highest_net_bps"] == pytest.approx(170.0)
+    decision = next(
+        decision
+        for decision in audit.router_decisions
+        if decision.get("source_reason") == "protect_profit_lock_trailing"
+    )
+    assert decision["protect_profit_lock_active"] is True
+    assert decision["exit_reason"] == "protect_profit_lock_trailing"
+    assert decision["effective_stop_px"] == pytest.approx(100.20)
+    assert audit.counts["protect_profit_lock_trailing_exit_count"] == 1
+
+
+def test_protect_profit_lock_strong_trailing_uses_50_bps_gap(tmp_path: Path) -> None:
+    out, audit, _pipe = _run_protect_profit_lock_case(
+        tmp_path,
+        _probe_position(probe=False, highest_px=102.20),
+        _series(101.70, high=102.20),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "protect_profit_lock_trailing"
+    assert order.meta["trailing_mode"] == "strong"
+    assert order.meta["trailing_gap_bps"] == pytest.approx(50.0)
+    assert order.meta["net_bps"] == pytest.approx(170.0)
+    assert order.meta["highest_net_bps"] == pytest.approx(220.0)
+    assert audit.counts["protect_profit_lock_trailing_exit_count"] == 1
+
+
+def test_protect_profit_lock_does_not_apply_to_probe_position(tmp_path: Path) -> None:
+    out, audit, _pipe = _run_protect_profit_lock_case(
+        tmp_path,
+        _probe_position(highest_px=102.20, probe_type="market_impulse_probe"),
+        _series(101.70, high=102.20),
+        probe_exit_enabled=False,
+    )
+
+    assert not [
+        order
+        for order in out.orders
+        if (order.meta or {}).get("reason") == "protect_profit_lock_trailing"
+    ]
+    assert audit.counts["protect_profit_lock_active_count"] == 0
+    assert audit.counts["protect_profit_lock_stop_raised_count"] == 0
+    assert audit.counts["protect_profit_lock_trailing_exit_count"] == 0
+    assert not [
+        decision
+        for decision in audit.router_decisions
+        if decision.get("protect_profit_lock_active") is True
+    ]
+
+
+def test_protect_profit_lock_does_not_run_outside_protect(tmp_path: Path) -> None:
+    out, audit, pipe = _run_protect_profit_lock_case(
+        tmp_path,
+        _probe_position(probe=False, highest_px=102.20),
+        _series(101.70, high=102.20),
+        level="DEFENSE",
+    )
+
+    assert not [
+        order
+        for order in out.orders
+        if (order.meta or {}).get("reason") == "protect_profit_lock_trailing"
+    ]
+    assert audit.counts["protect_profit_lock_active_count"] == 0
+    assert audit.counts["protect_profit_lock_stop_raised_count"] == 0
+    assert audit.counts["protect_profit_lock_trailing_exit_count"] == 0
+    assert pipe.profit_taking.positions["BTC/USDT"].current_stop == pytest.approx(95.0)
 
 
 def test_probe_open_records_position_and_profit_state(tmp_path: Path) -> None:

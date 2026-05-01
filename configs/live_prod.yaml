@@ -366,6 +366,13 @@ execution:
   probe_trailing_gap_bps: 25
   probe_time_stop_hours: 8
   probe_time_stop_min_net_bps: 10
+  protect_profit_lock_enabled: true
+  protect_profit_lock_min_net_bps: 100
+  protect_profit_lock_breakeven_plus_bps: 20
+  protect_profit_lock_trailing_start_net_bps: 150
+  protect_profit_lock_trailing_gap_bps: 60
+  protect_profit_lock_strong_start_net_bps: 200
+  protect_profit_lock_strong_trailing_gap_bps: 50
   negative_expectancy_fast_fail_market_aware: true
   negative_expectancy_fast_fail_bypass_when_market_impulse: true
   negative_expectancy_fast_fail_bypass_max_cycles: 1

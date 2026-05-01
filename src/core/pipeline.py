@@ -3567,6 +3567,8 @@ class V5Pipeline:
 
         # 4.5 Profit-first exit priority (profit-taking > fixed stop > rank exit)
         probe_exit_orders = []
+        protect_profit_lock_orders = []
+        protect_profit_lock_router_decisions = []
         profit_orders = []
         fixed_stop_orders = []
         profit_symbols = set()  # Track symbols already handled by profit-taking
@@ -3664,6 +3666,183 @@ class V5Pipeline:
                     audit.add_note(
                         f"Probe exit: {p.symbol} reason={reason} net={net_bps:.2f}bps "
                         f"high={high_net_bps:.2f}bps held_hours={held_hours}"
+                    )
+
+        protect_profit_lock_enabled = bool(getattr(self.cfg.execution, "protect_profit_lock_enabled", True))
+        protect_profit_lock_active = (
+            protect_profit_lock_enabled
+            and str(current_auto_risk_level or "").upper() == "PROTECT"
+        )
+        if protect_profit_lock_active:
+            min_net_bps = float(
+                _coalesce(getattr(self.cfg.execution, "protect_profit_lock_min_net_bps", None), 100.0)
+            )
+            breakeven_plus_bps = float(
+                _coalesce(getattr(self.cfg.execution, "protect_profit_lock_breakeven_plus_bps", None), 20.0)
+            )
+            trailing_start_bps = float(
+                _coalesce(getattr(self.cfg.execution, "protect_profit_lock_trailing_start_net_bps", None), 150.0)
+            )
+            trailing_gap_bps = float(
+                _coalesce(getattr(self.cfg.execution, "protect_profit_lock_trailing_gap_bps", None), 60.0)
+            )
+            strong_start_bps = float(
+                _coalesce(getattr(self.cfg.execution, "protect_profit_lock_strong_start_net_bps", None), 200.0)
+            )
+            strong_gap_bps = float(
+                _coalesce(getattr(self.cfg.execution, "protect_profit_lock_strong_trailing_gap_bps", None), 50.0)
+            )
+            rt_cost_bps = 2.0 * (
+                float(getattr(self.cfg.execution, "fee_bps", 0.0) or 0.0)
+                + float(getattr(self.cfg.execution, "slippage_bps", 0.0) or 0.0)
+            )
+
+            for p in active_positions:
+                if float(getattr(p, "qty", 0.0) or 0.0) <= 0:
+                    continue
+                if p.symbol in profit_symbols:
+                    continue
+                if self._probe_metadata_for_position(p, probe_state=probe_state) is not None:
+                    continue
+
+                s = market_data_1h.get(p.symbol)
+                if not s or not s.close:
+                    continue
+                current_price = float(s.close[-1])
+                if current_price <= 0:
+                    continue
+
+                state = (getattr(self.profit_taking, "positions", {}) or {}).get(p.symbol)
+                entry_px = (
+                    float(getattr(state, "entry_price", 0.0) or 0.0)
+                    if state is not None
+                    else 0.0
+                )
+                if entry_px <= 0:
+                    entry_px = float(getattr(p, "avg_px", 0.0) or 0.0)
+                if entry_px <= 0:
+                    continue
+
+                observed_high_price = max(
+                    current_price,
+                    float(s.high[-1]) if getattr(s, "high", None) else current_price,
+                    float(getattr(p, "highest_px", 0.0) or 0.0),
+                    float(getattr(state, "highest_price", 0.0) or 0.0) if state is not None else 0.0,
+                )
+                gross_bps = (float(current_price) / float(entry_px) - 1.0) * 10000.0
+                net_bps = float(gross_bps - rt_cost_bps)
+                high_gross_bps = (float(observed_high_price) / float(entry_px) - 1.0) * 10000.0
+                high_net_bps = float(high_gross_bps - rt_cost_bps)
+                stored_highest_net_bps = (
+                    float(getattr(state, "highest_net_bps", 0.0) or 0.0)
+                    if state is not None
+                    else 0.0
+                )
+                highest_net_bps = max(float(high_net_bps), stored_highest_net_bps)
+
+                current_stop_px = (
+                    float(getattr(state, "current_stop", 0.0) or 0.0)
+                    if state is not None
+                    else 0.0
+                )
+                effective_stop_px = current_stop_px
+                stop_raised = False
+                state_changed = False
+
+                if state is not None and highest_net_bps > float(getattr(state, "highest_net_bps", 0.0) or 0.0) + 1e-9:
+                    state.highest_net_bps = float(highest_net_bps)
+                    state_changed = True
+
+                if net_bps + 1e-12 >= min_net_bps:
+                    breakeven_stop_px = float(entry_px) * (1.0 + (rt_cost_bps + breakeven_plus_bps) / 10000.0)
+                    effective_stop_px = max(float(effective_stop_px or 0.0), breakeven_stop_px)
+                    if state is not None and effective_stop_px > float(getattr(state, "current_stop", 0.0) or 0.0) + 1e-9:
+                        state.current_stop = float(effective_stop_px)
+                        state.current_action = "protect_profit_lock"
+                        stop_raised = True
+                        state_changed = True
+
+                if state_changed and state is not None:
+                    try:
+                        self.profit_taking._save_state()
+                    except Exception:
+                        pass
+
+                trailing_gap = None
+                trailing_mode = None
+                bps_epsilon = 1e-9
+                if highest_net_bps + bps_epsilon >= strong_start_bps:
+                    trailing_gap = strong_gap_bps
+                    trailing_mode = "strong"
+                elif highest_net_bps + bps_epsilon >= trailing_start_bps:
+                    trailing_gap = trailing_gap_bps
+                    trailing_mode = "normal"
+
+                lock_engaged = (
+                    net_bps + bps_epsilon >= min_net_bps
+                    or trailing_gap is not None
+                )
+                if not lock_engaged:
+                    continue
+
+                exit_reason = None
+                if trailing_gap is not None and (highest_net_bps - net_bps) + bps_epsilon >= float(trailing_gap):
+                    exit_reason = "protect_profit_lock_trailing"
+
+                payload = {
+                    "protect_profit_lock_active": True,
+                    "symbol": p.symbol,
+                    "entry_px": float(entry_px),
+                    "current_px": float(current_price),
+                    "gross_bps": float(gross_bps),
+                    "roundtrip_cost_bps": float(rt_cost_bps),
+                    "net_bps": float(net_bps),
+                    "highest_net_bps": float(highest_net_bps),
+                    "effective_stop_px": float(effective_stop_px or 0.0),
+                    "exit_reason": exit_reason,
+                    "trailing_mode": trailing_mode,
+                    "trailing_gap_bps": float(trailing_gap) if trailing_gap is not None else None,
+                }
+
+                if audit:
+                    audit.record_count("protect_profit_lock_active_count", symbol=p.symbol)
+                    if stop_raised:
+                        audit.record_count("protect_profit_lock_stop_raised_count", symbol=p.symbol)
+
+                if exit_reason is None:
+                    protect_profit_lock_router_decisions.append(
+                        {
+                            "symbol": p.symbol,
+                            "action": "hold",
+                            "reason": "protect_profit_lock_stop_raised" if stop_raised else "protect_profit_lock_active",
+                            **payload,
+                        }
+                    )
+                    continue
+
+                protect_profit_lock_orders.append(
+                    Order(
+                        symbol=p.symbol,
+                        side="sell",
+                        intent="CLOSE_LONG",
+                        notional_usdt=float(p.qty) * current_price,
+                        signal_price=current_price,
+                        meta={
+                            "reason": exit_reason,
+                            "exit_reason": exit_reason,
+                            "protect_profit_lock_exit": True,
+                            **payload,
+                            "bypass_turnover_cap_for_exit": True,
+                            "turnover_cap_bypass_reason": "protect_profit_lock",
+                        },
+                    )
+                )
+                profit_symbols.add(p.symbol)
+                if audit:
+                    audit.record_count("protect_profit_lock_trailing_exit_count", symbol=p.symbol)
+                    audit.add_note(
+                        f"Protect profit lock trailing: {p.symbol} net={net_bps:.2f}bps "
+                        f"high={highest_net_bps:.2f}bps gap={float(trailing_gap):.2f}bps mode={trailing_mode}"
                     )
         
         for p in active_positions:
@@ -3973,8 +4152,16 @@ class V5Pipeline:
                 filtered_exit_orders.append(eo)
             exit_orders = filtered_exit_orders
         
-        # Merge all exit orders: probe first, then profit, stop, rank, impulse time-stop, then policy
-        exit_orders = probe_exit_orders + profit_orders + fixed_stop_orders + ranking_exit_orders + market_impulse_time_stop_orders + exit_orders
+        # Merge all exit orders: probe first, then protect profit-lock, profit, stop, rank, impulse time-stop, then policy
+        exit_orders = (
+            probe_exit_orders
+            + protect_profit_lock_orders
+            + profit_orders
+            + fixed_stop_orders
+            + ranking_exit_orders
+            + market_impulse_time_stop_orders
+            + exit_orders
+        )
 
         # Deduplicate: keep only one exit per symbol per round, priority: sell_all > dynamic_stop > fixed_stop > atr > partial
         if exit_orders:
@@ -3983,6 +4170,7 @@ class V5Pipeline:
                 'probe_stop_loss': 110,
                 'probe_trailing_stop': 110,
                 'probe_time_stop': 110,
+                'protect_profit_lock_trailing': 105,
                 'profit_taking_stop_loss_hit': 100,
                 'dynamic_stop': 95,  # 动态止损优先级高于固定止损
                 'profit_taking_': 93,
@@ -4063,6 +4251,18 @@ class V5Pipeline:
                         "exit_reason": meta.get("exit_reason", meta.get("reason")),
                     }
                 )
+            if bool(meta.get("protect_profit_lock_exit", False)):
+                router_payload.update(
+                    {
+                        "protect_profit_lock_active": True,
+                        "entry_px": meta.get("entry_px"),
+                        "current_px": meta.get("current_px"),
+                        "net_bps": meta.get("net_bps"),
+                        "highest_net_bps": meta.get("highest_net_bps"),
+                        "effective_stop_px": meta.get("effective_stop_px"),
+                        "exit_reason": meta.get("exit_reason", meta.get("reason")),
+                    }
+                )
             exit_router_decisions.append(router_payload)
         exit_symbols = {o.symbol for o in exit_orders}
         
@@ -4088,8 +4288,12 @@ class V5Pipeline:
                         "turnover_cap_bypass_reason": meta.get("turnover_cap_bypass_reason"),
                         "probe_exit_policy_active": bool(meta.get("probe_exit_policy_active", False)),
                         "probe_type": meta.get("probe_type"),
+                        "protect_profit_lock_active": bool(meta.get("protect_profit_lock_active", False)),
+                        "entry_px": meta.get("entry_px"),
+                        "current_px": meta.get("current_px"),
                         "net_bps": meta.get("net_bps"),
                         "highest_net_bps": meta.get("highest_net_bps"),
+                        "effective_stop_px": meta.get("effective_stop_px"),
                         "hold_hours": meta.get("hold_hours", meta.get("held_hours")),
                         "exit_reason": meta.get("exit_reason", meta.get("reason")),
                     }
@@ -4102,6 +4306,7 @@ class V5Pipeline:
             list(exit_router_decisions)
             + list(position_state_cleanup_router_decisions)
             + list(btc_leadership_probe_router_decisions)
+            + list(protect_profit_lock_router_decisions)
         )
         invalid_price_warnings: List[Dict] = []  # 记录价格无效的告警
 

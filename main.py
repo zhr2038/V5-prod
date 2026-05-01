@@ -546,6 +546,17 @@ PROBE_EXIT_CONFIG_KEYS = (
 )
 
 
+PROTECT_PROFIT_LOCK_CONFIG_KEYS = (
+    "protect_profit_lock_enabled",
+    "protect_profit_lock_min_net_bps",
+    "protect_profit_lock_breakeven_plus_bps",
+    "protect_profit_lock_trailing_start_net_bps",
+    "protect_profit_lock_trailing_gap_bps",
+    "protect_profit_lock_strong_start_net_bps",
+    "protect_profit_lock_strong_trailing_gap_bps",
+)
+
+
 def _btc_leadership_probe_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     execution = getattr(cfg, "execution", None)
     return {
@@ -560,6 +571,15 @@ def _probe_exit_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     return {
         key: getattr(execution, key)
         for key in PROBE_EXIT_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
+def _protect_profit_lock_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in PROTECT_PROFIT_LOCK_CONFIG_KEYS
         if hasattr(execution, key)
     }
 
@@ -758,6 +778,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             ),
             **_btc_leadership_probe_effective_config(cfg),
             **_probe_exit_effective_config(cfg),
+            **_protect_profit_lock_effective_config(cfg),
             **_negative_expectancy_release_effective_config(cfg),
         },
     }
