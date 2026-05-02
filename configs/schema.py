@@ -848,6 +848,16 @@ class ExecutionConfig(BaseModel):
     protect_profit_lock_trailing_gap_bps: float = Field(default=60.0, ge=0.0, le=10000.0)
     protect_profit_lock_strong_start_net_bps: float = Field(default=200.0, ge=-10000.0, le=10000.0)
     protect_profit_lock_strong_trailing_gap_bps: float = Field(default=50.0, ge=0.0, le=10000.0)
+    same_symbol_reentry_guard_enabled: bool = Field(default=True)
+    same_symbol_reentry_cooldown_hours_after_profit_lock: int = Field(default=6, ge=0, le=24 * 30)
+    same_symbol_reentry_cooldown_hours_after_probe_stop: int = Field(default=8, ge=0, le=24 * 30)
+    same_symbol_reentry_cooldown_hours_after_probe_take_profit: int = Field(default=4, ge=0, le=24 * 30)
+    same_symbol_reentry_allow_breakout: bool = Field(default=True)
+    same_symbol_reentry_breakout_above_last_high_bps: float = Field(default=20.0, ge=0.0, le=10000.0)
+    same_symbol_reentry_breakout_above_exit_bps: float = Field(default=50.0, ge=0.0, le=10000.0)
+    same_symbol_reentry_apply_to_market_impulse_probe: bool = Field(default=True)
+    same_symbol_reentry_apply_to_btc_leadership_probe: bool = Field(default=True)
+    same_symbol_reentry_apply_to_normal_entry: bool = Field(default=True)
     negative_expectancy_fast_fail_market_aware: bool = Field(
         default=True,
         description="Enable market-impulse-aware softening for single fast-fail negative expectancy blocks",

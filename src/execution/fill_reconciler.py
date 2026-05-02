@@ -19,6 +19,7 @@ from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
 from src.execution.probe_metadata import probe_tags_from_order_meta
+from src.execution.same_symbol_reentry_guard import record_same_symbol_exit_memory
 
 
 log = logging.getLogger(__name__)
@@ -153,7 +154,7 @@ class FillReconciler:
         else:
             self.position_store.set_qty(symbol, qty=new_qty)
 
-    def _record_reentry_cooldowns(self, row, agg: FillAgg) -> None:
+    def _record_reentry_cooldowns(self, row, agg: FillAgg, *, pre_position=None) -> None:
         side = str(getattr(row, "side", "") or "").lower()
         if side != "sell":
             return
@@ -164,7 +165,8 @@ class FillReconciler:
 
         reason = self._order_reason(row)
         if not reason:
-            return
+            reason = "unknown"
+        order_meta = self._order_meta(row)
 
         order_store_path = str(getattr(self.order_store, "path", "reports/orders.sqlite"))
         rank_exit_cooldown_path = str(derive_runtime_named_json_path(order_store_path, "rank_exit_cooldown_state"))
@@ -186,6 +188,31 @@ class FillReconciler:
                     reason,
                     path=take_profit_cooldown_path,
                     ts_ms=int(getattr(agg, "max_ts_ms", 0) or 0),
+                )
+            if str(getattr(row, "intent", "") or "").upper() == "CLOSE_LONG":
+                exit_px = float(agg.vwap_px) if agg.vwap_px is not None else 0.0
+                entry_px = float(getattr(pre_position, "avg_px", 0.0) or 0.0) if pre_position is not None else 0.0
+                close_qty = float(agg.acc_fill_sz or 0.0)
+                if pre_position is not None:
+                    close_qty = min(close_qty, float(getattr(pre_position, "qty", 0.0) or close_qty))
+                net_bps = order_meta.get("net_bps")
+                if net_bps is None and entry_px > 0 and exit_px > 0:
+                    gross_bps = (float(exit_px) / float(entry_px) - 1.0) * 10000.0
+                    quote_fee = float(sum(abs(v) for ccy, v in (agg.fees_by_ccy or {}).items() if str(ccy).upper() in {"USDT", "USD"}))
+                    basis = float(entry_px) * float(close_qty)
+                    fee_bps = quote_fee / basis * 10000.0 if basis > 0 else 0.0
+                    net_bps = float(gross_bps - fee_bps)
+                highest_px = order_meta.get("highest_px_before_exit")
+                if highest_px is None and pre_position is not None:
+                    highest_px = float(getattr(pre_position, "highest_px", 0.0) or 0.0)
+                record_same_symbol_exit_memory(
+                    path=str(derive_runtime_named_json_path(order_store_path, "same_symbol_reentry_exit_memory")),
+                    symbol=symbol,
+                    exit_ts_ms=int(getattr(agg, "max_ts_ms", 0) or 0),
+                    exit_px=exit_px,
+                    exit_reason=str(order_meta.get("exit_reason") or reason or ""),
+                    highest_px_before_exit=highest_px or exit_px,
+                    net_bps=net_bps,
                 )
         except Exception:
             pass
@@ -366,6 +393,8 @@ class FillReconciler:
             clid = str(row.cl_ord_id)
             row_state_before = str(row.state or "").upper()
             total = self._aggregate_order_total(row=row, delta=a)
+            symbol = str(getattr(row, "inst_id", "") or "").replace("-", "/")
+            pre_position = self.position_store.get(symbol) if self.position_store is not None and symbol else None
             next_state = row_state_before if row_state_before in {"FILLED", "CANCELED"} else ("PARTIAL" if total.acc_fill_sz > 0 else str(row.state))
 
             # Always at least PARTIAL if fill exists
@@ -380,7 +409,7 @@ class FillReconciler:
             )
             if row_state_before != "FILLED":
                 self._apply_position_delta(row, a)
-            self._record_reentry_cooldowns(row, total)
+            self._record_reentry_cooldowns(row, total, pre_position=pre_position)
             self._record_market_impulse_probe_fill(row, total)
             updated += 1
 

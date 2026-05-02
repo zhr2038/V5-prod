@@ -11,6 +11,7 @@ from typing import List, Optional
 from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
 from src.execution.probe_metadata import probe_tags_from_order_meta
+from src.execution.same_symbol_reentry_guard import record_same_symbol_exit_memory
 from src.execution.position_store import PositionStore
 from src.execution.account_store import AccountStore, AccountState
 from src.execution.fill_store import derive_runtime_cost_events_dir, derive_runtime_named_json_path
@@ -166,6 +167,26 @@ class ExecutionEngine:
                                 o.symbol,
                                 reason,
                                 path=str(derive_runtime_named_json_path(runtime_order_store_path, "take_profit_cooldown_state")),
+                            )
+                        if str(o.intent).upper() == "CLOSE_LONG":
+                            cost_basis = float(entry_px) * float(close_qty)
+                            net_bps = (
+                                float(realized_usdt) / float(cost_basis) * 10000.0
+                                if realized_usdt is not None and cost_basis > 0
+                                else None
+                            )
+                            meta = o.meta or {}
+                            record_same_symbol_exit_memory(
+                                path=str(derive_runtime_named_json_path(runtime_order_store_path, "same_symbol_reentry_exit_memory")),
+                                symbol=o.symbol,
+                                exit_px=px,
+                                exit_reason=str(meta.get("exit_reason") or reason or ""),
+                                highest_px_before_exit=(
+                                    meta.get("highest_px_before_exit")
+                                    or (float(getattr(p, "highest_px", 0.0) or 0.0) if p is not None else px)
+                                    or px
+                                ),
+                                net_bps=meta.get("net_bps", net_bps),
                             )
                     except Exception as e:
                         log.warning("Failed to record dry-run cooldown state for %s: %s", o.symbol, e)

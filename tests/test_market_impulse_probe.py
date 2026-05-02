@@ -14,6 +14,7 @@ from src.core.models import MarketSeries
 from src.core.pipeline import V5Pipeline
 from src.execution.fill_store import derive_runtime_auto_risk_eval_path, derive_runtime_auto_risk_guard_path, derive_runtime_named_json_path
 from src.execution.position_store import Position
+from src.execution.same_symbol_reentry_guard import record_same_symbol_exit_memory
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
 import src.core.pipeline as pipeline_module
@@ -193,14 +194,40 @@ def _market_data() -> dict[str, MarketSeries]:
     }
 
 
+def _market_data_with_btc(close: float) -> dict[str, MarketSeries]:
+    data = _market_data()
+    data["BTC/USDT"] = _series("BTC/USDT", close)
+    return data
+
+
 def _empty_portfolio():
     return SimpleNamespace(target_weights={}, selected=[], entry_candidates=[], volatilities={}, notes="")
 
 
-def test_market_impulse_probe_opens_small_probe_in_protect(tmp_path: Path) -> None:
-    cfg = _base_cfg(tmp_path)
-    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
-    payload = _strategy_payload(
+def _write_reentry_memory(
+    cfg: AppConfig,
+    pipe: V5Pipeline,
+    *,
+    symbol: str = "BTC/USDT",
+    hours_ago: float = 2.0,
+    reason: str = "protect_profit_lock_trailing",
+    exit_px: float = 70000.0,
+    highest_px_before_exit: float = 70200.0,
+    net_bps: float = 223.0,
+) -> None:
+    record_same_symbol_exit_memory(
+        path=derive_runtime_named_json_path(cfg.execution.order_store_path, "same_symbol_reentry_exit_memory"),
+        symbol=symbol,
+        exit_ts_ms=int(pipe.clock.now().timestamp() * 1000) - int(hours_ago * 3600 * 1000),
+        exit_px=exit_px,
+        exit_reason=reason,
+        highest_px_before_exit=highest_px_before_exit,
+        net_bps=net_bps,
+    )
+
+
+def _impulse_payload():
+    return _strategy_payload(
         {
             "BTC/USDT": ("buy", 0.90, None),
             "ETH/USDT": ("buy", 0.82, None),
@@ -208,6 +235,12 @@ def test_market_impulse_probe_opens_small_probe_in_protect(tmp_path: Path) -> No
             "BNB/USDT": ("sell", 0.20, None),
         }
     )
+
+
+def test_market_impulse_probe_opens_small_probe_in_protect(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _impulse_payload()
     pipe = _build_pipe(cfg, tmp_path, payload)
     pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
     audit = DecisionAudit(run_id="market-impulse-open")
@@ -229,6 +262,169 @@ def test_market_impulse_probe_opens_small_probe_in_protect(tmp_path: Path) -> No
     assert order.notional_usdt == 6.0
     assert order.meta["market_impulse_probe"] is True
     assert audit.counts["market_impulse_probe_open_count"] == 1
+
+
+def test_same_symbol_reentry_blocks_market_impulse_after_profit_lock(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _impulse_payload())
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    _write_reentry_memory(
+        cfg,
+        pipe,
+        hours_ago=2.0,
+        reason="protect_profit_lock_trailing",
+        exit_px=70000.0,
+        highest_px_before_exit=70200.0,
+    )
+    audit = DecisionAudit(run_id="same-symbol-profit-lock-block")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "same_symbol_reentry_cooldown")
+    assert decision["symbol"] == "BTC/USDT"
+    assert decision["last_exit_reason"] == "protect_profit_lock_trailing"
+    assert decision["last_exit_px"] == 70000.0
+    assert decision["highest_px_before_exit"] == 70200.0
+    assert decision["required_cooldown_hours"] == 6.0
+    assert decision["breakout_exception_met"] is False
+    assert audit.counts["same_symbol_reentry_cooldown_count"] == 1
+    assert audit.counts["market_impulse_probe_open_count"] == 0
+
+
+def test_same_symbol_reentry_allows_breakout_above_last_high(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _impulse_payload())
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    _write_reentry_memory(
+        cfg,
+        pipe,
+        hours_ago=2.0,
+        reason="protect_profit_lock_trailing",
+        exit_px=70000.0,
+        highest_px_before_exit=70200.0,
+    )
+    audit = DecisionAudit(run_id="same-symbol-breakout-bypass")
+
+    out = pipe.run(
+        market_data_1h=_market_data_with_btc(70350.0),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "BTC/USDT"
+    assert out.orders[0].meta["market_impulse_probe"] is True
+    assert audit.counts["same_symbol_reentry_breakout_bypass_count"] == 1
+    assert not any(d.get("reason") == "same_symbol_reentry_cooldown" for d in audit.router_decisions)
+
+
+def test_same_symbol_reentry_blocks_probe_after_probe_stop_loss(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _impulse_payload())
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    _write_reentry_memory(
+        cfg,
+        pipe,
+        hours_ago=2.0,
+        reason="probe_stop_loss",
+        exit_px=70000.0,
+        highest_px_before_exit=70200.0,
+        net_bps=-70.0,
+    )
+    audit = DecisionAudit(run_id="same-symbol-probe-stop-block")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "same_symbol_reentry_cooldown")
+    assert decision["last_exit_reason"] == "probe_stop_loss"
+    assert decision["required_cooldown_hours"] == 8.0
+    assert audit.counts["same_symbol_reentry_cooldown_count"] == 1
+
+
+def test_same_symbol_reentry_does_not_block_other_symbol_memory(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _impulse_payload())
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    _write_reentry_memory(
+        cfg,
+        pipe,
+        symbol="ETH/USDT",
+        hours_ago=2.0,
+        reason="protect_profit_lock_trailing",
+        exit_px=3500.0,
+        highest_px_before_exit=3510.0,
+    )
+    audit = DecisionAudit(run_id="same-symbol-other-symbol")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "BTC/USDT"
+    assert audit.counts["same_symbol_reentry_cooldown_count"] == 0
+
+
+def test_same_symbol_reentry_allows_after_cooldown_expiry(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _impulse_payload())
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    _write_reentry_memory(
+        cfg,
+        pipe,
+        hours_ago=7.0,
+        reason="protect_profit_lock_trailing",
+        exit_px=70000.0,
+        highest_px_before_exit=70200.0,
+    )
+    audit = DecisionAudit(run_id="same-symbol-expired")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "BTC/USDT"
+    assert audit.counts["same_symbol_reentry_cooldown_count"] == 0
 
 
 def test_market_impulse_probe_requires_three_trend_buys(tmp_path: Path) -> None:

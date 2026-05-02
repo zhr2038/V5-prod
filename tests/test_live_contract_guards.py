@@ -337,6 +337,8 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
         assert key in payload["execution"]
     for key in main_module.PROTECT_PROFIT_LOCK_CONFIG_KEYS:
         assert key in payload["execution"]
+    for key in main_module.SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS:
+        assert key in payload["execution"]
     assert payload["execution"]["btc_leadership_probe_enabled"] is True
     assert payload["execution"]["btc_leadership_probe_min_alpha6_score"] == pytest.approx(0.30)
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
@@ -345,6 +347,8 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["protect_profit_lock_enabled"] is True
     assert payload["execution"]["protect_profit_lock_min_net_bps"] == pytest.approx(100.0)
     assert payload["execution"]["protect_profit_lock_trailing_gap_bps"] == pytest.approx(60.0)
+    assert payload["execution"]["same_symbol_reentry_guard_enabled"] is True
+    assert payload["execution"]["same_symbol_reentry_cooldown_hours_after_profit_lock"] == 6
     assert payload["execution"]["negative_expectancy_release_start_ts"] == 1_776_000_000_000
     assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""
@@ -367,6 +371,8 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     for key in main_module.PROBE_EXIT_CONFIG_KEYS:
         assert key in payload["execution"]
     for key in main_module.PROTECT_PROFIT_LOCK_CONFIG_KEYS:
+        assert key in payload["execution"]
+    for key in main_module.SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS:
         assert key in payload["execution"]
     assert payload["execution"]["btc_leadership_probe_enabled"] is True
     assert payload["execution"]["btc_leadership_probe_only_in_protect"] is True
@@ -398,6 +404,16 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["protect_profit_lock_trailing_gap_bps"] == pytest.approx(60.0)
     assert payload["execution"]["protect_profit_lock_strong_start_net_bps"] == pytest.approx(200.0)
     assert payload["execution"]["protect_profit_lock_strong_trailing_gap_bps"] == pytest.approx(50.0)
+    assert payload["execution"]["same_symbol_reentry_guard_enabled"] is True
+    assert payload["execution"]["same_symbol_reentry_cooldown_hours_after_profit_lock"] == 6
+    assert payload["execution"]["same_symbol_reentry_cooldown_hours_after_probe_stop"] == 8
+    assert payload["execution"]["same_symbol_reentry_cooldown_hours_after_probe_take_profit"] == 4
+    assert payload["execution"]["same_symbol_reentry_allow_breakout"] is True
+    assert payload["execution"]["same_symbol_reentry_breakout_above_last_high_bps"] == pytest.approx(20.0)
+    assert payload["execution"]["same_symbol_reentry_breakout_above_exit_bps"] == pytest.approx(50.0)
+    assert payload["execution"]["same_symbol_reentry_apply_to_market_impulse_probe"] is True
+    assert payload["execution"]["same_symbol_reentry_apply_to_btc_leadership_probe"] is True
+    assert payload["execution"]["same_symbol_reentry_apply_to_normal_entry"] is True
     assert payload["execution"]["negative_expectancy_release_start_ts"] == 2_000_000_000
     assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""

@@ -224,6 +224,7 @@ from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.execution.position_store import Position
 from src.execution.probe_metadata import PROBE_POSITION_TYPES, probe_tags_from_order_meta, probe_type_from_meta
+from src.execution.same_symbol_reentry_guard import evaluate_same_symbol_reentry_guard
 from src.utils.time import utc_now_iso
 from src.execution.fill_store import (
     derive_fill_store_path,
@@ -430,6 +431,10 @@ class V5Pipeline:
         self.market_impulse_probe_state_path = derive_runtime_named_json_path(
             runtime_order_store_path,
             "market_impulse_probe_state",
+        ).resolve()
+        self.same_symbol_reentry_memory_path = derive_runtime_named_json_path(
+            runtime_order_store_path,
+            "same_symbol_reentry_exit_memory",
         ).resolve()
 
         # 负期望标的自动冷却（根因级抑制高成本来回交易）
@@ -1319,6 +1324,47 @@ class V5Pipeline:
         except Exception:
             pass
         return self._market_impulse_probe_state_has_active_position(sym)
+
+    def _evaluate_same_symbol_reentry_guard(
+        self,
+        *,
+        symbol: str,
+        latest_px: float,
+        entry_kind: str,
+        audit: Optional[DecisionAudit] = None,
+    ) -> Dict[str, Any]:
+        result = evaluate_same_symbol_reentry_guard(
+            path=self.same_symbol_reentry_memory_path,
+            symbol=symbol,
+            latest_px=float(latest_px or 0.0),
+            config=self.cfg,
+            entry_kind=entry_kind,
+            now_ms=int(self.clock.now().timestamp() * 1000),
+        )
+        if audit and bool(result.get("breakout_exception_met", False)):
+            audit.record_count("same_symbol_reentry_breakout_bypass_count", symbol=symbol)
+            audit.add_note(
+                "Same-symbol reentry breakout bypass: "
+                f"{symbol} kind={entry_kind} last_exit={result.get('last_exit_reason')} "
+                f"latest_px={result.get('latest_px')} exit_px={result.get('last_exit_px')} "
+                f"highest={result.get('highest_px_before_exit')}"
+            )
+        return result
+
+    def _same_symbol_reentry_block_decision(self, symbol: str, guard: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "action": "skip",
+            "reason": "same_symbol_reentry_cooldown",
+            "last_exit_reason": guard.get("last_exit_reason"),
+            "last_exit_px": guard.get("last_exit_px"),
+            "highest_px_before_exit": guard.get("highest_px_before_exit"),
+            "elapsed_hours": guard.get("elapsed_hours"),
+            "required_cooldown_hours": guard.get("required_cooldown_hours"),
+            "breakout_exception_met": bool(guard.get("breakout_exception_met", False)),
+            "latest_px": guard.get("latest_px"),
+            "net_bps": guard.get("net_bps"),
+        }
 
     def _clear_active_position_state_for_symbol(self, symbol: str) -> List[str]:
         sym = str(symbol)
@@ -3647,6 +3693,7 @@ class V5Pipeline:
                             "net_bps": float(net_bps),
                             "high_net_bps": float(high_net_bps),
                             "highest_net_bps": float(highest_net_bps),
+                            "highest_px_before_exit": float(highest_price),
                             "held_hours": held_hours,
                             "hold_hours": held_hours,
                             "probe_take_profit_net_bps": float(take_profit_bps),
@@ -3798,6 +3845,7 @@ class V5Pipeline:
                     "roundtrip_cost_bps": float(rt_cost_bps),
                     "net_bps": float(net_bps),
                     "highest_net_bps": float(highest_net_bps),
+                    "highest_px_before_exit": float(observed_high_price),
                     "effective_stop_px": float(effective_stop_px or 0.0),
                     "exit_reason": exit_reason,
                     "trailing_mode": trailing_mode,
@@ -5280,6 +5328,36 @@ class V5Pipeline:
                 continue
             
             # 如果通过所有检查，生成订单
+            if side == "buy" and intent == "OPEN_LONG":
+                entry_kind = "btc_leadership_probe" if btc_probe_meta is not None else "normal_entry"
+                reentry_guard = self._evaluate_same_symbol_reentry_guard(
+                    symbol=sym,
+                    latest_px=px,
+                    entry_kind=entry_kind,
+                    audit=audit,
+                )
+                if bool(reentry_guard.get("blocked", False)):
+                    self._record_replacement_block(
+                        audit=audit,
+                        blocked_replacement_reasons=blocked_replacement_reasons,
+                        symbol=sym,
+                        reason="same_symbol_reentry_cooldown",
+                    )
+                    if audit:
+                        audit.record_count("same_symbol_reentry_cooldown_count", symbol=sym)
+                        if btc_probe_meta is not None:
+                            audit.record_count(
+                                "btc_leadership_probe_blocked_count",
+                                symbol=f"{sym}:same_symbol_reentry_cooldown",
+                            )
+                        decision = self._same_symbol_reentry_block_decision(sym, reentry_guard)
+                        if btc_probe_meta is not None:
+                            decision.update(btc_probe_meta)
+                            decision["btc_leadership_probe"] = True
+                            decision["blocked_reason"] = "same_symbol_reentry_cooldown"
+                        router_decisions.append(decision)
+                    continue
+
             meta = {
                 "target_w": tw,
                 "dd_mult": dd_mult,
@@ -5465,6 +5543,33 @@ class V5Pipeline:
                             ) + 1
                             audit.add_note(
                                 f"Market impulse probe blocked: {sym} reason=insufficient_cash probe_notional={probe_notional:.4f} cash_remaining={cash_remaining:.4f}"
+                            )
+                        continue
+                    reentry_guard = self._evaluate_same_symbol_reentry_guard(
+                        symbol=sym,
+                        latest_px=px,
+                        entry_kind="market_impulse_probe",
+                        audit=audit,
+                    )
+                    if bool(reentry_guard.get("blocked", False)):
+                        if audit:
+                            audit.counts["market_impulse_probe_blocked_count"] = int(
+                                audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+                            ) + 1
+                            audit.record_count("same_symbol_reentry_cooldown_count", symbol=sym)
+                            router_decisions.append(
+                                {
+                                    **self._same_symbol_reentry_block_decision(sym, reentry_guard),
+                                    "market_impulse_probe": True,
+                                    "trend_buy_count": int(market_impulse_probe_context.get("trend_buy_count") or 0),
+                                    "btc_trend_score": market_impulse_probe_context.get("btc_trend_score"),
+                                    "trend_score": trend_score,
+                                }
+                            )
+                            audit.add_note(
+                                "Market impulse probe blocked by same-symbol reentry guard: "
+                                f"{sym} last_exit={reentry_guard.get('last_exit_reason')} "
+                                f"elapsed_hours={float(reentry_guard.get('elapsed_hours') or 0.0):.2f}"
                             )
                         continue
                     cooldown_until_ms = now_ms + probe_cooldown_hours * 3600 * 1000

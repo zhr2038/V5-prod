@@ -373,6 +373,16 @@ execution:
   protect_profit_lock_trailing_gap_bps: 60
   protect_profit_lock_strong_start_net_bps: 200
   protect_profit_lock_strong_trailing_gap_bps: 50
+  same_symbol_reentry_guard_enabled: true
+  same_symbol_reentry_cooldown_hours_after_profit_lock: 6
+  same_symbol_reentry_cooldown_hours_after_probe_stop: 8
+  same_symbol_reentry_cooldown_hours_after_probe_take_profit: 4
+  same_symbol_reentry_allow_breakout: true
+  same_symbol_reentry_breakout_above_last_high_bps: 20
+  same_symbol_reentry_breakout_above_exit_bps: 50
+  same_symbol_reentry_apply_to_market_impulse_probe: true
+  same_symbol_reentry_apply_to_btc_leadership_probe: true
+  same_symbol_reentry_apply_to_normal_entry: true
   negative_expectancy_fast_fail_market_aware: true
   negative_expectancy_fast_fail_bypass_when_market_impulse: true
   negative_expectancy_fast_fail_bypass_max_cycles: 1

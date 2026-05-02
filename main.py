@@ -557,6 +557,20 @@ PROTECT_PROFIT_LOCK_CONFIG_KEYS = (
 )
 
 
+SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS = (
+    "same_symbol_reentry_guard_enabled",
+    "same_symbol_reentry_cooldown_hours_after_profit_lock",
+    "same_symbol_reentry_cooldown_hours_after_probe_stop",
+    "same_symbol_reentry_cooldown_hours_after_probe_take_profit",
+    "same_symbol_reentry_allow_breakout",
+    "same_symbol_reentry_breakout_above_last_high_bps",
+    "same_symbol_reentry_breakout_above_exit_bps",
+    "same_symbol_reentry_apply_to_market_impulse_probe",
+    "same_symbol_reentry_apply_to_btc_leadership_probe",
+    "same_symbol_reentry_apply_to_normal_entry",
+)
+
+
 def _btc_leadership_probe_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     execution = getattr(cfg, "execution", None)
     return {
@@ -580,6 +594,15 @@ def _protect_profit_lock_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     return {
         key: getattr(execution, key)
         for key in PROTECT_PROFIT_LOCK_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
+def _same_symbol_reentry_guard_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS
         if hasattr(execution, key)
     }
 
@@ -779,6 +802,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             **_btc_leadership_probe_effective_config(cfg),
             **_probe_exit_effective_config(cfg),
             **_protect_profit_lock_effective_config(cfg),
+            **_same_symbol_reentry_guard_effective_config(cfg),
             **_negative_expectancy_release_effective_config(cfg),
         },
     }

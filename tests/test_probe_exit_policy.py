@@ -593,3 +593,39 @@ def test_probe_open_records_position_and_profit_state(tmp_path: Path) -> None:
     assert state["entry_px"] == 100.0
     assert state["target_w"] == 0.08
     assert state["highest_net_bps"] == 0.0
+
+
+def test_close_long_records_same_symbol_reentry_memory(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    store = PositionStore(path=str((tmp_path / "reports" / "positions.sqlite").resolve()))
+    store.upsert_buy("BTC/USDT", qty=1.0, px=100.0, tags={})
+    store.mark_position(
+        symbol="BTC/USDT",
+        now_ts="2026-04-25T07:00:00Z",
+        mark_px=102.0,
+        high_px=102.5,
+    )
+    engine = ExecutionEngine(cfg.execution, position_store=store, run_id="same-symbol-memory")
+    order = Order(
+        symbol="BTC/USDT",
+        side="sell",
+        intent="CLOSE_LONG",
+        notional_usdt=102.0,
+        signal_price=102.0,
+        meta={
+            "reason": "protect_profit_lock_trailing",
+            "exit_reason": "protect_profit_lock_trailing",
+            "highest_px_before_exit": 102.5,
+            "net_bps": 200.0,
+        },
+    )
+
+    engine.execute([order])
+
+    state_path = derive_runtime_named_json_path(cfg.execution.order_store_path, "same_symbol_reentry_exit_memory")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    rec = state["symbols"]["BTC/USDT"]
+    assert rec["exit_reason"] == "protect_profit_lock_trailing"
+    assert rec["exit_px"] == pytest.approx(102.0)
+    assert rec["highest_px_before_exit"] == pytest.approx(102.5)
+    assert rec["net_bps"] == pytest.approx(200.0)
