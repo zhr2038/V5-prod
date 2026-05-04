@@ -13,6 +13,7 @@
 - [风险控制](#风险控制)
 - [执行与订单管理](#执行与订单管理)
 - [诊断与可观测性](#诊断与可观测性)
+- [Web Dashboard](#web-dashboard)
 - [目录结构](#目录结构)
 - [环境准备](#环境准备)
 - [配置说明](#配置说明)
@@ -536,6 +537,258 @@ trades_roundtrips.csv
 
 ---
 
+## Web Dashboard
+
+V5 内置 Web Dashboard，用于把实盘运行状态、账户、成交、评分、K 线、系统健康和诊断信息集中展示。它不是独立交易系统，而是运行在 V5 工作区之上的可视化与观测入口。
+
+### 功能概览
+
+Dashboard 的主要目标是让运维和策略分析人员快速回答：
+
+```text
+系统现在是否健康？
+账户和 ledger 是否正常？
+当前是否有持仓？
+最近是否有成交？
+哪些币分数最高？
+哪些候选被 gate 拦住？
+当前 regime 是什么？
+风控是否处于 PROTECT / Risk-Off？
+probe 是否触发？
+ML / shadow / skipped label 是否有异常？
+```
+
+当前 Dashboard 覆盖：
+
+- 账户总览；
+- 交易历史；
+- 币种评分；
+- K 线图表；
+- 系统状态；
+- regime / vote history；
+- HMM 概率和衍生投票；
+- ML signal / shadow ML 面板；
+- 持仓聚焦 K 线；
+- Prometheus metrics；
+- health / ready / liveness 检查；
+- React SPA 或 legacy Jinja template 渲染模式。
+
+### 工作区与渲染模式
+
+Dashboard 会自动识别工作区：
+
+```text
+V5_WORKSPACE
+脚本所在仓库目录
+当前工作目录
+```
+
+它优先查找：
+
+```text
+web/templates/monitor_v2.html
+```
+
+并将工作区内的 `reports/`、`data/cache/`、`web/` 作为数据和前端资源来源。
+
+Dashboard 支持两种渲染模式：
+
+```text
+template / jinja / legacy
+react / spa / dist
+```
+
+可以通过环境变量切换：
+
+```bash
+export V5_DASHBOARD_RENDERER=template
+# 或
+export V5_DASHBOARD_RENDERER=react
+```
+
+React build 路径也可以通过环境变量指定：
+
+```bash
+export V5_DASHBOARD_DIST=/path/to/web/dist
+```
+
+如果没有指定，系统会尝试：
+
+```text
+web/dist
+dist
+frontend/dist
+```
+
+### Flask 后端
+
+Dashboard 使用 Flask 提供 HTTP 服务。后端会注册模板目录和静态文件目录：
+
+```text
+web/templates
+web/static
+```
+
+同时会给响应增加 no-cache header，避免移动端或浏览器缓存旧前端脚本，导致样式和图表不同步。
+
+### API 与页面能力
+
+Dashboard 页面和前端 JS 会读取多个 API 数据源，典型能力包括：
+
+- `GET /`：主监控页面；
+- `GET /metrics`：Prometheus 格式指标；
+- `/health`：健康检查；
+- `/ready`：ready check；
+- `/liveness`：liveness check；
+- `/api/...`：账户、持仓、评分、成交、K 线、ML、shadow、regime 等 JSON 数据接口；
+- 静态资源：`/static/...`；
+- React SPA fallback：非 API 路径可回退到 `index.html`。
+
+Dashboard 的测试覆盖了主页面关键 DOM 元素，例如：
+
+```text
+update-time
+health-content
+vote-history
+history-tooltip
+position-kline-chart
+position-kline-symbols
+position-kline-timeframes
+ml-impact-headline
+ml-impact-content
+```
+
+这说明 Dashboard 不只是简单静态页面，而是围绕实盘监控场景构建的交互式监控前端。
+
+### Prometheus 指标
+
+Dashboard 暴露：
+
+```text
+/metrics
+```
+
+用于输出 Prometheus 文本格式指标。若 metrics exporter 正常，返回类似：
+
+```text
+v5_metrics_exporter_up 1
+```
+
+如果 exporter 导入或执行失败，会返回：
+
+```text
+v5_metrics_exporter_up 0
+```
+
+这可以被 Prometheus、Grafana 或其他监控系统采集。
+
+### 健康检查
+
+Dashboard 会尝试注册健康检查蓝图：
+
+```text
+/health
+/ready
+/liveness
+```
+
+这些接口用于区分：
+
+- 服务是否存活；
+- 是否可以对外提供服务；
+- 是否满足部署或探针条件。
+
+### 缓存策略
+
+Dashboard 后端有两层缓存：
+
+1. **请求内缓存**  
+   同一个请求上下文中，多次调用同一个 API 函数会复用结果。
+
+2. **路由级短 TTL 缓存**  
+   例如 Dashboard 视图会根据 `view` 参数使用不同 TTL：
+
+   ```text
+   primary: 8 秒
+   deferred: 20 秒
+   full: 10 秒
+   ```
+
+这能减少 Dashboard 刷新时对 sqlite、reports、OKX public ticker 和系统状态文件的重复读取。
+
+### 安全设计
+
+Dashboard 有几项安全/稳健性设计：
+
+- 错误响应会隐藏 traceback；
+- 错误响应会避免泄露本地路径；
+- API 未知路径不会被 SPA fallback 吞掉；
+- 静态文件路径会防止 path traversal；
+- 响应中启用 no-cache，减少旧资源缓存造成的误判；
+- 敏感环境变量不应通过 Dashboard 暴露；
+- Dashboard 只应部署在可信网络、VPN、内网或受控反向代理后。
+
+### 建议部署方式
+
+开发或本地查看可以直接运行：
+
+```bash
+python scripts/web_dashboard.py
+```
+
+生产建议使用 systemd、反向代理或内网访问控制。例如：
+
+```text
+v5-dashboard.service
+nginx / caddy reverse proxy
+VPN / Tailscale / WireGuard
+basic auth 或内网白名单
+```
+
+建议不要将 Dashboard 裸露在公网，尤其是在系统连接真实交易所账户时。
+
+### 运维检查清单
+
+打开 Dashboard 后，建议优先检查：
+
+```text
+1. health / ready / liveness 是否正常；
+2. kill_switch 是否 false；
+3. reconcile_status 是否 ok；
+4. ledger_status 是否 ok；
+5. 当前是否有非 dust 持仓；
+6. 最近 24h 是否有成交；
+7. 最新 selected / router decision 是什么；
+8. 当前是否处于 PROTECT / Risk-Off；
+9. 当前 high-score blocked target 是否集中在某个 symbol；
+10. probe 是否触发、是否成交、是否被 stop-loss / time-stop；
+11. skipped label 是否正常补 4h / 8h / 12h / 24h；
+12. negative expectancy 是否与 roundtrip summary 一致；
+13. config runtime consumption audit 是否出现 configured_not_consumed。
+```
+
+### Dashboard 与 follow-up bundle 的关系
+
+Dashboard 适合实时查看；follow-up bundle 适合离线分析。
+
+两者的关系可以理解为：
+
+```text
+Dashboard = 当前状态和近期运行的在线视图
+follow-up bundle = 可审计、可复盘、可交给专家分析的离线证据包
+```
+
+如果 Dashboard 和 follow-up bundle 结论不一致，应优先检查：
+
+- 采样窗口是否一致；
+- Dashboard 缓存是否过期；
+- runtime config path 是否一致；
+- reports path 是否一致；
+- service 是否读取同一个工作区；
+- 是否存在 stale state 或旧 run 混入。
+
+---
+
 ## 目录结构
 
 典型结构如下：
@@ -566,11 +819,16 @@ trades_roundtrips.csv
 │   ├── research/
 │   └── risk/
 ├── scripts/
+│   ├── web_dashboard.py
 │   ├── generate_v5_bundle_remote.sh
 │   ├── health_check.py
 │   ├── reconcile_with_retry.py
 │   ├── fill_sync.py
 │   └── ...
+├── web/
+│   ├── templates/
+│   ├── static/
+│   └── dist/        # 可选 React build 输出
 ├── tests/
 │   ├── test_probe_exit_policy.py
 │   ├── test_market_impulse_probe.py
@@ -701,6 +959,38 @@ V5_LIVE_ARM = YES
 账户无借币 / 负债风险
 ```
 
+### Web Dashboard
+
+可以通过 Flask Dashboard 查看账户、评分、K 线、系统状态和诊断信息：
+
+```bash
+python scripts/web_dashboard.py
+```
+
+常见环境变量：
+
+```bash
+export V5_WORKSPACE=/home/ubuntu/clawd/v5-prod
+export V5_DASHBOARD_RENDERER=template   # 或 react
+export V5_DASHBOARD_DIST=/home/ubuntu/clawd/v5-prod/web/dist
+```
+
+Prometheus 指标入口：
+
+```text
+/metrics
+```
+
+健康检查入口：
+
+```text
+/health
+/ready
+/liveness
+```
+
+生产环境建议放在内网、VPN 或反向代理鉴权之后，不建议直接暴露公网。
+
 ### 诊断打包
 
 项目提供 follow-up bundle 打包脚本，用于把最近运行证据打包成可离线分析的压缩包：
@@ -747,6 +1037,7 @@ pytest tests/test_protect_entry_gate.py
 pytest tests/test_skipped_candidate_tracker.py
 pytest tests/test_alt_impulse_shadow.py
 pytest tests/test_backtest_cost_alignment.py
+pytest tests/test_web_dashboard.py
 ```
 
 如果改动 live execution 或风控逻辑，还应补充：
