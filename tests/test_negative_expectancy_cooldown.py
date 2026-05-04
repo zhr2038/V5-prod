@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -49,6 +51,31 @@ def _write_round_trip(
                 fee_ccy="USDT",
             ),
         ]
+    )
+
+
+def _ts_ms(raw: str) -> int:
+    return int(datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp() * 1000)
+
+
+def _fill(
+    *,
+    trade_id: str,
+    ts: str,
+    side: str,
+    px: float,
+    qty: float,
+    fee: float = 0.0,
+) -> FillRow:
+    return FillRow(
+        inst_id="BTC-USDT",
+        trade_id=trade_id,
+        ts_ms=_ts_ms(ts),
+        side=side,
+        fill_px=str(px),
+        fill_sz=str(qty),
+        fee=str(fee),
+        fee_ccy="USDT",
     )
 
 
@@ -107,6 +134,261 @@ def test_negative_expectancy_prefers_net_bps_from_fills_with_fee_conversion(tmp_
     blocked = cooldown.is_blocked("BTC/USDT")
     assert blocked is not None
     assert blocked["metric_used"] == "net_expectancy_bps"
+
+
+def test_negative_expectancy_includes_cycle_when_entry_before_lookback_but_close_inside(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fills_path = tmp_path / "reports" / "fills.sqlite"
+    orders_path = tmp_path / "reports" / "orders.sqlite"
+    state_path = tmp_path / "reports" / "negative_expectancy_state.json"
+    store = FillStore(path=str(fills_path))
+    store.upsert_many(
+        [
+            _fill(
+                trade_id="btc-normal-buy",
+                ts="2026-04-30T20:00:00Z",
+                side="buy",
+                px=76412.1,
+                qty=0.00020939,
+                fee=-0.01645,
+            ),
+            _fill(
+                trade_id="btc-normal-sell",
+                ts="2026-05-01T15:00:00Z",
+                side="sell",
+                px=78271.7,
+                qty=0.00020939,
+                fee=-0.01645,
+            ),
+            _fill(
+                trade_id="btc-probe-loss-buy",
+                ts="2026-05-01T17:00:00Z",
+                side="buy",
+                px=78277.4,
+                qty=0.00013414,
+                fee=-0.0105,
+            ),
+            _fill(
+                trade_id="btc-probe-loss-sell",
+                ts="2026-05-01T21:00:00Z",
+                side="sell",
+                px=77880.1,
+                qty=0.00013414,
+                fee=-0.0105,
+            ),
+            _fill(
+                trade_id="btc-zero-close-buy",
+                ts="2026-05-03T21:00:00Z",
+                side="buy",
+                px=78914.8,
+                qty=0.00013306,
+                fee=-0.0105,
+            ),
+            _fill(
+                trade_id="btc-zero-close-sell",
+                ts="2026-05-03T22:00:00Z",
+                side="sell",
+                px=78978.7,
+                qty=0.00013306,
+                fee=-0.0105,
+            ),
+        ]
+    )
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "btc-window-fp",
+                "release_start_ts": _ts_ms("2026-04-30T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-03T22:30:00Z") / 1000.0,
+    )
+    summaries_dir = tmp_path / "reports" / "summaries"
+    summaries_dir.mkdir(parents=True, exist_ok=True)
+    summaries_dir.joinpath("trades_roundtrips.csv").write_text(
+        "\n".join(
+            [
+                "open_time_utc,close_time_utc,symbol,qty,entry_px,exit_px,net_pnl_usdt,net_bps",
+                "2026-04-30T20:00:00Z,2026-05-01T15:00:00Z,BTC/USDT,0.00020939,76412.1,78271.7,0.3566,222.9",
+                "2026-05-01T17:00:00Z,2026-05-01T21:00:00Z,BTC/USDT,0.00013414,78277.4,77880.1,-0.0743,-70.8",
+                "2026-05-03T21:00:00Z,2026-05-03T22:00:00Z,BTC/USDT,0.00013306,78914.8,78978.7,-0.0125,-11.9",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(orders_path),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=360,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BTC/USDT"], config_fingerprint="btc-window-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["BTC/USDT"]
+
+    assert stats["lookback_filter_mode"] == "close_ts"
+    assert stats["closed_cycles"] == 3
+    assert stats["closed_cycles_included_by_close_ts"] == 3
+    assert stats["closed_cycles_with_entry_before_window"] == 1
+    assert stats["missing_entry_leg_count"] == 0
+    assert stats["net_pnl_sum_usdt"] == pytest.approx(0.2698, abs=0.01)
+    assert stats["net_pnl_sum_usdt"] > 0.20
+    assert stats["net_expectancy_bps"] > 0.0
+    assert stats["roundtrip_summary_net_bps"] > 0.0
+    assert abs(stats["mismatch_bps"]) < 5.0
+    assert state["negative_expectancy_net_bps"] == pytest.approx(stats["net_expectancy_bps"])
+    assert state["roundtrip_summary_net_bps"] == pytest.approx(stats["roundtrip_summary_net_bps"])
+    assert state["mismatch_bps"] == pytest.approx(stats["mismatch_bps"])
+    assert "negative_expectancy_roundtrip_mismatch" not in "; ".join(state["warnings"])
+
+
+def test_negative_expectancy_missing_entry_close_is_degraded_not_negative(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fills_path = tmp_path / "fills.sqlite"
+    state_path = tmp_path / "negative_expectancy_state.json"
+    FillStore(path=str(fills_path)).upsert_many(
+        [
+            _fill(
+                trade_id="btc-sell-without-entry",
+                ts="2026-05-01T15:00:00Z",
+                side="sell",
+                px=78271.7,
+                qty=0.00020939,
+                fee=-0.01645,
+            )
+        ]
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "missing-entry-fp",
+                "release_start_ts": _ts_ms("2026-04-30T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-01T16:00:00Z") / 1000.0,
+    )
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(tmp_path / "orders.sqlite"),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BTC/USDT"], config_fingerprint="missing-entry-fp")
+
+    with caplog.at_level(logging.WARNING, logger="src.risk.negative_expectancy_cooldown"):
+        state = cooldown.refresh(force=True)
+
+    stats = state["stats"]["BTC/USDT"]
+    assert stats["closed_cycles"] == 0
+    assert stats["missing_entry_leg_count"] == 1
+    assert stats["net_pnl_sum_usdt"] == 0.0
+    assert stats["degraded"] is True
+    assert cooldown.is_blocked("BTC/USDT") is None
+    assert any("missing_entry_leg_for_close_cycle" in item for item in state["warnings"])
+    assert any("missing_entry_leg_for_close_cycle" in record.getMessage() for record in caplog.records)
+
+
+def test_negative_expectancy_orders_fallback_filters_by_close_ts_not_entry_ts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orders_path = tmp_path / "orders.sqlite"
+    state_path = tmp_path / "negative_expectancy_state.json"
+    conn = sqlite3.connect(str(orders_path))
+    conn.execute(
+        """
+        CREATE TABLE orders (
+            inst_id TEXT,
+            side TEXT,
+            state TEXT,
+            acc_fill_sz REAL,
+            avg_px REAL,
+            fee REAL,
+            created_ts INTEGER,
+            updated_ts INTEGER
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO orders(inst_id, side, state, acc_fill_sz, avg_px, fee, created_ts, updated_ts) VALUES (?,?,?,?,?,?,?,?)",
+        [
+            ("BTC-USDT", "buy", "FILLED", 1.0, 100.0, 0.0, _ts_ms("2026-04-30T20:00:00Z"), 0),
+            ("BTC-USDT", "sell", "FILLED", 1.0, 102.0, 0.0, _ts_ms("2026-05-01T15:00:00Z"), 0),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "orders-close-ts-fp",
+                "release_start_ts": _ts_ms("2026-04-30T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-03T22:30:00Z") / 1000.0,
+    )
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=1,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(orders_path),
+            fills_db_path=str(tmp_path / "fills.sqlite"),
+            prefer_net_from_fills=False,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BTC/USDT"], config_fingerprint="orders-close-ts-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["BTC/USDT"]
+
+    assert stats["source"] == "orders"
+    assert stats["lookback_filter_mode"] == "close_ts"
+    assert stats["closed_cycles"] == 1
+    assert stats["closed_cycles_with_entry_before_window"] == 1
+    assert stats["net_pnl_sum_usdt"] == pytest.approx(2.0)
+    assert stats["net_expectancy_bps"] == pytest.approx(200.0)
 
 
 def test_negative_expectancy_scope_filters_to_whitelist_positions_and_managed_symbols(tmp_path: Path) -> None:

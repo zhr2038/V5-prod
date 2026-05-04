@@ -206,6 +206,14 @@ def test_negative_expectancy_refresh_writes_release_start_to_decision_audit(tmp_
                 "release_start_ts": 1_776_000_000_000,
                 "release_start_ts_status": "ok",
                 "warnings": [],
+                "lookback_filter_mode": "close_ts",
+                "roundtrip_sanity": {
+                    "BTC/USDT": {
+                        "negative_expectancy_net_bps": 73.0,
+                        "roundtrip_summary_net_bps": 72.5,
+                        "mismatch_bps": 0.5,
+                    }
+                },
                 "symbols": {},
                 "stats": {},
                 "scope_symbols": ["BTC/USDT"],
@@ -223,6 +231,10 @@ def test_negative_expectancy_refresh_writes_release_start_to_decision_audit(tmp_
     assert audit.negative_expectancy_state["config_fingerprint"] == "scope-fp"
     assert audit.negative_expectancy_state["release_start_ts"] == 1_776_000_000_000
     assert audit.negative_expectancy_state["release_start_ts_status"] == "ok"
+    assert audit.negative_expectancy_state["lookback_filter_mode"] == "close_ts"
+    assert audit.negative_expectancy_state["negative_expectancy_net_bps"] == pytest.approx(73.0)
+    assert audit.negative_expectancy_state["roundtrip_summary_net_bps"] == pytest.approx(72.5)
+    assert audit.negative_expectancy_state["mismatch_bps"] == pytest.approx(0.5)
     assert any("release_start_ts=1776000000000" in note for note in audit.notes)
 
 

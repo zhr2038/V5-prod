@@ -1,10 +1,12 @@
 
+import csv
 import json
 import logging
 import sqlite3
 import time
 import hashlib
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, Iterable, Set
 
@@ -256,6 +258,23 @@ class NegativeExpectancyCooldown:
         return float(0.0 - fee_val)
 
     @staticmethod
+    def _empty_expectancy_accumulator() -> Dict[str, float]:
+        return {
+            "gross_pnl_sum_usdt": 0.0,
+            "net_pnl_sum_usdt": 0.0,
+            "closed_cycles": 0.0,
+            "closed_notional_usdt": 0.0,
+            "fast_fail_gross_pnl_sum_usdt": 0.0,
+            "fast_fail_net_pnl_sum_usdt": 0.0,
+            "fast_fail_closed_cycles": 0.0,
+            "fast_fail_closed_notional_usdt": 0.0,
+            "fast_fail_hold_minutes_sum": 0.0,
+            "closed_cycles_included_by_close_ts": 0.0,
+            "closed_cycles_with_entry_before_window": 0.0,
+            "missing_entry_leg_count": 0.0,
+        }
+
+    @staticmethod
     def _build_expectancy_row(
         *,
         gross_pnl_sum_usdt: float,
@@ -270,9 +289,18 @@ class NegativeExpectancyCooldown:
         source: str,
         degraded_fee_model: bool = False,
         degraded_reason: str = "",
+        closed_cycles_included_by_close_ts: float = 0.0,
+        closed_cycles_with_entry_before_window: float = 0.0,
+        missing_entry_leg_count: float = 0.0,
+        lookback_filter_mode: str = "close_ts",
     ) -> Dict[str, Any]:
         n = int(closed_cycles or 0)
         ff_n = int(fast_fail_closed_cycles or 0)
+        missing_n = int(missing_entry_leg_count or 0)
+        degraded_reasons = [str(degraded_reason or "").strip()] if str(degraded_reason or "").strip() else []
+        if missing_n > 0:
+            degraded_reasons.append("missing_entry_leg_for_close_cycle")
+        degraded_reason_out = "; ".join(dict.fromkeys(degraded_reasons))
         gross_expectancy_usdt = float(gross_pnl_sum_usdt) / n if n > 0 else 0.0
         net_expectancy_usdt = float(net_pnl_sum_usdt) / n if n > 0 else 0.0
         gross_expectancy_bps = (
@@ -301,7 +329,12 @@ class NegativeExpectancyCooldown:
         return {
             "source": source,
             "degraded_fee_model": bool(degraded_fee_model),
-            "degraded_reason": str(degraded_reason or ""),
+            "degraded": bool(degraded_fee_model or degraded_reason_out),
+            "degraded_reason": degraded_reason_out,
+            "lookback_filter_mode": str(lookback_filter_mode or "close_ts"),
+            "closed_cycles_included_by_close_ts": int(closed_cycles_included_by_close_ts or n),
+            "closed_cycles_with_entry_before_window": int(closed_cycles_with_entry_before_window or 0),
+            "missing_entry_leg_count": missing_n,
             "closed_cycles": n,
             "closed_notional_usdt": float(closed_notional_usdt),
             "gross_pnl_sum_usdt": float(gross_pnl_sum_usdt),
@@ -347,12 +380,10 @@ class NegativeExpectancyCooldown:
                 """
                 SELECT inst_id, side, fill_px, fill_sz, fee, fee_ccy, ts_ms
                 FROM fills
-                WHERE ts_ms >= ?
-                  AND fill_px IS NOT NULL
+                WHERE fill_px IS NOT NULL
                   AND fill_sz IS NOT NULL
                 ORDER BY inst_id ASC, ts_ms ASC, trade_id ASC
                 """,
-                (since_ms,),
             ).fetchall()
         except Exception:
             return {}
@@ -389,20 +420,6 @@ class NegativeExpectancyCooldown:
             )
 
             inv_lots.setdefault(sym, [])
-            by_symbol.setdefault(
-                sym,
-                {
-                    "gross_pnl_sum_usdt": 0.0,
-                    "net_pnl_sum_usdt": 0.0,
-                    "closed_cycles": 0.0,
-                    "closed_notional_usdt": 0.0,
-                    "fast_fail_gross_pnl_sum_usdt": 0.0,
-                    "fast_fail_net_pnl_sum_usdt": 0.0,
-                    "fast_fail_closed_cycles": 0.0,
-                    "fast_fail_closed_notional_usdt": 0.0,
-                    "fast_fail_hold_minutes_sum": 0.0,
-                },
-            )
 
             if side == "buy":
                 inv_lots[sym].append(
@@ -417,6 +434,7 @@ class NegativeExpectancyCooldown:
 
             remaining = qty
             sell_fee_remaining = float(fee_cost_usdt)
+            matched_any = False
             while remaining > 1e-12 and inv_lots[sym]:
                 lot = inv_lots[sym][0]
                 lot_qty = float(lot.get("qty") or 0.0)
@@ -433,18 +451,23 @@ class NegativeExpectancyCooldown:
 
                 gross_pnl = sell_notional - buy_notional
                 net_pnl = gross_pnl - buy_fee_alloc - sell_fee_alloc
-                by_symbol[sym]["closed_cycles"] += 1.0
-                by_symbol[sym]["gross_pnl_sum_usdt"] += float(gross_pnl)
-                by_symbol[sym]["net_pnl_sum_usdt"] += float(net_pnl)
-                by_symbol[sym]["closed_notional_usdt"] += float(buy_notional)
-
                 hold_ms = max(0.0, float(event_ts) - float(lot.get("ts") or event_ts))
-                if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
-                    by_symbol[sym]["fast_fail_closed_cycles"] += 1.0
-                    by_symbol[sym]["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
-                    by_symbol[sym]["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
-                    by_symbol[sym]["fast_fail_closed_notional_usdt"] += float(buy_notional)
-                    by_symbol[sym]["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+                if event_ts >= int(since_ms):
+                    matched_any = True
+                    st = by_symbol.setdefault(sym, self._empty_expectancy_accumulator())
+                    st["closed_cycles"] += 1.0
+                    st["closed_cycles_included_by_close_ts"] += 1.0
+                    if float(lot.get("ts") or 0.0) < float(since_ms):
+                        st["closed_cycles_with_entry_before_window"] += 1.0
+                    st["gross_pnl_sum_usdt"] += float(gross_pnl)
+                    st["net_pnl_sum_usdt"] += float(net_pnl)
+                    st["closed_notional_usdt"] += float(buy_notional)
+                    if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
+                        st["fast_fail_closed_cycles"] += 1.0
+                        st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
+                        st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
+                        st["fast_fail_closed_notional_usdt"] += float(buy_notional)
+                        st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
 
                 remaining = max(0.0, remaining - close_qty)
                 sell_fee_remaining = float(sell_fee_remaining - sell_fee_alloc)
@@ -455,6 +478,16 @@ class NegativeExpectancyCooldown:
                 else:
                     lot["qty"] = left_qty
                     lot["fee_cost_usdt_remaining"] = left_buy_fee
+            if event_ts >= int(since_ms) and remaining > 1e-12 and not inv_lots[sym]:
+                st = by_symbol.setdefault(sym, self._empty_expectancy_accumulator())
+                st["missing_entry_leg_count"] += 1.0
+                if not matched_any:
+                    logger.warning(
+                        "NegativeExpectancy missing_entry_leg_for_close_cycle: source=fills symbol=%s close_ts_ms=%s qty=%s",
+                        sym,
+                        event_ts,
+                        qty,
+                    )
 
         out: Dict[str, Dict[str, Any]] = {}
         for sym, st in by_symbol.items():
@@ -469,6 +502,10 @@ class NegativeExpectancyCooldown:
                 fast_fail_closed_notional_usdt=float(st.get("fast_fail_closed_notional_usdt") or 0.0),
                 fast_fail_hold_minutes_sum=float(st.get("fast_fail_hold_minutes_sum") or 0.0),
                 source="fills",
+                closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
+                closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
+                missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
+                lookback_filter_mode="close_ts",
             )
         return out
 
@@ -506,11 +543,11 @@ class NegativeExpectancyCooldown:
             sql = (
                 f"SELECT inst_id, side, state, acc_fill_sz, avg_px, fee, {event_ts_expr} AS event_ts "
                 "FROM orders "
-                f"WHERE state='FILLED' AND {event_ts_expr} >= ? "
+                "WHERE state='FILLED' "
                 "AND acc_fill_sz IS NOT NULL AND avg_px IS NOT NULL "
                 f"ORDER BY inst_id, {event_ts_expr} ASC"
             )
-            rows = conn.execute(sql, (since_ms,)).fetchall()
+            rows = conn.execute(sql).fetchall()
         except Exception:
             return {}
         finally:
@@ -540,20 +577,6 @@ class NegativeExpectancyCooldown:
             fee_cost_usdt = self._orders_fee_to_usdt_best_effort(fee=r["fee"])
 
             inv_lots.setdefault(sym, [])
-            by_symbol.setdefault(
-                sym,
-                {
-                    "gross_pnl_sum_usdt": 0.0,
-                    "net_pnl_sum_usdt": 0.0,
-                    "closed_cycles": 0.0,
-                    "closed_notional_usdt": 0.0,
-                    "fast_fail_gross_pnl_sum_usdt": 0.0,
-                    "fast_fail_net_pnl_sum_usdt": 0.0,
-                    "fast_fail_closed_cycles": 0.0,
-                    "fast_fail_closed_notional_usdt": 0.0,
-                    "fast_fail_hold_minutes_sum": 0.0,
-                },
-            )
 
             if side == "buy":
                 inv_lots[sym].append(
@@ -568,6 +591,7 @@ class NegativeExpectancyCooldown:
 
             remaining = qty
             sell_fee_remaining = float(fee_cost_usdt)
+            matched_any = False
             while remaining > 1e-12 and inv_lots[sym]:
                 lot = inv_lots[sym][0]
                 lot_qty = float(lot.get("qty") or 0.0)
@@ -584,18 +608,23 @@ class NegativeExpectancyCooldown:
 
                 gross_pnl = sell_notional - buy_notional
                 net_pnl = gross_pnl - buy_fee_alloc - sell_fee_alloc
-                by_symbol[sym]["closed_cycles"] += 1.0
-                by_symbol[sym]["gross_pnl_sum_usdt"] += float(gross_pnl)
-                by_symbol[sym]["net_pnl_sum_usdt"] += float(net_pnl)
-                by_symbol[sym]["closed_notional_usdt"] += float(buy_notional)
-
                 hold_ms = max(0.0, float(event_ts) - float(lot.get("ts") or event_ts))
-                if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
-                    by_symbol[sym]["fast_fail_closed_cycles"] += 1.0
-                    by_symbol[sym]["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
-                    by_symbol[sym]["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
-                    by_symbol[sym]["fast_fail_closed_notional_usdt"] += float(buy_notional)
-                    by_symbol[sym]["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+                if event_ts >= int(since_ms):
+                    matched_any = True
+                    st = by_symbol.setdefault(sym, self._empty_expectancy_accumulator())
+                    st["closed_cycles"] += 1.0
+                    st["closed_cycles_included_by_close_ts"] += 1.0
+                    if float(lot.get("ts") or 0.0) < float(since_ms):
+                        st["closed_cycles_with_entry_before_window"] += 1.0
+                    st["gross_pnl_sum_usdt"] += float(gross_pnl)
+                    st["net_pnl_sum_usdt"] += float(net_pnl)
+                    st["closed_notional_usdt"] += float(buy_notional)
+                    if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
+                        st["fast_fail_closed_cycles"] += 1.0
+                        st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
+                        st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
+                        st["fast_fail_closed_notional_usdt"] += float(buy_notional)
+                        st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
 
                 remaining = max(0.0, remaining - close_qty)
                 sell_fee_remaining = float(sell_fee_remaining - sell_fee_alloc)
@@ -606,6 +635,16 @@ class NegativeExpectancyCooldown:
                 else:
                     lot["qty"] = left_qty
                     lot["fee_cost_usdt_remaining"] = left_buy_fee
+            if event_ts >= int(since_ms) and remaining > 1e-12 and not inv_lots[sym]:
+                st = by_symbol.setdefault(sym, self._empty_expectancy_accumulator())
+                st["missing_entry_leg_count"] += 1.0
+                if not matched_any:
+                    logger.warning(
+                        "NegativeExpectancy missing_entry_leg_for_close_cycle: source=orders symbol=%s close_ts_ms=%s qty=%s",
+                        sym,
+                        event_ts,
+                        qty,
+                    )
 
         out: Dict[str, Dict[str, Any]] = {}
         for sym, st in by_symbol.items():
@@ -622,6 +661,10 @@ class NegativeExpectancyCooldown:
                 source="orders",
                 degraded_fee_model=True,
                 degraded_reason="orders.sqlite fallback assumes orders.fee is quote/USDT-denominated signed fee",
+                closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
+                closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
+                missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
+                lookback_filter_mode="close_ts",
             )
         return out
 
@@ -652,6 +695,85 @@ class NegativeExpectancyCooldown:
             since_ms=since_ms,
             allowed_symbols=allowed_symbols,
         )
+
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
+        try:
+            if value is None or str(value).strip() == "":
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _coerce_iso_ms(value: Any) -> Optional[int]:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.astimezone(timezone.utc).timestamp() * 1000)
+        except Exception:
+            return None
+
+    def _roundtrip_summary_path_candidates(self) -> list[Path]:
+        orders_parent = Path(self.cfg.orders_db_path).parent
+        return [
+            orders_parent / "summaries" / "trades_roundtrips.csv",
+            PROJECT_ROOT / "reports" / "summaries" / "trades_roundtrips.csv",
+        ]
+
+    def _roundtrip_summary_by_symbol(self, *, since_ms: int) -> Dict[str, Dict[str, float]]:
+        path = next((p for p in self._roundtrip_summary_path_candidates() if p.exists()), None)
+        if path is None:
+            return {}
+        by_symbol: Dict[str, Dict[str, float]] = {}
+        try:
+            with path.open("r", encoding="utf-8", newline="") as fh:
+                for row in csv.DictReader(fh):
+                    sym = self._norm_symbol(str(row.get("symbol") or "").strip())
+                    if not sym:
+                        continue
+                    close_ms = self._coerce_iso_ms(row.get("close_time_utc") or row.get("exit_ts"))
+                    if close_ms is None or int(close_ms) < int(since_ms):
+                        continue
+                    net_pnl = self._coerce_float(row.get("net_pnl_usdt"))
+                    if net_pnl is None:
+                        continue
+                    qty = self._coerce_float(row.get("qty"))
+                    entry_px = self._coerce_float(row.get("entry_px"))
+                    notional = (float(qty) * float(entry_px)) if qty and entry_px else None
+                    if notional is None or notional <= 0:
+                        net_bps = self._coerce_float(row.get("net_bps"))
+                        if net_bps is not None and abs(float(net_bps)) > 1e-12:
+                            notional = abs(float(net_pnl) / float(net_bps) * 10000.0)
+                    if notional is None or notional <= 0:
+                        continue
+                    st = by_symbol.setdefault(
+                        sym,
+                        {
+                            "roundtrip_summary_net_pnl_usdt": 0.0,
+                            "roundtrip_summary_closed_notional_usdt": 0.0,
+                            "roundtrip_summary_closed_cycles": 0.0,
+                        },
+                    )
+                    st["roundtrip_summary_net_pnl_usdt"] += float(net_pnl)
+                    st["roundtrip_summary_closed_notional_usdt"] += float(notional)
+                    st["roundtrip_summary_closed_cycles"] += 1.0
+        except Exception:
+            return {}
+        for st in by_symbol.values():
+            notional = float(st.get("roundtrip_summary_closed_notional_usdt") or 0.0)
+            st["roundtrip_summary_net_bps"] = (
+                float(st.get("roundtrip_summary_net_pnl_usdt") or 0.0) / notional * 10000.0
+                if notional > 1e-12
+                else 0.0
+            )
+        return by_symbol
 
     def refresh(self, force: bool = False) -> Dict[str, Any]:
         if not self.cfg.enabled:
@@ -738,6 +860,39 @@ class NegativeExpectancyCooldown:
             since_ms=since_ms,
             allowed_symbols=self._scope_symbols,
         )
+        roundtrip_summary = self._roundtrip_summary_by_symbol(since_ms=since_ms)
+        roundtrip_sanity: Dict[str, Dict[str, Any]] = {}
+        for sym, st in stats.items():
+            missing_entry_count = int((st or {}).get("missing_entry_leg_count") or 0)
+            if missing_entry_count > 0:
+                warnings.append(
+                    self._release_warning(
+                        "missing_entry_leg_for_close_cycle",
+                        f"{sym} count={missing_entry_count}",
+                    )
+                )
+            summary = roundtrip_summary.get(sym)
+            if not summary:
+                continue
+            neg_net_bps = float((st or {}).get("net_expectancy_bps") or 0.0)
+            summary_net_bps = float(summary.get("roundtrip_summary_net_bps") or 0.0)
+            mismatch_bps = float(neg_net_bps - summary_net_bps)
+            sanity = {
+                "negative_expectancy_net_bps": float(neg_net_bps),
+                "roundtrip_summary_net_bps": float(summary_net_bps),
+                "mismatch_bps": float(mismatch_bps),
+                "roundtrip_summary_net_pnl_usdt": float(summary.get("roundtrip_summary_net_pnl_usdt") or 0.0),
+                "roundtrip_summary_closed_cycles": int(summary.get("roundtrip_summary_closed_cycles") or 0),
+            }
+            roundtrip_sanity[sym] = sanity
+            st.update(sanity)
+            if abs(mismatch_bps) > 50.0:
+                warnings.append(
+                    self._release_warning(
+                        "negative_expectancy_roundtrip_mismatch",
+                        f"{sym} mismatch_bps={mismatch_bps:.2f} negative_expectancy_net_bps={neg_net_bps:.2f} roundtrip_summary_net_bps={summary_net_bps:.2f}",
+                    )
+                )
 
         min_cycles = int(self.cfg.min_closed_cycles)
         exp_th_usdt = float(self.cfg.expectancy_threshold_usdt)
@@ -793,6 +948,8 @@ class NegativeExpectancyCooldown:
                     "updated_ts_ms": now_ms,
                 }
 
+        first_sanity = next(iter(roundtrip_sanity.values()), None)
+
         self._cache = {
             "updated_ts_ms": now_ms,
             "lookback_hours": int(self.cfg.lookback_hours),
@@ -807,6 +964,15 @@ class NegativeExpectancyCooldown:
             "release_start_ts": release_start_ts_out,
             "release_start_ts_status": release_start_ts_status,
             "warnings": warnings,
+            "lookback_filter_mode": "close_ts",
+            "roundtrip_sanity": roundtrip_sanity,
+            "negative_expectancy_net_bps": (
+                first_sanity.get("negative_expectancy_net_bps") if isinstance(first_sanity, dict) else None
+            ),
+            "roundtrip_summary_net_bps": (
+                first_sanity.get("roundtrip_summary_net_bps") if isinstance(first_sanity, dict) else None
+            ),
+            "mismatch_bps": first_sanity.get("mismatch_bps") if isinstance(first_sanity, dict) else None,
             "whitelist_symbols": list(self._scope_metadata.get("whitelist_symbols") or []),
             "managed_symbols": list(self._scope_metadata.get("managed_symbols") or []),
             "scope_symbols": list(self._scope_metadata.get("scope_symbols") or []),

@@ -2051,10 +2051,21 @@ class V5Pipeline:
                     "release_start_ts": release_start_ts,
                     "release_start_ts_status": str(state.get("release_start_ts_status") or ""),
                     "release_start_ts_warning": "; ".join(release_warnings),
+                    "lookback_filter_mode": str(state.get("lookback_filter_mode") or ""),
+                    "roundtrip_sanity": dict(state.get("roundtrip_sanity") or {}),
                     "state_path": str(getattr(self.negative_expectancy_cooldown.cfg, "state_path", "") or ""),
                     "stats_count": stats_n,
                     "cooldown_active_count": blocked_n,
                 }
+                first_sanity = next(iter((state.get("roundtrip_sanity") or {}).values()), None)
+                if isinstance(first_sanity, dict):
+                    audit.negative_expectancy_state.update(
+                        {
+                            "negative_expectancy_net_bps": first_sanity.get("negative_expectancy_net_bps"),
+                            "roundtrip_summary_net_bps": first_sanity.get("roundtrip_summary_net_bps"),
+                            "mismatch_bps": first_sanity.get("mismatch_bps"),
+                        }
+                    )
                 audit.add_note(
                     "NegativeExpectancy refresh: "
                     f"stats={stats_n}, cooldown_active={blocked_n}, "
