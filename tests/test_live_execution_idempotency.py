@@ -703,6 +703,164 @@ def test_entry_guard_respects_zero_max_spread_bps() -> None:
             )
 
 
+def test_entry_guard_blocks_open_long_buy_when_quote_missing() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            open_long_entry_guard_enabled=True,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("src.execution.live_execution_engine._public_mid_at_submit", lambda **kwargs: None)
+            result = eng.place(
+                Order(
+                    symbol="BTC/USDT",
+                    side="buy",
+                    intent="OPEN_LONG",
+                    notional_usdt=10.0,
+                    signal_price=100.0,
+                    meta={"decision_hash": "guard-missing-quote-buy"},
+                )
+            )
+
+        row = store.get(result.cl_ord_id)
+        req = json.loads(row.req_json)
+        meta = req["_v5_order_meta"]
+
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
+        assert row.last_error_code == "open_long_entry_guard_quote_unavailable"
+        assert meta["open_long_entry_guard_quote_available"] is False
+        assert meta["fail_open_buy"] is False
+        assert meta["fail_open_sell"] is True
+        assert meta["decision"] == "block_quote_unavailable"
+
+
+def test_entry_guard_allows_close_long_sell_when_quote_missing() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            open_long_entry_guard_enabled=True,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        order = Order(
+            symbol="BTC/USDT",
+            side="sell",
+            intent="CLOSE_LONG",
+            notional_usdt=10.0,
+            signal_price=100.0,
+            meta={"decision_hash": "guard-missing-quote-sell"},
+        )
+
+        eng._check_open_long_entry_guard(order, inst_id="BTC-USDT", tob=None)
+
+        assert order.meta["open_long_entry_guard_quote_available"] is False
+        assert order.meta["fail_open_buy"] is False
+        assert order.meta["fail_open_sell"] is True
+        assert order.meta["decision"] == "allow_sell_quote_unavailable_fail_open"
+
+
+def test_entry_guard_legacy_buy_fail_closed_does_not_block_close_long_sell() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            open_long_entry_guard_enabled=True,
+            open_long_entry_guard_fail_open=False,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        order = Order(
+            symbol="BTC/USDT",
+            side="sell",
+            intent="CLOSE_LONG",
+            notional_usdt=10.0,
+            signal_price=100.0,
+            meta={"decision_hash": "guard-legacy-fail-closed-sell"},
+        )
+
+        eng._check_open_long_entry_guard(order, inst_id="BTC-USDT", tob=None)
+
+        assert order.meta["fail_open_buy"] is False
+        assert order.meta["fail_open_sell"] is True
+        assert order.meta["decision"] == "allow_sell_quote_unavailable_fail_open"
+
+
+def test_entry_guard_legacy_fail_open_still_allows_open_long_buy() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            open_long_entry_guard_enabled=True,
+            open_long_entry_guard_fail_open=True,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        order = Order(
+            symbol="BTC/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=10.0,
+            signal_price=100.0,
+            meta={"decision_hash": "guard-legacy-fail-open"},
+        )
+
+        eng._check_open_long_entry_guard(order, inst_id="BTC-USDT", tob=None)
+
+        assert order.meta["open_long_entry_guard_quote_available"] is False
+        assert order.meta["fail_open_buy"] is True
+        assert order.meta["fail_open_sell"] is True
+        assert order.meta["decision"] == "allow_buy_quote_unavailable_fail_open"
+
+
+def test_entry_guard_split_buy_fail_closed_overrides_legacy_fail_open() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            open_long_entry_guard_enabled=True,
+            open_long_entry_guard_fail_open=True,
+            open_long_entry_guard_fail_open_buy=False,
+            open_long_entry_guard_fail_open_sell=True,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        order = Order(
+            symbol="BTC/USDT",
+            side="buy",
+            intent="OPEN_LONG",
+            notional_usdt=10.0,
+            signal_price=100.0,
+            meta={"decision_hash": "guard-split-overrides-legacy"},
+        )
+
+        with pytest.raises(ValueError, match="open_long_entry_guard_quote_unavailable"):
+            eng._check_open_long_entry_guard(order, inst_id="BTC-USDT", tob=None)
+
+        assert order.meta["fail_open_buy"] is False
+        assert order.meta["fail_open_sell"] is True
+        assert order.meta["decision"] == "block_quote_unavailable"
+
+
 def test_buy_guard_respects_zero_borrow_liability_epsilon(monkeypatch) -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()

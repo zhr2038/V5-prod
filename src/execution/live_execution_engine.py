@@ -670,35 +670,135 @@ class LiveExecutionEngine:
             return float(acc_fill_sz + base_fee)
         return float((-acc_fill_sz) + base_fee)
 
+    def _entry_guard_fail_open(self, *, direction: str) -> bool:
+        """Resolve split fail-open config, preserving legacy OPEN_LONG fallback semantics."""
+        is_buy = str(direction).lower() == "buy"
+        key = "open_long_entry_guard_fail_open_buy" if is_buy else "open_long_entry_guard_fail_open_sell"
+        default = False if is_buy else True
+        legacy_key = "open_long_entry_guard_fail_open"
+
+        fields_set = getattr(self.cfg, "model_fields_set", None)
+        if fields_set is None:
+            fields_set = getattr(self.cfg, "__fields_set__", None)
+        if fields_set is not None:
+            if key in fields_set:
+                return _to_bool(getattr(self.cfg, key, default))
+            if is_buy and legacy_key in fields_set:
+                return _to_bool(getattr(self.cfg, legacy_key, default))
+            return default
+
+        if hasattr(self.cfg, key):
+            return _to_bool(getattr(self.cfg, key))
+        if is_buy and hasattr(self.cfg, legacy_key):
+            return _to_bool(getattr(self.cfg, legacy_key))
+        return default
+
+    @staticmethod
+    def _set_entry_guard_audit(
+        o: Order,
+        *,
+        quote_available: bool,
+        fail_open_buy: bool,
+        fail_open_sell: bool,
+        decision: str,
+    ) -> None:
+        meta = dict(o.meta or {})
+        meta["open_long_entry_guard_quote_available"] = bool(quote_available)
+        meta["fail_open_buy"] = bool(fail_open_buy)
+        meta["fail_open_sell"] = bool(fail_open_sell)
+        meta["decision"] = str(decision)
+        meta["open_long_entry_guard_decision"] = str(decision)
+        o.meta = meta
+
     def _check_open_long_entry_guard(self, o: Order, *, inst_id: str, tob: Optional[Dict[str, Any]]) -> None:
         """Guard NEW long entries against chasing and excessive microstructure cost."""
         if not bool(getattr(self.cfg, "open_long_entry_guard_enabled", False)):
             return
-        if str(getattr(o, "side", "")).lower() != "buy":
-            return
-        if str(getattr(o, "intent", "")).upper() != "OPEN_LONG":
+        side = str(getattr(o, "side", "")).lower()
+        intent = str(getattr(o, "intent", "")).upper()
+        if (side, intent) not in {("buy", "OPEN_LONG"), ("sell", "CLOSE_LONG")}:
             return
 
-        signal_px = float(getattr(o, "signal_price", 0.0) or 0.0)
-        if signal_px <= 0:
-            return
+        fail_open_buy = self._entry_guard_fail_open(direction="buy")
+        fail_open_sell = self._entry_guard_fail_open(direction="sell")
 
         d = tob or {}
         ask = float(d.get("ask") or 0.0)
         bid = float(d.get("bid") or 0.0)
         mid = float(d.get("mid") or 0.0)
         ref_px = ask if ask > 0 else (mid if mid > 0 else 0.0)
+        quote_available = bool(ref_px > 0 or bid > 0)
+
+        if side == "sell" and intent == "CLOSE_LONG":
+            if quote_available:
+                self._set_entry_guard_audit(
+                    o,
+                    quote_available=True,
+                    fail_open_buy=fail_open_buy,
+                    fail_open_sell=fail_open_sell,
+                    decision="allow_sell",
+                )
+                return
+            if fail_open_sell:
+                self._set_entry_guard_audit(
+                    o,
+                    quote_available=False,
+                    fail_open_buy=fail_open_buy,
+                    fail_open_sell=fail_open_sell,
+                    decision="allow_sell_quote_unavailable_fail_open",
+                )
+                log.warning("ENTRY_GUARD sell fail-open (no top-of-book): %s", inst_id)
+                return
+            self._set_entry_guard_audit(
+                o,
+                quote_available=False,
+                fail_open_buy=fail_open_buy,
+                fail_open_sell=fail_open_sell,
+                decision="block_quote_unavailable",
+            )
+            raise ValueError(f"open_long_entry_guard_quote_unavailable: {inst_id} side=sell intent=CLOSE_LONG")
+
+        signal_px = float(getattr(o, "signal_price", 0.0) or 0.0)
+        if signal_px <= 0:
+            self._set_entry_guard_audit(
+                o,
+                quote_available=quote_available,
+                fail_open_buy=fail_open_buy,
+                fail_open_sell=fail_open_sell,
+                decision="allow_missing_signal_price",
+            )
+            return
 
         if ref_px <= 0:
-            fail_open = bool(getattr(self.cfg, "open_long_entry_guard_fail_open", True))
-            if fail_open:
+            if fail_open_buy:
+                self._set_entry_guard_audit(
+                    o,
+                    quote_available=False,
+                    fail_open_buy=fail_open_buy,
+                    fail_open_sell=fail_open_sell,
+                    decision="allow_buy_quote_unavailable_fail_open",
+                )
                 log.warning("ENTRY_GUARD skip (no top-of-book): %s", inst_id)
                 return
-            raise ValueError(f"ENTRY_GUARD_NO_TOB: {inst_id}")
+            self._set_entry_guard_audit(
+                o,
+                quote_available=False,
+                fail_open_buy=fail_open_buy,
+                fail_open_sell=fail_open_sell,
+                decision="block_quote_unavailable",
+            )
+            raise ValueError(f"open_long_entry_guard_quote_unavailable: {inst_id} side=buy intent=OPEN_LONG")
 
         max_premium = float(_coalesce(getattr(self.cfg, "open_long_max_signal_premium_pct", None), 0.006))
         premium = float(ref_px / signal_px - 1.0)
         if premium > max_premium:
+            self._set_entry_guard_audit(
+                o,
+                quote_available=True,
+                fail_open_buy=fail_open_buy,
+                fail_open_sell=fail_open_sell,
+                decision="block_premium",
+            )
             raise ValueError(
                 f"ENTRY_GUARD_PREMIUM: {inst_id} ask_or_mid={ref_px:.8f} signal={signal_px:.8f} "
                 f"premium={premium:.4%} > max={max_premium:.4%}"
@@ -708,9 +808,24 @@ class LiveExecutionEngine:
             spread_bps = float((ask - bid) / mid * 10000.0)
             max_spread_bps = float(_coalesce(getattr(self.cfg, "open_long_max_spread_bps", None), 35.0))
             if spread_bps > max_spread_bps:
+                self._set_entry_guard_audit(
+                    o,
+                    quote_available=True,
+                    fail_open_buy=fail_open_buy,
+                    fail_open_sell=fail_open_sell,
+                    decision="block_spread",
+                )
                 raise ValueError(
                     f"ENTRY_GUARD_SPREAD: {inst_id} spread_bps={spread_bps:.2f} > max={max_spread_bps:.2f}"
                 )
+
+        self._set_entry_guard_audit(
+            o,
+            quote_available=True,
+            fail_open_buy=fail_open_buy,
+            fail_open_sell=fail_open_sell,
+            decision="allow_buy",
+        )
 
     def _build_place_payload(self, o: Order, *, inst_id: str, cl_ord_id: str) -> Dict[str, Any]:
         # Minimal market order payload.
@@ -1182,6 +1297,15 @@ class LiveExecutionEngine:
                 req_store["_meta"] = {"mid_px_at_submit": tob.get("mid"), "bid": tob.get("bid"), "ask": tob.get("ask"), "ts_ms": tob.get("ts_ms")}
         except ValueError as e:
             # Policy/safety reject without touching the exchange.
+            error_text = str(e)
+            reject_req: Dict[str, Any] = {"safety_reject": True, "error": error_text}
+            if o.meta:
+                reject_req["_v5_order_meta"] = dict(o.meta)
+            reject_code = "SAFETY"
+            reject_event = "SAFETY_REJECT"
+            if error_text.startswith("open_long_entry_guard_quote_unavailable"):
+                reject_code = "open_long_entry_guard_quote_unavailable"
+                reject_event = "ENTRY_GUARD_BLOCK"
             self.order_store.upsert_new(
                 cl_ord_id=clid,
                 run_id=self.run_id,
@@ -1194,7 +1318,7 @@ class LiveExecutionEngine:
                 notional_usdt=float(o.notional_usdt),
                 window_start_ts=(o.meta or {}).get("window_start_ts"),
                 window_end_ts=(o.meta or {}).get("window_end_ts"),
-                req={"safety_reject": True, "error": str(e)},
+                req=reject_req,
                 reconcile_ok_at_submit=reconcile_ok,
                 kill_switch_at_submit=kill_switch,
                 submit_gate=gate,
@@ -1202,9 +1326,9 @@ class LiveExecutionEngine:
             self.order_store.update_state(
                 clid,
                 new_state="REJECTED",
-                last_error_code="SAFETY",
-                last_error_msg=str(e),
-                event_type="SAFETY_REJECT",
+                last_error_code=reject_code,
+                last_error_msg=error_text,
+                event_type=reject_event,
             )
             return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
         except DustOrderSkip as e:

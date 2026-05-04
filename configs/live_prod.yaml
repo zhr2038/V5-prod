@@ -402,7 +402,9 @@ execution:
   open_long_entry_guard_enabled: true
   open_long_max_signal_premium_pct: 0.006   # 新开仓时，实时ask相对信号价最大溢价0.6%
   open_long_max_spread_bps: 35               # 点差过大不追单
-  open_long_entry_guard_fail_open: true      # 盘口数据偶发不可用时不中断主流程
+  open_long_entry_guard_fail_open: true      # Legacy fallback when split buy/sell fail-open keys are absent.
+  open_long_entry_guard_fail_open_buy: false # OPEN_LONG buy fails closed when top-of-book is unavailable.
+  open_long_entry_guard_fail_open_sell: true # CLOSE_LONG sell fails open when top-of-book is unavailable.
   
   # 允许小额对账差异时继续交易
   allow_trade_on_small_reconcile_drift: true

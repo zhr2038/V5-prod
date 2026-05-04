@@ -654,7 +654,15 @@ class ExecutionConfig(BaseModel):
     open_long_max_spread_bps: float = Field(default=35.0, ge=0, le=10000)
     open_long_entry_guard_fail_open: bool = Field(
         default=True,
-        description="If top-of-book is unavailable, skip guard (true) or reject OPEN_LONG (false)",
+        description="Legacy OPEN_LONG buy fallback: if top-of-book is unavailable, skip guard (true) or reject (false)",
+    )
+    open_long_entry_guard_fail_open_buy: bool = Field(
+        default=False,
+        description="If top-of-book is unavailable for OPEN_LONG buy, allow (true) or reject (false)",
+    )
+    open_long_entry_guard_fail_open_sell: bool = Field(
+        default=True,
+        description="If top-of-book is unavailable for CLOSE_LONG sell, allow (true) or reject (false)",
     )
     protect_entry_require_alpha6_confirmation: bool = Field(
         default=True,
