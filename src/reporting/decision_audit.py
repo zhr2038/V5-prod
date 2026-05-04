@@ -103,6 +103,8 @@ class DecisionAudit:
     # 路由决策
     router_decisions: List[Dict[str, Any]] = field(default_factory=list)
     target_execution_explain: List[Dict[str, Any]] = field(default_factory=list)
+    market_impulse_selection_mode: str = "priority"
+    market_impulse_shadow_selection: Dict[str, Any] = field(default_factory=dict)
     
     # 拒绝原因计数
     rejects: Dict[str, int] = field(default_factory=lambda: {
@@ -232,6 +234,8 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.targets_post_risk = data.get("targets_post_risk", {})
     audit.router_decisions = data.get("router_decisions", [])
     audit.target_execution_explain = data.get("target_execution_explain", [])
+    audit.market_impulse_selection_mode = data.get("market_impulse_selection_mode", "priority") or "priority"
+    audit.market_impulse_shadow_selection = data.get("market_impulse_shadow_selection", {}) or {}
     audit.rejects = data.get("rejects", {})
     audit.budget = data.get("budget", {})
     audit.budget_action = data.get("budget_action", {})

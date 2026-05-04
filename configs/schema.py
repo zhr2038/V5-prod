@@ -766,6 +766,10 @@ class ExecutionConfig(BaseModel):
         le=10.0,
         description="Minimum per-symbol TrendFollowing score required for market impulse probe candidates",
     )
+    market_impulse_probe_selection_mode: str = Field(
+        default="priority",
+        description="Selection mode for market impulse probe candidates: priority, trend_score, alpha6_confirmed, or expected_net_shadow",
+    )
     market_impulse_probe_max_symbols: int = Field(
         default=1,
         ge=1,
@@ -1124,6 +1128,15 @@ class ExecutionConfig(BaseModel):
             raise ValueError("execution.borrow_block_mode must be 'global_abort' or 'symbol_only'")
         return vv
 
+    @field_validator("market_impulse_probe_selection_mode")
+    @classmethod
+    def _validate_market_impulse_probe_selection_mode(cls, v: str) -> str:
+        value = str(v or "priority").strip().lower()
+        allowed = {"priority", "trend_score", "alpha6_confirmed", "expected_net_shadow"}
+        if value not in allowed:
+            raise ValueError("market_impulse_probe_selection_mode must be one of: priority, trend_score, alpha6_confirmed, expected_net_shadow")
+        return value
+
 
     @model_validator(mode="before")
     @classmethod
@@ -1239,6 +1252,10 @@ class DiagnosticsConfig(BaseModel):
         ge=0.0,
         le=10000.0,
         description="Round-trip cost used when labeling ALT impulse shadow outcomes",
+    )
+    market_impulse_selection_shadow_enabled: bool = Field(
+        default=True,
+        description="Enable read-only shadow selection diagnostics for market impulse probe candidates",
     )
 
     @field_validator("skipped_candidate_horizons_hours")

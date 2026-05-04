@@ -1748,6 +1748,129 @@ class V5Pipeline:
             self._write_market_impulse_probe_state(state)
         return state
 
+    @staticmethod
+    def _market_impulse_probe_priority_order(symbol: str) -> int:
+        priority_order = {"BTC/USDT": 0, "ETH/USDT": 1, "SOL/USDT": 2, "BNB/USDT": 3}
+        return priority_order.get(str(symbol or ""), 99)
+
+    def _market_impulse_probe_expected_net_bps(self, symbol: str) -> Optional[float]:
+        stats = {}
+        try:
+            stats = self.negative_expectancy_cooldown.get_symbol_stats(symbol) or {}
+        except Exception:
+            stats = {}
+        if not isinstance(stats, dict):
+            return None
+        for key in ("net_expectancy_bps", "expectancy_bps", "gross_expectancy_bps"):
+            if key not in stats or stats.get(key) is None:
+                continue
+            try:
+                return float(stats.get(key) or 0.0)
+            except Exception:
+                continue
+        return None
+
+    def _market_impulse_probe_enrich_candidates(
+        self,
+        *,
+        candidates: List[Dict[str, Any]],
+        strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        alpha6_lookup = strategy_signal_lookup.get("Alpha6Factor") or {}
+        min_alpha6_score = float(getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.40) or 0.0)
+        min_f4 = float(getattr(self.cfg.execution, "protect_entry_min_f4_volume_expansion", 0.0) or 0.0)
+        min_f5 = float(getattr(self.cfg.execution, "protect_entry_min_f5_rsi_trend_confirm", 0.30) or 0.0)
+        enriched: List[Dict[str, Any]] = []
+        for item in candidates or []:
+            symbol = str(item.get("symbol") or "")
+            alpha6_signal = alpha6_lookup.get(symbol)
+            alpha6_score = self._signal_score(alpha6_signal)
+            alpha6_side = self._signal_side(alpha6_signal)
+            f4_volume_expansion = self._alpha6_volume_expansion(alpha6_signal)
+            f5_rsi_trend_confirm = self._alpha6_rsi_confirm(alpha6_signal)
+            alpha6_confirmed = bool(
+                alpha6_side == "buy"
+                and alpha6_score is not None
+                and float(alpha6_score) >= min_alpha6_score
+                and f4_volume_expansion is not None
+                and float(f4_volume_expansion) >= min_f4
+                and f5_rsi_trend_confirm is not None
+                and float(f5_rsi_trend_confirm) >= min_f5
+            )
+            row = dict(item)
+            row.update(
+                {
+                    "priority_rank": self._market_impulse_probe_priority_order(symbol),
+                    "alpha6_score": alpha6_score,
+                    "alpha6_side": alpha6_side,
+                    "f4_volume_expansion": f4_volume_expansion,
+                    "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
+                    "alpha6_confirmed": alpha6_confirmed,
+                    "expected_net_bps": self._market_impulse_probe_expected_net_bps(symbol),
+                }
+            )
+            enriched.append(row)
+        return enriched
+
+    @staticmethod
+    def _market_impulse_probe_selection_mode(value: Any) -> str:
+        mode = str(value or "priority").strip().lower()
+        return mode if mode in {"priority", "trend_score", "alpha6_confirmed", "expected_net_shadow"} else "priority"
+
+    def _market_impulse_probe_sort_key(self, item: Dict[str, Any], mode: str) -> tuple:
+        symbol = str(item.get("symbol") or "")
+        raw_priority_rank = item.get("priority_rank")
+        priority_rank = int(
+            raw_priority_rank
+            if raw_priority_rank is not None
+            else self._market_impulse_probe_priority_order(symbol)
+        )
+        trend_score = float(item.get("trend_score") or 0.0)
+        alpha6_score = item.get("alpha6_score")
+        alpha6_score_f = float(alpha6_score) if alpha6_score is not None else -999.0
+        expected_net = item.get("expected_net_bps")
+        expected_net_f = float(expected_net) if expected_net is not None else -1_000_000.0
+        if mode == "trend_score":
+            return (-trend_score, priority_rank, symbol)
+        if mode == "alpha6_confirmed":
+            return (0 if bool(item.get("alpha6_confirmed")) else 1, -alpha6_score_f, -trend_score, priority_rank, symbol)
+        if mode == "expected_net_shadow":
+            return (0 if expected_net is not None else 1, -expected_net_f, -trend_score, priority_rank, symbol)
+        return (priority_rank, -trend_score, symbol)
+
+    def _market_impulse_probe_select_symbol(self, candidates: List[Dict[str, Any]], mode: str) -> Optional[str]:
+        if not candidates:
+            return None
+        if mode == "alpha6_confirmed" and not any(bool(item.get("alpha6_confirmed")) for item in candidates):
+            return None
+        if mode == "expected_net_shadow" and not any(item.get("expected_net_bps") is not None for item in candidates):
+            return None
+        row = sorted(candidates, key=lambda item: self._market_impulse_probe_sort_key(item, mode))[0]
+        return str(row.get("symbol") or "") or None
+
+    def _market_impulse_probe_shadow_selection(
+        self,
+        *,
+        active: bool,
+        trend_buy_count: int,
+        btc_trend_score: Optional[float],
+        candidates: List[Dict[str, Any]],
+        selection_mode: str,
+    ) -> Dict[str, Any]:
+        return {
+            "active": bool(active),
+            "trend_buy_count": int(trend_buy_count or 0),
+            "btc_trend_score": btc_trend_score,
+            "selection_mode": selection_mode,
+            "selected_live": None,
+            "selected_by_priority": self._market_impulse_probe_select_symbol(candidates, "priority"),
+            "selected_by_trend_score": self._market_impulse_probe_select_symbol(candidates, "trend_score"),
+            "selected_by_alpha6_confirmed": self._market_impulse_probe_select_symbol(candidates, "alpha6_confirmed"),
+            "selected_by_expected_net_shadow": self._market_impulse_probe_select_symbol(candidates, "expected_net_shadow"),
+            "candidates": [dict(item) for item in candidates],
+            "live_missed_eth_by_trend_score": False,
+        }
+
     def _market_impulse_probe_context(
         self,
         *,
@@ -1757,15 +1880,42 @@ class V5Pipeline:
         require_feature_enabled: bool = True,
     ) -> Dict[str, Any]:
         enabled = bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
+        selection_mode = self._market_impulse_probe_selection_mode(
+            getattr(self.cfg.execution, "market_impulse_probe_selection_mode", "priority")
+        )
+        shadow_enabled = bool(getattr(getattr(self.cfg, "diagnostics", None), "market_impulse_selection_shadow_enabled", True))
+
+        def inactive_context(trend_buy_count: int = 0, btc_trend_score: Optional[float] = None, candidates: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+            rows = self._market_impulse_probe_enrich_candidates(
+                candidates=list(candidates or []),
+                strategy_signal_lookup=strategy_signal_lookup,
+            )
+            payload = {
+                "active": False,
+                "trend_buy_count": int(trend_buy_count or 0),
+                "btc_trend_score": btc_trend_score,
+                "candidates": rows,
+                "selection_mode": selection_mode,
+            }
+            if shadow_enabled:
+                payload["shadow_selection"] = self._market_impulse_probe_shadow_selection(
+                    active=False,
+                    trend_buy_count=int(trend_buy_count or 0),
+                    btc_trend_score=btc_trend_score,
+                    candidates=rows,
+                    selection_mode=selection_mode,
+                )
+            return payload
+
         if require_feature_enabled and not enabled:
-            return {"active": False, "trend_buy_count": 0, "btc_trend_score": None, "candidates": []}
+            return inactive_context()
 
         if bool(getattr(self.cfg.execution, "market_impulse_probe_only_in_protect", True)):
             if str(current_auto_risk_level or "").upper() != "PROTECT":
-                return {"active": False, "trend_buy_count": 0, "btc_trend_score": None, "candidates": []}
+                return inactive_context()
 
         if str(regime_state_str or "") in {"Risk-Off", "Risk_Off", "RiskOff"}:
-            return {"active": False, "trend_buy_count": 0, "btc_trend_score": None, "candidates": []}
+            return inactive_context()
 
         trend_lookup = strategy_signal_lookup.get("TrendFollowing") or {}
         min_symbol_trend_score = float(
@@ -1792,37 +1942,37 @@ class V5Pipeline:
             trend_buy_candidates.append({"symbol": str(symbol), "trend_score": float(trend_score)})
 
         if len(trend_buy_candidates) < int(getattr(self.cfg.execution, "market_impulse_probe_min_trend_buy_count", 3) or 3):
-            return {
-                "active": False,
-                "trend_buy_count": len(trend_buy_candidates),
-                "btc_trend_score": btc_trend_score,
-                "candidates": trend_buy_candidates,
-            }
+            return inactive_context(len(trend_buy_candidates), btc_trend_score, trend_buy_candidates)
 
         if bool(getattr(self.cfg.execution, "market_impulse_probe_require_btc_trend_buy", True)):
             min_btc_score = float(getattr(self.cfg.execution, "market_impulse_probe_min_btc_trend_score", 0.60) or 0.0)
             if btc_side != "buy" or btc_trend_score is None or float(btc_trend_score) < float(min_btc_score):
-                return {
-                    "active": False,
-                    "trend_buy_count": len(trend_buy_candidates),
-                    "btc_trend_score": btc_trend_score,
-                    "candidates": trend_buy_candidates,
-                }
+                return inactive_context(len(trend_buy_candidates), btc_trend_score, trend_buy_candidates)
 
-        priority_order = {"BTC/USDT": 0, "ETH/USDT": 1, "SOL/USDT": 2, "BNB/USDT": 3}
-        trend_buy_candidates.sort(
-            key=lambda item: (
-                priority_order.get(str(item.get("symbol") or ""), 99),
-                -float(item.get("trend_score") or 0.0),
-                str(item.get("symbol") or ""),
-            )
+        enriched_candidates = self._market_impulse_probe_enrich_candidates(
+            candidates=trend_buy_candidates,
+            strategy_signal_lookup=strategy_signal_lookup,
         )
-        return {
+        selected_candidates = sorted(
+            enriched_candidates,
+            key=lambda item: self._market_impulse_probe_sort_key(item, selection_mode),
+        )
+        payload = {
             "active": True,
-            "trend_buy_count": len(trend_buy_candidates),
+            "trend_buy_count": len(enriched_candidates),
             "btc_trend_score": btc_trend_score,
-            "candidates": trend_buy_candidates,
+            "candidates": selected_candidates,
+            "selection_mode": selection_mode,
         }
+        if shadow_enabled:
+            payload["shadow_selection"] = self._market_impulse_probe_shadow_selection(
+                active=True,
+                trend_buy_count=len(enriched_candidates),
+                btc_trend_score=btc_trend_score,
+                candidates=enriched_candidates,
+                selection_mode=selection_mode,
+            )
+        return payload
 
     def _should_soften_fast_fail_with_market_impulse(
         self,
@@ -5745,6 +5895,12 @@ class V5Pipeline:
             audit.counts["market_impulse_probe_candidate_count"] = int(
                 len(market_impulse_probe_context.get("candidates") or [])
             )
+            audit.market_impulse_selection_mode = str(
+                market_impulse_probe_context.get("selection_mode") or "priority"
+            )
+            audit.market_impulse_shadow_selection = dict(
+                market_impulse_probe_context.get("shadow_selection") or {}
+            )
 
         if (
             bool(getattr(self.cfg.execution, "market_impulse_probe_enabled", True))
@@ -5899,6 +6055,19 @@ class V5Pipeline:
                     selected_probe_symbols += 1
                     cash_remaining -= float(probe_notional)
                     if audit:
+                        shadow_selection = dict(getattr(audit, "market_impulse_shadow_selection", {}) or {})
+                        if shadow_selection:
+                            shadow_selection["selected_live"] = sym
+                            shadow_selection["live_missed_eth_by_trend_score"] = bool(
+                                sym != "ETH/USDT"
+                                and shadow_selection.get("selected_by_trend_score") == "ETH/USDT"
+                            )
+                            audit.market_impulse_shadow_selection = shadow_selection
+                            if shadow_selection["live_missed_eth_by_trend_score"]:
+                                audit.add_note(
+                                    "Market impulse shadow selection: live selected "
+                                    f"{sym} while trend_score shadow selected ETH/USDT"
+                                )
                         audit.counts["market_impulse_probe_open_count"] = int(
                             audit.counts.get("market_impulse_probe_open_count", 0) or 0
                         ) + 1

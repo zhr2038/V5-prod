@@ -572,6 +572,51 @@ def fixture_alt_impulse_shadow_root(root):
     return run_id
 
 
+def fixture_market_impulse_selection_shadow_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+
+    write_text(root / "configs/live_prod.yaml", "market_impulse_probe_selection_mode: priority\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "regime": "Trending",
+        "market_impulse_selection_mode": "priority",
+        "market_impulse_shadow_selection": {
+            "active": True,
+            "trend_buy_count": 3,
+            "btc_trend_score": 0.90,
+            "selected_live": "BTC/USDT",
+            "selected_by_priority": "BTC/USDT",
+            "selected_by_trend_score": "ETH/USDT",
+            "selected_by_alpha6_confirmed": "SOL/USDT",
+            "selected_by_expected_net_shadow": "ETH/USDT",
+            "candidates": [
+                {"symbol": "BTC/USDT", "trend_score": 0.90, "priority_rank": 0},
+                {"symbol": "ETH/USDT", "trend_score": 1.00, "priority_rank": 1, "expected_net_bps": 25.0},
+                {"symbol": "SOL/USDT", "trend_score": 0.78, "priority_rank": 2, "alpha6_confirmed": True},
+            ],
+            "live_missed_eth_by_trend_score": True,
+        },
+    })
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    return run_id
+
+
 def extract_member(tf, suffix):
     matches = [name for name in tf.getnames() if name.endswith(suffix)]
     assert matches, suffix
@@ -765,6 +810,29 @@ def main():
             assert "SOL/USDT: count=1, avg_net_bps 4h=not_observable" in readme, readme
             assert "BNB/USDT: count=0" in readme, readme
             assert "是否支持未来 live probe: diagnostic_only_review_required" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-market-impulse-selection-shadow-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_market_impulse_selection_shadow_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/market_impulse_selection_shadow.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["active"] == "true", row
+            assert row["selected_live"] == "BTC/USDT", row
+            assert row["selected_by_priority"] == "BTC/USDT", row
+            assert row["selected_by_trend_score"] == "ETH/USDT", row
+            assert row["selected_by_alpha6_confirmed"] == "SOL/USDT", row
+            assert row["selected_by_expected_net_shadow"] == "ETH/USDT", row
+            assert "ETH/USDT" in row["candidates_json"], row
+            assert window["market_impulse_selection_shadow_rows"] == 1, window
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

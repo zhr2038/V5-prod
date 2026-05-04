@@ -262,6 +262,112 @@ def test_market_impulse_probe_opens_small_probe_in_protect(tmp_path: Path) -> No
     assert order.notional_usdt == 6.0
     assert order.meta["market_impulse_probe"] is True
     assert audit.counts["market_impulse_probe_open_count"] == 1
+    assert audit.market_impulse_selection_mode == "priority"
+    shadow = audit.market_impulse_shadow_selection
+    assert shadow["active"] is True
+    assert shadow["selected_live"] == "BTC/USDT"
+    assert shadow["selected_by_priority"] == "BTC/USDT"
+
+
+def test_market_impulse_shadow_trend_score_selects_highest_without_changing_live_priority(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.90, None),
+            "ETH/USDT": ("buy", 1.00, None),
+            "SOL/USDT": ("buy", 0.78, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-shadow-trend")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert out.orders[0].symbol == "BTC/USDT"
+    shadow = audit.market_impulse_shadow_selection
+    assert shadow["selected_live"] == "BTC/USDT"
+    assert shadow["selected_by_priority"] == "BTC/USDT"
+    assert shadow["selected_by_trend_score"] == "ETH/USDT"
+    assert shadow["live_missed_eth_by_trend_score"] is True
+
+
+def test_market_impulse_shadow_alpha6_confirmed_prefers_confirmed_buy(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.90, None),
+            "ETH/USDT": ("buy", 0.95, {"side": "sell", "score": 0.80, "f4": 0.20, "f5": 0.60}),
+            "SOL/USDT": ("buy", 0.78, {"side": "buy", "score": 0.55, "f4": 0.10, "f5": 0.50}),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-shadow-alpha6")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert out.orders[0].symbol == "BTC/USDT"
+    shadow = audit.market_impulse_shadow_selection
+    assert shadow["selected_by_alpha6_confirmed"] == "SOL/USDT"
+    sol = next(item for item in shadow["candidates"] if item["symbol"] == "SOL/USDT")
+    assert sol["alpha6_confirmed"] is True
+
+
+def test_market_impulse_shadow_expected_net_selects_observed_best(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.90, None),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    pipe.negative_expectancy_cooldown = _DummyNegexp(
+        stats={
+            "BTC/USDT": {"net_expectancy_bps": 5.0},
+            "ETH/USDT": {"net_expectancy_bps": 22.0},
+            "SOL/USDT": {"net_expectancy_bps": 12.0},
+        }
+    )
+    audit = DecisionAudit(run_id="market-impulse-shadow-expected-net")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert out.orders[0].symbol == "BTC/USDT"
+    shadow = audit.market_impulse_shadow_selection
+    assert shadow["selected_by_expected_net_shadow"] == "ETH/USDT"
+    eth = next(item for item in shadow["candidates"] if item["symbol"] == "ETH/USDT")
+    assert eth["expected_net_bps"] == 22.0
 
 
 def test_same_symbol_reentry_blocks_market_impulse_after_profit_lock(tmp_path: Path) -> None:

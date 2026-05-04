@@ -226,6 +226,7 @@ diagnostics:
   alt_impulse_shadow_require_btc_positive_4h: true
   alt_impulse_shadow_require_broad_market_positive_count: 2
   alt_impulse_shadow_rt_cost_bps: 30
+  market_impulse_selection_shadow_enabled: true
 
 execution:
   mode: live
@@ -339,6 +340,7 @@ execution:
   market_impulse_probe_require_btc_trend_buy: true
   market_impulse_probe_min_btc_trend_score: 0.60
   market_impulse_probe_min_symbol_trend_score: 0.60
+  market_impulse_probe_selection_mode: priority
   market_impulse_probe_max_symbols: 1
   market_impulse_probe_target_w: 0.06
   market_impulse_probe_cooldown_hours: 8

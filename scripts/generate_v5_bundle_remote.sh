@@ -743,6 +743,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     open_position_rows = []
     dust_residual_roundtrip_rows = []
     high_score_blocked_rows = []
+    market_impulse_selection_shadow_rows = []
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
     dust_residual_row_keys = set()
@@ -790,6 +791,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         counts = audit.get("counts") if isinstance(audit.get("counts"), dict) else {}
         for field in PROBE_COUNT_FIELDS:
             probe_counts[field] += as_int(counts.get(field))
+        market_shadow = audit.get("market_impulse_shadow_selection")
+        if isinstance(market_shadow, dict):
+            market_impulse_selection_shadow_rows.append({
+                "ts_utc": audit_ts,
+                "run_id": run_id,
+                "active": str(bool(market_shadow.get("active"))).lower(),
+                "trend_buy_count": first_observed(market_shadow.get("trend_buy_count")),
+                "btc_trend_score": first_observed(market_shadow.get("btc_trend_score")),
+                "selected_live": first_observed(market_shadow.get("selected_live")),
+                "selected_by_priority": first_observed(market_shadow.get("selected_by_priority")),
+                "selected_by_trend_score": first_observed(market_shadow.get("selected_by_trend_score")),
+                "selected_by_alpha6_confirmed": first_observed(market_shadow.get("selected_by_alpha6_confirmed")),
+                "selected_by_expected_net_shadow": first_observed(market_shadow.get("selected_by_expected_net_shadow")),
+                "candidates_json": safe_json(market_shadow.get("candidates") or []),
+            })
         for item in audit.get("target_execution_explain") or []:
             if not isinstance(item, dict):
                 continue
@@ -2368,6 +2384,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         alt_impulse_shadow_by_reason,
         ["skip_reason", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
     )
+    write_csv(
+        "summaries/market_impulse_selection_shadow.csv",
+        market_impulse_selection_shadow_rows,
+        ["ts_utc", "run_id", "active", "trend_buy_count", "btc_trend_score", "selected_live", "selected_by_priority", "selected_by_trend_score", "selected_by_alpha6_confirmed", "selected_by_expected_net_shadow", "candidates_json"],
+    )
 
     high_count = sum(1 for item in issues if item.get("severity") == "high")
     medium_count = sum(1 for item in issues if item.get("severity") == "medium")
@@ -2443,6 +2464,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "high_score_blocked_matured_unlabeled_count": high_score_matured_unlabeled_count,
         "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
         "alt_impulse_shadow_duplicate_count": alt_impulse_shadow_duplicate_count,
+        "market_impulse_selection_shadow_rows": len(market_impulse_selection_shadow_rows),
         "probe_rows": len(probe_rows),
         "probe_lifecycle_rows": len(lifecycle_rows),
         "dust_anti_chase_rows": len(dust_rows),
