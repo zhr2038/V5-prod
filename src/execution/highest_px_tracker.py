@@ -8,7 +8,7 @@ Highest Price Tracker - 峰值价格持久化
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -61,7 +61,10 @@ class HighestPriceTracker:
                         if not isinstance(rec, dict):
                             continue
                         try:
-                            self.records[str(sym)] = HighestPriceRecord(**rec)
+                            allowed = {field.name for field in fields(HighestPriceRecord)}
+                            self.records[str(sym)] = HighestPriceRecord(
+                                **{key: value for key, value in rec.items() if key in allowed}
+                            )
                         except Exception:
                             continue
             except Exception as e:

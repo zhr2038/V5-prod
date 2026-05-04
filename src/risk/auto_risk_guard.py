@@ -156,7 +156,7 @@ class AutoRiskGuard:
     
     def evaluate(self, 
                  dd_pct: float,                    # 当前回撤
-                 conversion_rate: float,           # 成交转化率
+                 conversion_rate: float | None,    # 成交转化率
                  dust_reject_rate: float,          # dust拒单率
                  recent_pnl_trend: str,            # 最近盈亏趋势 'up'|'down'|'flat'
                  consecutive_losses: int = 0,      # 连续亏损轮数
@@ -170,10 +170,16 @@ class AutoRiskGuard:
         old_level = self.current_level
         new_level = old_level
         reasons = []
+        dd_pct = float(dd_pct or 0.0)
+        conversion_rate = float(conversion_rate or 0.0)
+        dust_reject_rate = float(dust_reject_rate or 0.0)
+        consecutive_losses = int(consecutive_losses or 0)
         
         # 更新指标
         self.metrics['last_dd_pct'] = dd_pct
         self.metrics['last_conversion_rate'] = conversion_rate
+        self.metrics['consecutive_loss_rounds'] = consecutive_losses
+        self.metrics['consecutive_losses'] = consecutive_losses
         
         # 降级条件（优先级高）
         if dd_pct >= 0.12:
@@ -224,8 +230,8 @@ class AutoRiskGuard:
     
     def _is_lower_level(self, level1: str, level2: str) -> bool:
         """判断level1是否比level2更保守（风险更低）"""
-        order = ['ATTACK', 'NEUTRAL', 'DEFENSE', 'PROTECT']
-        return order.index(level1) > order.index(level2)
+        order = {'ATTACK': 0, 'NEUTRAL': 1, 'DEFENSE': 2, 'PROTECT': 3}
+        return order.get(str(level1), order['PROTECT']) > order.get(str(level2), order['PROTECT'])
     
     def get_current_config(self) -> Dict:
         """获取当前档位配置"""

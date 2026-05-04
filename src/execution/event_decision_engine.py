@@ -340,7 +340,10 @@ class EventDecisionEngine:
             signal_dict = signal.to_dict() if hasattr(signal, 'to_dict') else signal
             
             # Check signal confirmation (except for exits)
-            has_exit = any(e.type in (EventType.SELECTION_CHANGE,) for e in sym_events)
+            has_exit = any(
+                e.type in (EventType.SELECTION_CHANGE, EventType.SIGNAL_DIRECTION_FLIP)
+                for e in sym_events
+            )
             
             if not has_exit:
                 confirmed = self.cooldown.check_signal_confirmation(symbol, signal_dict)
