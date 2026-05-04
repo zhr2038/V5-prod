@@ -100,6 +100,7 @@ class DecisionAudit:
 
     # 路由决策
     router_decisions: List[Dict[str, Any]] = field(default_factory=list)
+    target_execution_explain: List[Dict[str, Any]] = field(default_factory=list)
     
     # 拒绝原因计数
     rejects: Dict[str, int] = field(default_factory=lambda: {
@@ -145,6 +146,9 @@ class DecisionAudit:
     protect_entry_block_trend_only: bool = True
     protect_entry_require_alpha6_rsi_confirm_positive: bool = True
     protect_entry_alpha6_min_score: float = 0.40
+    protect_entry_require_volume_confirm: bool = True
+    protect_entry_min_f4_volume_expansion: float = 0.0
+    protect_entry_min_f5_rsi_trend_confirm: float = 0.30
     
     def reject(self, reason: str) -> None:
         """记录拒绝原因"""
@@ -223,6 +227,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.targets_pre_risk = data.get("targets_pre_risk", {})
     audit.targets_post_risk = data.get("targets_post_risk", {})
     audit.router_decisions = data.get("router_decisions", [])
+    audit.target_execution_explain = data.get("target_execution_explain", [])
     audit.rejects = data.get("rejects", {})
     audit.budget = data.get("budget", {})
     audit.budget_action = data.get("budget_action", {})
@@ -242,5 +247,12 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
         data.get("protect_entry_require_alpha6_rsi_confirm_positive", True)
     )
     audit.protect_entry_alpha6_min_score = float(data.get("protect_entry_alpha6_min_score", 0.40) or 0.0)
+    audit.protect_entry_require_volume_confirm = bool(data.get("protect_entry_require_volume_confirm", True))
+    audit.protect_entry_min_f4_volume_expansion = float(
+        data.get("protect_entry_min_f4_volume_expansion", 0.0) or 0.0
+    )
+    audit.protect_entry_min_f5_rsi_trend_confirm = float(
+        data.get("protect_entry_min_f5_rsi_trend_confirm", 0.30) or 0.0
+    )
     
     return audit

@@ -190,6 +190,152 @@ def test_protect_trend_only_buy_is_skipped(tmp_path: Path) -> None:
     )
 
 
+def _run_eth_target_explain_case(tmp_path: Path, strategy_payload: dict, final_score: float) -> DecisionAudit:
+    cfg = _base_cfg(tmp_path)
+    cfg.symbols = ["ETH/USDT"]
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+
+    pipe = _build_pipe(cfg, tmp_path, strategy_payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"ETH/USDT": 1.0},
+        selected=["ETH/USDT"],
+        entry_candidates=["ETH/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="eth-target-explain")
+
+    pipe.run(
+        market_data_1h={"ETH/USDT": _series("ETH/USDT", 2300.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"ETH/USDT": final_score}),
+        precomputed_regime=_regime(),
+    )
+    return audit
+
+
+def test_high_score_target_explain_marks_trend_only_eth_not_executed(tmp_path: Path) -> None:
+    audit = _run_eth_target_explain_case(
+        tmp_path,
+        _strategy_payload(
+            trend_signal={
+                "symbol": "ETH/USDT",
+                "side": "buy",
+                "score": 1.0,
+                "raw_score": 1.0,
+                "confidence": 1.0,
+            }
+        ),
+        1.0,
+    )
+
+    row = next(item for item in audit.target_execution_explain if item["symbol"] == "ETH/USDT")
+    assert row["target_w"] == 1.0
+    assert row["final_score"] == 1.0
+    assert row["selected_rank"] == 1
+    assert row["strategy_sources"] == ["TrendFollowing"]
+    assert row["trend_side"] == "buy"
+    assert row["alpha6_side"] is None
+    assert row["router_action"] == "skip"
+    assert row["router_reason"] == "protect_entry_trend_only"
+    assert row["passed_protect_entry_gate"] is False
+    assert row["high_score_but_not_executed"] is True
+    assert row["high_score_block_category"] == "trend_only"
+
+
+def test_high_score_target_explain_marks_alpha6_sell_eth_not_executed(tmp_path: Path) -> None:
+    audit = _run_eth_target_explain_case(
+        tmp_path,
+        _strategy_payload(
+            trend_signal={
+                "symbol": "ETH/USDT",
+                "side": "buy",
+                "score": 1.0,
+                "raw_score": 1.0,
+                "confidence": 1.0,
+            },
+            alpha6_signal={
+                "symbol": "ETH/USDT",
+                "side": "sell",
+                "score": 0.266,
+                "raw_score": 0.266,
+                "metadata": {
+                    "raw_factors": {
+                        "f4_volume_expansion": 0.10,
+                        "f5_rsi_trend_confirm": 0.37,
+                    }
+                },
+            },
+        ),
+        0.823,
+    )
+
+    row = next(item for item in audit.target_execution_explain if item["symbol"] == "ETH/USDT")
+    assert row["final_score"] == 0.823
+    assert row["alpha6_side"] == "sell"
+    assert row["router_reason"] == "protect_entry_no_alpha6_confirmation"
+    assert row["high_score_but_not_executed"] is True
+    assert row["high_score_block_category"] == "alpha6_sell"
+
+
+def test_high_score_target_explain_marks_low_alpha6_score(tmp_path: Path) -> None:
+    audit = _run_eth_target_explain_case(
+        tmp_path,
+        _strategy_payload(
+            alpha6_signal={
+                "symbol": "ETH/USDT",
+                "side": "buy",
+                "score": 0.111,
+                "raw_score": 0.111,
+                "metadata": {
+                    "raw_factors": {
+                        "f4_volume_expansion": 0.10,
+                        "f5_rsi_trend_confirm": 0.50,
+                    }
+                },
+            },
+        ),
+        0.95,
+    )
+
+    row = next(item for item in audit.target_execution_explain if item["symbol"] == "ETH/USDT")
+    assert row["alpha6_side"] == "buy"
+    assert row["alpha6_score"] == 0.111
+    assert row["router_reason"] == "protect_entry_alpha6_score_too_low"
+    assert row["high_score_but_not_executed"] is True
+    assert row["high_score_block_category"] == "alpha6_score_too_low"
+
+
+def test_target_execution_explain_passed_symbol_is_not_marked_blocked(tmp_path: Path) -> None:
+    audit = _run_eth_target_explain_case(
+        tmp_path,
+        _strategy_payload(
+            alpha6_signal={
+                "symbol": "ETH/USDT",
+                "side": "buy",
+                "score": 0.56,
+                "raw_score": 0.56,
+                "metadata": {
+                    "raw_factors": {
+                        "f4_volume_expansion": 0.10,
+                        "f5_rsi_trend_confirm": 0.46,
+                    }
+                },
+            },
+        ),
+        0.95,
+    )
+
+    row = next(item for item in audit.target_execution_explain if item["symbol"] == "ETH/USDT")
+    assert row["router_action"] == "create"
+    assert row["passed_protect_entry_gate"] is True
+    assert row["high_score_but_not_executed"] is False
+    assert row["high_score_block_category"] is None
+
+
 def test_protect_gate_falls_back_to_auto_risk_guard_when_eval_snapshot_missing(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_guard_level(cfg.execution.order_store_path, "PROTECT")

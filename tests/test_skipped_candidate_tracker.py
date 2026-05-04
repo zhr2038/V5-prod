@@ -917,6 +917,164 @@ def test_matured_without_future_price_becomes_not_observable(tmp_path: Path) -> 
     assert rows[0]["label_status"] == "not_observable"
 
 
+def test_high_score_blocked_alt_targets_write_labels_and_mature(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_14"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "data" / "cache"
+    cfg = AppConfig(symbols=["ETH/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4, 8, 12, 24]
+    cfg.diagnostics.skipped_candidate_roundtrip_cost_bps = 30.0
+
+    entry_ts_ms = int(datetime.fromisoformat("2026-04-21T14:00:00+00:00").timestamp() * 1000)
+    audit = DecisionAudit(run_id="20260421_14")
+    audit.now_ts = int(datetime.fromisoformat("2026-04-22T16:00:00+00:00").timestamp())
+    audit.regime = "Trending"
+    audit.target_execution_explain = [
+        {
+            "symbol": "ETH/USDT",
+            "target_w": 0.15,
+            "final_score": 1.0,
+            "selected_rank": 1,
+            "router_action": "skip",
+            "router_reason": "protect_entry_trend_only",
+            "high_score_block_category": "trend_only",
+            "trend_score": 1.0,
+            "trend_side": "buy",
+            "current_level": "PROTECT",
+            "regime": "Trending",
+        },
+        {
+            "symbol": "ETH/USDT",
+            "target_w": 0.15,
+            "final_score": 0.823,
+            "selected_rank": 1,
+            "router_action": "skip",
+            "router_reason": "protect_entry_no_alpha6_confirmation",
+            "high_score_block_category": "alpha6_sell",
+            "trend_score": 1.0,
+            "trend_side": "buy",
+            "alpha6_score": 0.266,
+            "alpha6_side": "sell",
+            "f4_volume_expansion": 0.10,
+            "f5_rsi_trend_confirm": 0.37,
+            "current_level": "PROTECT",
+            "regime": "Trending",
+        },
+    ]
+    market_data = {"ETH/USDT": _series("ETH/USDT", [entry_ts_ms], [100.0])}
+    _write_cache_csv(
+        cache_dir,
+        "ETH/USDT",
+        [
+            ("2026-04-21T14:00:00Z", 100.0),
+            ("2026-04-21T18:00:00Z", 101.0),
+            ("2026-04-21T22:00:00Z", 102.0),
+            ("2026-04-22T02:00:00Z", 103.0),
+            ("2026-04-22T14:00:00Z", 104.0),
+        ],
+    )
+
+    result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+    )
+    duplicate_result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h=market_data,
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+    )
+
+    assert result["new_records"] == 2
+    assert duplicate_result["new_records"] == 0
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 2
+    by_reason = {row["skip_reason"]: row for row in rows}
+    trend = by_reason["protect_entry_trend_only"]
+    no_alpha = by_reason["protect_entry_no_alpha6_confirmation"]
+    assert trend["high_score_blocked_target"] is True
+    assert trend["high_score_block_category"] == "trend_only"
+    assert trend["final_score"] == 1.0
+    assert trend["intended_side"] == "buy"
+    assert trend["target_w"] == 0.15
+    assert trend["entry_px"] == 100.0
+    assert trend["label_4h_net_bps"] == 70.0
+    assert trend["label_24h_net_bps"] == 370.0
+    assert trend["label_status"] == "complete"
+    assert no_alpha["final_score"] == 0.823
+    assert no_alpha["alpha6_side"] == "sell"
+    assert no_alpha["label_4h_status"] == "complete"
+
+    outcomes_path = tmp_path / "reports" / "summaries" / "high_score_blocked_outcomes.csv"
+    with outcomes_path.open("r", encoding="utf-8") as f:
+        outcome_rows = list(csv.DictReader(f))
+    assert len(outcome_rows) == 2
+
+    by_symbol_path = tmp_path / "reports" / "summaries" / "high_score_blocked_outcomes_by_symbol.csv"
+    with by_symbol_path.open("r", encoding="utf-8") as f:
+        symbol_rows = list(csv.DictReader(f))
+    assert {(row["symbol"], row["skip_reason"]) for row in symbol_rows} == {
+        ("ETH/USDT", "protect_entry_trend_only"),
+        ("ETH/USDT", "protect_entry_no_alpha6_confirmation"),
+    }
+    assert all(float(row["avg_4h_net_bps"]) == 70.0 for row in symbol_rows)
+    assert all(float(row["win_rate_4h"]) == 1.0 for row in symbol_rows)
+
+
+def test_low_score_regular_skip_not_in_high_score_blocked_outcomes(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260421_15"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["ETH/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+
+    entry_ts_ms = int(datetime.fromisoformat("2026-04-21T15:00:00+00:00").timestamp() * 1000)
+    audit = DecisionAudit(run_id="20260421_15")
+    audit.now_ts = entry_ts_ms // 1000
+    audit.regime = "Trending"
+    audit.router_decisions = [
+        {
+            "symbol": "ETH/USDT",
+            "action": "skip",
+            "reason": "protect_entry_trend_only",
+            "trend_score": 0.30,
+            "current_level": "PROTECT",
+        }
+    ]
+    audit.target_execution_explain = [
+        {
+            "symbol": "ETH/USDT",
+            "target_w": 0.15,
+            "final_score": 0.20,
+            "selected_rank": 3,
+            "router_action": "skip",
+            "router_reason": "protect_entry_trend_only",
+            "high_score_block_category": "trend_only",
+        }
+    ]
+
+    result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h={"ETH/USDT": _series("ETH/USDT", [entry_ts_ms], [100.0])},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    assert result["new_records"] == 1
+    outcomes_path = tmp_path / "reports" / "summaries" / "high_score_blocked_outcomes.csv"
+    with outcomes_path.open("r", encoding="utf-8") as f:
+        outcome_rows = list(csv.DictReader(f))
+    assert outcome_rows == []
+
+
 def test_tracker_disabled_writes_no_files(tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260421_03"
     run_dir.mkdir(parents=True, exist_ok=True)

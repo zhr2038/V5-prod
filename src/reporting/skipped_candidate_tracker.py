@@ -46,6 +46,8 @@ BTC_LEADERSHIP_PROBE_NOT_OBSERVABLE_SKIP_REASONS = {
     "btc_leadership_probe_not_flat",
     "btc_leadership_probe_cooldown",
 }
+HIGH_SCORE_BLOCKED_TARGET_SYMBOLS = {"BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"}
+HIGH_SCORE_BLOCKED_MIN_SCORE = 0.80
 
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
@@ -93,6 +95,15 @@ def _normalize_bool(value: Any) -> Optional[bool]:
 
 def _is_btc_leadership_probe_skip_reason(reason: str) -> bool:
     return str(reason or "").startswith(BTC_LEADERSHIP_PROBE_SKIP_PREFIX)
+
+
+def _is_high_score_blocked_reason(reason: str) -> bool:
+    text = str(reason or "").strip()
+    return (
+        text.startswith("protect_entry_")
+        or text == "cost_aware_edge"
+        or text.startswith("negative_expectancy_")
+    )
 
 
 def _resolve_reports_dir(run_dir: str | Path) -> Path:
@@ -268,6 +279,13 @@ def _signal_score(signal: Optional[Mapping[str, Any]]) -> Optional[float]:
     return None
 
 
+def _signal_side(signal: Optional[Mapping[str, Any]]) -> Optional[str]:
+    if not isinstance(signal, Mapping):
+        return None
+    side = str(signal.get("side") or "").strip().lower()
+    return side or None
+
+
 def _signal_factor(signal: Optional[Mapping[str, Any]], name: str) -> Optional[float]:
     if not isinstance(signal, Mapping):
         return None
@@ -285,8 +303,19 @@ def _signal_factor(signal: Optional[Mapping[str, Any]], name: str) -> Optional[f
 
 
 def _record_key(record: Mapping[str, Any]) -> str:
-    if _is_btc_leadership_probe_skip_reason(str(record.get("skip_reason") or "")):
-        return btc_leadership_probe_label_key(record)
+    ts_utc = str(record.get("ts_utc") or "").strip()
+    if not ts_utc:
+        entry_ts_ms = _record_entry_ts_ms(record)
+        ts_utc = _iso_from_ms(entry_ts_ms) if entry_ts_ms > 0 else ""
+    if ts_utc:
+        return "|".join(
+            [
+                str(record.get("run_id") or ""),
+                ts_utc,
+                str(record.get("symbol") or ""),
+                str(record.get("skip_reason") or ""),
+            ]
+        )
     return "|".join(
         [
             str(record.get("run_id") or ""),
@@ -401,6 +430,44 @@ def _aggregate_records(records: list[dict[str, Any]], *, key_field: str, horizon
     return out
 
 
+def _aggregate_records_by_fields(
+    records: list[dict[str, Any]],
+    *,
+    key_fields: list[str],
+    horizons: list[int],
+) -> list[dict[str, Any]]:
+    buckets: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        key = tuple(str(record.get(field) or "unknown") for field in key_fields)
+        buckets[key].append(record)
+
+    out: list[dict[str, Any]] = []
+    for bucket_key, rows in sorted(buckets.items(), key=lambda item: item[0]):
+        payload: dict[str, Any] = {
+            field: bucket_key[idx]
+            for idx, field in enumerate(key_fields)
+        }
+        payload.update(
+            {
+                "count": len(rows),
+                "pending_count": sum(1 for row in rows if str(row.get("label_status") or "") == "pending"),
+                "not_observable_count": sum(1 for row in rows if str(row.get("label_status") or "") == "not_observable"),
+                "complete_count": sum(1 for row in rows if str(row.get("label_status") or "") == "complete"),
+            }
+        )
+        for horizon in horizons:
+            net_key = f"{HORIZON_PREFIX}{int(horizon)}h_net_bps"
+            values = [_normalize_float(row.get(net_key)) for row in rows]
+            usable = [value for value in values if value is not None]
+            payload[f"avg_{int(horizon)}h_net_bps"] = round(sum(usable) / len(usable), 6) if usable else None
+            payload[f"win_rate_{int(horizon)}h"] = round(
+                sum(1 for value in usable if float(value) > 0.0) / len(usable),
+                6,
+            ) if usable else None
+        out.append(payload)
+    return out
+
+
 def _build_record(
     *,
     audit: DecisionAudit,
@@ -420,19 +487,27 @@ def _build_record(
     trend_signal = (strategy_lookup.get("TrendFollowing") or {}).get(symbol)
     alpha6_signal = (strategy_lookup.get("Alpha6Factor") or {}).get(symbol)
 
+    final_score = _normalize_float(router_decision.get("final_score"))
     score = _normalize_float(router_decision.get("score"))
     if score is None:
+        score = final_score
+    if score is None:
         score = top_scores.get(symbol)
+    if final_score is None:
+        final_score = score
+    selected_rank = _normalize_int(router_decision.get("selected_rank"))
 
     alpha6_score = _normalize_float(router_decision.get("alpha6_score"))
     if alpha6_score is None:
         alpha6_score = _normalize_float(router_decision.get("actual_alpha6_score"))
     if alpha6_score is None:
         alpha6_score = _signal_score(alpha6_signal)
+    alpha6_side = str(router_decision.get("alpha6_side") or "").strip().lower() or _signal_side(alpha6_signal)
 
     trend_score = _normalize_float(router_decision.get("trend_score"))
     if trend_score is None:
         trend_score = _signal_score(trend_signal)
+    trend_side = str(router_decision.get("trend_side") or "").strip().lower() or _signal_side(trend_signal)
 
     f4_volume_expansion = _normalize_float(router_decision.get("f4_volume_expansion"))
     if f4_volume_expansion is None:
@@ -475,6 +550,9 @@ def _build_record(
         net_expectancy_bps = _normalize_float(router_decision.get("fast_fail_expectancy_bps"))
 
     diagnostics = _diagnostics_cfg(cfg)
+    rt_cost_bps = _normalize_float(router_decision.get("rt_cost_bps"))
+    if rt_cost_bps is None:
+        rt_cost_bps = float(getattr(diagnostics, "skipped_candidate_roundtrip_cost_bps", 30.0) or 30.0)
     record = {
         "ts_utc": _iso_from_ms(entry_ts_ms),
         "run_id": str(audit.run_id),
@@ -482,12 +560,18 @@ def _build_record(
         "intended_side": str(intended_side),
         "skip_reason": str(skip_reason),
         "score": score,
+        "final_score": final_score,
+        "selected_rank": selected_rank,
+        "high_score_blocked_target": _normalize_bool(router_decision.get("high_score_blocked_target")) is True,
+        "high_score_block_category": str(router_decision.get("high_score_block_category") or ""),
         "required_score": required_score,
-        "regime": str(audit.regime or "Unknown"),
+        "regime": str(router_decision.get("regime") or audit.regime or "Unknown"),
         "current_level": str(current_level or router_decision.get("current_level") or ""),
         "target_w": _normalize_float(target_w),
         "alpha6_score": alpha6_score,
+        "alpha6_side": alpha6_side,
         "trend_score": trend_score,
+        "trend_side": trend_side,
         "f4_volume_expansion": f4_volume_expansion,
         "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
         "rolling_high": _normalize_float(router_decision.get("rolling_high")),
@@ -500,7 +584,7 @@ def _build_record(
         "closed_cycles": _normalize_int(router_decision.get("closed_cycles")),
         "net_expectancy_bps": net_expectancy_bps,
         "entry_px": _normalize_float(entry_px),
-        "rt_cost_bps": float(getattr(diagnostics, "skipped_candidate_roundtrip_cost_bps", 30.0) or 30.0),
+        "rt_cost_bps": rt_cost_bps,
         "entry_ts_ms": int(entry_ts_ms),
         "label_status": "pending",
         "label_not_observable_reason": "",
@@ -530,6 +614,36 @@ def _collect_skipped_candidates(
     }
     captured_keys: set[Any] = set()
     records: list[dict[str, Any]] = []
+
+    def _target_explain_reason(item: Mapping[str, Any]) -> str:
+        return str(item.get("router_reason") or item.get("blocked_reason") or item.get("reason") or "").strip()
+
+    def _is_high_score_target_explain(item: Mapping[str, Any]) -> bool:
+        symbol = str(item.get("symbol") or "").strip()
+        reason = _target_explain_reason(item)
+        final_score = _normalize_float(item.get("final_score"))
+        selected_rank = _normalize_int(item.get("selected_rank"))
+        target_w = _normalize_float(item.get("target_w"))
+        router_action = str(item.get("router_action") or "").strip().lower()
+        return bool(
+            symbol in HIGH_SCORE_BLOCKED_TARGET_SYMBOLS
+            and router_action == "skip"
+            and target_w is not None
+            and float(target_w) > 0.0
+            and _is_high_score_blocked_reason(reason)
+            and (
+                (final_score is not None and float(final_score) >= HIGH_SCORE_BLOCKED_MIN_SCORE)
+                or selected_rank == 1
+            )
+        )
+
+    high_score_explain_by_symbol_reason: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in (getattr(audit, "target_execution_explain", []) or []):
+        if not isinstance(item, Mapping) or not _is_high_score_target_explain(item):
+            continue
+        symbol = str(item.get("symbol") or "").strip()
+        reason = _target_explain_reason(item)
+        high_score_explain_by_symbol_reason.setdefault((symbol, reason), dict(item))
 
     def _entry_context(symbol: str, router_decision: Mapping[str, Any] | None) -> tuple[Optional[float], int]:
         decision = router_decision or {}
@@ -579,7 +693,8 @@ def _collect_skipped_candidates(
             zero_reason = str(rd.get("target_zero_reason") or "").strip()
             reason = zero_reason if zero_reason == "risk_off_pos_mult_zero" else "target_zero_no_order"
         is_btc_probe_skip = _is_btc_leadership_probe_skip_reason(reason)
-        if reason not in FOCUS_SKIP_REASONS and not is_btc_probe_skip:
+        target_explain = high_score_explain_by_symbol_reason.get((symbol, reason))
+        if reason not in FOCUS_SKIP_REASONS and not is_btc_probe_skip and target_explain is None:
             continue
         entry_px, entry_ts_ms = _entry_context(symbol, rd)
         if entry_ts_ms <= 0 and is_btc_probe_skip:
@@ -588,6 +703,14 @@ def _collect_skipped_candidates(
             continue
         intended_side = "buy" if is_btc_probe_skip else ("hold" if reason == "hold_current_no_valid_replacement" else "buy")
         target_w = rd.get("effective_target_w", rd.get("target_w", (audit.targets_post_risk or {}).get(symbol)))
+        router_for_record = dict(rd)
+        if target_explain is not None:
+            for key, value in target_explain.items():
+                if value not in (None, ""):
+                    router_for_record[key] = value
+            router_for_record["reason"] = reason
+            router_for_record["high_score_blocked_target"] = True
+            target_w = target_explain.get("target_w", target_w)
         record = _build_record(
             audit=audit,
             cfg=cfg,
@@ -600,9 +723,36 @@ def _collect_skipped_candidates(
             target_w=target_w,
             entry_px=entry_px,
             entry_ts_ms=entry_ts_ms,
-            router_decision=rd,
+            router_decision=router_for_record,
         )
-        key = _record_key(record) if is_btc_probe_skip else "|".join([symbol, reason])
+        key = _record_key(record)
+        if key in captured_keys:
+            continue
+        captured_keys.add(key)
+        records.append(record)
+
+    for (symbol, reason), target_explain in high_score_explain_by_symbol_reason.items():
+        entry_px, entry_ts_ms = _entry_context(symbol, target_explain)
+        if entry_ts_ms <= 0:
+            continue
+        router_for_record = dict(target_explain)
+        router_for_record["reason"] = reason
+        router_for_record["high_score_blocked_target"] = True
+        record = _build_record(
+            audit=audit,
+            cfg=cfg,
+            current_level=current_level,
+            strategy_lookup=strategy_lookup,
+            top_scores=top_scores,
+            symbol=symbol,
+            skip_reason=reason,
+            intended_side="buy",
+            target_w=target_explain.get("target_w"),
+            entry_px=entry_px,
+            entry_ts_ms=entry_ts_ms,
+            router_decision=router_for_record,
+        )
+        key = _record_key(record)
         if key in captured_keys:
             continue
         captured_keys.add(key)
@@ -901,9 +1051,15 @@ def update_skipped_candidate_tracker(
             for preserve_key in (
                 "entry_px",
                 "score",
+                "final_score",
+                "selected_rank",
+                "high_score_blocked_target",
+                "high_score_block_category",
                 "required_score",
                 "alpha6_score",
+                "alpha6_side",
                 "trend_score",
+                "trend_side",
                 "f4_volume_expansion",
                 "f5_rsi_trend_confirm",
                 "target_w",
@@ -960,12 +1116,18 @@ def update_skipped_candidate_tracker(
         "intended_side",
         "skip_reason",
         "score",
+        "final_score",
+        "selected_rank",
+        "high_score_blocked_target",
+        "high_score_block_category",
         "required_score",
         "regime",
         "current_level",
         "target_w",
         "alpha6_score",
+        "alpha6_side",
         "trend_score",
+        "trend_side",
         "f4_volume_expansion",
         "f5_rsi_trend_confirm",
         *BTC_LEADERSHIP_PROBE_FIELDS,
@@ -1023,10 +1185,55 @@ def update_skipped_candidate_tracker(
         by_reason_fields,
     )
 
+    high_score_records = [
+        row
+        for row in records
+        if _normalize_bool(row.get("high_score_blocked_target")) is True
+    ]
+    high_score_rows = []
+    for row in high_score_records:
+        payload = dict(row)
+        payload.pop("entry_ts_ms", None)
+        high_score_rows.append(payload)
+    _write_csv(summaries_dir / "high_score_blocked_outcomes.csv", high_score_rows, base_fields)
+
+    high_score_by_symbol = _aggregate_records_by_fields(
+        high_score_records,
+        key_fields=["symbol", "skip_reason"],
+        horizons=horizons,
+    )
+    high_score_by_symbol_fields = [
+        "symbol",
+        "skip_reason",
+        "count",
+        "pending_count",
+        "not_observable_count",
+        "complete_count",
+        *[f"avg_{int(h)}h_net_bps" for h in horizons],
+        *[f"win_rate_{int(h)}h" for h in horizons],
+    ]
+    _write_csv(
+        summaries_dir / "high_score_blocked_outcomes_by_symbol.csv",
+        high_score_by_symbol,
+        high_score_by_symbol_fields,
+    )
+
+    high_score_by_reason = _aggregate_records_by_fields(
+        high_score_records,
+        key_fields=["skip_reason"],
+        horizons=horizons,
+    )
+    _write_csv(
+        summaries_dir / "high_score_blocked_outcomes_by_reason.csv",
+        high_score_by_reason,
+        by_reason_fields,
+    )
+
     return {
         "enabled": True,
         "new_records": int(inserted),
         "total_records": int(len(records)),
+        "high_score_blocked_records": int(len(high_score_records)),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),
     }

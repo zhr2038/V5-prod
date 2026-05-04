@@ -1126,6 +1126,175 @@ class V5Pipeline:
         return None
 
     @staticmethod
+    def _target_execution_score_info(top_scores: List[Dict[str, Any]], symbol: str) -> Tuple[Optional[float], Optional[int]]:
+        sym = str(symbol or "").strip()
+        for row in top_scores or []:
+            if str((row or {}).get("symbol", "") or "").strip() != sym:
+                continue
+            score = _float_or_none(
+                (row or {}).get("final_score", (row or {}).get("score", (row or {}).get("display_score")))
+            )
+            rank = None
+            try:
+                raw_rank = (row or {}).get("selected_rank", (row or {}).get("rank"))
+                if raw_rank is not None:
+                    rank = int(raw_rank)
+            except Exception:
+                rank = None
+            return score, rank
+        return None, None
+
+    @staticmethod
+    def _target_execution_router_decision(
+        router_decisions: List[Dict[str, Any]],
+        symbol: str,
+    ) -> Dict[str, Any]:
+        sym = str(symbol or "").strip()
+        matches = [
+            dict(item or {})
+            for item in router_decisions or []
+            if isinstance(item, dict) and str((item or {}).get("symbol", "") or "").strip() == sym
+        ]
+        for preferred_action in ("skip", "create", "clip"):
+            for item in matches:
+                if str(item.get("action", "") or "").strip().lower() == preferred_action:
+                    return item
+        return matches[0] if matches else {}
+
+    @staticmethod
+    def _target_execution_strategy_sources(
+        strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
+        symbol: str,
+    ) -> List[str]:
+        sym = str(symbol or "").strip()
+        sources = []
+        for strategy_name, signals_by_symbol in (strategy_signal_lookup or {}).items():
+            if not isinstance(signals_by_symbol, dict):
+                continue
+            if sym in signals_by_symbol:
+                sources.append(str(strategy_name))
+        return sources
+
+    @staticmethod
+    def _target_execution_block_category(reason: str, alpha6_side: Optional[str]) -> str:
+        norm_reason = str(reason or "").strip()
+        norm_alpha6_side = str(alpha6_side or "").strip().lower()
+        if norm_reason == "protect_entry_trend_only":
+            return "trend_only"
+        if norm_reason == "protect_entry_no_alpha6_confirmation":
+            return "alpha6_sell" if norm_alpha6_side == "sell" else "no_alpha6_confirmation"
+        if norm_reason == "protect_entry_alpha6_score_too_low":
+            return "alpha6_score_too_low"
+        if norm_reason == "protect_entry_volume_confirm_negative":
+            return "volume_confirm_negative"
+        if norm_reason in {"protect_entry_rsi_confirm_too_weak", "protect_entry_alpha6_rsi_confirm_negative"}:
+            return "rsi_confirm_too_weak"
+        if "cost_aware" in norm_reason or "cost_edge" in norm_reason:
+            return "cost_aware"
+        if norm_reason.startswith("negative_expectancy") or "negative_expectancy" in norm_reason:
+            return "negative_expectancy"
+        if "risk_off" in norm_reason or "risk-off" in norm_reason:
+            return "risk_off"
+        return "other"
+
+    def _build_target_execution_explain(
+        self,
+        *,
+        targets_post_risk: Dict[str, float],
+        top_scores: List[Dict[str, Any]],
+        strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
+        router_decisions: List[Dict[str, Any]],
+        current_auto_risk_level: Optional[str],
+        regime_state: str,
+    ) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        protect_entry_require_alpha6_confirmation = bool(
+            getattr(self.cfg.execution, "protect_entry_require_alpha6_confirmation", True)
+        )
+        protect_entry_block_trend_only = bool(
+            getattr(self.cfg.execution, "protect_entry_block_trend_only", True)
+        )
+        protect_entry_alpha6_min_score = float(
+            getattr(self.cfg.execution, "protect_entry_alpha6_min_score", 0.40) or 0.0
+        )
+        protect_entry_min_f4_volume_expansion = float(
+            getattr(self.cfg.execution, "protect_entry_min_f4_volume_expansion", 0.0) or 0.0
+        )
+        protect_entry_min_f5_rsi_trend_confirm = float(
+            getattr(self.cfg.execution, "protect_entry_min_f5_rsi_trend_confirm", 0.30) or 0.0
+        )
+
+        for fallback_rank, (symbol, target_w) in enumerate((targets_post_risk or {}).items(), start=1):
+            sym = str(symbol or "").strip()
+            if not sym:
+                continue
+            final_score, selected_rank = self._target_execution_score_info(top_scores, sym)
+            if selected_rank is None:
+                selected_rank = fallback_rank
+
+            trend_signal = (strategy_signal_lookup.get("TrendFollowing") or {}).get(sym)
+            alpha6_signal = (strategy_signal_lookup.get("Alpha6Factor") or {}).get(sym)
+            router_decision = self._target_execution_router_decision(router_decisions, sym)
+            router_action = str(router_decision.get("action", "") or "").strip().lower()
+            router_reason = str(router_decision.get("reason", "") or "").strip()
+            blocked_reason = router_reason if router_action == "skip" else ""
+
+            trend_score = self._signal_score(trend_signal)
+            if trend_score is None:
+                trend_score = _float_or_none(router_decision.get("trend_score"))
+            trend_side = self._signal_side(trend_signal)
+            alpha6_score = self._signal_score(alpha6_signal)
+            if alpha6_score is None:
+                alpha6_score = _float_or_none(router_decision.get("alpha6_score"))
+            alpha6_side = self._signal_side(alpha6_signal) or (
+                str(router_decision.get("alpha6_side", "") or "").strip().lower() or None
+            )
+            f4_volume_expansion = self._alpha6_volume_expansion(alpha6_signal)
+            if f4_volume_expansion is None:
+                f4_volume_expansion = _float_or_none(router_decision.get("f4_volume_expansion"))
+            f5_rsi_trend_confirm = self._alpha6_rsi_confirm(alpha6_signal)
+            if f5_rsi_trend_confirm is None:
+                f5_rsi_trend_confirm = _float_or_none(router_decision.get("f5_rsi_trend_confirm"))
+
+            high_score_but_not_executed = bool(
+                final_score is not None
+                and float(final_score) >= 0.80
+                and router_action == "skip"
+            )
+            row = {
+                "symbol": sym,
+                "target_w": _float_or_none(target_w),
+                "final_score": final_score,
+                "selected_rank": selected_rank,
+                "strategy_sources": self._target_execution_strategy_sources(strategy_signal_lookup, sym),
+                "trend_score": trend_score,
+                "trend_side": trend_side,
+                "alpha6_score": alpha6_score,
+                "alpha6_side": alpha6_side,
+                "f4_volume_expansion": f4_volume_expansion,
+                "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
+                "protect_entry_require_alpha6_confirmation": protect_entry_require_alpha6_confirmation,
+                "protect_entry_block_trend_only": protect_entry_block_trend_only,
+                "protect_entry_alpha6_min_score": protect_entry_alpha6_min_score,
+                "protect_entry_min_f4_volume_expansion": protect_entry_min_f4_volume_expansion,
+                "protect_entry_min_f5_rsi_trend_confirm": protect_entry_min_f5_rsi_trend_confirm,
+                "passed_protect_entry_gate": not str(blocked_reason).startswith("protect_entry_"),
+                "blocked_reason": blocked_reason,
+                "router_action": router_action or None,
+                "router_reason": router_reason or None,
+                "high_score_but_not_executed": high_score_but_not_executed,
+                "high_score_block_category": (
+                    self._target_execution_block_category(router_reason, alpha6_side)
+                    if high_score_but_not_executed
+                    else None
+                ),
+                "current_level": current_auto_risk_level,
+                "regime": regime_state,
+            }
+            rows.append(row)
+        return rows
+
+    @staticmethod
     def _record_target_zero_reason(
         target_zero_reason_by_symbol: Dict[str, str],
         *,
@@ -4569,6 +4738,9 @@ class V5Pipeline:
             audit.protect_entry_block_trend_only = protect_entry_block_trend_only
             audit.protect_entry_require_alpha6_rsi_confirm_positive = protect_entry_require_alpha6_rsi_confirm_positive
             audit.protect_entry_alpha6_min_score = protect_entry_alpha6_min_score
+            audit.protect_entry_require_volume_confirm = protect_entry_require_volume_confirm
+            audit.protect_entry_min_f4_volume_expansion = protect_entry_min_f4_volume_expansion
+            audit.protect_entry_min_f5_rsi_trend_confirm = protect_entry_min_f5_rsi_trend_confirm
         if protect_entry_gate_active and audit:
             audit.add_note(
                 "PROTECT entry gate active: "
@@ -5932,6 +6104,18 @@ class V5Pipeline:
 
         if audit:
             audit.router_decisions = router_decisions
+            try:
+                explain_signal_lookup = strategy_signal_lookup or self._resolve_strategy_signal_lookup(audit)
+                audit.target_execution_explain = self._build_target_execution_explain(
+                    targets_post_risk=dict(target or {}),
+                    top_scores=list(audit.top_scores or []),
+                    strategy_signal_lookup=explain_signal_lookup,
+                    router_decisions=router_decisions,
+                    current_auto_risk_level=current_auto_risk_level,
+                    regime_state=regime_state_str,
+                )
+            except Exception as exc:
+                audit.add_note(f"target_execution_explain skipped: {str(exc)[:80]}")
             audit.counts["orders_rebalance"] = len(rebalance_orders)
             # fill budget_action suppression stats (F3.1)
             try:
