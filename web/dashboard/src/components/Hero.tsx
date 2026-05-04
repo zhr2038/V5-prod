@@ -36,21 +36,21 @@ export function Hero({ marketState, riskGuard, systemStatus, updateTime }: HeroP
       transition={{ duration: 0.5 }}
       className="relative z-10 px-6 pb-4"
     >
-      <div className="max-w-[1780px] mx-auto flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-        <div className="hero-safe-copy">
+      <div className="max-w-[1780px] mx-auto grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div className="hero-safe-copy min-w-0">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse accent-glow" />
             <span className="text-sm text-[var(--text-dim)] tracking-wide">
               {modeLabels[mode] || mode} · {updateTime || '等待刷新...'}
             </span>
           </div>
-          <h1 className="text-3xl md:text-4xl font-semibold text-gradient">
+          <h1 className="text-3xl sm:text-4xl font-semibold text-gradient">
             V5 生产交易看板
           </h1>
         </div>
 
-        <div className="liquid-glass-thin tone-pearl control-rail hero-safe-rail self-start md:self-auto">
-          <div className={`control-pill liquid-glass-thin ${stateClasses[state] || stateClasses.SIDEWAYS}`}>
+        <div className="material-surface material-clear tone-pearl control-rail hero-safe-rail w-full justify-center sm:justify-start lg:w-auto lg:justify-end">
+          <div className={`control-pill ${stateClasses[state] || stateClasses.SIDEWAYS}`}>
             市场: {stateLabels[state] || state}
           </div>
           <div className={`control-pill liquid-glass-thin ${riskClasses[level] || riskClasses.NEUTRAL}`}>

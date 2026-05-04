@@ -21,10 +21,45 @@
   --danger: #ff8ca0;
   --success: #7ce9b5;
   --warn: #ffcd87;
+  --kline-grid: rgba(255, 255, 255, 0.06);
+  --kline-grid-muted: rgba(255, 255, 255, 0.035);
+  --kline-axis: rgba(210, 218, 232, 0.76);
+  --kline-axis-muted: rgba(194, 204, 224, 0.66);
+  --kline-candle-up: #34d399;
+  --kline-candle-up-fill: rgba(52, 211, 153, 0.86);
+  --kline-candle-down: #fb7185;
+  --kline-candle-down-fill: rgba(251, 113, 133, 0.88);
+  --kline-volume-top: rgba(126, 236, 205, 0.62);
+  --kline-volume-bottom: rgba(126, 236, 205, 0.12);
+  --kline-ma7: rgba(141, 196, 255, 0.95);
+  --kline-ma20: rgba(255, 205, 120, 0.90);
+  --kline-last: #8dc4ff;
+  --kline-reference: rgba(255, 205, 120, 0.75);
+  --kline-crosshair: rgba(142, 240, 211, 0.72);
+  --kline-hover-band: rgba(142, 240, 211, 0.075);
+  --kline-tooltip-bg: rgba(18, 22, 31, 0.88);
+  --kline-tooltip-border: rgba(142, 240, 211, 0.34);
+  --kline-tooltip-text: rgba(245, 248, 255, 0.94);
+  --kline-marker: rgba(255, 255, 255, 0.32);
+  --kline-marker-muted: rgba(255, 255, 255, 0.28);
+  --kline-marker-text: rgba(255, 255, 255, 0.76);
+  --kline-marker-text-muted: rgba(255, 255, 255, 0.70);
+  --kline-label-bg: rgba(25, 35, 49, 0.90);
+  --kline-label-border: rgba(141, 196, 255, 0.44);
+  --kline-label-text: #9ad2ff;
+  --kline-reference-label-bg: rgba(48, 40, 18, 0.88);
+  --kline-reference-label-border: rgba(255, 205, 120, 0.40);
+  --kline-reference-label-text: #ffcb7f;
   --line: rgba(255, 255, 255, 0.10);
   --line-strong: rgba(255, 255, 255, 0.22);
   --surface-border: rgba(255, 255, 255, 0.13);
   --surface-border-strong: rgba(255, 255, 255, 0.20);
+  --glass-rim: rgba(255, 255, 255, 0.22);
+  --glass-rim-soft: rgba(255, 255, 255, 0.08);
+  --glass-shadow: rgba(3, 5, 12, 0.28);
+  --glass-shadow-soft: rgba(8, 10, 16, 0.12);
+  --glass-caustic: rgba(255, 255, 255, 0.08);
+  --glass-focus-glow: rgba(142, 240, 211, 0.08);
   --shadow-soft: 0 16px 40px rgba(8, 10, 16, 0.11);
   --shadow-deep: 0 24px 60px rgba(7, 9, 15, 0.16);
   --theme-chrome-dark: #322f34;
@@ -69,6 +104,27 @@ body {
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
+  background: var(--page-bg-base);
+  padding: var(--page-safe-top) var(--page-safe-right) 0 var(--page-safe-left);
+  scroll-snap-align: start;
+}
+
+.page-content {
+  position: relative;
+  min-height: calc(100vh + 240px);
+  min-height: calc(100svh + 240px);
+  min-height: calc(100dvh + 240px);
+  padding-bottom: var(--page-safe-bottom);
+}
+
+.page-content > * {
+  position: relative;
+  z-index: 1;
+}
+
+.dashboard-section {
+  scroll-snap-align: start;
+  scroll-margin-top: var(--page-safe-top);
 }
 
 .hero-safe-copy {
@@ -93,9 +149,10 @@ body {
   overflow: hidden;
   isolation: isolate;
   background:
-    radial-gradient(1200px 860px at 10% 14%, rgba(194, 112, 84, 0.14), transparent 58%),
-    radial-gradient(980px 760px at 86% 16%, rgba(124, 147, 185, 0.11), transparent 54%),
-    radial-gradient(940px 860px at 56% 76%, rgba(124, 144, 106, 0.09), transparent 58%),
+    radial-gradient(1200px 860px at 10% 14%, rgba(210, 116, 88, 0.13), transparent 58%),
+    radial-gradient(980px 760px at 86% 16%, rgba(148, 177, 226, 0.105), transparent 54%),
+    radial-gradient(940px 860px at 56% 76%, rgba(148, 170, 120, 0.09), transparent 58%),
+    conic-gradient(from 212deg at 60% 28%, rgba(255, 255, 255, 0.018), transparent 22%, rgba(255, 255, 255, 0.01) 46%, transparent 72%, rgba(255, 255, 255, 0.014)),
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
   background-color: var(--theme-chrome-dark);
 }
@@ -105,9 +162,10 @@ body {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(72vw 38vh at 50% 0%, rgba(255, 255, 255, 0.05), transparent 76%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.026), transparent 24%);
-  opacity: 0.44;
+    radial-gradient(72vw 38vh at 50% 0%, rgba(255, 255, 255, 0.042), transparent 76%),
+    linear-gradient(118deg, transparent 0%, rgba(255, 255, 255, 0.024) 34%, transparent 62%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 24%);
+  opacity: 0.42;
 }
 
 .liquid-bg::after {
@@ -115,8 +173,10 @@ body {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(88vw 78vh at 52% 36%, rgba(255, 255, 255, 0.024), transparent 74%);
+    radial-gradient(88vw 78vh at 52% 36%, rgba(255, 255, 255, 0.02), transparent 74%),
+    linear-gradient(102deg, transparent 8%, rgba(255, 255, 255, 0.018) 28%, transparent 56%);
   opacity: 0.16;
+  filter: url("#liquid-distortion") blur(0.2px);
 }
 
 .ambient-wash,
@@ -124,6 +184,7 @@ body {
 .ambient-pane,
 .liquid-caustic,
 .liquid-orb,
+.liquid-blob,
 .liquid-mesh,
 .liquid-noise,
 .liquid-blob {
@@ -174,12 +235,17 @@ body {
   min-height: 360px;
   top: 38vh;
   left: 58vw;
-  background: radial-gradient(circle, rgba(145, 116, 153, 0.16), rgba(145, 116, 153, 0.06) 44%, transparent 72%);
-  animation: washBreath 18s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(154, 118, 168, 0.16), rgba(154, 118, 168, 0.052) 44%, transparent 74%);
+  animation: washBreath 30s ease-in-out infinite;
 }
 
 .ambient-ribbon {
   display: none;
+  border-radius: 999px;
+  mix-blend-mode: screen;
+  filter: url("#liquid-distortion") blur(14px);
+  opacity: 0.14;
+  animation: ribbonFloat 32s ease-in-out infinite;
 }
 
 .ribbon-coral {
@@ -229,7 +295,7 @@ body {
 .liquid-caustic {
   border-radius: 999px;
   mix-blend-mode: screen;
-  opacity: 0.12;
+  opacity: 0.10;
   filter: url("#liquid-distortion-strong") blur(10px);
 }
 
@@ -261,19 +327,16 @@ body {
   width: 30vw;
   height: 10vh;
   background:
-    linear-gradient(96deg, transparent 12%, rgba(255, 255, 255, 0.06) 30%, rgba(255, 255, 255, 0.14) 44%, rgba(255, 255, 255, 0.04) 62%, transparent 86%);
-  transform: rotate(6deg);
-  filter: url("#liquid-distortion") blur(14px);
-  mix-blend-mode: screen;
-  opacity: 0.08;
-  animation: causticDriftCenter 34s ease-in-out infinite;
+    linear-gradient(96deg, transparent 12%, rgba(255, 255, 255, 0.050) 30%, rgba(255, 255, 255, 0.115) 44%, rgba(255, 255, 255, 0.032) 62%, transparent 86%);
+  transform: rotate(4deg);
+  animation: causticDriftLeft 34s ease-in-out infinite reverse;
 }
 
 .liquid-orb {
   border-radius: 50%;
   mix-blend-mode: screen;
   filter: url("#liquid-distortion") blur(28px);
-  opacity: 0.12;
+  opacity: 0.08;
 }
 
 .orb-1 {
@@ -308,17 +371,17 @@ body {
   height: 200px;
   top: 42vh;
   left: 8vw;
-  background: radial-gradient(circle at 38% 36%, rgba(255, 255, 255, 0.16), rgba(180, 140, 200, 0.12) 32%, rgba(255, 255, 255, 0.02) 66%, transparent 80%);
+  background: radial-gradient(circle at 38% 36%, rgba(255, 255, 255, 0.13), rgba(180, 140, 200, 0.10) 32%, rgba(255, 255, 255, 0.015) 66%, transparent 80%);
   filter: url("#liquid-distortion-strong") blur(22px);
-  animation: orbDriftSlow 32s ease-in-out infinite;
+  animation: orbDrift 26s ease-in-out infinite reverse;
 }
 
 .liquid-blob {
   border-radius: 60% 40% 50% 70% / 50% 60% 40% 50%;
   filter: url("#liquid-distortion-strong") blur(40px);
   mix-blend-mode: screen;
-  opacity: 0.07;
-  animation: blobMorph 20s ease-in-out infinite;
+  opacity: 0.055;
+  animation: blobMorph 24s ease-in-out infinite;
 }
 
 .blob-1 {
@@ -326,26 +389,40 @@ body {
   height: 320px;
   top: 20vh;
   left: 20vw;
-  background: radial-gradient(ellipse at 40% 40%, rgba(210, 170, 140, 0.35), rgba(180, 140, 120, 0.12) 50%, transparent 72%);
-  animation-duration: 24s;
+  background: radial-gradient(ellipse at 40% 40%, rgba(210, 170, 140, 0.28), rgba(180, 140, 120, 0.09) 50%, transparent 72%);
 }
 
 .blob-2 {
   width: 400px;
   height: 280px;
-  bottom: 16vh;
   right: 14vw;
-  background: radial-gradient(ellipse at 50% 40%, rgba(140, 170, 210, 0.30), rgba(120, 150, 190, 0.10) 50%, transparent 72%);
-  animation-duration: 28s;
-  animation-delay: -8s;
+  bottom: 16vh;
+  background: radial-gradient(ellipse at 50% 40%, rgba(140, 170, 210, 0.24), rgba(120, 150, 190, 0.08) 50%, transparent 72%);
+  animation-duration: 30s;
 }
 
 .liquid-mesh {
   display: none;
+  inset: 0;
+  opacity: 0.055;
+  mix-blend-mode: soft-light;
+  background:
+    linear-gradient(118deg, transparent 0 36%, rgba(255, 255, 255, 0.036) 43%, transparent 52%),
+    repeating-linear-gradient(96deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(18deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 46px);
+  filter: url("#liquid-distortion") blur(0.6px);
+  mask-image: radial-gradient(78% 72% at 50% 28%, black 0%, rgba(0, 0, 0, 0.68) 52%, transparent 100%);
 }
 
 .liquid-noise {
   display: none;
+  inset: 0;
+  opacity: 0.028;
+  mix-blend-mode: overlay;
+  background-image:
+    radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.45) 0 0.7px, transparent 0.9px),
+    radial-gradient(circle at 72% 62%, rgba(255, 255, 255, 0.32) 0 0.8px, transparent 1px);
+  background-size: 17px 19px, 23px 29px;
 }
 
 @keyframes orbDrift {
@@ -354,32 +431,9 @@ body {
   50% { transform: translate3d(18px, -14px, 0) scale(1.04); }
 }
 
-@keyframes orbDriftSlow {
-  0%,
-  100% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(-12px, 10px, 0) scale(1.06); }
-}
-
-@keyframes causticDriftLeft {
-  0%,
-  100% { transform: translate3d(0, 0, 0) rotate(-11deg); }
-  50% { transform: translate3d(3vw, -2vh, 0) rotate(-8deg); }
-}
-
-@keyframes causticDriftRight {
-  0%,
-  100% { transform: translate3d(0, 0, 0) rotate(12deg); }
-  50% { transform: translate3d(-4vw, 2vh, 0) rotate(10deg); }
-}
-
-@keyframes causticDriftCenter {
-  0%,
-  100% { transform: translate3d(0, 0, 0) rotate(6deg); }
-  50% { transform: translate3d(2vw, -1.5vh, 0) rotate(4deg); }
-}
-
 @keyframes blobMorph {
-  0%, 100% {
+  0%,
+  100% {
     border-radius: 60% 40% 50% 70% / 50% 60% 40% 50%;
     transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
   }
@@ -398,8 +452,27 @@ body {
 }
 
 @keyframes washBreath {
-  0%, 100% { opacity: 0.5; transform: scale(1); }
-  50% { opacity: 0.8; transform: scale(1.08); }
+  0%,
+  100% { opacity: 0.48; transform: scale(1); }
+  50% { opacity: 0.76; transform: scale(1.08); }
+}
+
+@keyframes causticDriftLeft {
+  0%,
+  100% { transform: translate3d(0, 0, 0) rotate(-11deg); }
+  50% { transform: translate3d(3vw, -2vh, 0) rotate(-8deg); }
+}
+
+@keyframes causticDriftRight {
+  0%,
+  100% { transform: translate3d(0, 0, 0) rotate(12deg); }
+  50% { transform: translate3d(-4vw, 2vh, 0) rotate(10deg); }
+}
+
+@keyframes ribbonFloat {
+  0%,
+  100% { transform: translate3d(0, 0, 0) rotate(var(--ribbon-rotate, 0deg)); }
+  50% { transform: translate3d(2vw, -1.5vh, 0) rotate(calc(var(--ribbon-rotate, 0deg) + 3deg)); }
 }
 
 @keyframes riseIn {
@@ -634,37 +707,41 @@ body {
 .material-surface,
 .glass-card,
 .glass-panel {
-  --tone-fill: rgba(132, 145, 168, 0.05);
-  --tone-lens: rgba(132, 145, 168, 0.04);
+  --tone-fill: rgba(132, 145, 168, 0.028);
+  --tone-lens: rgba(132, 145, 168, 0.024);
   --highlight-x: 18%;
   --highlight-y: 14%;
-  --highlight-opacity: 0.12;
-  --lens-left: auto;
+  --highlight-opacity: 0.074;
+  --lens-left: 112%;
   --lens-right: -12%;
   --lens-bottom: -16%;
-  --lens-opacity: 0.02;
+  --lens-opacity: 0.034;
   --surface-sheen:
     linear-gradient(
       45deg,
-      rgba(255, 255, 255, 0.12) 0%,
-      transparent 16%,
-      transparent 84%,
-      rgba(255, 255, 255, 0.10) 100%
+      rgba(255, 255, 255, 0.105) 0%,
+      transparent 15%,
+      transparent 82%,
+      rgba(255, 255, 255, 0.082) 100%
     );
   position: relative;
   isolation: isolate;
   overflow: hidden;
   border-radius: 28px;
-  border: 1px solid var(--surface-border);
+  border: 1px solid color-mix(in srgb, var(--surface-border) 88%, transparent);
   background: var(--surface-fill);
-  backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate)) brightness(var(--surface-brightness));
-  -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate)) brightness(var(--surface-brightness));
+  background-clip: padding-box;
+  backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate)) brightness(var(--surface-brightness)) contrast(1.03);
+  -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate)) brightness(var(--surface-brightness)) contrast(1.03);
   box-shadow:
     var(--surface-shadow),
-    inset 1px -1px 0 rgba(255, 255, 255, 0.08),
-    inset -1px 1px 0 rgba(255, 255, 255, 0.05),
-    inset 0 0 1px rgba(0, 0, 0, 0.14);
-  transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+    0 0 0 1px rgba(255, 255, 255, 0.028),
+    inset 1px -1px 0 rgba(255, 255, 255, 0.082),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.058),
+    inset 0 1.5px 1.5px rgba(255, 255, 255, 0.040),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.118),
+    inset 0 0 1.5px rgba(0, 0, 0, 0.14);
+  transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease, background 0.22s ease;
 }
 
 .material-surface::before,
@@ -685,29 +762,32 @@ body {
   border-radius: inherit;
   background:
     var(--surface-sheen),
-    radial-gradient(120px 64px at var(--highlight-x) var(--highlight-y), rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.025) 32%, transparent 74%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012) 16%, transparent 34%),
-    linear-gradient(132deg, rgba(255, 255, 255, 0.018), transparent 28%, rgba(255, 255, 255, 0.008) 56%, transparent 82%);
+    radial-gradient(180px 92px at var(--highlight-x) var(--highlight-y), rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.030) 40%, transparent 76%),
+    radial-gradient(58% 64% at var(--lens-left, 112%) var(--lens-bottom, 112%), var(--tone-lens), transparent 68%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.010) 16%, transparent 34%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.070), transparent 22%),
+    linear-gradient(132deg, rgba(255, 255, 255, 0.020), transparent 28%, rgba(255, 255, 255, 0.008) 56%, transparent 82%);
   opacity: var(--highlight-opacity);
 }
 
 .material-surface::after,
 .glass-card::after,
 .glass-panel::after {
-  inset: 7px;
+  inset: 5px;
   border-radius: inherit;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.074);
   background:
     linear-gradient(
       45deg,
-      rgba(255, 255, 255, 0.16) 0%,
+      rgba(255, 255, 255, 0.115) 0%,
       transparent 18%,
       transparent 82%,
-      rgba(255, 255, 255, 0.14) 100%
+      rgba(255, 255, 255, 0.095) 100%
     ),
-    radial-gradient(circle at 52% 82%, rgba(0, 0, 0, 0.08), transparent 54%);
-  filter: blur(2px);
-  opacity: 0.24;
+    radial-gradient(64% 48% at 50% 106%, rgba(0, 0, 0, 0.105), transparent 68%),
+    radial-gradient(54% 48% at var(--lens-right) var(--lens-bottom), var(--tone-lens), transparent 70%);
+  filter: blur(1.35px);
+  opacity: 0.27;
 }
 
 .material-surface > *,
@@ -718,71 +798,72 @@ body {
 }
 
 .surface-lift:hover {
-  transform: translateY(-1px);
   border-color: var(--surface-border-strong);
   box-shadow:
     var(--surface-shadow-hover),
-    inset 1px -1px 0 rgba(255, 255, 255, 0.10),
-    inset -1px 1px 0 rgba(255, 255, 255, 0.07),
-    inset 0 0 1px rgba(0, 0, 0, 0.16);
+    0 0 0 1px rgba(255, 255, 255, 0.038),
+    inset 1px -1px 0 rgba(255, 255, 255, 0.096),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.068),
+    inset 0 1.5px 1.5px rgba(255, 255, 255, 0.050),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.13),
+    inset 0 0 1.5px rgba(0, 0, 0, 0.16);
 }
 
 .material-clear,
 .glass-panel {
   --surface-fill:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.072), rgba(255, 255, 255, 0.024) 18%, rgba(255, 255, 255, 0.008) 38%, rgba(255, 255, 255, 0.018) 100%),
-    linear-gradient(165deg, var(--tone-fill), rgba(255, 255, 255, 0.008) 44%, rgba(19, 22, 29, 0.016) 100%);
-  --surface-blur: 10px;
-  --surface-saturate: 142%;
-  --surface-brightness: 1.02;
-  --surface-shadow: 0 10px 24px rgba(8, 10, 16, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(255, 255, 255, 0.015);
-  --surface-shadow-hover: 0 12px 26px rgba(8, 10, 16, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(255, 255, 255, 0.02);
-  --highlight-opacity: 0.12;
+    linear-gradient(145deg, rgba(255, 255, 255, 0.050), rgba(255, 255, 255, 0.018) 18%, rgba(255, 255, 255, 0.005) 38%, rgba(255, 255, 255, 0.012) 100%),
+    linear-gradient(165deg, var(--tone-fill), rgba(255, 255, 255, 0.005) 44%, rgba(19, 22, 29, 0.014) 100%);
+  --surface-blur: 22px;
+  --surface-saturate: 184%;
+  --surface-brightness: 1.042;
+  --surface-shadow: 0 14px 36px rgba(8, 10, 16, 0.070), 0 6px 16px rgba(8, 10, 16, 0.040), inset 0 1px 0 rgba(255, 255, 255, 0.080), inset 0 -1px 0 rgba(0, 0, 0, 0.065);
+  --surface-shadow-hover: 0 16px 40px rgba(8, 10, 16, 0.080), 0 8px 18px rgba(8, 10, 16, 0.046), inset 0 1px 0 rgba(255, 255, 255, 0.096), inset 0 -1px 0 rgba(0, 0, 0, 0.072);
+  --highlight-opacity: 0.072;
 }
 
 .material-regular,
 .glass-card {
   --surface-fill:
-    linear-gradient(152deg, rgba(255, 255, 255, 0.082), rgba(255, 255, 255, 0.028) 16%, rgba(255, 255, 255, 0.010) 34%, rgba(255, 255, 255, 0.02) 100%),
-    linear-gradient(168deg, var(--tone-fill), rgba(255, 255, 255, 0.008) 48%, rgba(21, 24, 32, 0.032) 100%);
-  --surface-blur: 11px;
-  --surface-saturate: 136%;
-  --surface-brightness: 1.02;
-  --surface-shadow: 0 14px 34px rgba(8, 10, 16, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 -1px 0 rgba(255, 255, 255, 0.018);
-  --surface-shadow-hover: 0 16px 38px rgba(8, 10, 16, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(255, 255, 255, 0.02);
-  --highlight-opacity: 0.105;
+    linear-gradient(152deg, rgba(255, 255, 255, 0.060), rgba(255, 255, 255, 0.020) 16%, rgba(255, 255, 255, 0.006) 34%, rgba(255, 255, 255, 0.015) 100%),
+    linear-gradient(168deg, var(--tone-fill), rgba(255, 255, 255, 0.005) 48%, rgba(21, 24, 32, 0.022) 100%);
+  --surface-blur: 24px;
+  --surface-saturate: 178%;
+  --surface-brightness: 1.038;
+  --surface-shadow: 0 20px 52px rgba(8, 10, 16, 0.082), 0 8px 22px rgba(8, 10, 16, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.088), inset 0 -1px 0 rgba(0, 0, 0, 0.070);
+  --surface-shadow-hover: 0 22px 56px rgba(8, 10, 16, 0.092), 0 10px 24px rgba(8, 10, 16, 0.052), inset 0 1px 0 rgba(255, 255, 255, 0.104), inset 0 -1px 0 rgba(0, 0, 0, 0.078);
+  --highlight-opacity: 0.068;
 }
 
 .material-reading {
   --surface-fill:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012) 14%, rgba(28, 32, 41, 0.10) 100%),
-    linear-gradient(168deg, rgba(255, 255, 255, 0.012), var(--tone-fill) 38%, rgba(14, 17, 24, 0.14) 100%);
-  --surface-blur: 10px;
-  --surface-saturate: 110%;
-  --surface-brightness: 1;
-  --surface-shadow: 0 14px 32px rgba(8, 10, 16, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  --highlight-opacity: 0.08;
-  --lens-opacity: 0;
-  --surface-border: rgba(255, 255, 255, 0.10);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.010) 14%, rgba(28, 32, 41, 0.068) 100%),
+    linear-gradient(168deg, rgba(255, 255, 255, 0.009), var(--tone-fill) 38%, rgba(14, 17, 24, 0.088) 100%);
+  --surface-blur: 18px;
+  --surface-saturate: 136%;
+  --surface-brightness: 1.012;
+  --surface-shadow: 0 18px 42px rgba(8, 10, 16, 0.078), 0 7px 18px rgba(8, 10, 16, 0.040), inset 0 1px 0 rgba(255, 255, 255, 0.064), inset 0 -1px 0 rgba(0, 0, 0, 0.058);
+  --highlight-opacity: 0.052;
+  --lens-opacity: 0.018;
+  --surface-border: rgba(255, 255, 255, 0.12);
 }
 
 .material-reading::before {
   background:
-    radial-gradient(110px 56px at var(--highlight-x) var(--highlight-y), rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015) 30%, transparent 76%),
-    linear-gradient(132deg, rgba(255, 255, 255, 0.014), transparent 26%, rgba(255, 255, 255, 0.008) 52%, transparent 78%);
+    linear-gradient(132deg, rgba(255, 255, 255, 0.010), transparent 26%, rgba(255, 255, 255, 0.005) 52%, transparent 78%);
 }
 
 .material-inset {
   --surface-fill:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.006) 16%, rgba(15, 18, 24, 0.08) 100%),
-    linear-gradient(165deg, rgba(122, 138, 164, 0.03), rgba(15, 18, 24, 0.10) 68%);
-  --surface-blur: 6px;
-  --surface-saturate: 106%;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.007) 16%, rgba(15, 18, 24, 0.095) 100%),
+    linear-gradient(165deg, rgba(122, 138, 164, 0.034), rgba(15, 18, 24, 0.12) 68%);
+  --surface-blur: 8px;
+  --surface-saturate: 112%;
   --surface-brightness: 1;
-  --surface-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 16px rgba(6, 8, 12, 0.06);
+  --surface-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.052), inset 0 -1px 0 rgba(0, 0, 0, 0.068), 0 8px 18px rgba(6, 8, 12, 0.07);
   --highlight-opacity: 0.06;
   --lens-opacity: 0;
-  --surface-border: rgba(255, 255, 255, 0.06);
+  --surface-border: rgba(255, 255, 255, 0.075);
   border-radius: 24px;
 }
 
@@ -803,15 +884,17 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
   padding: 7px;
   border-radius: 999px;
   box-shadow:
-    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.12),
-    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
-    inset 0 0 1px rgba(0, 0, 0, 0.12);
+    0 10px 24px rgba(8, 10, 16, 0.045),
+    inset 1px -1px 0 rgba(255, 255, 255, 0.045),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.032);
 }
 
 .control-pill {
+  min-width: 0;
   padding: 9px 14px;
   border-radius: 999px;
   font-size: 0.875rem;
@@ -821,9 +904,8 @@ body {
   justify-content: center;
   white-space: nowrap;
   box-shadow:
-    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.12),
-    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.09),
-    inset 0 0 1px rgba(0, 0, 0, 0.10);
+    inset 1px -1px 0 rgba(255, 255, 255, 0.052),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.036);
 }
 
 .control-pill[data-emphasis="soft"] {
@@ -838,9 +920,9 @@ body {
   border-radius: 26px;
   min-height: 92px;
   box-shadow:
-    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.10),
-    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.08),
-    inset 0 0 1px rgba(0, 0, 0, 0.10);
+    0 8px 20px rgba(8, 10, 16, 0.035),
+    inset 1px -1px 0 rgba(255, 255, 255, 0.042),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.030);
 }
 
 .glass-progress-track,
@@ -849,12 +931,11 @@ body {
   border-radius: 999px;
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02) 34%, rgba(14, 17, 23, 0.18) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.012) 34%, rgba(14, 17, 23, 0.10) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.10),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.12),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08);
 }
 
 .glass-progress-track::before,
@@ -865,9 +946,8 @@ body {
   border-radius: inherit;
   pointer-events: none;
   background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.14) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.10) 100%),
-    radial-gradient(110px 26px at 14% 18%, rgba(255, 255, 255, 0.08), transparent 60%);
-  opacity: 0.5;
+    linear-gradient(45deg, rgba(255, 255, 255, 0.055) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.040) 100%);
+  opacity: 0.32;
 }
 
 .glass-progress-track--slim {
@@ -880,7 +960,7 @@ body {
 
 .glass-progress-track--center {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018) 34%, rgba(14, 17, 23, 0.16) 100%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.036), rgba(255, 255, 255, 0.010) 34%, rgba(14, 17, 23, 0.09) 100%);
 }
 
 .score-progress-track {
@@ -1084,12 +1164,12 @@ body {
   --lens-opacity: 0;
   --surface-border: rgba(255, 255, 255, 0.06);
   box-shadow:
-    inset 1px -1px 0 rgba(255, 255, 255, 0.08),
-    inset -1px 1px 0 rgba(255, 255, 255, 0.06);
+    inset 1px -1px 0 rgba(255, 255, 255, 0.038),
+    inset -1px 1px 0 rgba(255, 255, 255, 0.026);
 }
 
 .list-row:hover {
-  transform: translateY(-1px);
+  border-color: var(--surface-border-strong);
 }
 
 .status-badge {
@@ -1245,6 +1325,35 @@ body {
     --text-soft: #233045;
     --text-dim: #43506a;
     --text-faint: #64728b;
+    --kline-grid: rgba(48, 58, 78, 0.17);
+    --kline-grid-muted: rgba(48, 58, 78, 0.11);
+    --kline-axis: rgba(35, 48, 69, 0.78);
+    --kline-axis-muted: rgba(67, 80, 106, 0.70);
+    --kline-candle-up: #047857;
+    --kline-candle-up-fill: rgba(5, 150, 105, 0.90);
+    --kline-candle-down: #be123c;
+    --kline-candle-down-fill: rgba(225, 29, 72, 0.90);
+    --kline-volume-top: rgba(5, 150, 105, 0.30);
+    --kline-volume-bottom: rgba(5, 150, 105, 0.08);
+    --kline-ma7: rgba(37, 99, 235, 0.95);
+    --kline-ma20: rgba(180, 83, 9, 0.95);
+    --kline-last: rgba(37, 99, 235, 0.86);
+    --kline-reference: rgba(180, 83, 9, 0.82);
+    --kline-crosshair: rgba(13, 148, 136, 0.72);
+    --kline-hover-band: rgba(13, 148, 136, 0.075);
+    --kline-tooltip-bg: rgba(248, 250, 252, 0.96);
+    --kline-tooltip-border: rgba(13, 148, 136, 0.30);
+    --kline-tooltip-text: rgba(17, 24, 39, 0.92);
+    --kline-marker: rgba(48, 58, 78, 0.42);
+    --kline-marker-muted: rgba(48, 58, 78, 0.36);
+    --kline-marker-text: rgba(35, 48, 69, 0.86);
+    --kline-marker-text-muted: rgba(35, 48, 69, 0.78);
+    --kline-label-bg: rgba(239, 246, 255, 0.96);
+    --kline-label-border: rgba(37, 99, 235, 0.36);
+    --kline-label-text: #1d4ed8;
+    --kline-reference-label-bg: rgba(255, 251, 235, 0.96);
+    --kline-reference-label-border: rgba(180, 83, 9, 0.34);
+    --kline-reference-label-text: #92400e;
     --line: rgba(48, 58, 78, 0.16);
     --line-strong: rgba(48, 58, 78, 0.28);
     --surface-border: rgba(79, 92, 118, 0.20);
@@ -1385,6 +1494,7 @@ body {
     .ambient-pane,
     .liquid-caustic,
     .liquid-orb,
+    .liquid-blob,
     .liquid-bg::before,
     .liquid-bg::after {
       display: none;
@@ -1416,17 +1526,16 @@ body {
       --surface-brightness: 1.01;
       --surface-shadow: 0 8px 18px rgba(8, 10, 16, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.06);
       --surface-shadow-hover: 0 10px 20px rgba(8, 10, 16, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-      --highlight-opacity: 0.04;
-      --lens-opacity: 0;
+      --highlight-opacity: 0.052;
+      --lens-opacity: 0.014;
     }
 
     .material-surface::after,
     .glass-card::after,
-    .glass-panel::after,
-    .liquid-glass::after,
-    .liquid-glass-thick::after,
-    .liquid-glass-thin::after {
-      display: none;
+    .glass-panel::after {
+      inset: 6px;
+      filter: blur(0.8px);
+      opacity: 0.14;
     }
   }
 }
@@ -1467,7 +1576,8 @@ body {
 
   .pane-left,
   .pane-right,
-  .ambient-ribbon {
+  .ambient-ribbon,
+  .liquid-blob {
     display: none;
   }
 
@@ -1479,6 +1589,19 @@ body {
   .liquid-glass-thin,
   .liquid-glass-inset {
     border-radius: 24px;
+  }
+}
+
+@media (max-width: 520px) {
+  .control-rail {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .control-rail .control-pill {
+    flex: 1 1 calc(50% - 4px);
+    padding-right: 10px;
+    padding-left: 10px;
   }
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type PointerEvent } from 'react';
 // import { motion } from 'framer-motion';
 import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, sideLabels } from '../lib/format';
@@ -82,6 +82,16 @@ function buildSeriesPath(
   return path;
 }
 
+type ChartHover = {
+  index: number;
+  y: number;
+  price: number;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function CandlestickSvg({
   data,
   timeframe,
@@ -146,15 +156,66 @@ function CandlestickSvg({
     Number(referencePrice) >= min;
   const ma7Path = buildSeriesPath(ma7, x, y);
   const ma20Path = buildSeriesPath(ma20, x, y);
+  const [hover, setHover] = useState<ChartHover | null>(null);
+  const hoveredCandle = hover && data[hover.index] ? data[hover.index] : null;
+  const hoverX = hover ? x(hover.index) : 0;
+  const hoverY = hover?.y || 0;
+  const hoverPrice = hover?.price || 0;
+  const hoverTime = hoveredCandle ? formatChartTime(candleTimestamp(hoveredCandle), timeframe) : '';
+  const hoverChange = hoveredCandle ? hoveredCandle.close - hoveredCandle.open : 0;
+  const hoverChangePct = hoveredCandle?.open ? hoverChange / hoveredCandle.open : 0;
+  const hoverUp = hoverChange >= 0;
+  const hoverBodyTop = hoveredCandle ? Math.min(y(hoveredCandle.open), y(hoveredCandle.close)) : 0;
+  const hoverBodyHeight = hoveredCandle ? Math.max(1, Math.abs(y(hoveredCandle.close) - y(hoveredCandle.open))) : 0;
+  const hoverTooltipX = hoverX < w * 0.55 ? w - pad.r - 238 : pad.l + 8;
+  const hoverTooltipY = pad.t + 8;
+  const hoverTimeLabelWidth = timeframe === '1d' ? 60 : 78;
+  const hoverTimeLabelX = clamp(hoverX - hoverTimeLabelWidth / 2, pad.l, w - pad.r - hoverTimeLabelWidth);
+
+  const handlePointerMove = (event: PointerEvent<SVGSVGElement>) => {
+    const svg = event.currentTarget;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return;
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const local = point.matrixTransform(matrix.inverse());
+    if (local.x < pad.l || local.x > w - pad.r || local.y < pad.t || local.y > volumeBaseY) {
+      setHover(null);
+      return;
+    }
+
+    const ratio = clamp((local.x - pad.l) / chartW, 0, 1);
+    const index = clamp(Math.round(ratio * Math.max(data.length - 1, 1)), 0, data.length - 1);
+    const priceY = clamp(local.y, pad.t, pad.t + priceH);
+    const price = max - ((priceY - pad.t) / priceH) * range;
+    setHover({ index, y: priceY, price });
+  };
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full">
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="w-full h-full cursor-crosshair select-none"
+      onPointerMove={handlePointerMove}
+      onPointerLeave={() => setHover(null)}
+      role="img"
+      aria-label="Interactive candlestick chart"
+    >
       <defs>
         <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="rgba(126, 236, 205, 0.62)" />
           <stop offset="100%" stopColor="rgba(126, 236, 205, 0.12)" />
         </linearGradient>
       </defs>
+      {hoveredCandle ? (
+        <rect
+          x={hoverX - candleBand / 2}
+          y={pad.t}
+          width={candleBand}
+          height={volumeBaseY - pad.t}
+          fill="var(--kline-hover-band)"
+        />
+      ) : null}
       {priceTicks.map((tick) => (
         <line
           key={tick}
@@ -237,6 +298,18 @@ function CandlestickSvg({
           </g>
         );
       })}
+      {hoveredCandle ? (
+        <rect
+          x={hoverX - bodyWidth / 2 - 2}
+          y={hoverBodyTop - 2}
+          width={bodyWidth + 4}
+          height={hoverBodyHeight + 4}
+          fill="none"
+          stroke={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}
+          strokeWidth={1.2}
+          rx={2}
+        />
+      ) : null}
       <line
         x1={pad.l}
         x2={w - pad.r}
@@ -372,6 +445,101 @@ function CandlestickSvg({
               {referenceLabel}
             </text>
           ) : null}
+        </>
+      ) : null}
+      {hoveredCandle ? (
+        <>
+          <line
+            x1={hoverX}
+            x2={hoverX}
+            y1={pad.t}
+            y2={volumeBaseY}
+            stroke="var(--kline-crosshair)"
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+          <line
+            x1={pad.l}
+            x2={w - pad.r}
+            y1={hoverY}
+            y2={hoverY}
+            stroke="var(--kline-crosshair)"
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+          <circle
+            cx={hoverX}
+            cy={y(hoveredCandle.close)}
+            r={3.4}
+            fill="var(--kline-tooltip-bg)"
+            stroke={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}
+            strokeWidth={1.4}
+          />
+          <rect
+            x={w - pad.r + 4}
+            y={hoverY - 10}
+            width="52"
+            height="18"
+            rx="9"
+            fill="var(--kline-tooltip-bg)"
+            stroke="var(--kline-tooltip-border)"
+          />
+          <text
+            x={w - pad.r + 30}
+            y={hoverY + 3}
+            fill="var(--kline-tooltip-text)"
+            fontSize="11"
+            textAnchor="middle"
+          >
+            {formatAxisPrice(hoverPrice)}
+          </text>
+          <rect
+            x={hoverTimeLabelX}
+            y={h - 28}
+            width={hoverTimeLabelWidth}
+            height="18"
+            rx="9"
+            fill="var(--kline-tooltip-bg)"
+            stroke="var(--kline-tooltip-border)"
+          />
+          <text
+            x={hoverTimeLabelX + hoverTimeLabelWidth / 2}
+            y={h - 15}
+            fill="var(--kline-tooltip-text)"
+            fontSize="11"
+            textAnchor="middle"
+          >
+            {hoverTime}
+          </text>
+          <g>
+            <rect
+              x={hoverTooltipX}
+              y={hoverTooltipY}
+              width="230"
+              height="82"
+              rx="14"
+              fill="var(--kline-tooltip-bg)"
+              stroke="var(--kline-tooltip-border)"
+            />
+            <text x={hoverTooltipX + 12} y={hoverTooltipY + 18} fill="var(--kline-tooltip-text)" fontSize="11" fontWeight="600">
+              {hoverTime}
+            </text>
+            <text x={hoverTooltipX + 12} y={hoverTooltipY + 38} fill="var(--kline-axis-muted)" fontSize="10">
+              O <tspan fill="var(--kline-tooltip-text)">{formatAxisPrice(hoveredCandle.open)}</tspan>
+              <tspan dx="10">H </tspan><tspan fill="var(--kline-candle-up)">{formatAxisPrice(hoveredCandle.high)}</tspan>
+            </text>
+            <text x={hoverTooltipX + 12} y={hoverTooltipY + 56} fill="var(--kline-axis-muted)" fontSize="10">
+              L <tspan fill="var(--kline-candle-down)">{formatAxisPrice(hoveredCandle.low)}</tspan>
+              <tspan dx="10">C </tspan><tspan fill="var(--kline-tooltip-text)">{formatAxisPrice(hoveredCandle.close)}</tspan>
+            </text>
+            <text x={hoverTooltipX + 12} y={hoverTooltipY + 74} fill="var(--kline-axis-muted)" fontSize="10">
+              Vol <tspan fill="var(--kline-tooltip-text)">{formatCompactVolume(Number(hoveredCandle.volume || 0))}</tspan>
+              <tspan dx="10">Chg </tspan>
+              <tspan fill={hoverUp ? 'var(--kline-candle-up)' : 'var(--kline-candle-down)'}>
+                {fmtPct(hoverChangePct, 2)}
+              </tspan>
+            </text>
+          </g>
         </>
       ) : null}
     </svg>
@@ -516,8 +684,8 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
   }, activeSymbol ? 10000 : null);
 
   return (
-    <div className="liquid-glass-thick tone-sky reading-frame p-5 flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+    <div className="material-surface material-regular tone-sky reading-frame p-4 sm:p-5 flex flex-col gap-4 sm:gap-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <CandlestickChart className="w-4 h-4" />
           <span>持仓聚焦</span>
@@ -555,8 +723,8 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
         <>
           {spotlightPosition ? (
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 items-start">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="liquid-glass-thin metric-pill tone-sky px-4 py-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                   <div className="text-xs text-[var(--text-dim)]">市值</div>
                   <div className="text-lg font-semibold">{fmtUsd(spotlightPosition.value)}</div>
                 </div>
@@ -579,8 +747,8 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
               </div>
             </div>
           ) : fallbackTrade ? (
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              <div className="liquid-glass-thin metric-pill tone-sky px-4 py-3">
+            <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+              <div className="material-surface material-clear clear-control metric-pill tone-sky px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">状态</div>
                 <div className="text-lg font-semibold">最近成交</div>
               </div>
@@ -596,7 +764,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                 <div className="text-xs text-[var(--text-dim)]">成交数量</div>
                 <div className="text-lg font-mono">{fmtNum(fallbackTrade.qty, 6)}</div>
               </div>
-              <div className="liquid-glass-thin metric-pill tone-plum px-4 py-3">
+              <div className="material-surface material-clear clear-control metric-pill tone-plum col-span-2 xl:col-span-1 px-4 py-3">
                 <div className="text-xs text-[var(--text-dim)]">时间</div>
                 <div className="text-sm font-medium">{fallbackTrade.timestamp || '--'}</div>
                 <div className="text-[11px] text-[var(--text-dim)] mt-1">额 {fmtUsd(fallbackTrade.value)}</div>
@@ -686,7 +854,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
                     最近收盘 <span className="ml-1 font-mono text-white">{fmtUsd(Number(chartSummary?.close || latestCandle?.close || 0))}</span>
                   </div>
                 </div>
-                <div className="mt-3 h-[19rem]">
+                <div className="mt-3 h-[16rem] sm:h-[19rem]">
                   <CandlestickSvg
                     data={chartCandles}
                     timeframe={tf}
@@ -699,7 +867,7 @@ export function PositionsPanel({ positions = [], trades = [] }: PositionsPanelPr
           ) : null}
         </>
       ) : (
-        <div className="h-56 flex items-center justify-center text-[var(--text-dim)] text-sm">
+        <div className="min-h-[5.5rem] sm:min-h-[7rem] flex items-center justify-center px-4 text-center text-[var(--text-dim)] text-sm">
           当前无持仓
         </div>
       )}

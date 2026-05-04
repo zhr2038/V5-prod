@@ -57,7 +57,7 @@ export function MLBand({ mlTraining }: MLBandProps) {
       transition={{ delay: 0.15 }}
       className="relative z-10 px-6 pb-6"
     >
-      <div className="max-w-[1780px] mx-auto liquid-glass-thick tone-neutral p-5">
+      <div className="max-w-[1780px] mx-auto material-surface material-regular tone-neutral p-4 sm:p-5">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)] mb-4">
           <Brain className="w-4 h-4" />
           <span>ML 训练链路</span>
@@ -76,7 +76,7 @@ export function MLBand({ mlTraining }: MLBandProps) {
           />
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {stageConfig.map((stage) => {
             const active = Boolean(stages[stage.key]);
             const note = stage.summary(mlTraining || {});

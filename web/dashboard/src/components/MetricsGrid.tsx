@@ -74,20 +74,20 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
         variants={container}
         initial="hidden"
         animate="show"
-        className="max-w-[1780px] mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"
+        className="max-w-[1780px] mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 lg:gap-4"
       >
-        {cards.map((card) => (
+        {cards.map((card, index) => (
           <motion.div
             key={card.label}
             variants={item}
-            className={`${card.surface} p-5 flex flex-col gap-2`}
+            className={`${card.surface} ${index === cards.length - 1 ? 'col-span-2 md:col-span-1' : ''} p-4 sm:p-5 flex min-w-0 flex-col gap-2`}
           >
-            <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm">
+            <div className="flex min-w-0 items-center gap-2 text-[var(--text-dim)] text-sm">
               <card.icon className="w-4 h-4" />
-              <span>{card.label}</span>
+              <span className="truncate">{card.label}</span>
             </div>
-            <div className="text-2xl font-semibold tracking-tight">{card.value}</div>
-            <div className={`text-sm font-medium ${card.tone}`}>{card.sub}</div>
+            <div className="text-xl sm:text-2xl font-semibold tracking-tight">{card.value}</div>
+            <div className={`text-xs sm:text-sm font-medium ${card.tone}`}>{card.sub}</div>
           </motion.div>
         ))}
       </motion.div>
