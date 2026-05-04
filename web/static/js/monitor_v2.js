@@ -90,6 +90,7 @@ const esc = (value) => String(value ?? "")
 
 const fmtNum = (value, digits = 2) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 const fmtUsd = (value) => Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : "--";
+const fmtUsdt = (value) => Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} USDT` : "--";
 const pctVal = (value) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return null;
@@ -1240,7 +1241,7 @@ function renderDashboard(payload) {
   document.getElementById("update-time")?.setAttribute("data-legacy-refresh-label", "鏈€杩戝埛鏂?");
   setText("total-equity", fmtUsd(account.totalEquity));
   setHtml("total-pnl", `${fmtPct(account.totalPnlPercent)} <span class="subtle">盈亏 ${fmtUsd(account.totalPnl)}</span>`);
-  setText("cash-usdt", fmtUsd(account.cash));
+  setText("cash-usdt", fmtUsdt(account.cash));
   setText("cash-ratio", account.totalEquity ? `${fmtNum((account.cash / account.totalEquity) * 100, 1)}% 现金` : "--");
   setText("positions-value", fmtUsd(account.positionsValue));
 
