@@ -48,9 +48,9 @@ def _series(close: float, *, high: float | None = None) -> MarketSeries:
     )
 
 
-def _regime() -> RegimeResult:
+def _regime(state: RegimeState = RegimeState.TRENDING) -> RegimeResult:
     return RegimeResult(
-        state=RegimeState.TRENDING,
+        state=state,
         atr_pct=0.01,
         ma20=100.0,
         ma60=95.0,
@@ -144,6 +144,38 @@ def _run_exit_case(tmp_path: Path, position: Position, series: MarketSeries):
     return out, audit
 
 
+def _run_zero_target_case(
+    tmp_path: Path,
+    position: Position,
+    series: MarketSeries,
+    *,
+    cfg_mutator=None,
+    regime_state: RegimeState = RegimeState.TRENDING,
+):
+    cfg = _cfg(tmp_path)
+    if cfg_mutator is not None:
+        cfg_mutator(cfg)
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={},
+        selected=[],
+        entry_candidates=[],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="probe-zero-target")
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": series},
+        positions=[position],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(regime_state),
+    )
+    return out, audit
+
+
 def _run_protect_profit_lock_case(
     tmp_path: Path,
     position: Position,
@@ -173,6 +205,12 @@ def _single_exit(out) -> Order:
     exits = [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
     assert len(exits) == 1
     return exits[0]
+
+
+def _single_sell(out) -> Order:
+    sells = [order for order in out.orders if order.side == "sell"]
+    assert len(sells) == 1
+    return sells[0]
 
 
 def _single_probe_exit_decision(audit: DecisionAudit) -> dict:
@@ -276,7 +314,7 @@ def test_probe_time_stop_does_not_fire_before_8h(tmp_path: Path) -> None:
     position = _probe_position(entry_ts="2026-04-25T03:30:00Z")
     out, audit = _run_exit_case(tmp_path, position, _series(100.05))
 
-    assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
+    assert not [order for order in out.orders if order.side == "sell"]
     assert audit.counts["probe_time_stop_count"] == 0
 
 
@@ -291,6 +329,85 @@ def test_market_impulse_probe_uses_probe_exit_policy(tmp_path: Path) -> None:
     assert order.meta["reason"] == "probe_take_profit"
     assert order.meta["probe_type"] == "market_impulse_probe"
     assert audit.counts["probe_take_profit_count"] == 1
+
+
+def test_active_market_impulse_probe_ignores_normal_zero_target_close(tmp_path: Path) -> None:
+    out, audit = _run_zero_target_case(
+        tmp_path,
+        _probe_position(probe_type="market_impulse_probe"),
+        _series(100.10),
+    )
+
+    assert not [order for order in out.orders if order.side == "sell" and order.intent == "CLOSE_LONG"]
+    decision = next(
+        d for d in audit.router_decisions if d.get("reason") == "active_probe_ignore_zero_target_close"
+    )
+    assert decision["symbol"] == "BTC/USDT"
+    assert decision["probe_type"] == "market_impulse_probe"
+    assert decision["current_net_bps"] == pytest.approx(10.0)
+    assert decision["targets_post_risk"] == {}
+    assert audit.counts["active_probe_ignore_zero_target_close_count"] == 1
+
+
+def test_active_market_impulse_probe_stop_loss_closes_even_when_target_zero(tmp_path: Path) -> None:
+    out, audit = _run_zero_target_case(
+        tmp_path,
+        _probe_position(probe_type="market_impulse_probe"),
+        _series(99.50),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "probe_stop_loss"
+    assert audit.counts["probe_stop_loss_count"] == 1
+    assert audit.counts["active_probe_ignore_zero_target_close_count"] == 0
+
+
+def test_active_market_impulse_probe_time_stop_closes_instead_of_zero_target(tmp_path: Path) -> None:
+    out, audit = _run_zero_target_case(
+        tmp_path,
+        _probe_position(entry_ts="2026-04-24T23:30:00Z", probe_type="market_impulse_probe"),
+        _series(100.05),
+    )
+
+    order = _single_exit(out)
+    assert order.meta["reason"] == "probe_time_stop"
+    assert order.meta["probe_time_stop_hours"] == 8.0
+    assert audit.counts["probe_time_stop_count"] == 1
+    assert audit.counts["active_probe_ignore_zero_target_close_count"] == 0
+
+
+def test_active_market_impulse_probe_allows_risk_off_zero_target_close_when_configured(tmp_path: Path) -> None:
+    def mutate(cfg: AppConfig) -> None:
+        cfg.regime.pos_mult_risk_off = 0.0
+        cfg.execution.probe_allow_zero_target_close_on_risk_off = True
+
+    out, audit = _run_zero_target_case(
+        tmp_path,
+        _probe_position(probe_type="market_impulse_probe"),
+        _series(100.10),
+        cfg_mutator=mutate,
+        regime_state=RegimeState.RISK_OFF,
+    )
+
+    order = _single_sell(out)
+    assert order.meta["turnover_cap_bypass_reason"] == "zero_target_close"
+    assert any(
+        d.get("symbol") == "BTC/USDT" and d.get("reason") == "zero_target_close"
+        for d in audit.router_decisions
+    )
+    assert audit.counts["active_probe_ignore_zero_target_close_count"] == 0
+
+
+def test_non_probe_position_still_uses_zero_target_close(tmp_path: Path) -> None:
+    out, audit = _run_zero_target_case(
+        tmp_path,
+        _probe_position(probe=False),
+        _series(100.10),
+    )
+
+    order = _single_sell(out)
+    assert order.meta["turnover_cap_bypass_reason"] == "zero_target_close"
+    assert audit.counts["active_probe_ignore_zero_target_close_count"] == 0
 
 
 def test_market_impulse_probe_metadata_skips_legacy_4h_time_stop(tmp_path: Path) -> None:

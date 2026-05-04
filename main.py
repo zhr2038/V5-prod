@@ -543,6 +543,10 @@ PROBE_EXIT_CONFIG_KEYS = (
     "probe_trailing_gap_bps",
     "probe_time_stop_hours",
     "probe_time_stop_min_net_bps",
+    "probe_ignore_normal_zero_target_close",
+    "probe_min_hold_hours_before_zero_target_close",
+    "probe_allow_zero_target_close_on_risk_off",
+    "probe_allow_zero_target_close_on_hard_negative_expectancy",
 )
 
 

@@ -344,6 +344,10 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_exit_enabled"] is True
     assert payload["execution"]["probe_time_stop_hours"] == 8
+    assert payload["execution"]["probe_ignore_normal_zero_target_close"] is True
+    assert payload["execution"]["probe_min_hold_hours_before_zero_target_close"] == 4
+    assert payload["execution"]["probe_allow_zero_target_close_on_risk_off"] is True
+    assert payload["execution"]["probe_allow_zero_target_close_on_hard_negative_expectancy"] is False
     assert payload["execution"]["protect_profit_lock_enabled"] is True
     assert payload["execution"]["protect_profit_lock_min_net_bps"] == pytest.approx(100.0)
     assert payload["execution"]["protect_profit_lock_trailing_gap_bps"] == pytest.approx(60.0)
@@ -397,6 +401,10 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["probe_trailing_gap_bps"] == pytest.approx(25.0)
     assert payload["execution"]["probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_time_stop_min_net_bps"] == pytest.approx(10.0)
+    assert payload["execution"]["probe_ignore_normal_zero_target_close"] is True
+    assert payload["execution"]["probe_min_hold_hours_before_zero_target_close"] == 4
+    assert payload["execution"]["probe_allow_zero_target_close_on_risk_off"] is True
+    assert payload["execution"]["probe_allow_zero_target_close_on_hard_negative_expectancy"] is False
     assert payload["execution"]["protect_profit_lock_enabled"] is True
     assert payload["execution"]["protect_profit_lock_min_net_bps"] == pytest.approx(100.0)
     assert payload["execution"]["protect_profit_lock_breakeven_plus_bps"] == pytest.approx(20.0)

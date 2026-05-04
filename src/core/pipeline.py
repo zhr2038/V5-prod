@@ -1366,6 +1366,71 @@ class V5Pipeline:
             "net_bps": guard.get("net_bps"),
         }
 
+    def _active_probe_zero_target_close_skip_decision(
+        self,
+        *,
+        position: Position,
+        probe_state: Optional[Mapping[str, Any]],
+        current_px: float,
+        now_utc: datetime,
+        targets_post_risk: Mapping[str, float],
+        is_risk_off_close_only: bool,
+        source_reason: str,
+    ) -> Optional[Dict[str, Any]]:
+        probe_meta = self._probe_metadata_for_position(position, probe_state=probe_state)
+        if probe_meta is None:
+            return None
+
+        sym = str(getattr(position, "symbol", "") or "")
+        px = float(current_px or 0.0)
+        entry_px = float(probe_meta.get("entry_px") or 0.0)
+        entry_ts = str(probe_meta.get("entry_ts") or "").strip()
+        entry_dt = _parse_iso_utc(entry_ts)
+        hold_hours = (
+            max(0.0, (now_utc - entry_dt).total_seconds() / 3600.0)
+            if entry_dt is not None
+            else None
+        )
+        current_net_bps = self._probe_net_bps(entry_px=entry_px, current_px=px) if px > 0 and entry_px > 0 else None
+
+        if bool(is_risk_off_close_only) and bool(
+            getattr(self.cfg.execution, "probe_allow_zero_target_close_on_risk_off", True)
+        ):
+            return None
+
+        hard_negative_expectancy = self._held_symbol_has_negative_expectancy_hard_block(sym)
+        if hard_negative_expectancy and bool(
+            getattr(self.cfg.execution, "probe_allow_zero_target_close_on_hard_negative_expectancy", False)
+        ):
+            return None
+
+        ignore_normal_zero_close = bool(
+            getattr(self.cfg.execution, "probe_ignore_normal_zero_target_close", True)
+        )
+        min_hold_hours = float(
+            _coalesce(getattr(self.cfg.execution, "probe_min_hold_hours_before_zero_target_close", None), 4.0)
+        )
+        if not ignore_normal_zero_close:
+            if hold_hours is None or float(hold_hours) >= float(min_hold_hours):
+                return None
+
+        return {
+            "symbol": sym,
+            "action": "skip",
+            "reason": "active_probe_ignore_zero_target_close",
+            "source_reason": str(source_reason or "zero_target_close"),
+            "probe_type": probe_meta.get("probe_type"),
+            "entry_reason": probe_meta.get("entry_reason"),
+            "entry_ts": entry_ts,
+            "hold_hours": hold_hours,
+            "current_net_bps": current_net_bps,
+            "targets_post_risk": dict(targets_post_risk or {}),
+            "probe_ignore_normal_zero_target_close": bool(ignore_normal_zero_close),
+            "probe_min_hold_hours_before_zero_target_close": float(min_hold_hours),
+            "hard_negative_expectancy": bool(hard_negative_expectancy),
+            "risk_off_close_only": bool(is_risk_off_close_only),
+        }
+
     def _clear_active_position_state_for_symbol(self, symbol: str) -> List[str]:
         sym = str(symbol)
         cleared: List[str] = []
@@ -4584,6 +4649,25 @@ class V5Pipeline:
                 if px_fs <= 0:
                     px_fs = float(getattr(active_held, 'last_mark_px', 0.0) or 0.0)
                 if px_fs > 0:
+                    probe_zero_skip = self._active_probe_zero_target_close_skip_decision(
+                        position=active_held,
+                        probe_state=probe_state,
+                        current_px=px_fs,
+                        now_utc=now_utc,
+                        targets_post_risk=target,
+                        is_risk_off_close_only=is_risk_off_close_only,
+                        source_reason="force_close_unscored",
+                    )
+                    if probe_zero_skip is not None:
+                        if audit:
+                            audit.record_count("active_probe_ignore_zero_target_close_count", symbol=sym)
+                            audit.add_note(
+                                "Active probe ignored normal zero_target_close: "
+                                f"{sym} source=force_close_unscored probe_type={probe_zero_skip.get('probe_type')} "
+                                f"hold_hours={probe_zero_skip.get('hold_hours')}"
+                            )
+                            router_decisions.append(probe_zero_skip)
+                        continue
                     notional_fs = max(0.0, float(getattr(active_held, 'qty', 0.0) or 0.0) * px_fs)
                     if notional_fs > 0:
                         rebalance_orders.append(
@@ -4731,6 +4815,28 @@ class V5Pipeline:
             bypass_turnover_cap_for_exit = bool(
                 side == "sell" and active_held is not None and abs(float(tw)) <= float(target_hold_eps)
             )
+
+            if bypass_turnover_cap_for_exit and active_held is not None:
+                probe_zero_skip = self._active_probe_zero_target_close_skip_decision(
+                    position=active_held,
+                    probe_state=probe_state,
+                    current_px=px,
+                    now_utc=now_utc,
+                    targets_post_risk=target,
+                    is_risk_off_close_only=is_risk_off_close_only,
+                    source_reason=target_zero_reason or "zero_target_close",
+                )
+                if probe_zero_skip is not None:
+                    if audit:
+                        audit.record_count("active_probe_ignore_zero_target_close_count", symbol=sym)
+                        audit.add_note(
+                            "Active probe ignored normal zero_target_close: "
+                            f"{sym} source={probe_zero_skip.get('source_reason')} "
+                            f"probe_type={probe_zero_skip.get('probe_type')} "
+                            f"hold_hours={probe_zero_skip.get('hold_hours')}"
+                        )
+                        router_decisions.append(probe_zero_skip)
+                    continue
 
             if (
                 side == "sell"

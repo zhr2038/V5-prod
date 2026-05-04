@@ -78,6 +78,7 @@ class DecisionAudit:
         "protect_profit_lock_trailing_exit_count": 0,
         "same_symbol_reentry_cooldown_count": 0,
         "same_symbol_reentry_breakout_bypass_count": 0,
+        "active_probe_ignore_zero_target_close_count": 0,
         "position_state_cleared_after_close_count": 0,
         "stale_position_state_detected_count": 0,
     })
