@@ -4,6 +4,9 @@ export const fmtNum = (value: unknown, digits = 2) =>
 export const fmtUsd = (value: unknown) =>
   Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '--';
 
+export const fmtUsdt = (value: unknown) =>
+  Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} USDT` : '--';
+
 export const pctVal = (value: unknown) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return null;

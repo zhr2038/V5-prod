@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { TrendingUp, Wallet, PieChart, Activity, Target } from 'lucide-react';
-import { fmtUsd, fmtPct } from '../lib/format';
+import { fmtUsd, fmtPct, fmtUsdt } from '../lib/format';
 import type { AccountData, SystemStatus } from '../types';
 
 interface MetricsGridProps {
@@ -35,7 +35,7 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
     {
       icon: PieChart,
       label: '现金',
-      value: fmtUsd(account?.cash),
+      value: fmtUsdt(account?.cash),
       sub: account?.totalEquity
         ? `${((account.cash / account.totalEquity) * 100).toFixed(1)}% 现金`
         : '--',
