@@ -22,6 +22,35 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
 
 
+def _warn_backtest_cost_below_live(cfg: AppConfig, *, path: Path) -> None:
+    try:
+        bt_fee = float(getattr(cfg.backtest, "fee_bps", 0.0) or 0.0)
+        live_fee = float(getattr(cfg.execution, "fee_bps", 0.0) or 0.0)
+        if bt_fee < live_fee:
+            logger.warning(
+                "Backtest fee_bps below live execution fee_bps in %s: backtest.fee_bps=%s < execution.fee_bps=%s",
+                path,
+                bt_fee,
+                live_fee,
+            )
+    except Exception:
+        logger.warning("Unable to compare backtest fee_bps with live execution fee_bps in %s", path)
+
+    try:
+        bt_slippage = float(getattr(cfg.backtest, "slippage_bps", 0.0) or 0.0)
+        live_slippage = float(getattr(cfg.execution, "slippage_bps", 0.0) or 0.0)
+        if bt_slippage < live_slippage:
+            logger.warning(
+                "Backtest slippage_bps below live execution slippage_bps in %s: "
+                "backtest.slippage_bps=%s < execution.slippage_bps=%s",
+                path,
+                bt_slippage,
+                live_slippage,
+            )
+    except Exception:
+        logger.warning("Unable to compare backtest slippage_bps with live execution slippage_bps in %s", path)
+
+
 def load_config(path: str = "configs/config.yaml", env_path: Optional[str] = ".env") -> AppConfig:
     """Load YAML config with ${ENV} substitution.
 
@@ -58,7 +87,9 @@ def load_config(path: str = "configs/config.yaml", env_path: Optional[str] = ".e
 
     raw = _resolve(raw)
     try:
-        return AppConfig.model_validate(raw)
+        cfg = AppConfig.model_validate(raw)
+        _warn_backtest_cost_below_live(cfg, path=p)
+        return cfg
     except Exception:
         logger.exception("Config validation failed: %s", p)
         raise

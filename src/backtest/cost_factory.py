@@ -38,10 +38,19 @@ class CostModelMeta:
         }
 
 
+def _live_cost_floor(cfg: AppConfig) -> tuple[float, float]:
+    bt = cfg.backtest
+    execution = cfg.execution
+    fee_bps = max(float(bt.fee_bps), float(getattr(execution, "fee_bps", 0.0) or 0.0))
+    slippage_bps = max(float(bt.slippage_bps), float(getattr(execution, "slippage_bps", 0.0) or 0.0))
+    return fee_bps, slippage_bps
+
+
 def make_cost_model_from_cfg(cfg: AppConfig):
     """Make cost model from cfg"""
     bt = cfg.backtest
-    default_model = FixedCostModel(fee_bps=float(bt.fee_bps), slippage_bps=float(bt.slippage_bps))
+    default_fee_bps, default_slippage_bps = _live_cost_floor(cfg)
+    default_model = FixedCostModel(fee_bps=default_fee_bps, slippage_bps=default_slippage_bps)
 
     if str(bt.cost_model).lower() != "calibrated":
         return default_model, CostModelMeta(
@@ -84,8 +93,8 @@ def make_cost_model_from_cfg(cfg: AppConfig):
         slippage_quantile=str(bt.slippage_quantile),
         min_fills_global=int(bt.min_fills_global),
         min_fills_bucket=int(bt.min_fills_bucket),
-        default_fee_bps=float(bt.fee_bps),
-        default_slippage_bps=float(bt.slippage_bps),
+        default_fee_bps=default_fee_bps,
+        default_slippage_bps=default_slippage_bps,
     )
 
     # even if global fills insufficient, resolve() will fallback; meta explains source

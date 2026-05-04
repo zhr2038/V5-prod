@@ -446,7 +446,7 @@ budget:
   cost_budget_bps_per_day: 40
 
 backtest:
-  fee_bps: 6
+  fee_bps: 10
   slippage_bps: 5
   one_bar_delay: true
   walk_forward_folds: 4
