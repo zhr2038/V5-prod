@@ -53,6 +53,7 @@ CURRENT_REPORT_FILES = [
     ("reports/effective_live_config.json", "raw/reports/effective_live_config.json", False),
     ("reports/event_candidates.json", "raw/reports/event_candidates.json", False),
     ("reports/skipped_candidate_labels.jsonl", "raw/reports/skipped_candidate_labels.jsonl", False),
+    ("reports/alt_impulse_shadow_labels.jsonl", "raw/reports/alt_impulse_shadow_labels.jsonl", False),
 ]
 SECRET_KEY_RE = re.compile(
     r"(?i)(authorization|api[_-]?(?:key|secret)|secret|token|cookie|pass(?:word|phrase)|private[_-]?key|ok-access-(?:key|sign|passphrase))"
@@ -1564,6 +1565,29 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     label_index = {btc_label_row_key(row): row for row in label_rows if all(part != not_obs for part in btc_label_row_key(row))}
     outcome_index = {btc_label_row_key(row): row for row in outcome_rows if all(part != not_obs for part in btc_label_row_key(row))}
 
+    alt_impulse_shadow_label_rows = []
+    alt_impulse_shadow_labels_path = OUT / "raw" / "reports" / "alt_impulse_shadow_labels.jsonl"
+    if alt_impulse_shadow_labels_path.is_file():
+        for line in alt_impulse_shadow_labels_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+                if isinstance(item, dict):
+                    alt_impulse_shadow_label_rows.append(item)
+            except Exception:
+                collection_errors.append({"source": str(alt_impulse_shadow_labels_path), "error": "invalid jsonl row"})
+    alt_impulse_shadow_label_rows, alt_impulse_shadow_duplicate_count = dedupe_rows_by_key(
+        alt_impulse_shadow_label_rows,
+        btc_label_row_key,
+    )
+    if alt_impulse_shadow_labels_path.is_file():
+        alt_text = "\n".join(
+            json.dumps(sanitize_obj(row), ensure_ascii=False, sort_keys=True)
+            for row in alt_impulse_shadow_label_rows
+        )
+        write_text("raw/reports/alt_impulse_shadow_labels.jsonl", alt_text + ("\n" if alt_text else ""))
+
     def loose_label_key(row):
         return (
             flatten_value(first_value(row, ("run_id",), not_obs)) or not_obs,
@@ -1672,6 +1696,45 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     )
     high_score_blocked_outcomes_by_reason = aggregate_high_score_outcomes(
         high_score_blocked_outcome_rows,
+        ["skip_reason"],
+    )
+
+    alt_impulse_shadow_fields = [
+        "ts_utc",
+        "run_id",
+        "symbol",
+        "entry_px",
+        "final_score",
+        "trend_score",
+        "trend_side",
+        "alpha6_score",
+        "alpha6_side",
+        "f4_volume_expansion",
+        "f5_rsi_trend_confirm",
+        "skip_reason",
+        "btc_4h_ret_bps",
+        "whitelist_positive_4h_count",
+        "regime",
+        "current_level",
+        "rt_cost_bps",
+        "label_4h_net_bps",
+        "label_8h_net_bps",
+        "label_12h_net_bps",
+        "label_24h_net_bps",
+        "label_status",
+    ]
+    alt_impulse_shadow_rows = []
+    for row in alt_impulse_shadow_label_rows:
+        alt_impulse_shadow_rows.append({
+            field: first_observed(first_value(row, (field,), not_obs))
+            for field in alt_impulse_shadow_fields
+        })
+    alt_impulse_shadow_by_symbol = aggregate_high_score_outcomes(
+        alt_impulse_shadow_rows,
+        ["symbol", "skip_reason"],
+    )
+    alt_impulse_shadow_by_reason = aggregate_high_score_outcomes(
+        alt_impulse_shadow_rows,
         ["skip_reason"],
     )
 
@@ -2290,6 +2353,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         high_score_blocked_outcomes_by_reason,
         ["skip_reason", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
     )
+    write_csv(
+        "summaries/alt_impulse_shadow_outcomes.csv",
+        alt_impulse_shadow_rows,
+        alt_impulse_shadow_fields,
+    )
+    write_csv(
+        "summaries/alt_impulse_shadow_outcomes_by_symbol.csv",
+        alt_impulse_shadow_by_symbol,
+        ["symbol", "skip_reason", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
+    )
+    write_csv(
+        "summaries/alt_impulse_shadow_outcomes_by_reason.csv",
+        alt_impulse_shadow_by_reason,
+        ["skip_reason", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
+    )
 
     high_count = sum(1 for item in issues if item.get("severity") == "high")
     medium_count = sum(1 for item in issues if item.get("severity") == "medium")
@@ -2363,6 +2441,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "high_score_blocked_outcome_count": len(high_score_blocked_outcome_rows),
         "high_score_blocked_pending_count": high_score_pending_count,
         "high_score_blocked_matured_unlabeled_count": high_score_matured_unlabeled_count,
+        "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
+        "alt_impulse_shadow_duplicate_count": alt_impulse_shadow_duplicate_count,
         "probe_rows": len(probe_rows),
         "probe_lifecycle_rows": len(lifecycle_rows),
         "dust_anti_chase_rows": len(dust_rows),
@@ -2517,6 +2597,27 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         else "not_observable_no_matured_labels"
     )
 
+    def alt_impulse_symbol_line(symbol):
+        rows = [row for row in alt_impulse_shadow_rows if row.get("symbol") == symbol]
+        if not rows:
+            return f"{symbol}: count=0, avg_net_bps=not_observable, win_rate=not_observable"
+        avg_parts = []
+        win_parts = []
+        for horizon in (4, 8, 12, 24):
+            values = [as_float(row.get(f"label_{horizon}h_net_bps")) for row in rows]
+            usable = [value for value in values if value is not None]
+            avg = round(sum(usable) / len(usable), 6) if usable else not_obs
+            win = round(sum(1 for value in usable if value > 0) / len(usable), 6) if usable else not_obs
+            avg_parts.append(f"{horizon}h={avg}")
+            win_parts.append(f"{horizon}h={win}")
+        return f"{symbol}: count={len(rows)}, avg_net_bps " + ", ".join(avg_parts) + "; win_rate " + ", ".join(win_parts)
+
+    alt_impulse_future_probe_text = (
+        "diagnostic_only_review_required"
+        if any(row.get("label_status") == "complete" for row in alt_impulse_shadow_rows)
+        else ("not_observable_no_matured_labels" if alt_impulse_shadow_rows else "not_applicable_no_shadow_samples")
+    )
+
     readme = [
         f"# V5 live follow-up bundle {STAMP}",
         "",
@@ -2565,6 +2666,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- ETH 高分被挡样本数: {eth_high_score_count_text}",
         f"- ETH 4h/8h/12h/24h net bps: {eth_high_score_perf_text}",
         f"- 是否支持放松 gate: {eth_high_score_relax_gate_text}",
+        "",
+        "## ALT impulse shadow",
+        f"- ETH/USDT: {alt_impulse_symbol_line('ETH/USDT')}",
+        f"- SOL/USDT: {alt_impulse_symbol_line('SOL/USDT')}",
+        f"- BNB/USDT: {alt_impulse_symbol_line('BNB/USDT')}",
+        f"- 是否支持未来 live probe: {alt_impulse_future_probe_text}",
         "",
         "## BTC leadership probe 可观测性",
         f"- 逻辑是否出现: {'yes' if btc_config_audit['seen_in_decision_audit'] else 'no'}",

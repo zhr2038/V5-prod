@@ -1488,6 +1488,27 @@ def main() -> None:
     except Exception as e:
         log.warning(f"skipped candidate tracker failed: {e}")
 
+    # Read-only ALT impulse shadow evaluator. It records forward labels only.
+    try:
+        from src.reporting.alt_impulse_shadow import update_alt_impulse_shadow_evaluator
+
+        shadow_result = update_alt_impulse_shadow_evaluator(
+            run_dir=str(runtime_run_dir),
+            audit=audit,
+            market_data_1h=md_1h,
+            cfg=cfg,
+            current_level=pipe._load_current_auto_risk_level(),
+            cache_dir=PROJECT_ROOT / "data" / "cache",
+        )
+        if shadow_result.get("enabled"):
+            log.info(
+                "ALT_IMPULSE_SHADOW new_records=%s total_records=%s",
+                int(shadow_result.get("new_records", 0) or 0),
+                int(shadow_result.get("total_records", 0) or 0),
+            )
+    except Exception as e:
+        log.warning(f"alt impulse shadow evaluator failed: {e}")
+
     # Update account peak equity
     # (equity is logged inside pipeline; recompute here quickly)
     eq = float(acc.cash_usdt)

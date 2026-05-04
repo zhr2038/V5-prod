@@ -1205,6 +1205,41 @@ class DiagnosticsConfig(BaseModel):
         le=10000.0,
         description="Round-trip cost used when labeling skipped candidate outcomes",
     )
+    alt_impulse_shadow_enabled: bool = Field(
+        default=True,
+        description="Enable read-only ALT impulse shadow labels for high-score blocked targets",
+    )
+    alt_impulse_shadow_symbols: List[str] = Field(
+        default_factory=lambda: ["ETH/USDT", "SOL/USDT", "BNB/USDT"],
+        description="Symbols eligible for ALT impulse shadow labeling",
+    )
+    alt_impulse_shadow_min_final_score: float = Field(
+        default=0.80,
+        ge=0.0,
+        le=1.0,
+        description="Minimum final score for ALT impulse shadow candidates",
+    )
+    alt_impulse_shadow_min_trend_score: float = Field(
+        default=0.80,
+        ge=0.0,
+        le=1.0,
+        description="Minimum trend score for ALT impulse shadow candidates",
+    )
+    alt_impulse_shadow_require_btc_positive_4h: bool = Field(
+        default=True,
+        description="Require BTC 4h return to be positive for ALT impulse shadow labels",
+    )
+    alt_impulse_shadow_require_broad_market_positive_count: int = Field(
+        default=2,
+        ge=0,
+        description="Minimum number of whitelist symbols with positive 4h return",
+    )
+    alt_impulse_shadow_rt_cost_bps: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=10000.0,
+        description="Round-trip cost used when labeling ALT impulse shadow outcomes",
+    )
 
     @field_validator("skipped_candidate_horizons_hours")
     @classmethod
@@ -1221,6 +1256,25 @@ class DiagnosticsConfig(BaseModel):
             out.append(value)
         if not out:
             raise ValueError("skipped_candidate_horizons_hours cannot be empty")
+        return out
+
+    @field_validator("alt_impulse_shadow_symbols")
+    @classmethod
+    def _validate_alt_impulse_shadow_symbols(cls, v: List[str]) -> List[str]:
+        out: List[str] = []
+        seen = set()
+        for raw in v or []:
+            symbol = str(raw or "").strip().upper()
+            if not symbol:
+                continue
+            if "/" not in symbol:
+                raise ValueError("alt_impulse_shadow_symbols entries must use BASE/QUOTE format")
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            out.append(symbol)
+        if not out:
+            raise ValueError("alt_impulse_shadow_symbols cannot be empty")
         return out
 
 

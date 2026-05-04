@@ -219,6 +219,13 @@ diagnostics:
   skipped_candidate_label_enabled: true
   skipped_candidate_horizons_hours: [4, 8, 12, 24]
   skipped_candidate_roundtrip_cost_bps: 30
+  alt_impulse_shadow_enabled: true
+  alt_impulse_shadow_symbols: ["ETH/USDT", "SOL/USDT", "BNB/USDT"]
+  alt_impulse_shadow_min_final_score: 0.80
+  alt_impulse_shadow_min_trend_score: 0.80
+  alt_impulse_shadow_require_btc_positive_4h: true
+  alt_impulse_shadow_require_broad_market_positive_count: 2
+  alt_impulse_shadow_rt_cost_bps: 30
 
 execution:
   mode: live
