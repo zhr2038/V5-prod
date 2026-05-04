@@ -564,6 +564,139 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             return value
         return parse_live_config_number(live_config_text, key)
 
+    def collect_config_keys_from_yaml_text(text):
+        if not text:
+            return set()
+        return set(re.findall(r"(?m)^\s*(?!#)([A-Za-z_][A-Za-z0-9_]*)\s*:", text))
+
+    live_config_keys = collect_config_keys_from_yaml_text(live_config_text)
+
+    CONFIG_CONSUMPTION_FIXED_KEYS = {
+        "split_orders",
+        "split_interval_sec",
+        "market_impulse_probe_time_stop_hours",
+        "probe_exit_enabled",
+    }
+    CONFIG_CONSUMPTION_PREFIXES = (
+        "btc_leadership_probe_",
+        "protect_profit_lock_",
+        "same_symbol_reentry_",
+    )
+
+    def key_pattern(key):
+        return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(key)}(?![A-Za-z0-9_])")
+
+    def discover_audited_config_keys(text):
+        found = {key for key in CONFIG_CONSUMPTION_FIXED_KEYS if key_pattern(key).search(text or "")}
+        for prefix in CONFIG_CONSUMPTION_PREFIXES:
+            found.update(re.findall(rf"(?<![A-Za-z0-9_]){re.escape(prefix)}[A-Za-z0-9_]+", text or ""))
+        return found
+
+    def read_source_file(path):
+        try:
+            if path.stat().st_size > 2 * 1024 * 1024:
+                return ""
+            return path.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            collection_errors.append({"source": str(path), "error": f"config_consumption_scan: {exc!r}"})
+            return ""
+
+    def schema_source_texts():
+        candidates = []
+        configs_dir = ROOT / "configs"
+        if configs_dir.is_dir():
+            candidates.extend(sorted(configs_dir.glob("**/*schema*.py")))
+            schema_py = configs_dir / "schema.py"
+            if schema_py.is_file():
+                candidates.append(schema_py)
+        seen = set()
+        texts = {}
+        for path in candidates:
+            try:
+                resolved = path.resolve()
+            except Exception:
+                resolved = path
+            if resolved in seen or not path.is_file():
+                continue
+            seen.add(resolved)
+            texts[path.relative_to(ROOT).as_posix()] = read_source_file(path)
+        return texts
+
+    def runtime_source_texts():
+        texts = {}
+        src_dir = ROOT / "src"
+        if not src_dir.is_dir():
+            return texts
+        excluded_parts = {"__pycache__", "reporting", "research"}
+        for path in sorted(src_dir.rglob("*.py")):
+            try:
+                rel = path.relative_to(ROOT)
+            except ValueError:
+                continue
+            if any(part in excluded_parts for part in rel.parts):
+                continue
+            texts[rel.as_posix()] = read_source_file(path)
+        return texts
+
+    def build_config_runtime_consumption_audit():
+        schema_texts = schema_source_texts()
+        runtime_texts = runtime_source_texts()
+        schema_keys = set()
+        runtime_keys = set()
+        for text in schema_texts.values():
+            schema_keys |= discover_audited_config_keys(text)
+        for text in runtime_texts.values():
+            runtime_keys |= discover_audited_config_keys(text)
+
+        prefix_keys = {
+            key for key in (live_config_keys | effective_keys | schema_keys | runtime_keys)
+            if any(str(key).startswith(prefix) for prefix in CONFIG_CONSUMPTION_PREFIXES)
+        }
+        candidate_keys = sorted(CONFIG_CONSUMPTION_FIXED_KEYS | prefix_keys)
+        rows = []
+        for key in candidate_keys:
+            pattern = key_pattern(key)
+            defined = key in schema_keys or any(pattern.search(text) for text in schema_texts.values())
+            present_live = key in live_config_keys
+            present_effective = key in effective_keys
+            consumer_files = [
+                rel for rel, text in runtime_texts.items()
+                if pattern.search(text)
+            ]
+            consumed = bool(consumer_files)
+            if (present_live or present_effective) and consumed:
+                diagnosis = "consumed"
+            elif present_live and not consumed:
+                diagnosis = "configured_not_consumed"
+                add_issue(
+                    "low",
+                    "config_key_not_consumed",
+                    "Config key is present in live_prod.yaml but was not observed in runtime source consumption paths.",
+                    {
+                        "config_key": key,
+                        "present_in_effective_config": present_effective,
+                        "defined_in_schema": bool(defined),
+                    },
+                )
+            elif present_effective and not consumed:
+                diagnosis = "effective_config_not_consumed"
+            elif defined:
+                diagnosis = "defined_not_configured"
+            elif consumed:
+                diagnosis = "runtime_consumed_not_configured"
+            else:
+                diagnosis = "not_observable"
+            rows.append({
+                "config_key": key,
+                "defined_in_schema": str(bool(defined)).lower(),
+                "present_in_live_prod": str(bool(present_live)).lower(),
+                "present_in_effective_config": str(bool(present_effective)).lower(),
+                "consumed_in_runtime_code": str(bool(consumed)).lower(),
+                "consumer_files": ";".join(consumer_files) if consumer_files else not_obs,
+                "diagnosis": diagnosis,
+            })
+        return rows
+
     config_dust_usdt_ignore = config_number("dust_usdt_ignore") or 0.0
     config_min_trade_value_usdt = config_number("min_trade_value_usdt") or 0.0
     global_dust_threshold_usdt = max(config_dust_usdt_ignore, 1.0, 0.1 * config_min_trade_value_usdt)
@@ -2576,6 +2709,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         except Exception as exc:
             collection_errors.append({"source": str(log_path), "error": f"log_scan: {exc!r}"})
 
+    config_runtime_consumption_rows = build_config_runtime_consumption_audit()
+    config_runtime_not_consumed_count = sum(
+        1 for row in config_runtime_consumption_rows
+        if row.get("present_in_live_prod") == "true" and row.get("consumed_in_runtime_code") != "true"
+    )
+
     write_csv(
         "summaries/router_decisions.csv",
         router_rows,
@@ -2625,6 +2764,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "summaries/negative_expectancy_consistency.csv",
         negative_consistency_rows,
         ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_weighted_net_bps", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "negexp_fast_fail_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
+    )
+    write_csv(
+        "summaries/config_runtime_consumption_audit.csv",
+        config_runtime_consumption_rows,
+        ["config_key", "defined_in_schema", "present_in_live_prod", "present_in_effective_config", "consumed_in_runtime_code", "consumer_files", "diagnosis"],
     )
     write_csv(
         "summaries/factor_contribution_audit.csv",
@@ -2751,6 +2895,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "dust_threshold_usdt": global_dust_threshold_usdt,
         "negative_expectancy_consistency_rows": len(negative_consistency_rows),
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
+        "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
+        "config_runtime_not_consumed_count": config_runtime_not_consumed_count,
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_recent_24h_target_count": len(high_score_recent_24h_rows),
         "high_score_block_category_counts": high_score_block_category_counts,
@@ -2988,6 +3134,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- consistency rows: {len(negative_consistency_rows)}",
         f"- mismatch_suspected_count: {negative_expectancy_mismatch_count}",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
+        "",
+        "## 配置消费审计",
+        f"- audited config keys: {len(config_runtime_consumption_rows)}",
+        f"- live config keys not consumed in runtime: {config_runtime_not_consumed_count}",
+        f"- low issue present: {'yes' if config_runtime_not_consumed_count else 'no'}",
         "",
         "## Alpha6 factor contribution audit",
         f"- factor_contribution_audit_rows: {len(factor_contribution_rows)}",

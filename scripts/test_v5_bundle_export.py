@@ -361,6 +361,85 @@ def fixture_negative_expectancy_missing_root(root):
     write_json(root / "reports/negative_expectancy_cooldown.json", {"stats": {}})
 
 
+def fixture_config_runtime_consumption_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "\n".join(
+            [
+                "execution:",
+                "  split_orders: 3",
+                "  split_interval_sec: 3.0",
+                "  same_symbol_reentry_enabled: true",
+                "  btc_leadership_probe_enabled: true",
+                "  protect_profit_lock_enabled: true",
+                "",
+            ]
+        ),
+    )
+    write_text(
+        root / "configs/schema.py",
+        "\n".join(
+            [
+                "split_orders: int = 1",
+                "split_interval_sec: float = 0.0",
+                "same_symbol_reentry_enabled: bool = False",
+                "btc_leadership_probe_enabled: bool = False",
+                "protect_profit_lock_enabled: bool = False",
+                "probe_exit_enabled: bool = False",
+                "",
+            ]
+        ),
+    )
+    write_text(
+        root / "src/core/pipeline.py",
+        "\n".join(
+            [
+                "def consume(cfg):",
+                "    getattr(cfg.execution, 'same_symbol_reentry_enabled', False)",
+                "    getattr(cfg.execution, 'btc_leadership_probe_enabled', False)",
+                "    getattr(cfg.execution, 'protect_profit_lock_enabled', False)",
+                "",
+            ]
+        ),
+    )
+    write_text(
+        root / "src/reporting/decision_audit.py",
+        "CONFIG_KEYS = ['split_orders', 'split_interval_sec']\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_json(
+        root / "reports/effective_live_config.json",
+        {
+            "execution": {
+                "split_orders": 3,
+                "split_interval_sec": 3.0,
+                "same_symbol_reentry_enabled": True,
+                "btc_leadership_probe_enabled": True,
+                "protect_profit_lock_enabled": True,
+            }
+        },
+    )
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {"now_ts": window_end + 15, "window_end_ts": window_end})
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    return run_id
+
+
 def fixture_high_score_blocked_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -1196,6 +1275,41 @@ def main():
             assert row["diagnosis"] == "not_observable_negative_expectancy_symbol_missing", row
             assert window["negative_expectancy_mismatch_count"] == 0, window
             assert not any(item.get("code") == "negative_expectancy_roundtrip_mismatch" for item in issues["issues"]), issues
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-config-runtime-consumption-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_config_runtime_consumption_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/config_runtime_consumption_audit.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            by_key = {row["config_key"]: row for row in rows}
+            assert by_key["split_orders"]["defined_in_schema"] == "true", by_key["split_orders"]
+            assert by_key["split_orders"]["present_in_live_prod"] == "true", by_key["split_orders"]
+            assert by_key["split_orders"]["present_in_effective_config"] == "true", by_key["split_orders"]
+            assert by_key["split_orders"]["consumed_in_runtime_code"] == "false", by_key["split_orders"]
+            assert by_key["split_orders"]["diagnosis"] == "configured_not_consumed", by_key["split_orders"]
+            assert by_key["split_interval_sec"]["diagnosis"] == "configured_not_consumed", by_key["split_interval_sec"]
+            assert by_key["same_symbol_reentry_enabled"]["consumed_in_runtime_code"] == "true", by_key["same_symbol_reentry_enabled"]
+            assert by_key["same_symbol_reentry_enabled"]["consumer_files"] == "src/core/pipeline.py", by_key["same_symbol_reentry_enabled"]
+            assert by_key["btc_leadership_probe_enabled"]["diagnosis"] == "consumed", by_key["btc_leadership_probe_enabled"]
+            assert by_key["protect_profit_lock_enabled"]["diagnosis"] == "consumed", by_key["protect_profit_lock_enabled"]
+            assert by_key["probe_exit_enabled"]["present_in_live_prod"] == "false", by_key["probe_exit_enabled"]
+            low_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "low" and item.get("code") == "config_key_not_consumed"
+            ]
+            assert {item["evidence"]["config_key"] for item in low_issues} == {"split_orders", "split_interval_sec"}, issues
+            assert window["config_runtime_not_consumed_count"] == 2, window
+            assert "## 配置消费审计" in readme, readme
+            assert "live config keys not consumed in runtime: 2" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
