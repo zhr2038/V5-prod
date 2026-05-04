@@ -82,6 +82,8 @@ class AlphaSnapshot:
     ml_overlay_scores: Dict[str, float] | None = None
     ml_overlay_raw_scores: Dict[str, float] | None = None
     ml_runtime: Dict[str, Any] | None = None
+    effective_alpha6_weights: Dict[str, float] | None = None
+    weight_source: str = "static"
 
 
 class AlphaEngine:
@@ -108,6 +110,10 @@ class AlphaEngine:
         self.alpha6_strategy = None
         self.mean_reversion_strategy = None
         self._alpha6_static_weights: Dict[str, float] = {}
+        self._last_effective_alpha6_weights: Dict[str, float] = {}
+        self._last_alpha6_weight_source: str = "static"
+        self._last_alpha6_regime_applied: bool = False
+        self._last_alpha6_dynamic_applied: bool = False
         self._multi_strategy_base_allocations: Dict[str, Decimal] = {}
         self.repo_root = Path(__file__).resolve().parents[2]
         self._ml_model = None
@@ -168,15 +174,86 @@ class AlphaEngine:
         except Exception:
             return {}
 
-    def _resolve_classic_base_weights(self, static_base_w: Dict[str, float]) -> Dict[str, float]:
-        weights = dict(static_base_w)
+    @staticmethod
+    def _weights_l1(weights: Dict[str, float]) -> float:
+        return float(sum(abs(float(v)) for v in (weights or {}).values()))
+
+    @staticmethod
+    def _weights_differ(
+        left: Dict[str, float],
+        right: Dict[str, float],
+        *,
+        tolerance: float = 1e-12,
+    ) -> bool:
+        keys = set((left or {}).keys()) | set((right or {}).keys())
+        for key in keys:
+            try:
+                lv = float((left or {}).get(key, 0.0) or 0.0)
+                rv = float((right or {}).get(key, 0.0) or 0.0)
+            except Exception:
+                return True
+            if abs(lv - rv) > tolerance:
+                return True
+        return False
+
+    @classmethod
+    def _normalize_weights_to_l1(cls, weights: Dict[str, float], target_l1: float) -> Dict[str, float]:
+        out = {str(k): float(v) for k, v in (weights or {}).items()}
+        current_l1 = cls._weights_l1(out)
+        if current_l1 <= 1e-12 or float(target_l1 or 0.0) <= 0.0:
+            return out
+        scale = float(target_l1) / current_l1
+        return {k: round(float(v) * scale, 12) for k, v in out.items()}
+
+    @staticmethod
+    def _compose_weight_source(regime_applied: bool, dynamic_applied: bool) -> str:
+        if regime_applied and dynamic_applied:
+            return "regime_plus_dynamic_ic"
+        if regime_applied:
+            return "regime"
+        if dynamic_applied:
+            return "dynamic_ic"
+        return "static"
+
+    def _remember_alpha6_weights(
+        self,
+        weights: Dict[str, float],
+        *,
+        regime_applied: bool,
+        dynamic_applied: bool,
+    ) -> None:
+        self._last_effective_alpha6_weights = {str(k): float(v) for k, v in (weights or {}).items()}
+        self._last_alpha6_regime_applied = bool(regime_applied)
+        self._last_alpha6_dynamic_applied = bool(dynamic_applied)
+        self._last_alpha6_weight_source = self._compose_weight_source(regime_applied, dynamic_applied)
+
+    def _resolve_classic_base_weight_details(self, static_base_w: Dict[str, float]) -> tuple[Dict[str, float], str]:
+        weights = {str(k): float(v) for k, v in (static_base_w or {}).items()}
         regime_override = self._load_regime_weight_override()
-        for key in static_base_w.keys():
+        regime_applied = False
+        for key in weights.keys():
             if key in regime_override:
                 weights[key] = float(regime_override[key])
-        if regime_override:
-            return weights
-        return self._load_dynamic_ic_weights(weights)
+                regime_applied = True
+
+        regime_adjusted_weights = dict(weights)
+        dynamic_weights = self._load_dynamic_ic_weights(regime_adjusted_weights)
+        dynamic_applied = self._weights_differ(regime_adjusted_weights, dynamic_weights)
+        if dynamic_applied:
+            weights = self._normalize_weights_to_l1(dynamic_weights, self._weights_l1(regime_adjusted_weights))
+        else:
+            weights = regime_adjusted_weights
+
+        self._remember_alpha6_weights(
+            weights,
+            regime_applied=regime_applied,
+            dynamic_applied=dynamic_applied,
+        )
+        return weights, self._last_alpha6_weight_source
+
+    def _resolve_classic_base_weights(self, static_base_w: Dict[str, float]) -> Dict[str, float]:
+        weights, _source = self._resolve_classic_base_weight_details(static_base_w)
+        return weights
 
     def _resolve_multi_strategy_alpha6_weights(self) -> Dict[str, float]:
         weights = dict(self._alpha6_static_weights)
@@ -188,9 +265,16 @@ class AlphaEngine:
             "f4_volume_expansion": "f4_volume_expansion",
             "f5_rsi_trend_confirm": "f5_rsi_trend_confirm",
         }
+        regime_applied = False
         for src_key, dst_key in remap.items():
             if src_key in regime_override:
                 weights[dst_key] = float(regime_override[src_key])
+                regime_applied = True
+        self._remember_alpha6_weights(
+            weights,
+            regime_applied=regime_applied,
+            dynamic_applied=False,
+        )
         return weights
 
     def _apply_multi_strategy_regime_weights(self) -> None:
@@ -1244,6 +1328,16 @@ class AlphaEngine:
                 raw_scores = dict(scores)
             factor_snapshot = self._get_alpha6_factor_snapshot()
             telemetry_scores = self._build_multi_strategy_telemetry_scores(factor_snapshot)
+            pre_dynamic_alpha6_weights = dict(self._last_effective_alpha6_weights)
+            effective_alpha6_weights = dict(
+                getattr(self.alpha6_strategy, "last_resolved_weights", None) or pre_dynamic_alpha6_weights
+            )
+            dynamic_applied = self._weights_differ(pre_dynamic_alpha6_weights, effective_alpha6_weights)
+            self._remember_alpha6_weights(
+                effective_alpha6_weights,
+                regime_applied=self._last_alpha6_regime_applied,
+                dynamic_applied=dynamic_applied,
+            )
             ml_overlay_raw_scores, ml_raw_preds, ml_runtime = self._compute_ml_overlay_scores(market_data)
             ml_overlay_scores = self._transform_ml_overlay_scores(ml_overlay_raw_scores)
             ml_weight = float(getattr(getattr(self.cfg, "ml_factor", None), "ml_weight", 0.0) or 0.0)
@@ -1331,6 +1425,8 @@ class AlphaEngine:
                 ml_overlay_scores=ml_overlay_scores,
                 ml_overlay_raw_scores=ml_overlay_raw_scores,
                 ml_runtime=ml_runtime,
+                effective_alpha6_weights=dict(self._last_effective_alpha6_weights),
+                weight_source=self._last_alpha6_weight_source,
             )
 
         # 否则使用传统5因子 + Alpha158 overlay（可选）
@@ -1539,4 +1635,6 @@ class AlphaEngine:
             ml_overlay_scores=ml_overlay_scores,
             ml_overlay_raw_scores=ml_overlay_raw_scores,
             ml_runtime=ml_runtime,
+            effective_alpha6_weights=dict(base_w),
+            weight_source=self._last_alpha6_weight_source,
         )

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from configs.loader import load_config
+from configs.schema import AlphaConfig
 from src.alpha.alpha_engine import AlphaEngine
 from src.execution.account_store import AccountState, AccountStore
 from src.execution.fill_store import derive_position_store_path, derive_runtime_named_json_path
@@ -38,6 +39,73 @@ def _market_df(symbol: str) -> pd.DataFrame:
             "low": closes,
             "volume": [1000.0] * len(closes),
         }
+    )
+
+
+BASE_FACTOR_WEIGHTS = {
+    "f1_mom_5d": 0.10,
+    "f2_mom_20d": 0.20,
+    "f3_vol_adj_ret_20d": 0.30,
+    "f4_volume_expansion": 0.15,
+    "f5_rsi_trend_confirm": 0.25,
+}
+
+REGIME_FACTOR_WEIGHTS = {
+    "f1_mom_5d": 0.05,
+    "f2_mom_20d": 0.45,
+    "f3_vol_adj_ret_20d": 0.20,
+    "f4_volume_expansion": 0.15,
+    "f5_rsi_trend_confirm": 0.15,
+}
+
+
+def _weight_l1(weights: dict[str, float]) -> float:
+    return sum(abs(float(v)) for v in weights.values())
+
+
+def _weight_engine(
+    tmp_path: Path,
+    *,
+    regime_enabled: bool,
+    dynamic_enabled: bool,
+) -> AlphaEngine:
+    cfg = AlphaConfig(
+        dynamic_weights_by_regime_enabled=regime_enabled,
+        dynamic_weights_by_regime_path="reports/alpha_dynamic_weights_by_regime.json",
+        dynamic_ic_weighting={
+            "enabled": dynamic_enabled,
+            "ic_monitor_path": "reports/alpha_ic_monitor.json",
+            "min_abs_ic": 0.01,
+        },
+    )
+    engine = AlphaEngine(cfg)
+    engine.repo_root = tmp_path
+    engine.set_regime_context("Trending")
+    return engine
+
+
+def _write_regime_weights(tmp_path: Path, weights: dict[str, float]) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "alpha_dynamic_weights_by_regime.json").write_text(
+        json.dumps({"regimes": {"Trending": {"weights": weights}}}),
+        encoding="utf-8",
+    )
+
+
+def _write_ic_monitor(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    factor_ic = {}
+    for key in BASE_FACTOR_WEIGHTS:
+        mean = 0.03 if key == "f1_mom_5d" else -0.03
+        factor_ic[key] = {
+            "rank_ic_short": {"count": 12, "mean": mean},
+            "rank_ic_long": {"count": 12, "mean": mean},
+        }
+    (reports_dir / "alpha_ic_monitor.json").write_text(
+        json.dumps({"factor_ic": factor_ic}),
+        encoding="utf-8",
     )
 
 
@@ -99,6 +167,52 @@ alpha:
     engine = AlphaEngine(cfg.alpha)
     assert engine.alpha6_strategy is not None
     assert engine.alpha6_strategy.factor_weights["f3_vol_adj_ret"] == pytest.approx(0.30)
+
+
+def test_classic_weights_use_regime_override_when_ic_file_is_absent(tmp_path):
+    _write_regime_weights(tmp_path, REGIME_FACTOR_WEIGHTS)
+    engine = _weight_engine(tmp_path, regime_enabled=True, dynamic_enabled=True)
+
+    weights = engine._resolve_classic_base_weights(BASE_FACTOR_WEIGHTS)
+
+    assert weights == pytest.approx(REGIME_FACTOR_WEIGHTS)
+    assert engine._last_alpha6_weight_source == "regime"
+
+
+def test_classic_weights_use_dynamic_ic_without_regime_override(tmp_path):
+    _write_ic_monitor(tmp_path)
+    engine = _weight_engine(tmp_path, regime_enabled=False, dynamic_enabled=True)
+
+    weights = engine._resolve_classic_base_weights(BASE_FACTOR_WEIGHTS)
+
+    assert weights != pytest.approx(BASE_FACTOR_WEIGHTS)
+    assert weights["f1_mom_5d"] > BASE_FACTOR_WEIGHTS["f1_mom_5d"]
+    assert weights["f2_mom_20d"] < BASE_FACTOR_WEIGHTS["f2_mom_20d"]
+    assert _weight_l1(weights) == pytest.approx(_weight_l1(BASE_FACTOR_WEIGHTS))
+    assert engine._last_alpha6_weight_source == "dynamic_ic"
+
+
+def test_classic_weights_compose_regime_override_with_dynamic_ic(tmp_path):
+    _write_regime_weights(tmp_path, REGIME_FACTOR_WEIGHTS)
+    _write_ic_monitor(tmp_path)
+    engine = _weight_engine(tmp_path, regime_enabled=True, dynamic_enabled=True)
+
+    weights = engine._resolve_classic_base_weights(BASE_FACTOR_WEIGHTS)
+
+    assert weights != pytest.approx(REGIME_FACTOR_WEIGHTS)
+    assert weights["f1_mom_5d"] > REGIME_FACTOR_WEIGHTS["f1_mom_5d"]
+    assert weights["f2_mom_20d"] < REGIME_FACTOR_WEIGHTS["f2_mom_20d"]
+    assert _weight_l1(weights) == pytest.approx(_weight_l1(REGIME_FACTOR_WEIGHTS))
+    assert engine._last_alpha6_weight_source == "regime_plus_dynamic_ic"
+
+
+def test_classic_weights_fall_back_to_static_when_ic_file_is_absent(tmp_path):
+    engine = _weight_engine(tmp_path, regime_enabled=False, dynamic_enabled=True)
+
+    weights = engine._resolve_classic_base_weights(BASE_FACTOR_WEIGHTS)
+
+    assert weights == pytest.approx(BASE_FACTOR_WEIGHTS)
+    assert engine._last_alpha6_weight_source == "static"
 
 
 def test_alpha_engine_ignores_stale_equity_snapshot_and_uses_account_store(tmp_path, monkeypatch):

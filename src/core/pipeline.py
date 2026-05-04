@@ -577,6 +577,8 @@ class V5Pipeline:
             ml_overlay_scores=_filter_optional_scores(alpha.ml_overlay_scores),
             ml_overlay_raw_scores=_filter_optional_scores(alpha.ml_overlay_raw_scores),
             ml_runtime=alpha.ml_runtime,
+            effective_alpha6_weights=dict(getattr(alpha, "effective_alpha6_weights", {}) or {}),
+            weight_source=str(getattr(alpha, "weight_source", "static") or "static"),
         )
 
     def _load_current_auto_risk_level(self) -> Optional[str]:
@@ -3249,6 +3251,8 @@ class V5Pipeline:
         """
         
         if audit:
+            audit.effective_alpha6_weights = dict(getattr(alpha, "effective_alpha6_weights", {}) or {})
+            audit.weight_source = str(getattr(alpha, "weight_source", "static") or "static")
             audit.regime = str(regime.state.value if hasattr(regime.state, 'value') else regime.state)
             audit.regime_multiplier = regime.multiplier
             # 保存Ensemble详情（如果可用）

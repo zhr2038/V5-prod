@@ -31,6 +31,8 @@ class DecisionAudit:
     # 状态信息
     regime: str = "Unknown"
     regime_multiplier: float = 1.0
+    effective_alpha6_weights: Dict[str, float] = field(default_factory=dict)
+    weight_source: str = "static"
     
     # 计数信息
     counts: Dict[str, int] = field(default_factory=lambda: {
@@ -219,6 +221,8 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
         window_end_ts=data.get("window_end_ts"),
         regime=data.get("regime", "Unknown"),
         regime_multiplier=data.get("regime_multiplier", 1.0),
+        effective_alpha6_weights=data.get("effective_alpha6_weights", {}) or {},
+        weight_source=data.get("weight_source", "static") or "static",
     )
     
     # 恢复其他字段
