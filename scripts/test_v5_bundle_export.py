@@ -297,9 +297,68 @@ def fixture_last_72h_trade_no_24h_root(root):
                 "closed_cycles": 1,
                 "net_pnl_sum_usdt": -0.1,
                 "net_expectancy_bps": -10.0,
+                "fast_fail_net_expectancy_bps": -12.0,
             }
         }
     })
+
+
+def fixture_negative_expectancy_consistent_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    write_text(root / "configs/live_prod.yaml", "probe_time_stop_hours: 4\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    current_run_id = now.strftime("%Y%m%d_%H")
+    current_run_dir = root / "reports/runs/prod" / current_run_id
+    write_json(current_run_dir / "decision_audit.json", {"window_end_ts": int(now.timestamp()), "router_decisions": []})
+    write_text(current_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run_dir / "equity.jsonl", "{}\n")
+    write_json(current_run_dir / "summary.json", {"run_id": current_run_id})
+
+    def add_trade_run(hours_ago, intent, side, qty, price, fee, reason):
+        run_dt = now - dt.timedelta(hours=hours_ago)
+        run_id = run_dt.strftime("%Y%m%d_%H")
+        ts = int(run_dt.timestamp())
+        run_dir = root / "reports/runs/prod" / run_id
+        write_json(run_dir / "decision_audit.json", {
+            "window_end_ts": ts,
+            "router_decisions": [
+                {"symbol": "BTC/USDT", "action": "create", "intent": intent, "side": side, "reason": reason}
+            ],
+        })
+        write_text(
+            run_dir / "trades.csv",
+            "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n"
+            f"{iso(ts + 20)},{run_id},BTC/USDT,{intent},{side},{qty},{price},{qty * price},{fee}\n",
+        )
+        write_text(run_dir / "equity.jsonl", "{}\n")
+        write_json(run_dir / "summary.json", {"run_id": run_id})
+
+    add_trade_run(6, "OPEN_LONG", "buy", 1.0, 100.0, 0.1, "ok")
+    add_trade_run(5, "CLOSE_LONG", "sell", 1.0, 110.0, 0.11, "exit_signal_priority")
+    write_json(root / "reports/negative_expectancy_cooldown.json", {
+        "stats": {
+            "BTC/USDT": {
+                "closed_cycles": 1,
+                "net_pnl_sum_usdt": 9.78,
+                "net_expectancy_bps": 978.0,
+                "fast_fail_net_expectancy_bps": 977.0,
+            }
+        }
+    })
+
+
+def fixture_negative_expectancy_missing_root(root):
+    fixture_negative_expectancy_consistent_root(root)
+    write_json(root / "reports/negative_expectancy_cooldown.json", {"stats": {}})
 
 
 def fixture_high_score_blocked_root(root):
@@ -1068,7 +1127,10 @@ def main():
             assert negexp[0]["symbol"] == "BTC/USDT", negexp
             assert negexp[0]["roundtrip_closed_count"] == "1", negexp
             assert negexp[0]["roundtrip_net_pnl_sum_usdt"] == "9.79", negexp
+            assert negexp[0]["roundtrip_weighted_net_bps"] == "979", negexp
             assert negexp[0]["negexp_net_pnl_sum_usdt"] == "-0.1", negexp
+            assert negexp[0]["negexp_fast_fail_net_expectancy_bps"] == "-12", negexp
+            assert negexp[0]["bps_mismatch"] == "989", negexp
             assert negexp[0]["mismatch_suspected"] == "true", negexp
             high_mismatch = [
                 item for item in issues["issues"]
@@ -1082,8 +1144,58 @@ def main():
             assert "latest_24h 是否真实成交: no / 0" in readme, readme
             assert "last_72h 是否真实成交: yes / 2" in readme, readme
             assert "closed roundtrip gross/net bps: gross=" in readme, readme
-            assert "## Negative expectancy 口径检查" in readme, readme
+            assert "## Negative expectancy 口径一致性" in readme, readme
             assert "mismatch_suspected_count: 1" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-negexp-consistent-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_negative_expectancy_consistent_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                negexp = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_consistency.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert len(negexp) == 1, negexp
+            row = negexp[0]
+            assert row["roundtrip_net_pnl_sum_usdt"] == "9.79", row
+            assert row["roundtrip_weighted_net_bps"] == "979", row
+            assert row["negexp_net_pnl_sum_usdt"] == "9.78", row
+            assert row["negexp_net_expectancy_bps"] == "978", row
+            assert row["negexp_fast_fail_net_expectancy_bps"] == "977", row
+            assert row["pnl_mismatch_usdt"] == "0.01", row
+            assert row["bps_mismatch"] == "1", row
+            assert row["mismatch_suspected"] == "false", row
+            assert row["diagnosis"] == "ok", row
+            assert window["negative_expectancy_mismatch_count"] == 0, window
+            assert not any(item.get("code") == "negative_expectancy_roundtrip_mismatch" for item in issues["issues"]), issues
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-negexp-missing-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_negative_expectancy_missing_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                negexp = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/negative_expectancy_consistency.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert len(negexp) == 1, negexp
+            row = negexp[0]
+            assert row["symbol"] == "BTC/USDT", row
+            assert row["negexp_net_pnl_sum_usdt"] == "not_observable", row
+            assert row["negexp_fast_fail_net_expectancy_bps"] == "not_observable", row
+            assert row["mismatch_suspected"] == "false", row
+            assert row["diagnosis"] == "not_observable_negative_expectancy_symbol_missing", row
+            assert window["negative_expectancy_mismatch_count"] == 0, window
+            assert not any(item.get("code") == "negative_expectancy_roundtrip_mismatch" for item in issues["issues"]), issues
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

@@ -2488,20 +2488,33 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         neg_closed_cycles = as_float(first_value(neg, ("closed_cycles",), not_obs))
         neg_net_pnl = as_float(first_value(neg, ("net_pnl_sum_usdt",), not_obs))
         neg_net_bps = as_float(first_value(neg, ("net_expectancy_bps",), not_obs))
+        neg_fast_fail_net_bps = as_float(first_value(neg, ("fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps"), not_obs))
         pnl_mismatch = (rt_net_pnl - neg_net_pnl) if rt_net_pnl is not None and neg_net_pnl is not None else None
-        bps_mismatch = (rt_weighted_bps - neg_net_bps) if rt_weighted_bps is not None and neg_net_bps is not None else None
-        mismatch_suspected = bool(rt_net_pnl is not None and neg_net_pnl is not None and rt_net_pnl > 0 and neg_net_pnl < 0 and abs(rt_net_pnl - neg_net_pnl) > 0.05)
+        bps_mismatch = abs(rt_weighted_bps - neg_net_bps) if rt_weighted_bps is not None and neg_net_bps is not None else None
+        pnl_sign_mismatch = bool(
+            rt_net_pnl is not None
+            and neg_net_pnl is not None
+            and rt_net_pnl > 0
+            and neg_net_pnl < 0
+            and abs(pnl_mismatch or 0.0) > 0.05
+        )
+        bps_large_mismatch = bool(bps_mismatch is not None and bps_mismatch > 50.0)
+        mismatch_suspected = bool(pnl_sign_mismatch or bps_large_mismatch)
         if mismatch_suspected:
             diagnosis = "high_issue_negative_expectancy_roundtrip_mismatch"
             add_issue(
                 "high",
                 "negative_expectancy_roundtrip_mismatch",
-                "Roundtrip summary shows positive net PnL while negative expectancy state shows negative net PnL for the same symbol.",
+                "Roundtrip summary and negative expectancy state disagree for the same symbol.",
                 {
                     "symbol": symbol,
                     "roundtrip_net_pnl_sum_usdt": fmt_num(rt_net_pnl, 12),
+                    "roundtrip_weighted_net_bps": fmt_num(rt_weighted_bps, 4),
                     "negexp_net_pnl_sum_usdt": fmt_num(neg_net_pnl, 12),
+                    "negexp_net_expectancy_bps": fmt_num(neg_net_bps, 4),
+                    "negexp_fast_fail_net_expectancy_bps": fmt_num(neg_fast_fail_net_bps, 4),
                     "pnl_mismatch_usdt": fmt_num(pnl_mismatch, 12),
+                    "bps_mismatch": fmt_num(bps_mismatch, 4),
                     "roundtrip_closed_count": int(rt["count"]),
                     "negexp_closed_cycles": fmt_num(neg_closed_cycles, 0),
                 },
@@ -2509,19 +2522,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         elif not neg:
             diagnosis = "not_observable_negative_expectancy_symbol_missing"
         elif rt["count"] == 0:
-            diagnosis = "not_applicable_no_closed_roundtrips"
-        elif rt_net_pnl is None or neg_net_pnl is None:
-            diagnosis = "not_observable_pnl"
+            diagnosis = "not_observable_no_closed_roundtrips"
+        elif rt_net_pnl is None or neg_net_pnl is None or rt_weighted_bps is None or neg_net_bps is None:
+            diagnosis = "not_observable_pnl_or_bps"
         else:
             diagnosis = "ok"
         negative_consistency_rows.append({
             "symbol": symbol,
             "roundtrip_closed_count": int(rt["count"]),
             "roundtrip_net_pnl_sum_usdt": fmt_num(rt_net_pnl, 12),
-            "roundtrip_net_bps_weighted": fmt_num(rt_weighted_bps, 4),
+            "roundtrip_weighted_net_bps": fmt_num(rt_weighted_bps, 4),
             "negexp_closed_cycles": fmt_num(neg_closed_cycles, 0),
             "negexp_net_pnl_sum_usdt": fmt_num(neg_net_pnl, 12),
             "negexp_net_expectancy_bps": fmt_num(neg_net_bps, 4),
+            "negexp_fast_fail_net_expectancy_bps": fmt_num(neg_fast_fail_net_bps, 4),
             "pnl_mismatch_usdt": fmt_num(pnl_mismatch, 12),
             "bps_mismatch": fmt_num(bps_mismatch, 4),
             "mismatch_suspected": str(mismatch_suspected).lower(),
@@ -2610,7 +2624,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/negative_expectancy_consistency.csv",
         negative_consistency_rows,
-        ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_net_bps_weighted", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
+        ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_weighted_net_bps", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "negexp_fast_fail_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
     )
     write_csv(
         "summaries/factor_contribution_audit.csv",
@@ -2970,7 +2984,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- 当前 stop 是否足够保护浮盈: {open_stop_protection_text}",
         f"- dust residual ignored: positions={dust_residual_position_count}, roundtrips={dust_residual_roundtrip_count}",
         "",
-        "## Negative expectancy 口径检查",
+        "## Negative expectancy 口径一致性",
         f"- consistency rows: {len(negative_consistency_rows)}",
         f"- mismatch_suspected_count: {negative_expectancy_mismatch_count}",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
