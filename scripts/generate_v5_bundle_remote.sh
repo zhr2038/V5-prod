@@ -567,6 +567,49 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     config_dust_usdt_ignore = config_number("dust_usdt_ignore") or 0.0
     config_min_trade_value_usdt = config_number("min_trade_value_usdt") or 0.0
     global_dust_threshold_usdt = max(config_dust_usdt_ignore, 1.0, 0.1 * config_min_trade_value_usdt)
+    FACTOR_KEYS = [
+        "f1_mom_5d",
+        "f2_mom_20d",
+        "f3_vol_adj_ret",
+        "f4_volume_expansion",
+        "f5_rsi_trend_confirm",
+    ]
+    FACTOR_ALIASES = {
+        "f1_mom_5d": ("f1_mom_5d",),
+        "f2_mom_20d": ("f2_mom_20d",),
+        "f3_vol_adj_ret": ("f3_vol_adj_ret", "f3_vol_adj_ret_20d"),
+        "f4_volume_expansion": ("f4_volume_expansion",),
+        "f5_rsi_trend_confirm": ("f5_rsi_trend_confirm",),
+    }
+
+    def factor_bucket_value(bucket, factor):
+        if not isinstance(bucket, dict):
+            return None
+        for key in FACTOR_ALIASES.get(factor, (factor,)):
+            if key not in bucket:
+                continue
+            value = as_float(bucket.get(key))
+            if value is not None:
+                return value
+        return None
+
+    def normalize_factor_weights(weights):
+        out = {}
+        if not isinstance(weights, dict):
+            return out
+        for factor in FACTOR_KEYS:
+            value = factor_bucket_value(weights, factor)
+            if value is not None:
+                out[factor] = value
+        return out
+
+    CONFIG_FACTOR_WEIGHTS = {}
+    for factor in FACTOR_KEYS:
+        for alias in FACTOR_ALIASES.get(factor, (factor,)):
+            value = config_number(alias)
+            if value is not None:
+                CONFIG_FACTOR_WEIGHTS[factor] = value
+                break
 
     def parse_time_to_hours_ago(value):
         if value in (None, "", not_obs):
@@ -730,6 +773,164 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     def router_trade_probe_type(item, reason):
         return first_observed(probe_type_of(item), probe_type_from_reason(reason), probe_type_from_reason(item.get("source_reason")))
 
+    def strategy_signal_lookup_from_audit(audit):
+        lookup = defaultdict(dict)
+        strategies = audit.get("strategy_signals") if isinstance(audit, dict) else []
+        if not isinstance(strategies, list):
+            return lookup
+        for strategy in strategies:
+            if not isinstance(strategy, dict):
+                continue
+            name = flatten_value(first_value(strategy, ("strategy", "name"), ""))
+            if not name:
+                continue
+            signals = strategy.get("signals") if isinstance(strategy.get("signals"), list) else []
+            for signal in signals:
+                if not isinstance(signal, dict):
+                    continue
+                symbol = flatten_value(first_value(signal, ("symbol", "instId"), ""))
+                if symbol:
+                    lookup[name][symbol] = signal
+        return lookup
+
+    def signal_factor_buckets(signal):
+        if not isinstance(signal, dict):
+            return {}, {}
+        metadata = signal.get("metadata") if isinstance(signal.get("metadata"), dict) else {}
+        raw = metadata.get("raw_factors") if isinstance(metadata.get("raw_factors"), dict) else {}
+        z = metadata.get("z_factors") if isinstance(metadata.get("z_factors"), dict) else {}
+        return raw, z
+
+    def audit_factor_bucket(audit, bucket_name, symbol):
+        containers = [
+            audit.get(bucket_name),
+            audit.get(f"alpha_{bucket_name}"),
+            (audit.get("alpha_snapshot") or {}).get(bucket_name) if isinstance(audit.get("alpha_snapshot"), dict) else None,
+            (audit.get("factor_snapshot") or {}).get(bucket_name) if isinstance(audit.get("factor_snapshot"), dict) else None,
+        ]
+        for container in containers:
+            if isinstance(container, dict) and isinstance(container.get(symbol), dict):
+                return container.get(symbol)
+        return {}
+
+    def top_score_value(row):
+        if not isinstance(row, dict):
+            return None
+        return as_float(first_value(row, ("final_score", "score", "display_score"), not_obs))
+
+    def router_decision_by_symbol(audit):
+        out = {}
+        decisions = audit.get("router_decisions") if isinstance(audit, dict) else []
+        if not isinstance(decisions, list):
+            return out
+        for item in decisions:
+            if not isinstance(item, dict):
+                continue
+            symbol = flatten_value(first_value(item, ("symbol", "instId"), ""))
+            if symbol and symbol not in out:
+                out[symbol] = item
+        return out
+
+    def target_explain_by_symbol(audit):
+        out = {}
+        rows = audit.get("target_execution_explain") if isinstance(audit, dict) else []
+        if not isinstance(rows, list):
+            return out
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            symbol = flatten_value(first_value(item, ("symbol",), ""))
+            if symbol and symbol not in out:
+                out[symbol] = item
+        return out
+
+    def factor_contribution_base_rows(audit, run_id, audit_ts, audit_regime, audit_level):
+        top_scores = audit.get("top_scores") if isinstance(audit.get("top_scores"), list) else []
+        targets = audit.get("targets_post_risk") if isinstance(audit.get("targets_post_risk"), dict) else {}
+        if not top_scores and not targets:
+            return []
+        top_map = {}
+        ordered_symbols = []
+        for idx, row in enumerate(top_scores, start=1):
+            if not isinstance(row, dict):
+                continue
+            symbol = flatten_value(first_value(row, ("symbol", "instId"), ""))
+            if not symbol:
+                continue
+            enriched = dict(row)
+            enriched.setdefault("rank", idx)
+            top_map[symbol] = enriched
+            if symbol not in ordered_symbols:
+                ordered_symbols.append(symbol)
+        for symbol in targets.keys():
+            symbol = flatten_value(symbol)
+            if symbol and symbol not in ordered_symbols:
+                ordered_symbols.append(symbol)
+
+        signal_lookup = strategy_signal_lookup_from_audit(audit)
+        alpha6_lookup = signal_lookup.get("Alpha6Factor") or {}
+        explain_map = target_explain_by_symbol(audit)
+        router_map = router_decision_by_symbol(audit)
+        weights = normalize_factor_weights(audit.get("effective_alpha6_weights")) or dict(CONFIG_FACTOR_WEIGHTS)
+        rows = []
+        for symbol in ordered_symbols:
+            top_row = top_map.get(symbol, {})
+            explain = explain_map.get(symbol, {})
+            router = router_map.get(symbol, {})
+            signal = alpha6_lookup.get(symbol)
+            raw_from_signal, z_from_signal = signal_factor_buckets(signal)
+            raw_factors = (
+                top_row.get("raw_factors") if isinstance(top_row.get("raw_factors"), dict) else {}
+            ) or raw_from_signal or audit_factor_bucket(audit, "raw_factors", symbol)
+            z_factors = (
+                top_row.get("z_factors") if isinstance(top_row.get("z_factors"), dict) else {}
+            ) or z_from_signal or audit_factor_bucket(audit, "z_factors", symbol)
+            alpha6_score = as_float(first_value(signal or {}, ("score", "raw_score"), not_obs))
+            if alpha6_score is None:
+                alpha6_score = as_float(first_value(explain, ("alpha6_score",), not_obs))
+            contributions = {}
+            for factor in FACTOR_KEYS:
+                z_value = factor_bucket_value(z_factors, factor)
+                weight = weights.get(factor)
+                contributions[factor] = (z_value * weight) if z_value is not None and weight is not None else None
+            positive = [(factor, value) for factor, value in contributions.items() if value is not None and value > 0]
+            numeric = [(factor, value) for factor, value in contributions.items() if value is not None]
+            if positive:
+                dominant_factor, dominant_value = max(positive, key=lambda item: (item[1], item[0]))
+                denominator = sum(value for _, value in positive)
+            elif numeric:
+                dominant_factor, dominant_value = max(numeric, key=lambda item: (abs(item[1]), item[0]))
+                denominator = sum(abs(value) for _, value in numeric)
+            else:
+                dominant_factor, dominant_value, denominator = not_obs, None, None
+            dominant_pct = (abs(dominant_value) / denominator * 100.0) if dominant_value is not None and denominator else None
+            router_action = flatten_value(first_value(router, ("action",), first_value(explain, ("router_action",), not_obs)))
+            router_reason = flatten_value(first_value(router, ("reason", "source_reason"), first_value(explain, ("router_reason", "blocked_reason"), not_obs)))
+            rows.append({
+                "ts_utc": audit_ts,
+                "run_id": run_id,
+                "symbol": symbol,
+                "final_score": fmt_num(top_score_value(top_row), 8),
+                "alpha6_score": fmt_num(alpha6_score, 8),
+                "raw_factors": safe_json(raw_factors) if raw_factors else not_obs,
+                "z_factors": safe_json(z_factors) if z_factors else not_obs,
+                "effective_factor_weights": safe_json(weights) if weights else not_obs,
+                "contribution_f1_mom_5d": fmt_num(contributions["f1_mom_5d"], 8),
+                "contribution_f2_mom_20d": fmt_num(contributions["f2_mom_20d"], 8),
+                "contribution_f3_vol_adj_ret": fmt_num(contributions["f3_vol_adj_ret"], 8),
+                "contribution_f4_volume_expansion": fmt_num(contributions["f4_volume_expansion"], 8),
+                "contribution_f5_rsi_trend_confirm": fmt_num(contributions["f5_rsi_trend_confirm"], 8),
+                "dominant_factor": dominant_factor,
+                "dominant_factor_contribution_pct": fmt_num(dominant_pct, 6),
+                "router_action": router_action or not_obs,
+                "router_reason": router_reason or not_obs,
+                "forward_4h_net_bps": not_obs,
+                "forward_8h_net_bps": not_obs,
+                "forward_12h_net_bps": not_obs,
+                "forward_24h_net_bps": not_obs,
+            })
+        return rows
+
     audit_paths = sorted((OUT / "raw" / "recent_runs").glob("*/decision_audit.json"))
     trade_paths = sorted((OUT / "raw" / "recent_runs").glob("*/trades.csv"))
     router_rows = []
@@ -744,6 +945,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     dust_residual_roundtrip_rows = []
     high_score_blocked_rows = []
     market_impulse_selection_shadow_rows = []
+    factor_contribution_rows = []
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
     dust_residual_row_keys = set()
@@ -791,6 +993,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         counts = audit.get("counts") if isinstance(audit.get("counts"), dict) else {}
         for field in PROBE_COUNT_FIELDS:
             probe_counts[field] += as_int(counts.get(field))
+        factor_contribution_rows.extend(
+            factor_contribution_base_rows(
+                audit,
+                run_id,
+                audit_ts,
+                audit_regime,
+                audit_level,
+            )
+        )
         market_shadow = audit.get("market_impulse_shadow_selection")
         if isinstance(market_shadow, dict):
             market_impulse_selection_shadow_rows.append({
@@ -1754,6 +1965,58 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         ["skip_reason"],
     )
 
+    def factor_forward_value(row, horizon):
+        key = btc_label_key(
+            row.get("run_id"),
+            row.get("ts_utc"),
+            row.get("symbol"),
+            row.get("router_reason"),
+        )
+        label = label_index.get(key) if key and all(part != not_obs for part in key) else None
+        outcome = outcome_index.get(key) if key and all(part != not_obs for part in key) else None
+        if not (label or outcome) and key and all(part != not_obs for part in key):
+            loose_key = (key[0], key[2], key[3])
+            label = label_loose_index.get(loose_key)
+            outcome = outcome_loose_index.get(loose_key)
+        src = outcome or label or {}
+        if src:
+            value = first_value(src, (f"forward_{horizon}h_net_bps", f"label_{horizon}h_net_bps"), not_obs)
+            if value != not_obs:
+                return flatten_value(value)
+            status = flatten_value(first_value(src, (f"label_{horizon}h_status", "label_status", "label_24h_status"), ""))
+            if status == "pending":
+                return "pending"
+            if status == "not_observable":
+                return not_obs
+        age_hours = parse_time_to_hours_ago(row.get("ts_utc"))
+        if age_hours is not None and age_hours < float(horizon):
+            return "pending"
+        return not_obs
+
+    for row in factor_contribution_rows:
+        for horizon in (4, 8, 12, 24):
+            row[f"forward_{horizon}h_net_bps"] = factor_forward_value(row, horizon)
+
+    def aggregate_factor_contribution(rows):
+        grouped = defaultdict(list)
+        for row in rows:
+            factor = row.get("dominant_factor") or not_obs
+            if factor == not_obs:
+                continue
+            grouped[factor].append(row)
+        out = []
+        for factor, group_rows in sorted(grouped.items()):
+            payload = {"dominant_factor": factor, "count": len(group_rows)}
+            for horizon in (4, 8, 12, 24):
+                values = [as_float(row.get(f"forward_{horizon}h_net_bps")) for row in group_rows]
+                usable = [value for value in values if value is not None]
+                payload[f"avg_{horizon}h_net_bps"] = round(sum(usable) / len(usable), 6) if usable else not_obs
+                payload[f"win_rate_{horizon}h"] = round(sum(1 for value in usable if value > 0) / len(usable), 6) if usable else not_obs
+            out.append(payload)
+        return out
+
+    factor_contribution_outcomes_by_factor = aggregate_factor_contribution(factor_contribution_rows)
+
     high_score_pending_count = 0
     high_score_matured_unlabeled_count = 0
     if audit_high_score_but_not_executed_count and not high_score_blocked_rows:
@@ -2350,6 +2613,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_net_bps_weighted", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
     )
     write_csv(
+        "summaries/factor_contribution_audit.csv",
+        factor_contribution_rows,
+        ["ts_utc", "run_id", "symbol", "final_score", "alpha6_score", "raw_factors", "z_factors", "effective_factor_weights", "contribution_f1_mom_5d", "contribution_f2_mom_20d", "contribution_f3_vol_adj_ret", "contribution_f4_volume_expansion", "contribution_f5_rsi_trend_confirm", "dominant_factor", "dominant_factor_contribution_pct", "router_action", "router_reason", "forward_4h_net_bps", "forward_8h_net_bps", "forward_12h_net_bps", "forward_24h_net_bps"],
+    )
+    write_csv(
+        "summaries/factor_contribution_outcomes_by_factor.csv",
+        factor_contribution_outcomes_by_factor,
+        ["dominant_factor", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
+    )
+    write_csv(
         "summaries/high_score_blocked_targets.csv",
         high_score_blocked_rows,
         ["ts_utc", "run_id", "symbol", "final_score", "selected_rank", "target_w", "router_action", "router_reason", "high_score_block_category", "trend_score", "trend_side", "alpha6_score", "alpha6_side", "f4_volume_expansion", "f5_rsi_trend_confirm", "current_level", "regime"],
@@ -2431,6 +2704,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         row for row in high_score_blocked_rows
         if parse_dt_utc(row.get("ts_utc")) is not None and parse_dt_utc(row.get("ts_utc")).timestamp() >= RECENT_24H
     ]
+    f3_dominant_rows = [
+        row for row in factor_contribution_outcomes_by_factor
+        if row.get("dominant_factor") == "f3_vol_adj_ret"
+    ]
+    f3_dominant_negative_evidence = any(
+        as_float(row.get("avg_24h_net_bps")) is not None and as_float(row.get("avg_24h_net_bps")) < 0
+        for row in f3_dominant_rows
+    )
 
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
@@ -2465,6 +2746,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
         "alt_impulse_shadow_duplicate_count": alt_impulse_shadow_duplicate_count,
         "market_impulse_selection_shadow_rows": len(market_impulse_selection_shadow_rows),
+        "factor_contribution_audit_rows": len(factor_contribution_rows),
+        "factor_contribution_factor_count": len(factor_contribution_outcomes_by_factor),
+        "f3_dominant_negative_evidence": bool(f3_dominant_negative_evidence),
         "probe_rows": len(probe_rows),
         "probe_lifecycle_rows": len(lifecycle_rows),
         "dust_anti_chase_rows": len(dust_rows),
@@ -2640,6 +2924,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         else ("not_observable_no_matured_labels" if alt_impulse_shadow_rows else "not_applicable_no_shadow_samples")
     )
 
+    def factor_contribution_summary_text():
+        if not factor_contribution_outcomes_by_factor:
+            return "not_observable_no_factor_rows"
+        parts = []
+        for row in factor_contribution_outcomes_by_factor[:8]:
+            factor = row.get("dominant_factor") or not_obs
+            parts.append(
+                f"{factor}: count={row.get('count', 0)}, "
+                f"4h={row.get('avg_4h_net_bps', not_obs)}, "
+                f"8h={row.get('avg_8h_net_bps', not_obs)}, "
+                f"12h={row.get('avg_12h_net_bps', not_obs)}, "
+                f"24h={row.get('avg_24h_net_bps', not_obs)}"
+            )
+        return "; ".join(parts)
+
+    factor_contribution_summary = factor_contribution_summary_text()
+
     readme = [
         f"# V5 live follow-up bundle {STAMP}",
         "",
@@ -2673,6 +2974,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- consistency rows: {len(negative_consistency_rows)}",
         f"- mismatch_suspected_count: {negative_expectancy_mismatch_count}",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
+        "",
+        "## Alpha6 factor contribution audit",
+        f"- factor_contribution_audit_rows: {len(factor_contribution_rows)}",
+        f"- outcomes_by_factor: {factor_contribution_summary}",
+        f"- f3_dominant_negative_evidence: {'true' if f3_dominant_negative_evidence else 'false'}",
         "",
         "## 高分但未成交目标",
         f"- 最近 24h 哪些 symbol 高分但没买: {high_score_symbols_text}",

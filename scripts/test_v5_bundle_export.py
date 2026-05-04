@@ -617,6 +617,167 @@ def fixture_market_impulse_selection_shadow_root(root):
     return run_id
 
 
+def fixture_factor_contribution_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    current_window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    old_window_end = current_window_end - 25 * 3600
+    current_run_id = dt.datetime.fromtimestamp(current_window_end, dt.timezone.utc).strftime("%Y%m%d_%H")
+    old_run_id = dt.datetime.fromtimestamp(old_window_end, dt.timezone.utc).strftime("%Y%m%d_%H")
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "\n".join(
+            [
+                "f1_mom_5d: 0.10",
+                "f2_mom_20d: 0.30",
+                "f3_vol_adj_ret: 0.35",
+                "f4_volume_expansion: 0.15",
+                "f5_rsi_trend_confirm: 0.10",
+                "",
+            ]
+        ),
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    old_run_dir = root / "reports/runs/prod" / old_run_id
+    old_audit_ts = old_window_end + 15
+    write_json(old_run_dir / "decision_audit.json", {
+        "now_ts": old_audit_ts,
+        "window_end_ts": old_window_end,
+        "effective_alpha6_weights": {
+            "f1_mom_5d": 0.10,
+            "f2_mom_20d": 0.30,
+            "f3_vol_adj_ret": 0.35,
+            "f4_volume_expansion": 0.15,
+            "f5_rsi_trend_confirm": 0.10,
+        },
+        "top_scores": [{"symbol": "ETH/USDT", "score": 1.0, "rank": 1}],
+        "targets_post_risk": {"ETH/USDT": 0.15},
+        "router_decisions": [
+            {
+                "symbol": "ETH/USDT",
+                "action": "skip",
+                "reason": "protect_entry_no_alpha6_confirmation",
+            }
+        ],
+        "strategy_signals": [
+            {
+                "strategy": "Alpha6Factor",
+                "signals": [
+                    {
+                        "symbol": "ETH/USDT",
+                        "side": "buy",
+                        "score": 0.91,
+                        "metadata": {
+                            "raw_factors": {
+                                "f1_mom_5d": 0.01,
+                                "f2_mom_20d": 0.02,
+                                "f3_vol_adj_ret": 4.2,
+                                "f4_volume_expansion": -0.1,
+                                "f5_rsi_trend_confirm": -0.2,
+                            },
+                            "z_factors": {
+                                "f1_mom_5d": 0.10,
+                                "f2_mom_20d": 0.20,
+                                "f3_vol_adj_ret": 2.00,
+                                "f4_volume_expansion": -0.10,
+                                "f5_rsi_trend_confirm": -0.10,
+                            },
+                        },
+                    }
+                ],
+            }
+        ],
+    })
+    write_text(old_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(old_run_dir / "equity.jsonl", "{}\n")
+    write_json(old_run_dir / "summary.json", {"run_id": old_run_id})
+
+    current_run_dir = root / "reports/runs/prod" / current_run_id
+    current_audit_ts = current_window_end + 15
+    write_json(current_run_dir / "decision_audit.json", {
+        "now_ts": current_audit_ts,
+        "window_end_ts": current_window_end,
+        "effective_alpha6_weights": {
+            "f1_mom_5d": 0.10,
+            "f2_mom_20d": 0.30,
+            "f3_vol_adj_ret": 0.35,
+            "f4_volume_expansion": 0.15,
+            "f5_rsi_trend_confirm": 0.10,
+        },
+        "top_scores": [{"symbol": "SOL/USDT", "final_score": 0.87, "rank": 1}],
+        "targets_post_risk": {"SOL/USDT": 0.12},
+        "router_decisions": [
+            {
+                "symbol": "SOL/USDT",
+                "action": "skip",
+                "reason": "protect_entry_trend_only",
+            }
+        ],
+        "strategy_signals": [
+            {
+                "strategy": "Alpha6Factor",
+                "signals": [
+                    {
+                        "symbol": "SOL/USDT",
+                        "side": "buy",
+                        "score": 0.55,
+                        "metadata": {
+                            "raw_factors": {
+                                "f1_mom_5d": 0.02,
+                                "f2_mom_20d": 3.0,
+                                "f3_vol_adj_ret": 0.5,
+                                "f4_volume_expansion": 0.1,
+                                "f5_rsi_trend_confirm": 0.1,
+                            },
+                            "z_factors": {
+                                "f1_mom_5d": 0.10,
+                                "f2_mom_20d": 1.20,
+                                "f3_vol_adj_ret": 0.20,
+                                "f4_volume_expansion": 0.10,
+                                "f5_rsi_trend_confirm": 0.10,
+                            },
+                        },
+                    }
+                ],
+            }
+        ],
+    })
+    write_text(current_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run_dir / "equity.jsonl", "{}\n")
+    write_json(current_run_dir / "summary.json", {"run_id": current_run_id})
+
+    write_text(
+        root / "reports/skipped_candidate_labels.jsonl",
+        json.dumps(
+            {
+                "run_id": old_run_id,
+                "ts_utc": iso(old_audit_ts),
+                "symbol": "ETH/USDT",
+                "skip_reason": "protect_entry_no_alpha6_confirmation",
+                "entry_px": 2000.0,
+                "label_status": "complete",
+                "label_4h_net_bps": -10.0,
+                "label_8h_net_bps": -20.0,
+                "label_12h_net_bps": -30.0,
+                "label_24h_net_bps": -40.0,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    return old_run_id, current_run_id
+
+
 def extract_member(tf, suffix):
     matches = [name for name in tf.getnames() if name.endswith(suffix)]
     assert matches, suffix
@@ -833,6 +994,37 @@ def main():
             assert row["selected_by_expected_net_shadow"] == "ETH/USDT", row
             assert "ETH/USDT" in row["candidates_json"], row
             assert window["market_impulse_selection_shadow_rows"] == 1, window
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-factor-contribution-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_factor_contribution_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/factor_contribution_audit.csv")).read().decode().splitlines()))
+                by_factor = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/factor_contribution_outcomes_by_factor.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 2, rows
+            eth = next(row for row in rows if row["symbol"] == "ETH/USDT")
+            sol = next(row for row in rows if row["symbol"] == "SOL/USDT")
+            assert eth["dominant_factor"] == "f3_vol_adj_ret", eth
+            assert float(eth["contribution_f3_vol_adj_ret"]) == 0.7, eth
+            assert eth["router_reason"] == "protect_entry_no_alpha6_confirmation", eth
+            assert eth["forward_4h_net_bps"] == "-10.0", eth
+            assert eth["forward_24h_net_bps"] == "-40.0", eth
+            assert sol["forward_4h_net_bps"] == "pending", sol
+            f3 = next(row for row in by_factor if row["dominant_factor"] == "f3_vol_adj_ret")
+            assert float(f3["avg_24h_net_bps"]) == -40.0, by_factor
+            assert f3["win_rate_24h"] == "0.0", by_factor
+            assert window["factor_contribution_audit_rows"] == 2, window
+            assert window["f3_dominant_negative_evidence"] is True, window
+            assert "## Alpha6 factor contribution audit" in readme, readme
+            assert "f3_dominant_negative_evidence: true" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
