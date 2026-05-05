@@ -440,6 +440,62 @@ def fixture_config_runtime_consumption_root(root):
     return run_id
 
 
+def fixture_rank_exit_consistency_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    open_run_dt = now - dt.timedelta(hours=1)
+    open_run_id = open_run_dt.strftime("%Y%m%d_%H")
+    close_run_id = now.strftime("%Y%m%d_%H")
+    open_ts = int(open_run_dt.timestamp())
+    close_ts = int(now.timestamp())
+
+    write_text(root / "configs/live_prod.yaml", "close_only_weight_eps: 0.001\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "rank_exit_target_still_positive: BNB/USDT target_w=0.1500 > eps=0.0010, rank=4, source=fused\n")
+
+    open_run_dir = root / "reports/runs/prod" / open_run_id
+    write_json(open_run_dir / "decision_audit.json", {"window_end_ts": open_ts, "router_decisions": []})
+    write_text(
+        open_run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,entry_reason\n"
+        f"{iso(open_ts + 20)},{open_run_id},BNB/USDT,OPEN_LONG,buy,1.0,600.0,600.0,0.6,ok\n",
+    )
+    write_text(open_run_dir / "equity.jsonl", "{}\n")
+    write_json(open_run_dir / "summary.json", {"run_id": open_run_id})
+
+    close_run_dir = root / "reports/runs/prod" / close_run_id
+    write_json(close_run_dir / "decision_audit.json", {
+        "now_ts": close_ts + 15,
+        "window_end_ts": close_ts,
+        "notes": [
+            "rank_exit_target_still_positive: BNB/USDT target_w=0.1500 > eps=0.0010, rank=4, source=fused"
+        ],
+        "exit_signals": [],
+        "router_decisions": [
+            {"symbol": "BNB/USDT", "action": "skip", "reason": "target_still_positive"}
+        ],
+        "targets_post_risk": {"BNB/USDT": 0.15},
+        "target_execution_explain": [
+            {"symbol": "BNB/USDT", "target_w": 0.15, "selected_rank": 2}
+        ],
+    })
+    write_text(
+        close_run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,exit_reason\n"
+        f"{iso(close_ts + 20)},{close_run_id},BNB/USDT,CLOSE_LONG,sell,1.0,610.0,610.0,0.61,rank_exit_4\n",
+    )
+    write_text(close_run_dir / "equity.jsonl", "{}\n")
+    write_json(close_run_dir / "summary.json", {"run_id": close_run_id})
+    return close_run_id
+
+
 def fixture_high_score_blocked_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -1310,6 +1366,47 @@ def main():
             assert window["config_runtime_not_consumed_count"] == 2, window
             assert "## 配置消费审计" in readme, readme
             assert "live config keys not consumed in runtime: 2" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-rank-exit-consistency-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_rank_exit_consistency_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/rank_exit_consistency.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["symbol"] == "BNB/USDT", row
+            assert row["exit_reason"] == "rank_exit_4", row
+            assert row["target_w"] == "0.15", row
+            assert row["rank"] == "4", row
+            assert row["close_only_weight_eps"] == "0.001", row
+            assert row["has_exit_signal"] == "false", row
+            assert row["has_router_close_create"] == "false", row
+            assert row["has_target_still_positive_note"] == "true", row
+            assert row["target_positive"] == "true", row
+            assert row["conflict_suspected"] == "true", row
+            assert row["diagnosis"].startswith("high_issue_rank_exit_target_positive_execution_conflict"), row
+            rank_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "rank_exit_target_positive_execution_conflict"
+            ]
+            assert len(rank_issues) == 1, issues
+            assert issues["high_issue_count"] >= 1, issues
+            assert window["rank_exit_sell_count"] == 1, window
+            assert window["rank_exit_conflict_count"] == 1, window
+            assert window["rank_exit_target_positive_sell_count"] == 1, window
+            assert "## Rank exit 一致性检查" in readme, readme
+            assert "rank_exit sell 数量: 1" in readme, readme
+            assert "conflict 数量: 1" in readme, readme
+            assert "是否存在 target 仍为正但实盘卖出: yes" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

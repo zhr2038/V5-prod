@@ -1095,6 +1095,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     covered_trade_event_ids = set()
     trade_read_errors = 0
     latest_symbol_context = {}
+    audit_by_run = {}
 
     profit_state = state_map("profit_taking_state.json")
     highest_state = state_map("highest_px_state.json")
@@ -1115,6 +1116,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         audit = load_json(audit_path)
         if not isinstance(audit, dict):
             continue
+        audit_by_run[run_id] = audit
         audit_text = safe_json(audit)
         if "btc_leadership_probe" in audit_text:
             btc_seen_in_decision_audit = True
@@ -2675,6 +2677,218 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "diagnosis": diagnosis,
         })
 
+    def is_rank_exit_reason(value):
+        return flatten_value(value).startswith("rank_exit")
+
+    def first_rank_exit_reason(*values):
+        for value in values:
+            text = flatten_value(value)
+            if text.startswith("rank_exit"):
+                return text
+        return ""
+
+    def audit_notes_for_rank(audit):
+        notes = audit.get("notes") if isinstance(audit, dict) else []
+        if not isinstance(notes, list):
+            notes = [notes] if notes else []
+        return [flatten_value(note) for note in notes]
+
+    def note_for_symbol(notes, symbol, marker):
+        for note in notes:
+            if marker in note and symbol in note:
+                return note
+        return ""
+
+    def rank_from_note(note):
+        if not note:
+            return None
+        match = re.search(r"(?:rank=|rank\s+)(\d+)", note)
+        if match:
+            return as_int(match.group(1))
+        return None
+
+    def target_w_from_audit(audit, symbol):
+        explain_rows = audit.get("target_execution_explain") if isinstance(audit.get("target_execution_explain"), list) else []
+        for item in explain_rows:
+            if isinstance(item, dict) and flatten_value(item.get("symbol")) == symbol:
+                value = first_value(item, ("target_w", "effective_target_w", "target_weight"), not_obs)
+                if as_float(value) is not None:
+                    return as_float(value)
+        targets = audit.get("targets_post_risk") if isinstance(audit.get("targets_post_risk"), dict) else {}
+        value = targets.get(symbol)
+        if isinstance(value, dict):
+            value = first_value(value, ("target_w", "weight", "w"), not_obs)
+        return as_float(value)
+
+    def rank_from_audit(audit, symbol, note):
+        note_rank = rank_from_note(note)
+        if note_rank:
+            return note_rank
+        explain_rows = audit.get("target_execution_explain") if isinstance(audit.get("target_execution_explain"), list) else []
+        for item in explain_rows:
+            if isinstance(item, dict) and flatten_value(item.get("symbol")) == symbol:
+                rank = as_int(first_value(item, ("selected_rank", "rank"), not_obs))
+                if rank:
+                    return rank
+        return None
+
+    def has_rank_exit_signal(audit, symbol, exit_reason):
+        signals = audit.get("exit_signals") if isinstance(audit.get("exit_signals"), list) else []
+        for item in signals:
+            if not isinstance(item, dict):
+                continue
+            if flatten_value(item.get("symbol")) != symbol:
+                continue
+            reason = first_rank_exit_reason(item.get("reason"), item.get("exit_reason"), item.get("source_reason"))
+            if reason and (reason == exit_reason or reason.startswith("rank_exit")):
+                return True
+        return False
+
+    def has_rank_exit_router_close_create(audit, symbol, exit_reason):
+        decisions = audit.get("router_decisions") if isinstance(audit.get("router_decisions"), list) else []
+        for item in decisions:
+            if not isinstance(item, dict):
+                continue
+            if flatten_value(item.get("symbol")) != symbol:
+                continue
+            action = flatten_value(item.get("action")).lower()
+            side = flatten_value(item.get("side")).lower()
+            intent = normalize_trade_intent(item)
+            reason = first_rank_exit_reason(item.get("reason"), item.get("source_reason"), item.get("exit_reason"))
+            if action == "create" and (side == "sell" or intent == "CLOSE_LONG") and reason:
+                if reason == exit_reason or reason.startswith("rank_exit"):
+                    return True
+        return False
+
+    def rank_exit_events_from_trades():
+        rows = []
+        seen = set()
+
+        def add(row):
+            key = (row.get("ts_utc"), row.get("run_id"), row.get("symbol"), row.get("exit_reason"))
+            if key in seen:
+                return
+            seen.add(key)
+            rows.append(row)
+
+        for event in raw_trade_events:
+            intent = event.get("intent")
+            side = flatten_value(event.get("side")).lower()
+            raw_item = event.get("raw_item") if isinstance(event.get("raw_item"), dict) else {}
+            router = event.get("router_info") if isinstance(event.get("router_info"), dict) else {}
+            reason = first_rank_exit_reason(
+                event.get("exit_reason"),
+                raw_item.get("exit_reason"),
+                raw_item.get("reason"),
+                raw_item.get("source_reason"),
+                router.get("reason"),
+                router.get("source_reason"),
+            )
+            if reason and (intent == "CLOSE_LONG" or side == "sell"):
+                add({
+                    "ts_utc": event.get("timestamp", not_obs),
+                    "run_id": event.get("run_id", not_obs),
+                    "symbol": event.get("symbol", not_obs),
+                    "exit_reason": reason,
+                })
+        for row in trade_rows:
+            reason = first_rank_exit_reason(row.get("exit_reason"), row.get("raw_json"))
+            if not reason:
+                continue
+            side = flatten_value(row.get("side")).lower()
+            if "sell" not in side and row.get("roundtrip_status") != "closed":
+                continue
+            add({
+                "ts_utc": first_observed(row.get("exit_ts"), row.get("timestamp"), row.get("entry_ts")),
+                "run_id": row.get("run_id", not_obs),
+                "symbol": row.get("symbol", not_obs),
+                "exit_reason": reason,
+            })
+        return rows
+
+    def rank_exit_log_target_positive_symbols():
+        symbols = set()
+        for log_path in sorted((OUT / "raw" / "logs").glob("*")):
+            try:
+                with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        if "rank_exit_target_still_positive" not in line:
+                            continue
+                        match = re.search(r"([A-Z0-9]+/[A-Z0-9]+)", line)
+                        if match:
+                            symbols.add(match.group(1))
+            except Exception as exc:
+                collection_errors.append({"source": str(log_path), "error": f"rank_exit_log_scan: {exc!r}"})
+        return symbols
+
+    def build_rank_exit_consistency_rows():
+        rows = []
+        log_target_positive_symbols = rank_exit_log_target_positive_symbols()
+        close_only_weight_eps = config_number("close_only_weight_eps")
+        if close_only_weight_eps is None:
+            close_only_weight_eps = 0.001
+        for event in rank_exit_events_from_trades():
+            run_id = event.get("run_id", not_obs)
+            symbol = event.get("symbol", not_obs)
+            exit_reason = event.get("exit_reason", not_obs)
+            audit = audit_by_run.get(run_id, {})
+            notes = audit_notes_for_rank(audit)
+            target_positive_note = note_for_symbol(notes, symbol, "rank_exit_target_still_positive")
+            has_target_still_positive_note = bool(target_positive_note or symbol in log_target_positive_symbols)
+            target_w = target_w_from_audit(audit, symbol)
+            target_positive = bool(target_w is not None and target_w > close_only_weight_eps)
+            has_exit_signal = has_rank_exit_signal(audit, symbol, exit_reason)
+            has_router_close_create = has_rank_exit_router_close_create(audit, symbol, exit_reason)
+            conflict_suspected = bool(
+                is_rank_exit_reason(exit_reason)
+                and (has_target_still_positive_note or target_positive)
+                and (not has_exit_signal or not has_router_close_create)
+            )
+            missing_bits = []
+            if not has_exit_signal:
+                missing_bits.append("missing_exit_signal")
+            if not has_router_close_create:
+                missing_bits.append("missing_router_close_create")
+            if conflict_suspected:
+                diagnosis = "high_issue_rank_exit_target_positive_execution_conflict:" + ",".join(missing_bits)
+                add_issue(
+                    "high",
+                    "rank_exit_target_positive_execution_conflict",
+                    "rank_exit sell was observed while target remained positive or target-positive note was present, without complete exit_signal/router close-create evidence.",
+                    {
+                        "run_id": run_id,
+                        "symbol": symbol,
+                        "exit_reason": exit_reason,
+                        "target_w": fmt_num(target_w, 8),
+                        "target_positive": target_positive,
+                        "has_target_still_positive_note": has_target_still_positive_note,
+                        "has_exit_signal": has_exit_signal,
+                        "has_router_close_create": has_router_close_create,
+                    },
+                )
+            elif is_rank_exit_reason(exit_reason):
+                diagnosis = "ok"
+            else:
+                diagnosis = not_obs
+            rows.append({
+                "ts_utc": event.get("ts_utc", not_obs),
+                "run_id": run_id,
+                "symbol": symbol,
+                "exit_reason": exit_reason,
+                "target_w": fmt_num(target_w, 8),
+                "rank": fmt_num(rank_from_audit(audit, symbol, target_positive_note), 0),
+                "close_only_weight_eps": fmt_num(close_only_weight_eps, 8),
+                "has_exit_signal": str(has_exit_signal).lower(),
+                "has_router_close_create": str(has_router_close_create).lower(),
+                "has_target_still_positive_note": str(has_target_still_positive_note).lower(),
+                "target_positive": str(target_positive).lower(),
+                "conflict_suspected": str(conflict_suspected).lower(),
+                "diagnosis": diagnosis,
+            })
+        return rows
+
+    rank_exit_consistency_rows = build_rank_exit_consistency_rows()
+
     uncovered_trade_events = sorted({event["event_id"] for event in raw_trade_events} - covered_trade_event_ids)
     roundtrip_warning = bool(uncovered_trade_events)
     if roundtrip_warning:
@@ -2771,6 +2985,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         ["config_key", "defined_in_schema", "present_in_live_prod", "present_in_effective_config", "consumed_in_runtime_code", "consumer_files", "diagnosis"],
     )
     write_csv(
+        "summaries/rank_exit_consistency.csv",
+        rank_exit_consistency_rows,
+        ["ts_utc", "run_id", "symbol", "exit_reason", "target_w", "rank", "close_only_weight_eps", "has_exit_signal", "has_router_close_create", "has_target_still_positive_note", "target_positive", "conflict_suspected", "diagnosis"],
+    )
+    write_csv(
         "summaries/factor_contribution_audit.csv",
         factor_contribution_rows,
         ["ts_utc", "run_id", "symbol", "final_score", "alpha6_score", "raw_factors", "z_factors", "effective_factor_weights", "contribution_f1_mom_5d", "contribution_f2_mom_20d", "contribution_f3_vol_adj_ret", "contribution_f4_volume_expansion", "contribution_f5_rsi_trend_confirm", "dominant_factor", "dominant_factor_contribution_pct", "router_action", "router_reason", "forward_4h_net_bps", "forward_8h_net_bps", "forward_12h_net_bps", "forward_24h_net_bps"],
@@ -2857,6 +3076,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     dust_residual_roundtrip_count = len(dust_residual_roundtrip_rows)
     effective_open_position_count = len(open_position_rows)
     negative_expectancy_mismatch_count = sum(1 for row in negative_consistency_rows if row.get("mismatch_suspected") == "true")
+    rank_exit_conflict_count = sum(1 for row in rank_exit_consistency_rows if row.get("conflict_suspected") == "true")
+    rank_exit_target_positive_sell_count = sum(1 for row in rank_exit_consistency_rows if row.get("target_positive") == "true" or row.get("has_target_still_positive_note") == "true")
     high_score_block_category_counts = dict(sorted(Counter(row.get("high_score_block_category") or not_obs for row in high_score_blocked_rows).items()))
     high_score_recent_24h_rows = [
         row for row in high_score_blocked_rows
@@ -2897,6 +3118,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
         "config_runtime_not_consumed_count": config_runtime_not_consumed_count,
+        "rank_exit_sell_count": len(rank_exit_consistency_rows),
+        "rank_exit_conflict_count": rank_exit_conflict_count,
+        "rank_exit_target_positive_sell_count": rank_exit_target_positive_sell_count,
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_recent_24h_target_count": len(high_score_recent_24h_rows),
         "high_score_block_category_counts": high_score_block_category_counts,
@@ -3139,6 +3363,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- audited config keys: {len(config_runtime_consumption_rows)}",
         f"- live config keys not consumed in runtime: {config_runtime_not_consumed_count}",
         f"- low issue present: {'yes' if config_runtime_not_consumed_count else 'no'}",
+        "",
+        "## Rank exit 一致性检查",
+        f"- rank_exit sell 数量: {len(rank_exit_consistency_rows)}",
+        f"- conflict 数量: {rank_exit_conflict_count}",
+        f"- 是否存在 target 仍为正但实盘卖出: {'yes' if rank_exit_target_positive_sell_count else 'no'}",
         "",
         "## Alpha6 factor contribution audit",
         f"- factor_contribution_audit_rows: {len(factor_contribution_rows)}",
