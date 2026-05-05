@@ -831,6 +831,20 @@ class LiveExecutionEngine:
             decision="allow_buy",
         )
 
+    @staticmethod
+    def _check_rank_exit_router_validation(o: Order) -> None:
+        side = str(getattr(o, "side", "") or "").lower()
+        intent = str(getattr(o, "intent", "") or "").upper()
+        meta = dict(getattr(o, "meta", None) or {})
+        reason = str(meta.get("reason") or "")
+        if side != "sell" or intent != "CLOSE_LONG" or not reason.startswith("rank_exit_"):
+            return
+        if bool(meta.get("rank_exit_validated_by_router")):
+            return
+        if bool(meta.get("external_rank_exit_action_consumed")) and str(meta.get("validation_result") or "") == "accepted":
+            return
+        raise SafetyReject(f"rank_exit_missing_router_validation: {o.symbol} reason={reason}")
+
     def _build_place_payload(self, o: Order, *, inst_id: str, cl_ord_id: str) -> Dict[str, Any]:
         # Minimal market order payload.
         side = str(o.side)
@@ -1277,6 +1291,7 @@ class LiveExecutionEngine:
                     return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         try:
+            self._check_rank_exit_router_validation(o)
             # Best-effort top-of-book at submit time for entry guard + slippage attribution.
             tob = _public_mid_at_submit(inst_id=inst_id, timeout_sec=2.0)
             self._check_open_long_entry_guard(o, inst_id=inst_id, tob=tob)
@@ -1307,6 +1322,9 @@ class LiveExecutionEngine:
             if error_text.startswith("open_long_entry_guard_quote_unavailable"):
                 reject_code = "open_long_entry_guard_quote_unavailable"
                 reject_event = "ENTRY_GUARD_BLOCK"
+            elif error_text.startswith("rank_exit_missing_router_validation"):
+                reject_code = "rank_exit_missing_router_validation"
+                reject_event = "RANK_EXIT_GUARD_BLOCK"
             self.order_store.upsert_new(
                 cl_ord_id=clid,
                 run_id=self.run_id,

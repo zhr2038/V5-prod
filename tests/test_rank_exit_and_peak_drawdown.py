@@ -132,6 +132,150 @@ def test_rank_exit_does_not_close_when_target_still_positive_even_in_strict_mode
     assert len(out.orders) == 0
     notes = [str(n) for n in audit.notes]
     assert any("rank_exit_target_still_positive: OKB/USDT" in n for n in notes)
+    assert any(
+        d.get("symbol") == "OKB/USDT"
+        and d.get("action") == "skip"
+        and d.get("reason") == "rank_exit_target_still_positive"
+        and d.get("target_w") == pytest.approx(0.50)
+        for d in audit.router_decisions
+    )
+
+
+def test_rank_exit_target_positive_guard_blocks_bnb_even_when_event_rank_is_good(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT", "BNB/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.rank_exit_require_zero_target = True
+    cfg.execution.min_hold_minutes_before_rank_exit = 0
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BNB/USDT": 0.15},
+        selected=["BNB/USDT"],
+        volatilities={},
+        notes="",
+    )
+    pipe.profit_taking.positions["BNB/USDT"] = PositionProfitState(
+        symbol="BNB/USDT",
+        entry_price=628.4,
+        entry_time=datetime.now(timezone.utc),
+        highest_price=628.4,
+        profit_high=0.0,
+        current_stop=600.0,
+        rank_exit_streak=3,
+        last_rank=4,
+    )
+
+    px = 628.4
+    target_w = 0.15
+    cash = (px / target_w) - px
+    audit = DecisionAudit(run_id="bnb-rank-exit-target-positive")
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0), "BNB/USDT": _series("BNB/USDT", px)},
+        positions=[
+            Position(
+                symbol="BNB/USDT",
+                qty=1.0,
+                avg_px=px,
+                entry_ts="2026-05-04T07:00:00Z",
+                highest_px=px,
+                last_update_ts="2026-05-04T07:00:00Z",
+                last_mark_px=px,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=cash,
+        equity_peak_usdt=cash + px,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(
+            raw_factors={},
+            z_factors={},
+            scores={"BTC/USDT": 1.0, "BNB/USDT": 0.9, "ETH/USDT": 0.8},
+        ),
+        precomputed_regime=_regime(),
+    )
+
+    assert not any(
+        order.side == "sell"
+        and order.intent == "CLOSE_LONG"
+        and str((order.meta or {}).get("reason", "")).startswith("rank_exit_")
+        for order in out.orders
+    )
+    decision = next(
+        d for d in audit.router_decisions
+        if d.get("symbol") == "BNB/USDT" and d.get("reason") == "rank_exit_target_still_positive"
+    )
+    assert decision["action"] == "skip"
+    assert decision["target_w"] == pytest.approx(0.15)
+    assert decision["rank"] == 2
+
+
+def test_rank_exit_zero_target_allows_close_when_rank_threshold_and_confirm_met(tmp_path):
+    cfg = AppConfig(symbols=["BTC/USDT", "BNB/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.rank_exit_max_rank = 3
+    cfg.execution.rank_exit_confirm_rounds = 1
+    cfg.execution.rank_exit_require_zero_target = True
+    cfg.execution.min_hold_minutes_before_rank_exit = 0
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={},
+        selected=[],
+        volatilities={},
+        notes="",
+    )
+    pipe.profit_taking.positions["BNB/USDT"] = PositionProfitState(
+        symbol="BNB/USDT",
+        entry_price=628.4,
+        entry_time=datetime.now(timezone.utc),
+        highest_price=628.4,
+        profit_high=0.0,
+        current_stop=600.0,
+        rank_exit_streak=0,
+        last_rank=4,
+    )
+
+    px = 622.0
+    audit = DecisionAudit(run_id="bnb-rank-exit-zero-target")
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 50000.0), "BNB/USDT": _series("BNB/USDT", px)},
+        positions=[
+            Position(
+                symbol="BNB/USDT",
+                qty=1.0,
+                avg_px=628.4,
+                entry_ts="2026-05-04T07:00:00Z",
+                highest_px=628.4,
+                last_update_ts="2026-05-04T07:00:00Z",
+                last_mark_px=px,
+                unrealized_pnl_pct=-0.01,
+            )
+        ],
+        cash_usdt=100.0,
+        equity_peak_usdt=800.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(
+            raw_factors={},
+            z_factors={},
+            scores={"BTC/USDT": 1.0, "ETH/USDT": 0.9, "SOL/USDT": 0.8, "BNB/USDT": 0.7},
+        ),
+        precomputed_regime=_regime(),
+    )
+
+    order = next(
+        order for order in out.orders
+        if order.symbol == "BNB/USDT"
+        and order.side == "sell"
+        and order.intent == "CLOSE_LONG"
+    )
+    assert str(order.meta["reason"]).startswith("rank_exit_rank_4_exceeds_3_streak_1")
+    assert order.meta["rank_exit_validated_by_router"] is True
+    assert any(
+        d.get("symbol") == "BNB/USDT"
+        and d.get("action") == "create"
+        and d.get("source_reason") == order.meta["reason"]
+        for d in audit.router_decisions
+    )
 
 
 def test_rank_exit_buffer_positions_delays_streak_start(tmp_path):

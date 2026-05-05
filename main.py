@@ -374,6 +374,154 @@ def _merge_managed_symbols(base_symbols: list[str], held_symbols: list[str]) -> 
     return list(dict.fromkeys(base + held))
 
 
+def _audit_rank_for_symbol(audit, symbol: str) -> int | None:
+    for row in getattr(audit, "top_scores", []) or []:
+        if str((row or {}).get("symbol") or "") != str(symbol):
+            continue
+        try:
+            return int((row or {}).get("rank"))
+        except Exception:
+            return None
+    return None
+
+
+def _rank_exit_trigger_rank(cfg) -> int:
+    execution = getattr(cfg, "execution", None)
+    max_rank = int(getattr(execution, "rank_exit_max_rank", 3) or 3)
+    buffer_positions = int(getattr(execution, "rank_exit_buffer_positions", 0) or 0)
+    return max_rank + max(0, buffer_positions)
+
+
+def _external_rank_exit_decision(
+    *,
+    action: dict[str, Any],
+    symbol: str,
+    validation_result: str,
+    decision_action: str,
+    reason: str,
+    target_w: float | None,
+    current_rank: int | None,
+    close_only_weight_eps: float,
+) -> dict[str, Any]:
+    generated_at_ms = action.get("generated_at_ms")
+    return {
+        "symbol": symbol,
+        "action": decision_action,
+        "reason": reason,
+        "source_reason": str(action.get("reason") or ""),
+        "target_w": target_w,
+        "rank": current_rank,
+        "close_only_weight_eps": close_only_weight_eps,
+        "source": "event_action_bridge",
+        "external_rank_exit_action_consumed": True,
+        "source_file": action.get("source_file"),
+        "generated_ts": generated_at_ms,
+        "generated_at_ms": generated_at_ms,
+        "validation_result": validation_result,
+    }
+
+
+def _validate_external_rank_exit_action(
+    *,
+    action: dict[str, Any],
+    cfg,
+    audit,
+    targets_post_risk: dict[str, float] | None,
+    window_start_ts: int | None,
+) -> tuple[bool, dict[str, Any]]:
+    symbol = str(action.get("symbol") or "").strip()
+    execution = getattr(cfg, "execution", None)
+    rebalance = getattr(cfg, "rebalance", None)
+    target_context = dict(targets_post_risk or {}) if targets_post_risk is not None else None
+    target_w = float(target_context.get(symbol, 0.0) or 0.0) if target_context is not None else None
+    close_eps = float(getattr(rebalance, "close_only_weight_eps", 0.001) or 0.001)
+    current_rank = _audit_rank_for_symbol(audit, symbol)
+
+    if bool(getattr(execution, "rank_exit_require_zero_target", True)):
+        if target_w is None:
+            return False, _external_rank_exit_decision(
+                action=action,
+                symbol=symbol,
+                validation_result="target_context_unavailable",
+                decision_action="skip",
+                reason="external_rank_exit_unverified_target",
+                target_w=None,
+                current_rank=current_rank,
+                close_only_weight_eps=close_eps,
+            )
+        if target_w > close_eps:
+            return False, _external_rank_exit_decision(
+                action=action,
+                symbol=symbol,
+                validation_result="blocked_target_still_positive",
+                decision_action="skip",
+                reason="rank_exit_target_still_positive",
+                target_w=target_w,
+                current_rank=current_rank,
+                close_only_weight_eps=close_eps,
+            )
+
+    generated_at_ms = int(action.get("generated_at_ms") or 0)
+    if generated_at_ms <= 0:
+        return False, _external_rank_exit_decision(
+            action=action,
+            symbol=symbol,
+            validation_result="generated_ts_unavailable",
+            decision_action="skip",
+            reason="external_rank_exit_unverified_generated_ts",
+            target_w=target_w,
+            current_rank=current_rank,
+            close_only_weight_eps=close_eps,
+        )
+    if window_start_ts is not None and generated_at_ms < int(window_start_ts) * 1000:
+        return False, _external_rank_exit_decision(
+            action=action,
+            symbol=symbol,
+            validation_result="stale_before_run_window",
+            decision_action="skip",
+            reason="stale_rank_exit_action",
+            target_w=target_w,
+            current_rank=current_rank,
+            close_only_weight_eps=close_eps,
+        )
+
+    if current_rank is None:
+        return False, _external_rank_exit_decision(
+            action=action,
+            symbol=symbol,
+            validation_result="current_rank_unavailable",
+            decision_action="skip",
+            reason="external_rank_exit_unverified_rank",
+            target_w=target_w,
+            current_rank=None,
+            close_only_weight_eps=close_eps,
+        )
+
+    trigger_rank = _rank_exit_trigger_rank(cfg)
+    if current_rank <= trigger_rank:
+        return False, _external_rank_exit_decision(
+            action=action,
+            symbol=symbol,
+            validation_result="current_rank_not_rank_exit",
+            decision_action="skip",
+            reason="external_rank_exit_rank_not_exceeded",
+            target_w=target_w,
+            current_rank=current_rank,
+            close_only_weight_eps=close_eps,
+        )
+
+    return True, _external_rank_exit_decision(
+        action=action,
+        symbol=symbol,
+        validation_result="accepted",
+        decision_action="create",
+        reason="exit_signal_priority",
+        target_w=target_w,
+        current_rank=current_rank,
+        close_only_weight_eps=close_eps,
+    )
+
+
 def _merge_event_close_override_orders(
     *,
     orders: list[Order],
@@ -381,6 +529,9 @@ def _merge_event_close_override_orders(
     prices: dict[str, float],
     run_id: str,
     order_store_path: str | os.PathLike[str] | None = None,
+    cfg=None,
+    targets_post_risk: dict[str, float] | None = None,
+    window_start_ts: int | None = None,
     audit=None,
 ) -> list[Order]:
     override_actions = consume_event_actions_for_run(run_id=run_id, order_store_path=order_store_path)
@@ -401,10 +552,39 @@ def _merge_event_close_override_orders(
 
     appended: list[Order] = []
     skipped: list[str] = []
+    audit_decisions: list[dict[str, Any]] = []
     for action in override_actions:
         symbol = str(action.get("symbol") or "").strip()
         if not symbol or symbol in existing_close_symbols:
             continue
+        reason = str(action.get("reason") or "event_close")
+        validation_decision = None
+        if reason.startswith("rank_exit_"):
+            if cfg is None or audit is None:
+                validation_decision = _external_rank_exit_decision(
+                    action=action,
+                    symbol=symbol,
+                    validation_result="audit_or_config_unavailable",
+                    decision_action="skip",
+                    reason="external_rank_exit_unverified_context",
+                    target_w=None,
+                    current_rank=None,
+                    close_only_weight_eps=0.001,
+                )
+                audit_decisions.append(validation_decision)
+                skipped.append(symbol)
+                continue
+            accepted, validation_decision = _validate_external_rank_exit_action(
+                action=action,
+                cfg=cfg,
+                audit=audit,
+                targets_post_risk=targets_post_risk,
+                window_start_ts=window_start_ts,
+            )
+            audit_decisions.append(validation_decision)
+            if not accepted:
+                skipped.append(symbol)
+                continue
         pos = held_map.get(symbol)
         qty = float(getattr(pos, "qty", 0.0) or 0.0) if pos is not None else 0.0
         px = float(prices.get(symbol, 0.0) or 0.0)
@@ -421,18 +601,50 @@ def _merge_event_close_override_orders(
                 signal_price=float(px),
                 meta={
                     "source": "event_driven_override",
-                    "reason": str(action.get("reason") or "event_close"),
+                    "reason": reason,
                     "event_type": str(action.get("event_type") or ""),
                     "priority": 0,
+                    "external_rank_exit_action_consumed": bool(reason.startswith("rank_exit_")),
+                    "source_file": action.get("source_file"),
+                    "generated_ts": action.get("generated_at_ms"),
+                    "validation_result": (validation_decision or {}).get("validation_result"),
+                    "rank_exit_validated_by_router": bool(
+                        reason.startswith("rank_exit_")
+                        and (validation_decision or {}).get("validation_result") == "accepted"
+                    ),
                 },
             )
         )
+        if validation_decision and validation_decision.get("validation_result") == "accepted":
+            try:
+                audit.exit_signals = list(audit.exit_signals or []) + [
+                    {
+                        "symbol": symbol,
+                        "side": "sell",
+                        "intent": "CLOSE_LONG",
+                        "reason": reason,
+                        "external_rank_exit_action_consumed": True,
+                        "source_file": action.get("source_file"),
+                        "generated_ts": action.get("generated_at_ms"),
+                        "validation_result": "accepted",
+                    }
+                ]
+            except Exception:
+                pass
         existing_close_symbols.add(symbol)
 
     if audit is not None:
+        if audit_decisions:
+            audit.router_decisions = list(audit.router_decisions or []) + audit_decisions
         audit.add_note(
             f"event close override: loaded={len(override_actions)} appended={len(appended)} skipped={skipped}"
         )
+        for decision in audit_decisions:
+            if decision.get("action") == "skip":
+                audit.add_note(
+                    "external rank_exit skipped: "
+                    + json.dumps(decision, ensure_ascii=False, sort_keys=True)
+                )
 
     return list(orders or []) + appended
 
@@ -1525,6 +1737,9 @@ def main() -> None:
         prices=prices,
         run_id=run_id,
         order_store_path=str(getattr(getattr(cfg, "execution", None), "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite"),
+        cfg=cfg,
+        targets_post_risk=dict(getattr(out.portfolio, "target_weights", {}) or {}),
+        window_start_ts=window_start_ts,
         audit=audit,
     )
     if live_whitelist:
@@ -1574,6 +1789,11 @@ def main() -> None:
                 pass
     except Exception as e:
         log.warning(f"order arbitration skipped: {e}")
+
+    try:
+        audit.save(str(runtime_run_dir))
+    except Exception as e:
+        log.warning(f"decision audit refresh before execution failed: {e}")
 
     from src.reporting.trade_log import TradeLogWriter
 

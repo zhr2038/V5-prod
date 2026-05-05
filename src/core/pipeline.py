@@ -4403,6 +4403,7 @@ class V5Pipeline:
         # - 排名来源要与选币/定仓尽量同源（fused 优先）
         # - 若本轮该币目标仓位仍>0，则不应触发 rank_exit，避免“同轮又买又卖”
         ranking_exit_orders = []
+        rank_exit_guard_decisions = []
         rank_scores = dict(getattr(alpha, 'scores', {}) or {})
         rank_source = 'alpha'
         symbol_ranks: Dict[str, int] = {}
@@ -4445,6 +4446,17 @@ class V5Pipeline:
                 current_rank = symbol_ranks.get(p.symbol, 999)
                 tw = float(target.get(p.symbol, 0.0) or 0.0)
                 if rank_exit_require_zero_target and tw > target_hold_eps:
+                    decision = {
+                        "symbol": p.symbol,
+                        "action": "skip",
+                        "reason": "rank_exit_target_still_positive",
+                        "target_w": tw,
+                        "rank": current_rank,
+                        "close_only_weight_eps": target_hold_eps,
+                        "source": rank_source,
+                        "rank_exit_require_zero_target": True,
+                    }
+                    rank_exit_guard_decisions.append(decision)
                     if audit:
                         audit.add_note(
                             f"rank_exit_target_still_positive: {p.symbol} target_w={tw:.4f} > eps={target_hold_eps:.4f}, "
@@ -4508,9 +4520,11 @@ class V5Pipeline:
                                 "current_rank": current_rank,
                                 "rank_source": rank_source,
                                 "target_w": tw,
+                                "close_only_weight_eps": target_hold_eps,
                                 "confirm_rounds": rank_exit_confirm_rounds,
                                 "max_rank": rank_exit_max_rank,
                                 "buffer_positions": rank_exit_buffer_positions,
+                                "rank_exit_validated_by_router": True,
                             },
                         )
                     )
@@ -4751,6 +4765,7 @@ class V5Pipeline:
         rebalance_orders: List[Order] = []
         router_decisions = (
             list(exit_router_decisions)
+            + list(rank_exit_guard_decisions)
             + list(position_state_cleanup_router_decisions)
             + list(btc_leadership_probe_router_decisions)
             + list(protect_profit_lock_router_decisions)

@@ -42,13 +42,17 @@ def _normalize_close_action(action: Dict[str, Any]) -> Dict[str, Any] | None:
         priority = 99 if raw_priority is None else int(raw_priority)
     except Exception:
         priority = 99
-    return {
+    normalized = {
         "symbol": symbol,
         "action": "close",
         "reason": str(action.get("reason") or "event_close"),
         "priority": priority,
         "event_type": str(action.get("event_type") or ""),
     }
+    for key in ("current_rank", "rank", "rank_source", "source", "price"):
+        if key in action:
+            normalized[key] = action.get(key)
+    return normalized
 
 
 def persist_event_actions(
@@ -126,11 +130,14 @@ def consume_event_actions_for_run(
                 pass
             return []
 
-    actions = [
-        item
-        for item in (_normalize_close_action(action) for action in (payload.get("actions") or []))
-        if item is not None
-    ]
+    actions = []
+    for item in (_normalize_close_action(action) for action in (payload.get("actions") or [])):
+        if item is None:
+            continue
+        item["generated_at_ms"] = generated_at_ms
+        item["source_file"] = str(action_path)
+        item["target_run_id"] = target_run_id
+        actions.append(item)
     try:
         action_path.unlink(missing_ok=True)
     except Exception:
