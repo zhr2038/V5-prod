@@ -496,6 +496,82 @@ def fixture_rank_exit_consistency_root(root):
     return close_run_id
 
 
+def fixture_protect_sideways_normal_entry_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    open_run_dt = now - dt.timedelta(hours=6)
+    close_run_dt = now
+    open_run_id = open_run_dt.strftime("%Y%m%d_%H")
+    close_run_id = close_run_dt.strftime("%Y%m%d_%H")
+    open_ts = int(open_run_dt.timestamp())
+    close_ts = int(close_run_dt.timestamp())
+
+    write_text(root / "configs/live_prod.yaml", "protect_entry_alpha6_min_score: 0.40\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    open_run_dir = root / "reports/runs/prod" / open_run_id
+    write_json(open_run_dir / "decision_audit.json", {
+        "now_ts": open_ts + 15,
+        "window_end_ts": open_ts,
+        "regime": "Sideways",
+        "current_level": "PROTECT",
+        "router_decisions": [
+            {"symbol": "BNB/USDT", "action": "create", "intent": "OPEN_LONG", "side": "buy", "reason": "ok"}
+        ],
+        "target_execution_explain": [
+            {
+                "symbol": "BNB/USDT",
+                "target_w": 0.15,
+                "router_action": "create",
+                "router_reason": "ok",
+                "final_score": 0.74,
+                "alpha6_score": 0.572,
+                "f4_volume_expansion": 1.925,
+                "f5_rsi_trend_confirm": 0.302,
+                "trend_score": 0.81,
+                "current_level": "PROTECT",
+                "regime": "Sideways",
+            }
+        ],
+    })
+    open_rows = ["ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,entry_reason\n"]
+    for idx in range(5):
+        open_rows.append(
+            f"{iso(open_ts + 20 + idx)},{open_run_id},BNB/USDT,OPEN_LONG,buy,1.0,628.4,628.4,0.6284,ok\n"
+        )
+    write_text(open_run_dir / "trades.csv", "".join(open_rows))
+    write_text(open_run_dir / "equity.jsonl", "{}\n")
+    write_json(open_run_dir / "summary.json", {"run_id": open_run_id})
+
+    close_run_dir = root / "reports/runs/prod" / close_run_id
+    write_json(close_run_dir / "decision_audit.json", {
+        "now_ts": close_ts + 15,
+        "window_end_ts": close_ts,
+        "regime": "Sideways",
+        "current_level": "PROTECT",
+        "router_decisions": [
+            {"symbol": "BNB/USDT", "action": "create", "intent": "CLOSE_LONG", "side": "sell", "reason": "stop_loss", "source_reason": "stop_loss"}
+        ],
+    })
+    close_rows = ["ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,exit_reason\n"]
+    for idx in range(5):
+        close_rows.append(
+            f"{iso(close_ts + 20 + idx)},{close_run_id},BNB/USDT,CLOSE_LONG,sell,1.0,621.5,621.5,0.6215,stop_loss\n"
+        )
+    write_text(close_run_dir / "trades.csv", "".join(close_rows))
+    write_text(close_run_dir / "equity.jsonl", "{}\n")
+    write_json(close_run_dir / "summary.json", {"run_id": close_run_id})
+    return close_run_id
+
+
 def fixture_high_score_blocked_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -1407,6 +1483,47 @@ def main():
             assert "rank_exit sell 数量: 1" in readme, readme
             assert "conflict 数量: 1" in readme, readme
             assert "是否存在 target 仍为正但实盘卖出: yes" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-protect-sideways-normal-entry-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_protect_sideways_normal_entry_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/protect_sideways_normal_entry_outcomes.csv")).read().decode().splitlines()))
+                by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/protect_sideways_normal_entry_outcomes_by_symbol.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 5, rows
+            row = rows[0]
+            assert row["symbol"] == "BNB/USDT", row
+            assert row["entry_px"] == "628.4", row
+            assert row["exit_reason"] == "stop_loss", row
+            assert row["alpha6_score_at_entry"] == "0.572", row
+            assert row["f4_at_entry"] == "1.925", row
+            assert row["f5_at_entry"] == "0.302", row
+            assert row["trend_score_at_entry"] == "0.81", row
+            assert row["result_bucket"] == "loss_le_-100bps", row
+            assert len(by_symbol) == 1, by_symbol
+            assert by_symbol[0]["symbol"] == "BNB/USDT", by_symbol
+            assert by_symbol[0]["count"] == "5", by_symbol
+            assert float(by_symbol[0]["avg_net_bps"]) < -100.0, by_symbol
+            assert by_symbol[0]["win_rate"] == "0.0", by_symbol
+            assert window["protect_sideways_normal_entry_count"] == 5, window
+            assert window["protect_sideways_normal_entry_medium_issue"] is True, window
+            medium_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "medium" and item.get("code") == "protect_sideways_normal_entry_negative"
+            ]
+            assert len(medium_issues) == 1, issues
+            assert "## PROTECT Sideways 普通开仓表现" in readme, readme
+            assert "sample_count: 5" in readme, readme
+            assert "BNB/USDT: count=5" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

@@ -1095,6 +1095,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     covered_trade_event_ids = set()
     trade_read_errors = 0
     latest_symbol_context = {}
+    entry_context_by_run_symbol = {}
     audit_by_run = {}
 
     profit_state = state_map("profit_taking_state.json")
@@ -1128,6 +1129,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         counts = audit.get("counts") if isinstance(audit.get("counts"), dict) else {}
         for field in PROBE_COUNT_FIELDS:
             probe_counts[field] += as_int(counts.get(field))
+        signal_lookup = strategy_signal_lookup_from_audit(audit)
+        alpha6_lookup = signal_lookup.get("Alpha6Factor") or {}
+        trend_lookup = signal_lookup.get("TrendFollowing") or {}
         factor_contribution_rows.extend(
             factor_contribution_base_rows(
                 audit,
@@ -1155,6 +1159,34 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         for item in audit.get("target_execution_explain") or []:
             if not isinstance(item, dict):
                 continue
+            symbol = flatten_value(item.get("symbol")) or not_obs
+            if symbol != not_obs:
+                alpha6_signal = alpha6_lookup.get(symbol, {})
+                trend_signal = trend_lookup.get(symbol, {})
+                raw_factors, _ = signal_factor_buckets(alpha6_signal)
+                entry_context_by_run_symbol[(run_id, symbol)] = {
+                    "ts_utc": audit_ts,
+                    "current_level": first_observed(first_value(item, ("current_level", "risk_level"), not_obs), audit_level),
+                    "regime": first_observed(first_value(item, ("regime", "market_regime"), not_obs), audit_regime),
+                    "alpha6_score": first_observed(
+                        item.get("alpha6_score"),
+                        first_value(alpha6_signal, ("alpha6_score", "score", "final_score"), not_obs),
+                    ),
+                    "f4_volume_expansion": first_observed(
+                        item.get("f4_volume_expansion"),
+                        first_value(raw_factors, ("f4_volume_expansion", "f4"), not_obs),
+                        first_value(alpha6_signal, ("f4_volume_expansion",), not_obs),
+                    ),
+                    "f5_rsi_trend_confirm": first_observed(
+                        item.get("f5_rsi_trend_confirm"),
+                        first_value(raw_factors, ("f5_rsi_trend_confirm", "f5"), not_obs),
+                        first_value(alpha6_signal, ("f5_rsi_trend_confirm",), not_obs),
+                    ),
+                    "trend_score": first_observed(
+                        item.get("trend_score"),
+                        first_value(trend_signal, ("trend_score", "score", "final_score"), not_obs),
+                    ),
+                }
             high_score_blocked = str(item.get("high_score_but_not_executed", "")).strip().lower() == "true"
             if item.get("high_score_but_not_executed") is True:
                 high_score_blocked = True
@@ -1163,7 +1195,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             router_action = flatten_value(item.get("router_action")).lower()
             if not high_score_blocked or router_action != "skip":
                 continue
-            symbol = flatten_value(item.get("symbol")) or not_obs
             high_score_blocked_rows.append({
                 "ts_utc": audit_ts,
                 "run_id": run_id,
@@ -1242,6 +1273,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "probe_type": router_trade_probe_type(item, trade_reason),
                     "raw_json": raw_json,
                 })
+                if router_intent == "OPEN_LONG" and symbol != not_obs:
+                    context = entry_context_by_run_symbol.setdefault((run_id, symbol), {})
+                    context.setdefault("ts_utc", audit_ts)
+                    if audit_level != not_obs:
+                        context.setdefault("current_level", audit_level)
+                    if audit_regime != not_obs:
+                        context.setdefault("regime", audit_regime)
+                    for source_key, dest_key in (
+                        ("alpha6_score", "alpha6_score"),
+                        ("f4_volume_expansion", "f4_volume_expansion"),
+                        ("f5_rsi_trend_confirm", "f5_rsi_trend_confirm"),
+                        ("trend_score", "trend_score"),
+                    ):
+                        observed = first_observed(item.get(source_key))
+                        if observed != not_obs:
+                            context.setdefault(dest_key, observed)
 
             if reason.startswith("btc_leadership_probe_") and action == "skip":
                 decision_ts_utc = btc_decision_ts_utc(item, audit, audit_ts)
@@ -2572,6 +2619,113 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
     closed_roundtrip_rows = [row for row in trade_rows if row.get("roundtrip_status") == "closed"]
 
+    def entry_run_id_from_roundtrip_source(source_file):
+        text = flatten_value(source_file).replace("\\", "/")
+        first_part = text.split(";", 1)[0]
+        match = re.search(r"(?:^|/)raw/recent_runs/([^/]+)/trades\.csv$", first_part)
+        if match:
+            return match.group(1)
+        parts = [part for part in first_part.split("/") if part]
+        for idx, part in enumerate(parts):
+            if part == "recent_runs" and idx + 1 < len(parts):
+                return parts[idx + 1]
+        return not_obs
+
+    def is_normal_non_probe_entry(row):
+        entry_reason = flatten_value(row.get("entry_reason")).strip().lower()
+        probe_type = flatten_value(row.get("probe_type")).strip()
+        return (
+            entry_reason in {"ok", "normal"}
+            and row.get("entry_reason") not in PROBE_TYPES
+            and row.get("exit_reason") not in PROBE_EXIT_REASONS
+            and probe_type not in PROBE_TYPES
+            and probe_type != "probe"
+        )
+
+    def result_bucket_for_net_bps(net_bps):
+        value = as_float(net_bps)
+        if value is None:
+            return not_obs
+        if value > 0:
+            return "win"
+        if value <= -100:
+            return "loss_le_-100bps"
+        if value < 0:
+            return "loss"
+        return "flat"
+
+    def protect_sideways_context_for_roundtrip(row):
+        symbol = row.get("symbol", not_obs)
+        entry_run_id = entry_run_id_from_roundtrip_source(row.get("source_file"))
+        return (
+            entry_context_by_run_symbol.get((entry_run_id, symbol))
+            or entry_context_by_run_symbol.get((row.get("run_id"), symbol))
+            or {}
+        )
+
+    protect_sideways_normal_entry_rows = []
+    for row in closed_roundtrip_rows:
+        if not is_normal_non_probe_entry(row):
+            continue
+        context = protect_sideways_context_for_roundtrip(row)
+        current_level = flatten_value(context.get("current_level", not_obs)).upper()
+        regime = flatten_value(context.get("regime", not_obs)).lower()
+        if current_level != "PROTECT" or regime != "sideways":
+            continue
+        protect_sideways_normal_entry_rows.append({
+            "entry_ts": row.get("entry_ts", not_obs),
+            "symbol": row.get("symbol", not_obs),
+            "entry_px": row.get("entry_px", not_obs),
+            "exit_ts": row.get("exit_ts", not_obs),
+            "exit_px": row.get("exit_px", not_obs),
+            "hold_minutes": row.get("hold_minutes", not_obs),
+            "net_bps": row.get("net_bps", not_obs),
+            "alpha6_score_at_entry": first_observed(context.get("alpha6_score")),
+            "f4_at_entry": first_observed(context.get("f4_volume_expansion")),
+            "f5_at_entry": first_observed(context.get("f5_rsi_trend_confirm")),
+            "trend_score_at_entry": first_observed(context.get("trend_score")),
+            "exit_reason": row.get("exit_reason", not_obs),
+            "result_bucket": result_bucket_for_net_bps(row.get("net_bps")),
+        })
+
+    def aggregate_protect_sideways_rows(rows):
+        grouped = defaultdict(list)
+        for row in rows:
+            grouped[row.get("symbol") or not_obs].append(row)
+        out = []
+        for symbol, group_rows in sorted(grouped.items()):
+            net_values = [as_float(row.get("net_bps")) for row in group_rows]
+            net_values = [value for value in net_values if value is not None]
+            hold_values = [as_float(row.get("hold_minutes")) for row in group_rows]
+            hold_values = [value for value in hold_values if value is not None]
+            out.append({
+                "symbol": symbol,
+                "count": len(group_rows),
+                "avg_net_bps": round(sum(net_values) / len(net_values), 6) if net_values else not_obs,
+                "win_rate": round(sum(1 for value in net_values if value > 0) / len(net_values), 6) if net_values else not_obs,
+                "avg_hold_minutes": round(sum(hold_values) / len(hold_values), 6) if hold_values else not_obs,
+            })
+        return out
+
+    protect_sideways_normal_entry_by_symbol = aggregate_protect_sideways_rows(protect_sideways_normal_entry_rows)
+    protect_sideways_net_values = [as_float(row.get("net_bps")) for row in protect_sideways_normal_entry_rows]
+    protect_sideways_net_values = [value for value in protect_sideways_net_values if value is not None]
+    protect_sideways_avg_net_bps = (
+        sum(protect_sideways_net_values) / len(protect_sideways_net_values)
+        if protect_sideways_net_values
+        else None
+    )
+    if len(protect_sideways_normal_entry_rows) >= 5 and protect_sideways_avg_net_bps is not None and protect_sideways_avg_net_bps < -30.0:
+        add_issue(
+            "medium",
+            "protect_sideways_normal_entry_negative",
+            "PROTECT + Sideways normal non-probe entries have negative average realized net bps in the bundle window.",
+            {
+                "sample_count": len(protect_sideways_normal_entry_rows),
+                "avg_net_bps": fmt_num(protect_sideways_avg_net_bps, 6),
+            },
+        )
+
     def roundtrip_entry_notional(row):
         qty = as_float(row.get("qty"))
         entry_px = as_float(row.get("entry_px"))
@@ -2990,6 +3144,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         ["ts_utc", "run_id", "symbol", "exit_reason", "target_w", "rank", "close_only_weight_eps", "has_exit_signal", "has_router_close_create", "has_target_still_positive_note", "target_positive", "conflict_suspected", "diagnosis"],
     )
     write_csv(
+        "summaries/protect_sideways_normal_entry_outcomes.csv",
+        protect_sideways_normal_entry_rows,
+        ["entry_ts", "symbol", "entry_px", "exit_ts", "exit_px", "hold_minutes", "net_bps", "alpha6_score_at_entry", "f4_at_entry", "f5_at_entry", "trend_score_at_entry", "exit_reason", "result_bucket"],
+    )
+    write_csv(
+        "summaries/protect_sideways_normal_entry_outcomes_by_symbol.csv",
+        protect_sideways_normal_entry_by_symbol,
+        ["symbol", "count", "avg_net_bps", "win_rate", "avg_hold_minutes"],
+    )
+    write_csv(
         "summaries/factor_contribution_audit.csv",
         factor_contribution_rows,
         ["ts_utc", "run_id", "symbol", "final_score", "alpha6_score", "raw_factors", "z_factors", "effective_factor_weights", "contribution_f1_mom_5d", "contribution_f2_mom_20d", "contribution_f3_vol_adj_ret", "contribution_f4_volume_expansion", "contribution_f5_rsi_trend_confirm", "dominant_factor", "dominant_factor_contribution_pct", "router_action", "router_reason", "forward_4h_net_bps", "forward_8h_net_bps", "forward_12h_net_bps", "forward_24h_net_bps"],
@@ -3078,6 +3242,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     negative_expectancy_mismatch_count = sum(1 for row in negative_consistency_rows if row.get("mismatch_suspected") == "true")
     rank_exit_conflict_count = sum(1 for row in rank_exit_consistency_rows if row.get("conflict_suspected") == "true")
     rank_exit_target_positive_sell_count = sum(1 for row in rank_exit_consistency_rows if row.get("target_positive") == "true" or row.get("has_target_still_positive_note") == "true")
+    protect_sideways_win_rate = (
+        sum(1 for value in protect_sideways_net_values if value > 0) / len(protect_sideways_net_values)
+        if protect_sideways_net_values
+        else None
+    )
+    protect_sideways_medium_issue_present = any(item.get("code") == "protect_sideways_normal_entry_negative" for item in issues)
     high_score_block_category_counts = dict(sorted(Counter(row.get("high_score_block_category") or not_obs for row in high_score_blocked_rows).items()))
     high_score_recent_24h_rows = [
         row for row in high_score_blocked_rows
@@ -3121,6 +3291,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
         "rank_exit_conflict_count": rank_exit_conflict_count,
         "rank_exit_target_positive_sell_count": rank_exit_target_positive_sell_count,
+        "protect_sideways_normal_entry_count": len(protect_sideways_normal_entry_rows),
+        "protect_sideways_normal_entry_avg_net_bps": protect_sideways_avg_net_bps if protect_sideways_avg_net_bps is not None else not_obs,
+        "protect_sideways_normal_entry_win_rate": protect_sideways_win_rate if protect_sideways_win_rate is not None else not_obs,
+        "protect_sideways_normal_entry_medium_issue": bool(protect_sideways_medium_issue_present),
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_recent_24h_target_count": len(high_score_recent_24h_rows),
         "high_score_block_category_counts": high_score_block_category_counts,
@@ -3220,6 +3394,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         open_pnl_text = "not_applicable_no_open_positions"
         open_net_bps_text = "not_applicable_no_open_positions"
         open_stop_protection_text = "not_applicable_no_open_positions"
+
+    if protect_sideways_normal_entry_rows:
+        protect_sideways_by_symbol_text = "; ".join(
+            f"{row.get('symbol')}: count={row.get('count')}, avg_net_bps={row.get('avg_net_bps')}, win_rate={row.get('win_rate')}, avg_hold_minutes={row.get('avg_hold_minutes')}"
+            for row in protect_sideways_normal_entry_by_symbol
+        )
+        protect_sideways_avg_text = fmt_num(protect_sideways_avg_net_bps, 6)
+        protect_sideways_win_rate_text = fmt_num(protect_sideways_win_rate, 6)
+    else:
+        protect_sideways_by_symbol_text = "not_applicable_no_protect_sideways_normal_entries"
+        protect_sideways_avg_text = "not_applicable_no_protect_sideways_normal_entries"
+        protect_sideways_win_rate_text = "not_applicable_no_protect_sideways_normal_entries"
 
     if high_score_recent_24h_rows:
         high_score_symbols_text = ", ".join(sorted({row.get("symbol") or not_obs for row in high_score_recent_24h_rows}))
@@ -3353,6 +3539,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- unrealized net bps: {open_net_bps_text}",
         f"- 当前 stop 是否足够保护浮盈: {open_stop_protection_text}",
         f"- dust residual ignored: positions={dust_residual_position_count}, roundtrips={dust_residual_roundtrip_count}",
+        "",
+        "## PROTECT Sideways 普通开仓表现",
+        f"- sample_count: {len(protect_sideways_normal_entry_rows)}",
+        f"- avg_net_bps: {protect_sideways_avg_text}",
+        f"- win_rate: {protect_sideways_win_rate_text}",
+        f"- by_symbol: {protect_sideways_by_symbol_text}",
+        f"- medium issue present: {'yes' if protect_sideways_medium_issue_present else 'no'}",
         "",
         "## Negative expectancy 口径一致性",
         f"- consistency rows: {len(negative_consistency_rows)}",
