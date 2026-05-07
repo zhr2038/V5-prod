@@ -317,6 +317,11 @@ execution:
   negative_expectancy_fast_fail_open_block_enabled: true
   negative_expectancy_fast_fail_open_block_min_closed_cycles: 1
   negative_expectancy_fast_fail_open_block_floor_bps: 5.0
+  protect_negative_expectancy_short_cycle_guard_enabled: true
+  protect_negative_expectancy_short_cycle_min_cycles: 2
+  protect_negative_expectancy_short_cycle_floor_bps: -80
+  protect_negative_expectancy_short_cycle_apply_to_normal_entry: true
+  protect_negative_expectancy_short_cycle_apply_to_probe: false
 
   order_state_machine_path: reports/order_state_machine.json
   force_close_unscored_positions: true

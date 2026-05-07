@@ -444,6 +444,7 @@ class V5Pipeline:
                 bool(getattr(cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
                 bool(getattr(cfg.execution, 'negative_expectancy_open_block_enabled', False)),
                 bool(getattr(cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
+                bool(getattr(cfg.execution, 'protect_negative_expectancy_short_cycle_guard_enabled', False)),
             ]
         )
         raw_negexp_state_path = str(
@@ -1323,6 +1324,7 @@ class V5Pipeline:
             "negative_expectancy_cooldown",
             "negative_expectancy_open_block",
             "negative_expectancy_fast_fail_open_block",
+            "protect_negative_expectancy_short_cycle_block",
             "min_notional",
             "insufficient_cash",
         }
@@ -2039,6 +2041,15 @@ class V5Pipeline:
                     return False, "negative_expectancy_cooldown", None
 
             stat = self.negative_expectancy_cooldown.get_symbol_stats(symbol) or {}
+            short_cycle_block = self._protect_negative_expectancy_short_cycle_block_context(
+                symbol=symbol,
+                stat=stat,
+                current_auto_risk_level=self._load_current_auto_risk_level(),
+                is_probe=True,
+            )
+            if short_cycle_block is not None:
+                return False, "protect_negative_expectancy_short_cycle_block", None
+
             if bool(getattr(self.cfg.execution, "negative_expectancy_open_block_enabled", False)):
                 min_cycles = int(getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2)
                 floor_bps = float(_coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0))
@@ -2331,6 +2342,7 @@ class V5Pipeline:
                 bool(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_open_block_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
+                bool(getattr(self.cfg.execution, 'protect_negative_expectancy_short_cycle_guard_enabled', False)),
             ]
         )
         if not neg_feedback_enabled:
@@ -2429,6 +2441,50 @@ class V5Pipeline:
                 except Exception:
                     continue
         return 0.0
+
+    def _protect_negative_expectancy_short_cycle_block_context(
+        self,
+        *,
+        symbol: str,
+        stat: Dict[str, Any],
+        current_auto_risk_level: Optional[str],
+        is_probe: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        if not bool(getattr(self.cfg.execution, "protect_negative_expectancy_short_cycle_guard_enabled", False)):
+            return None
+        if str(current_auto_risk_level or "").upper() != "PROTECT":
+            return None
+        if bool(is_probe):
+            if not bool(getattr(self.cfg.execution, "protect_negative_expectancy_short_cycle_apply_to_probe", False)):
+                return None
+        elif not bool(
+            getattr(self.cfg.execution, "protect_negative_expectancy_short_cycle_apply_to_normal_entry", True)
+        ):
+            return None
+
+        min_cycles = int(
+            getattr(self.cfg.execution, "protect_negative_expectancy_short_cycle_min_cycles", 2) or 2
+        )
+        floor_bps = float(
+            _coalesce(
+                getattr(self.cfg.execution, "protect_negative_expectancy_short_cycle_floor_bps", -80.0),
+                -80.0,
+            )
+        )
+        closed_cycles = int((stat or {}).get("closed_cycles") or 0)
+        net_expectancy_bps = self._negative_expectancy_bps(stat or {})
+        if closed_cycles >= min_cycles and float(net_expectancy_bps) <= float(floor_bps):
+            return {
+                "symbol": str(symbol),
+                "action": "skip",
+                "reason": "protect_negative_expectancy_short_cycle_block",
+                "closed_cycles": int(closed_cycles),
+                "net_expectancy_bps": float(net_expectancy_bps),
+                "floor_bps": float(floor_bps),
+                "min_cycles": int(min_cycles),
+                "current_level": str(current_auto_risk_level or ""),
+            }
+        return None
 
     def _apply_negative_expectancy_score_penalty(
         self,
@@ -3352,6 +3408,7 @@ class V5Pipeline:
                 bool(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_open_block_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
+                bool(getattr(self.cfg.execution, 'protect_negative_expectancy_short_cycle_guard_enabled', False)),
             ]
         )
         neg_cd_enabled = bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False))
@@ -5233,6 +5290,33 @@ class V5Pipeline:
                     )
                 continue
 
+            neg_stats = None
+            if side == "buy" and neg_feedback_enabled:
+                try:
+                    neg_stats = self.negative_expectancy_cooldown.get_symbol_stats(sym)
+                except Exception:
+                    neg_stats = None
+
+            if side == "buy" and intent == "OPEN_LONG":
+                short_cycle_block = self._protect_negative_expectancy_short_cycle_block_context(
+                    symbol=sym,
+                    stat=neg_stats or {},
+                    current_auto_risk_level=current_auto_risk_level,
+                    is_probe=btc_probe_meta is not None,
+                )
+                if short_cycle_block is not None:
+                    self._record_replacement_block(
+                        audit=audit,
+                        blocked_replacement_reasons=blocked_replacement_reasons,
+                        symbol=sym,
+                        reason="protect_negative_expectancy_short_cycle_block",
+                    )
+                    if audit:
+                        audit.record_count("protect_negative_expectancy_short_cycle_block_count", symbol=sym)
+                        audit.record_gate("protect_negative_expectancy_short_cycle_block", symbol=sym)
+                        router_decisions.append(short_cycle_block)
+                    continue
+
             if side == "buy" and intent == "OPEN_LONG" and protect_entry_gate_active and btc_probe_meta is None:
                 protect_block = self._evaluate_protect_entry_gate(
                     symbol=sym,
@@ -5290,13 +5374,6 @@ class V5Pipeline:
                             decision["blocked_reason"] = str(decision.get("reason") or "")
                         router_decisions.append(decision)
                     continue
-
-            neg_stats = None
-            if side == "buy" and neg_feedback_enabled:
-                try:
-                    neg_stats = self.negative_expectancy_cooldown.get_symbol_stats(sym)
-                except Exception:
-                    neg_stats = None
 
             # Negative expectancy cooldown gate
             if side == "buy" and neg_cd_enabled:

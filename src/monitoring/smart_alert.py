@@ -24,11 +24,13 @@ KNOWN_NO_TRADE_BLOCK_REASONS = {
     "negative_expectancy_cooldown",
     "negative_expectancy_open_block",
     "negative_expectancy_fast_fail_open_block",
+    "protect_negative_expectancy_short_cycle_block",
 }
 NEGATIVE_EXPECTANCY_HARD_BLOCK_COUNT_KEYS = (
     "negative_expectancy_cooldown",
     "negative_expectancy_open_block",
     "negative_expectancy_fast_fail_open_block",
+    "protect_negative_expectancy_short_cycle_block_count",
 )
 
 

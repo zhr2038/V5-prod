@@ -29,6 +29,7 @@ def _negative_expectancy_summary_fields(rd: Path) -> Dict[str, int]:
             "negative_expectancy_cooldown_count": 0,
             "negative_expectancy_open_block_count": 0,
             "negative_expectancy_fast_fail_open_block_count": 0,
+            "protect_negative_expectancy_short_cycle_block_count": 0,
             "negative_expectancy_probation_release_count": 0,
         }
 
@@ -44,6 +45,9 @@ def _negative_expectancy_summary_fields(rd: Path) -> Dict[str, int]:
         "negative_expectancy_open_block_count": int(counts.get("negative_expectancy_open_block", 0) or 0),
         "negative_expectancy_fast_fail_open_block_count": int(
             counts.get("negative_expectancy_fast_fail_open_block", 0) or 0
+        ),
+        "protect_negative_expectancy_short_cycle_block_count": int(
+            counts.get("protect_negative_expectancy_short_cycle_block_count", 0) or 0
         ),
         "negative_expectancy_probation_release_count": 0,
     }

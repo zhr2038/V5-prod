@@ -92,6 +92,21 @@ def negative_expectancy_config_fingerprint(config: Any) -> str:
             "negative_expectancy_fast_fail_open_block_floor_bps": float(
                 getattr(execution_cfg, "negative_expectancy_fast_fail_open_block_floor_bps", 0.0) or 0.0
             ),
+            "protect_negative_expectancy_short_cycle_guard_enabled": bool(
+                getattr(execution_cfg, "protect_negative_expectancy_short_cycle_guard_enabled", False)
+            ),
+            "protect_negative_expectancy_short_cycle_min_cycles": int(
+                getattr(execution_cfg, "protect_negative_expectancy_short_cycle_min_cycles", 2) or 2
+            ),
+            "protect_negative_expectancy_short_cycle_floor_bps": float(
+                getattr(execution_cfg, "protect_negative_expectancy_short_cycle_floor_bps", -80.0) or 0.0
+            ),
+            "protect_negative_expectancy_short_cycle_apply_to_normal_entry": bool(
+                getattr(execution_cfg, "protect_negative_expectancy_short_cycle_apply_to_normal_entry", True)
+            ),
+            "protect_negative_expectancy_short_cycle_apply_to_probe": bool(
+                getattr(execution_cfg, "protect_negative_expectancy_short_cycle_apply_to_probe", False)
+            ),
         },
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

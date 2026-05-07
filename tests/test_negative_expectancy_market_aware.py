@@ -174,6 +174,16 @@ def _selected_btc_portfolio():
     )
 
 
+def _selected_bnb_portfolio():
+    return SimpleNamespace(
+        target_weights={"BNB/USDT": 0.15},
+        selected=["BNB/USDT"],
+        entry_candidates=["BNB/USDT"],
+        volatilities={},
+        notes="",
+    )
+
+
 def test_fast_fail_rank_guard_hard_blocks_without_market_impulse(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
@@ -293,3 +303,106 @@ def test_market_impulse_single_fast_fail_is_softened_in_open_path(tmp_path: Path
     assert out.orders[0].symbol == "BTC/USDT"
     assert not any(d.get("reason") == "negative_expectancy_fast_fail_open_block" for d in audit.router_decisions)
     assert audit.counts["negative_expectancy_fast_fail_softened_count"] == 1
+
+
+def _run_short_cycle_guard_case(tmp_path: Path, *, current_level: str, stats: dict):
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
+    cfg.execution.protect_negative_expectancy_short_cycle_guard_enabled = True
+    cfg.execution.protect_negative_expectancy_short_cycle_min_cycles = 2
+    cfg.execution.protect_negative_expectancy_short_cycle_floor_bps = -80.0
+    cfg.execution.protect_negative_expectancy_short_cycle_apply_to_normal_entry = True
+    cfg.execution.protect_negative_expectancy_short_cycle_apply_to_probe = False
+    _write_auto_risk_level(cfg.execution.order_store_path, current_level)
+    pipe = _build_pipe(cfg, tmp_path, _strategy_payload(market_impulse=False))
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _selected_bnb_portfolio()
+    pipe.negative_expectancy_cooldown = _DummyNegexp(stats={"BNB/USDT": stats})
+    audit = DecisionAudit(run_id=f"short-cycle-{current_level}")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BNB/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+    return out, audit
+
+
+def test_protect_short_cycle_negative_expectancy_blocks_normal_open(tmp_path: Path) -> None:
+    out, audit = _run_short_cycle_guard_case(
+        tmp_path,
+        current_level="PROTECT",
+        stats={"closed_cycles": 2, "net_expectancy_bps": -126.25},
+    )
+
+    assert not out.orders
+    decision = next(
+        d for d in audit.router_decisions if d.get("reason") == "protect_negative_expectancy_short_cycle_block"
+    )
+    assert decision["symbol"] == "BNB/USDT"
+    assert decision["closed_cycles"] == 2
+    assert decision["net_expectancy_bps"] == -126.25
+    assert decision["floor_bps"] == -80.0
+    assert audit.counts["protect_negative_expectancy_short_cycle_block_count"] == 1
+
+
+def test_short_cycle_guard_is_inactive_outside_protect(tmp_path: Path) -> None:
+    out, audit = _run_short_cycle_guard_case(
+        tmp_path,
+        current_level="NORMAL",
+        stats={"closed_cycles": 2, "net_expectancy_bps": -126.25},
+    )
+
+    assert any(order.symbol == "BNB/USDT" and order.intent == "OPEN_LONG" for order in out.orders)
+    assert not any(
+        d.get("reason") == "protect_negative_expectancy_short_cycle_block" for d in audit.router_decisions
+    )
+
+
+def test_short_cycle_guard_does_not_apply_to_probe_by_default(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.protect_negative_expectancy_short_cycle_guard_enabled = True
+    cfg.execution.protect_negative_expectancy_short_cycle_apply_to_probe = False
+    pipe = _build_pipe(cfg, tmp_path, _strategy_payload(market_impulse=True))
+
+    assert (
+        pipe._protect_negative_expectancy_short_cycle_block_context(
+            symbol="BTC/USDT",
+            stat={"closed_cycles": 2, "net_expectancy_bps": -126.25},
+            current_auto_risk_level="PROTECT",
+            is_probe=True,
+        )
+        is None
+    )
+
+
+def test_short_cycle_guard_requires_min_cycles(tmp_path: Path) -> None:
+    out, audit = _run_short_cycle_guard_case(
+        tmp_path,
+        current_level="PROTECT",
+        stats={"closed_cycles": 1, "net_expectancy_bps": -126.25},
+    )
+
+    assert not any(
+        d.get("reason") == "protect_negative_expectancy_short_cycle_block" for d in audit.router_decisions
+    )
+    assert not audit.counts.get("protect_negative_expectancy_short_cycle_block_count", 0)
+    assert out.orders or any(str(d.get("reason", "")).startswith("protect_entry_") for d in audit.router_decisions)
+
+
+def test_short_cycle_guard_requires_floor_breach(tmp_path: Path) -> None:
+    out, audit = _run_short_cycle_guard_case(
+        tmp_path,
+        current_level="PROTECT",
+        stats={"closed_cycles": 2, "net_expectancy_bps": -30.0},
+    )
+
+    assert not any(
+        d.get("reason") == "protect_negative_expectancy_short_cycle_block" for d in audit.router_decisions
+    )
+    assert not audit.counts.get("protect_negative_expectancy_short_cycle_block_count", 0)
+    assert out.orders or any(str(d.get("reason", "")).startswith("protect_entry_") for d in audit.router_decisions)

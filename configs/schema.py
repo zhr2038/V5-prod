@@ -1086,6 +1086,16 @@ class ExecutionConfig(BaseModel):
         le=10000,
         description="Block new OPEN_LONG orders when recent fast-fail round-trips stay below this threshold in bps",
     )
+    protect_negative_expectancy_short_cycle_guard_enabled: bool = Field(default=True)
+    protect_negative_expectancy_short_cycle_min_cycles: int = Field(default=2, ge=1, le=200)
+    protect_negative_expectancy_short_cycle_floor_bps: float = Field(
+        default=-80.0,
+        ge=-10000,
+        le=10000,
+        description="In PROTECT, block normal OPEN_LONG when short-sample realized expectancy is clearly negative",
+    )
+    protect_negative_expectancy_short_cycle_apply_to_normal_entry: bool = Field(default=True)
+    protect_negative_expectancy_short_cycle_apply_to_probe: bool = Field(default=False)
 
     order_state_machine_path: str = Field(
         default="reports/order_state_machine.json",

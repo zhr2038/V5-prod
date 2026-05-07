@@ -787,6 +787,15 @@ SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS = (
 )
 
 
+PROTECT_NEGATIVE_EXPECTANCY_SHORT_CYCLE_CONFIG_KEYS = (
+    "protect_negative_expectancy_short_cycle_guard_enabled",
+    "protect_negative_expectancy_short_cycle_min_cycles",
+    "protect_negative_expectancy_short_cycle_floor_bps",
+    "protect_negative_expectancy_short_cycle_apply_to_normal_entry",
+    "protect_negative_expectancy_short_cycle_apply_to_probe",
+)
+
+
 def _btc_leadership_probe_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     execution = getattr(cfg, "execution", None)
     return {
@@ -819,6 +828,15 @@ def _same_symbol_reentry_guard_effective_config(cfg: AppConfig) -> Dict[str, Any
     return {
         key: getattr(execution, key)
         for key in SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
+def _protect_negative_expectancy_short_cycle_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in PROTECT_NEGATIVE_EXPECTANCY_SHORT_CYCLE_CONFIG_KEYS
         if hasattr(execution, key)
     }
 
@@ -856,6 +874,7 @@ def _negative_expectancy_feedback_enabled(cfg: AppConfig) -> bool:
             bool(getattr(execution, "negative_expectancy_score_penalty_enabled", False)),
             bool(getattr(execution, "negative_expectancy_open_block_enabled", False)),
             bool(getattr(execution, "negative_expectancy_fast_fail_open_block_enabled", False)),
+            bool(getattr(execution, "protect_negative_expectancy_short_cycle_guard_enabled", False)),
         ]
     )
 
@@ -1019,6 +1038,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             **_probe_exit_effective_config(cfg),
             **_protect_profit_lock_effective_config(cfg),
             **_same_symbol_reentry_guard_effective_config(cfg),
+            **_protect_negative_expectancy_short_cycle_effective_config(cfg),
             **_negative_expectancy_release_effective_config(cfg),
         },
     }

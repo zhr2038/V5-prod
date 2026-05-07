@@ -76,6 +76,7 @@ def _selected_zero_reason_buckets(
         "negative_expectancy_cooldown": "negative_expectancy_block",
         "negative_expectancy_open_block": "negative_expectancy_block",
         "negative_expectancy_fast_fail_open_block": "negative_expectancy_block",
+        "protect_negative_expectancy_short_cycle_block": "negative_expectancy_block",
     }
     for key, bucket_name in mappings.items():
         value = int(c.get(key, 0) or 0)
@@ -93,7 +94,7 @@ def _selected_zero_reason_buckets(
             buckets[bucket_name] += 1
         elif reason == "cost_aware_edge":
             buckets["cost_aware_block"] += 1
-        elif reason.startswith("negative_expectancy_"):
+        elif reason.startswith("negative_expectancy_") or reason == "protect_negative_expectancy_short_cycle_block":
             buckets["negative_expectancy_block"] += 1
 
     return {
