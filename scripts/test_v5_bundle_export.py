@@ -903,6 +903,141 @@ def fixture_alt_impulse_shadow_root(root):
     return run_id
 
 
+def write_ohlcv_cache(root, symbol, rows):
+    prefix = symbol.replace("/", "_").replace("-", "_")
+    path = root / "data/cache" / f"{prefix}_1H_fixture.csv"
+    lines = ["timestamp,open,high,low,close,volume"]
+    for ts, close in rows:
+        lines.append(f"{iso(ts)},{close},{close},{close},{close},1")
+    write_text(path, "\n".join(lines) + "\n")
+    return path
+
+
+def fixture_alt_impulse_shadow_cache_fill_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    entry_ts = window_end - 5 * 3600
+    run_id = dt.datetime.fromtimestamp(entry_ts, dt.timezone.utc).strftime("%Y%m%d_%H")
+
+    write_text(root / "configs/live_prod.yaml", "alt_impulse_shadow_enabled: true\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": entry_ts + 15,
+        "window_end_ts": entry_ts,
+        "regime": "Trending",
+        "target_execution_explain": [
+            {
+                "symbol": "SOL/USDT",
+                "target_w": 0.15,
+                "final_score": 1.0,
+                "router_action": "skip",
+                "router_reason": "protect_entry_trend_only",
+            },
+            {
+                "symbol": "ETH/USDT",
+                "target_w": 0.15,
+                "final_score": 1.0,
+                "router_action": "skip",
+                "router_reason": "protect_entry_no_alpha6_confirmation",
+            },
+        ],
+        "router_decisions": [],
+    })
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    write_text(
+        root / "reports/alt_impulse_shadow_labels.jsonl",
+        "\n".join(
+            json.dumps(row, ensure_ascii=False)
+            for row in [
+                {
+                    "ts_utc": iso(entry_ts),
+                    "run_id": run_id,
+                    "symbol": "SOL/USDT",
+                    "entry_px": "not_observable",
+                    "final_score": 1.0,
+                    "trend_score": 1.0,
+                    "trend_side": "buy",
+                    "skip_reason": "protect_entry_trend_only",
+                    "current_level": "PROTECT",
+                    "rt_cost_bps": 30.0,
+                },
+                {
+                    "ts_utc": iso(entry_ts),
+                    "run_id": run_id,
+                    "symbol": "ETH/USDT",
+                    "entry_px": "not_observable",
+                    "final_score": 1.0,
+                    "trend_score": 1.0,
+                    "trend_side": "buy",
+                    "skip_reason": "protect_entry_no_alpha6_confirmation",
+                    "current_level": "PROTECT",
+                    "rt_cost_bps": 30.0,
+                },
+            ]
+        )
+        + "\n",
+    )
+    write_ohlcv_cache(root, "SOL/USDT", [(entry_ts, 100.0), (entry_ts + 4 * 3600, 105.0)])
+    write_ohlcv_cache(root, "ETH/USDT", [(entry_ts, 2000.0)])
+    return run_id
+
+
+def fixture_alt_impulse_shadow_missing_entry_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    entry_ts = window_end - 5 * 3600
+    run_id = dt.datetime.fromtimestamp(entry_ts, dt.timezone.utc).strftime("%Y%m%d_%H")
+
+    write_text(root / "configs/live_prod.yaml", "alt_impulse_shadow_enabled: true\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {"now_ts": entry_ts + 15, "window_end_ts": entry_ts, "target_execution_explain": []})
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    write_text(
+        root / "reports/alt_impulse_shadow_labels.jsonl",
+        json.dumps(
+            {
+                "ts_utc": iso(entry_ts),
+                "run_id": run_id,
+                "symbol": "SOL/USDT",
+                "entry_px": "not_observable",
+                "final_score": 1.0,
+                "trend_score": 1.0,
+                "trend_side": "buy",
+                "skip_reason": "protect_entry_trend_only",
+                "current_level": "PROTECT",
+                "rt_cost_bps": 30.0,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    return run_id
+
+
 def fixture_market_impulse_selection_shadow_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -1302,6 +1437,53 @@ def main():
             assert "SOL/USDT: count=1, avg_net_bps 4h=not_observable" in readme, readme
             assert "BNB/USDT: count=0" in readme, readme
             assert "是否支持未来 live probe: diagnostic_only_review_required" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-alt-impulse-shadow-cache-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_alt_impulse_shadow_cache_fill_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes.csv")).read().decode().splitlines()))
+            sol = next(row for row in outcomes if row["symbol"] == "SOL/USDT")
+            assert sol["entry_px"] == "100", outcomes
+            assert sol["label_4h_net_bps"] == "470", sol
+            assert sol["label_8h_net_bps"] == "pending", sol
+            assert sol["label_status"] == "pending", sol
+            eth = next(row for row in outcomes if row["symbol"] == "ETH/USDT")
+            assert eth["entry_px"] == "2000", outcomes
+            assert eth["label_4h_net_bps"] == "not_observable", eth
+            assert eth["label_status"] == "not_observable", eth
+            assert eth["label_not_observable_reason"] == "missing_future_px", eth
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-alt-impulse-shadow-missing-entry-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_alt_impulse_shadow_missing_entry_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert len(outcomes) == 1, outcomes
+            row = outcomes[0]
+            assert row["entry_px"] == "not_observable", row
+            assert row["label_4h_net_bps"] == "not_observable", row
+            assert row["label_status"] == "not_observable", row
+            assert row["label_not_observable_reason"] == "missing_entry_px", row
+            assert window["alt_impulse_shadow_entry_px_not_observable_count"] == 1, window
+            assert any(
+                item.get("severity") == "medium" and item.get("code") == "alt_impulse_shadow_entry_px_not_observable"
+                for item in issues["issues"]
+            ), issues
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

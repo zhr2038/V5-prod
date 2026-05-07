@@ -1095,6 +1095,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     covered_trade_event_ids = set()
     trade_read_errors = 0
     latest_symbol_context = {}
+    event_candidate_price_by_symbol = {}
     entry_context_by_run_symbol = {}
     audit_by_run = {}
 
@@ -1431,6 +1432,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     px_value = first_value(item, ("current_px", "latest_px", "last_px", "price", "px"), not_obs)
                     if as_float(px_value) is not None:
                         context["current_px"] = flatten_value(px_value)
+                        event_candidate_price_by_symbol[symbol] = {
+                            "current_px": flatten_value(px_value),
+                            "ts_utc": not_obs,
+                        }
+                        event_candidate_price_by_symbol[symbol.replace("-", "/").upper()] = {
+                            "current_px": flatten_value(px_value),
+                            "ts_utc": not_obs,
+                        }
                     if event_regime != not_obs:
                         context["regime"] = event_regime
                     if event_level != not_obs:
@@ -2108,6 +2117,260 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         ["skip_reason"],
     )
 
+    def normalize_symbol_text(value):
+        text = flatten_value(value)
+        return text.replace("-", "/").upper() if text else ""
+
+    def symbol_map_get(mapping, symbol):
+        if not isinstance(mapping, dict):
+            return {}
+        if symbol in mapping:
+            return mapping.get(symbol) or {}
+        wanted = normalize_symbol_text(symbol)
+        for key, value in mapping.items():
+            if normalize_symbol_text(key) == wanted:
+                return value or {}
+        return {}
+
+    def positive_float(value):
+        number = as_float(value)
+        if number is None or number <= 0:
+            return None
+        return number
+
+    def price_from_dict(obj, names=("latest_px", "current_px", "price", "px")):
+        if not isinstance(obj, dict):
+            return None
+        return positive_float(first_value(obj, names, not_obs))
+
+    def symbol_price_from_nested(obj, symbol, names=("latest_px", "current_px", "last_px", "price", "px", "close")):
+        wanted = normalize_symbol_text(symbol)
+        if not wanted:
+            return None
+        for item in iter_dicts(obj):
+            item_symbol = normalize_symbol_text(first_value(item, ("symbol", "instId", "inst_id", "instrument"), ""))
+            if item_symbol != wanted:
+                continue
+            price = price_from_dict(item, names)
+            if price is not None:
+                return price
+        return None
+
+    def cache_timestamp_ms(value):
+        if value in (None, "", not_obs):
+            return None
+        if isinstance(value, (int, float)):
+            raw = float(value)
+            return int(raw if raw > 10_000_000_000 else raw * 1000.0)
+        text = str(value).strip()
+        if not text:
+            return None
+        if re.fullmatch(r"\d+(?:\.\d+)?", text):
+            raw = float(text)
+            return int(raw if raw > 10_000_000_000 else raw * 1000.0)
+        parsed = parse_dt_utc(text)
+        return int(parsed.timestamp() * 1000.0) if parsed else None
+
+    def cache_file_epoch(path, prefix):
+        suffix = path.stem[len(prefix):] if path.stem.startswith(prefix) else path.stem
+        hourly_match = re.search(r"(20\d{6}_\d{2})$", suffix)
+        if hourly_match:
+            try:
+                return dt.datetime.strptime(hourly_match.group(1), "%Y%m%d_%H").timestamp()
+            except Exception:
+                pass
+        date_tokens = re.findall(r"(20\d{2}-\d{2}-\d{2}|20\d{6})", suffix)
+        if date_tokens:
+            token = date_tokens[-1]
+            try:
+                return dt.datetime.strptime(token, "%Y-%m-%d" if "-" in token else "%Y%m%d").timestamp()
+            except Exception:
+                pass
+        try:
+            return path.stat().st_mtime
+        except Exception:
+            return 0.0
+
+    def cache_symbol_prefixes(symbol):
+        text = flatten_value(symbol)
+        variants = [
+            text.replace("/", "_").replace("-", "_"),
+            text.replace("/", "-"),
+            text.replace("/", "").replace("-", ""),
+        ]
+        return [value for value in dict.fromkeys(v.strip() for v in variants) if value]
+
+    def cache_files_for_symbol(symbol):
+        cache_dir = ROOT / "data" / "cache"
+        if not cache_dir.is_dir():
+            return []
+        files = []
+        seen = set()
+        for prefix in cache_symbol_prefixes(symbol):
+            patterns = (
+                f"{prefix}_1H_*.csv",
+                f"{prefix}_1h_*.csv",
+                f"{prefix}_60m_*.csv",
+                f"{prefix}*1H*.csv",
+                f"{prefix}*1h*.csv",
+                f"{prefix}*60m*.csv",
+            )
+            for pattern in patterns:
+                for path in cache_dir.glob(pattern):
+                    if path.is_file() and path not in seen:
+                        seen.add(path)
+                        files.append(path)
+            if not files:
+                for pattern in patterns:
+                    for path in cache_dir.rglob(pattern):
+                        if path.is_file() and path not in seen:
+                            seen.add(path)
+                            files.append(path)
+        return sorted(files, key=lambda path: cache_file_epoch(path, cache_symbol_prefixes(symbol)[0] if cache_symbol_prefixes(symbol) else ""))
+
+    def row_get_ci(row, names):
+        lowered = {str(key).strip().lower(): value for key, value in row.items()}
+        for name in names:
+            if name in lowered:
+                return lowered[name]
+        return None
+
+    cache_candles_by_symbol = {}
+
+    def load_cache_candles(symbol):
+        cache_key = normalize_symbol_text(symbol)
+        if cache_key in cache_candles_by_symbol:
+            return cache_candles_by_symbol[cache_key]
+        candles = {}
+        for path in cache_files_for_symbol(symbol):
+            try:
+                with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
+                    reader = csv.DictReader(fh)
+                    for row in reader:
+                        ts_ms = cache_timestamp_ms(row_get_ci(row, ("timestamp", "timestamp_ms", "ts", "time", "datetime", "date")))
+                        close = positive_float(row_get_ci(row, ("close", "c", "last", "price", "px")))
+                        if ts_ms is not None and close is not None:
+                            candles[int(ts_ms)] = close
+            except Exception as exc:
+                collection_errors.append({"source": str(path), "error": f"alt_impulse_shadow_cache_read: {exc!r}"})
+        rows = sorted(candles.items())
+        cache_candles_by_symbol[cache_key] = rows
+        return rows
+
+    def cache_price_at_or_after(symbol, when_dt):
+        if when_dt is None:
+            return None, "missing_market_data"
+        candles = load_cache_candles(symbol)
+        if not candles:
+            return None, "missing_market_data"
+        target_ms = int(when_dt.timestamp() * 1000.0)
+        for ts_ms, close in candles:
+            if ts_ms >= target_ms:
+                return close, ""
+        return None, "missing_future_px"
+
+    def resolve_alt_shadow_entry_px(row):
+        symbol = first_observed(first_value(row, ("symbol", "instId"), not_obs))
+        run_id = first_observed(first_value(row, ("run_id",), not_obs))
+        ts_utc = first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs))
+        audit = audit_by_run.get(run_id, {}) if run_id != not_obs else {}
+
+        target_item = symbol_map_get(target_explain_by_symbol(audit), symbol)
+        price = price_from_dict(target_item, ("latest_px", "current_px", "price", "px"))
+        if price is not None:
+            return price, "", "target_execution_explain"
+
+        router_item = symbol_map_get(router_decision_by_symbol(audit), symbol)
+        price = price_from_dict(router_item, ("latest_px", "current_px", "price", "px"))
+        if price is not None:
+            return price, "", "router_decisions"
+
+        price = symbol_price_from_nested(audit, symbol)
+        if price is not None:
+            return price, "", "decision_audit_market_data"
+
+        event_price = price_from_dict(symbol_map_get(event_candidate_price_by_symbol, symbol), ("latest_px", "current_px", "price", "px"))
+        if event_price is not None:
+            return event_price, "", "event_candidates"
+
+        cache_price, cache_reason = cache_price_at_or_after(symbol, parse_dt_utc(ts_utc))
+        if cache_price is not None:
+            return cache_price, "", "data_cache_1h"
+
+        existing_price = price_from_dict(row, ("entry_px", "latest_px", "current_px", "price", "px"))
+        if existing_price is not None:
+            return existing_price, "", "label_row"
+
+        return None, "missing_entry_px", cache_reason or "missing_entry_px"
+
+    def alt_shadow_not_observable_reason(reasons):
+        for preferred in ("missing_entry_px", "missing_market_data", "missing_future_px"):
+            if preferred in reasons:
+                return preferred
+        return first_observed(*reasons) if reasons else ""
+
+    def build_alt_impulse_shadow_row(row):
+        out = {
+            field: first_observed(first_value(row, (field,), not_obs))
+            for field in alt_impulse_shadow_fields
+        }
+        entry_px, entry_reason, _entry_source = resolve_alt_shadow_entry_px(row)
+        entry_dt = parse_dt_utc(first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)))
+        rt_cost_bps = as_float(first_value(row, ("rt_cost_bps",), not_obs))
+        if rt_cost_bps is None:
+            rt_cost_bps = 0.0
+
+        horizon_statuses = []
+        not_observable_reasons = []
+        out["entry_px"] = fmt_num(entry_px, 10) if entry_px is not None else not_obs
+        if entry_reason:
+            not_observable_reasons.append(entry_reason)
+
+        for horizon in (4, 8, 12, 24):
+            field = f"label_{horizon}h_net_bps"
+            existing_value = first_value(row, (field,), not_obs)
+            if as_float(existing_value) is not None:
+                out[field] = first_observed(existing_value)
+                horizon_statuses.append("complete")
+                continue
+            if entry_px is None or entry_dt is None:
+                out[field] = not_obs
+                horizon_statuses.append("not_observable")
+                if entry_reason:
+                    not_observable_reasons.append(entry_reason)
+                else:
+                    not_observable_reasons.append("missing_entry_px")
+                continue
+            horizon_dt = entry_dt + dt.timedelta(hours=horizon)
+            if NOW < horizon_dt:
+                out[field] = "pending"
+                horizon_statuses.append("pending")
+                continue
+            future_px, future_reason = cache_price_at_or_after(out["symbol"], horizon_dt)
+            if future_px is None:
+                out[field] = not_obs
+                horizon_statuses.append("not_observable")
+                not_observable_reasons.append(future_reason or "missing_future_px")
+                continue
+            net_bps = ((future_px / entry_px) - 1.0) * 10000.0 - rt_cost_bps
+            out[field] = fmt_num(net_bps, 6)
+            horizon_statuses.append("complete")
+
+        if any(status == "not_observable" for status in horizon_statuses):
+            out["label_status"] = "not_observable"
+        elif any(status == "pending" for status in horizon_statuses):
+            out["label_status"] = "pending"
+        elif horizon_statuses and all(status == "complete" for status in horizon_statuses):
+            out["label_status"] = "complete"
+        else:
+            out["label_status"] = first_observed(first_value(row, ("label_status",), not_obs))
+        out["label_not_observable_reason"] = (
+            alt_shadow_not_observable_reason(not_observable_reasons)
+            if out["label_status"] == "not_observable"
+            else first_observed(first_value(row, ("label_not_observable_reason", "not_observable_reason"), ""))
+        )
+        return out
+
     alt_impulse_shadow_fields = [
         "ts_utc",
         "run_id",
@@ -2131,13 +2394,25 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "label_12h_net_bps",
         "label_24h_net_bps",
         "label_status",
+        "label_not_observable_reason",
     ]
     alt_impulse_shadow_rows = []
     for row in alt_impulse_shadow_label_rows:
-        alt_impulse_shadow_rows.append({
-            field: first_observed(first_value(row, (field,), not_obs))
-            for field in alt_impulse_shadow_fields
-        })
+        alt_impulse_shadow_rows.append(build_alt_impulse_shadow_row(row))
+    alt_impulse_shadow_entry_px_not_observable_count = sum(
+        1 for row in alt_impulse_shadow_rows
+        if as_float(row.get("entry_px")) is None
+    )
+    if alt_impulse_shadow_rows and alt_impulse_shadow_entry_px_not_observable_count == len(alt_impulse_shadow_rows):
+        add_issue(
+            "medium",
+            "alt_impulse_shadow_entry_px_not_observable",
+            "ALT impulse shadow labels exist but every sample has entry_px not_observable, so forward labels cannot be trusted.",
+            {
+                "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
+                "entry_px_not_observable_count": alt_impulse_shadow_entry_px_not_observable_count,
+            },
+        )
     alt_impulse_shadow_by_symbol = aggregate_high_score_outcomes(
         alt_impulse_shadow_rows,
         ["symbol", "skip_reason"],
@@ -3421,6 +3696,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "high_score_blocked_matured_unlabeled_count": high_score_matured_unlabeled_count,
         "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
         "alt_impulse_shadow_duplicate_count": alt_impulse_shadow_duplicate_count,
+        "alt_impulse_shadow_entry_px_not_observable_count": alt_impulse_shadow_entry_px_not_observable_count,
         "market_impulse_selection_shadow_rows": len(market_impulse_selection_shadow_rows),
         "factor_contribution_audit_rows": len(factor_contribution_rows),
         "factor_contribution_factor_count": len(factor_contribution_outcomes_by_factor),
