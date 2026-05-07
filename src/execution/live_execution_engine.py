@@ -841,8 +841,6 @@ class LiveExecutionEngine:
             return
         if bool(meta.get("rank_exit_validated_by_router")):
             return
-        if bool(meta.get("external_rank_exit_action_consumed")) and str(meta.get("validation_result") or "") == "accepted":
-            return
         raise SafetyReject(f"rank_exit_missing_router_validation: {o.symbol} reason={reason}")
 
     def _build_place_payload(self, o: Order, *, inst_id: str, cl_ord_id: str) -> Dict[str, Any]:

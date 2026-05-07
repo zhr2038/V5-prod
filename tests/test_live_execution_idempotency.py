@@ -889,6 +889,39 @@ def test_live_execution_rejects_rank_exit_sell_without_router_validation() -> No
         assert row.last_error_code == "rank_exit_missing_router_validation"
 
 
+def test_live_execution_rejects_external_rank_exit_without_router_validation_flag() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        result = eng.place(
+            Order(
+                symbol="BNB/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=12.0,
+                signal_price=622.0,
+                meta={
+                    "decision_hash": "rank-exit-external-no-router-validation",
+                    "reason": "rank_exit_4",
+                    "external_rank_exit_action_consumed": True,
+                    "validation_result": "accepted",
+                },
+            )
+        )
+
+        row = store.get(result.cl_ord_id)
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
+        assert row.last_error_code == "rank_exit_missing_router_validation"
+
+
 def test_buy_guard_respects_zero_borrow_liability_epsilon(monkeypatch) -> None:
     with tempfile.TemporaryDirectory() as td:
         okx = FakeOKX()
