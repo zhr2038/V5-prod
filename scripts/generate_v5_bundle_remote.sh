@@ -2914,6 +2914,91 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     return True
         return False
 
+    def symbol_from_inst_id(inst_id):
+        text = flatten_value(inst_id).strip()
+        if "/" in text:
+            return text
+        if "-" in text:
+            base, quote = text.split("-", 1)
+            return f"{base}/{quote}"
+        return text or not_obs
+
+    def log_line_ts_utc(line):
+        match = re.search(
+            r"(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)",
+            line,
+        )
+        if not match:
+            return not_obs, None
+        raw = match.group(1).replace(",", ".")
+        parsed = parse_dt_utc(raw)
+        if parsed is None:
+            return not_obs, None
+        return parsed.strftime("%Y-%m-%dT%H:%M:%SZ"), parsed
+
+    def audit_window_for_run(run_id, audit):
+        if not isinstance(audit, dict):
+            return None, None, parse_run_time(run_id)
+        audit_dt = parse_dt_utc(run_ts(run_id, audit)) or parse_run_time(run_id)
+        start_dt = parse_dt_utc(first_value(audit, ("window_start_ts", "start_ts"), not_obs))
+        end_dt = parse_dt_utc(first_value(audit, ("window_end_ts", "end_ts"), not_obs))
+        if start_dt is None and end_dt is not None:
+            start_dt = end_dt - dt.timedelta(hours=1)
+        if start_dt is None:
+            run_dt = parse_run_time(run_id)
+            if run_dt is not None:
+                start_dt = run_dt
+        if end_dt is None and start_dt is not None:
+            end_dt = start_dt + dt.timedelta(hours=1)
+        return start_dt, end_dt, audit_dt
+
+    def run_id_for_log_event(event_dt):
+        if event_dt is None:
+            return not_obs
+        window_matches = []
+        nearest = []
+        for run_id, audit in audit_by_run.items():
+            start_dt, end_dt, audit_dt = audit_window_for_run(run_id, audit)
+            if start_dt is not None and end_dt is not None and start_dt <= event_dt < end_dt:
+                window_matches.append((abs((event_dt - (audit_dt or end_dt)).total_seconds()), run_id))
+            if audit_dt is not None:
+                nearest.append((abs((event_dt - audit_dt).total_seconds()), run_id))
+        if window_matches:
+            return sorted(window_matches)[0][1]
+        if nearest:
+            return sorted(nearest)[0][1]
+        return not_obs
+
+    def parse_trade_safety_rank_exit_line(line, source):
+        if "TRADE_SAFETY:" not in line:
+            return None
+        match = re.search(r"TRADE_SAFETY:\s*(?P<side>\w+)\s+(?P<inst>[A-Z0-9][A-Z0-9/-]*)(?:,\s*(?P<rest>.*))?$", line)
+        if not match:
+            return None
+        side = flatten_value(match.group("side")).lower()
+        inst_id = flatten_value(match.group("inst"))
+        rest = flatten_value(match.group("rest"))
+        fields = {
+            key: value.strip()
+            for key, value in re.findall(r"([A-Za-z_][A-Za-z0-9_]*)=([^,]+)", rest)
+        }
+        intent = flatten_value(fields.get("intent")).upper()
+        reason = flatten_value(fields.get("reason"))
+        if side != "sell" or intent != "CLOSE_LONG" or not reason.startswith("rank_exit"):
+            return None
+        ts_utc, event_dt = log_line_ts_utc(line)
+        return {
+            "ts_utc": ts_utc,
+            "run_id": run_id_for_log_event(event_dt),
+            "symbol": symbol_from_inst_id(inst_id),
+            "exit_reason": reason,
+            "side": side,
+            "intent": intent,
+            "notional": first_observed(fields.get("notional")),
+            "source": source,
+            "raw_json": safe_json({"line": line.strip()}),
+        }
+
     def rank_exit_events_from_trades():
         rows = []
         seen = set()
@@ -2944,6 +3029,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "run_id": event.get("run_id", not_obs),
                     "symbol": event.get("symbol", not_obs),
                     "exit_reason": reason,
+                    "source": f"trades:{event.get('source_file', not_obs)}",
                 })
         for row in trade_rows:
             reason = first_rank_exit_reason(row.get("exit_reason"), row.get("raw_json"))
@@ -2957,7 +3043,37 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "run_id": row.get("run_id", not_obs),
                 "symbol": row.get("symbol", not_obs),
                 "exit_reason": reason,
+                "source": f"trades_roundtrips:{row.get('source_file', not_obs)}",
             })
+        return rows
+
+    def rank_exit_events_from_logs():
+        rows = []
+        for log_path in sorted((OUT / "raw" / "logs").glob("*")):
+            source = f"log:{log_path.relative_to(OUT).as_posix()}"
+            try:
+                with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        event = parse_trade_safety_rank_exit_line(line, source)
+                        if event:
+                            rows.append(event)
+            except Exception as exc:
+                collection_errors.append({"source": str(log_path), "error": f"rank_exit_trade_safety_scan: {exc!r}"})
+        return rows
+
+    def rank_exit_events():
+        rows = []
+        seen = set()
+        for event in rank_exit_events_from_trades() + rank_exit_events_from_logs():
+            key = (
+                event.get("run_id", not_obs),
+                event.get("symbol", not_obs),
+                event.get("exit_reason", not_obs),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(event)
         return rows
 
     def rank_exit_log_target_positive_symbols():
@@ -2981,7 +3097,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         close_only_weight_eps = config_number("close_only_weight_eps")
         if close_only_weight_eps is None:
             close_only_weight_eps = 0.001
-        for event in rank_exit_events_from_trades():
+        for event in rank_exit_events():
             run_id = event.get("run_id", not_obs)
             symbol = event.get("symbol", not_obs)
             exit_reason = event.get("exit_reason", not_obs)
@@ -3013,6 +3129,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                         "run_id": run_id,
                         "symbol": symbol,
                         "exit_reason": exit_reason,
+                        "source": event.get("source", not_obs),
                         "target_w": fmt_num(target_w, 8),
                         "target_positive": target_positive,
                         "has_target_still_positive_note": has_target_still_positive_note,
@@ -3029,6 +3146,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "run_id": run_id,
                 "symbol": symbol,
                 "exit_reason": exit_reason,
+                "source": event.get("source", not_obs),
                 "target_w": fmt_num(target_w, 8),
                 "rank": fmt_num(rank_from_audit(audit, symbol, target_positive_note), 0),
                 "close_only_weight_eps": fmt_num(close_only_weight_eps, 8),
@@ -3141,7 +3259,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/rank_exit_consistency.csv",
         rank_exit_consistency_rows,
-        ["ts_utc", "run_id", "symbol", "exit_reason", "target_w", "rank", "close_only_weight_eps", "has_exit_signal", "has_router_close_create", "has_target_still_positive_note", "target_positive", "conflict_suspected", "diagnosis"],
+        ["ts_utc", "run_id", "symbol", "exit_reason", "source", "target_w", "rank", "close_only_weight_eps", "has_exit_signal", "has_router_close_create", "has_target_still_positive_note", "target_positive", "conflict_suspected", "diagnosis"],
     )
     write_csv(
         "summaries/protect_sideways_normal_entry_outcomes.csv",
