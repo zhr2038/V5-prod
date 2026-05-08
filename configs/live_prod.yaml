@@ -392,6 +392,18 @@ execution:
   protect_profit_lock_trailing_gap_bps: 60
   protect_profit_lock_strong_start_net_bps: 200
   protect_profit_lock_strong_trailing_gap_bps: 50
+  swing_hold_enabled: true
+  swing_min_hold_hours: 24
+  swing_apply_only_to_normal_entry: true
+  swing_require_alpha6_confirmed: true
+  swing_min_alpha6_score: 0.50
+  swing_min_f5_rsi: 0.30
+  swing_min_f4_volume: 0.0
+  swing_ignore_normal_zero_target_close_before_min_hold: true
+  swing_ignore_rank_exit_before_min_hold: true
+  swing_allow_exit_on_risk_off: true
+  swing_allow_exit_on_stop_loss: true
+  swing_allow_exit_on_profit_lock: true
   same_symbol_reentry_guard_enabled: true
   same_symbol_reentry_cooldown_hours_after_profit_lock: 6
   same_symbol_reentry_cooldown_hours_after_probe_stop: 8

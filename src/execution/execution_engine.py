@@ -10,7 +10,7 @@ from typing import List, Optional
 
 from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
-from src.execution.probe_metadata import probe_tags_from_order_meta
+from src.execution.probe_metadata import position_tags_from_order_meta
 from src.execution.same_symbol_reentry_guard import record_same_symbol_exit_memory
 from src.execution.position_store import PositionStore
 from src.execution.account_store import AccountStore, AccountState
@@ -108,7 +108,7 @@ class ExecutionEngine:
                         o.symbol,
                         qty=qty,
                         px=px,
-                        tags=probe_tags_from_order_meta(o.meta or {}, entry_px=px, entry_ts=ts),
+                        tags=position_tags_from_order_meta(o.meta or {}, entry_px=px, entry_ts=ts),
                     )
 
             elif self.position_store and o.intent in {"CLOSE_LONG", "REBALANCE"} and o.side == "sell":

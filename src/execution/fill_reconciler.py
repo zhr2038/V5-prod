@@ -18,7 +18,7 @@ from src.execution.fill_store import FillStore, derive_runtime_named_json_path, 
 from src.execution.okx_private_client import OKXPrivateClient
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
-from src.execution.probe_metadata import probe_tags_from_order_meta
+from src.execution.probe_metadata import position_tags_from_order_meta
 from src.execution.same_symbol_reentry_guard import record_same_symbol_exit_memory
 
 
@@ -125,7 +125,7 @@ class FillReconciler:
                 symbol,
                 qty=float(delta_qty),
                 px=fill_px,
-                tags=probe_tags_from_order_meta(self._order_meta(row), entry_px=fill_px),
+                tags=position_tags_from_order_meta(self._order_meta(row), entry_px=fill_px),
             )
             return
 

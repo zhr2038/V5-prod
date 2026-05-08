@@ -24,7 +24,7 @@ from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, r
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
-from src.execution.probe_metadata import probe_tags_from_order_meta
+from src.execution.probe_metadata import position_tags_from_order_meta
 from src.data.okx_instruments import OKXSpotInstrumentsCache, round_down_to_lot
 
 
@@ -534,6 +534,20 @@ class LiveExecutionEngine:
     @staticmethod
     def _base_ccy(symbol: str) -> str:
         return str(symbol).split("/")[0].upper()
+
+    @staticmethod
+    def _order_meta_from_row(row: Any) -> Dict[str, Any]:
+        try:
+            raw = getattr(row, "req_json", None)
+            if not raw:
+                return {}
+            obj = json.loads(raw)
+            if not isinstance(obj, dict):
+                return {}
+            meta = obj.get("_v5_order_meta")
+            return dict(meta or {}) if isinstance(meta, dict) else {}
+        except Exception:
+            return {}
 
     def _compute_base_delta_from_fills(
         self,
@@ -1299,12 +1313,12 @@ class LiveExecutionEngine:
             req_store = dict(payload)
             req_store["_v5_reason"] = str(((o.meta or {}).get("reason")) or "")
             order_meta = dict(o.meta or {})
-            probe_tags = probe_tags_from_order_meta(
+            position_tags = position_tags_from_order_meta(
                 order_meta,
                 entry_px=float(o.signal_price or 0.0),
             )
-            if probe_tags is not None:
-                order_meta.update(probe_tags)
+            if position_tags is not None:
+                order_meta.update(position_tags)
             if order_meta:
                 req_store["_v5_order_meta"] = order_meta
             if tob:
@@ -1535,6 +1549,10 @@ class LiveExecutionEngine:
                                 str(row.inst_id).replace("-", "/"),
                                 qty=float(delta_buy_qty),
                                 px=float(avg_px or 0.0),
+                                tags=position_tags_from_order_meta(
+                                    self._order_meta_from_row(row),
+                                    entry_px=float(avg_px or 0.0),
+                                ),
                             )
                     elif str(row.side).lower() == "sell":
                         p = self.position_store.get(str(row.inst_id).replace("-", "/"))

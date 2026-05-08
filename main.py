@@ -787,6 +787,22 @@ SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS = (
 )
 
 
+SWING_HOLD_CONFIG_KEYS = (
+    "swing_hold_enabled",
+    "swing_min_hold_hours",
+    "swing_apply_only_to_normal_entry",
+    "swing_require_alpha6_confirmed",
+    "swing_min_alpha6_score",
+    "swing_min_f5_rsi",
+    "swing_min_f4_volume",
+    "swing_ignore_normal_zero_target_close_before_min_hold",
+    "swing_ignore_rank_exit_before_min_hold",
+    "swing_allow_exit_on_risk_off",
+    "swing_allow_exit_on_stop_loss",
+    "swing_allow_exit_on_profit_lock",
+)
+
+
 PROTECT_NEGATIVE_EXPECTANCY_SHORT_CYCLE_CONFIG_KEYS = (
     "protect_negative_expectancy_short_cycle_guard_enabled",
     "protect_negative_expectancy_short_cycle_min_cycles",
@@ -828,6 +844,15 @@ def _same_symbol_reentry_guard_effective_config(cfg: AppConfig) -> Dict[str, Any
     return {
         key: getattr(execution, key)
         for key in SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
+def _swing_hold_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in SWING_HOLD_CONFIG_KEYS
         if hasattr(execution, key)
     }
 
@@ -1038,6 +1063,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             **_probe_exit_effective_config(cfg),
             **_protect_profit_lock_effective_config(cfg),
             **_same_symbol_reentry_guard_effective_config(cfg),
+            **_swing_hold_effective_config(cfg),
             **_protect_negative_expectancy_short_cycle_effective_config(cfg),
             **_negative_expectancy_release_effective_config(cfg),
         },

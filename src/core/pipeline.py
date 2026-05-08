@@ -1604,6 +1604,152 @@ class V5Pipeline:
             "risk_off_close_only": bool(is_risk_off_close_only),
         }
 
+    def _normal_entry_swing_hold_meta(
+        self,
+        *,
+        symbol: str,
+        strategy_signal_lookup: Mapping[str, Dict[str, Dict[str, Any]]],
+        current_auto_risk_level: Optional[str],
+        now_utc: datetime,
+    ) -> Optional[Dict[str, Any]]:
+        if not bool(getattr(self.cfg.execution, "swing_hold_enabled", True)):
+            return None
+        apply_only_normal_entry = bool(
+            getattr(self.cfg.execution, "swing_apply_only_to_normal_entry", True)
+        )
+        level = str(current_auto_risk_level or "").strip().upper()
+        if level not in {"PROTECT", "NORMAL"}:
+            return None
+
+        alpha6_signal = (strategy_signal_lookup.get("Alpha6Factor") or {}).get(symbol)
+        values = self._protect_entry_signal_values(alpha6_signal)
+        alpha6_side = values.get("alpha6_side")
+        alpha6_score = values.get("alpha6_score")
+        f4 = values.get("f4_volume_expansion")
+        f5 = values.get("f5_rsi_trend_confirm")
+        if bool(getattr(self.cfg.execution, "swing_require_alpha6_confirmed", True)) and alpha6_side != "buy":
+            return None
+        if alpha6_score is None or f4 is None or f5 is None:
+            return None
+
+        min_score = float(getattr(self.cfg.execution, "swing_min_alpha6_score", 0.50) or 0.0)
+        min_f5 = float(getattr(self.cfg.execution, "swing_min_f5_rsi", 0.30) or 0.0)
+        min_f4 = float(getattr(self.cfg.execution, "swing_min_f4_volume", 0.0) or 0.0)
+        if float(alpha6_score) < min_score or float(f5) < min_f5 or float(f4) < min_f4:
+            return None
+
+        min_hold_hours = float(getattr(self.cfg.execution, "swing_min_hold_hours", 24) or 0.0)
+        entry_ts = now_utc.isoformat().replace("+00:00", "Z")
+        return {
+            "swing_hold_position": True,
+            "swing_apply_only_to_normal_entry": apply_only_normal_entry,
+            "swing_entry_ts": entry_ts,
+            "swing_entry_ts_ms": int(now_utc.timestamp() * 1000),
+            "swing_min_hold_hours": min_hold_hours,
+            "entry_reason": "normal_entry",
+            "alpha6_score": float(alpha6_score),
+            "alpha6_side": alpha6_side,
+            "f4_volume_expansion": float(f4),
+            "f5_rsi_trend_confirm": float(f5),
+            "current_level": level,
+        }
+
+    def _swing_position_meta(
+        self,
+        position: Position,
+        *,
+        probe_state: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        tags = self._position_tags(position)
+        if self._probe_metadata_for_position(position, probe_state=probe_state) is not None:
+            return None
+        if not bool(tags.get("swing_hold_position", False)):
+            return None
+        return tags
+
+    def _swing_min_hold_guard_decision(
+        self,
+        *,
+        position: Position,
+        probe_state: Optional[Mapping[str, Any]],
+        now_utc: datetime,
+        blocked_exit_reason: str,
+        target_w: Optional[float] = None,
+        is_risk_off_close_only: bool = False,
+        rank: Optional[int] = None,
+        source: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not bool(getattr(self.cfg.execution, "swing_hold_enabled", True)):
+            return None
+        reason = str(blocked_exit_reason or "").strip()
+        reason_l = reason.lower()
+        if not reason_l:
+            return None
+        if reason_l.startswith("rank_exit") and not bool(
+            getattr(self.cfg.execution, "swing_ignore_rank_exit_before_min_hold", True)
+        ):
+            return None
+        ordinary_close = (
+            reason_l in {"zero_target_close", "force_close_unscored", "target_rebalance_sell", "target_churn"}
+            or reason_l.startswith("zero_target")
+            or reason_l.startswith("replacement_target")
+        )
+        if ordinary_close and not bool(
+            getattr(self.cfg.execution, "swing_ignore_normal_zero_target_close_before_min_hold", True)
+        ):
+            return None
+        if bool(is_risk_off_close_only) and bool(getattr(self.cfg.execution, "swing_allow_exit_on_risk_off", True)):
+            return None
+        if bool(getattr(self.cfg.execution, "swing_allow_exit_on_stop_loss", True)) and (
+            reason_l.startswith("stop_loss")
+            or reason_l.startswith("fixed_stop_loss")
+            or reason_l.startswith("dynamic_stop")
+        ):
+            return None
+        if bool(getattr(self.cfg.execution, "swing_allow_exit_on_profit_lock", True)) and reason_l.startswith(
+            "protect_profit_lock"
+        ):
+            return None
+        if reason_l.startswith("manual") or reason_l.startswith("kill_switch"):
+            return None
+
+        meta = self._swing_position_meta(position, probe_state=probe_state)
+        if meta is None:
+            return None
+
+        required_hold_hours = float(
+            _coalesce(meta.get("swing_min_hold_hours"), getattr(self.cfg.execution, "swing_min_hold_hours", 24))
+        )
+        entry_ts = str(meta.get("swing_entry_ts") or getattr(position, "entry_ts", "") or "").strip()
+        entry_dt = _parse_iso_utc(entry_ts)
+        if entry_dt is None:
+            return None
+        hold_hours = max(0.0, (now_utc - entry_dt).total_seconds() / 3600.0)
+        if hold_hours >= required_hold_hours:
+            return None
+
+        decision = {
+            "symbol": str(getattr(position, "symbol", "") or ""),
+            "action": "skip",
+            "reason": "swing_min_hold_guard",
+            "blocked_exit_reason": reason,
+            "hold_hours": float(hold_hours),
+            "required_hold_hours": float(required_hold_hours),
+            "swing_hold_position": True,
+            "swing_entry_ts": entry_ts,
+            "alpha6_score": meta.get("alpha6_score"),
+            "f4_volume_expansion": meta.get("f4_volume_expansion"),
+            "f5_rsi_trend_confirm": meta.get("f5_rsi_trend_confirm"),
+            "current_level": meta.get("current_level"),
+        }
+        if target_w is not None:
+            decision["target_w"] = float(target_w)
+        if rank is not None:
+            decision["rank"] = int(rank)
+        if source is not None:
+            decision["source"] = str(source)
+        return decision
+
     def _clear_active_position_state_for_symbol(self, symbol: str) -> List[str]:
         sym = str(symbol)
         cleared: List[str] = []
@@ -4565,6 +4711,27 @@ class V5Pipeline:
                 s = market_data_1h.get(p.symbol)
                 if s and s.close:
                     current_price = float(s.close[-1])
+                    swing_guard = self._swing_min_hold_guard_decision(
+                        position=p,
+                        probe_state=probe_state,
+                        now_utc=now_utc,
+                        blocked_exit_reason=f"rank_exit_{reason}",
+                        target_w=tw,
+                        is_risk_off_close_only=is_risk_off_close_only,
+                        rank=current_rank,
+                        source=rank_source,
+                    )
+                    if swing_guard is not None:
+                        rank_exit_guard_decisions.append(swing_guard)
+                        if audit:
+                            audit.record_count("swing_min_hold_guard_count", symbol=p.symbol)
+                            audit.add_note(
+                                "Swing min-hold guard blocked rank_exit: "
+                                f"{p.symbol} hold_hours={float(swing_guard.get('hold_hours') or 0.0):.2f} "
+                                f"< {float(swing_guard.get('required_hold_hours') or 0.0):.2f}, "
+                                f"blocked_exit_reason={swing_guard.get('blocked_exit_reason')}"
+                            )
+                        continue
                     ranking_exit_orders.append(
                         Order(
                             symbol=p.symbol,
@@ -4953,9 +5120,10 @@ class V5Pipeline:
         protect_replacement_hold_min_score = float(
             getattr(self.cfg.execution, "protect_replacement_hold_min_score", 0.10) or 0.0
         )
+        swing_hold_enabled = bool(getattr(self.cfg.execution, "swing_hold_enabled", True))
         strategy_signal_lookup = (
             self._resolve_strategy_signal_lookup(audit)
-            if protect_entry_gate_active
+            if protect_entry_gate_active or swing_hold_enabled
             else {}
         )
         if audit:
@@ -5076,6 +5244,24 @@ class V5Pipeline:
                                 f"hold_hours={probe_zero_skip.get('hold_hours')}"
                             )
                             router_decisions.append(probe_zero_skip)
+                        continue
+                    swing_guard = self._swing_min_hold_guard_decision(
+                        position=active_held,
+                        probe_state=probe_state,
+                        now_utc=now_utc,
+                        blocked_exit_reason="force_close_unscored",
+                        target_w=tw,
+                        is_risk_off_close_only=is_risk_off_close_only,
+                    )
+                    if swing_guard is not None:
+                        if audit:
+                            audit.record_count("swing_min_hold_guard_count", symbol=sym)
+                            audit.add_note(
+                                "Swing min-hold guard blocked force_close_unscored: "
+                                f"{sym} hold_hours={float(swing_guard.get('hold_hours') or 0.0):.2f} "
+                                f"< {float(swing_guard.get('required_hold_hours') or 0.0):.2f}"
+                            )
+                            router_decisions.append(swing_guard)
                         continue
                     notional_fs = max(0.0, float(getattr(active_held, 'qty', 0.0) or 0.0) * px_fs)
                     if notional_fs > 0:
@@ -5245,6 +5431,28 @@ class V5Pipeline:
                             f"hold_hours={probe_zero_skip.get('hold_hours')}"
                         )
                         router_decisions.append(probe_zero_skip)
+                    continue
+
+            if side == "sell" and active_held is not None:
+                swing_blocked_exit_reason = "zero_target_close" if bypass_turnover_cap_for_exit else "target_rebalance_sell"
+                swing_guard = self._swing_min_hold_guard_decision(
+                    position=active_held,
+                    probe_state=probe_state,
+                    now_utc=now_utc,
+                    blocked_exit_reason=swing_blocked_exit_reason,
+                    target_w=tw,
+                    is_risk_off_close_only=is_risk_off_close_only,
+                )
+                if swing_guard is not None:
+                    if audit:
+                        audit.record_count("swing_min_hold_guard_count", symbol=sym)
+                        audit.add_note(
+                            "Swing min-hold guard blocked soft close: "
+                            f"{sym} reason={swing_blocked_exit_reason} "
+                            f"hold_hours={float(swing_guard.get('hold_hours') or 0.0):.2f} "
+                            f"< {float(swing_guard.get('required_hold_hours') or 0.0):.2f}"
+                        )
+                        router_decisions.append(swing_guard)
                     continue
 
             if (
@@ -5893,11 +6101,34 @@ class V5Pipeline:
                         router_decisions.append(decision)
                     continue
 
+            swing_meta: Dict[str, Any] = {}
+            if side == "buy" and intent == "OPEN_LONG" and btc_probe_meta is None:
+                swing_candidate_meta = self._normal_entry_swing_hold_meta(
+                    symbol=sym,
+                    strategy_signal_lookup=strategy_signal_lookup,
+                    current_auto_risk_level=current_auto_risk_level,
+                    now_utc=now_utc,
+                )
+                if swing_candidate_meta is not None:
+                    swing_meta = swing_candidate_meta
+                    if audit:
+                        audit.record_count("swing_hold_position_count", symbol=sym)
+                        audit.add_note(
+                            "Swing hold position marked: "
+                            f"{sym} min_hold_hours={float(swing_meta.get('swing_min_hold_hours') or 0.0):.2f} "
+                            f"alpha6={float(swing_meta.get('alpha6_score') or 0.0):.3f} "
+                            f"f4={float(swing_meta.get('f4_volume_expansion') or 0.0):.3f} "
+                            f"f5={float(swing_meta.get('f5_rsi_trend_confirm') or 0.0):.3f} "
+                            f"level={swing_meta.get('current_level')}"
+                        )
+
             meta = {
                 "target_w": tw,
                 "dd_mult": dd_mult,
                 "score_rank": int(symbol_ranks.get(sym, 1_000_000)),
             }
+            if swing_meta:
+                meta.update(swing_meta)
             if dust_add_size_ignore_info:
                 meta.update(dust_add_size_ignore_info)
             if side == "buy":
@@ -5976,6 +6207,17 @@ class V5Pipeline:
                 if side == "buy" and btc_probe_meta is not None:
                     audit.record_count("btc_leadership_probe_open_count", symbol=sym)
                     decision.update(btc_probe_meta)
+                if side == "buy" and swing_meta:
+                    decision.update(
+                        {
+                            "swing_hold_position": True,
+                            "swing_min_hold_hours": swing_meta.get("swing_min_hold_hours"),
+                            "alpha6_score": swing_meta.get("alpha6_score"),
+                            "f4_volume_expansion": swing_meta.get("f4_volume_expansion"),
+                            "f5_rsi_trend_confirm": swing_meta.get("f5_rsi_trend_confirm"),
+                            "current_level": swing_meta.get("current_level"),
+                        }
+                    )
                 router_decisions.append(decision)
 
         market_impulse_probe_context = self._market_impulse_probe_context(
