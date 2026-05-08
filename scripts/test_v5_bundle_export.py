@@ -1015,6 +1015,96 @@ def fixture_multi_position_swing_shadow_root(root):
     return run_id
 
 
+def fixture_multi_position_swing_shadow_from_audit_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    entry_dt = now - dt.timedelta(hours=50)
+    entry_ts = int(entry_dt.timestamp())
+    current_ts = int(now.timestamp())
+    entry_run_id = entry_dt.strftime("%Y%m%d_%H")
+    current_run_id = now.strftime("%Y%m%d_%H")
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "diagnostics:\n"
+        "  multi_position_swing_shadow_enabled: true\n"
+        "  multi_position_swing_shadow_symbols: [\"BTC/USDT\", \"ETH/USDT\", \"SOL/USDT\", \"BNB/USDT\"]\n"
+        "  multi_position_swing_shadow_min_final_score: 0.30\n"
+        "  multi_position_swing_shadow_horizons_hours: [24, 48, 72]\n"
+        "  multi_position_swing_shadow_rt_cost_bps: 30\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    entry_run_dir = root / "reports/runs/prod" / entry_run_id
+    write_json(entry_run_dir / "decision_audit.json", {
+        "now_ts": entry_ts + 15,
+        "window_end_ts": entry_ts,
+        "regime": "Trending",
+        "top_scores": [
+            {"symbol": "SOL/USDT", "score": 0.61, "display_score": 0.61, "rank": 1},
+            {"symbol": "BNB/USDT", "score": 0.50, "display_score": 0.50, "rank": 2},
+            {"symbol": "ETH/USDT", "score": -0.20, "display_score": -0.20, "rank": 3},
+        ],
+        "targets_post_risk": {"SOL/USDT": 0.15},
+        "target_execution_explain": [
+            {
+                "symbol": "SOL/USDT",
+                "target_w": 0.15,
+                "final_score": 0.61,
+                "selected_rank": 1,
+                "router_action": "skip",
+                "router_reason": "protect_entry_rsi_confirm_too_weak",
+                "current_level": "PROTECT",
+                "regime": "Trending",
+            },
+            {
+                "symbol": "BNB/USDT",
+                "target_w": 0.0,
+                "final_score": 0.50,
+                "selected_rank": 2,
+                "router_action": "skip",
+                "router_reason": "deadband",
+                "current_level": "PROTECT",
+                "regime": "Trending",
+            },
+        ],
+        "router_decisions": [
+            {"symbol": "SOL/USDT", "action": "skip", "reason": "protect_entry_rsi_confirm_too_weak"},
+            {"symbol": "BNB/USDT", "action": "skip", "reason": "deadband"},
+        ],
+    })
+    write_text(entry_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(entry_run_dir / "equity.jsonl", "{}\n")
+    write_json(entry_run_dir / "summary.json", {"run_id": entry_run_id})
+
+    current_run_dir = root / "reports/runs/prod" / current_run_id
+    write_json(current_run_dir / "decision_audit.json", {
+        "now_ts": current_ts + 15,
+        "window_end_ts": current_ts,
+        "regime": "Trending",
+        "top_scores": [{"symbol": "SOL/USDT", "score": 0.20, "display_score": 0.20, "rank": 1}],
+        "targets_post_risk": {},
+        "target_execution_explain": [],
+        "router_decisions": [],
+    })
+    write_text(current_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run_dir / "equity.jsonl", "{}\n")
+    write_json(current_run_dir / "summary.json", {"run_id": current_run_id})
+
+    entry_label_ts = entry_ts + 15
+    write_ohlcv_cache(root, "SOL/USDT", [(entry_label_ts, 100.0), (entry_label_ts + 24 * 3600, 104.0), (entry_label_ts + 48 * 3600, 106.0)])
+    write_ohlcv_cache(root, "BNB/USDT", [(entry_label_ts, 200.0), (entry_label_ts + 24 * 3600, 198.0), (entry_label_ts + 48 * 3600, 210.0)])
+    return entry_run_id
+
+
 def fixture_alt_impulse_shadow_cache_fill_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -1747,6 +1837,48 @@ def main():
             assert "top2 是否优于 top1: no / 24h top1=370" in readme, readme
             assert "top3 是否增加风险: yes" in readme, readme
             assert "哪些组合表现最好: k=1 symbols=[\"ETH/USDT\"] 24h_avg=370" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-multi-position-swing-shadow-from-audit-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_multi_position_swing_shadow_from_audit_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/multi_position_swing_shadow_outcomes.csv")).read().decode().splitlines()))
+                by_k = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/multi_position_swing_shadow_by_k.csv")).read().decode().splitlines()))
+                by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/multi_position_swing_shadow_by_symbol.csv")).read().decode().splitlines()))
+                labels_lines = tf.extractfile(extract_member(tf, "raw/reports/multi_position_swing_shadow_labels.jsonl")).read().decode().splitlines()
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+            assert len(labels_lines) == 2, labels_lines
+            assert len(outcomes) == 2, outcomes
+            top1 = next(row for row in outcomes if row["k"] == "1")
+            top2 = next(row for row in outcomes if row["k"] == "2")
+            assert top1["symbols"] == "[\"SOL/USDT\"]", top1
+            assert top1["entry_px_by_symbol"] == "{\"SOL/USDT\": 100.0}", top1
+            assert top1["final_score_by_symbol"] == "{\"SOL/USDT\": 0.61}", top1
+            assert top1["label_24h_status"] == "complete", top1
+            assert top1["label_24h_net_bps"] == "370", top1
+            assert top1["label_48h_status"] == "complete", top1
+            assert top1["label_72h_status"] == "pending", top1
+            assert top2["symbols"] == "[\"SOL/USDT\", \"BNB/USDT\"]", top2
+            assert top2["label_24h_portfolio_avg_net_bps"] == "120", top2
+            assert top2["label_24h_worst_symbol_net_bps"] == "-130", top2
+            assert top2["label_24h_win_count"] == "1", top2
+            by_k_map = {row["k"]: row for row in by_k}
+            assert by_k_map["1"]["count"] == "1", by_k
+            assert by_k_map["2"]["count"] == "1", by_k
+            assert "3" not in by_k_map, by_k
+            by_symbol_map = {row["symbol"]: row for row in by_symbol}
+            assert by_symbol_map["SOL/USDT"]["count"] == "2", by_symbol
+            assert by_symbol_map["BNB/USDT"]["count"] == "1", by_symbol
+            assert window["multi_position_swing_shadow_label_count"] == 2, window
+            assert window["multi_position_swing_shadow_complete_count"] == 2, window
+            assert "reports/multi_position_swing_shadow_labels.jsonl" not in manifest["missing_paths"], manifest
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
