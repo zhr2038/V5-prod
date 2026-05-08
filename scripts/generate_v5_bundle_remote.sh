@@ -135,6 +135,8 @@ MAX_COPY_BYTES = 20 * 1024 * 1024
 MAX_LOG_BYTES = 5 * 1024 * 1024
 RECENT_72H = NOW.timestamp() - 72 * 3600
 RECENT_24H = NOW.timestamp() - 24 * 3600
+WINDOW_72H_START = NOW - dt.timedelta(hours=72)
+WINDOW_72H_END = NOW
 
 missing_paths = []
 collection_errors = []
@@ -3562,6 +3564,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             return not_obs, None
         return parsed.strftime("%Y-%m-%dT%H:%M:%SZ"), parsed
 
+    def in_current_72h_window(value):
+        parsed = value if isinstance(value, dt.datetime) else parse_dt_utc(value)
+        if parsed is None:
+            return False
+        parsed = parsed.astimezone(dt.timezone.utc)
+        return WINDOW_72H_START <= parsed <= WINDOW_72H_END
+
     def audit_window_for_run(run_id, audit):
         if not isinstance(audit, dict):
             return None, None, parse_run_time(run_id)
@@ -3581,18 +3590,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     def run_id_for_log_event(event_dt):
         if event_dt is None:
             return not_obs
-        window_matches = []
-        nearest = []
+        matches = []
+        tolerance = dt.timedelta(minutes=90)
         for run_id, audit in audit_by_run.items():
             start_dt, end_dt, audit_dt = audit_window_for_run(run_id, audit)
-            if start_dt is not None and end_dt is not None and start_dt <= event_dt < end_dt:
-                window_matches.append((abs((event_dt - (audit_dt or end_dt)).total_seconds()), run_id))
-            if audit_dt is not None:
-                nearest.append((abs((event_dt - audit_dt).total_seconds()), run_id))
-        if window_matches:
-            return sorted(window_matches)[0][1]
-        if nearest:
-            return sorted(nearest)[0][1]
+            reference_dt = end_dt or audit_dt or parse_run_time(run_id)
+            if reference_dt is None:
+                continue
+            delta = abs(event_dt - reference_dt)
+            if delta > tolerance:
+                continue
+            in_window = bool(start_dt is not None and end_dt is not None and start_dt <= event_dt < end_dt)
+            matches.append((0 if in_window else 1, delta.total_seconds(), run_id))
+        if matches:
+            return sorted(matches)[0][2]
         return not_obs
 
     def parse_trade_safety_rank_exit_line(line, source):
@@ -3613,9 +3624,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if side != "sell" or intent != "CLOSE_LONG" or not reason.startswith("rank_exit"):
             return None
         ts_utc, event_dt = log_line_ts_utc(line)
+        current_window = in_current_72h_window(event_dt)
         return {
             "ts_utc": ts_utc,
-            "run_id": run_id_for_log_event(event_dt),
+            "run_id": run_id_for_log_event(event_dt) if current_window else not_obs,
             "symbol": symbol_from_inst_id(inst_id),
             "exit_reason": reason,
             "side": side,
@@ -3623,6 +3635,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "notional": first_observed(fields.get("notional")),
             "source": source,
             "raw_json": safe_json({"line": line.strip()}),
+            "_event_dt": event_dt,
+            "_current_window": current_window,
         }
 
     def rank_exit_events_from_trades():
@@ -3673,6 +3687,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             })
         return rows
 
+    legacy_rank_exit_event_rows = []
+
     def rank_exit_events_from_logs():
         rows = []
         for log_path in sorted((OUT / "raw" / "logs").glob("*")):
@@ -3682,7 +3698,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     for line in fh:
                         event = parse_trade_safety_rank_exit_line(line, source)
                         if event:
-                            rows.append(event)
+                            if event.get("_current_window"):
+                                rows.append(event)
+                            else:
+                                legacy_rank_exit_event_rows.append({
+                                    "ts_utc": event.get("ts_utc", not_obs),
+                                    "run_id": not_obs,
+                                    "symbol": event.get("symbol", not_obs),
+                                    "exit_reason": event.get("exit_reason", not_obs),
+                                    "source": event.get("source", not_obs),
+                                    "notional": event.get("notional", not_obs),
+                                    "diagnosis": "legacy_rank_exit_event_outside_current_window",
+                                })
             except Exception as exc:
                 collection_errors.append({"source": str(log_path), "error": f"rank_exit_trade_safety_scan: {exc!r}"})
         return rows
@@ -3692,9 +3719,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         seen = set()
         for event in rank_exit_events_from_trades() + rank_exit_events_from_logs():
             key = (
+                event.get("ts_utc", not_obs),
                 event.get("run_id", not_obs),
                 event.get("symbol", not_obs),
                 event.get("exit_reason", not_obs),
+                event.get("source", not_obs),
             )
             if key in seen:
                 continue
@@ -3709,6 +3738,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 with log_path.open("r", encoding="utf-8", errors="replace") as fh:
                     for line in fh:
                         if "rank_exit_target_still_positive" not in line:
+                            continue
+                        _, line_dt = log_line_ts_utc(line)
+                        if not in_current_72h_window(line_dt):
                             continue
                         match = re.search(r"([A-Z0-9]+/[A-Z0-9]+)", line)
                         if match:
@@ -3727,16 +3759,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             run_id = event.get("run_id", not_obs)
             symbol = event.get("symbol", not_obs)
             exit_reason = event.get("exit_reason", not_obs)
-            audit = audit_by_run.get(run_id, {})
+            reliable_run = bool(run_id not in (None, "", not_obs) and run_id in audit_by_run)
+            audit = audit_by_run.get(run_id, {}) if reliable_run else {}
             notes = audit_notes_for_rank(audit)
             target_positive_note = note_for_symbol(notes, symbol, "rank_exit_target_still_positive")
-            has_target_still_positive_note = bool(target_positive_note or symbol in log_target_positive_symbols)
-            target_w = target_w_from_audit(audit, symbol)
+            has_target_still_positive_note = bool(reliable_run and (target_positive_note or symbol in log_target_positive_symbols))
+            target_w = target_w_from_audit(audit, symbol) if reliable_run else None
             target_positive = bool(target_w is not None and target_w > close_only_weight_eps)
-            has_exit_signal = has_rank_exit_signal(audit, symbol, exit_reason)
-            has_router_close_create = has_rank_exit_router_close_create(audit, symbol, exit_reason)
+            has_exit_signal = has_rank_exit_signal(audit, symbol, exit_reason) if reliable_run else False
+            has_router_close_create = has_rank_exit_router_close_create(audit, symbol, exit_reason) if reliable_run else False
             conflict_suspected = bool(
                 is_rank_exit_reason(exit_reason)
+                and reliable_run
                 and (has_target_still_positive_note or target_positive)
                 and (not has_exit_signal or not has_router_close_create)
             )
@@ -3763,6 +3797,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                         "has_router_close_create": has_router_close_create,
                     },
                 )
+            elif is_rank_exit_reason(exit_reason) and not reliable_run:
+                diagnosis = "rank_exit_event_unmatched_to_run"
             elif is_rank_exit_reason(exit_reason):
                 diagnosis = "ok"
             else:
@@ -3886,6 +3922,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "summaries/rank_exit_consistency.csv",
         rank_exit_consistency_rows,
         ["ts_utc", "run_id", "symbol", "exit_reason", "source", "target_w", "rank", "close_only_weight_eps", "has_exit_signal", "has_router_close_create", "has_target_still_positive_note", "target_positive", "conflict_suspected", "diagnosis"],
+    )
+    write_csv(
+        "summaries/legacy_rank_exit_events.csv",
+        legacy_rank_exit_event_rows,
+        ["ts_utc", "run_id", "symbol", "exit_reason", "source", "notional", "diagnosis"],
     )
     write_csv(
         "summaries/protect_sideways_normal_entry_outcomes.csv",
@@ -4062,6 +4103,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
         "window_hours": 72,
+        "last_72h_start_utc": WINDOW_72H_START.isoformat(),
+        "last_72h_end_utc": WINDOW_72H_END.isoformat(),
         "remote_root": str(ROOT),
         "run_count": len(copied_runs),
         "recent_24h_decision_audit_count": len(recent_24_decisions),
@@ -4641,6 +4684,8 @@ manifest = {
     "git_branch": branch.splitlines()[0] if branch else "not_git",
     "git_commit": commit.splitlines()[0] if commit else "not_git",
     "sampling_end_utc": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "last_72h_start_utc": WINDOW_72H_START.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "last_72h_end_utc": WINDOW_72H_END.strftime("%Y-%m-%dT%H:%M:%SZ"),
     "remote_root": str(ROOT),
     "bundle_path": str(TAR),
     "sha256_path": str(SHA_PATH),

@@ -557,6 +557,51 @@ def fixture_rank_exit_log_only_consistency_root(root):
     return close_run_id
 
 
+def fixture_legacy_rank_exit_log_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    run_id = now.strftime("%Y%m%d_%H")
+    window_end = int(now.timestamp())
+    old_ts = dt.datetime(2026, 3, 17, 8, 0, 49, tzinfo=dt.timezone.utc)
+    old_iso = old_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    write_text(root / "configs/live_prod.yaml", "close_only_weight_eps: 0.001\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(
+        root / "logs/v5_runtime.log",
+        f"{old_iso} INFO TRADE_SAFETY: sell ETH-USDT, tdMode=cash, intent=CLOSE_LONG, reason=rank_exit_4, notional=12.3400\n"
+        f"{old_iso} WARNING rank_exit_target_still_positive: ETH/USDT target_w=0.1500 > eps=0.0010, rank=2, source=fused\n",
+    )
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "notes": [
+            "rank_exit_target_still_positive: ETH/USDT target_w=0.1500 > eps=0.0010, rank=2, source=fused"
+        ],
+        "exit_signals": [],
+        "router_decisions": [
+            {"symbol": "ETH/USDT", "action": "skip", "reason": "deadband"}
+        ],
+        "targets_post_risk": {"ETH/USDT": 0.15},
+        "target_execution_explain": [
+            {"symbol": "ETH/USDT", "target_w": 0.15, "selected_rank": 2}
+        ],
+    })
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    return run_id
+
+
 def fixture_protect_sideways_normal_entry_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     open_run_dt = now - dt.timedelta(hours=6)
@@ -1967,6 +2012,36 @@ def main():
             assert window["rank_exit_sell_count"] == 1, window
             assert window["rank_exit_conflict_count"] == 1, window
             assert window["rank_exit_target_positive_sell_count"] == 1, window
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-legacy-rank-exit-log-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_legacy_rank_exit_log_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/rank_exit_consistency.csv")).read().decode().splitlines()))
+                legacy_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/legacy_rank_exit_events.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert rows == [], rows
+            assert len(legacy_rows) == 1, legacy_rows
+            legacy = legacy_rows[0]
+            assert legacy["ts_utc"] == "2026-03-17T08:00:49Z", legacy
+            assert legacy["run_id"] == "not_observable", legacy
+            assert legacy["symbol"] == "ETH/USDT", legacy
+            assert legacy["exit_reason"] == "rank_exit_4", legacy
+            assert legacy["diagnosis"] == "legacy_rank_exit_event_outside_current_window", legacy
+            rank_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "rank_exit_target_positive_execution_conflict"
+            ]
+            assert rank_issues == [], issues
+            assert window["rank_exit_sell_count"] == 0, window
+            assert window["rank_exit_conflict_count"] == 0, window
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
