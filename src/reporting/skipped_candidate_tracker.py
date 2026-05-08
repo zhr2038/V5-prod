@@ -30,6 +30,8 @@ FOCUS_SKIP_REASONS = {
 }
 BTC_LEADERSHIP_PROBE_SKIP_PREFIX = "btc_leadership_probe_"
 HORIZON_PREFIX = "label_"
+LEGACY_LABEL_HORIZONS = [4, 8, 12, 24]
+DEFAULT_EXTENDED_LABEL_HORIZONS = [4, 8, 12, 24, 48, 72, 120]
 BTC_LEADERSHIP_PROBE_FIELDS = [
     "rolling_high",
     "breakout_buffer_bps",
@@ -55,6 +57,34 @@ def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
     if diagnostics is None:
         return DiagnosticsConfig()
     return diagnostics
+
+
+def _normalize_horizons(raw: Any, fallback: list[int]) -> list[int]:
+    out: list[int] = []
+    seen: set[int] = set()
+    for item in raw or []:
+        try:
+            value = int(item)
+        except Exception:
+            continue
+        if value <= 0 or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out or list(fallback)
+
+
+def _label_horizons(diagnostics: Any) -> list[int]:
+    legacy = _normalize_horizons(
+        getattr(diagnostics, "skipped_candidate_horizons_hours", None),
+        LEGACY_LABEL_HORIZONS,
+    )
+    if legacy != LEGACY_LABEL_HORIZONS:
+        return legacy
+    return _normalize_horizons(
+        getattr(diagnostics, "extended_label_horizons_hours", None),
+        DEFAULT_EXTENDED_LABEL_HORIZONS,
+    )
 
 
 def _iso_from_ms(timestamp_ms: int) -> str:
@@ -468,6 +498,38 @@ def _aggregate_records_by_fields(
     return out
 
 
+def _aggregate_records_by_horizon(records: list[dict[str, Any]], *, horizons: list[int]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for horizon in horizons:
+        h = int(horizon)
+        net_key = f"{HORIZON_PREFIX}{h}h_net_bps"
+        status_key = f"{HORIZON_PREFIX}{h}h_status"
+        values = [_normalize_float(row.get(net_key)) for row in records]
+        usable = [value for value in values if value is not None]
+        def row_horizon_status(row: dict[str, Any]) -> str:
+            status = str(row.get(status_key) or "")
+            if status in {"pending", "not_observable", "complete"}:
+                return status
+            if _normalize_float(row.get(net_key)) is not None:
+                return "complete"
+            value_text = str(row.get(net_key) or "")
+            if value_text in {"pending", "not_observable"}:
+                return value_text
+            return ""
+        out.append(
+            {
+                "horizon_hours": h,
+                "count": len(records),
+                "pending_count": sum(1 for row in records if row_horizon_status(row) == "pending"),
+                "not_observable_count": sum(1 for row in records if row_horizon_status(row) == "not_observable"),
+                "complete_count": sum(1 for row in records if row_horizon_status(row) == "complete"),
+                "avg_net_bps": round(sum(usable) / len(usable), 6) if usable else None,
+                "win_rate": round(sum(1 for value in usable if float(value) > 0.0) / len(usable), 6) if usable else None,
+            }
+        )
+    return out
+
+
 def _build_record(
     *,
     audit: DecisionAudit,
@@ -589,7 +651,7 @@ def _build_record(
         "label_status": "pending",
         "label_not_observable_reason": "",
     }
-    for horizon in getattr(diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24]:
+    for horizon in _label_horizons(diagnostics):
         h = int(horizon)
         record[f"{HORIZON_PREFIX}{h}h_gross_bps"] = None
         record[f"{HORIZON_PREFIX}{h}h_net_bps"] = None
@@ -1030,7 +1092,7 @@ def update_skipped_candidate_tracker(
     reports_dir = _resolve_reports_dir(run_dir)
     labels_path = _skipped_candidate_labels_path(reports_dir)
     summaries_dir = _summaries_dir(reports_dir)
-    horizons = [int(value) for value in (getattr(diagnostics, "skipped_candidate_horizons_hours", [4, 8, 12, 24]) or [4, 8, 12, 24])]
+    horizons = _label_horizons(diagnostics)
     cache_root = Path(cache_dir) if cache_dir is not None else (PROJECT_ROOT / "data" / "cache")
 
     records_by_key = _load_existing_records(labels_path)
@@ -1162,6 +1224,20 @@ def update_skipped_candidate_tracker(
         *[f"win_rate_{int(h)}h" for h in horizons],
     ]
     _write_csv(summaries_dir / "skipped_candidate_outcomes_by_symbol.csv", by_symbol, by_symbol_fields)
+    by_horizon_fields = [
+        "horizon_hours",
+        "count",
+        "pending_count",
+        "not_observable_count",
+        "complete_count",
+        "avg_net_bps",
+        "win_rate",
+    ]
+    _write_csv(
+        summaries_dir / "skipped_candidate_outcomes_by_horizon.csv",
+        _aggregate_records_by_horizon(records, horizons=horizons),
+        by_horizon_fields,
+    )
 
     btc_probe_rows = [
         row
@@ -1227,6 +1303,11 @@ def update_skipped_candidate_tracker(
         summaries_dir / "high_score_blocked_outcomes_by_reason.csv",
         high_score_by_reason,
         by_reason_fields,
+    )
+    _write_csv(
+        summaries_dir / "high_score_blocked_outcomes_by_horizon.csv",
+        _aggregate_records_by_horizon(high_score_records, horizons=horizons),
+        by_horizon_fields,
     )
 
     return {

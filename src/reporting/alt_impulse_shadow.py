@@ -10,11 +10,13 @@ from src.reporting.decision_audit import DecisionAudit
 from src.reporting.skipped_candidate_tracker import (
     HORIZON_PREFIX,
     _aggregate_records_by_fields,
+    _aggregate_records_by_horizon,
     _coerce_epoch_ms,
     _default_ohlcv_provider_for_cfg,
     _find_close_at_or_after,
     _iso_from_ms,
     _load_existing_records,
+    _label_horizons,
     _merge_series,
     _normalize_bool,
     _normalize_float,
@@ -34,7 +36,6 @@ ALT_IMPULSE_SHADOW_REASONS = {
     "protect_entry_no_alpha6_confirmation",
     "protect_entry_alpha6_score_too_low",
 }
-ALT_IMPULSE_SHADOW_HORIZONS = [4, 8, 12, 24]
 
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
@@ -312,7 +313,7 @@ def update_alt_impulse_shadow_evaluator(
     labels_path = _labels_path(reports_dir)
     summaries_dir = _summaries_dir(reports_dir)
     cache_root = Path(cache_dir) if cache_dir is not None else Path(__file__).resolve().parents[2] / "data" / "cache"
-    horizons = list(ALT_IMPULSE_SHADOW_HORIZONS)
+    horizons = _label_horizons(diagnostics)
 
     records_by_key = _load_existing_records(labels_path)
     new_records = _collect_shadow_candidates(
@@ -381,14 +382,8 @@ def update_alt_impulse_shadow_evaluator(
             "pending_count",
             "not_observable_count",
             "complete_count",
-            "avg_4h_net_bps",
-            "avg_8h_net_bps",
-            "avg_12h_net_bps",
-            "avg_24h_net_bps",
-            "win_rate_4h",
-            "win_rate_8h",
-            "win_rate_12h",
-            "win_rate_24h",
+            *[f"avg_{int(h)}h_net_bps" for h in horizons],
+            *[f"win_rate_{int(h)}h" for h in horizons],
         ],
     )
     _write_csv(
@@ -400,14 +395,21 @@ def update_alt_impulse_shadow_evaluator(
             "pending_count",
             "not_observable_count",
             "complete_count",
-            "avg_4h_net_bps",
-            "avg_8h_net_bps",
-            "avg_12h_net_bps",
-            "avg_24h_net_bps",
-            "win_rate_4h",
-            "win_rate_8h",
-            "win_rate_12h",
-            "win_rate_24h",
+            *[f"avg_{int(h)}h_net_bps" for h in horizons],
+            *[f"win_rate_{int(h)}h" for h in horizons],
+        ],
+    )
+    _write_csv(
+        summaries_dir / "alt_impulse_shadow_outcomes_by_horizon.csv",
+        _aggregate_records_by_horizon(records, horizons=horizons),
+        [
+            "horizon_hours",
+            "count",
+            "pending_count",
+            "not_observable_count",
+            "complete_count",
+            "avg_net_bps",
+            "win_rate",
         ],
     )
     return {

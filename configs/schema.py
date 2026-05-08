@@ -1222,6 +1222,10 @@ class DiagnosticsConfig(BaseModel):
         default_factory=lambda: [4, 8, 12, 24],
         description="Forward-label horizons (hours) for skipped candidate outcome tracking",
     )
+    extended_label_horizons_hours: List[int] = Field(
+        default_factory=lambda: [4, 8, 12, 24, 48, 72, 120],
+        description="Extended forward-label horizons (hours) for skipped, high-score blocked, and shadow outcome tracking",
+    )
     skipped_candidate_roundtrip_cost_bps: float = Field(
         default=30.0,
         ge=0.0,
@@ -1268,21 +1272,21 @@ class DiagnosticsConfig(BaseModel):
         description="Enable read-only shadow selection diagnostics for market impulse probe candidates",
     )
 
-    @field_validator("skipped_candidate_horizons_hours")
+    @field_validator("skipped_candidate_horizons_hours", "extended_label_horizons_hours")
     @classmethod
-    def _validate_skipped_candidate_horizons_hours(cls, v: List[int]) -> List[int]:
+    def _validate_label_horizons_hours(cls, v: List[int]) -> List[int]:
         out: List[int] = []
         seen = set()
         for raw in v or []:
             value = int(raw)
             if value <= 0:
-                raise ValueError("skipped_candidate_horizons_hours entries must be positive")
+                raise ValueError("label horizon entries must be positive")
             if value in seen:
                 continue
             seen.add(value)
             out.append(value)
         if not out:
-            raise ValueError("skipped_candidate_horizons_hours cannot be empty")
+            raise ValueError("label horizons cannot be empty")
         return out
 
     @field_validator("alt_impulse_shadow_symbols")

@@ -149,6 +149,7 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
     entry_ts_ms = _ts_ms("2026-04-21T14:00:00Z")
     prior_ts_ms = entry_ts_ms - 4 * 3600 * 1000
     cfg = _cfg()
+    cfg.diagnostics.extended_label_horizons_hours = [4, 24, 48, 72]
 
     update_alt_impulse_shadow_evaluator(
         run_dir=run_dir,
@@ -172,12 +173,13 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
             ("2026-04-21T22:00:00Z", 102.0),
             ("2026-04-22T02:00:00Z", 103.0),
             ("2026-04-22T14:00:00Z", 104.0),
+            ("2026-04-23T14:00:00Z", 105.0),
         ],
     )
 
-    later_audit = _audit("20260422_14", entry_ts_ms + 24 * 3600 * 1000, [])
+    later_audit = _audit("20260424_02", entry_ts_ms + 60 * 3600 * 1000, [])
     result = update_alt_impulse_shadow_evaluator(
-        run_dir=tmp_path / "reports" / "runs" / "20260422_14",
+        run_dir=tmp_path / "reports" / "runs" / "20260424_02",
         audit=later_audit,
         market_data_1h={},
         cfg=cfg,
@@ -192,6 +194,8 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
     assert rows[0]["label_status"] == "complete"
     assert rows[0]["label_4h_net_bps"] == 70.0
     assert rows[0]["label_24h_net_bps"] == 370.0
+    assert rows[0]["label_48h_net_bps"] == 470.0
+    assert rows[0]["label_72h_status"] == "pending"
 
     by_symbol_path = tmp_path / "reports" / "summaries" / "alt_impulse_shadow_outcomes_by_symbol.csv"
     with by_symbol_path.open("r", encoding="utf-8") as handle:
@@ -199,7 +203,15 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
     assert by_symbol[0]["symbol"] == "ETH/USDT"
     assert by_symbol[0]["skip_reason"] == "protect_entry_trend_only"
     assert by_symbol[0]["avg_4h_net_bps"] == "70.0"
+    assert by_symbol[0]["avg_48h_net_bps"] == "470.0"
     assert by_symbol[0]["win_rate_4h"] == "1.0"
+
+    by_horizon_path = tmp_path / "reports" / "summaries" / "alt_impulse_shadow_outcomes_by_horizon.csv"
+    with by_horizon_path.open("r", encoding="utf-8") as handle:
+        by_horizon = {row["horizon_hours"]: row for row in csv.DictReader(handle)}
+    assert by_horizon["48"]["avg_net_bps"] == "470.0"
+    assert by_horizon["48"]["complete_count"] == "1"
+    assert by_horizon["72"]["pending_count"] == "1"
 
 
 def test_alt_impulse_shadow_disabled_writes_no_files(tmp_path: Path) -> None:

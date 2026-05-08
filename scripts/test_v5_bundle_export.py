@@ -994,6 +994,75 @@ def fixture_alt_impulse_shadow_cache_fill_root(root):
     return run_id
 
 
+def fixture_alt_impulse_shadow_extended_horizon_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    current_run_id = now.strftime("%Y%m%d_%H")
+    entry_ts = window_end - 60 * 3600
+    entry_run_id = dt.datetime.fromtimestamp(entry_ts, dt.timezone.utc).strftime("%Y%m%d_%H")
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "diagnostics:\n  extended_label_horizons_hours: [48, 56, 72]\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    entry_run_dir = root / "reports/runs/prod" / entry_run_id
+    write_json(entry_run_dir / "decision_audit.json", {
+        "now_ts": entry_ts + 15,
+        "window_end_ts": entry_ts,
+        "regime": "Trending",
+        "target_execution_explain": [],
+        "router_decisions": [],
+    })
+    write_text(entry_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(entry_run_dir / "equity.jsonl", "{}\n")
+    write_json(entry_run_dir / "summary.json", {"run_id": entry_run_id})
+
+    current_run_dir = root / "reports/runs/prod" / current_run_id
+    write_json(current_run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "regime": "Trending",
+        "target_execution_explain": [],
+        "router_decisions": [],
+    })
+    write_text(current_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run_dir / "equity.jsonl", "{}\n")
+    write_json(current_run_dir / "summary.json", {"run_id": current_run_id})
+
+    write_text(
+        root / "reports/alt_impulse_shadow_labels.jsonl",
+        json.dumps(
+            {
+                "ts_utc": iso(entry_ts),
+                "run_id": entry_run_id,
+                "symbol": "SOL/USDT",
+                "entry_px": "not_observable",
+                "final_score": 1.0,
+                "trend_score": 1.0,
+                "trend_side": "buy",
+                "skip_reason": "protect_entry_trend_only",
+                "current_level": "PROTECT",
+                "rt_cost_bps": 30.0,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    write_ohlcv_cache(root, "SOL/USDT", [(entry_ts, 100.0), (entry_ts + 48 * 3600, 110.0)])
+    return entry_run_id
+
+
 def fixture_alt_impulse_shadow_missing_entry_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -1377,7 +1446,7 @@ def main():
             assert "## 高分但未成交目标" in readme, readme
             assert "最近 24h 哪些 symbol 高分但没买: ETH/USDT" in readme, readme
             assert "ETH 是否出现高分但未成交: yes" in readme, readme
-            assert "这些被挡样本历史 forward net bps: ETH/USDT/protect_entry_no_alpha6_confirmation: 4h=not_observable" in readme, readme
+            assert "这些被挡样本历史 forward net bps: ETH/USDT/protect_entry_no_alpha6_confirmation: count=1, 4h=not_observable" in readme, readme
             assert "是否建议进入 skipped label: yes" in readme, readme
             assert "是否支持放松 gate: diagnostic_only_review_required" in readme, readme
             assert "## ETH/ALT 高分被挡事后表现" in readme, readme
@@ -1419,6 +1488,7 @@ def main():
                 outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes.csv")).read().decode().splitlines()))
                 by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_symbol.csv")).read().decode().splitlines()))
                 by_reason = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_reason.csv")).read().decode().splitlines()))
+                by_horizon = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_horizon.csv")).read().decode().splitlines()))
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(outcomes) == 2, outcomes
@@ -1431,10 +1501,11 @@ def main():
             assert by_symbol_map[("ETH/USDT", "protect_entry_trend_only")]["avg_4h_net_bps"] == "70.0", by_symbol
             assert by_symbol_map[("ETH/USDT", "protect_entry_trend_only")]["win_rate_4h"] == "1.0", by_symbol
             assert any(row["skip_reason"] == "protect_entry_no_alpha6_confirmation" for row in by_reason), by_reason
+            assert any(row["horizon_hours"] == "48" for row in by_horizon), by_horizon
             assert window["alt_impulse_shadow_label_count"] == 2, window
             assert "## ALT impulse shadow" in readme, readme
-            assert "ETH/USDT: count=1, avg_net_bps 4h=70.0" in readme, readme
-            assert "SOL/USDT: count=1, avg_net_bps 4h=not_observable" in readme, readme
+            assert "ETH/USDT: count=1, 4h_avg=70.0" in readme, readme
+            assert "SOL/USDT: count=1, 4h_avg=not_observable" in readme, readme
             assert "BNB/USDT: count=0" in readme, readme
             assert "是否支持未来 live probe: diagnostic_only_review_required" in readme, readme
         finally:
@@ -1453,12 +1524,38 @@ def main():
             assert sol["entry_px"] == "100", outcomes
             assert sol["label_4h_net_bps"] == "470", sol
             assert sol["label_8h_net_bps"] == "pending", sol
-            assert sol["label_status"] == "pending", sol
+            assert sol["label_status"] == "complete", sol
             eth = next(row for row in outcomes if row["symbol"] == "ETH/USDT")
             assert eth["entry_px"] == "2000", outcomes
             assert eth["label_4h_net_bps"] == "not_observable", eth
             assert eth["label_status"] == "not_observable", eth
             assert eth["label_not_observable_reason"] == "missing_future_px", eth
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-alt-impulse-shadow-extended-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_alt_impulse_shadow_extended_horizon_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes.csv")).read().decode().splitlines()))
+                by_horizon = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_horizon.csv")).read().decode().splitlines()))
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            sol = next(row for row in outcomes if row["symbol"] == "SOL/USDT")
+            assert sol["entry_px"] == "100", sol
+            assert sol["label_48h_net_bps"] == "970", sol
+            assert sol["label_48h_status"] == "complete", sol
+            assert sol["label_56h_status"] == "not_observable", sol
+            assert sol["label_72h_status"] == "pending", sol
+            horizon_map = {row["horizon_hours"]: row for row in by_horizon}
+            assert horizon_map["48"]["avg_net_bps"] == "970.0", by_horizon
+            assert horizon_map["48"]["complete_count"] == "1", by_horizon
+            assert horizon_map["56"]["not_observable_count"] == "1", by_horizon
+            assert horizon_map["72"]["pending_count"] == "1", by_horizon
+            assert "48h: count=1, avg=970.0" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

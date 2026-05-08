@@ -218,6 +218,7 @@ ml_labeler:
 diagnostics:
   skipped_candidate_label_enabled: true
   skipped_candidate_horizons_hours: [4, 8, 12, 24]
+  extended_label_horizons_hours: [4, 8, 12, 24, 48, 72, 120]
   skipped_candidate_roundtrip_cost_bps: 30
   alt_impulse_shadow_enabled: true
   alt_impulse_shadow_symbols: ["ETH/USDT", "SOL/USDT", "BNB/USDT"]

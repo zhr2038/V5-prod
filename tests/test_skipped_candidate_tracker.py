@@ -1164,6 +1164,81 @@ def test_tracker_uses_default_diagnostics_when_config_lacks_diagnostics(tmp_path
     assert rows[0]["label_24h_status"] == "pending"
 
 
+def test_extended_label_horizons_fill_48h_pending_72h_and_missing_future(tmp_path: Path) -> None:
+    entry_run_dir = tmp_path / "reports" / "runs" / "20260421_00"
+    entry_run_dir.mkdir(parents=True, exist_ok=True)
+    update_run_dir = tmp_path / "reports" / "runs" / "20260423_12"
+    update_run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "data" / "cache"
+    cfg = AppConfig(symbols=["ETH/USDT"])
+    cfg.diagnostics.extended_label_horizons_hours = [48, 56, 72]
+    cfg.diagnostics.skipped_candidate_roundtrip_cost_bps = 30.0
+
+    entry_ts_ms = int(datetime.fromisoformat("2026-04-21T00:00:00+00:00").timestamp() * 1000)
+    entry_audit = DecisionAudit(run_id="20260421_00")
+    entry_audit.now_ts = entry_ts_ms // 1000
+    entry_audit.regime = "Trending"
+    entry_audit.router_decisions = [
+        {
+            "symbol": "ETH/USDT",
+            "action": "skip",
+            "reason": "protect_entry_trend_only",
+            "final_score": 0.95,
+            "trend_score": 0.92,
+            "px": 100.0,
+        }
+    ]
+
+    update_skipped_candidate_tracker(
+        run_dir=entry_run_dir,
+        audit=entry_audit,
+        market_data_1h={"ETH/USDT": _series("ETH/USDT", [entry_ts_ms], [100.0])},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+        ohlcv_provider=None,
+    )
+    _write_cache_csv(
+        cache_dir,
+        "ETH/USDT",
+        [
+            ("2026-04-21T00:00:00Z", 100.0),
+            ("2026-04-23T00:00:00Z", 110.0),
+        ],
+    )
+
+    update_ts_ms = entry_ts_ms + 60 * 3600 * 1000
+    update_audit = DecisionAudit(run_id="20260423_12")
+    update_audit.now_ts = update_ts_ms // 1000
+    update_audit.regime = "Trending"
+    update_skipped_candidate_tracker(
+        run_dir=update_run_dir,
+        audit=update_audit,
+        market_data_1h={},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+        ohlcv_provider=None,
+    )
+
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["label_48h_status"] == "complete"
+    assert row["label_48h_net_bps"] == 970.0
+    assert row["label_56h_status"] == "not_observable"
+    assert row["label_72h_status"] == "pending"
+
+    by_horizon_path = tmp_path / "reports" / "summaries" / "skipped_candidate_outcomes_by_horizon.csv"
+    with by_horizon_path.open("r", encoding="utf-8") as handle:
+        by_horizon = {row["horizon_hours"]: row for row in csv.DictReader(handle)}
+    assert by_horizon["48"]["avg_net_bps"] == "970.0"
+    assert by_horizon["48"]["complete_count"] == "1"
+    assert by_horizon["56"]["not_observable_count"] == "1"
+    assert by_horizon["72"]["pending_count"] == "1"
+
+
 def test_load_cache_ohlcv_prefers_logically_newer_file_for_duplicate_timestamp(tmp_path: Path) -> None:
     from src.reporting.skipped_candidate_tracker import _load_cache_ohlcv
 

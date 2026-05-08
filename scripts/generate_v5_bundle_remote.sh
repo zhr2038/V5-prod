@@ -571,6 +571,56 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
     live_config_keys = collect_config_keys_from_yaml_text(live_config_text)
 
+    DEFAULT_LABEL_HORIZONS = [4, 8, 12, 24, 48, 72, 120]
+    LEGACY_LABEL_HORIZONS = [4, 8, 12, 24]
+
+    def normalize_horizon_list(raw, fallback):
+        out = []
+        seen = set()
+        for item in raw or []:
+            value = as_int(item)
+            if value <= 0 or value in seen:
+                continue
+            seen.add(value)
+            out.append(value)
+        return out or list(fallback)
+
+    def find_list_config_value(obj, key):
+        if isinstance(obj, dict):
+            if key in obj and isinstance(obj.get(key), list):
+                return obj.get(key)
+            for value in obj.values():
+                found = find_list_config_value(value, key)
+                if found is not None:
+                    return found
+        elif isinstance(obj, list):
+            for value in obj:
+                found = find_list_config_value(value, key)
+                if found is not None:
+                    return found
+        return None
+
+    def parse_live_config_int_list(text, key):
+        match = re.search(rf"(?m)^\s*{re.escape(key)}\s*:\s*\[([^\]]*)\]\s*(?:#.*)?$", text or "")
+        if not match:
+            return None
+        values = []
+        for part in match.group(1).split(","):
+            value = as_int(part.strip())
+            if value > 0:
+                values.append(value)
+        return values or None
+
+    def config_int_list(key):
+        return find_list_config_value(effective_data, key) or parse_live_config_int_list(live_config_text, key)
+
+    legacy_label_horizons = normalize_horizon_list(config_int_list("skipped_candidate_horizons_hours"), LEGACY_LABEL_HORIZONS)
+    label_horizons = (
+        legacy_label_horizons
+        if legacy_label_horizons != LEGACY_LABEL_HORIZONS
+        else normalize_horizon_list(config_int_list("extended_label_horizons_hours"), DEFAULT_LABEL_HORIZONS)
+    )
+
     CONFIG_CONSUMPTION_FIXED_KEYS = {
         "split_orders",
         "split_interval_sec",
@@ -2026,6 +2076,50 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
     label_loose_index = build_loose_index(label_rows)
     outcome_loose_index = build_loose_index(outcome_rows)
+    def label_horizon_fields(horizons, *, include_status_reason=True):
+        fields = []
+        for horizon in horizons:
+            h = int(horizon)
+            fields.extend([
+                f"label_{h}h_gross_bps",
+                f"label_{h}h_net_bps",
+                f"label_{h}h_would_have_won_net",
+            ])
+            if include_status_reason:
+                fields.extend([f"label_{h}h_status", f"label_{h}h_reason"])
+        return fields
+
+    def aggregate_rows_by_horizon(rows, horizons, value_prefix="label_"):
+        out = []
+        for horizon in horizons:
+            h = int(horizon)
+            net_key = f"{value_prefix}{h}h_net_bps"
+            status_key = f"{value_prefix}{h}h_status"
+            values = [as_float(row.get(net_key)) for row in rows]
+            usable = [value for value in values if value is not None]
+            def row_horizon_status(row):
+                status = flatten_value(row.get(status_key))
+                if status in {"pending", "not_observable", "complete"}:
+                    return status
+                if as_float(row.get(net_key)) is not None:
+                    return "complete"
+                value_text = flatten_value(row.get(net_key))
+                if value_text == "pending":
+                    return "pending"
+                if value_text == not_obs:
+                    return "not_observable"
+                return ""
+            out.append({
+                "horizon_hours": h,
+                "count": len(rows),
+                "pending_count": sum(1 for row in rows if row_horizon_status(row) == "pending"),
+                "not_observable_count": sum(1 for row in rows if row_horizon_status(row) == "not_observable"),
+                "complete_count": sum(1 for row in rows if row_horizon_status(row) == "complete"),
+                "avg_net_bps": round(sum(usable) / len(usable), 6) if usable else not_obs,
+                "win_rate": round(sum(1 for value in usable if value > 0) / len(usable), 6) if usable else not_obs,
+            })
+        return out
+
     high_score_outcome_fields = [
         "ts_utc",
         "run_id",
@@ -2045,22 +2139,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "rt_cost_bps",
         "current_level",
         "regime",
-        "label_4h_gross_bps",
-        "label_4h_net_bps",
-        "label_4h_would_have_won_net",
-        "label_4h_status",
-        "label_8h_gross_bps",
-        "label_8h_net_bps",
-        "label_8h_would_have_won_net",
-        "label_8h_status",
-        "label_12h_gross_bps",
-        "label_12h_net_bps",
-        "label_12h_would_have_won_net",
-        "label_12h_status",
-        "label_24h_gross_bps",
-        "label_24h_net_bps",
-        "label_24h_would_have_won_net",
-        "label_24h_status",
+        *label_horizon_fields(label_horizons),
         "label_status",
         "label_not_observable_reason",
     ]
@@ -2100,7 +2179,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         for key, group_rows in sorted(grouped.items(), key=lambda item: item[0]):
             payload = {field: key[idx] for idx, field in enumerate(key_fields)}
             payload["count"] = len(group_rows)
-            for horizon in (4, 8, 12, 24):
+            for horizon in label_horizons:
                 values = [as_float(row.get(f"label_{horizon}h_net_bps")) for row in group_rows]
                 usable = [value for value in values if value is not None]
                 payload[f"avg_{horizon}h_net_bps"] = round(sum(usable) / len(usable), 6) if usable else not_obs
@@ -2326,15 +2405,27 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if entry_reason:
             not_observable_reasons.append(entry_reason)
 
-        for horizon in (4, 8, 12, 24):
-            field = f"label_{horizon}h_net_bps"
-            existing_value = first_value(row, (field,), not_obs)
+        for horizon in label_horizons:
+            gross_field = f"label_{horizon}h_gross_bps"
+            net_field = f"label_{horizon}h_net_bps"
+            win_field = f"label_{horizon}h_would_have_won_net"
+            status_field = f"label_{horizon}h_status"
+            reason_field = f"label_{horizon}h_reason"
+            existing_value = first_value(row, (net_field,), not_obs)
             if as_float(existing_value) is not None:
-                out[field] = first_observed(existing_value)
-                horizon_statuses.append("complete")
+                out[gross_field] = first_observed(first_value(row, (gross_field,), not_obs))
+                out[net_field] = first_observed(existing_value)
+                out[win_field] = first_observed(first_value(row, (win_field,), str(as_float(existing_value) > 0)))
+                out[status_field] = first_observed(first_value(row, (status_field,), "complete"))
+                out[reason_field] = first_observed(first_value(row, (reason_field,), ""))
+                horizon_statuses.append(out[status_field] if out[status_field] in ("pending", "not_observable", "complete") else "complete")
                 continue
             if entry_px is None or entry_dt is None:
-                out[field] = not_obs
+                out[gross_field] = not_obs
+                out[net_field] = not_obs
+                out[win_field] = not_obs
+                out[status_field] = "not_observable"
+                out[reason_field] = entry_reason or "missing_entry_px"
                 horizon_statuses.append("not_observable")
                 if entry_reason:
                     not_observable_reasons.append(entry_reason)
@@ -2343,25 +2434,38 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 continue
             horizon_dt = entry_dt + dt.timedelta(hours=horizon)
             if NOW < horizon_dt:
-                out[field] = "pending"
+                out[gross_field] = "pending"
+                out[net_field] = "pending"
+                out[win_field] = "pending"
+                out[status_field] = "pending"
+                out[reason_field] = f"awaiting_horizon_until_{horizon_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}"
                 horizon_statuses.append("pending")
                 continue
             future_px, future_reason = cache_price_at_or_after(out["symbol"], horizon_dt)
             if future_px is None:
-                out[field] = not_obs
+                out[gross_field] = not_obs
+                out[net_field] = not_obs
+                out[win_field] = not_obs
+                out[status_field] = "not_observable"
+                out[reason_field] = future_reason or "missing_future_px"
                 horizon_statuses.append("not_observable")
                 not_observable_reasons.append(future_reason or "missing_future_px")
                 continue
-            net_bps = ((future_px / entry_px) - 1.0) * 10000.0 - rt_cost_bps
-            out[field] = fmt_num(net_bps, 6)
+            gross_bps = ((future_px / entry_px) - 1.0) * 10000.0
+            net_bps = gross_bps - rt_cost_bps
+            out[gross_field] = fmt_num(gross_bps, 6)
+            out[net_field] = fmt_num(net_bps, 6)
+            out[win_field] = str(net_bps > 0).lower()
+            out[status_field] = "complete"
+            out[reason_field] = ""
             horizon_statuses.append("complete")
 
-        if any(status == "not_observable" for status in horizon_statuses):
+        if any(status == "complete" for status in horizon_statuses):
+            out["label_status"] = "complete"
+        elif any(status == "not_observable" for status in horizon_statuses):
             out["label_status"] = "not_observable"
         elif any(status == "pending" for status in horizon_statuses):
             out["label_status"] = "pending"
-        elif horizon_statuses and all(status == "complete" for status in horizon_statuses):
-            out["label_status"] = "complete"
         else:
             out["label_status"] = first_observed(first_value(row, ("label_status",), not_obs))
         out["label_not_observable_reason"] = (
@@ -2389,10 +2493,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "regime",
         "current_level",
         "rt_cost_bps",
-        "label_4h_net_bps",
-        "label_8h_net_bps",
-        "label_12h_net_bps",
-        "label_24h_net_bps",
+        *label_horizon_fields(label_horizons),
         "label_status",
         "label_not_observable_reason",
     ]
@@ -2421,6 +2522,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         alt_impulse_shadow_rows,
         ["skip_reason"],
     )
+    high_score_blocked_outcomes_by_horizon = aggregate_rows_by_horizon(high_score_blocked_outcome_rows, label_horizons)
+    alt_impulse_shadow_by_horizon = aggregate_rows_by_horizon(alt_impulse_shadow_rows, label_horizons)
+    skipped_candidate_outcomes_by_horizon = aggregate_rows_by_horizon(outcome_rows, label_horizons)
+    skipped_candidate_outcomes_by_symbol = aggregate_high_score_outcomes(outcome_rows, ["symbol", "skip_reason"])
+    skipped_candidate_outcomes_by_reason = aggregate_high_score_outcomes(outcome_rows, ["skip_reason"])
 
     def factor_forward_value(row, horizon):
         key = btc_label_key(
@@ -2451,7 +2557,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         return not_obs
 
     for row in factor_contribution_rows:
-        for horizon in (4, 8, 12, 24):
+        for horizon in label_horizons:
             row[f"forward_{horizon}h_net_bps"] = factor_forward_value(row, horizon)
 
     def aggregate_factor_contribution(rows):
@@ -2464,7 +2570,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         out = []
         for factor, group_rows in sorted(grouped.items()):
             payload = {"dominant_factor": factor, "count": len(group_rows)}
-            for horizon in (4, 8, 12, 24):
+            for horizon in label_horizons:
                 values = [as_float(row.get(f"forward_{horizon}h_net_bps")) for row in group_rows]
                 usable = [value for value in values if value is not None]
                 payload[f"avg_{horizon}h_net_bps"] = round(sum(usable) / len(usable), 6) if usable else not_obs
@@ -3519,7 +3625,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/btc_leadership_probe_blocked_outcomes.csv",
         btc_blocked_rows,
-        ["ts_utc", "run_id", "symbol", "skip_reason", "entry_px", "age_hours", "label_4h_net_bps", "label_8h_net_bps", "label_12h_net_bps", "label_24h_net_bps", "label_status", "not_observable_reason", "alpha6_score", "f4_volume_expansion", "f5_rsi_trend_confirm", "rolling_high", "breakout_met", "net_expectancy_bps", "closed_cycles"],
+        ["ts_utc", "run_id", "symbol", "skip_reason", "entry_px", "age_hours", *[f"label_{int(h)}h_net_bps" for h in label_horizons], "label_status", "not_observable_reason", "alpha6_score", "f4_volume_expansion", "f5_rsi_trend_confirm", "rolling_high", "breakout_met", "net_expectancy_bps", "closed_cycles"],
     )
     write_csv(
         "summaries/negative_expectancy_consistency.csv",
@@ -3549,12 +3655,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/factor_contribution_audit.csv",
         factor_contribution_rows,
-        ["ts_utc", "run_id", "symbol", "final_score", "alpha6_score", "raw_factors", "z_factors", "effective_factor_weights", "contribution_f1_mom_5d", "contribution_f2_mom_20d", "contribution_f3_vol_adj_ret", "contribution_f4_volume_expansion", "contribution_f5_rsi_trend_confirm", "dominant_factor", "dominant_factor_contribution_pct", "router_action", "router_reason", "forward_4h_net_bps", "forward_8h_net_bps", "forward_12h_net_bps", "forward_24h_net_bps"],
+        ["ts_utc", "run_id", "symbol", "final_score", "alpha6_score", "raw_factors", "z_factors", "effective_factor_weights", "contribution_f1_mom_5d", "contribution_f2_mom_20d", "contribution_f3_vol_adj_ret", "contribution_f4_volume_expansion", "contribution_f5_rsi_trend_confirm", "dominant_factor", "dominant_factor_contribution_pct", "router_action", "router_reason", *[f"forward_{int(h)}h_net_bps" for h in label_horizons]],
     )
     write_csv(
         "summaries/factor_contribution_outcomes_by_factor.csv",
         factor_contribution_outcomes_by_factor,
-        ["dominant_factor", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
+        ["dominant_factor", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
     )
     write_csv(
         "summaries/high_score_blocked_targets.csv",
@@ -3569,12 +3675,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/high_score_blocked_outcomes_by_symbol.csv",
         high_score_blocked_outcomes_by_symbol,
-        ["symbol", "skip_reason", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
+        ["symbol", "skip_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
     )
     write_csv(
         "summaries/high_score_blocked_outcomes_by_reason.csv",
         high_score_blocked_outcomes_by_reason,
-        ["skip_reason", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
+        ["skip_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
+    )
+    write_csv(
+        "summaries/high_score_blocked_outcomes_by_horizon.csv",
+        high_score_blocked_outcomes_by_horizon,
+        ["horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
     )
     write_csv(
         "summaries/alt_impulse_shadow_outcomes.csv",
@@ -3584,12 +3695,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/alt_impulse_shadow_outcomes_by_symbol.csv",
         alt_impulse_shadow_by_symbol,
-        ["symbol", "skip_reason", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
+        ["symbol", "skip_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
     )
     write_csv(
         "summaries/alt_impulse_shadow_outcomes_by_reason.csv",
         alt_impulse_shadow_by_reason,
-        ["skip_reason", "count", "avg_4h_net_bps", "avg_8h_net_bps", "avg_12h_net_bps", "avg_24h_net_bps", "win_rate_4h", "win_rate_8h", "win_rate_12h", "win_rate_24h"],
+        ["skip_reason", "count", *[f"avg_{int(h)}h_net_bps" for h in label_horizons], *[f"win_rate_{int(h)}h" for h in label_horizons]],
+    )
+    write_csv(
+        "summaries/alt_impulse_shadow_outcomes_by_horizon.csv",
+        alt_impulse_shadow_by_horizon,
+        ["horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
+    )
+    write_csv(
+        "summaries/skipped_candidate_outcomes_by_horizon.csv",
+        skipped_candidate_outcomes_by_horizon,
+        ["horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
     )
     write_csv(
         "summaries/market_impulse_selection_shadow.csv",
@@ -3828,15 +3949,52 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         usable = [value for value in values if value is not None]
         return f"{round(sum(usable) / len(usable), 6)}" if usable else not_obs
 
+    def horizon_avg_win_text(rows, *, prefix="label_"):
+        parts = []
+        for horizon in label_horizons:
+            values = [as_float(row.get(f"{prefix}{int(horizon)}h_net_bps")) for row in rows]
+            usable = [value for value in values if value is not None]
+            avg = round(sum(usable) / len(usable), 6) if usable else not_obs
+            win = round(sum(1 for value in usable if value > 0) / len(usable), 6) if usable else not_obs
+            parts.append(f"{int(horizon)}h_avg={avg}, {int(horizon)}h_win={win}")
+        return ", ".join(parts)
+
+    def aggregate_summary_lines(rows, key_fields, limit=12):
+        if not rows:
+            return "not_observable_no_rows"
+        parts = []
+        for row in rows[:limit]:
+            key = "/".join(row.get(field) or not_obs for field in key_fields)
+            horizon_parts = []
+            for horizon in label_horizons:
+                h = int(horizon)
+                horizon_parts.append(
+                    f"{h}h={row.get(f'avg_{h}h_net_bps', not_obs)}"
+                    f"/win={row.get(f'win_rate_{h}h', not_obs)}"
+                )
+            parts.append(f"{key}: count={row.get('count', 0)}, " + ", ".join(horizon_parts))
+        return "; ".join(parts)
+
+    def by_horizon_summary_lines(rows):
+        if not rows:
+            return "not_observable_no_rows"
+        return "; ".join(
+            f"{row.get('horizon_hours', not_obs)}h: count={row.get('count', 0)}, "
+            f"avg={row.get('avg_net_bps', not_obs)}, win={row.get('win_rate', not_obs)}, "
+            f"complete={row.get('complete_count', 0)}, pending={row.get('pending_count', 0)}, "
+            f"not_observable={row.get('not_observable_count', 0)}"
+            for row in rows
+        )
+
     if eth_high_score_outcome_rows:
         eth_high_score_count_text = str(len(eth_high_score_outcome_rows))
         eth_high_score_perf_text = ", ".join(
             f"{horizon}h={avg_net_text(eth_high_score_outcome_rows, horizon)}"
-            for horizon in (4, 8, 12, 24)
+            for horizon in label_horizons
         )
         eth_high_score_relax_gate_text = (
             "diagnostic_only_review_required"
-            if any(avg_net_text(eth_high_score_outcome_rows, horizon) != not_obs for horizon in (4, 8, 12, 24))
+            if any(avg_net_text(eth_high_score_outcome_rows, horizon) != not_obs for horizon in label_horizons)
             else "not_observable_no_matured_labels"
         )
     else:
@@ -3847,18 +4005,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     def high_score_forward_summary_text():
         if not high_score_blocked_outcomes_by_symbol:
             return "not_observable_no_matured_labels"
-        parts = []
-        for row in high_score_blocked_outcomes_by_symbol[:12]:
-            symbol = row.get("symbol") or not_obs
-            reason = row.get("skip_reason") or not_obs
-            parts.append(
-                f"{symbol}/{reason}: "
-                f"4h={row.get('avg_4h_net_bps', not_obs)}, "
-                f"8h={row.get('avg_8h_net_bps', not_obs)}, "
-                f"12h={row.get('avg_12h_net_bps', not_obs)}, "
-                f"24h={row.get('avg_24h_net_bps', not_obs)}"
-            )
-        return "; ".join(parts)
+        return aggregate_summary_lines(high_score_blocked_outcomes_by_symbol, ["symbol", "skip_reason"])
 
     high_score_forward_net_bps_text = high_score_forward_summary_text()
     high_score_relax_gate_text = (
@@ -3871,16 +4018,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         rows = [row for row in alt_impulse_shadow_rows if row.get("symbol") == symbol]
         if not rows:
             return f"{symbol}: count=0, avg_net_bps=not_observable, win_rate=not_observable"
-        avg_parts = []
-        win_parts = []
-        for horizon in (4, 8, 12, 24):
-            values = [as_float(row.get(f"label_{horizon}h_net_bps")) for row in rows]
-            usable = [value for value in values if value is not None]
-            avg = round(sum(usable) / len(usable), 6) if usable else not_obs
-            win = round(sum(1 for value in usable if value > 0) / len(usable), 6) if usable else not_obs
-            avg_parts.append(f"{horizon}h={avg}")
-            win_parts.append(f"{horizon}h={win}")
-        return f"{symbol}: count={len(rows)}, avg_net_bps " + ", ".join(avg_parts) + "; win_rate " + ", ".join(win_parts)
+        return f"{symbol}: count={len(rows)}, " + horizon_avg_win_text(rows)
 
     alt_impulse_future_probe_text = (
         "diagnostic_only_review_required"
@@ -3891,17 +4029,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     def factor_contribution_summary_text():
         if not factor_contribution_outcomes_by_factor:
             return "not_observable_no_factor_rows"
-        parts = []
-        for row in factor_contribution_outcomes_by_factor[:8]:
-            factor = row.get("dominant_factor") or not_obs
-            parts.append(
-                f"{factor}: count={row.get('count', 0)}, "
-                f"4h={row.get('avg_4h_net_bps', not_obs)}, "
-                f"8h={row.get('avg_8h_net_bps', not_obs)}, "
-                f"12h={row.get('avg_12h_net_bps', not_obs)}, "
-                f"24h={row.get('avg_24h_net_bps', not_obs)}"
-            )
-        return "; ".join(parts)
+        return aggregate_summary_lines(factor_contribution_outcomes_by_factor, ["dominant_factor"], limit=8)
 
     factor_contribution_summary = factor_contribution_summary_text()
 
@@ -3946,6 +4074,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- mismatch_suspected_count: {negative_expectancy_mismatch_count}",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
         "",
+        "## Skipped candidate extended forward labels",
+        f"- horizons_hours: {','.join(str(int(h)) for h in label_horizons)}",
+        f"- by_horizon: {by_horizon_summary_lines(skipped_candidate_outcomes_by_horizon)}",
+        f"- by_symbol: {aggregate_summary_lines(skipped_candidate_outcomes_by_symbol, ['symbol', 'skip_reason'])}",
+        f"- by_skip_reason: {aggregate_summary_lines(skipped_candidate_outcomes_by_reason, ['skip_reason'])}",
+        "",
         "## 配置消费审计",
         f"- audited config keys: {len(config_runtime_consumption_rows)}",
         f"- live config keys not consumed in runtime: {config_runtime_not_consumed_count}",
@@ -3973,13 +4107,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "",
         "## ETH/ALT 高分被挡事后表现",
         f"- ETH 高分被挡样本数: {eth_high_score_count_text}",
-        f"- ETH 4h/8h/12h/24h net bps: {eth_high_score_perf_text}",
+        f"- high_score_by_skip_reason: {aggregate_summary_lines(high_score_blocked_outcomes_by_reason, ['skip_reason'])}",
+        f"- high_score_by_horizon: {by_horizon_summary_lines(high_score_blocked_outcomes_by_horizon)}",
+        f"- ETH extended net bps: {eth_high_score_perf_text}",
         f"- 是否支持放松 gate: {eth_high_score_relax_gate_text}",
         "",
         "## ALT impulse shadow",
-        f"- ETH/USDT: {alt_impulse_symbol_line('ETH/USDT')}",
-        f"- SOL/USDT: {alt_impulse_symbol_line('SOL/USDT')}",
-        f"- BNB/USDT: {alt_impulse_symbol_line('BNB/USDT')}",
+        f"- {alt_impulse_symbol_line('ETH/USDT')}",
+        f"- {alt_impulse_symbol_line('SOL/USDT')}",
+        f"- {alt_impulse_symbol_line('BNB/USDT')}",
+        f"- by_skip_reason: {aggregate_summary_lines(alt_impulse_shadow_by_reason, ['skip_reason'])}",
+        f"- by_horizon: {by_horizon_summary_lines(alt_impulse_shadow_by_horizon)}",
         f"- 是否支持未来 live probe: {alt_impulse_future_probe_text}",
         "",
         "## BTC leadership probe 可观测性",
