@@ -1096,6 +1096,95 @@ def fixture_alt_impulse_shadow_cache_fill_root(root):
     return run_id
 
 
+def fixture_alt_impulse_shadow_skipped_provider_future_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    entry_ts = window_end - 56 * 3600 + 15
+    provider_entry_ts = entry_ts - 15
+    entry_run_id = dt.datetime.fromtimestamp(entry_ts, dt.timezone.utc).strftime("%Y%m%d_%H")
+    current_run_id = now.strftime("%Y%m%d_%H")
+
+    write_text(root / "configs/live_prod.yaml", "alt_impulse_shadow_enabled: true\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    for run_id, ts_value in ((entry_run_id, entry_ts), (current_run_id, window_end)):
+        run_dir = root / "reports/runs/prod" / run_id
+        write_json(run_dir / "decision_audit.json", {
+            "now_ts": ts_value + 15,
+            "window_end_ts": ts_value,
+            "regime": "Trending",
+            "target_execution_explain": [],
+            "router_decisions": [],
+        })
+        write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+        write_text(run_dir / "equity.jsonl", "{}\n")
+        write_json(run_dir / "summary.json", {"run_id": run_id})
+
+    write_text(
+        root / "reports/alt_impulse_shadow_labels.jsonl",
+        json.dumps(
+            {
+                "ts_utc": iso(entry_ts),
+                "run_id": entry_run_id,
+                "symbol": "SOL/USDT",
+                "entry_px": 88.96,
+                "final_score": 1.0,
+                "trend_score": 1.0,
+                "trend_side": "buy",
+                "skip_reason": "protect_entry_trend_only",
+                "current_level": "PROTECT",
+                "rt_cost_bps": 30.0,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    write_text(
+        root / "reports/skipped_candidate_labels.jsonl",
+        json.dumps(
+            {
+                "ts_utc": iso(provider_entry_ts),
+                "entry_ts_ms": provider_entry_ts * 1000,
+                "run_id": entry_run_id,
+                "symbol": "SOL/USDT",
+                "entry_px": 86.88,
+                "skip_reason": "protect_entry_confirmation_not_stable",
+                "rt_cost_bps": 30.0,
+                "label_4h_gross_bps": 70.211786,
+                "label_4h_net_bps": 40.211786,
+                "label_4h_status": "complete",
+                "label_8h_gross_bps": 287.753223,
+                "label_8h_net_bps": 257.753223,
+                "label_8h_status": "complete",
+                "label_12h_gross_bps": 174.953959,
+                "label_12h_net_bps": 144.953959,
+                "label_12h_status": "complete",
+                "label_24h_gross_bps": 145.027624,
+                "label_24h_net_bps": 115.027624,
+                "label_24h_status": "complete",
+                "label_48h_gross_bps": 136.970534,
+                "label_48h_net_bps": 106.970534,
+                "label_48h_status": "complete",
+                "label_72h_status": "pending",
+                "label_120h_status": "pending",
+                "label_status": "complete",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    return entry_run_id
+
+
 def fixture_alt_impulse_shadow_extended_horizon_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -1680,6 +1769,47 @@ def main():
             assert eth["label_4h_net_bps"] == "not_observable", eth
             assert eth["label_status"] == "not_observable", eth
             assert eth["label_not_observable_reason"] == "missing_future_px", eth
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-alt-impulse-shadow-skipped-provider-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_alt_impulse_shadow_skipped_provider_future_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes.csv")).read().decode().splitlines()))
+                by_horizon = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/alt_impulse_shadow_outcomes_by_horizon.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert len(outcomes) == 1, outcomes
+            sol = outcomes[0]
+            assert sol["symbol"] == "SOL/USDT", sol
+            assert sol["entry_px"] == "88.96", sol
+            assert sol["label_4h_status"] == "complete", sol
+            assert sol["label_8h_status"] == "complete", sol
+            assert sol["label_12h_status"] == "complete", sol
+            assert sol["label_24h_status"] == "complete", sol
+            assert sol["label_48h_status"] == "complete", sol
+            assert sol["label_72h_status"] == "pending", sol
+            assert sol["future_price_source_4h"] == "skipped_candidate_label_provider", sol
+            assert sol["future_px_4h"] != "not_observable", sol
+            expected_future_4h = 86.88 * (1.0 + 70.211786 / 10000.0)
+            expected_net_4h = ((expected_future_4h / 88.96) - 1.0) * 10000.0 - 30.0
+            assert abs(float(sol["label_4h_net_bps"]) - expected_net_4h) < 0.00001, sol
+            horizon_map = {row["horizon_hours"]: row for row in by_horizon}
+            for horizon in ("4", "8", "12", "24", "48"):
+                assert horizon_map[horizon]["complete_count"] == "1", by_horizon
+                assert horizon_map[horizon]["not_observable_count"] == "0", by_horizon
+            assert horizon_map["72"]["pending_count"] == "1", by_horizon
+            assert window["alt_impulse_shadow_matured_horizon_count"] >= 5, window
+            assert window["alt_impulse_shadow_missing_future_px_count"] == 0, window
+            assert not any(
+                item.get("severity") == "medium" and item.get("code") == "alt_impulse_shadow_future_px_not_observable"
+                for item in issues["issues"]
+            ), issues
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

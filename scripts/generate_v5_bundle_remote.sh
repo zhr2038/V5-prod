@@ -2153,6 +2153,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 fields.extend([f"label_{h}h_status", f"label_{h}h_reason"])
         return fields
 
+    def future_price_debug_fields(horizons):
+        fields = []
+        for horizon in horizons:
+            h = int(horizon)
+            fields.extend([f"future_px_{h}h", f"future_price_source_{h}h"])
+        return fields
+
     def aggregate_rows_by_horizon(rows, horizons, value_prefix="label_"):
         out = []
         for horizon in horizons:
@@ -2412,6 +2419,114 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 return close, ""
         return None, "missing_future_px"
 
+    def price_point_at_or_near(points, when_dt, *, before_tolerance_seconds=300, after_tolerance_seconds=7200):
+        if when_dt is None:
+            return None
+        if not points:
+            return None
+        target_ms = int(when_dt.timestamp() * 1000.0)
+        before_limit = target_ms - int(before_tolerance_seconds * 1000.0)
+        after_limit = target_ms + int(after_tolerance_seconds * 1000.0)
+        candidates = []
+        for ts_ms, close, source in points:
+            try:
+                ts_int = int(ts_ms)
+                close_value = float(close)
+            except Exception:
+                continue
+            if close_value <= 0.0:
+                continue
+            if before_limit <= ts_int <= after_limit:
+                candidates.append((abs(ts_int - target_ms), 0 if ts_int >= target_ms else 1, ts_int, close_value, source))
+        if not candidates:
+            return None
+        _, _, ts_int, close_value, source = sorted(candidates)[0]
+        return close_value, source, ts_int
+
+    def cache_future_price(symbol, when_dt):
+        if when_dt is None:
+            return None, "", "missing_market_data"
+        candles = load_cache_candles(symbol)
+        if not candles:
+            return None, "", "missing_market_data"
+        points = [(ts_ms, close, "data_cache_1h") for ts_ms, close in candles]
+        match = price_point_at_or_near(points, when_dt)
+        if match is None:
+            return None, "", "missing_future_px"
+        price, source, _ts_ms = match
+        return price, source, ""
+
+    run_market_price_points_by_symbol = defaultdict(list)
+    for run_id, audit in audit_by_run.items():
+        audit_dt = parse_dt_utc(run_ts(run_id, audit)) or parse_run_time(run_id)
+        if audit_dt is None:
+            continue
+        ts_ms = int(audit_dt.timestamp() * 1000.0)
+        for item in iter_dicts(audit):
+            symbol = normalize_symbol_text(first_value(item, ("symbol", "instId", "inst_id", "instrument"), ""))
+            if not symbol:
+                continue
+            price = price_from_dict(item, ("latest_px", "current_px", "last_px", "price", "px", "close"))
+            if price is None:
+                continue
+            run_market_price_points_by_symbol[symbol].append((ts_ms, price, f"recent_run_decision_audit:{run_id}"))
+    for symbol in list(run_market_price_points_by_symbol.keys()):
+        run_market_price_points_by_symbol[symbol] = sorted(run_market_price_points_by_symbol[symbol], key=lambda row: row[0])
+
+    skipped_label_future_price_points_by_symbol = defaultdict(list)
+
+    def row_entry_dt(row):
+        ts_value = first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs))
+        parsed = parse_dt_utc(ts_value)
+        if parsed is not None:
+            return parsed
+        entry_ts_ms = first_value(row, ("entry_ts_ms",), not_obs)
+        parsed = parse_dt_utc(entry_ts_ms)
+        return parsed
+
+    for provider_name, provider_rows in (
+        ("skipped_candidate_label_provider", label_rows),
+        ("skipped_candidate_outcome_provider", outcome_rows),
+    ):
+        for provider_row in provider_rows:
+            symbol = normalize_symbol_text(first_value(provider_row, ("symbol", "instId"), ""))
+            entry_px_for_provider = positive_float(first_value(provider_row, ("entry_px",), not_obs))
+            entry_dt_for_provider = row_entry_dt(provider_row)
+            if not symbol or entry_px_for_provider is None or entry_dt_for_provider is None:
+                continue
+            for horizon in label_horizons:
+                status = flatten_value(first_value(provider_row, (f"label_{int(horizon)}h_status",), ""))
+                gross_bps = as_float(first_value(provider_row, (f"label_{int(horizon)}h_gross_bps",), not_obs))
+                if status != "complete" or gross_bps is None:
+                    continue
+                future_dt = entry_dt_for_provider + dt.timedelta(hours=int(horizon))
+                future_px = entry_px_for_provider * (1.0 + gross_bps / 10000.0)
+                skipped_label_future_price_points_by_symbol[symbol].append(
+                    (int(future_dt.timestamp() * 1000.0), future_px, provider_name)
+                )
+    for symbol in list(skipped_label_future_price_points_by_symbol.keys()):
+        skipped_label_future_price_points_by_symbol[symbol] = sorted(
+            skipped_label_future_price_points_by_symbol[symbol],
+            key=lambda row: row[0],
+        )
+
+    def future_price_for_symbol(symbol, when_dt):
+        cache_px, cache_source, cache_reason = cache_future_price(symbol, when_dt)
+        if cache_px is not None:
+            return cache_px, cache_source, ""
+        normalized = normalize_symbol_text(symbol)
+        run_match = price_point_at_or_near(run_market_price_points_by_symbol.get(normalized), when_dt)
+        if run_match is not None:
+            price, source, _ts_ms = run_match
+            return price, source, ""
+        label_match = price_point_at_or_near(skipped_label_future_price_points_by_symbol.get(normalized), when_dt)
+        if label_match is not None:
+            price, source, _ts_ms = label_match
+            return price, source, ""
+        if cache_reason == "missing_market_data" and not run_market_price_points_by_symbol.get(normalized) and not skipped_label_future_price_points_by_symbol.get(normalized):
+            return None, "", "missing_market_data"
+        return None, "", "missing_future_px"
+
     def resolve_alt_shadow_entry_px(row):
         symbol = first_observed(first_value(row, ("symbol", "instId"), not_obs))
         run_id = first_observed(first_value(row, ("run_id",), not_obs))
@@ -2475,6 +2590,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             win_field = f"label_{horizon}h_would_have_won_net"
             status_field = f"label_{horizon}h_status"
             reason_field = f"label_{horizon}h_reason"
+            future_px_field = f"future_px_{horizon}h"
+            future_source_field = f"future_price_source_{horizon}h"
             existing_value = first_value(row, (net_field,), not_obs)
             if as_float(existing_value) is not None:
                 out[gross_field] = first_observed(first_value(row, (gross_field,), not_obs))
@@ -2482,6 +2599,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 out[win_field] = first_observed(first_value(row, (win_field,), str(as_float(existing_value) > 0)))
                 out[status_field] = first_observed(first_value(row, (status_field,), "complete"))
                 out[reason_field] = first_observed(first_value(row, (reason_field,), ""))
+                existing_gross = as_float(first_value(row, (gross_field,), not_obs))
+                if entry_px is not None and existing_gross is not None:
+                    out[future_px_field] = fmt_num(entry_px * (1.0 + existing_gross / 10000.0), 10)
+                    out[future_source_field] = "existing_label_gross_bps"
+                else:
+                    out[future_px_field] = first_observed(first_value(row, (future_px_field,), not_obs))
+                    out[future_source_field] = first_observed(first_value(row, (future_source_field,), not_obs))
                 horizon_statuses.append(out[status_field] if out[status_field] in ("pending", "not_observable", "complete") else "complete")
                 continue
             if entry_px is None or entry_dt is None:
@@ -2490,6 +2614,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 out[win_field] = not_obs
                 out[status_field] = "not_observable"
                 out[reason_field] = entry_reason or "missing_entry_px"
+                out[future_px_field] = not_obs
+                out[future_source_field] = not_obs
                 horizon_statuses.append("not_observable")
                 if entry_reason:
                     not_observable_reasons.append(entry_reason)
@@ -2503,15 +2629,19 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 out[win_field] = "pending"
                 out[status_field] = "pending"
                 out[reason_field] = f"awaiting_horizon_until_{horizon_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+                out[future_px_field] = "pending"
+                out[future_source_field] = "pending"
                 horizon_statuses.append("pending")
                 continue
-            future_px, future_reason = cache_price_at_or_after(out["symbol"], horizon_dt)
+            future_px, future_source, future_reason = future_price_for_symbol(out["symbol"], horizon_dt)
             if future_px is None:
                 out[gross_field] = not_obs
                 out[net_field] = not_obs
                 out[win_field] = not_obs
                 out[status_field] = "not_observable"
                 out[reason_field] = future_reason or "missing_future_px"
+                out[future_px_field] = not_obs
+                out[future_source_field] = future_reason or "missing_future_px"
                 horizon_statuses.append("not_observable")
                 not_observable_reasons.append(future_reason or "missing_future_px")
                 continue
@@ -2522,6 +2652,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             out[win_field] = str(net_bps > 0).lower()
             out[status_field] = "complete"
             out[reason_field] = ""
+            out[future_px_field] = fmt_num(future_px, 10)
+            out[future_source_field] = future_source or "not_observable"
             horizon_statuses.append("complete")
 
         if any(status == "complete" for status in horizon_statuses):
@@ -2558,6 +2690,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "current_level",
         "rt_cost_bps",
         *label_horizon_fields(label_horizons),
+        *future_price_debug_fields(label_horizons),
         "label_status",
         "label_not_observable_reason",
     ]
@@ -2576,6 +2709,37 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             {
                 "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
                 "entry_px_not_observable_count": alt_impulse_shadow_entry_px_not_observable_count,
+            },
+        )
+    alt_impulse_shadow_matured_horizon_count = 0
+    alt_impulse_shadow_missing_future_px_count = 0
+    for row in alt_impulse_shadow_rows:
+        entry_px_value = as_float(row.get("entry_px"))
+        entry_dt = parse_dt_utc(first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)))
+        if entry_px_value is None or entry_dt is None:
+            continue
+        for horizon in label_horizons:
+            horizon_dt = entry_dt + dt.timedelta(hours=int(horizon))
+            if NOW < horizon_dt:
+                continue
+            alt_impulse_shadow_matured_horizon_count += 1
+            status = flatten_value(row.get(f"label_{int(horizon)}h_status"))
+            reason = flatten_value(row.get(f"label_{int(horizon)}h_reason"))
+            if status == "not_observable" and reason == "missing_future_px":
+                alt_impulse_shadow_missing_future_px_count += 1
+    if (
+        alt_impulse_shadow_rows
+        and alt_impulse_shadow_matured_horizon_count > 0
+        and alt_impulse_shadow_missing_future_px_count == alt_impulse_shadow_matured_horizon_count
+    ):
+        add_issue(
+            "medium",
+            "alt_impulse_shadow_future_px_not_observable",
+            "ALT impulse shadow labels have entry_px, but every matured horizon is missing future_px.",
+            {
+                "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
+                "matured_horizon_count": alt_impulse_shadow_matured_horizon_count,
+                "missing_future_px_count": alt_impulse_shadow_missing_future_px_count,
             },
         )
     alt_impulse_shadow_by_symbol = aggregate_high_score_outcomes(
@@ -4144,6 +4308,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
         "alt_impulse_shadow_duplicate_count": alt_impulse_shadow_duplicate_count,
         "alt_impulse_shadow_entry_px_not_observable_count": alt_impulse_shadow_entry_px_not_observable_count,
+        "alt_impulse_shadow_matured_horizon_count": alt_impulse_shadow_matured_horizon_count,
+        "alt_impulse_shadow_missing_future_px_count": alt_impulse_shadow_missing_future_px_count,
         "multi_position_swing_shadow_label_count": len(multi_position_swing_shadow_rows),
         "multi_position_swing_shadow_duplicate_count": multi_position_swing_shadow_duplicate_count,
         "multi_position_swing_shadow_complete_count": int(multi_position_swing_status_counts.get("complete", 0)),
