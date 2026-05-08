@@ -376,6 +376,15 @@ def fixture_config_runtime_consumption_root(root):
                 "  same_symbol_reentry_enabled: true",
                 "  btc_leadership_probe_enabled: true",
                 "  protect_profit_lock_enabled: true",
+                "  swing_hold_enabled: true",
+                "  swing_min_hold_hours: 24",
+                "  protect_recovery_multi_position_enabled: false",
+                "  protect_negative_expectancy_short_cycle_guard_enabled: true",
+                "  open_long_entry_guard_fail_open_buy: false",
+                "  open_long_entry_guard_fail_open_sell: true",
+                "diagnostics:",
+                "  multi_position_swing_shadow_enabled: true",
+                "  alt_impulse_shadow_enabled: true",
                 "",
             ]
         ),
@@ -389,7 +398,25 @@ def fixture_config_runtime_consumption_root(root):
                 "same_symbol_reentry_enabled: bool = False",
                 "btc_leadership_probe_enabled: bool = False",
                 "protect_profit_lock_enabled: bool = False",
+                "swing_hold_enabled: bool = True",
+                "swing_min_hold_hours: int = 24",
+                "protect_recovery_multi_position_enabled: bool = False",
+                "protect_negative_expectancy_short_cycle_guard_enabled: bool = True",
+                "open_long_entry_guard_fail_open_buy: bool = False",
+                "open_long_entry_guard_fail_open_sell: bool = True",
+                "multi_position_swing_shadow_enabled: bool = True",
+                "alt_impulse_shadow_enabled: bool = True",
                 "probe_exit_enabled: bool = False",
+                "",
+            ]
+        ),
+    )
+    write_text(
+        root / "main.py",
+        "\n".join(
+            [
+                "def boot(cfg):",
+                "    getattr(cfg.execution, 'swing_min_hold_hours', 24)",
                 "",
             ]
         ),
@@ -402,6 +429,20 @@ def fixture_config_runtime_consumption_root(root):
                 "    getattr(cfg.execution, 'same_symbol_reentry_enabled', False)",
                 "    getattr(cfg.execution, 'btc_leadership_probe_enabled', False)",
                 "    getattr(cfg.execution, 'protect_profit_lock_enabled', False)",
+                "    getattr(cfg.execution, 'swing_hold_enabled', True)",
+                "    getattr(cfg.execution, 'protect_recovery_multi_position_enabled', False)",
+                "    getattr(cfg.execution, 'protect_negative_expectancy_short_cycle_guard_enabled', False)",
+                "",
+            ]
+        ),
+    )
+    write_text(
+        root / "src/execution/live_execution_engine.py",
+        "\n".join(
+            [
+                "def guard(cfg):",
+                "    getattr(cfg.execution, 'open_long_entry_guard_fail_open_buy', False)",
+                "    getattr(cfg.execution, 'open_long_entry_guard_fail_open_sell', True)",
                 "",
             ]
         ),
@@ -409,6 +450,14 @@ def fixture_config_runtime_consumption_root(root):
     write_text(
         root / "src/reporting/decision_audit.py",
         "CONFIG_KEYS = ['split_orders', 'split_interval_sec']\n",
+    )
+    write_text(
+        root / "src/reporting/multi_position_swing_shadow.py",
+        "def enabled(cfg):\n    return getattr(cfg.diagnostics, 'multi_position_swing_shadow_enabled', True)\n",
+    )
+    write_text(
+        root / "src/reporting/alt_impulse_shadow.py",
+        "def enabled(cfg):\n    return getattr(cfg.diagnostics, 'alt_impulse_shadow_enabled', True)\n",
     )
     for name in (
         "kill_switch",
@@ -428,6 +477,16 @@ def fixture_config_runtime_consumption_root(root):
                 "same_symbol_reentry_enabled": True,
                 "btc_leadership_probe_enabled": True,
                 "protect_profit_lock_enabled": True,
+                "swing_hold_enabled": True,
+                "swing_min_hold_hours": 24,
+                "protect_recovery_multi_position_enabled": False,
+                "protect_negative_expectancy_short_cycle_guard_enabled": True,
+                "open_long_entry_guard_fail_open_buy": False,
+                "open_long_entry_guard_fail_open_sell": True,
+            },
+            "diagnostics": {
+                "multi_position_swing_shadow_enabled": True,
+                "alt_impulse_shadow_enabled": True,
             }
         },
     )
@@ -2179,12 +2238,26 @@ def main():
             assert by_key["split_orders"]["present_in_live_prod"] == "true", by_key["split_orders"]
             assert by_key["split_orders"]["present_in_effective_config"] == "true", by_key["split_orders"]
             assert by_key["split_orders"]["consumed_in_runtime_code"] == "false", by_key["split_orders"]
+            assert by_key["split_orders"]["consumer_category"] == "not_consumed", by_key["split_orders"]
             assert by_key["split_orders"]["diagnosis"] == "configured_not_consumed", by_key["split_orders"]
             assert by_key["split_interval_sec"]["diagnosis"] == "configured_not_consumed", by_key["split_interval_sec"]
             assert by_key["same_symbol_reentry_enabled"]["consumed_in_runtime_code"] == "true", by_key["same_symbol_reentry_enabled"]
+            assert by_key["same_symbol_reentry_enabled"]["consumer_category"] == "live_runtime", by_key["same_symbol_reentry_enabled"]
             assert by_key["same_symbol_reentry_enabled"]["consumer_files"] == "src/core/pipeline.py", by_key["same_symbol_reentry_enabled"]
-            assert by_key["btc_leadership_probe_enabled"]["diagnosis"] == "consumed", by_key["btc_leadership_probe_enabled"]
-            assert by_key["protect_profit_lock_enabled"]["diagnosis"] == "consumed", by_key["protect_profit_lock_enabled"]
+            assert by_key["btc_leadership_probe_enabled"]["diagnosis"] == "live_runtime_consumed", by_key["btc_leadership_probe_enabled"]
+            assert by_key["protect_profit_lock_enabled"]["diagnosis"] == "live_runtime_consumed", by_key["protect_profit_lock_enabled"]
+            assert by_key["swing_hold_enabled"]["consumer_category"] == "live_runtime", by_key["swing_hold_enabled"]
+            assert by_key["swing_hold_enabled"]["diagnosis"] == "live_runtime_consumed", by_key["swing_hold_enabled"]
+            assert by_key["swing_min_hold_hours"]["consumer_files"] == "main.py", by_key["swing_min_hold_hours"]
+            assert by_key["protect_recovery_multi_position_enabled"]["consumer_category"] == "live_runtime", by_key["protect_recovery_multi_position_enabled"]
+            assert by_key["protect_negative_expectancy_short_cycle_guard_enabled"]["consumer_category"] == "live_runtime", by_key["protect_negative_expectancy_short_cycle_guard_enabled"]
+            assert by_key["open_long_entry_guard_fail_open_buy"]["consumer_files"] == "src/execution/live_execution_engine.py", by_key["open_long_entry_guard_fail_open_buy"]
+            assert by_key["open_long_entry_guard_fail_open_sell"]["consumer_category"] == "live_runtime", by_key["open_long_entry_guard_fail_open_sell"]
+            assert by_key["multi_position_swing_shadow_enabled"]["present_in_live_prod"] == "true", by_key["multi_position_swing_shadow_enabled"]
+            assert by_key["multi_position_swing_shadow_enabled"]["consumer_category"] == "diagnostics", by_key["multi_position_swing_shadow_enabled"]
+            assert by_key["multi_position_swing_shadow_enabled"]["diagnosis"] == "diagnostics_consumed", by_key["multi_position_swing_shadow_enabled"]
+            assert by_key["alt_impulse_shadow_enabled"]["consumer_category"] == "diagnostics", by_key["alt_impulse_shadow_enabled"]
+            assert by_key["alt_impulse_shadow_enabled"]["diagnosis"] == "diagnostics_consumed", by_key["alt_impulse_shadow_enabled"]
             assert by_key["probe_exit_enabled"]["present_in_live_prod"] == "false", by_key["probe_exit_enabled"]
             low_issues = [
                 item for item in issues["issues"]

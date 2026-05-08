@@ -683,8 +683,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     }
     CONFIG_CONSUMPTION_PREFIXES = (
         "btc_leadership_probe_",
+        "swing_",
+        "protect_recovery_",
+        "protect_negative_expectancy_short_cycle_",
+        "open_long_entry_guard_fail_open_",
+        "multi_position_swing_shadow_",
+        "alt_impulse_shadow_",
         "protect_profit_lock_",
         "same_symbol_reentry_",
+    )
+    CONFIG_CONSUMPTION_DIAGNOSTICS_PREFIXES = (
+        "multi_position_swing_shadow_",
+        "alt_impulse_shadow_",
     )
 
     def key_pattern(key):
@@ -728,32 +738,61 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
     def runtime_source_texts():
         texts = {}
-        src_dir = ROOT / "src"
-        if not src_dir.is_dir():
-            return texts
-        excluded_parts = {"__pycache__", "reporting", "research"}
-        for path in sorted(src_dir.rglob("*.py")):
+        candidates = []
+        main_py = ROOT / "main.py"
+        if main_py.is_file():
+            candidates.append(main_py)
+        scan_dirs = [
+            ROOT / "src" / "core",
+            ROOT / "src" / "reporting",
+            ROOT / "src" / "execution",
+            ROOT / "src" / "risk",
+            ROOT / "src" / "backtest",
+        ]
+        for scan_dir in scan_dirs:
+            if scan_dir.is_dir():
+                candidates.extend(sorted(scan_dir.rglob("*.py")))
+        seen = set()
+        excluded_parts = {"__pycache__", "research"}
+        for path in candidates:
             try:
                 rel = path.relative_to(ROOT)
             except ValueError:
                 continue
             if any(part in excluded_parts for part in rel.parts):
                 continue
+            try:
+                resolved = path.resolve()
+            except Exception:
+                resolved = path
+            if resolved in seen or not path.is_file():
+                continue
+            seen.add(resolved)
             texts[rel.as_posix()] = read_source_file(path)
         return texts
+
+    def config_consumer_file_category(rel):
+        rel = str(rel)
+        if rel == "main.py" or rel.startswith("src/core/") or rel.startswith("src/execution/") or rel.startswith("src/risk/"):
+            return "live_runtime"
+        if rel.startswith("src/reporting/") or rel.startswith("src/backtest/"):
+            return "diagnostics"
+        return "diagnostics"
+
+    def config_key_is_diagnostics(key):
+        return any(str(key).startswith(prefix) for prefix in CONFIG_CONSUMPTION_DIAGNOSTICS_PREFIXES)
 
     def build_config_runtime_consumption_audit():
         schema_texts = schema_source_texts()
         runtime_texts = runtime_source_texts()
         schema_keys = set()
-        runtime_keys = set()
         for text in schema_texts.values():
             schema_keys |= discover_audited_config_keys(text)
-        for text in runtime_texts.values():
-            runtime_keys |= discover_audited_config_keys(text)
 
+        # Broad prefixes such as swing_ also match runtime counters and local variables.
+        # Keep the audit focused on config-shaped keys declared in live/effective/schema.
         prefix_keys = {
-            key for key in (live_config_keys | effective_keys | schema_keys | runtime_keys)
+            key for key in (live_config_keys | effective_keys | schema_keys)
             if any(str(key).startswith(prefix) for prefix in CONFIG_CONSUMPTION_PREFIXES)
         }
         candidate_keys = sorted(CONFIG_CONSUMPTION_FIXED_KEYS | prefix_keys)
@@ -763,31 +802,56 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             defined = key in schema_keys or any(pattern.search(text) for text in schema_texts.values())
             present_live = key in live_config_keys
             present_effective = key in effective_keys
-            consumer_files = [
+            matched_consumer_files = [
                 rel for rel, text in runtime_texts.items()
                 if pattern.search(text)
             ]
+            live_consumer_files = [
+                rel for rel in matched_consumer_files
+                if config_consumer_file_category(rel) == "live_runtime"
+            ]
+            diagnostics_consumer_files = [
+                rel for rel in matched_consumer_files
+                if config_consumer_file_category(rel) == "diagnostics"
+            ]
+            diagnostics_key = config_key_is_diagnostics(key)
+            if live_consumer_files:
+                consumer_category = "live_runtime"
+                consumer_files = live_consumer_files
+            elif diagnostics_key and diagnostics_consumer_files:
+                consumer_category = "diagnostics"
+                consumer_files = diagnostics_consumer_files
+            elif defined and not (present_live or present_effective):
+                consumer_category = "schema_only"
+                consumer_files = []
+            else:
+                consumer_category = "not_consumed"
+                consumer_files = []
             consumed = bool(consumer_files)
-            if (present_live or present_effective) and consumed:
-                diagnosis = "consumed"
+            if (present_live or present_effective) and consumed and consumer_category == "live_runtime":
+                diagnosis = "live_runtime_consumed"
+            elif (present_live or present_effective) and consumed and consumer_category == "diagnostics":
+                diagnosis = "diagnostics_consumed"
             elif present_live and not consumed:
                 diagnosis = "configured_not_consumed"
-                add_issue(
-                    "low",
-                    "config_key_not_consumed",
-                    "Config key is present in live_prod.yaml but was not observed in runtime source consumption paths.",
-                    {
-                        "config_key": key,
-                        "present_in_effective_config": present_effective,
-                        "defined_in_schema": bool(defined),
-                    },
-                )
+                if not diagnostics_key:
+                    add_issue(
+                        "low",
+                        "config_key_not_consumed",
+                        "Config key is present in live_prod.yaml but was not observed in live runtime source consumption paths.",
+                        {
+                            "config_key": key,
+                            "present_in_effective_config": present_effective,
+                            "defined_in_schema": bool(defined),
+                            "consumer_category": consumer_category,
+                        },
+                    )
             elif present_effective and not consumed:
                 diagnosis = "effective_config_not_consumed"
             elif defined:
                 diagnosis = "defined_not_configured"
             elif consumed:
-                diagnosis = "runtime_consumed_not_configured"
+                diagnosis = f"{consumer_category}_consumed_not_configured"
             else:
                 diagnosis = "not_observable"
             rows.append({
@@ -796,6 +860,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "present_in_live_prod": str(bool(present_live)).lower(),
                 "present_in_effective_config": str(bool(present_effective)).lower(),
                 "consumed_in_runtime_code": str(bool(consumed)).lower(),
+                "consumer_category": consumer_category,
                 "consumer_files": ";".join(consumer_files) if consumer_files else not_obs,
                 "diagnosis": diagnosis,
             })
@@ -4389,7 +4454,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/config_runtime_consumption_audit.csv",
         config_runtime_consumption_rows,
-        ["config_key", "defined_in_schema", "present_in_live_prod", "present_in_effective_config", "consumed_in_runtime_code", "consumer_files", "diagnosis"],
+        ["config_key", "defined_in_schema", "present_in_live_prod", "present_in_effective_config", "consumed_in_runtime_code", "consumer_category", "consumer_files", "diagnosis"],
     )
     write_csv(
         "summaries/rank_exit_consistency.csv",
