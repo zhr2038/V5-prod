@@ -1767,6 +1767,27 @@ def main() -> None:
     except Exception as e:
         log.warning(f"alt impulse shadow evaluator failed: {e}")
 
+    # Read-only multi-position swing shadow evaluator. It records hypothetical top-k portfolios only.
+    try:
+        from src.reporting.multi_position_swing_shadow import update_multi_position_swing_shadow_evaluator
+
+        multi_shadow_result = update_multi_position_swing_shadow_evaluator(
+            run_dir=str(runtime_run_dir),
+            audit=audit,
+            market_data_1h=md_1h,
+            cfg=cfg,
+            current_level=pipe._load_current_auto_risk_level(),
+            cache_dir=PROJECT_ROOT / "data" / "cache",
+        )
+        if multi_shadow_result.get("enabled"):
+            log.info(
+                "MULTI_POSITION_SWING_SHADOW new_records=%s total_records=%s",
+                int(multi_shadow_result.get("new_records", 0) or 0),
+                int(multi_shadow_result.get("total_records", 0) or 0),
+            )
+    except Exception as e:
+        log.warning(f"multi-position swing shadow evaluator failed: {e}")
+
     # Update account peak equity
     # (equity is logged inside pipeline; recompute here quickly)
     eq = float(acc.cash_usdt)

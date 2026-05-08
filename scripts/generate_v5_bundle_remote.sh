@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${V5_REMOTE_ROOT:-/home/ubuntu/clawd/v5-prod}"
+ROOT="${1:-${V5_REMOTE_ROOT:-/home/ubuntu/clawd/v5-prod}}"
 
 python3 - "$ROOT" <<'PY'
 import csv
@@ -54,6 +54,7 @@ CURRENT_REPORT_FILES = [
     ("reports/event_candidates.json", "raw/reports/event_candidates.json", False),
     ("reports/skipped_candidate_labels.jsonl", "raw/reports/skipped_candidate_labels.jsonl", False),
     ("reports/alt_impulse_shadow_labels.jsonl", "raw/reports/alt_impulse_shadow_labels.jsonl", False),
+    ("reports/multi_position_swing_shadow_labels.jsonl", "raw/reports/multi_position_swing_shadow_labels.jsonl", False),
 ]
 SECRET_KEY_RE = re.compile(
     r"(?i)(authorization|api[_-]?(?:key|secret)|secret|token|cookie|pass(?:word|phrase)|private[_-]?key|ok-access-(?:key|sign|passphrase))"
@@ -2056,6 +2057,67 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         )
         write_text("raw/reports/alt_impulse_shadow_labels.jsonl", alt_text + ("\n" if alt_text else ""))
 
+    def normalize_multi_symbol_text(value):
+        text = flatten_value(value)
+        return text.replace("-", "/").upper() if text else ""
+
+    def parse_symbols_list(value):
+        if isinstance(value, list):
+            raw = value
+        else:
+            text = flatten_value(value)
+            if not text or text == not_obs:
+                return []
+            try:
+                parsed = json.loads(text)
+                raw = parsed if isinstance(parsed, list) else [text]
+            except Exception:
+                raw = [part.strip() for part in text.split(",")]
+        out = []
+        seen = set()
+        for item in raw:
+            symbol = normalize_multi_symbol_text(item)
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            out.append(symbol)
+        return out
+
+    def multi_position_swing_shadow_row_key(row):
+        symbols = parse_symbols_list(first_value(row, ("symbols", "symbols_json"), ""))
+        return (
+            flatten_value(first_value(row, ("run_id",), not_obs)) or not_obs,
+            canonical_ts_utc(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)),
+            flatten_value(first_value(row, ("k", "top_k"), not_obs)) or not_obs,
+            ",".join(symbols) or not_obs,
+        )
+
+    multi_position_swing_shadow_label_rows = []
+    multi_position_swing_shadow_labels_path = OUT / "raw" / "reports" / "multi_position_swing_shadow_labels.jsonl"
+    if multi_position_swing_shadow_labels_path.is_file():
+        for line in multi_position_swing_shadow_labels_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+                if isinstance(item, dict):
+                    multi_position_swing_shadow_label_rows.append(item)
+            except Exception:
+                collection_errors.append({"source": str(multi_position_swing_shadow_labels_path), "error": "invalid jsonl row"})
+    multi_position_swing_shadow_label_rows, multi_position_swing_shadow_duplicate_count = dedupe_rows_by_key(
+        multi_position_swing_shadow_label_rows,
+        multi_position_swing_shadow_row_key,
+    )
+    if multi_position_swing_shadow_labels_path.is_file():
+        multi_shadow_text = "\n".join(
+            json.dumps(sanitize_obj(row), ensure_ascii=False, sort_keys=True)
+            for row in multi_position_swing_shadow_label_rows
+        )
+        write_text(
+            "raw/reports/multi_position_swing_shadow_labels.jsonl",
+            multi_shadow_text + ("\n" if multi_shadow_text else ""),
+        )
+
     def loose_label_key(row):
         return (
             flatten_value(first_value(row, ("run_id",), not_obs)) or not_obs,
@@ -2527,6 +2589,189 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     skipped_candidate_outcomes_by_horizon = aggregate_rows_by_horizon(outcome_rows, label_horizons)
     skipped_candidate_outcomes_by_symbol = aggregate_high_score_outcomes(outcome_rows, ["symbol", "skip_reason"])
     skipped_candidate_outcomes_by_reason = aggregate_high_score_outcomes(outcome_rows, ["skip_reason"])
+    multi_position_swing_horizons = [24, 48, 72]
+
+    def parse_json_obj(value, default):
+        if isinstance(value, (dict, list)):
+            return value
+        text = flatten_value(value)
+        if not text or text == not_obs:
+            return default
+        try:
+            return json.loads(text)
+        except Exception:
+            return default
+
+    def multi_shadow_entry_px_map(row, symbols):
+        raw = first_value(row, ("entry_px", "entry_px_by_symbol"), {})
+        parsed = parse_json_obj(raw, {})
+        out = {}
+        if isinstance(parsed, dict):
+            for symbol in symbols:
+                value = positive_float(first_value(parsed, (symbol, symbol.replace("/", "-")), not_obs))
+                if value is not None:
+                    out[symbol] = value
+        for symbol in symbols:
+            if symbol in out:
+                continue
+            audit = audit_by_run.get(first_observed(first_value(row, ("run_id",), not_obs)), {})
+            target_item = symbol_map_get(target_explain_by_symbol(audit), symbol)
+            price = price_from_dict(target_item, ("entry_px", "latest_px", "current_px", "price", "px"))
+            if price is None:
+                price = symbol_price_from_nested(audit, symbol)
+            if price is None:
+                price = cache_price_at_or_after(symbol, parse_dt_utc(first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs))))[0]
+            if price is not None:
+                out[symbol] = price
+        return out
+
+    def build_multi_position_swing_shadow_row(row):
+        symbols = parse_symbols_list(first_value(row, ("symbols", "symbols_json"), ""))
+        entry_dt = parse_dt_utc(first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)))
+        entry_px_map = multi_shadow_entry_px_map(row, symbols)
+        rt_cost_bps = as_float(first_value(row, ("rt_cost_bps",), not_obs))
+        if rt_cost_bps is None:
+            rt_cost_bps = 0.0
+        out = {
+            "ts_utc": first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)),
+            "run_id": first_observed(first_value(row, ("run_id",), not_obs)),
+            "k": first_observed(first_value(row, ("k", "top_k"), len(symbols) if symbols else not_obs)),
+            "symbols": json.dumps(symbols, ensure_ascii=False),
+            "equal_weight": first_observed(first_value(row, ("equal_weight",), (1.0 / len(symbols)) if symbols else not_obs)),
+            "entry_px": json.dumps(entry_px_map, ensure_ascii=False, sort_keys=True) if entry_px_map else not_obs,
+            "final_score": json.dumps(parse_json_obj(first_value(row, ("final_score", "final_scores"), {}), {}), ensure_ascii=False, sort_keys=True),
+            "selected_rank": json.dumps(parse_json_obj(first_value(row, ("selected_rank", "selected_ranks"), {}), {}), ensure_ascii=False, sort_keys=True),
+            "rt_cost_bps": fmt_num(rt_cost_bps, 6),
+        }
+        horizon_statuses = []
+        for horizon in multi_position_swing_horizons:
+            status_field = f"label_{horizon}h_status"
+            avg_field = f"label_{horizon}h_portfolio_avg_net_bps"
+            worst_field = f"label_{horizon}h_worst_symbol_net_bps"
+            win_field = f"label_{horizon}h_win_count"
+            symbol_field = f"label_{horizon}h_symbol_net_bps"
+            reason_field = f"label_{horizon}h_reason"
+
+            existing_avg = first_value(row, (avg_field, f"portfolio_avg_{horizon}h_net_bps"), not_obs)
+            if as_float(existing_avg) is not None:
+                out[avg_field] = first_observed(existing_avg)
+                out[worst_field] = first_observed(first_value(row, (worst_field, f"worst_symbol_{horizon}h_net_bps"), not_obs))
+                out[win_field] = first_observed(first_value(row, (win_field, f"win_count_{horizon}h"), not_obs))
+                out[symbol_field] = first_observed(first_value(row, (symbol_field,), not_obs))
+                out[status_field] = first_observed(first_value(row, (status_field,), "complete"))
+                out[reason_field] = first_observed(first_value(row, (reason_field,), ""))
+                horizon_statuses.append(out[status_field] if out[status_field] in ("pending", "not_observable", "complete") else "complete")
+                continue
+
+            if entry_dt is None or not symbols or len(entry_px_map) != len(symbols):
+                missing_symbols = [symbol for symbol in symbols if symbol not in entry_px_map]
+                out[avg_field] = not_obs
+                out[worst_field] = not_obs
+                out[win_field] = not_obs
+                out[symbol_field] = not_obs
+                out[status_field] = "not_observable"
+                out[reason_field] = "missing_entry_px" if missing_symbols else "missing_entry_ts"
+                horizon_statuses.append("not_observable")
+                continue
+
+            horizon_dt = entry_dt + dt.timedelta(hours=int(horizon))
+            if NOW < horizon_dt:
+                out[avg_field] = "pending"
+                out[worst_field] = "pending"
+                out[win_field] = "pending"
+                out[symbol_field] = "pending"
+                out[status_field] = "pending"
+                out[reason_field] = f"awaiting_horizon_until_{horizon_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+                horizon_statuses.append("pending")
+                continue
+
+            symbol_net = {}
+            missing = []
+            for symbol in symbols:
+                future_px, future_reason = cache_price_at_or_after(symbol, horizon_dt)
+                entry_px = as_float(entry_px_map.get(symbol))
+                if entry_px is None or entry_px <= 0:
+                    missing.append(f"{symbol}:missing_entry_px")
+                    continue
+                if future_px is None:
+                    missing.append(f"{symbol}:{future_reason or 'missing_future_px'}")
+                    continue
+                symbol_net[symbol] = round(((future_px / entry_px) - 1.0) * 10000.0 - rt_cost_bps, 6)
+            if missing or len(symbol_net) != len(symbols):
+                out[avg_field] = not_obs
+                out[worst_field] = not_obs
+                out[win_field] = not_obs
+                out[symbol_field] = json.dumps(symbol_net, ensure_ascii=False, sort_keys=True) if symbol_net else not_obs
+                out[status_field] = "not_observable"
+                out[reason_field] = ";".join(missing) or "missing_market_data"
+                horizon_statuses.append("not_observable")
+                continue
+            values = list(symbol_net.values())
+            out[avg_field] = fmt_num(sum(values) / len(values), 6)
+            out[worst_field] = fmt_num(min(values), 6)
+            out[win_field] = str(sum(1 for value in values if value > 0))
+            out[symbol_field] = json.dumps(symbol_net, ensure_ascii=False, sort_keys=True)
+            out[status_field] = "complete"
+            out[reason_field] = ""
+            horizon_statuses.append("complete")
+
+        if any(status == "complete" for status in horizon_statuses):
+            out["label_status"] = "complete"
+        elif any(status == "not_observable" for status in horizon_statuses):
+            out["label_status"] = "not_observable"
+        elif any(status == "pending" for status in horizon_statuses):
+            out["label_status"] = "pending"
+        else:
+            out["label_status"] = first_observed(first_value(row, ("label_status",), not_obs))
+        return out
+
+    def aggregate_multi_position_by_k(rows):
+        grouped = defaultdict(list)
+        for row in rows:
+            grouped[flatten_value(row.get("k") or not_obs)].append(row)
+        out = []
+        for k, group_rows in sorted(grouped.items()):
+            payload = {"k": k, "count": len(group_rows)}
+            for horizon in multi_position_swing_horizons:
+                values = [as_float(row.get(f"label_{horizon}h_portfolio_avg_net_bps")) for row in group_rows]
+                usable = [value for value in values if value is not None]
+                payload[f"avg_{horizon}h_net_bps"] = round(sum(usable) / len(usable), 6) if usable else not_obs
+            values_24h = [as_float(row.get("label_24h_portfolio_avg_net_bps")) for row in group_rows]
+            usable_24h = [value for value in values_24h if value is not None]
+            worst_24h = [as_float(row.get("label_24h_worst_symbol_net_bps")) for row in group_rows]
+            usable_worst_24h = [value for value in worst_24h if value is not None]
+            payload["win_rate"] = round(sum(1 for value in usable_24h if value > 0) / len(usable_24h), 6) if usable_24h else not_obs
+            payload["worst_avg"] = round(sum(usable_worst_24h) / len(usable_worst_24h), 6) if usable_worst_24h else not_obs
+            out.append(payload)
+        return out
+
+    def aggregate_multi_position_by_symbol(rows):
+        grouped = defaultdict(list)
+        for row in rows:
+            for symbol in parse_symbols_list(row.get("symbols")):
+                grouped[symbol].append(row)
+        out = []
+        for symbol, group_rows in sorted(grouped.items()):
+            payload = {"symbol": symbol, "count": len(group_rows)}
+            for horizon in multi_position_swing_horizons:
+                values = []
+                for row in group_rows:
+                    per_symbol = parse_json_obj(row.get(f"label_{horizon}h_symbol_net_bps"), {})
+                    if isinstance(per_symbol, dict):
+                        value = as_float(first_value(per_symbol, (symbol, symbol.replace("/", "-")), not_obs))
+                        if value is not None:
+                            values.append(value)
+                payload[f"avg_{horizon}h_net_bps"] = round(sum(values) / len(values), 6) if values else not_obs
+                payload[f"win_rate_{horizon}h"] = round(sum(1 for value in values if value > 0) / len(values), 6) if values else not_obs
+            out.append(payload)
+        return out
+
+    multi_position_swing_shadow_rows = [
+        build_multi_position_swing_shadow_row(row)
+        for row in multi_position_swing_shadow_label_rows
+    ]
+    multi_position_swing_shadow_by_k = aggregate_multi_position_by_k(multi_position_swing_shadow_rows)
+    multi_position_swing_shadow_by_symbol = aggregate_multi_position_by_symbol(multi_position_swing_shadow_rows)
 
     def factor_forward_value(row, horizon):
         key = btc_label_key(
@@ -3707,6 +3952,43 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         alt_impulse_shadow_by_horizon,
         ["horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
     )
+    multi_position_swing_fields = [
+        "ts_utc",
+        "run_id",
+        "k",
+        "symbols",
+        "equal_weight",
+        "entry_px",
+        "final_score",
+        "selected_rank",
+        "rt_cost_bps",
+    ]
+    for horizon in multi_position_swing_horizons:
+        h = int(horizon)
+        multi_position_swing_fields.extend([
+            f"label_{h}h_status",
+            f"label_{h}h_portfolio_avg_net_bps",
+            f"label_{h}h_worst_symbol_net_bps",
+            f"label_{h}h_win_count",
+            f"label_{h}h_symbol_net_bps",
+            f"label_{h}h_reason",
+        ])
+    multi_position_swing_fields.append("label_status")
+    write_csv(
+        "summaries/multi_position_swing_shadow_outcomes.csv",
+        multi_position_swing_shadow_rows,
+        multi_position_swing_fields,
+    )
+    write_csv(
+        "summaries/multi_position_swing_shadow_by_k.csv",
+        multi_position_swing_shadow_by_k,
+        ["k", "count", "avg_24h_net_bps", "avg_48h_net_bps", "avg_72h_net_bps", "win_rate", "worst_avg"],
+    )
+    write_csv(
+        "summaries/multi_position_swing_shadow_by_symbol.csv",
+        multi_position_swing_shadow_by_symbol,
+        ["symbol", "count", "avg_24h_net_bps", "avg_48h_net_bps", "avg_72h_net_bps", "win_rate_24h", "win_rate_48h", "win_rate_72h"],
+    )
     write_csv(
         "summaries/skipped_candidate_outcomes_by_horizon.csv",
         skipped_candidate_outcomes_by_horizon,
@@ -3775,6 +4057,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         as_float(row.get("avg_24h_net_bps")) is not None and as_float(row.get("avg_24h_net_bps")) < 0
         for row in f3_dominant_rows
     )
+    multi_position_swing_status_counts = Counter(row.get("label_status") or not_obs for row in multi_position_swing_shadow_rows)
 
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
@@ -3818,6 +4101,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "alt_impulse_shadow_label_count": len(alt_impulse_shadow_rows),
         "alt_impulse_shadow_duplicate_count": alt_impulse_shadow_duplicate_count,
         "alt_impulse_shadow_entry_px_not_observable_count": alt_impulse_shadow_entry_px_not_observable_count,
+        "multi_position_swing_shadow_label_count": len(multi_position_swing_shadow_rows),
+        "multi_position_swing_shadow_duplicate_count": multi_position_swing_shadow_duplicate_count,
+        "multi_position_swing_shadow_complete_count": int(multi_position_swing_status_counts.get("complete", 0)),
+        "multi_position_swing_shadow_pending_count": int(multi_position_swing_status_counts.get("pending", 0)),
+        "multi_position_swing_shadow_not_observable_count": int(multi_position_swing_status_counts.get("not_observable", 0)),
         "market_impulse_selection_shadow_rows": len(market_impulse_selection_shadow_rows),
         "factor_contribution_audit_rows": len(factor_contribution_rows),
         "factor_contribution_factor_count": len(factor_contribution_outcomes_by_factor),
@@ -4026,6 +4314,93 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         else ("not_observable_no_matured_labels" if alt_impulse_shadow_rows else "not_applicable_no_shadow_samples")
     )
 
+    def multi_position_by_k_row(k):
+        key = str(k)
+        for row in multi_position_swing_shadow_by_k:
+            if str(row.get("k")) == key:
+                return row
+        return {}
+
+    def multi_position_value(row, key):
+        if not row:
+            return None
+        return as_float(row.get(key))
+
+    def multi_position_top2_vs_top1_text():
+        k1 = multi_position_by_k_row(1)
+        k2 = multi_position_by_k_row(2)
+        if not k1 or not k2:
+            return "not_observable_missing_top1_or_top2"
+        for horizon in multi_position_swing_horizons:
+            h = int(horizon)
+            top1 = multi_position_value(k1, f"avg_{h}h_net_bps")
+            top2 = multi_position_value(k2, f"avg_{h}h_net_bps")
+            if top1 is not None and top2 is not None:
+                verdict = "yes" if top2 > top1 else "no"
+                return f"{verdict} / {h}h top1={fmt_num(top1, 6)}, top2={fmt_num(top2, 6)}"
+        return "not_observable_no_complete_top1_top2_labels"
+
+    def multi_position_top3_risk_text():
+        k2 = multi_position_by_k_row(2)
+        k3 = multi_position_by_k_row(3)
+        if not k2 or not k3:
+            return "not_observable_missing_top2_or_top3"
+        top2_worst = multi_position_value(k2, "worst_avg")
+        top3_worst = multi_position_value(k3, "worst_avg")
+        top2_win = multi_position_value(k2, "win_rate")
+        top3_win = multi_position_value(k3, "win_rate")
+        if top2_worst is None or top3_worst is None:
+            return "not_observable_no_complete_top2_top3_worst"
+        risk_up = top3_worst < top2_worst or (top2_win is not None and top3_win is not None and top3_win < top2_win)
+        return (
+            f"{'yes' if risk_up else 'no'} / "
+            f"top2_worst_avg={fmt_num(top2_worst, 6)}, top3_worst_avg={fmt_num(top3_worst, 6)}, "
+            f"top2_win_rate={fmt_num(top2_win, 6) if top2_win is not None else not_obs}, "
+            f"top3_win_rate={fmt_num(top3_win, 6) if top3_win is not None else not_obs}"
+        )
+
+    def multi_position_best_combinations_text(limit=5):
+        ranked = [
+            row for row in multi_position_swing_shadow_rows
+            if as_float(row.get("label_24h_portfolio_avg_net_bps")) is not None
+        ]
+        if not ranked:
+            return "not_observable_no_complete_24h_labels"
+        ranked.sort(key=lambda row: as_float(row.get("label_24h_portfolio_avg_net_bps")) or -1e18, reverse=True)
+        parts = []
+        for row in ranked[:limit]:
+            parts.append(
+                f"k={row.get('k', not_obs)} symbols={row.get('symbols', not_obs)} "
+                f"24h_avg={row.get('label_24h_portfolio_avg_net_bps', not_obs)} "
+                f"worst={row.get('label_24h_worst_symbol_net_bps', not_obs)} "
+                f"wins={row.get('label_24h_win_count', not_obs)}"
+            )
+        return "; ".join(parts)
+
+    def multi_position_by_k_text():
+        if not multi_position_swing_shadow_by_k:
+            return "not_observable_no_rows"
+        return "; ".join(
+            f"k={row.get('k', not_obs)} count={row.get('count', 0)} "
+            f"24h={row.get('avg_24h_net_bps', not_obs)} "
+            f"48h={row.get('avg_48h_net_bps', not_obs)} "
+            f"72h={row.get('avg_72h_net_bps', not_obs)} "
+            f"win_rate={row.get('win_rate', not_obs)} "
+            f"worst_avg={row.get('worst_avg', not_obs)}"
+            for row in multi_position_swing_shadow_by_k
+        )
+
+    def multi_position_by_symbol_text():
+        if not multi_position_swing_shadow_by_symbol:
+            return "not_observable_no_rows"
+        return "; ".join(
+            f"{row.get('symbol', not_obs)} count={row.get('count', 0)} "
+            f"24h={row.get('avg_24h_net_bps', not_obs)}/win={row.get('win_rate_24h', not_obs)} "
+            f"48h={row.get('avg_48h_net_bps', not_obs)}/win={row.get('win_rate_48h', not_obs)} "
+            f"72h={row.get('avg_72h_net_bps', not_obs)}/win={row.get('win_rate_72h', not_obs)}"
+            for row in multi_position_swing_shadow_by_symbol
+        )
+
     def factor_contribution_summary_text():
         if not factor_contribution_outcomes_by_factor:
             return "not_observable_no_factor_rows"
@@ -4119,6 +4494,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- by_skip_reason: {aggregate_summary_lines(alt_impulse_shadow_by_reason, ['skip_reason'])}",
         f"- by_horizon: {by_horizon_summary_lines(alt_impulse_shadow_by_horizon)}",
         f"- 是否支持未来 live probe: {alt_impulse_future_probe_text}",
+        "",
+        "## 多币 swing shadow",
+        f"- label_count: {len(multi_position_swing_shadow_rows)}",
+        f"- top2 是否优于 top1: {multi_position_top2_vs_top1_text()}",
+        f"- top3 是否增加风险: {multi_position_top3_risk_text()}",
+        f"- 哪些组合表现最好: {multi_position_best_combinations_text()}",
+        f"- by_k: {multi_position_by_k_text()}",
+        f"- by_symbol: {multi_position_by_symbol_text()}",
         "",
         "## BTC leadership probe 可观测性",
         f"- 逻辑是否出现: {'yes' if btc_config_audit['seen_in_decision_audit'] else 'no'}",

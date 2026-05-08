@@ -1279,12 +1279,40 @@ class DiagnosticsConfig(BaseModel):
         le=10000.0,
         description="Round-trip cost used when labeling ALT impulse shadow outcomes",
     )
+    multi_position_swing_shadow_enabled: bool = Field(
+        default=True,
+        description="Enable read-only top-1/top-2/top-3 multi-position swing shadow labels",
+    )
+    multi_position_swing_shadow_symbols: List[str] = Field(
+        default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"],
+        description="Symbols eligible for multi-position swing shadow portfolios",
+    )
+    multi_position_swing_shadow_min_final_score: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=1.0,
+        description="Minimum final score for multi-position swing shadow candidates",
+    )
+    multi_position_swing_shadow_horizons_hours: List[int] = Field(
+        default_factory=lambda: [24, 48, 72],
+        description="Forward-label horizons (hours) for multi-position swing shadow portfolios",
+    )
+    multi_position_swing_shadow_rt_cost_bps: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=10000.0,
+        description="Round-trip cost used when labeling multi-position swing shadow outcomes",
+    )
     market_impulse_selection_shadow_enabled: bool = Field(
         default=True,
         description="Enable read-only shadow selection diagnostics for market impulse probe candidates",
     )
 
-    @field_validator("skipped_candidate_horizons_hours", "extended_label_horizons_hours")
+    @field_validator(
+        "skipped_candidate_horizons_hours",
+        "extended_label_horizons_hours",
+        "multi_position_swing_shadow_horizons_hours",
+    )
     @classmethod
     def _validate_label_horizons_hours(cls, v: List[int]) -> List[int]:
         out: List[int] = []
@@ -1301,7 +1329,7 @@ class DiagnosticsConfig(BaseModel):
             raise ValueError("label horizons cannot be empty")
         return out
 
-    @field_validator("alt_impulse_shadow_symbols")
+    @field_validator("alt_impulse_shadow_symbols", "multi_position_swing_shadow_symbols")
     @classmethod
     def _validate_alt_impulse_shadow_symbols(cls, v: List[str]) -> List[str]:
         out: List[str] = []
@@ -1317,7 +1345,7 @@ class DiagnosticsConfig(BaseModel):
             seen.add(symbol)
             out.append(symbol)
         if not out:
-            raise ValueError("alt_impulse_shadow_symbols cannot be empty")
+            raise ValueError("shadow symbols cannot be empty")
         return out
 
 

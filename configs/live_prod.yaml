@@ -227,6 +227,11 @@ diagnostics:
   alt_impulse_shadow_require_btc_positive_4h: true
   alt_impulse_shadow_require_broad_market_positive_count: 2
   alt_impulse_shadow_rt_cost_bps: 30
+  multi_position_swing_shadow_enabled: true
+  multi_position_swing_shadow_symbols: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
+  multi_position_swing_shadow_min_final_score: 0.30
+  multi_position_swing_shadow_horizons_hours: [24, 48, 72]
+  multi_position_swing_shadow_rt_cost_bps: 30
   market_impulse_selection_shadow_enabled: true
 
 execution:

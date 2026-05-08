@@ -913,6 +913,63 @@ def write_ohlcv_cache(root, symbol, rows):
     return path
 
 
+def fixture_multi_position_swing_shadow_root(root):
+    run_id = fixture_root(root)
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    entry_ts = window_end - 50 * 3600
+
+    write_text(
+        root / "reports/multi_position_swing_shadow_labels.jsonl",
+        "\n".join(
+            json.dumps(row, ensure_ascii=False)
+            for row in [
+                {
+                    "ts_utc": iso(entry_ts),
+                    "run_id": run_id,
+                    "k": 1,
+                    "symbols": ["ETH/USDT"],
+                    "equal_weight": 1.0,
+                    "entry_px": {"ETH/USDT": 100.0},
+                    "final_score": {"ETH/USDT": 0.9},
+                    "selected_rank": {"ETH/USDT": 1},
+                    "rt_cost_bps": 30.0,
+                    "label_status": "pending",
+                },
+                {
+                    "ts_utc": iso(entry_ts),
+                    "run_id": run_id,
+                    "k": 2,
+                    "symbols": ["ETH/USDT", "BTC/USDT"],
+                    "equal_weight": 0.5,
+                    "entry_px": {"ETH/USDT": 100.0, "BTC/USDT": 200.0},
+                    "final_score": {"ETH/USDT": 0.9, "BTC/USDT": 0.8},
+                    "selected_rank": {"ETH/USDT": 1, "BTC/USDT": 2},
+                    "rt_cost_bps": 30.0,
+                    "label_status": "pending",
+                },
+                {
+                    "ts_utc": iso(entry_ts),
+                    "run_id": run_id,
+                    "k": 3,
+                    "symbols": ["ETH/USDT", "BTC/USDT", "SOL/USDT"],
+                    "equal_weight": 0.33333333,
+                    "entry_px": {"ETH/USDT": 100.0, "BTC/USDT": 200.0, "SOL/USDT": 50.0},
+                    "final_score": {"ETH/USDT": 0.9, "BTC/USDT": 0.8, "SOL/USDT": 0.7},
+                    "selected_rank": {"ETH/USDT": 1, "BTC/USDT": 2, "SOL/USDT": 3},
+                    "rt_cost_bps": 30.0,
+                    "label_status": "pending",
+                },
+            ]
+        )
+        + "\n",
+    )
+    write_ohlcv_cache(root, "ETH/USDT", [(entry_ts, 100.0), (entry_ts + 24 * 3600, 104.0), (entry_ts + 48 * 3600, 106.0)])
+    write_ohlcv_cache(root, "BTC/USDT", [(entry_ts, 200.0), (entry_ts + 24 * 3600, 202.0), (entry_ts + 48 * 3600, 204.0)])
+    write_ohlcv_cache(root, "SOL/USDT", [(entry_ts, 50.0), (entry_ts + 24 * 3600, 49.0), (entry_ts + 48 * 3600, 51.0)])
+    return run_id
+
+
 def fixture_alt_impulse_shadow_cache_fill_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -1326,9 +1383,15 @@ def run_bundle(root):
         script_path = f"/mnt/{script_path[0].lower()}/{tail}"
     else:
         script_path = script_path.replace("\\", "/")
+    root_path = str(root)
+    if len(root_path) >= 3 and root_path[1] == ":":
+        tail = root_path[3:].replace("\\", "/")
+        root_path = f"/mnt/{root_path[0].lower()}/{tail}"
+    else:
+        root_path = root_path.replace("\\", "/")
     proc = subprocess.run(
-        ["bash", script_path],
-        env={**os.environ, "V5_REMOTE_ROOT": str(root)},
+        ["bash", script_path, root_path],
+        env=os.environ.copy(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1337,7 +1400,12 @@ def run_bundle(root):
     bundle_path = None
     for line in proc.stdout.splitlines():
         if line.startswith("BUNDLE_PATH="):
-            bundle_path = pathlib.Path(line.split("=", 1)[1])
+            raw_bundle_path = line.split("=", 1)[1]
+            if os.name == "nt" and raw_bundle_path.startswith("/"):
+                converted = subprocess.check_output(["wsl.exe", "wslpath", "-w", raw_bundle_path], text=True).strip()
+                bundle_path = pathlib.Path(converted)
+            else:
+                bundle_path = pathlib.Path(raw_bundle_path)
             break
     assert bundle_path and bundle_path.is_file(), proc.stdout + proc.stderr
     return bundle_path
@@ -1508,6 +1576,43 @@ def main():
             assert "SOL/USDT: count=1, 4h_avg=not_observable" in readme, readme
             assert "BNB/USDT: count=0" in readme, readme
             assert "是否支持未来 live probe: diagnostic_only_review_required" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-multi-position-swing-shadow-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_multi_position_swing_shadow_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/multi_position_swing_shadow_outcomes.csv")).read().decode().splitlines()))
+                by_k = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/multi_position_swing_shadow_by_k.csv")).read().decode().splitlines()))
+                by_symbol = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/multi_position_swing_shadow_by_symbol.csv")).read().decode().splitlines()))
+                labels_lines = tf.extractfile(extract_member(tf, "raw/reports/multi_position_swing_shadow_labels.jsonl")).read().decode().splitlines()
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(outcomes) == 3, outcomes
+            assert len(labels_lines) == 3, labels_lines
+            top2 = next(row for row in outcomes if row["k"] == "2")
+            assert top2["label_24h_status"] == "complete", top2
+            assert top2["label_24h_portfolio_avg_net_bps"] == "220", top2
+            assert top2["label_24h_worst_symbol_net_bps"] == "70", top2
+            assert top2["label_24h_win_count"] == "2", top2
+            assert top2["label_48h_status"] == "complete", top2
+            assert top2["label_72h_status"] == "pending", top2
+            by_k_map = {row["k"]: row for row in by_k}
+            assert by_k_map["2"]["avg_24h_net_bps"] == "220.0", by_k
+            assert by_k_map["3"]["worst_avg"] == "-230.0", by_k
+            by_symbol_map = {row["symbol"]: row for row in by_symbol}
+            assert by_symbol_map["ETH/USDT"]["avg_24h_net_bps"] == "370.0", by_symbol
+            assert window["multi_position_swing_shadow_label_count"] == 3, window
+            assert window["multi_position_swing_shadow_complete_count"] == 3, window
+            assert "## 多币 swing shadow" in readme, readme
+            assert "top2 是否优于 top1: no / 24h top1=370" in readme, readme
+            assert "top3 是否增加风险: yes" in readme, readme
+            assert "哪些组合表现最好: k=1 symbols=[\"ETH/USDT\"] 24h_avg=370" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
