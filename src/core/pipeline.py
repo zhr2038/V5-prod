@@ -1361,6 +1361,306 @@ class V5Pipeline:
             return False
         return False
 
+    def _protect_recovery_symbol_has_negative_expectancy(self, symbol: str) -> bool:
+        try:
+            blocked = self.negative_expectancy_cooldown.is_blocked(symbol)
+            if blocked:
+                return True
+        except Exception:
+            pass
+        try:
+            stat = self.negative_expectancy_cooldown.get_symbol_stats(symbol) or {}
+        except Exception:
+            stat = {}
+        if not isinstance(stat, dict) or not stat:
+            return False
+        try:
+            if int(stat.get("closed_cycles") or 0) > 0 and self._negative_expectancy_bps(stat) < 0.0:
+                return True
+            if int(stat.get("fast_fail_closed_cycles") or 0) > 0 and self._negative_expectancy_bps(stat, fast_fail=True) < 0.0:
+                return True
+        except Exception:
+            return False
+        return False
+
+    @staticmethod
+    def _series_return_bps(series: Optional[Any], lookback_hours: int = 4) -> Optional[float]:
+        try:
+            closes = [float(value) for value in (getattr(series, "close", None) or [])]
+        except Exception:
+            closes = []
+        if len(closes) < 2:
+            return None
+        latest = float(closes[-1])
+        past_index = max(0, len(closes) - 1 - max(1, int(lookback_hours or 4)))
+        past = float(closes[past_index])
+        if latest <= 0.0 or past <= 0.0:
+            return None
+        return (latest / past - 1.0) * 10000.0
+
+    def _protect_recovery_alt_shadow_supports_symbol(self, symbol: str) -> bool:
+        sym = str(symbol or "").strip()
+        if not sym:
+            return False
+        path = Path(REPORTS_DIR) / "alt_impulse_shadow_labels.jsonl"
+        if not path.exists():
+            return False
+        horizons = (24, 48, 72)
+        try:
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                if not isinstance(item, dict) or str(item.get("symbol") or "").strip() != sym:
+                    continue
+                for horizon in horizons:
+                    status = str(
+                        item.get(f"label_{horizon}h_status")
+                        or item.get("label_status")
+                        or ""
+                    ).strip()
+                    if status != "complete":
+                        continue
+                    value = _float_or_none(item.get(f"label_{horizon}h_net_bps"))
+                    if value is not None and float(value) > 0.0:
+                        return True
+        except Exception:
+            return False
+        return False
+
+    def _protect_recovery_signal_support(
+        self,
+        *,
+        symbol: str,
+        strategy_signal_lookup: Mapping[str, Dict[str, Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        alpha6_signal = (strategy_signal_lookup.get("Alpha6Factor") or {}).get(symbol)
+        values = self._protect_entry_signal_values(alpha6_signal)
+        alpha6_ok = bool(self._protect_entry_signal_meets_normal_confirmation(alpha6_signal))
+        shadow_ok = bool(self._protect_recovery_alt_shadow_supports_symbol(symbol))
+        return {
+            **values,
+            "alpha6_confirmed": alpha6_ok,
+            "alt_shadow_supported": shadow_ok,
+        }
+
+    def _protect_recovery_swing_hold_meta(
+        self,
+        *,
+        symbol: str,
+        candidate: Mapping[str, Any],
+        now_utc: datetime,
+    ) -> Dict[str, Any]:
+        min_hold_hours = float(getattr(self.cfg.execution, "swing_min_hold_hours", 24) or 0.0)
+        entry_ts = now_utc.isoformat().replace("+00:00", "Z")
+        return {
+            "swing_hold_position": True,
+            "swing_apply_only_to_normal_entry": True,
+            "swing_entry_ts": entry_ts,
+            "swing_entry_ts_ms": int(now_utc.timestamp() * 1000),
+            "swing_min_hold_hours": min_hold_hours,
+            "entry_reason": "protect_recovery_swing",
+            "protect_recovery_multi_position": True,
+            "protect_recovery_entry_support": candidate.get("entry_support"),
+            "alpha6_score": candidate.get("alpha6_score"),
+            "alpha6_side": candidate.get("alpha6_side"),
+            "f4_volume_expansion": candidate.get("f4_volume_expansion"),
+            "f5_rsi_trend_confirm": candidate.get("f5_rsi_trend_confirm"),
+            "current_level": "PROTECT",
+        }
+
+    def _apply_protect_recovery_multi_position_targets(
+        self,
+        *,
+        target: Dict[str, float],
+        alpha: Any,
+        market_data_1h: Mapping[str, Any],
+        positions: List[Position],
+        prices: Mapping[str, float],
+        current_auto_risk_level: Optional[str],
+        regime_state_str: str,
+        strategy_signal_lookup: Mapping[str, Dict[str, Dict[str, Any]]],
+        audit: Optional[DecisionAudit],
+    ) -> tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[Dict[str, Any]], bool]:
+        if not bool(getattr(self.cfg.execution, "protect_recovery_multi_position_enabled", False)):
+            return target, {}, [], False
+        router_decisions: List[Dict[str, Any]] = []
+
+        def record_skip(reason: str, **fields: Any) -> None:
+            if not audit:
+                return
+            audit.record_count("protect_recovery_multi_position_skip_count", symbol=reason)
+            audit.add_note(f"PROTECT recovery multi-position skipped: reason={reason}")
+            router_decisions.append(
+                {
+                    "symbol": "PROTECT_RECOVERY",
+                    "action": "skip",
+                    "reason": reason,
+                    **fields,
+                }
+            )
+
+        if str(current_auto_risk_level or "").upper() != "PROTECT":
+            record_skip("protect_recovery_not_protect", current_level=current_auto_risk_level)
+            return target, {}, router_decisions, False
+        if str(regime_state_str or "") in {"Risk-Off", "Risk_Off", "RiskOff"}:
+            record_skip("protect_recovery_risk_off", regime=regime_state_str)
+            return target, {}, router_decisions, False
+
+        allowed_symbols = [
+            str(symbol or "").strip().upper().replace("-", "/")
+            for symbol in (getattr(self.cfg.execution, "protect_recovery_allowed_symbols", None) or [])
+            if str(symbol or "").strip()
+        ]
+        allowed_symbols = list(dict.fromkeys(allowed_symbols))
+        if self._live_symbol_whitelist:
+            allowed_symbols = [symbol for symbol in allowed_symbols if symbol in self._live_symbol_whitelist]
+        if not allowed_symbols:
+            record_skip("protect_recovery_no_allowed_symbols")
+            return target, {}, router_decisions, False
+
+        positive_4h: Dict[str, float] = {}
+        for symbol in allowed_symbols:
+            ret_bps = self._series_return_bps(market_data_1h.get(symbol), lookback_hours=4)
+            if ret_bps is not None and float(ret_bps) > 0.0:
+                positive_4h[symbol] = float(ret_bps)
+        min_positive = int(getattr(self.cfg.execution, "protect_recovery_min_positive_whitelist_4h_count", 3) or 0)
+        if bool(getattr(self.cfg.execution, "protect_recovery_require_market_context", True)) and len(positive_4h) < min_positive:
+            record_skip(
+                "protect_recovery_market_context_not_met",
+                positive_4h_count=len(positive_4h),
+                required_positive_4h_count=min_positive,
+                positive_4h_symbols=sorted(positive_4h),
+            )
+            return target, {}, router_decisions, False
+
+        max_positions = int(getattr(self.cfg.execution, "protect_recovery_max_positions", 2) or 2)
+        max_positions = max(1, min(max_positions, 5))
+        per_target_w = min(
+            0.08,
+            float(getattr(self.cfg.execution, "protect_recovery_position_target_w", 0.08) or 0.0),
+        )
+        max_gross = float(getattr(self.cfg.execution, "protect_recovery_max_gross_exposure", 0.18) or 0.0)
+        if per_target_w <= 0.0 or max_gross <= 0.0:
+            record_skip("protect_recovery_zero_sizing", per_target_w=per_target_w, max_gross=max_gross)
+            return {}, {}, router_decisions, True
+
+        disallow_negexp = bool(
+            getattr(self.cfg.execution, "protect_recovery_disallow_symbols_with_negative_expectancy", True)
+        )
+        scores = dict(getattr(alpha, "scores", {}) or {})
+        candidates: List[Dict[str, Any]] = []
+        for rank, (symbol, score) in enumerate(sorted(scores.items(), key=lambda item: item[1], reverse=True), start=1):
+            sym = str(symbol or "").strip().upper().replace("-", "/")
+            if sym not in allowed_symbols or sym not in market_data_1h:
+                continue
+            px = float(prices.get(sym, 0.0) or 0.0)
+            if px <= 0.0:
+                continue
+            if disallow_negexp and self._protect_recovery_symbol_has_negative_expectancy(sym):
+                if audit:
+                    audit.record_count("protect_recovery_negative_expectancy_excluded_count", symbol=sym)
+                    router_decisions.append(
+                        {
+                            "symbol": sym,
+                            "action": "skip",
+                            "reason": "protect_recovery_negative_expectancy_excluded",
+                        }
+                    )
+                continue
+
+            support = self._protect_recovery_signal_support(
+                symbol=sym,
+                strategy_signal_lookup=strategy_signal_lookup,
+            )
+            alpha6_ok = bool(support.get("alpha6_confirmed"))
+            shadow_ok = bool(support.get("alt_shadow_supported"))
+            if sym == "ETH/USDT" and not (str(support.get("alpha6_side") or "") == "buy" or shadow_ok):
+                if audit:
+                    router_decisions.append(
+                        {
+                            "symbol": sym,
+                            "action": "skip",
+                            "reason": "protect_recovery_eth_no_alpha6_or_shadow",
+                            **support,
+                        }
+                    )
+                continue
+            if sym == "SOL/USDT" and not (alpha6_ok or shadow_ok):
+                if audit:
+                    router_decisions.append(
+                        {
+                            "symbol": sym,
+                            "action": "skip",
+                            "reason": "protect_recovery_sol_no_confirmation_or_shadow",
+                            **support,
+                        }
+                    )
+                continue
+
+            entry_support = "alpha6_confirmed" if alpha6_ok else ("alt_shadow" if shadow_ok else "score")
+            candidates.append(
+                {
+                    "symbol": sym,
+                    "score": float(score),
+                    "rank": int(rank),
+                    "entry_support": entry_support,
+                    **support,
+                }
+            )
+
+        selected = candidates[:max_positions]
+        if not selected:
+            record_skip("protect_recovery_no_qualified_candidates")
+            return {}, {}, router_decisions, True
+
+        selected_target = {row["symbol"]: float(per_target_w) for row in selected}
+        gross = sum(abs(float(value)) for value in selected_target.values())
+        if gross > max_gross > 0.0:
+            scale = float(max_gross) / float(gross)
+            selected_target = {
+                symbol: round(float(weight) * scale, 10)
+                for symbol, weight in selected_target.items()
+            }
+
+        meta_by_symbol: Dict[str, Dict[str, Any]] = {}
+        for row in selected:
+            sym = row["symbol"]
+            meta_by_symbol[sym] = {
+                **row,
+                "target_w": float(selected_target.get(sym, 0.0) or 0.0),
+                "max_positions": int(max_positions),
+                "max_gross_exposure": float(max_gross),
+                "positive_4h_count": int(len(positive_4h)),
+                "positive_4h_symbols": sorted(positive_4h),
+            }
+
+        if audit:
+            audit.record_count("protect_recovery_multi_position_active_count")
+            audit.counts["protect_recovery_multi_position_candidate_count"] = len(candidates)
+            audit.counts["protect_recovery_multi_position_selected_count"] = len(selected_target)
+            audit.add_note(
+                "PROTECT recovery multi-position active: "
+                f"symbols={sorted(selected_target)} gross={sum(selected_target.values()):.4f} "
+                f"positive_4h_count={len(positive_4h)}"
+            )
+            for row in selected:
+                router_decisions.append(
+                    {
+                        "symbol": row["symbol"],
+                        "action": "target",
+                        "reason": "protect_recovery_multi_position_target",
+                        "target_w": float(selected_target.get(row["symbol"], 0.0) or 0.0),
+                        "score": row.get("score"),
+                        "rank": row.get("rank"),
+                        "entry_support": row.get("entry_support"),
+                        "positive_4h_count": int(len(positive_4h)),
+                        "max_gross_exposure": float(max_gross),
+                    }
+                )
+
+        return selected_target, meta_by_symbol, router_decisions, True
+
     @staticmethod
     def _record_replacement_block(
         *,
@@ -3938,6 +4238,31 @@ class V5Pipeline:
             if protect_entry_gate_active or btc_probe_enabled
             else {}
         )
+        protect_recovery_meta_by_symbol: Dict[str, Dict[str, Any]] = {}
+        protect_recovery_router_decisions: List[Dict[str, Any]] = []
+        protect_recovery_overrode_targets = False
+        (
+            target,
+            protect_recovery_meta_by_symbol,
+            protect_recovery_router_decisions,
+            protect_recovery_overrode_targets,
+        ) = (
+            self._apply_protect_recovery_multi_position_targets(
+                target=target,
+                alpha=alpha,
+                market_data_1h=market_data_1h,
+                positions=active_positions,
+                prices=prices,
+                current_auto_risk_level=current_auto_risk_level,
+                regime_state_str=regime_state_str,
+                strategy_signal_lookup=strategy_signal_lookup,
+                audit=audit,
+            )
+        )
+        if protect_recovery_overrode_targets:
+            eligible_buy_symbols = set(target.keys())
+            if audit:
+                audit.targets_post_risk = dict(target)
 
         def _has_effective_non_dust_position() -> bool:
             for pos in positions:
@@ -4993,6 +5318,7 @@ class V5Pipeline:
             + list(position_state_cleanup_router_decisions)
             + list(btc_leadership_probe_router_decisions)
             + list(protect_profit_lock_router_decisions)
+            + list(protect_recovery_router_decisions)
         )
         invalid_price_warnings: List[Dict] = []  # 记录价格无效的告警
 
@@ -5194,6 +5520,7 @@ class V5Pipeline:
             held_is_dust = held is not None and dust_position_info is not None
             active_held = None if held_is_dust else held
             btc_probe_meta = btc_leadership_probe_meta_by_symbol.get(sym)
+            protect_recovery_meta = protect_recovery_meta_by_symbol.get(sym)
 
             if sym in exit_symbols:
                 if audit:
@@ -5525,7 +5852,17 @@ class V5Pipeline:
                         router_decisions.append(short_cycle_block)
                     continue
 
-            if side == "buy" and intent == "OPEN_LONG" and protect_entry_gate_active and btc_probe_meta is None:
+            protect_recovery_shadow_entry = (
+                protect_recovery_meta is not None
+                and str(protect_recovery_meta.get("entry_support") or "") == "alt_shadow"
+            )
+            if (
+                side == "buy"
+                and intent == "OPEN_LONG"
+                and protect_entry_gate_active
+                and btc_probe_meta is None
+                and not protect_recovery_shadow_entry
+            ):
                 protect_block = self._evaluate_protect_entry_gate(
                     symbol=sym,
                     strategy_signal_lookup=strategy_signal_lookup,
@@ -5582,6 +5919,17 @@ class V5Pipeline:
                             decision["blocked_reason"] = str(decision.get("reason") or "")
                         router_decisions.append(decision)
                     continue
+            elif side == "buy" and intent == "OPEN_LONG" and protect_recovery_shadow_entry and audit:
+                audit.record_count("protect_recovery_alt_shadow_entry_bypass_count", symbol=sym)
+                router_decisions.append(
+                    {
+                        "symbol": sym,
+                        "action": "allow",
+                        "reason": "protect_recovery_alt_shadow_supported",
+                        "entry_support": "alt_shadow",
+                        "current_level": current_auto_risk_level,
+                    }
+                )
 
             # Negative expectancy cooldown gate
             if side == "buy" and neg_cd_enabled:
@@ -6103,12 +6451,19 @@ class V5Pipeline:
 
             swing_meta: Dict[str, Any] = {}
             if side == "buy" and intent == "OPEN_LONG" and btc_probe_meta is None:
-                swing_candidate_meta = self._normal_entry_swing_hold_meta(
-                    symbol=sym,
-                    strategy_signal_lookup=strategy_signal_lookup,
-                    current_auto_risk_level=current_auto_risk_level,
-                    now_utc=now_utc,
-                )
+                if protect_recovery_meta is not None:
+                    swing_candidate_meta = self._protect_recovery_swing_hold_meta(
+                        symbol=sym,
+                        candidate=protect_recovery_meta,
+                        now_utc=now_utc,
+                    )
+                else:
+                    swing_candidate_meta = self._normal_entry_swing_hold_meta(
+                        symbol=sym,
+                        strategy_signal_lookup=strategy_signal_lookup,
+                        current_auto_risk_level=current_auto_risk_level,
+                        now_utc=now_utc,
+                    )
                 if swing_candidate_meta is not None:
                     swing_meta = swing_candidate_meta
                     if audit:
@@ -6216,6 +6571,11 @@ class V5Pipeline:
                             "f4_volume_expansion": swing_meta.get("f4_volume_expansion"),
                             "f5_rsi_trend_confirm": swing_meta.get("f5_rsi_trend_confirm"),
                             "current_level": swing_meta.get("current_level"),
+                            "entry_reason": swing_meta.get("entry_reason"),
+                            "protect_recovery_multi_position": bool(
+                                swing_meta.get("protect_recovery_multi_position", False)
+                            ),
+                            "protect_recovery_entry_support": swing_meta.get("protect_recovery_entry_support"),
                         }
                     )
                 router_decisions.append(decision)

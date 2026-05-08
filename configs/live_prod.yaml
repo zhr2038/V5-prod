@@ -409,6 +409,14 @@ execution:
   swing_allow_exit_on_risk_off: true
   swing_allow_exit_on_stop_loss: true
   swing_allow_exit_on_profit_lock: true
+  protect_recovery_multi_position_enabled: false
+  protect_recovery_max_positions: 2
+  protect_recovery_max_gross_exposure: 0.18
+  protect_recovery_position_target_w: 0.08
+  protect_recovery_require_market_context: true
+  protect_recovery_min_positive_whitelist_4h_count: 3
+  protect_recovery_allowed_symbols: ["BTC/USDT", "SOL/USDT", "ETH/USDT"]
+  protect_recovery_disallow_symbols_with_negative_expectancy: true
   same_symbol_reentry_guard_enabled: true
   same_symbol_reentry_cooldown_hours_after_profit_lock: 6
   same_symbol_reentry_cooldown_hours_after_probe_stop: 8

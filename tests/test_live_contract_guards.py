@@ -353,6 +353,8 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
         assert key in payload["execution"]
     for key in main_module.SWING_HOLD_CONFIG_KEYS:
         assert key in payload["execution"]
+    for key in main_module.PROTECT_RECOVERY_MULTI_POSITION_CONFIG_KEYS:
+        assert key in payload["execution"]
     assert payload["execution"]["btc_leadership_probe_enabled"] is True
     assert payload["execution"]["btc_leadership_probe_min_alpha6_score"] == pytest.approx(0.30)
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
@@ -371,6 +373,11 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["swing_min_hold_hours"] == 24
     assert payload["execution"]["swing_min_alpha6_score"] == pytest.approx(0.50)
     assert payload["execution"]["swing_ignore_rank_exit_before_min_hold"] is True
+    assert payload["execution"]["protect_recovery_multi_position_enabled"] is False
+    assert payload["execution"]["protect_recovery_max_positions"] == 2
+    assert payload["execution"]["protect_recovery_max_gross_exposure"] == pytest.approx(0.18)
+    assert payload["execution"]["protect_recovery_position_target_w"] == pytest.approx(0.08)
+    assert payload["execution"]["protect_recovery_allowed_symbols"] == ["BTC/USDT", "SOL/USDT", "ETH/USDT"]
     assert payload["execution"]["negative_expectancy_release_start_ts"] == 1_776_000_000_000
     assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""
@@ -397,6 +404,8 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     for key in main_module.SAME_SYMBOL_REENTRY_GUARD_CONFIG_KEYS:
         assert key in payload["execution"]
     for key in main_module.SWING_HOLD_CONFIG_KEYS:
+        assert key in payload["execution"]
+    for key in main_module.PROTECT_RECOVERY_MULTI_POSITION_CONFIG_KEYS:
         assert key in payload["execution"]
     assert payload["execution"]["btc_leadership_probe_enabled"] is True
     assert payload["execution"]["btc_leadership_probe_only_in_protect"] is True
@@ -454,6 +463,14 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["swing_allow_exit_on_risk_off"] is True
     assert payload["execution"]["swing_allow_exit_on_stop_loss"] is True
     assert payload["execution"]["swing_allow_exit_on_profit_lock"] is True
+    assert payload["execution"]["protect_recovery_multi_position_enabled"] is False
+    assert payload["execution"]["protect_recovery_max_positions"] == 2
+    assert payload["execution"]["protect_recovery_max_gross_exposure"] == pytest.approx(0.18)
+    assert payload["execution"]["protect_recovery_position_target_w"] == pytest.approx(0.08)
+    assert payload["execution"]["protect_recovery_require_market_context"] is True
+    assert payload["execution"]["protect_recovery_min_positive_whitelist_4h_count"] == 3
+    assert payload["execution"]["protect_recovery_allowed_symbols"] == ["BTC/USDT", "SOL/USDT", "ETH/USDT"]
+    assert payload["execution"]["protect_recovery_disallow_symbols_with_negative_expectancy"] is True
     assert payload["execution"]["negative_expectancy_release_start_ts"] == 2_000_000_000
     assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""

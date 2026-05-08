@@ -736,6 +736,20 @@ class ExecutionConfig(BaseModel):
         le=10.0,
         description="Minimum held symbol score required to keep the current holding when replacement entries are all blocked",
     )
+    protect_recovery_multi_position_enabled: bool = Field(
+        default=False,
+        description="Enable PROTECT recovery mode that can hold up to two readied swing positions",
+    )
+    protect_recovery_max_positions: int = Field(default=2, ge=1, le=5)
+    protect_recovery_max_gross_exposure: float = Field(default=0.18, ge=0.0, le=1.0)
+    protect_recovery_position_target_w: float = Field(default=0.08, ge=0.0, le=1.0)
+    protect_recovery_require_market_context: bool = Field(default=True)
+    protect_recovery_min_positive_whitelist_4h_count: int = Field(default=3, ge=0, le=20)
+    protect_recovery_allowed_symbols: List[str] = Field(
+        default_factory=lambda: ["BTC/USDT", "SOL/USDT", "ETH/USDT"],
+        description="Symbols eligible for PROTECT recovery multi-position swing entries",
+    )
+    protect_recovery_disallow_symbols_with_negative_expectancy: bool = Field(default=True)
     market_impulse_probe_enabled: bool = Field(
         default=True,
         description="Enable small beta probe entries during broad market impulse conditions",
@@ -1158,6 +1172,25 @@ class ExecutionConfig(BaseModel):
         if value not in allowed:
             raise ValueError("market_impulse_probe_selection_mode must be one of: priority, trend_score, alpha6_confirmed, expected_net_shadow")
         return value
+
+    @field_validator("protect_recovery_allowed_symbols")
+    @classmethod
+    def _validate_protect_recovery_allowed_symbols(cls, v: List[str]) -> List[str]:
+        out: List[str] = []
+        seen: set[str] = set()
+        for item in v or []:
+            symbol = str(item or "").strip().upper().replace("-", "/")
+            if not symbol:
+                continue
+            if "/" not in symbol:
+                raise ValueError("protect_recovery_allowed_symbols entries must use BASE/QUOTE format")
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            out.append(symbol)
+        if not out:
+            raise ValueError("protect_recovery_allowed_symbols cannot be empty")
+        return out
 
 
     @model_validator(mode="before")

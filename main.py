@@ -803,6 +803,18 @@ SWING_HOLD_CONFIG_KEYS = (
 )
 
 
+PROTECT_RECOVERY_MULTI_POSITION_CONFIG_KEYS = (
+    "protect_recovery_multi_position_enabled",
+    "protect_recovery_max_positions",
+    "protect_recovery_max_gross_exposure",
+    "protect_recovery_position_target_w",
+    "protect_recovery_require_market_context",
+    "protect_recovery_min_positive_whitelist_4h_count",
+    "protect_recovery_allowed_symbols",
+    "protect_recovery_disallow_symbols_with_negative_expectancy",
+)
+
+
 PROTECT_NEGATIVE_EXPECTANCY_SHORT_CYCLE_CONFIG_KEYS = (
     "protect_negative_expectancy_short_cycle_guard_enabled",
     "protect_negative_expectancy_short_cycle_min_cycles",
@@ -853,6 +865,15 @@ def _swing_hold_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     return {
         key: getattr(execution, key)
         for key in SWING_HOLD_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
+def _protect_recovery_multi_position_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in PROTECT_RECOVERY_MULTI_POSITION_CONFIG_KEYS
         if hasattr(execution, key)
     }
 
@@ -1064,6 +1085,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             **_protect_profit_lock_effective_config(cfg),
             **_same_symbol_reentry_guard_effective_config(cfg),
             **_swing_hold_effective_config(cfg),
+            **_protect_recovery_multi_position_effective_config(cfg),
             **_protect_negative_expectancy_short_cycle_effective_config(cfg),
             **_negative_expectancy_release_effective_config(cfg),
         },
