@@ -1653,6 +1653,95 @@ def fixture_factor_contribution_root(root):
     return old_run_id, current_run_id
 
 
+def fixture_factor_contribution_f3_risk_root(root):
+    fixture_factor_contribution_root(root)
+    now = dt.datetime.now(dt.timezone.utc)
+    risk_window_end = int((now.replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=30)).timestamp())
+    risk_run_id = dt.datetime.fromtimestamp(risk_window_end, dt.timezone.utc).strftime("%Y%m%d_%H")
+    risk_audit_ts = risk_window_end + 15
+    symbols = [f"F3{i:02d}/USDT" for i in range(20)]
+    risk_run_dir = root / "reports/runs/prod" / risk_run_id
+    write_json(risk_run_dir / "decision_audit.json", {
+        "now_ts": risk_audit_ts,
+        "window_end_ts": risk_window_end,
+        "effective_alpha6_weights": {
+            "f1_mom_5d": 0.10,
+            "f2_mom_20d": 0.30,
+            "f3_vol_adj_ret": 0.35,
+            "f4_volume_expansion": 0.15,
+            "f5_rsi_trend_confirm": 0.10,
+        },
+        "top_scores": [
+            {"symbol": symbol, "final_score": 0.95, "rank": idx + 1}
+            for idx, symbol in enumerate(symbols)
+        ],
+        "targets_post_risk": {symbol: 0.05 for symbol in symbols},
+        "router_decisions": [
+            {
+                "symbol": symbol,
+                "action": "skip",
+                "reason": "protect_entry_no_alpha6_confirmation",
+            }
+            for symbol in symbols
+        ],
+        "strategy_signals": [
+            {
+                "strategy": "Alpha6Factor",
+                "signals": [
+                    {
+                        "symbol": symbol,
+                        "side": "buy",
+                        "score": 0.88,
+                        "metadata": {
+                            "raw_factors": {
+                                "f1_mom_5d": 0.01,
+                                "f2_mom_20d": 0.02,
+                                "f3_vol_adj_ret": 4.0,
+                                "f4_volume_expansion": -0.1,
+                                "f5_rsi_trend_confirm": -0.2,
+                            },
+                            "z_factors": {
+                                "f1_mom_5d": 0.10,
+                                "f2_mom_20d": 0.20,
+                                "f3_vol_adj_ret": 2.00,
+                                "f4_volume_expansion": -0.10,
+                                "f5_rsi_trend_confirm": -0.10,
+                            },
+                        },
+                    }
+                    for symbol in symbols
+                ],
+            }
+        ],
+    })
+    write_text(risk_run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(risk_run_dir / "equity.jsonl", "{}\n")
+    write_json(risk_run_dir / "summary.json", {"run_id": risk_run_id})
+
+    labels_path = root / "reports/skipped_candidate_labels.jsonl"
+    with labels_path.open("a", encoding="utf-8") as fh:
+        for symbol in symbols:
+            fh.write(
+                json.dumps(
+                    {
+                        "run_id": risk_run_id,
+                        "ts_utc": iso(risk_audit_ts),
+                        "symbol": symbol,
+                        "skip_reason": "protect_entry_no_alpha6_confirmation",
+                        "entry_px": 100.0,
+                        "label_status": "complete",
+                        "label_4h_net_bps": -60.0,
+                        "label_8h_net_bps": -70.0,
+                        "label_12h_net_bps": -90.0,
+                        "label_24h_net_bps": -100.0,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    return risk_run_id
+
+
 def extract_member(tf, suffix):
     matches = [name for name in tf.getnames() if name.endswith(suffix)]
     assert matches, suffix
@@ -2088,6 +2177,7 @@ def main():
             with tarfile.open(bundle, "r:gz") as tf:
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/factor_contribution_audit.csv")).read().decode().splitlines()))
                 by_factor = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/factor_contribution_outcomes_by_factor.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(rows) == 2, rows
@@ -2103,9 +2193,44 @@ def main():
             assert float(f3["avg_24h_net_bps"]) == -40.0, by_factor
             assert f3["win_rate_24h"] == "0.0", by_factor
             assert window["factor_contribution_audit_rows"] == 2, window
-            assert window["f3_dominant_negative_evidence"] is True, window
+            assert window["f3_dominant_count"] == 1, window
+            assert window["f3_dominant_negative_evidence"] is False, window
+            assert not any(item.get("code") == "f3_dominant_negative_evidence" for item in issues["issues"]), issues
             assert "## Alpha6 factor contribution audit" in readme, readme
+            assert "## F3-dominant 风险检查" in readme, readme
+            assert "f3_dominant_count: 1" in readme, readme
+            assert "f3_dominant_negative_evidence: false" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-factor-contribution-f3-risk-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_factor_contribution_f3_risk_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                by_factor = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/factor_contribution_outcomes_by_factor.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            f3 = next(row for row in by_factor if row["dominant_factor"] == "f3_vol_adj_ret")
+            assert int(f3["count"]) == 21, by_factor
+            assert float(f3["avg_24h_net_bps"]) < -50.0, f3
+            assert float(f3["win_rate_24h"]) < 0.3, f3
+            assert window["f3_dominant_count"] == 21, window
+            assert window["f3_dominant_negative_evidence"] is True, window
+            f3_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "medium" and item.get("code") == "f3_dominant_negative_evidence"
+            ]
+            assert len(f3_issues) == 1, issues
+            assert f3_issues[0]["evidence"]["f3_dominant_count"] == 21, f3_issues
+            assert "## F3-dominant 风险检查" in readme, readme
+            assert "f3_dominant_count: 21" in readme, readme
             assert "f3_dominant_negative_evidence: true" in readme, readme
+            assert "action: diagnostic_only_monitor_no_trade_block" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

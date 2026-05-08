@@ -3364,6 +3364,40 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         return out
 
     factor_contribution_outcomes_by_factor = aggregate_factor_contribution(factor_contribution_rows)
+    f3_dominant_row = next(
+        (
+            row for row in factor_contribution_outcomes_by_factor
+            if row.get("dominant_factor") == "f3_vol_adj_ret"
+        ),
+        {},
+    )
+    f3_dominant_count = as_int(f3_dominant_row.get("count")) if f3_dominant_row else 0
+    f3_dominant_avg_4h_net_bps = as_float(f3_dominant_row.get("avg_4h_net_bps")) if f3_dominant_row else None
+    f3_dominant_avg_8h_net_bps = as_float(f3_dominant_row.get("avg_8h_net_bps")) if f3_dominant_row else None
+    f3_dominant_avg_12h_net_bps = as_float(f3_dominant_row.get("avg_12h_net_bps")) if f3_dominant_row else None
+    f3_dominant_avg_24h_net_bps = as_float(f3_dominant_row.get("avg_24h_net_bps")) if f3_dominant_row else None
+    f3_dominant_win_rate_24h = as_float(f3_dominant_row.get("win_rate_24h")) if f3_dominant_row else None
+    f3_dominant_negative_evidence = (
+        f3_dominant_count >= 20
+        and f3_dominant_avg_24h_net_bps is not None
+        and f3_dominant_avg_24h_net_bps < -50.0
+        and f3_dominant_win_rate_24h is not None
+        and f3_dominant_win_rate_24h < 0.3
+    )
+    if f3_dominant_negative_evidence:
+        add_issue(
+            "medium",
+            "f3_dominant_negative_evidence",
+            "F3-vol-adjusted-return dominant candidates show materially negative 24h forward outcomes; monitor before considering any trading guard.",
+            {
+                "f3_dominant_count": f3_dominant_count,
+                "avg_4h_net_bps": f3_dominant_avg_4h_net_bps,
+                "avg_8h_net_bps": f3_dominant_avg_8h_net_bps,
+                "avg_12h_net_bps": f3_dominant_avg_12h_net_bps,
+                "avg_24h_net_bps": f3_dominant_avg_24h_net_bps,
+                "win_rate_24h": f3_dominant_win_rate_24h,
+            },
+        )
 
     high_score_pending_count = 0
     high_score_matured_unlabeled_count = 0
@@ -4637,14 +4671,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         row for row in high_score_blocked_rows
         if parse_dt_utc(row.get("ts_utc")) is not None and parse_dt_utc(row.get("ts_utc")).timestamp() >= RECENT_24H
     ]
-    f3_dominant_rows = [
-        row for row in factor_contribution_outcomes_by_factor
-        if row.get("dominant_factor") == "f3_vol_adj_ret"
-    ]
-    f3_dominant_negative_evidence = any(
-        as_float(row.get("avg_24h_net_bps")) is not None and as_float(row.get("avg_24h_net_bps")) < 0
-        for row in f3_dominant_rows
-    )
     multi_position_swing_status_counts = Counter(row.get("label_status") or not_obs for row in multi_position_swing_shadow_rows)
 
     window_summary = {
@@ -4702,6 +4728,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "market_impulse_selection_shadow_rows": len(market_impulse_selection_shadow_rows),
         "factor_contribution_audit_rows": len(factor_contribution_rows),
         "factor_contribution_factor_count": len(factor_contribution_outcomes_by_factor),
+        "f3_dominant_count": f3_dominant_count,
+        "f3_dominant_avg_4h_net_bps": f3_dominant_avg_4h_net_bps if f3_dominant_avg_4h_net_bps is not None else not_obs,
+        "f3_dominant_avg_8h_net_bps": f3_dominant_avg_8h_net_bps if f3_dominant_avg_8h_net_bps is not None else not_obs,
+        "f3_dominant_avg_12h_net_bps": f3_dominant_avg_12h_net_bps if f3_dominant_avg_12h_net_bps is not None else not_obs,
+        "f3_dominant_avg_24h_net_bps": f3_dominant_avg_24h_net_bps if f3_dominant_avg_24h_net_bps is not None else not_obs,
+        "f3_dominant_win_rate_24h": f3_dominant_win_rate_24h if f3_dominant_win_rate_24h is not None else not_obs,
         "f3_dominant_negative_evidence": bool(f3_dominant_negative_evidence),
         "probe_rows": len(probe_rows),
         "probe_lifecycle_rows": len(lifecycle_rows),
@@ -5062,6 +5094,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- factor_contribution_audit_rows: {len(factor_contribution_rows)}",
         f"- outcomes_by_factor: {factor_contribution_summary}",
         f"- f3_dominant_negative_evidence: {'true' if f3_dominant_negative_evidence else 'false'}",
+        "",
+        "## F3-dominant 风险检查",
+        f"- f3_dominant_count: {f3_dominant_count}",
+        f"- avg_4h_net_bps: {fmt_num(f3_dominant_avg_4h_net_bps, 6)}",
+        f"- avg_8h_net_bps: {fmt_num(f3_dominant_avg_8h_net_bps, 6)}",
+        f"- avg_12h_net_bps: {fmt_num(f3_dominant_avg_12h_net_bps, 6)}",
+        f"- avg_24h_net_bps: {fmt_num(f3_dominant_avg_24h_net_bps, 6)}",
+        f"- win_rate_24h: {fmt_num(f3_dominant_win_rate_24h, 6)}",
+        f"- f3_dominant_negative_evidence: {'true' if f3_dominant_negative_evidence else 'false'}",
+        f"- action: diagnostic_only_monitor_no_trade_block",
         "",
         "## 高分但未成交目标",
         f"- 最近 24h 哪些 symbol 高分但没买: {high_score_symbols_text}",
