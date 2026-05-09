@@ -103,6 +103,8 @@ function CandlestickSvg({
   referencePrice?: number;
   referenceLabel?: string;
 }) {
+  const [hover, setHover] = useState<ChartHover | null>(null);
+
   if (!data.length) {
     return (
       <div className="flex items-center justify-center h-full text-[var(--text-dim)] text-sm">
@@ -156,7 +158,6 @@ function CandlestickSvg({
     Number(referencePrice) >= min;
   const ma7Path = buildSeriesPath(ma7, x, y);
   const ma20Path = buildSeriesPath(ma20, x, y);
-  const [hover, setHover] = useState<ChartHover | null>(null);
   const hoveredCandle = hover && data[hover.index] ? data[hover.index] : null;
   const hoverX = hover ? x(hover.index) : 0;
   const hoverY = hover?.y || 0;
@@ -542,6 +543,14 @@ function CandlestickSvg({
           </g>
         </>
       ) : null}
+      <rect
+        x={pad.l}
+        y={pad.t}
+        width={chartW}
+        height={volumeBaseY - pad.t}
+        fill="transparent"
+        pointerEvents="all"
+      />
     </svg>
   );
 }
