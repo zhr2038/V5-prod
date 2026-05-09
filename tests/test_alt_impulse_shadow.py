@@ -164,6 +164,11 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
         cache_dir=cache_dir,
         ohlcv_provider=None,
     )
+    labels_path = tmp_path / "reports" / "alt_impulse_shadow_labels.jsonl"
+    initial_rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines()]
+    initial_rows[0]["label_not_observable_reason"] = "missing_entry_px"
+    labels_path.write_text("\n".join(json.dumps(row) for row in initial_rows) + "\n", encoding="utf-8")
+
     _write_cache_csv(
         cache_dir,
         "ETH/USDT",
@@ -189,10 +194,11 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
     )
 
     assert result["total_records"] == 1
-    labels_path = tmp_path / "reports" / "alt_impulse_shadow_labels.jsonl"
     rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines()]
     assert rows[0]["label_status"] == "complete"
+    assert rows[0]["label_not_observable_reason"] == ""
     assert rows[0]["label_4h_net_bps"] == 70.0
+    assert rows[0]["label_4h_reason"] == ""
     assert rows[0]["label_24h_net_bps"] == 370.0
     assert rows[0]["label_48h_net_bps"] == 470.0
     assert rows[0]["label_72h_status"] == "pending"
@@ -212,6 +218,47 @@ def test_alt_impulse_shadow_matures_forward_labels(tmp_path: Path) -> None:
     assert by_horizon["48"]["avg_net_bps"] == "470.0"
     assert by_horizon["48"]["complete_count"] == "1"
     assert by_horizon["72"]["pending_count"] == "1"
+
+
+def test_alt_impulse_shadow_missing_entry_keeps_global_reason_when_all_not_observable(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260422_02"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    labels_path = tmp_path / "reports" / "alt_impulse_shadow_labels.jsonl"
+    labels_path.parent.mkdir(parents=True, exist_ok=True)
+    entry_ts_ms = _ts_ms("2026-04-21T14:00:00Z")
+    labels_path.write_text(
+        json.dumps(
+            {
+                "ts_utc": "2026-04-21T14:00:00Z",
+                "entry_ts_ms": entry_ts_ms,
+                "run_id": "20260421_14",
+                "symbol": "ETH/USDT",
+                "skip_reason": "protect_entry_trend_only",
+                "rt_cost_bps": 30.0,
+                "label_status": "pending",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cfg = _cfg()
+    cfg.diagnostics.extended_label_horizons_hours = [4, 8]
+
+    update_alt_impulse_shadow_evaluator(
+        run_dir=run_dir,
+        audit=_audit("20260422_02", entry_ts_ms + 12 * 3600 * 1000, []),
+        market_data_1h={},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+        ohlcv_provider=None,
+    )
+
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["label_status"] == "not_observable"
+    assert rows[0]["label_not_observable_reason"] == "missing_entry_px"
+    assert rows[0]["label_4h_status"] == "not_observable"
+    assert rows[0]["label_4h_reason"] == "missing_entry_px"
 
 
 def test_alt_impulse_shadow_disabled_writes_no_files(tmp_path: Path) -> None:

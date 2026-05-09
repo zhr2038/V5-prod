@@ -983,6 +983,7 @@ def fixture_alt_impulse_shadow_root(root):
                     "label_12h_net_bps": 270.0,
                     "label_24h_net_bps": 370.0,
                     "label_status": "complete",
+                    "label_not_observable_reason": "missing_entry_px",
                 },
                 {
                     "ts_utc": iso(window_end),
@@ -1223,6 +1224,7 @@ def fixture_alt_impulse_shadow_cache_fill_root(root):
                     "skip_reason": "protect_entry_trend_only",
                     "current_level": "PROTECT",
                     "rt_cost_bps": 30.0,
+                    "label_not_observable_reason": "missing_entry_px",
                 },
                 {
                     "ts_utc": iso(entry_ts),
@@ -1292,6 +1294,7 @@ def fixture_alt_impulse_shadow_skipped_provider_future_root(root):
                 "skip_reason": "protect_entry_trend_only",
                 "current_level": "PROTECT",
                 "rt_cost_bps": 30.0,
+                "label_not_observable_reason": "missing_entry_px",
             },
             ensure_ascii=False,
         )
@@ -1394,6 +1397,7 @@ def fixture_alt_impulse_shadow_extended_horizon_root(root):
                 "skip_reason": "protect_entry_trend_only",
                 "current_level": "PROTECT",
                 "rt_cost_bps": 30.0,
+                "label_not_observable_reason": "missing_entry_px",
             },
             ensure_ascii=False,
         )
@@ -1935,6 +1939,7 @@ def main():
             eth = next(row for row in outcomes if row["symbol"] == "ETH/USDT")
             assert eth["label_4h_net_bps"] == "70.0", outcomes
             assert eth["label_status"] == "complete", outcomes
+            assert eth["label_not_observable_reason"] == "", outcomes
             sol = next(row for row in outcomes if row["symbol"] == "SOL/USDT")
             assert sol["label_status"] == "pending", outcomes
             by_symbol_map = {(row["symbol"], row["skip_reason"]): row for row in by_symbol}
@@ -2044,11 +2049,14 @@ def main():
             assert sol["label_4h_net_bps"] == "470", sol
             assert sol["label_8h_net_bps"] == "pending", sol
             assert sol["label_status"] == "complete", sol
+            assert sol["label_not_observable_reason"] == "", sol
             eth = next(row for row in outcomes if row["symbol"] == "ETH/USDT")
             assert eth["entry_px"] == "2000", outcomes
             assert eth["label_4h_net_bps"] == "not_observable", eth
-            assert eth["label_status"] == "not_observable", eth
-            assert eth["label_not_observable_reason"] == "missing_future_px", eth
+            assert eth["label_4h_reason"] == "missing_future_px", eth
+            assert eth["label_8h_status"] == "pending", eth
+            assert eth["label_status"] == "pending", eth
+            assert eth["label_not_observable_reason"] == "", eth
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
@@ -2074,6 +2082,7 @@ def main():
             assert sol["label_24h_status"] == "complete", sol
             assert sol["label_48h_status"] == "complete", sol
             assert sol["label_72h_status"] == "pending", sol
+            assert sol["label_not_observable_reason"] == "", sol
             assert sol["future_price_source_4h"] == "skipped_candidate_label_provider", sol
             assert sol["future_px_4h"] != "not_observable", sol
             expected_future_4h = 86.88 * (1.0 + 70.211786 / 10000.0)
@@ -2110,6 +2119,7 @@ def main():
             assert sol["label_48h_status"] == "complete", sol
             assert sol["label_56h_status"] == "not_observable", sol
             assert sol["label_72h_status"] == "pending", sol
+            assert sol["label_not_observable_reason"] == "", sol
             horizon_map = {row["horizon_hours"]: row for row in by_horizon}
             assert horizon_map["48"]["avg_net_bps"] == "970.0", by_horizon
             assert horizon_map["48"]["complete_count"] == "1", by_horizon

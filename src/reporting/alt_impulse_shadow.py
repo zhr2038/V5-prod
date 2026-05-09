@@ -295,6 +295,61 @@ def _summary_fields(horizons: list[int]) -> list[str]:
     ]
 
 
+def _alt_global_not_observable_reason(record: Mapping[str, Any], horizons: list[int]) -> str:
+    reasons: list[str] = []
+    for horizon in horizons:
+        h = int(horizon)
+        if str(record.get(f"{HORIZON_PREFIX}{h}h_status") or "").strip() != "not_observable":
+            continue
+        reason = str(record.get(f"{HORIZON_PREFIX}{h}h_reason") or "").strip()
+        if reason:
+            reasons.append(reason)
+    for preferred in ("missing_entry_px", "missing_market_data", "missing_future_px"):
+        if preferred in reasons:
+            return preferred
+    return reasons[0] if reasons else ""
+
+
+def _normalize_label_status_reason(record: dict[str, Any], horizons: list[int]) -> None:
+    statuses: list[str] = []
+    for horizon in horizons:
+        h = int(horizon)
+        status_key = f"{HORIZON_PREFIX}{h}h_status"
+        reason_key = f"{HORIZON_PREFIX}{h}h_reason"
+        net_key = f"{HORIZON_PREFIX}{h}h_net_bps"
+        status = str(record.get(status_key) or "").strip()
+        if _normalize_float(record.get(net_key)) is not None:
+            status = "complete"
+            record[status_key] = "complete"
+            record[reason_key] = ""
+        if status:
+            statuses.append(status)
+
+    entry_px = _normalize_float(record.get("entry_px"))
+    entry_px_observed = entry_px is not None and entry_px > 0
+
+    if "complete" in statuses:
+        record["label_status"] = "complete"
+        record["label_not_observable_reason"] = ""
+        return
+
+    if "pending" in statuses:
+        record["label_status"] = "pending"
+        record["label_not_observable_reason"] = ""
+        return
+
+    if statuses and all(status == "not_observable" for status in statuses):
+        reason = _alt_global_not_observable_reason(record, horizons)
+        if entry_px_observed and reason == "missing_entry_px":
+            reason = ""
+        record["label_status"] = "not_observable"
+        record["label_not_observable_reason"] = reason
+        return
+
+    if entry_px_observed and str(record.get("label_not_observable_reason") or "").strip() == "missing_entry_px":
+        record["label_not_observable_reason"] = ""
+
+
 def update_alt_impulse_shadow_evaluator(
     *,
     run_dir: str | Path,
@@ -362,6 +417,8 @@ def update_alt_impulse_shadow_evaluator(
             asof_ts_ms=asof_ts_ms,
             ohlcv_provider=ohlcv_provider,
         )
+        for record in records:
+            _normalize_label_status_reason(record, horizons)
         records.sort(key=lambda row: (_record_entry_ts_ms(row), str(row.get("run_id") or ""), str(row.get("symbol") or ""), str(row.get("skip_reason") or "")))
         _write_records(labels_path, records)
 

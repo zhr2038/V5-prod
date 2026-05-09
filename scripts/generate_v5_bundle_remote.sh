@@ -2700,6 +2700,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         return None, "missing_entry_px", cache_reason or "missing_entry_px"
 
     def alt_shadow_not_observable_reason(reasons):
+        reasons = [flatten_value(reason).strip() for reason in reasons if flatten_value(reason).strip()]
         for preferred in ("missing_entry_px", "missing_market_data", "missing_future_px"):
             if preferred in reasons:
                 return preferred
@@ -2735,8 +2736,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 out[gross_field] = first_observed(first_value(row, (gross_field,), not_obs))
                 out[net_field] = first_observed(existing_value)
                 out[win_field] = first_observed(first_value(row, (win_field,), str(as_float(existing_value) > 0)))
-                out[status_field] = first_observed(first_value(row, (status_field,), "complete"))
-                out[reason_field] = first_observed(first_value(row, (reason_field,), ""))
+                out[status_field] = "complete"
+                out[reason_field] = ""
                 existing_gross = as_float(first_value(row, (gross_field,), not_obs))
                 if entry_px is not None and existing_gross is not None:
                     out[future_px_field] = fmt_num(entry_px * (1.0 + existing_gross / 10000.0), 10)
@@ -2796,17 +2797,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
         if any(status == "complete" for status in horizon_statuses):
             out["label_status"] = "complete"
-        elif any(status == "not_observable" for status in horizon_statuses):
-            out["label_status"] = "not_observable"
         elif any(status == "pending" for status in horizon_statuses):
             out["label_status"] = "pending"
+        elif horizon_statuses and all(status == "not_observable" for status in horizon_statuses):
+            out["label_status"] = "not_observable"
+        elif any(status == "not_observable" for status in horizon_statuses):
+            out["label_status"] = "not_observable"
         else:
             out["label_status"] = first_observed(first_value(row, ("label_status",), not_obs))
-        out["label_not_observable_reason"] = (
-            alt_shadow_not_observable_reason(not_observable_reasons)
-            if out["label_status"] == "not_observable"
-            else first_observed(first_value(row, ("label_not_observable_reason", "not_observable_reason"), ""))
-        )
+        if entry_px is not None:
+            not_observable_reasons = [reason for reason in not_observable_reasons if flatten_value(reason).strip() != "missing_entry_px"]
+        if out["label_status"] == "complete":
+            out["label_not_observable_reason"] = ""
+        elif out["label_status"] == "not_observable":
+            out["label_not_observable_reason"] = alt_shadow_not_observable_reason(not_observable_reasons)
+        else:
+            out["label_not_observable_reason"] = ""
         return out
 
     alt_impulse_shadow_fields = [
