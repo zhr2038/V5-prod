@@ -4044,6 +4044,101 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             },
         )
 
+    SOL_SWING_SYMBOL = "SOL/USDT"
+
+    def is_sol_symbol(value):
+        return normalize_symbol_text(value) == SOL_SWING_SYMBOL
+
+    def numeric_values(rows, field):
+        values = [as_float(row.get(field)) for row in rows]
+        return [value for value in values if value is not None]
+
+    def avg_field(rows, field):
+        values = numeric_values(rows, field)
+        return (sum(values) / len(values)) if values else None
+
+    def sum_field(rows, field):
+        values = numeric_values(rows, field)
+        return sum(values) if values else None
+
+    def is_sol_swing_roundtrip(row):
+        if not is_sol_symbol(row.get("symbol")) or is_probe_trade_row(row):
+            return False
+        entry_reason = flatten_value(row.get("entry_reason")).strip().lower()
+        exit_reason = flatten_value(row.get("exit_reason")).strip().lower()
+        raw_json = flatten_value(row.get("raw_json")).lower()
+        return (
+            entry_reason in {"ok", "normal", "normal_entry", "protect_recovery", "protect_recovery_swing"}
+            or exit_reason.startswith("protect_profit_lock")
+            or "swing_hold_position" in raw_json
+        )
+
+    sol_real_swing_roundtrips = [row for row in closed_roundtrip_rows if is_sol_swing_roundtrip(row)]
+    sol_high_score_target_rows = [row for row in high_score_blocked_rows if is_sol_symbol(row.get("symbol"))]
+    sol_high_score_outcome_rows = [row for row in high_score_blocked_outcome_rows if is_sol_symbol(row.get("symbol"))]
+
+    def sol_multi_position_shadow_row():
+        rows = [row for row in multi_position_swing_shadow_by_symbol if is_sol_symbol(row.get("symbol"))]
+        for mode in (MULTI_SHADOW_MODE_PROTECT_RECOVERY, MULTI_SHADOW_MODE_ALL):
+            for row in rows:
+                if flatten_value(row.get("shadow_mode") or MULTI_SHADOW_MODE_ALL) == mode:
+                    return row
+        return rows[0] if rows else {}
+
+    def latest_sol_selected_and_reasons():
+        selected_count = 0
+        reasons = Counter()
+        for run_id, audit in audit_by_run.items():
+            if not isinstance(audit, dict):
+                continue
+            audit_dt = parse_dt_utc(first_observed(first_value(audit, ("now_ts", "window_end_ts", "ts_utc", "timestamp"), not_obs)))
+            if audit_dt is None:
+                audit_dt = parse_run_time(run_id)
+            if audit_dt is None or audit_dt.timestamp() < RECENT_24H:
+                continue
+            selected = False
+            target_w = target_weight_from_targets(audit.get("targets_post_risk"), SOL_SWING_SYMBOL)
+            if target_w is not None and target_w > 0:
+                selected = True
+            for item in audit.get("target_execution_explain") or []:
+                if not isinstance(item, dict) or not is_sol_symbol(item.get("symbol")):
+                    continue
+                explain_target_w = as_float(first_value(item, ("target_w", "effective_target_w", "target_weight"), not_obs))
+                if explain_target_w is not None and explain_target_w > 0:
+                    selected = True
+                action = flatten_value(first_value(item, ("router_action", "action"), "")).lower()
+                reason = flatten_value(first_value(item, ("router_reason", "blocked_reason", "reason"), ""))
+                if action == "skip" and reason:
+                    reasons[reason] += 1
+            for item in audit.get("router_decisions") or []:
+                if not isinstance(item, dict) or not is_sol_symbol(item.get("symbol")):
+                    continue
+                action = flatten_value(item.get("action")).lower()
+                reason = flatten_value(first_value(item, ("reason", "source_reason"), ""))
+                if action == "skip" and reason:
+                    reasons[reason] += 1
+            if selected:
+                selected_count += 1
+        return selected_count, ";".join(f"{reason}:{count}" for reason, count in reasons.most_common()) or not_obs
+
+    latest_sol_selected_count, latest_sol_block_reasons = latest_sol_selected_and_reasons()
+    sol_multi_shadow = sol_multi_position_shadow_row()
+    sol_swing_performance_rows = [{
+        "window": "last_72h",
+        "real_roundtrip_count": len(sol_real_swing_roundtrips),
+        "real_net_bps_avg": fmt_num(avg_field(sol_real_swing_roundtrips, "net_bps"), 6),
+        "real_net_pnl_usdt": fmt_num(sum_field(sol_real_swing_roundtrips, "net_pnl_usdt") if sol_real_swing_roundtrips else 0.0, 12),
+        "high_score_blocked_count": len(sol_high_score_target_rows) if sol_high_score_target_rows else len(sol_high_score_outcome_rows),
+        "high_score_blocked_24h_avg": fmt_num(avg_field(sol_high_score_outcome_rows, "label_24h_net_bps"), 6),
+        "high_score_blocked_48h_avg": fmt_num(avg_field(sol_high_score_outcome_rows, "label_48h_net_bps"), 6),
+        "high_score_blocked_72h_avg": fmt_num(avg_field(sol_high_score_outcome_rows, "label_72h_net_bps"), 6),
+        "multi_position_shadow_24h_avg": first_observed(first_value(sol_multi_shadow, ("avg_24h_net_bps",), not_obs)),
+        "multi_position_shadow_48h_avg": first_observed(first_value(sol_multi_shadow, ("avg_48h_net_bps",), not_obs)),
+        "multi_position_shadow_72h_avg": first_observed(first_value(sol_multi_shadow, ("avg_72h_net_bps",), not_obs)),
+        "latest_selected_count": latest_sol_selected_count,
+        "latest_block_reasons": latest_sol_block_reasons,
+    }]
+
     def roundtrip_entry_notional(row):
         qty = as_float(row.get("qty"))
         entry_px = as_float(row.get("entry_px"))
@@ -4732,6 +4827,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         ["shadow_mode", "symbol", "count", "avg_24h_net_bps", "avg_48h_net_bps", "avg_72h_net_bps", "win_rate_24h", "win_rate_48h", "win_rate_72h"],
     )
     write_csv(
+        "summaries/sol_swing_performance.csv",
+        sol_swing_performance_rows,
+        ["window", "real_roundtrip_count", "real_net_bps_avg", "real_net_pnl_usdt", "high_score_blocked_count", "high_score_blocked_24h_avg", "high_score_blocked_48h_avg", "high_score_blocked_72h_avg", "multi_position_shadow_24h_avg", "multi_position_shadow_48h_avg", "multi_position_shadow_72h_avg", "latest_selected_count", "latest_block_reasons"],
+    )
+    write_csv(
         "summaries/skipped_candidate_outcomes_by_horizon.csv",
         skipped_candidate_outcomes_by_horizon,
         ["horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
@@ -5170,6 +5270,45 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             for row in multi_position_swing_shadow_by_symbol
         )
 
+    sol_swing_summary = sol_swing_performance_rows[0] if sol_swing_performance_rows else {}
+
+    def sol_swing_real_profit_text():
+        count = as_int(sol_swing_summary.get("real_roundtrip_count", 0))
+        avg = as_float(sol_swing_summary.get("real_net_bps_avg"))
+        pnl = sol_swing_summary.get("real_net_pnl_usdt", not_obs)
+        if count <= 0:
+            return "not_observable_no_real_sol_swing_roundtrips"
+        if avg is None:
+            return f"not_observable / count={count}, net_pnl_usdt={pnl}"
+        return f"{'yes' if avg > 0 else 'no'} / count={count}, avg_net_bps={fmt_num(avg, 6)}, net_pnl_usdt={pnl}"
+
+    def sol_swing_shadow_support_text():
+        hs_values = [as_float(sol_swing_summary.get(f"high_score_blocked_{h}h_avg")) for h in (24, 48, 72)]
+        mp_values = [as_float(sol_swing_summary.get(f"multi_position_shadow_{h}h_avg")) for h in (24, 48, 72)]
+        observed = [value for value in hs_values + mp_values if value is not None]
+        if not observed:
+            return "not_observable_no_sol_shadow_rows"
+        support = any(value > 0 for value in observed)
+        return (
+            f"{'yes' if support else 'no'} / "
+            f"high_score_24h={sol_swing_summary.get('high_score_blocked_24h_avg', not_obs)}, "
+            f"48h={sol_swing_summary.get('high_score_blocked_48h_avg', not_obs)}, "
+            f"72h={sol_swing_summary.get('high_score_blocked_72h_avg', not_obs)}; "
+            f"multi_position_24h={sol_swing_summary.get('multi_position_shadow_24h_avg', not_obs)}, "
+            f"48h={sol_swing_summary.get('multi_position_shadow_48h_avg', not_obs)}, "
+            f"72h={sol_swing_summary.get('multi_position_shadow_72h_avg', not_obs)}"
+        )
+
+    sol_swing_continue_observe_text = (
+        "yes / diagnostic_only"
+        if (
+            as_int(sol_swing_summary.get("real_roundtrip_count", 0)) > 0
+            or as_int(sol_swing_summary.get("high_score_blocked_count", 0)) > 0
+            or sol_swing_summary.get("multi_position_shadow_24h_avg", not_obs) != not_obs
+        )
+        else "not_observable_no_sol_samples"
+    )
+
     def factor_contribution_summary_text():
         if not factor_contribution_outcomes_by_factor:
             return "not_observable_no_factor_rows"
@@ -5273,6 +5412,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- by_skip_reason: {aggregate_summary_lines(alt_impulse_shadow_by_reason, ['skip_reason'])}",
         f"- by_horizon: {by_horizon_summary_lines(alt_impulse_shadow_by_horizon)}",
         f"- 是否支持未来 live probe: {alt_impulse_future_probe_text}",
+        "",
+        "## SOL swing 观察",
+        f"- 真实 SOL swing 是否赚钱: {sol_swing_real_profit_text()}",
+        f"- shadow 是否支持: {sol_swing_shadow_support_text()}",
+        f"- 是否建议继续观察: {sol_swing_continue_observe_text}",
+        "- 是否建议启用多币: no / diagnostic_only_default_disabled",
         "",
         "## 多币 swing shadow",
         f"- label_count: {len(multi_position_swing_shadow_rows)}",

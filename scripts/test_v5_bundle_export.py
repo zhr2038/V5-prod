@@ -1075,6 +1075,143 @@ def fixture_multi_position_swing_shadow_root(root):
     return run_id
 
 
+def fixture_sol_swing_performance_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+    entry_ts = window_end - 6 * 3600
+    exit_ts = window_end - 3600
+    label_ts = window_end - 50 * 3600
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "diagnostics:\n"
+        "  multi_position_swing_shadow_enabled: true\n"
+        "execution:\n"
+        "  swing_hold_enabled: true\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "current_level": "PROTECT",
+        "regime": "Trending",
+        "targets_post_risk": {"SOL/USDT": 0.15},
+        "target_execution_explain": [
+            {
+                "symbol": "SOL/USDT",
+                "target_w": 0.15,
+                "final_score": 0.92,
+                "selected_rank": 1,
+                "router_action": "skip",
+                "router_reason": "protect_entry_trend_only",
+                "high_score_but_not_executed": True,
+                "high_score_block_category": "trend_only",
+                "trend_score": 0.95,
+                "trend_side": "buy",
+                "current_level": "PROTECT",
+                "regime": "Trending",
+            },
+        ],
+        "router_decisions": [
+            {
+                "symbol": "SOL/USDT",
+                "action": "create",
+                "intent": "OPEN_LONG",
+                "side": "buy",
+                "reason": "ok",
+                "alpha6_score": 0.6,
+                "f4_volume_expansion": 0.4,
+                "f5_rsi_trend_confirm": 0.35,
+            },
+            {
+                "symbol": "SOL/USDT",
+                "action": "create",
+                "intent": "CLOSE_LONG",
+                "side": "sell",
+                "reason": "protect_profit_lock_trailing",
+                "source_reason": "protect_profit_lock_trailing",
+            },
+            {
+                "symbol": "SOL/USDT",
+                "action": "skip",
+                "reason": "protect_entry_trend_only",
+            },
+        ],
+    })
+    write_text(
+        run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,raw_meta\n"
+        f"{iso(entry_ts)},{run_id},SOL/USDT,OPEN_LONG,buy,1,100,100,0.01,\"{{\"\"swing_hold_position\"\": true}}\"\n"
+        f"{iso(exit_ts)},{run_id},SOL/USDT,CLOSE_LONG,sell,1,101.3,101.3,0.01,\n",
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+
+    write_text(
+        root / "reports/skipped_candidate_labels.jsonl",
+        json.dumps(
+            {
+                "ts_utc": iso(label_ts),
+                "run_id": run_id,
+                "symbol": "SOL/USDT",
+                "intended_side": "buy",
+                "skip_reason": "protect_entry_trend_only",
+                "high_score_blocked_target": True,
+                "high_score_block_category": "trend_only",
+                "final_score": 0.92,
+                "target_w": 0.15,
+                "entry_px": 100.0,
+                "rt_cost_bps": 30.0,
+                "label_24h_net_bps": 110.0,
+                "label_48h_net_bps": 160.0,
+                "label_72h_net_bps": 210.0,
+                "label_status": "complete",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    write_text(
+        root / "reports/multi_position_swing_shadow_labels.jsonl",
+        json.dumps(
+            {
+                "ts_utc": iso(label_ts),
+                "run_id": run_id,
+                "shadow_mode": "protect_recovery_rules",
+                "k": 1,
+                "symbols": ["SOL/USDT"],
+                "equal_weight": 1.0,
+                "entry_px": {"SOL/USDT": 100.0},
+                "final_score": {"SOL/USDT": 0.92},
+                "selected_rank": {"SOL/USDT": 1},
+                "rt_cost_bps": 30.0,
+                "label_24h_portfolio_avg_net_bps": 130.0,
+                "label_24h_symbol_net_bps": {"SOL/USDT": 130.0},
+                "label_48h_portfolio_avg_net_bps": 180.0,
+                "label_48h_symbol_net_bps": {"SOL/USDT": 180.0},
+                "label_72h_portfolio_avg_net_bps": 230.0,
+                "label_72h_symbol_net_bps": {"SOL/USDT": 230.0},
+                "label_status": "complete",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    return run_id
+
+
 def fixture_multi_position_swing_shadow_from_audit_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     entry_dt = now - dt.timedelta(hours=50)
@@ -1995,6 +2132,37 @@ def main():
             assert "all_candidates top2 是否优于 top1: no / 24h top1=370" in readme, readme
             assert "top3 是否增加风险: yes" in readme, readme
             assert "哪些组合表现最好: mode=all_candidates k=1 symbols=[\"ETH/USDT\"] 24h_avg=370" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-sol-swing-performance-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_sol_swing_performance_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/sol_swing_performance.csv")).read().decode().splitlines()))
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["window"] == "last_72h", row
+            assert row["real_roundtrip_count"] == "1", row
+            assert row["real_net_bps_avg"] == "128", row
+            assert row["real_net_pnl_usdt"] == "1.28", row
+            assert row["high_score_blocked_count"] == "1", row
+            assert row["high_score_blocked_24h_avg"] == "110", row
+            assert row["high_score_blocked_48h_avg"] == "160", row
+            assert row["high_score_blocked_72h_avg"] == "210", row
+            assert row["multi_position_shadow_24h_avg"] == "130.0", row
+            assert row["multi_position_shadow_48h_avg"] == "180.0", row
+            assert row["multi_position_shadow_72h_avg"] == "230.0", row
+            assert row["latest_selected_count"] == "1", row
+            assert "protect_entry_trend_only" in row["latest_block_reasons"], row
+            assert "## SOL swing 观察" in readme, readme
+            assert "真实 SOL swing 是否赚钱: yes" in readme, readme
+            assert "是否建议启用多币: no / diagnostic_only_default_disabled" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
