@@ -1839,6 +1839,21 @@ class V5Pipeline:
             "net_bps": guard.get("net_bps"),
         }
 
+    def _same_symbol_reentry_breakout_bypass_decision(self, symbol: str, guard: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "action": "allow",
+            "reason": "same_symbol_reentry_breakout_bypass",
+            "last_exit_reason": guard.get("last_exit_reason"),
+            "last_exit_px": guard.get("last_exit_px"),
+            "highest_px_before_exit": guard.get("highest_px_before_exit"),
+            "elapsed_hours": guard.get("elapsed_hours"),
+            "required_cooldown_hours": guard.get("required_cooldown_hours"),
+            "breakout_exception_met": True,
+            "latest_px": guard.get("latest_px"),
+            "net_bps": guard.get("net_bps"),
+        }
+
     def _active_probe_zero_target_close_skip_decision(
         self,
         *,
@@ -5833,6 +5848,42 @@ class V5Pipeline:
                     neg_stats = None
 
             if side == "buy" and intent == "OPEN_LONG":
+                entry_kind = "btc_leadership_probe" if btc_probe_meta is not None else "normal_entry"
+                reentry_guard = self._evaluate_same_symbol_reentry_guard(
+                    symbol=sym,
+                    latest_px=px,
+                    entry_kind=entry_kind,
+                    audit=audit,
+                )
+                if bool(reentry_guard.get("blocked", False)):
+                    self._record_replacement_block(
+                        audit=audit,
+                        blocked_replacement_reasons=blocked_replacement_reasons,
+                        symbol=sym,
+                        reason="same_symbol_reentry_cooldown",
+                    )
+                    if audit:
+                        audit.record_count("same_symbol_reentry_cooldown_count", symbol=sym)
+                        if btc_probe_meta is not None:
+                            audit.record_count(
+                                "btc_leadership_probe_blocked_count",
+                                symbol=f"{sym}:same_symbol_reentry_cooldown",
+                            )
+                        decision = self._same_symbol_reentry_block_decision(sym, reentry_guard)
+                        if btc_probe_meta is not None:
+                            decision.update(btc_probe_meta)
+                            decision["btc_leadership_probe"] = True
+                            decision["blocked_reason"] = "same_symbol_reentry_cooldown"
+                        router_decisions.append(decision)
+                    continue
+                if bool(reentry_guard.get("breakout_exception_met", False)) and audit:
+                    decision = self._same_symbol_reentry_breakout_bypass_decision(sym, reentry_guard)
+                    if btc_probe_meta is not None:
+                        decision.update(btc_probe_meta)
+                        decision["btc_leadership_probe"] = True
+                    router_decisions.append(decision)
+
+            if side == "buy" and intent == "OPEN_LONG":
                 short_cycle_block = self._protect_negative_expectancy_short_cycle_block_context(
                     symbol=sym,
                     stat=neg_stats or {},
@@ -6419,36 +6470,6 @@ class V5Pipeline:
                 continue
             
             # 如果通过所有检查，生成订单
-            if side == "buy" and intent == "OPEN_LONG":
-                entry_kind = "btc_leadership_probe" if btc_probe_meta is not None else "normal_entry"
-                reentry_guard = self._evaluate_same_symbol_reentry_guard(
-                    symbol=sym,
-                    latest_px=px,
-                    entry_kind=entry_kind,
-                    audit=audit,
-                )
-                if bool(reentry_guard.get("blocked", False)):
-                    self._record_replacement_block(
-                        audit=audit,
-                        blocked_replacement_reasons=blocked_replacement_reasons,
-                        symbol=sym,
-                        reason="same_symbol_reentry_cooldown",
-                    )
-                    if audit:
-                        audit.record_count("same_symbol_reentry_cooldown_count", symbol=sym)
-                        if btc_probe_meta is not None:
-                            audit.record_count(
-                                "btc_leadership_probe_blocked_count",
-                                symbol=f"{sym}:same_symbol_reentry_cooldown",
-                            )
-                        decision = self._same_symbol_reentry_block_decision(sym, reentry_guard)
-                        if btc_probe_meta is not None:
-                            decision.update(btc_probe_meta)
-                            decision["btc_leadership_probe"] = True
-                            decision["blocked_reason"] = "same_symbol_reentry_cooldown"
-                        router_decisions.append(decision)
-                    continue
-
             swing_meta: Dict[str, Any] = {}
             if side == "buy" and intent == "OPEN_LONG" and btc_probe_meta is None:
                 if protect_recovery_meta is not None:
@@ -6715,6 +6736,16 @@ class V5Pipeline:
                                 f"elapsed_hours={float(reentry_guard.get('elapsed_hours') or 0.0):.2f}"
                             )
                         continue
+                    if bool(reentry_guard.get("breakout_exception_met", False)) and audit:
+                        router_decisions.append(
+                            {
+                                **self._same_symbol_reentry_breakout_bypass_decision(sym, reentry_guard),
+                                "market_impulse_probe": True,
+                                "trend_buy_count": int(market_impulse_probe_context.get("trend_buy_count") or 0),
+                                "btc_trend_score": market_impulse_probe_context.get("btc_trend_score"),
+                                "trend_score": trend_score,
+                            }
+                        )
                     cooldown_until_ms = now_ms + probe_cooldown_hours * 3600 * 1000
                     meta = {
                         "target_w": float(effective_probe_target_w),

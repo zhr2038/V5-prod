@@ -1566,6 +1566,72 @@ def test_fill_reconciler_records_take_profit_cooldown_for_already_filled_order()
         assert payload["BTC/USDT"]["last_take_profit_ts_ms"] == 1
 
 
+def test_fill_reconciler_records_same_symbol_reentry_memory_from_profit_lock_close() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/positions.sqlite")
+        fills = FillStore(path=f"{td}/fills.sqlite")
+        pos.upsert_buy("SOL/USDT", qty=1.0, px=100.0)
+        pos.mark_position(
+            symbol="SOL/USDT",
+            now_ts="2026-05-09T05:00:00Z",
+            mark_px=102.0,
+            high_px=103.0,
+        )
+
+        store.upsert_new(
+            cl_ord_id="PL1",
+            run_id="r",
+            inst_id="SOL-USDT",
+            side="sell",
+            intent="CLOSE_LONG",
+            decision_hash="pl-h",
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=102.0,
+            req={
+                "_v5_reason": "protect_profit_lock_trailing",
+                "_v5_order_meta": {
+                    "reason": "protect_profit_lock_trailing",
+                    "exit_reason": "protect_profit_lock_trailing",
+                    "highest_px_before_exit": 103.0,
+                    "net_bps": 128.0,
+                },
+            },
+        )
+        store.update_state("PL1", new_state="OPEN", ord_id="3001")
+
+        fills.upsert_many(
+            [
+                FillRow(
+                    inst_id="SOL-USDT",
+                    trade_id="pl-fill-1",
+                    ts_ms=123456,
+                    ord_id="3001",
+                    cl_ord_id="PL1",
+                    side="sell",
+                    fill_px="102",
+                    fill_sz="1.0",
+                    fee="0",
+                    fee_ccy="USDT",
+                ),
+            ]
+        )
+
+        rec = FillReconciler(fill_store=fills, order_store=store, okx=None, position_store=pos)
+        rec.reconcile()
+
+        memory_path = Path(td) / "same_symbol_reentry_exit_memory.json"
+        assert memory_path.exists()
+        payload = json.loads(memory_path.read_text(encoding="utf-8"))
+        rec_payload = payload["symbols"]["SOL/USDT"]
+        assert rec_payload["exit_reason"] == "protect_profit_lock_trailing"
+        assert rec_payload["exit_ts_ms"] == 123456
+        assert rec_payload["exit_px"] == pytest.approx(102.0)
+        assert rec_payload["highest_px_before_exit"] == pytest.approx(103.0)
+        assert rec_payload["net_bps"] == pytest.approx(128.0)
+
+
 
 
 def test_place_buy_ignores_instrument_spec_fetch_failure(monkeypatch) -> None:

@@ -15,8 +15,9 @@ from src.core.clock import FixedClock
 from src.core.models import MarketSeries
 from src.core.pipeline import V5Pipeline
 from src.execution.execution_engine import ExecutionEngine
-from src.execution.fill_store import derive_runtime_auto_risk_eval_path
+from src.execution.fill_store import derive_runtime_auto_risk_eval_path, derive_runtime_named_json_path
 from src.execution.position_store import Position, PositionStore
+from src.execution.same_symbol_reentry_guard import record_same_symbol_exit_memory
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
 import src.core.pipeline as pipeline_module
@@ -155,6 +156,26 @@ def _swing_position(symbol: str = "BTC/USDT", *, entry_ts: str = "2026-05-08T02:
     )
 
 
+def _write_same_symbol_exit_memory(
+    cfg: AppConfig,
+    *,
+    symbol: str = "SOL/USDT",
+    hours_ago: float = 1.0,
+    exit_px: float = 102.0,
+    highest_px_before_exit: float = 103.0,
+    reason: str = "protect_profit_lock_trailing",
+) -> None:
+    record_same_symbol_exit_memory(
+        path=derive_runtime_named_json_path(cfg.execution.order_store_path, "same_symbol_reentry_exit_memory"),
+        symbol=symbol,
+        exit_ts_ms=int(NOW.timestamp() * 1000) - int(float(hours_ago) * 3600 * 1000),
+        exit_px=exit_px,
+        exit_reason=reason,
+        highest_px_before_exit=highest_px_before_exit,
+        net_bps=128.0,
+    )
+
+
 def test_normal_alpha6_entry_marks_swing_hold_in_order_and_position_state(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_level(cfg.execution.order_store_path, "NORMAL")
@@ -194,6 +215,129 @@ def test_normal_alpha6_entry_marks_swing_hold_in_order_and_position_state(tmp_pa
     assert tags["swing_min_hold_hours"] == 24.0
     assert tags["alpha6_score"] == 0.60
     assert tags["f5_rsi_trend_confirm"] == 0.35
+
+
+def test_same_symbol_reentry_blocks_normal_swing_entry_after_profit_lock(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT"])
+    cfg.execution.same_symbol_reentry_apply_to_normal_entry = True
+    cfg.execution.protect_entry_confirm_rounds = 1
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    _write_same_symbol_exit_memory(
+        cfg,
+        symbol="SOL/USDT",
+        hours_ago=1.0,
+        exit_px=102.0,
+        highest_px_before_exit=103.0,
+    )
+    pipe = _build_pipe(cfg, tmp_path, _alpha6_payload("SOL/USDT"))
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"SOL/USDT": 1.0},
+        selected=["SOL/USDT"],
+        entry_candidates=["SOL/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="same-symbol-normal-swing-block")
+
+    out = pipe.run(
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", 102.1, high=102.2)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "same_symbol_reentry_cooldown")
+    assert decision["symbol"] == "SOL/USDT"
+    assert decision["action"] == "skip"
+    assert decision["last_exit_reason"] == "protect_profit_lock_trailing"
+    assert decision["last_exit_px"] == 102.0
+    assert decision["highest_px_before_exit"] == 103.0
+    assert decision["required_cooldown_hours"] == 6.0
+    assert decision["breakout_exception_met"] is False
+    assert audit.counts["same_symbol_reentry_cooldown_count"] == 1
+    assert not any(d.get("action") == "create" and d.get("symbol") == "SOL/USDT" for d in audit.router_decisions)
+
+
+def test_same_symbol_reentry_allows_normal_swing_entry_after_cooldown(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT"])
+    cfg.execution.protect_entry_confirm_rounds = 1
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    _write_same_symbol_exit_memory(
+        cfg,
+        symbol="SOL/USDT",
+        hours_ago=6.1,
+        exit_px=102.0,
+        highest_px_before_exit=103.0,
+    )
+    pipe = _build_pipe(cfg, tmp_path, _alpha6_payload("SOL/USDT"))
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"SOL/USDT": 1.0},
+        selected=["SOL/USDT"],
+        entry_candidates=["SOL/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="same-symbol-normal-swing-expired")
+
+    out = pipe.run(
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", 102.1, high=102.2)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "SOL/USDT"
+    assert out.orders[0].intent == "OPEN_LONG"
+    assert out.orders[0].meta["swing_hold_position"] is True
+    assert audit.counts["same_symbol_reentry_cooldown_count"] == 0
+
+
+def test_same_symbol_reentry_breakout_bypass_audited_for_normal_swing_entry(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT"])
+    cfg.execution.protect_entry_confirm_rounds = 1
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    _write_same_symbol_exit_memory(
+        cfg,
+        symbol="SOL/USDT",
+        hours_ago=1.0,
+        exit_px=102.0,
+        highest_px_before_exit=103.0,
+    )
+    pipe = _build_pipe(cfg, tmp_path, _alpha6_payload("SOL/USDT"))
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"SOL/USDT": 1.0},
+        selected=["SOL/USDT"],
+        entry_candidates=["SOL/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="same-symbol-normal-swing-breakout")
+
+    out = pipe.run(
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", 103.5, high=103.6)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "SOL/USDT"
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "same_symbol_reentry_breakout_bypass")
+    assert decision["action"] == "allow"
+    assert decision["symbol"] == "SOL/USDT"
+    assert decision["breakout_exception_met"] is True
+    assert audit.counts["same_symbol_reentry_breakout_bypass_count"] == 1
 
 
 def test_swing_guard_blocks_zero_target_close_before_min_hold(tmp_path: Path) -> None:

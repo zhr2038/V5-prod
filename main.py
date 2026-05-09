@@ -1214,6 +1214,72 @@ def _run_live_preflight_or_raise(
     return None, None
 
 
+def _sync_live_fills_before_routing(
+    cfg: AppConfig,
+    *,
+    client,
+    position_store,
+    audit=None,
+    log_obj=None,
+) -> Dict[str, Any]:
+    mode = str(getattr(getattr(cfg, "execution", None), "mode", "dry_run") or "dry_run").lower()
+    if mode != "live" or client is None:
+        return {"enabled": False, "new_fills": 0, "updated_orders": 0}
+
+    try:
+        from src.execution.fill_store import FillStore, derive_fill_store_path, parse_okx_fills
+        from src.execution.fill_reconciler import FillReconciler
+        from src.execution.order_store import OrderStore
+
+        runtime_order_store_path = str(
+            getattr(cfg.execution, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite"
+        )
+        live_order_store = OrderStore(runtime_order_store_path)
+        fs = FillStore(path=str(derive_fill_store_path(live_order_store.path)))
+        after = None
+        total_new = 0
+        for _ in range(5):
+            r = client.get_fills(after=after, limit=100)
+            rows = parse_okx_fills(r.data, source="fills_pre_route")
+            inserted, _ = fs.upsert_many(rows)
+            total_new += int(inserted)
+
+            data = (r.data or {}).get("data") or []
+            if not isinstance(data, list) or not data:
+                break
+            last = data[-1] if isinstance(data[-1], dict) else {}
+            after = last.get("billId") or last.get("tradeId")
+            if inserted == 0:
+                break
+            time.sleep(0.05)
+
+        rec = FillReconciler(
+            fill_store=fs,
+            order_store=live_order_store,
+            okx=client,
+            position_store=position_store,
+        )
+        result = rec.reconcile(limit=2000, max_get_order_per_run=10) or {}
+        updated_orders = int(result.get("updated_orders", 0) or 0)
+        if audit is not None:
+            audit.add_note(
+                f"LIVE_FILL_SYNC_PRE_ROUTE new_fills={total_new} updated_orders={updated_orders}"
+            )
+        if log_obj is not None and (total_new > 0 or updated_orders > 0):
+            log_obj.info(
+                "LIVE_FILL_SYNC_PRE_ROUTE new_fills=%s updated_orders=%s",
+                total_new,
+                updated_orders,
+            )
+        return {"enabled": True, "new_fills": int(total_new), "updated_orders": updated_orders}
+    except Exception as e:
+        if audit is not None:
+            audit.add_note(f"LIVE_FILL_SYNC_PRE_ROUTE failed: {e}")
+        if log_obj is not None:
+            log_obj.warning("live fill sync before routing failed: %s", e, exc_info=True)
+        return {"enabled": True, "error": str(e), "new_fills": 0, "updated_orders": 0}
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent
     cfg_path = os.getenv("V5_CONFIG")
@@ -1314,6 +1380,26 @@ def main() -> None:
             cfg,
             store=store,
             acc_store=acc_store,
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+        )
+        _sync_live_fills_before_routing(
+            cfg,
+            client=live_okx_client,
+            position_store=store,
+            audit=audit,
+            log_obj=log,
+        )
+        held = store.list()
+        held_symbols = [
+            str(getattr(p, "symbol", "") or "")
+            for p in held
+            if float(getattr(p, "qty", 0.0) or 0.0) > 0.0
+        ]
+        _assert_live_symbol_subset(
+            held_symbols,
+            live_whitelist,
+            stage="held_symbols_after_pre_route_fill_sync",
             audit=audit,
             runtime_run_dir=runtime_run_dir,
         )
