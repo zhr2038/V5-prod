@@ -1090,7 +1090,12 @@ def fixture_multi_position_swing_shadow_from_audit_root(root):
         "  multi_position_swing_shadow_symbols: [\"BTC/USDT\", \"ETH/USDT\", \"SOL/USDT\", \"BNB/USDT\"]\n"
         "  multi_position_swing_shadow_min_final_score: 0.30\n"
         "  multi_position_swing_shadow_horizons_hours: [24, 48, 72]\n"
-        "  multi_position_swing_shadow_rt_cost_bps: 30\n",
+        "  multi_position_swing_shadow_rt_cost_bps: 30\n"
+        "execution:\n"
+        "  protect_recovery_allowed_symbols: [\"BTC/USDT\", \"SOL/USDT\", \"ETH/USDT\"]\n"
+        "  protect_recovery_require_market_context: true\n"
+        "  protect_recovery_min_positive_whitelist_4h_count: 0\n"
+        "  protect_recovery_disallow_symbols_with_negative_expectancy: true\n",
     )
     for name in (
         "kill_switch",
@@ -1979,17 +1984,17 @@ def main():
             assert top2["label_24h_win_count"] == "2", top2
             assert top2["label_48h_status"] == "complete", top2
             assert top2["label_72h_status"] == "pending", top2
-            by_k_map = {row["k"]: row for row in by_k}
-            assert by_k_map["2"]["avg_24h_net_bps"] == "220.0", by_k
-            assert by_k_map["3"]["worst_avg"] == "-230.0", by_k
-            by_symbol_map = {row["symbol"]: row for row in by_symbol}
-            assert by_symbol_map["ETH/USDT"]["avg_24h_net_bps"] == "370.0", by_symbol
+            by_k_map = {(row["shadow_mode"], row["k"]): row for row in by_k}
+            assert by_k_map[("all_candidates", "2")]["avg_24h_net_bps"] == "220.0", by_k
+            assert by_k_map[("all_candidates", "3")]["worst_avg"] == "-230.0", by_k
+            by_symbol_map = {(row["shadow_mode"], row["symbol"]): row for row in by_symbol}
+            assert by_symbol_map[("all_candidates", "ETH/USDT")]["avg_24h_net_bps"] == "370.0", by_symbol
             assert window["multi_position_swing_shadow_label_count"] == 3, window
             assert window["multi_position_swing_shadow_complete_count"] == 3, window
             assert "## 多币 swing shadow" in readme, readme
-            assert "top2 是否优于 top1: no / 24h top1=370" in readme, readme
+            assert "all_candidates top2 是否优于 top1: no / 24h top1=370" in readme, readme
             assert "top3 是否增加风险: yes" in readme, readme
-            assert "哪些组合表现最好: k=1 symbols=[\"ETH/USDT\"] 24h_avg=370" in readme, readme
+            assert "哪些组合表现最好: mode=all_candidates k=1 symbols=[\"ETH/USDT\"] 24h_avg=370" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
@@ -2007,10 +2012,11 @@ def main():
                 labels_lines = tf.extractfile(extract_member(tf, "raw/reports/multi_position_swing_shadow_labels.jsonl")).read().decode().splitlines()
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
                 manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
-            assert len(labels_lines) == 2, labels_lines
-            assert len(outcomes) == 2, outcomes
-            top1 = next(row for row in outcomes if row["k"] == "1")
-            top2 = next(row for row in outcomes if row["k"] == "2")
+            assert len(labels_lines) == 3, labels_lines
+            assert len(outcomes) == 3, outcomes
+            top1 = next(row for row in outcomes if row["shadow_mode"] == "all_candidates" and row["k"] == "1")
+            top2 = next(row for row in outcomes if row["shadow_mode"] == "all_candidates" and row["k"] == "2")
+            protect_top1 = next(row for row in outcomes if row["shadow_mode"] == "protect_recovery_rules" and row["k"] == "1")
             assert top1["symbols"] == "[\"SOL/USDT\"]", top1
             assert top1["entry_px_by_symbol"] == "{\"SOL/USDT\": 100.0}", top1
             assert top1["final_score_by_symbol"] == "{\"SOL/USDT\": 0.61}", top1
@@ -2022,15 +2028,19 @@ def main():
             assert top2["label_24h_portfolio_avg_net_bps"] == "120", top2
             assert top2["label_24h_worst_symbol_net_bps"] == "-130", top2
             assert top2["label_24h_win_count"] == "1", top2
-            by_k_map = {row["k"]: row for row in by_k}
-            assert by_k_map["1"]["count"] == "1", by_k
-            assert by_k_map["2"]["count"] == "1", by_k
-            assert "3" not in by_k_map, by_k
-            by_symbol_map = {row["symbol"]: row for row in by_symbol}
-            assert by_symbol_map["SOL/USDT"]["count"] == "2", by_symbol
-            assert by_symbol_map["BNB/USDT"]["count"] == "1", by_symbol
-            assert window["multi_position_swing_shadow_label_count"] == 2, window
-            assert window["multi_position_swing_shadow_complete_count"] == 2, window
+            assert protect_top1["symbols"] == "[\"SOL/USDT\"]", protect_top1
+            by_k_map = {(row["shadow_mode"], row["k"]): row for row in by_k}
+            assert by_k_map[("all_candidates", "1")]["count"] == "1", by_k
+            assert by_k_map[("all_candidates", "2")]["count"] == "1", by_k
+            assert by_k_map[("protect_recovery_rules", "1")]["count"] == "1", by_k
+            assert ("protect_recovery_rules", "2") not in by_k_map, by_k
+            by_symbol_map = {(row["shadow_mode"], row["symbol"]): row for row in by_symbol}
+            assert by_symbol_map[("all_candidates", "SOL/USDT")]["count"] == "2", by_symbol
+            assert by_symbol_map[("all_candidates", "BNB/USDT")]["count"] == "1", by_symbol
+            assert by_symbol_map[("protect_recovery_rules", "SOL/USDT")]["count"] == "1", by_symbol
+            assert ("protect_recovery_rules", "BNB/USDT") not in by_symbol_map, by_symbol
+            assert window["multi_position_swing_shadow_label_count"] == 3, window
+            assert window["multi_position_swing_shadow_complete_count"] == 3, window
             assert "reports/multi_position_swing_shadow_labels.jsonl" not in manifest["missing_paths"], manifest
         finally:
             bundle.unlink(missing_ok=True)

@@ -31,6 +31,9 @@ from src.reporting.skipped_candidate_tracker import (
 
 DEFAULT_SWING_SHADOW_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
 DEFAULT_SWING_SHADOW_HORIZONS = [24, 48, 72]
+SHADOW_MODE_ALL_CANDIDATES = "all_candidates"
+SHADOW_MODE_PROTECT_RECOVERY_RULES = "protect_recovery_rules"
+SHADOW_MODES = [SHADOW_MODE_ALL_CANDIDATES, SHADOW_MODE_PROTECT_RECOVERY_RULES]
 NEGATIVE_EXPECTANCY_HARD_REASONS = {
     "negative_expectancy_cooldown",
     "negative_expectancy_open_block",
@@ -93,6 +96,7 @@ def _shadow_key(record: Mapping[str, Any]) -> str:
     symbols = _parse_symbols(record.get("symbols"))
     return "|".join(
         [
+            str(record.get("shadow_mode") or SHADOW_MODE_ALL_CANDIDATES),
             str(record.get("run_id") or ""),
             str(record.get("ts_utc") or ""),
             str(record.get("k") or ""),
@@ -204,6 +208,41 @@ def _price_from_mapping(item: Mapping[str, Any]) -> Optional[float]:
     return None
 
 
+def _find_close_at_or_before(series: list[dict[str, float | int]], target_ts_ms: int) -> Optional[float]:
+    out: Optional[float] = None
+    for row in series:
+        ts_ms = int(row.get("timestamp_ms") or 0)
+        if ts_ms > int(target_ts_ms):
+            break
+        close = _normalize_float(row.get("close"))
+        if close is not None and close > 0:
+            out = close
+    return out
+
+
+def _four_hour_return_bps(
+    *,
+    symbol: str,
+    asof_ts_ms: int,
+    market_data_1h: Dict[str, MarketSeries],
+    cache_dir: Path,
+    cached: dict[str, list[dict[str, float | int]]],
+) -> Optional[float]:
+    if asof_ts_ms <= 0:
+        return None
+    rows = _series_for_symbol(
+        symbol=symbol,
+        cache_dir=cache_dir,
+        market_data_1h=market_data_1h,
+        cached=cached,
+    )
+    start_px = _find_close_at_or_before(rows, asof_ts_ms - 4 * ONE_HOUR_MS)
+    end_px = _find_close_at_or_before(rows, asof_ts_ms)
+    if start_px is None or start_px <= 0 or end_px is None or end_px <= 0:
+        return None
+    return ((float(end_px) / float(start_px)) - 1.0) * 10_000.0
+
+
 def _entry_px(
     *,
     symbol: str,
@@ -235,6 +274,84 @@ def _is_risk_off(*, audit: DecisionAudit, current_level: Optional[str]) -> bool:
     return False
 
 
+def _protect_recovery_allowed_symbols(cfg: AppConfig) -> list[str]:
+    execution = getattr(cfg, "execution", None)
+    raw = getattr(execution, "protect_recovery_allowed_symbols", None) or ["BTC/USDT", "SOL/USDT", "ETH/USDT"]
+    out: list[str] = []
+    seen: set[str] = set()
+    for symbol in raw:
+        text = _symbol_text(symbol)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _negative_expectancy_entry(audit: DecisionAudit, symbol: str) -> dict[str, Any]:
+    state = getattr(audit, "negative_expectancy_state", {}) or {}
+    if not isinstance(state, Mapping):
+        return {}
+    wanted = _symbol_text(symbol)
+    for section_name in ("stats", "symbols"):
+        section = state.get(section_name)
+        if not isinstance(section, Mapping):
+            continue
+        for raw_symbol, entry in section.items():
+            if _symbol_text(raw_symbol) == wanted and isinstance(entry, Mapping):
+                return dict(entry)
+    for raw_symbol, entry in state.items():
+        if _symbol_text(raw_symbol) == wanted and isinstance(entry, Mapping):
+            return dict(entry)
+    return {}
+
+
+def _negative_expectancy_bps(entry: Mapping[str, Any], *, fast_fail: bool = False) -> Optional[float]:
+    keys = (
+        ("fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps", "net_expectancy_bps")
+        if fast_fail
+        else ("net_expectancy_bps", "expectancy_bps")
+    )
+    for key in keys:
+        value = _normalize_float(entry.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _symbol_has_negative_expectancy(audit: DecisionAudit, symbol: str, router_reasons: set[str]) -> bool:
+    if router_reasons & NEGATIVE_EXPECTANCY_HARD_REASONS:
+        return True
+    entry = _negative_expectancy_entry(audit, symbol)
+    if not entry:
+        return False
+    closed_cycles = _normalize_float(entry.get("closed_cycles")) or 0.0
+    fast_fail_cycles = _normalize_float(entry.get("fast_fail_closed_cycles")) or 0.0
+    net_bps = _negative_expectancy_bps(entry)
+    fast_fail_bps = _negative_expectancy_bps(entry, fast_fail=True)
+    if closed_cycles > 0 and net_bps is not None and net_bps < 0:
+        return True
+    if fast_fail_cycles > 0 and fast_fail_bps is not None and fast_fail_bps < 0:
+        return True
+    return False
+
+
+def _alpha6_confirmed_for_swing(*, cfg: AppConfig, alpha6_side: str, alpha6_score: Optional[float], f4: Optional[float], f5: Optional[float]) -> bool:
+    execution = getattr(cfg, "execution", None)
+    min_alpha6 = float(getattr(execution, "swing_min_alpha6_score", 0.50) or 0.50)
+    min_f5 = float(getattr(execution, "swing_min_f5_rsi", 0.30) or 0.30)
+    min_f4 = float(getattr(execution, "swing_min_f4_volume", 0.0) or 0.0)
+    if str(alpha6_side or "").strip().lower() != "buy":
+        return False
+    if alpha6_score is None or alpha6_score < min_alpha6:
+        return False
+    if f4 is None or f4 < min_f4:
+        return False
+    if f5 is None or f5 < min_f5:
+        return False
+    return True
+
+
 def _collect_candidates(
     *,
     audit: DecisionAudit,
@@ -242,18 +359,42 @@ def _collect_candidates(
     market_data_1h: Dict[str, MarketSeries],
     current_level: Optional[str],
     cache_dir: Path,
+    shadow_mode: str,
 ) -> list[dict[str, Any]]:
     diagnostics = _diagnostics_cfg(cfg)
-    allowed_symbols = {
-        _symbol_text(symbol)
-        for symbol in (
-            getattr(diagnostics, "multi_position_swing_shadow_symbols", None)
-            or DEFAULT_SWING_SHADOW_SYMBOLS
-        )
-    }
+    mode = str(shadow_mode or SHADOW_MODE_ALL_CANDIDATES)
+    if mode == SHADOW_MODE_PROTECT_RECOVERY_RULES:
+        allowed_symbols = set(_protect_recovery_allowed_symbols(cfg))
+    else:
+        allowed_symbols = {
+            _symbol_text(symbol)
+            for symbol in (
+                getattr(diagnostics, "multi_position_swing_shadow_symbols", None)
+                or DEFAULT_SWING_SHADOW_SYMBOLS
+            )
+        }
     min_score = float(getattr(diagnostics, "multi_position_swing_shadow_min_final_score", 0.30) or 0.30)
     if _is_risk_off(audit=audit, current_level=current_level):
         return []
+    if mode == SHADOW_MODE_PROTECT_RECOVERY_RULES:
+        execution = getattr(cfg, "execution", None)
+        require_market_context = bool(getattr(execution, "protect_recovery_require_market_context", True))
+        min_positive = int(getattr(execution, "protect_recovery_min_positive_whitelist_4h_count", 3) or 0)
+        cached_for_context: dict[str, list[dict[str, float | int]]] = {}
+        asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
+        positive_count = 0
+        for symbol in allowed_symbols:
+            ret_bps = _four_hour_return_bps(
+                symbol=symbol,
+                asof_ts_ms=asof_ts_ms,
+                market_data_1h=market_data_1h,
+                cache_dir=cache_dir,
+                cached=cached_for_context,
+            )
+            if ret_bps is not None and ret_bps > 0:
+                positive_count += 1
+        if require_market_context and positive_count < min_positive:
+            return []
 
     explain_by_symbol = _target_explain_map(audit)
     signal_by_symbol = _strategy_signal_map(audit)
@@ -277,7 +418,14 @@ def _collect_candidates(
         if final_score is None or final_score < min_score:
             continue
         reasons = router_reasons.get(symbol, set())
-        if reasons & NEGATIVE_EXPECTANCY_HARD_REASONS:
+        has_negative_expectancy = _symbol_has_negative_expectancy(audit, symbol, reasons)
+        if mode == SHADOW_MODE_ALL_CANDIDATES and reasons & NEGATIVE_EXPECTANCY_HARD_REASONS:
+            continue
+        if (
+            mode == SHADOW_MODE_PROTECT_RECOVERY_RULES
+            and bool(getattr(getattr(cfg, "execution", None), "protect_recovery_disallow_symbols_with_negative_expectancy", True))
+            and has_negative_expectancy
+        ):
             continue
         explain = explain_by_symbol.get(symbol, {})
         signal = signal_by_symbol.get(symbol, {})
@@ -292,6 +440,17 @@ def _collect_candidates(
         selected_rank = _normalize_float(row.get("rank"))
         if selected_rank is None:
             selected_rank = _normalize_float(explain.get("selected_rank"))
+        alpha6_score = _normalize_float(explain.get("alpha6_score"))
+        alpha6_side = str(explain.get("alpha6_side") or signal.get("side") or "").strip().lower()
+        f4 = _normalize_float(explain.get("f4_volume_expansion"))
+        f5 = _normalize_float(explain.get("f5_rsi_trend_confirm"))
+        alpha6_confirmed = _alpha6_confirmed_for_swing(
+            cfg=cfg,
+            alpha6_side=alpha6_side,
+            alpha6_score=alpha6_score,
+            f4=f4,
+            f5=f5,
+        )
         out.append(
             {
                 "symbol": symbol,
@@ -302,11 +461,25 @@ def _collect_candidates(
                 "router_action": str(explain.get("router_action") or "").strip().lower() or None,
                 "router_reason": str(explain.get("router_reason") or "").strip() or None,
                 "trend_score": _normalize_float(explain.get("trend_score")),
-                "alpha6_score": _normalize_float(explain.get("alpha6_score")),
+                "alpha6_score": alpha6_score,
+                "alpha6_side": alpha6_side or None,
+                "f4_volume_expansion": f4,
+                "f5_rsi_trend_confirm": f5,
+                "entry_support": "alpha6_confirmed" if alpha6_confirmed else "score",
+                "negative_expectancy_excluded": bool(has_negative_expectancy),
             }
         )
         seen.add(symbol)
 
+    if mode == SHADOW_MODE_PROTECT_RECOVERY_RULES:
+        return sorted(
+            out,
+            key=lambda item: (
+                0 if item.get("entry_support") == "alpha6_confirmed" else 1,
+                -float(item.get("final_score") or 0.0),
+                int(item.get("selected_rank") or 999),
+            ),
+        )
     return sorted(out, key=lambda item: (-float(item.get("final_score") or 0.0), int(item.get("selected_rank") or 999)))
 
 
@@ -320,44 +493,51 @@ def _collect_shadow_records(
 ) -> list[dict[str, Any]]:
     diagnostics = _diagnostics_cfg(cfg)
     rt_cost_bps = float(getattr(diagnostics, "multi_position_swing_shadow_rt_cost_bps", 30.0) or 30.0)
-    candidates = _collect_candidates(
-        audit=audit,
-        cfg=cfg,
-        market_data_1h=market_data_1h,
-        current_level=current_level,
-        cache_dir=cache_dir,
-    )
-    if not candidates:
-        return []
     asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
     ts_utc = _iso_from_ms(asof_ts_ms) if asof_ts_ms > 0 else ""
     records: list[dict[str, Any]] = []
-    for k in range(1, min(3, len(candidates)) + 1):
-        selected = candidates[:k]
-        symbols = [item["symbol"] for item in selected]
-        record = {
-            "ts_utc": ts_utc,
-            "entry_ts_ms": asof_ts_ms,
-            "run_id": str(getattr(audit, "run_id", "") or ""),
-            "k": k,
-            "symbols": symbols,
-            "equal_weight": round(1.0 / float(k), 8),
-            "entry_px": {
-                item["symbol"]: item.get("entry_px")
-                for item in selected
-            },
-            "final_score": {
-                item["symbol"]: item.get("final_score")
-                for item in selected
-            },
-            "selected_rank": {
-                item["symbol"]: item.get("selected_rank")
-                for item in selected
-            },
-            "rt_cost_bps": rt_cost_bps,
-            "label_status": "pending",
-        }
-        records.append(record)
+    for shadow_mode in SHADOW_MODES:
+        candidates = _collect_candidates(
+            audit=audit,
+            cfg=cfg,
+            market_data_1h=market_data_1h,
+            current_level=current_level,
+            cache_dir=cache_dir,
+            shadow_mode=shadow_mode,
+        )
+        if not candidates:
+            continue
+        for k in range(1, min(3, len(candidates)) + 1):
+            selected = candidates[:k]
+            symbols = [item["symbol"] for item in selected]
+            record = {
+                "ts_utc": ts_utc,
+                "entry_ts_ms": asof_ts_ms,
+                "run_id": str(getattr(audit, "run_id", "") or ""),
+                "shadow_mode": shadow_mode,
+                "k": k,
+                "symbols": symbols,
+                "equal_weight": round(1.0 / float(k), 8),
+                "entry_px": {
+                    item["symbol"]: item.get("entry_px")
+                    for item in selected
+                },
+                "final_score": {
+                    item["symbol"]: item.get("final_score")
+                    for item in selected
+                },
+                "selected_rank": {
+                    item["symbol"]: item.get("selected_rank")
+                    for item in selected
+                },
+                "entry_support": {
+                    item["symbol"]: item.get("entry_support")
+                    for item in selected
+                },
+                "rt_cost_bps": rt_cost_bps,
+                "label_status": "pending",
+            }
+            records.append(record)
     return records
 
 
@@ -485,7 +665,7 @@ def _csv_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for record in records:
         row = dict(record)
         row.pop("entry_ts_ms", None)
-        for key in ("symbols", "entry_px", "final_score", "selected_rank"):
+        for key in ("symbols", "entry_px", "final_score", "selected_rank", "entry_support"):
             if isinstance(row.get(key), (dict, list)):
                 row[key] = _json_dumps(row[key])
         for key, value in list(row.items()):
@@ -512,12 +692,14 @@ def _fields(horizons: list[int]) -> list[str]:
     return [
         "ts_utc",
         "run_id",
+        "shadow_mode",
         "k",
         "symbols",
         "equal_weight",
         "entry_px",
         "final_score",
         "selected_rank",
+        "entry_support",
         "rt_cost_bps",
         *horizon_fields,
         "label_status",
@@ -525,15 +707,15 @@ def _fields(horizons: list[int]) -> list[str]:
 
 
 def _aggregate_by_k(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         try:
-            grouped[int(record.get("k") or 0)].append(record)
+            grouped[(str(record.get("shadow_mode") or SHADOW_MODE_ALL_CANDIDATES), int(record.get("k") or 0))].append(record)
         except Exception:
             continue
     out: list[dict[str, Any]] = []
-    for k, rows in sorted(grouped.items()):
-        payload: dict[str, Any] = {"k": k, "count": len(rows)}
+    for (shadow_mode, k), rows in sorted(grouped.items()):
+        payload: dict[str, Any] = {"shadow_mode": shadow_mode, "k": k, "count": len(rows)}
         for horizon in DEFAULT_SWING_SHADOW_HORIZONS:
             values = [
                 _normalize_float(row.get(f"{HORIZON_PREFIX}{horizon}h_portfolio_avg_net_bps"))
@@ -566,13 +748,13 @@ def _aggregate_by_k(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _aggregate_by_symbol(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         for symbol in _parse_symbols(record.get("symbols")):
-            grouped[symbol].append(record)
+            grouped[(str(record.get("shadow_mode") or SHADOW_MODE_ALL_CANDIDATES), symbol)].append(record)
     out: list[dict[str, Any]] = []
-    for symbol, rows in sorted(grouped.items()):
-        payload: dict[str, Any] = {"symbol": symbol, "count": len(rows)}
+    for (shadow_mode, symbol), rows in sorted(grouped.items()):
+        payload: dict[str, Any] = {"shadow_mode": shadow_mode, "symbol": symbol, "count": len(rows)}
         for horizon in DEFAULT_SWING_SHADOW_HORIZONS:
             values = []
             for row in rows:
@@ -641,7 +823,7 @@ def update_multi_position_swing_shadow_evaluator(
             asof_ts_ms=asof_ts_ms,
             ohlcv_provider=ohlcv_provider,
         )
-        records.sort(key=lambda row: (_record_entry_ts_ms(row), str(row.get("run_id") or ""), int(row.get("k") or 0)))
+        records.sort(key=lambda row: (_record_entry_ts_ms(row), str(row.get("run_id") or ""), str(row.get("shadow_mode") or SHADOW_MODE_ALL_CANDIDATES), int(row.get("k") or 0)))
         _write_records(labels_path, records)
 
     fields = _fields(horizons)
@@ -650,6 +832,7 @@ def update_multi_position_swing_shadow_evaluator(
         summaries_dir / "multi_position_swing_shadow_by_k.csv",
         _aggregate_by_k(records),
         [
+            "shadow_mode",
             "k",
             "count",
             "avg_24h_net_bps",
@@ -663,6 +846,7 @@ def update_multi_position_swing_shadow_evaluator(
         summaries_dir / "multi_position_swing_shadow_by_symbol.csv",
         _aggregate_by_symbol(records),
         [
+            "shadow_mode",
             "symbol",
             "count",
             "avg_24h_net_bps",

@@ -2201,9 +2201,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             out.append(symbol)
         return out
 
+    MULTI_SHADOW_MODE_ALL = "all_candidates"
+    MULTI_SHADOW_MODE_PROTECT_RECOVERY = "protect_recovery_rules"
+    MULTI_SHADOW_MODES = [MULTI_SHADOW_MODE_ALL, MULTI_SHADOW_MODE_PROTECT_RECOVERY]
+
     def multi_position_swing_shadow_row_key(row):
         symbols = parse_symbols_list(first_value(row, ("symbols", "symbols_json"), ""))
         return (
+            flatten_value(first_value(row, ("shadow_mode",), MULTI_SHADOW_MODE_ALL)) or MULTI_SHADOW_MODE_ALL,
             flatten_value(first_value(row, ("run_id",), not_obs)) or not_obs,
             canonical_ts_utc(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)),
             flatten_value(first_value(row, ("k", "top_k"), not_obs)) or not_obs,
@@ -2978,18 +2983,102 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             return provider_price, provider_source
         return None, cache_reason or "missing_entry_px"
 
-    def multi_shadow_collect_candidates_for_audit(run_id, audit):
+    def multi_shadow_protect_recovery_allowed_symbols():
+        return list(
+            dict.fromkeys(
+                normalize_symbol_text(symbol)
+                for symbol in config_string_list(
+                    "protect_recovery_allowed_symbols",
+                    ["BTC/USDT", "SOL/USDT", "ETH/USDT"],
+                )
+                if normalize_symbol_text(symbol)
+            )
+        )
+
+    def multi_shadow_negative_expectancy_entry(symbol):
+        if not isinstance(negative_expectancy_state, dict):
+            return {}
+        wanted = normalize_symbol_text(symbol)
+        for section_name in ("stats", "symbols"):
+            section = negative_expectancy_state.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            for raw_symbol, entry in section.items():
+                if normalize_symbol_text(raw_symbol) == wanted and isinstance(entry, dict):
+                    return entry
+        for raw_symbol, entry in negative_expectancy_state.items():
+            if normalize_symbol_text(raw_symbol) == wanted and isinstance(entry, dict):
+                return entry
+        return {}
+
+    def multi_shadow_symbol_has_negative_expectancy(symbol, router_reasons):
+        if router_reasons & MULTI_POSITION_NEGATIVE_EXPECTANCY_HARD_REASONS:
+            return True
+        entry = multi_shadow_negative_expectancy_entry(symbol)
+        if not isinstance(entry, dict) or not entry:
+            return False
+        closed_cycles = as_float(first_value(entry, ("closed_cycles",), 0)) or 0.0
+        fast_fail_cycles = as_float(first_value(entry, ("fast_fail_closed_cycles",), 0)) or 0.0
+        net_bps = as_float(first_value(entry, ("net_expectancy_bps", "expectancy_bps"), not_obs))
+        fast_fail_bps = as_float(first_value(entry, ("fast_fail_net_expectancy_bps", "fast_fail_expectancy_bps"), not_obs))
+        return bool(
+            (closed_cycles > 0 and net_bps is not None and net_bps < 0)
+            or (fast_fail_cycles > 0 and fast_fail_bps is not None and fast_fail_bps < 0)
+        )
+
+    def multi_shadow_alpha6_confirmed_for_swing(explain):
+        alpha6_side = flatten_value(first_value(explain, ("alpha6_side",), "")).lower()
+        alpha6_score = as_float(first_value(explain, ("alpha6_score",), not_obs))
+        f4 = as_float(first_value(explain, ("f4_volume_expansion",), not_obs))
+        f5 = as_float(first_value(explain, ("f5_rsi_trend_confirm",), not_obs))
+        min_alpha6 = config_number("swing_min_alpha6_score")
+        min_f5 = config_number("swing_min_f5_rsi")
+        min_f4 = config_number("swing_min_f4_volume")
+        min_alpha6 = 0.50 if min_alpha6 is None else float(min_alpha6)
+        min_f5 = 0.30 if min_f5 is None else float(min_f5)
+        min_f4 = 0.0 if min_f4 is None else float(min_f4)
+        return bool(
+            alpha6_side == "buy"
+            and alpha6_score is not None and alpha6_score >= min_alpha6
+            and f4 is not None and f4 >= min_f4
+            and f5 is not None and f5 >= min_f5
+        )
+
+    def multi_shadow_return_bps(symbol, when_dt, hours=4):
+        if when_dt is None:
+            return None
+        start_px = cache_price_at_or_after(symbol, when_dt - dt.timedelta(hours=int(hours)))[0]
+        end_px = cache_price_at_or_after(symbol, when_dt)[0]
+        if start_px is None or end_px is None or start_px <= 0 or end_px <= 0:
+            return None
+        return ((end_px / start_px) - 1.0) * 10000.0
+
+    def multi_shadow_collect_candidates_for_audit(run_id, audit, shadow_mode=MULTI_SHADOW_MODE_ALL):
         if not bool(config_bool("multi_position_swing_shadow_enabled", True)):
             return [], "disabled"
         if audit_is_risk_off(audit):
             return [], "risk_off"
-        allowed_symbols = {
-            normalize_symbol_text(symbol)
-            for symbol in config_string_list(
-                "multi_position_swing_shadow_symbols",
-                ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"],
-            )
-        }
+        if shadow_mode == MULTI_SHADOW_MODE_PROTECT_RECOVERY:
+            allowed_symbols = set(multi_shadow_protect_recovery_allowed_symbols())
+            min_positive = config_number("protect_recovery_min_positive_whitelist_4h_count")
+            min_positive = 3 if min_positive is None else int(min_positive)
+            require_market_context = config_bool("protect_recovery_require_market_context", True)
+            positive_count = 0
+            audit_ts_for_context = parse_dt_utc(run_ts(run_id, audit)) or parse_run_time(run_id)
+            for symbol in allowed_symbols:
+                ret_bps = multi_shadow_return_bps(symbol, audit_ts_for_context, hours=4)
+                if ret_bps is not None and ret_bps > 0:
+                    positive_count += 1
+            if require_market_context and positive_count < min_positive:
+                return [], f"protect_recovery_market_context_not_met:{positive_count}/{min_positive}"
+        else:
+            allowed_symbols = {
+                normalize_symbol_text(symbol)
+                for symbol in config_string_list(
+                    "multi_position_swing_shadow_symbols",
+                    ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"],
+                )
+            }
         min_score = config_number("multi_position_swing_shadow_min_final_score")
         if min_score is None:
             min_score = 0.30
@@ -3030,14 +3119,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 debug_reasons.append(f"{symbol}:score_below_min")
                 continue
             reasons = router_reasons_for_symbol(audit, symbol)
-            if reasons & MULTI_POSITION_NEGATIVE_EXPECTANCY_HARD_REASONS:
+            has_negative_expectancy = multi_shadow_symbol_has_negative_expectancy(symbol, reasons)
+            if shadow_mode == MULTI_SHADOW_MODE_ALL and reasons & MULTI_POSITION_NEGATIVE_EXPECTANCY_HARD_REASONS:
                 debug_reasons.append(f"{symbol}:negative_expectancy_hard_cooldown")
+                continue
+            if (
+                shadow_mode == MULTI_SHADOW_MODE_PROTECT_RECOVERY
+                and config_bool("protect_recovery_disallow_symbols_with_negative_expectancy", True)
+                and has_negative_expectancy
+            ):
+                debug_reasons.append(f"{symbol}:protect_recovery_negative_expectancy_excluded")
                 continue
             entry_px, entry_source = multi_shadow_candidate_entry_px(symbol, audit, audit_ts)
             selected_rank = first_observed(
                 first_value(row, ("rank", "base_rank", "selected_rank"), not_obs),
                 first_value(explain, ("selected_rank", "rank"), ordinal),
             )
+            entry_support = "alpha6_confirmed" if multi_shadow_alpha6_confirmed_for_swing(explain) else "score"
             candidates.append(
                 {
                     "symbol": symbol,
@@ -3048,9 +3146,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "entry_px_source": entry_source,
                     "router_action": first_observed(first_value(explain, ("router_action",), not_obs)),
                     "router_reason": first_observed(first_value(explain, ("router_reason", "blocked_reason"), not_obs)),
+                    "entry_support": entry_support,
+                    "negative_expectancy_excluded": has_negative_expectancy,
                 }
             )
-        candidates.sort(key=lambda item: (-float(item.get("final_score") or 0.0), int(item.get("selected_rank") or 999)))
+        if shadow_mode == MULTI_SHADOW_MODE_PROTECT_RECOVERY:
+            candidates.sort(key=lambda item: (0 if item.get("entry_support") == "alpha6_confirmed" else 1, -float(item.get("final_score") or 0.0), int(item.get("selected_rank") or 999)))
+        else:
+            candidates.sort(key=lambda item: (-float(item.get("final_score") or 0.0), int(item.get("selected_rank") or 999)))
         return candidates, ";".join(debug_reasons)
 
     def generate_multi_position_swing_shadow_label_rows():
@@ -3060,7 +3163,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if rt_cost_bps is None:
             rt_cost_bps = 30.0
         for run_id, audit in sorted(audit_by_run.items()):
-            candidates, debug_reason = multi_shadow_collect_candidates_for_audit(run_id, audit)
             raw_qualified_count = 0
             min_score = config_number("multi_position_swing_shadow_min_final_score")
             if min_score is None:
@@ -3079,41 +3181,46 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 score = as_float(top_score_value(row))
                 if symbol in allowed and score is not None and score >= float(min_score):
                     raw_qualified_count += 1
-            if raw_qualified_count > 0 and not candidates:
-                debug_rows.append(
-                    {
-                        "ts_utc": canonical_ts_utc(run_ts(run_id, audit)),
-                        "run_id": run_id,
-                        "qualified_candidate_count": raw_qualified_count,
-                        "debug_reason": debug_reason or "no_candidates_after_filter",
-                    }
-                )
-                continue
-            if not candidates:
-                continue
             audit_ts_text = canonical_ts_utc(run_ts(run_id, audit))
-            for k in range(1, min(3, len(candidates)) + 1):
-                selected = candidates[:k]
-                symbols = [item["symbol"] for item in selected]
-                generated.append(
-                    {
-                        "ts_utc": audit_ts_text,
-                        "run_id": run_id,
-                        "k": k,
-                        "symbols": symbols,
-                        "equal_weight": round(1.0 / float(k), 8),
-                        "entry_px": {item["symbol"]: item.get("entry_px") for item in selected},
-                        "entry_px_by_symbol": {item["symbol"]: item.get("entry_px") for item in selected},
-                        "entry_px_source": {item["symbol"]: item.get("entry_px_source") for item in selected},
-                        "final_score": {item["symbol"]: item.get("final_score") for item in selected},
-                        "final_score_by_symbol": {item["symbol"]: item.get("final_score") for item in selected},
-                        "selected_rank": {item["symbol"]: item.get("selected_rank") for item in selected},
-                        "target_w": {item["symbol"]: item.get("target_w") for item in selected},
-                        "rt_cost_bps": rt_cost_bps,
-                        "label_status": "pending",
-                        "debug_reason": "generated_from_decision_audit",
-                    }
-                )
+            for shadow_mode in MULTI_SHADOW_MODES:
+                candidates, debug_reason = multi_shadow_collect_candidates_for_audit(run_id, audit, shadow_mode=shadow_mode)
+                if raw_qualified_count > 0 and not candidates:
+                    debug_rows.append(
+                        {
+                            "ts_utc": audit_ts_text,
+                            "run_id": run_id,
+                            "shadow_mode": shadow_mode,
+                            "qualified_candidate_count": raw_qualified_count,
+                            "debug_reason": debug_reason or "no_candidates_after_filter",
+                        }
+                    )
+                    continue
+                if not candidates:
+                    continue
+                for k in range(1, min(3, len(candidates)) + 1):
+                    selected = candidates[:k]
+                    symbols = [item["symbol"] for item in selected]
+                    generated.append(
+                        {
+                            "ts_utc": audit_ts_text,
+                            "run_id": run_id,
+                            "shadow_mode": shadow_mode,
+                            "k": k,
+                            "symbols": symbols,
+                            "equal_weight": round(1.0 / float(k), 8),
+                            "entry_px": {item["symbol"]: item.get("entry_px") for item in selected},
+                            "entry_px_by_symbol": {item["symbol"]: item.get("entry_px") for item in selected},
+                            "entry_px_source": {item["symbol"]: item.get("entry_px_source") for item in selected},
+                            "final_score": {item["symbol"]: item.get("final_score") for item in selected},
+                            "final_score_by_symbol": {item["symbol"]: item.get("final_score") for item in selected},
+                            "selected_rank": {item["symbol"]: item.get("selected_rank") for item in selected},
+                            "entry_support": {item["symbol"]: item.get("entry_support") for item in selected},
+                            "target_w": {item["symbol"]: item.get("target_w") for item in selected},
+                            "rt_cost_bps": rt_cost_bps,
+                            "label_status": "pending",
+                            "debug_reason": f"generated_from_decision_audit:{shadow_mode}",
+                        }
+                    )
         return generated, debug_rows
 
     generated_multi_shadow_rows, multi_position_swing_shadow_debug_rows = generate_multi_position_swing_shadow_label_rows()
@@ -3173,6 +3280,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         out = {
             "ts_utc": first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)),
             "run_id": first_observed(first_value(row, ("run_id",), not_obs)),
+            "shadow_mode": first_observed(first_value(row, ("shadow_mode",), MULTI_SHADOW_MODE_ALL)),
             "k": first_observed(first_value(row, ("k", "top_k"), len(symbols) if symbols else not_obs)),
             "symbols": json.dumps(symbols, ensure_ascii=False),
             "equal_weight": first_observed(first_value(row, ("equal_weight",), (1.0 / len(symbols)) if symbols else not_obs)),
@@ -3181,6 +3289,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "final_score": json.dumps(parse_json_obj(first_value(row, ("final_score", "final_scores"), {}), {}), ensure_ascii=False, sort_keys=True),
             "final_score_by_symbol": json.dumps(parse_json_obj(first_value(row, ("final_score_by_symbol", "final_score", "final_scores"), {}), {}), ensure_ascii=False, sort_keys=True),
             "selected_rank": json.dumps(parse_json_obj(first_value(row, ("selected_rank", "selected_ranks"), {}), {}), ensure_ascii=False, sort_keys=True),
+            "entry_support": json.dumps(parse_json_obj(first_value(row, ("entry_support",), {}), {}), ensure_ascii=False, sort_keys=True),
             "rt_cost_bps": fmt_num(rt_cost_bps, 6),
             "debug_reason": first_observed(first_value(row, ("debug_reason",), "")),
         }
@@ -3274,10 +3383,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     def aggregate_multi_position_by_k(rows):
         grouped = defaultdict(list)
         for row in rows:
-            grouped[flatten_value(row.get("k") or not_obs)].append(row)
+            grouped[(
+                flatten_value(row.get("shadow_mode") or MULTI_SHADOW_MODE_ALL),
+                flatten_value(row.get("k") or not_obs),
+            )].append(row)
         out = []
-        for k, group_rows in sorted(grouped.items()):
-            payload = {"k": k, "count": len(group_rows)}
+        for (shadow_mode, k), group_rows in sorted(grouped.items()):
+            payload = {"shadow_mode": shadow_mode, "k": k, "count": len(group_rows)}
             for horizon in multi_position_swing_horizons:
                 values = [as_float(row.get(f"label_{horizon}h_portfolio_avg_net_bps")) for row in group_rows]
                 usable = [value for value in values if value is not None]
@@ -3295,10 +3407,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         grouped = defaultdict(list)
         for row in rows:
             for symbol in parse_symbols_list(row.get("symbols")):
-                grouped[symbol].append(row)
+                grouped[(flatten_value(row.get("shadow_mode") or MULTI_SHADOW_MODE_ALL), symbol)].append(row)
         out = []
-        for symbol, group_rows in sorted(grouped.items()):
-            payload = {"symbol": symbol, "count": len(group_rows)}
+        for (shadow_mode, symbol), group_rows in sorted(grouped.items()):
+            payload = {"shadow_mode": shadow_mode, "symbol": symbol, "count": len(group_rows)}
             for horizon in multi_position_swing_horizons:
                 values = []
                 for row in group_rows:
@@ -4574,6 +4686,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     multi_position_swing_fields = [
         "ts_utc",
         "run_id",
+        "shadow_mode",
         "k",
         "symbols",
         "equal_weight",
@@ -4582,6 +4695,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "final_score",
         "final_score_by_symbol",
         "selected_rank",
+        "entry_support",
         "rt_cost_bps",
         "debug_reason",
     ]
@@ -4605,17 +4719,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/multi_position_swing_shadow_debug.csv",
         multi_position_swing_shadow_debug_rows,
-        ["ts_utc", "run_id", "qualified_candidate_count", "debug_reason"],
+        ["ts_utc", "run_id", "shadow_mode", "qualified_candidate_count", "debug_reason"],
     )
     write_csv(
         "summaries/multi_position_swing_shadow_by_k.csv",
         multi_position_swing_shadow_by_k,
-        ["k", "count", "avg_24h_net_bps", "avg_48h_net_bps", "avg_72h_net_bps", "win_rate", "worst_avg"],
+        ["shadow_mode", "k", "count", "avg_24h_net_bps", "avg_48h_net_bps", "avg_72h_net_bps", "win_rate", "worst_avg"],
     )
     write_csv(
         "summaries/multi_position_swing_shadow_by_symbol.csv",
         multi_position_swing_shadow_by_symbol,
-        ["symbol", "count", "avg_24h_net_bps", "avg_48h_net_bps", "avg_72h_net_bps", "win_rate_24h", "win_rate_48h", "win_rate_72h"],
+        ["shadow_mode", "symbol", "count", "avg_24h_net_bps", "avg_48h_net_bps", "avg_72h_net_bps", "win_rate_24h", "win_rate_48h", "win_rate_72h"],
     )
     write_csv(
         "summaries/skipped_candidate_outcomes_by_horizon.csv",
@@ -4945,10 +5059,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         else ("not_observable_no_matured_labels" if alt_impulse_shadow_rows else "not_applicable_no_shadow_samples")
     )
 
-    def multi_position_by_k_row(k):
+    def multi_position_by_k_row(k, shadow_mode=MULTI_SHADOW_MODE_ALL):
         key = str(k)
         for row in multi_position_swing_shadow_by_k:
-            if str(row.get("k")) == key:
+            if str(row.get("k")) == key and flatten_value(row.get("shadow_mode") or MULTI_SHADOW_MODE_ALL) == shadow_mode:
                 return row
         return {}
 
@@ -4957,9 +5071,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             return None
         return as_float(row.get(key))
 
-    def multi_position_top2_vs_top1_text():
-        k1 = multi_position_by_k_row(1)
-        k2 = multi_position_by_k_row(2)
+    def multi_position_top2_vs_top1_text(shadow_mode=MULTI_SHADOW_MODE_ALL):
+        k1 = multi_position_by_k_row(1, shadow_mode)
+        k2 = multi_position_by_k_row(2, shadow_mode)
         if not k1 or not k2:
             return "not_observable_missing_top1_or_top2"
         for horizon in multi_position_swing_horizons:
@@ -4972,8 +5086,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         return "not_observable_no_complete_top1_top2_labels"
 
     def multi_position_top3_risk_text():
-        k2 = multi_position_by_k_row(2)
-        k3 = multi_position_by_k_row(3)
+        k2 = multi_position_by_k_row(2, MULTI_SHADOW_MODE_ALL)
+        k3 = multi_position_by_k_row(3, MULTI_SHADOW_MODE_ALL)
         if not k2 or not k3:
             return "not_observable_missing_top2_or_top3"
         top2_worst = multi_position_value(k2, "worst_avg")
@@ -5001,18 +5115,42 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         parts = []
         for row in ranked[:limit]:
             parts.append(
-                f"k={row.get('k', not_obs)} symbols={row.get('symbols', not_obs)} "
+                f"mode={row.get('shadow_mode', MULTI_SHADOW_MODE_ALL)} k={row.get('k', not_obs)} symbols={row.get('symbols', not_obs)} "
                 f"24h_avg={row.get('label_24h_portfolio_avg_net_bps', not_obs)} "
                 f"worst={row.get('label_24h_worst_symbol_net_bps', not_obs)} "
                 f"wins={row.get('label_24h_win_count', not_obs)}"
             )
         return "; ".join(parts)
 
+    def multi_position_protect_recovery_observation_text():
+        all_k1 = multi_position_by_k_row(1, MULTI_SHADOW_MODE_ALL)
+        all_k2 = multi_position_by_k_row(2, MULTI_SHADOW_MODE_ALL)
+        pr_k1 = multi_position_by_k_row(1, MULTI_SHADOW_MODE_PROTECT_RECOVERY)
+        pr_k2 = multi_position_by_k_row(2, MULTI_SHADOW_MODE_PROTECT_RECOVERY)
+        if not all_k1 or not all_k2 or not pr_k2:
+            return "not_observable_missing_mode_rows"
+        for horizon in multi_position_swing_horizons:
+            h = int(horizon)
+            all_top1 = multi_position_value(all_k1, f"avg_{h}h_net_bps")
+            all_top2 = multi_position_value(all_k2, f"avg_{h}h_net_bps")
+            pr_top1 = multi_position_value(pr_k1, f"avg_{h}h_net_bps") if pr_k1 else None
+            pr_top2 = multi_position_value(pr_k2, f"avg_{h}h_net_bps")
+            if all_top1 is None or all_top2 is None or pr_top2 is None:
+                continue
+            all_top2_bad = all_top2 < all_top1
+            protect_top2_good = (pr_top1 is not None and pr_top2 >= pr_top1) or pr_top2 > all_top2
+            verdict = "yes_continue_observing" if all_top2_bad and protect_top2_good else "no_clear_edge_yet"
+            return (
+                f"{verdict} / {h}h all_top1={fmt_num(all_top1, 6)}, all_top2={fmt_num(all_top2, 6)}, "
+                f"protect_recovery_top2={fmt_num(pr_top2, 6)}"
+            )
+        return "not_observable_no_complete_top2_labels"
+
     def multi_position_by_k_text():
         if not multi_position_swing_shadow_by_k:
             return "not_observable_no_rows"
         return "; ".join(
-            f"k={row.get('k', not_obs)} count={row.get('count', 0)} "
+            f"mode={row.get('shadow_mode', MULTI_SHADOW_MODE_ALL)} k={row.get('k', not_obs)} count={row.get('count', 0)} "
             f"24h={row.get('avg_24h_net_bps', not_obs)} "
             f"48h={row.get('avg_48h_net_bps', not_obs)} "
             f"72h={row.get('avg_72h_net_bps', not_obs)} "
@@ -5025,7 +5163,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if not multi_position_swing_shadow_by_symbol:
             return "not_observable_no_rows"
         return "; ".join(
-            f"{row.get('symbol', not_obs)} count={row.get('count', 0)} "
+            f"mode={row.get('shadow_mode', MULTI_SHADOW_MODE_ALL)} {row.get('symbol', not_obs)} count={row.get('count', 0)} "
             f"24h={row.get('avg_24h_net_bps', not_obs)}/win={row.get('win_rate_24h', not_obs)} "
             f"48h={row.get('avg_48h_net_bps', not_obs)}/win={row.get('win_rate_48h', not_obs)} "
             f"72h={row.get('avg_72h_net_bps', not_obs)}/win={row.get('win_rate_72h', not_obs)}"
@@ -5138,7 +5276,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "",
         "## 多币 swing shadow",
         f"- label_count: {len(multi_position_swing_shadow_rows)}",
-        f"- top2 是否优于 top1: {multi_position_top2_vs_top1_text()}",
+        f"- all_candidates top2 是否优于 top1: {multi_position_top2_vs_top1_text(MULTI_SHADOW_MODE_ALL)}",
+        f"- protect_recovery_rules top2 是否优于 top1: {multi_position_top2_vs_top1_text(MULTI_SHADOW_MODE_PROTECT_RECOVERY)}",
+        f"- all_candidates top2 差但 protect_recovery_rules top2 好: {multi_position_protect_recovery_observation_text()}",
         f"- top3 是否增加风险: {multi_position_top3_risk_text()}",
         f"- 哪些组合表现最好: {multi_position_best_combinations_text()}",
         f"- by_k: {multi_position_by_k_text()}",

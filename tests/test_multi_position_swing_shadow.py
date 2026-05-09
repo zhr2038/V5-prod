@@ -107,6 +107,70 @@ def test_top2_shadow_is_generated_without_orders(tmp_path: Path) -> None:
     assert any(row["k"] == "2" and "ETH/USDT" in row["symbols"] for row in outcomes)
 
 
+def test_protect_recovery_rules_shadow_excludes_bnb_and_groups_by_mode(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260508_08"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    entry_ts_ms = _ts_ms("2026-05-08T08:00:00Z")
+    prior_ts_ms = entry_ts_ms - 4 * 3600 * 1000
+    cfg = _cfg()
+    cfg.execution.protect_recovery_allowed_symbols = ["BTC/USDT", "SOL/USDT", "ETH/USDT"]
+    cfg.execution.protect_recovery_disallow_symbols_with_negative_expectancy = True
+    cfg.execution.protect_recovery_require_market_context = True
+    cfg.execution.protect_recovery_min_positive_whitelist_4h_count = 3
+
+    audit = _audit("20260508_08", entry_ts_ms)
+    audit.top_scores = [
+        {"symbol": "BNB/USDT", "score": 0.95, "rank": 1},
+        {"symbol": "SOL/USDT", "score": 0.90, "rank": 2},
+        {"symbol": "ETH/USDT", "score": 0.85, "rank": 3},
+        {"symbol": "BTC/USDT", "score": 0.80, "rank": 4},
+    ]
+    audit.target_execution_explain = [
+        {"symbol": "BNB/USDT", "entry_px": 300.0, "final_score": 0.95},
+        {"symbol": "SOL/USDT", "entry_px": 50.0, "final_score": 0.90, "alpha6_side": "buy", "alpha6_score": 0.70, "f4_volume_expansion": 0.5, "f5_rsi_trend_confirm": 0.4},
+        {"symbol": "ETH/USDT", "entry_px": 100.0, "final_score": 0.85, "alpha6_side": "buy", "alpha6_score": 0.65, "f4_volume_expansion": 0.4, "f5_rsi_trend_confirm": 0.35},
+        {"symbol": "BTC/USDT", "entry_px": 200.0, "final_score": 0.80, "alpha6_side": "buy", "alpha6_score": 0.60, "f4_volume_expansion": 0.3, "f5_rsi_trend_confirm": 0.32},
+    ]
+
+    result = update_multi_position_swing_shadow_evaluator(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h={
+            "BTC/USDT": _series("BTC/USDT", [prior_ts_ms, entry_ts_ms], [100.0, 101.0]),
+            "SOL/USDT": _series("SOL/USDT", [prior_ts_ms, entry_ts_ms], [50.0, 51.0]),
+            "ETH/USDT": _series("ETH/USDT", [prior_ts_ms, entry_ts_ms], [98.0, 100.0]),
+            "BNB/USDT": _series("BNB/USDT", [prior_ts_ms, entry_ts_ms], [300.0, 301.0]),
+        },
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+        ohlcv_provider=None,
+    )
+
+    assert result["new_records"] == 6
+    labels = [
+        json.loads(line)
+        for line in (tmp_path / "reports" / "multi_position_swing_shadow_labels.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    all_top2 = next(row for row in labels if row["shadow_mode"] == "all_candidates" and row["k"] == 2)
+    protect_top2 = next(row for row in labels if row["shadow_mode"] == "protect_recovery_rules" and row["k"] == 2)
+    assert all_top2["symbols"] == ["BNB/USDT", "SOL/USDT"]
+    assert "BNB/USDT" not in protect_top2["symbols"]
+    assert protect_top2["symbols"] == ["SOL/USDT", "ETH/USDT"]
+
+    by_k = list(
+        csv.DictReader((tmp_path / "reports" / "summaries" / "multi_position_swing_shadow_by_k.csv").read_text(encoding="utf-8").splitlines())
+    )
+    assert any(row["shadow_mode"] == "all_candidates" and row["k"] == "2" for row in by_k)
+    assert any(row["shadow_mode"] == "protect_recovery_rules" and row["k"] == "2" for row in by_k)
+
+    by_symbol = list(
+        csv.DictReader((tmp_path / "reports" / "summaries" / "multi_position_swing_shadow_by_symbol.csv").read_text(encoding="utf-8").splitlines())
+    )
+    assert any(row["shadow_mode"] == "all_candidates" and row["symbol"] == "BNB/USDT" for row in by_symbol)
+    assert not any(row["shadow_mode"] == "protect_recovery_rules" and row["symbol"] == "BNB/USDT" for row in by_symbol)
+
+
 def test_matured_horizons_fill_portfolio_labels(tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260508_08"
     run_dir.mkdir(parents=True, exist_ok=True)
