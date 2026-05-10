@@ -50,6 +50,14 @@ BTC_LEADERSHIP_PROBE_NOT_OBSERVABLE_SKIP_REASONS = {
 }
 HIGH_SCORE_BLOCKED_TARGET_SYMBOLS = {"BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"}
 HIGH_SCORE_BLOCKED_MIN_SCORE = 0.80
+HIGH_SCORE_NON_ENTRY_MANAGEMENT_REASONS = {
+    "rank_exit_target_still_positive",
+    "exit_order_selected",
+    "deadband",
+    "active_probe_ignore_zero_target_close",
+    "swing_min_hold_guard",
+    "hold_current_no_valid_replacement",
+}
 
 
 def _diagnostics_cfg(cfg: Any) -> DiagnosticsConfig:
@@ -129,10 +137,15 @@ def _is_btc_leadership_probe_skip_reason(reason: str) -> bool:
 
 def _is_high_score_blocked_reason(reason: str) -> bool:
     text = str(reason or "").strip()
+    if text in HIGH_SCORE_NON_ENTRY_MANAGEMENT_REASONS:
+        return False
     return (
         text.startswith("protect_entry_")
         or text == "cost_aware_edge"
         or text.startswith("negative_expectancy_")
+        or text == "same_symbol_reentry_cooldown"
+        or text.startswith("min_notional")
+        or text.startswith("insufficient_cash")
     )
 
 

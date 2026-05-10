@@ -2339,7 +2339,34 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     def truthy(value):
         return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
 
+    HIGH_SCORE_NON_ENTRY_MANAGEMENT_REASONS = {
+        "rank_exit_target_still_positive",
+        "exit_order_selected",
+        "deadband",
+        "active_probe_ignore_zero_target_close",
+        "swing_min_hold_guard",
+        "hold_current_no_valid_replacement",
+    }
+
+    def high_score_reason_text(row):
+        return flatten_value(first_value(row, ("skip_reason", "router_reason", "reason", "blocked_reason"), ""))
+
+    def is_high_score_labelable_reason(reason):
+        text = str(reason or "").strip()
+        if text in HIGH_SCORE_NON_ENTRY_MANAGEMENT_REASONS:
+            return False
+        return (
+            text.startswith("protect_entry_")
+            or text == "cost_aware_edge"
+            or text.startswith("negative_expectancy_")
+            or text == "same_symbol_reentry_cooldown"
+            or text.startswith("min_notional")
+            or text.startswith("insufficient_cash")
+        )
+
     def is_high_score_blocked_outcome_source(row):
+        if not is_high_score_labelable_reason(high_score_reason_text(row)):
+            return False
         if truthy(row.get("high_score_blocked_target")):
             return True
         category = flatten_value(row.get("high_score_block_category"))
@@ -3519,6 +3546,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
     high_score_pending_count = 0
     high_score_matured_unlabeled_count = 0
+    high_score_labelable_rows = [
+        row for row in high_score_blocked_rows
+        if is_high_score_labelable_reason(high_score_reason_text(row))
+    ]
+    high_score_non_entry_management_rows = [
+        row for row in high_score_blocked_rows
+        if not is_high_score_labelable_reason(high_score_reason_text(row))
+    ]
     if audit_high_score_but_not_executed_count and not high_score_blocked_rows:
         add_issue(
             "medium",
@@ -3527,7 +3562,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             {"audit_high_score_but_not_executed_count": audit_high_score_but_not_executed_count},
         )
 
-    for row in high_score_blocked_rows:
+    for row in high_score_labelable_rows:
         key = btc_label_key(
             row.get("run_id"),
             row.get("ts_utc"),
@@ -4929,6 +4964,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "protect_sideways_normal_entry_win_rate": protect_sideways_win_rate if protect_sideways_win_rate is not None else not_obs,
         "protect_sideways_normal_entry_medium_issue": bool(protect_sideways_medium_issue_present),
         "high_score_blocked_target_count": len(high_score_blocked_rows),
+        "high_score_blocked_labelable_target_count": len(high_score_labelable_rows),
+        "high_score_blocked_non_entry_management_count": len(high_score_non_entry_management_rows),
         "high_score_blocked_recent_24h_target_count": len(high_score_recent_24h_rows),
         "high_score_block_category_counts": high_score_block_category_counts,
         "high_score_blocked_outcome_count": len(high_score_blocked_outcome_rows),
@@ -5056,6 +5093,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         protect_sideways_win_rate_text = "not_applicable_no_protect_sideways_normal_entries"
 
     if high_score_recent_24h_rows:
+        high_score_recent_labelable_rows = [
+            row for row in high_score_recent_24h_rows
+            if is_high_score_labelable_reason(high_score_reason_text(row))
+        ]
         high_score_symbols_text = ", ".join(sorted({row.get("symbol") or not_obs for row in high_score_recent_24h_rows}))
         high_score_gate_text = ", ".join(
             f"{category}={count}"
@@ -5064,7 +5105,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         high_score_eth_seen_text = "yes" if any(row.get("symbol") == "ETH/USDT" for row in high_score_recent_24h_rows) else "no"
         high_score_trend_only_text = "yes" if any(row.get("high_score_block_category") == "trend_only" for row in high_score_recent_24h_rows) else "no"
         high_score_alpha6_sell_text = "yes" if any(row.get("high_score_block_category") == "alpha6_sell" or row.get("alpha6_side") == "sell" for row in high_score_recent_24h_rows) else "no"
-        high_score_skipped_label_text = "yes"
+        high_score_skipped_label_text = "yes" if high_score_recent_labelable_rows else "no / non_entry_management_only"
     else:
         high_score_symbols_text = "none"
         high_score_gate_text = "not_applicable_no_recent_24h_high_score_blocked_targets"
@@ -5072,6 +5113,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         high_score_trend_only_text = "not_applicable_no_recent_24h_high_score_blocked_targets"
         high_score_alpha6_sell_text = "not_applicable_no_recent_24h_high_score_blocked_targets"
         high_score_skipped_label_text = "not_applicable_no_recent_24h_high_score_blocked_targets"
+    high_score_non_entry_reason_text = (
+        ", ".join(
+            f"{reason}={count}"
+            for reason, count in Counter(high_score_reason_text(row) or not_obs for row in high_score_non_entry_management_rows).most_common()
+        )
+        if high_score_non_entry_management_rows
+        else "none"
+    )
 
     eth_high_score_outcome_rows = [
         row for row in high_score_blocked_outcome_rows if row.get("symbol") == "ETH/USDT"
@@ -5389,6 +5438,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- action: diagnostic_only_monitor_no_trade_block",
         "",
         "## 高分但未成交目标",
+        f"- high-score blocked targets total: {len(high_score_blocked_rows)}",
+        f"- labelable high-score blocked targets: {len(high_score_labelable_rows)}",
+        f"- non-entry management blocks: {len(high_score_non_entry_management_rows)} ({high_score_non_entry_reason_text})",
         f"- 最近 24h 哪些 symbol 高分但没买: {high_score_symbols_text}",
         f"- ETH 是否出现高分但未成交: {high_score_eth_seen_text}",
         f"- 主要被什么 gate 拦: {high_score_gate_text}",

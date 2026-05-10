@@ -933,6 +933,109 @@ def fixture_high_score_missing_label_root(root):
     return old_run_id
 
 
+def fixture_high_score_non_labelable_management_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    old_window_end = window_end - 30 * 3600
+    current_run_id = now.strftime("%Y%m%d_%H")
+    old_run_id = dt.datetime.fromtimestamp(old_window_end, dt.timezone.utc).strftime("%Y%m%d_%H")
+    old_ts = old_window_end + 15
+
+    write_text(root / "configs/live_prod.yaml", "protect_entry_alpha6_min_score: 0.40\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    current_run = root / "reports/runs/prod" / current_run_id
+    write_json(current_run / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "regime": "Trending",
+        "target_execution_explain": [],
+    })
+    write_text(current_run / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run / "equity.jsonl", "{}\n")
+    write_json(current_run / "summary.json", {"run_id": current_run_id})
+
+    old_run = root / "reports/runs/prod" / old_run_id
+    write_json(old_run / "decision_audit.json", {
+        "now_ts": old_ts,
+        "window_end_ts": old_window_end,
+        "regime": "Trending",
+        "target_execution_explain": [
+            {
+                "symbol": "SOL/USDT",
+                "target_w": 0.15,
+                "final_score": 0.95,
+                "selected_rank": 1,
+                "router_action": "skip",
+                "router_reason": "rank_exit_target_still_positive",
+                "high_score_but_not_executed": True,
+                "high_score_block_category": "other",
+                "current_level": "PROTECT",
+                "regime": "Trending",
+            },
+            {
+                "symbol": "SOL/USDT",
+                "target_w": 0.15,
+                "final_score": 0.91,
+                "selected_rank": 1,
+                "router_action": "skip",
+                "router_reason": "exit_order_selected",
+                "high_score_but_not_executed": True,
+                "high_score_block_category": "other",
+                "current_level": "PROTECT",
+                "regime": "Trending",
+            },
+            {
+                "symbol": "BNB/USDT",
+                "target_w": 0.15,
+                "final_score": 0.90,
+                "selected_rank": 2,
+                "router_action": "skip",
+                "router_reason": "protect_entry_trend_only",
+                "high_score_but_not_executed": True,
+                "high_score_block_category": "trend_only",
+                "current_level": "PROTECT",
+                "regime": "Trending",
+            },
+        ],
+    })
+    write_text(old_run / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(old_run / "equity.jsonl", "{}\n")
+    write_json(old_run / "summary.json", {"run_id": old_run_id})
+    write_text(
+        root / "reports/skipped_candidate_labels.jsonl",
+        json.dumps(
+            {
+                "ts_utc": iso(old_ts),
+                "run_id": old_run_id,
+                "symbol": "BNB/USDT",
+                "intended_side": "buy",
+                "skip_reason": "protect_entry_trend_only",
+                "high_score_blocked_target": True,
+                "high_score_block_category": "trend_only",
+                "final_score": 0.90,
+                "target_w": 0.15,
+                "entry_px": 200.0,
+                "rt_cost_bps": 30.0,
+                "label_24h_net_bps": 70.0,
+                "label_status": "complete",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    return old_run_id
+
+
 def fixture_alt_impulse_shadow_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -2060,6 +2163,41 @@ def main():
             ]
             assert len(high_score_issues) == 1, issues
             assert window["high_score_blocked_matured_unlabeled_count"] == 1, window
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-high-score-non-labelable-management-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_high_score_non_labelable_management_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                targets = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/high_score_blocked_targets.csv")).read().decode().splitlines()))
+                outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/high_score_blocked_outcomes.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert {row["router_reason"] for row in targets} == {
+                "rank_exit_target_still_positive",
+                "exit_order_selected",
+                "protect_entry_trend_only",
+            }, targets
+            assert [(row["symbol"], row["skip_reason"]) for row in outcomes] == [
+                ("BNB/USDT", "protect_entry_trend_only")
+            ], outcomes
+            assert window["high_score_blocked_target_count"] == 3, window
+            assert window["high_score_blocked_labelable_target_count"] == 1, window
+            assert window["high_score_blocked_non_entry_management_count"] == 2, window
+            assert window["high_score_blocked_matured_unlabeled_count"] == 0, window
+            assert not [
+                item for item in issues["issues"]
+                if item.get("code") == "high_score_blocked_matured_without_label"
+            ], issues
+            assert "high-score blocked targets total: 3" in readme, readme
+            assert "labelable high-score blocked targets: 1" in readme, readme
+            assert "non-entry management blocks: 2" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

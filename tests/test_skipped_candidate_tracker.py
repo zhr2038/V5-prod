@@ -1028,6 +1028,77 @@ def test_high_score_blocked_alt_targets_write_labels_and_mature(tmp_path: Path) 
     assert all(float(row["win_rate_4h"]) == 1.0 for row in symbol_rows)
 
 
+def test_high_score_blocked_management_reasons_are_not_labeled(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260509_10"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg = AppConfig(symbols=["SOL/USDT", "BNB/USDT"])
+    cfg.diagnostics.skipped_candidate_horizons_hours = [4]
+
+    entry_ts_ms = int(datetime.fromisoformat("2026-05-09T10:00:00+00:00").timestamp() * 1000)
+    audit = DecisionAudit(run_id="20260509_10")
+    audit.now_ts = entry_ts_ms // 1000
+    audit.regime = "Trending"
+    audit.target_execution_explain = [
+        {
+            "symbol": "SOL/USDT",
+            "target_w": 0.15,
+            "final_score": 0.95,
+            "selected_rank": 1,
+            "router_action": "skip",
+            "router_reason": "rank_exit_target_still_positive",
+            "high_score_but_not_executed": True,
+            "high_score_block_category": "other",
+        },
+        {
+            "symbol": "SOL/USDT",
+            "target_w": 0.15,
+            "final_score": 0.91,
+            "selected_rank": 1,
+            "router_action": "skip",
+            "router_reason": "exit_order_selected",
+            "high_score_but_not_executed": True,
+            "high_score_block_category": "other",
+        },
+        {
+            "symbol": "BNB/USDT",
+            "target_w": 0.15,
+            "final_score": 0.90,
+            "selected_rank": 2,
+            "router_action": "skip",
+            "router_reason": "protect_entry_trend_only",
+            "high_score_but_not_executed": True,
+            "high_score_block_category": "trend_only",
+        },
+    ]
+
+    result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h={
+            "SOL/USDT": _series("SOL/USDT", [entry_ts_ms], [100.0]),
+            "BNB/USDT": _series("BNB/USDT", [entry_ts_ms], [200.0]),
+        },
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "data" / "cache",
+    )
+
+    assert result["new_records"] == 1
+    assert result["high_score_blocked_records"] == 1
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "BNB/USDT"
+    assert rows[0]["skip_reason"] == "protect_entry_trend_only"
+
+    outcomes_path = tmp_path / "reports" / "summaries" / "high_score_blocked_outcomes.csv"
+    with outcomes_path.open("r", encoding="utf-8") as f:
+        outcome_rows = list(csv.DictReader(f))
+    assert [(row["symbol"], row["skip_reason"]) for row in outcome_rows] == [
+        ("BNB/USDT", "protect_entry_trend_only")
+    ]
+
+
 def test_low_score_regular_skip_not_in_high_score_blocked_outcomes(tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260421_15"
     run_dir.mkdir(parents=True, exist_ok=True)
