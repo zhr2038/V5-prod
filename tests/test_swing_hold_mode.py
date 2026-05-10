@@ -340,6 +340,128 @@ def test_same_symbol_reentry_breakout_bypass_audited_for_normal_swing_entry(tmp_
     assert audit.counts["same_symbol_reentry_breakout_bypass_count"] == 1
 
 
+def test_protect_profit_lock_exit_writes_pending_reentry_memory_before_fill(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT"])
+    cfg.execution.protect_entry_confirm_rounds = 1
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+
+    exit_pipe = _build_pipe(cfg, tmp_path)
+    exit_pipe._load_current_auto_risk_level = lambda: "PROTECT"
+    exit_pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"SOL/USDT": 0.50},
+        selected=["SOL/USDT"],
+        entry_candidates=[],
+        volatilities={},
+        notes="",
+    )
+    exit_position = _swing_position("SOL/USDT")
+    exit_position.highest_px = 101.70
+    exit_audit = DecisionAudit(run_id="same-symbol-pending-memory-exit")
+
+    exit_out = exit_pipe.run(
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", 101.10, high=101.70)},
+        positions=[exit_position],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=exit_audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert any((order.meta or {}).get("reason") == "protect_profit_lock_trailing" for order in exit_out.orders)
+    memory_path = derive_runtime_named_json_path(cfg.execution.order_store_path, "same_symbol_reentry_exit_memory")
+    memory = json.loads(memory_path.read_text(encoding="utf-8"))
+    rec = memory["symbols"]["SOL/USDT"]
+    assert rec["exit_reason"] == "protect_profit_lock_trailing"
+    assert rec["memory_status"] == "pending_router_exit"
+    assert rec["source"] == "router_decision"
+    assert rec["exit_px"] == 101.10
+    assert rec["highest_px_before_exit"] == 101.70
+
+    entry_pipe = _build_pipe(cfg, tmp_path, _alpha6_payload("SOL/USDT"))
+    entry_pipe._load_current_auto_risk_level = lambda: "PROTECT"
+    entry_pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"SOL/USDT": 1.0},
+        selected=["SOL/USDT"],
+        entry_candidates=["SOL/USDT"],
+        volatilities={},
+        notes="",
+    )
+    entry_audit = DecisionAudit(run_id="same-symbol-pending-memory-block")
+
+    entry_out = entry_pipe.run(
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", 101.2, high=101.3)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=entry_audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not entry_out.orders
+    decision = next(d for d in entry_audit.router_decisions if d.get("reason") == "same_symbol_reentry_cooldown")
+    assert decision["symbol"] == "SOL/USDT"
+    assert decision["action"] == "skip"
+    assert decision["last_exit_reason"] == "protect_profit_lock_trailing"
+    assert decision["required_cooldown_hours"] == 6.0
+    assert not any(
+        d.get("action") == "create"
+        and d.get("symbol") == "SOL/USDT"
+        and d.get("side") == "buy"
+        for d in entry_audit.router_decisions
+    )
+
+
+def test_same_symbol_filled_memory_overrides_pending_without_duplicate(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT"])
+    memory_path = derive_runtime_named_json_path(cfg.execution.order_store_path, "same_symbol_reentry_exit_memory")
+    ts_ms = int(NOW.timestamp() * 1000)
+
+    record_same_symbol_exit_memory(
+        path=memory_path,
+        symbol="SOL/USDT",
+        exit_ts_ms=ts_ms,
+        exit_px=101.10,
+        exit_reason="protect_profit_lock_trailing",
+        highest_px_before_exit=101.70,
+        net_bps=110.0,
+        memory_status="pending_router_exit",
+        source="router_decision",
+    )
+    record_same_symbol_exit_memory(
+        path=memory_path,
+        symbol="SOL/USDT",
+        exit_ts_ms=ts_ms,
+        exit_px=101.30,
+        exit_reason="protect_profit_lock_trailing",
+        highest_px_before_exit=101.80,
+        net_bps=128.0,
+        memory_status="filled",
+        source="fill_reconciler",
+    )
+    record_same_symbol_exit_memory(
+        path=memory_path,
+        symbol="SOL/USDT",
+        exit_ts_ms=ts_ms,
+        exit_px=101.10,
+        exit_reason="protect_profit_lock_trailing",
+        highest_px_before_exit=101.70,
+        net_bps=110.0,
+        memory_status="pending_router_exit",
+        source="router_decision",
+    )
+
+    state = json.loads(memory_path.read_text(encoding="utf-8"))
+    assert list(state["symbols"].keys()) == ["SOL/USDT"]
+    rec = state["symbols"]["SOL/USDT"]
+    assert rec["memory_status"] == "filled"
+    assert rec["source"] == "fill_reconciler"
+    assert rec["exit_px"] == 101.30
+    assert rec["highest_px_before_exit"] == 101.80
+    assert rec["net_bps"] == 128.0
+
+
 def test_swing_guard_blocks_zero_target_close_before_min_hold(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_level(cfg.execution.order_store_path, "NORMAL")

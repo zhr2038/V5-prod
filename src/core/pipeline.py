@@ -224,7 +224,7 @@ from src.alpha.alpha_engine import AlphaEngine, AlphaSnapshot
 from src.core.models import MarketSeries, Order
 from src.execution.position_store import Position
 from src.execution.probe_metadata import PROBE_POSITION_TYPES, probe_tags_from_order_meta, probe_type_from_meta
-from src.execution.same_symbol_reentry_guard import evaluate_same_symbol_reentry_guard
+from src.execution.same_symbol_reentry_guard import evaluate_same_symbol_reentry_guard, record_same_symbol_exit_memory
 from src.utils.time import utc_now_iso
 from src.execution.fill_store import (
     derive_fill_store_path,
@@ -5288,6 +5288,28 @@ class V5Pipeline:
                         "exit_reason": meta.get("exit_reason", meta.get("reason")),
                     }
                 )
+                if str(meta.get("exit_reason") or meta.get("reason") or "") == "protect_profit_lock_trailing":
+                    try:
+                        record_same_symbol_exit_memory(
+                            path=self.same_symbol_reentry_memory_path,
+                            symbol=order.symbol,
+                            exit_ts_ms=int(now_utc.timestamp() * 1000),
+                            exit_px=px_exit or meta.get("current_px") or getattr(order, "signal_price", None),
+                            exit_reason="protect_profit_lock_trailing",
+                            highest_px_before_exit=meta.get("highest_px_before_exit") or meta.get("current_px") or px_exit,
+                            net_bps=meta.get("net_bps"),
+                            memory_status="pending_router_exit",
+                            source="router_decision",
+                        )
+                        router_payload["same_symbol_exit_memory_status"] = "pending_router_exit"
+                    except Exception as exc:
+                        router_payload["same_symbol_exit_memory_status"] = "record_failed"
+                        router_payload["same_symbol_exit_memory_error"] = str(exc)[:120]
+                        if audit:
+                            audit.add_note(
+                                "same-symbol pending exit memory write failed: "
+                                f"{order.symbol} reason=protect_profit_lock_trailing error={str(exc)[:120]}"
+                            )
             exit_router_decisions.append(router_payload)
         exit_symbols = {o.symbol for o in exit_orders}
         

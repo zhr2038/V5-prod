@@ -57,6 +57,8 @@ def record_same_symbol_exit_memory(
     exit_reason: str = "",
     highest_px_before_exit: Optional[float] = None,
     net_bps: Optional[float] = None,
+    memory_status: str = "filled",
+    source: str = "",
 ) -> None:
     sym = str(symbol or "").strip()
     if not sym:
@@ -70,7 +72,23 @@ def record_same_symbol_exit_memory(
     symbols = state.setdefault("symbols", {})
     prev = symbols.get(sym) if isinstance(symbols.get(sym), dict) else {}
     prev_ts = int((prev or {}).get("exit_ts_ms") or 0)
-    if prev_ts > event_ts_ms:
+
+    def _status_rank(value: Any) -> int:
+        text = str(value or "").strip().lower()
+        if text.startswith("filled"):
+            return 2
+        if text.startswith("pending"):
+            return 1
+        return 0
+
+    status = str(memory_status or "filled").strip() or "filled"
+    new_rank = _status_rank(status)
+    prev_rank = _status_rank((prev or {}).get("memory_status"))
+    if prev_ts > event_ts_ms and not (prev_rank < new_rank and new_rank >= 2):
+        return
+    if prev_ts > event_ts_ms and prev_rank < new_rank:
+        event_ts_ms = prev_ts
+    if prev_ts == event_ts_ms and prev_rank > new_rank:
         return
 
     def _float_or_none(value: Any) -> Optional[float]:
@@ -96,6 +114,8 @@ def record_same_symbol_exit_memory(
         "exit_reason": reason,
         "highest_px_before_exit": high_f,
         "net_bps": _float_or_none(net_bps),
+        "memory_status": status,
+        "source": str(source or "").strip(),
     }
     symbols[sym] = payload
     _save_state(path, state)
