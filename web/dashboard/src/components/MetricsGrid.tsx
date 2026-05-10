@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import { TrendingUp, Wallet, PieChart, Activity, Target } from 'lucide-react';
 import { fmtUsd, fmtPct, fmtUsdt } from '../lib/format';
 import type { AccountData, SystemStatus } from '../types';
@@ -8,19 +7,6 @@ interface MetricsGridProps {
   systemStatus?: SystemStatus | null;
   focusSymbol?: string;
 }
-
-const container = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.06 },
-  },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 12, scale: 0.98 },
-  show: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.4 } },
-};
 
 export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridProps) {
   const cards = [
@@ -70,16 +56,10 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
 
   return (
     <div className="relative z-10 px-6 pb-6">
-      <motion.div
-        variants={container}
-        initial="hidden"
-        animate="show"
-        className="max-w-[1780px] mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 lg:gap-4"
-      >
+      <div className="max-w-[1780px] mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 lg:gap-4">
         {cards.map((card, index) => (
-          <motion.div
+          <div
             key={card.label}
-            variants={item}
             className={`${card.surface} ${index === cards.length - 1 ? 'col-span-2 md:col-span-1' : ''} p-4 sm:p-5 flex min-w-0 flex-col gap-2`}
           >
             <div className="flex min-w-0 items-center gap-2 text-[var(--text-dim)] text-sm">
@@ -88,9 +68,9 @@ export function MetricsGrid({ account, systemStatus, focusSymbol }: MetricsGridP
             </div>
             <div className="text-xl sm:text-2xl font-semibold tracking-tight">{card.value}</div>
             <div className={`text-xs sm:text-sm font-medium ${card.tone}`}>{card.sub}</div>
-          </motion.div>
+          </div>
         ))}
-      </motion.div>
+      </div>
     </div>
   );
 }

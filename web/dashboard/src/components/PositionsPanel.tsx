@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type PointerEvent } from 'react';
-// import { motion } from 'framer-motion';
 import { CandlestickChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, sideLabels } from '../lib/format';
 import { api } from '../api';

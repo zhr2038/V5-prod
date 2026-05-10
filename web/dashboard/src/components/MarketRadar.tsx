@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import { Radar } from 'lucide-react';
 import { stateLabels } from '../lib/format';
 import type { MarketStateData } from '../types';
@@ -120,11 +119,8 @@ export function MarketRadar({ marketState }: MarketRadarProps) {
                 ? 'bg-rose-400'
                 : 'bg-amber-400';
             return (
-              <motion.div
+              <div
                 key={i}
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: i * 0.01 }}
                 title={`${h.label}: ${stateLabels[s] || s}`}
                 className={`w-3 h-6 rounded-sm ${color}`}
                 style={{ opacity: 0.3 + confidence * 0.7 }}

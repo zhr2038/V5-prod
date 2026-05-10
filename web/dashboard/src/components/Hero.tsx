@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import { stateLabels, riskLabels, modeLabels, fmtNum, fmtPct } from '../lib/format';
 import type { MarketStateData, RiskGuardData, SystemStatus } from '../types';
 
@@ -30,12 +29,7 @@ export function Hero({ marketState, riskGuard, systemStatus, updateTime }: HeroP
   const dd = riskGuard?.metrics?.dd_pct ?? riskGuard?.metrics?.last_dd_pct ?? null;
 
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="relative z-10 px-6 pb-4"
-    >
+    <section className="relative z-10 px-6 pb-4">
       <div className="max-w-[1780px] mx-auto grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div className="hero-safe-copy min-w-0">
           <div className="flex items-center gap-3 mb-2">
@@ -64,6 +58,6 @@ export function Hero({ marketState, riskGuard, systemStatus, updateTime }: HeroP
           </div>
         </div>
       </div>
-    </motion.section>
+    </section>
   );
 }

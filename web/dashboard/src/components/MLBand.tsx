@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import { Brain } from 'lucide-react';
 import type { MLTrainingData } from '../types';
 
@@ -51,12 +50,7 @@ export function MLBand({ mlTraining }: MLBandProps) {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.15 }}
-      className="relative z-10 px-6 pb-6"
-    >
+    <div className="relative z-10 px-6 pb-6">
       <div className="max-w-[1780px] mx-auto material-surface material-regular tone-neutral p-4 sm:p-5">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)] mb-4">
           <Brain className="w-4 h-4" />
@@ -65,14 +59,11 @@ export function MLBand({ mlTraining }: MLBandProps) {
         </div>
 
         <div className="ml-progress-track relative mb-5">
-          <motion.div
+          <div
             className="ml-progress-fill absolute inset-y-0 left-0"
             style={{
               width: `${progress}%`,
             }}
-            initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
-            transition={{ duration: 0.8 }}
           />
         </div>
 
@@ -103,6 +94,6 @@ export function MLBand({ mlTraining }: MLBandProps) {
           })}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

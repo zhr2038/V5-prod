@@ -1,5 +1,4 @@
 import { Suspense, lazy, startTransition, useEffect, useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { LiquidBg } from './components/LiquidBg';
 import { Hero } from './components/Hero';
 import { MetricsGrid } from './components/MetricsGrid';
@@ -37,6 +36,13 @@ type IdleWindow = Window & {
   requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
   cancelIdleCallback?: (handle: number) => void;
 };
+
+function isTouchWebKit() {
+  return Boolean(
+    window.matchMedia('(hover: none) and (pointer: coarse)').matches &&
+      globalThis.CSS?.supports?.('-webkit-touch-callout', 'none')
+  );
+}
 
 function deferredPayloadLooksSparse(payload?: Partial<DashboardData> | null) {
   if (!payload) return true;
@@ -152,10 +158,13 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void loadPrimary();
     let timeoutId: number | null = null;
+    const primaryTimeoutId = globalThis.setTimeout(() => {
+      void loadPrimary();
+    }, 0);
     let idleId: number | null = null;
     const idleWindow = window as IdleWindow;
+    const deferSlowPath = isTouchWebKit();
 
     const runDeferred = () => {
       void loadSecondary();
@@ -165,12 +174,13 @@ function App() {
     };
 
     if (idleWindow.requestIdleCallback) {
-      idleId = idleWindow.requestIdleCallback(() => runDeferred(), { timeout: 1200 });
+      idleId = idleWindow.requestIdleCallback(() => runDeferred(), { timeout: deferSlowPath ? 2600 : 1200 });
     } else {
-      timeoutId = globalThis.setTimeout(runDeferred, 400);
+      timeoutId = globalThis.setTimeout(runDeferred, deferSlowPath ? 1800 : 400);
     }
 
     return () => {
+      globalThis.clearTimeout(primaryTimeoutId);
       if (idleId !== null && idleWindow.cancelIdleCallback) {
         idleWindow.cancelIdleCallback(idleId);
       }
@@ -182,7 +192,12 @@ function App() {
 
   useEffect(() => {
     if (!showDeferredPanels) return;
-    void loadDeferred();
+    const timeoutId = globalThis.setTimeout(() => {
+      void loadDeferred();
+    }, isTouchWebKit() ? 1800 : 0);
+    return () => {
+      globalThis.clearTimeout(timeoutId);
+    };
   }, [showDeferredPanels, loadDeferred]);
 
   useInterval(() => {
@@ -265,14 +280,10 @@ function App() {
         </div>
 
         {loading && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="fixed bottom-4 right-5 z-50 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-dim)]"
-          >
+          <div className="fixed bottom-4 right-5 z-50 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-dim)]">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]/80" />
             <span>刷新中</span>
-          </motion.div>
+          </div>
         )}
       </div>
     </div>
