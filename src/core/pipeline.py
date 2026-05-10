@@ -2065,6 +2065,60 @@ class V5Pipeline:
             decision["source"] = str(source)
         return decision
 
+    def _swing_hold_runtime_context(
+        self,
+        *,
+        position: Position,
+        probe_state: Optional[Mapping[str, Any]],
+        now_utc: datetime,
+        current_px: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not bool(getattr(self.cfg.execution, "swing_hold_enabled", True)):
+            return None
+        meta = self._swing_position_meta(position, probe_state=probe_state)
+        if meta is None:
+            return None
+
+        required_hold_hours = float(
+            _coalesce(meta.get("swing_min_hold_hours"), getattr(self.cfg.execution, "swing_min_hold_hours", 24))
+        )
+        entry_ts = str(meta.get("swing_entry_ts") or getattr(position, "entry_ts", "") or "").strip()
+        entry_dt = _parse_iso_utc(entry_ts)
+        if entry_dt is None:
+            return None
+        hold_hours = max(0.0, (now_utc - entry_dt).total_seconds() / 3600.0)
+
+        entry_px = _float_or_none(meta.get("entry_px"))
+        if entry_px is None:
+            entry_px = _float_or_none(getattr(position, "avg_px", None))
+        px = _float_or_none(current_px)
+        net_bps = self._probe_net_bps(entry_px=float(entry_px), current_px=float(px)) if entry_px and px else None
+
+        return {
+            "swing_hold_position": True,
+            "swing_entry_ts": entry_ts,
+            "required_hold_hours": float(required_hold_hours),
+            "hold_hours": float(hold_hours),
+            "post_min_hold": bool(hold_hours >= required_hold_hours),
+            "entry_px": float(entry_px) if entry_px is not None else None,
+            "current_px": float(px) if px is not None else None,
+            "net_bps": float(net_bps) if net_bps is not None else None,
+            "alpha6_score": meta.get("alpha6_score"),
+            "f4_volume_expansion": meta.get("f4_volume_expansion"),
+            "f5_rsi_trend_confirm": meta.get("f5_rsi_trend_confirm"),
+            "current_level": meta.get("current_level"),
+        }
+
+    @staticmethod
+    def _swing_replacement_block_reason_allows_hold(reason: str) -> bool:
+        return str(reason or "").strip() in {
+            "protect_entry_no_alpha6_confirmation",
+            "protect_entry_trend_only",
+            "protect_entry_rsi_confirm_too_weak",
+            "protect_entry_alpha6_score_too_low",
+            "cost_aware_edge",
+        }
+
     def _clear_active_position_state_for_symbol(self, symbol: str) -> List[str]:
         sym = str(symbol)
         cleared: List[str] = []
@@ -5833,6 +5887,12 @@ class V5Pipeline:
                     held_score = float((alpha.scores or {}).get(sym))
                 except Exception:
                     held_score = None
+                swing_hold_context = self._swing_hold_runtime_context(
+                    position=active_held,
+                    probe_state=probe_state,
+                    now_utc=now_utc,
+                    current_px=px,
+                )
                 pending_zero_target_close_candidates.append(
                     {
                         "symbol": sym,
@@ -5845,6 +5905,7 @@ class V5Pipeline:
                             meta={},
                         ),
                         "held_score": held_score,
+                        "swing_hold_context": swing_hold_context,
                     }
                 )
                 continue
@@ -6863,6 +6924,38 @@ class V5Pipeline:
                 sym = str(pending.get("symbol") or "")
                 order = pending.get("order")
                 held_score = pending.get("held_score")
+                swing_hold_context = pending.get("swing_hold_context") if isinstance(pending, dict) else None
+                if not isinstance(swing_hold_context, dict):
+                    swing_hold_context = None
+                replacement_symbol = None
+                replacement_block_reason = None
+                for candidate in sorted(blocked_candidate_symbols):
+                    reason = blocked_replacement_reasons.get(candidate)
+                    if self._swing_replacement_block_reason_allows_hold(str(reason or "")):
+                        replacement_symbol = candidate
+                        replacement_block_reason = reason
+                        break
+
+                swing_post_min_hold_current = False
+                if (
+                    bool(getattr(self.cfg.execution, "swing_hold_current_when_replacement_blocked", True))
+                    and all_replacements_blocked
+                    and swing_hold_context is not None
+                    and bool(swing_hold_context.get("post_min_hold", False))
+                    and replacement_symbol is not None
+                    and replacement_block_reason is not None
+                    and not self._held_symbol_has_negative_expectancy_hard_block(sym)
+                ):
+                    min_net_after_hold = float(
+                        _coalesce(getattr(self.cfg.execution, "swing_hold_min_net_bps_after_min_hold", None), 0.0)
+                    )
+                    min_score_after_hold = float(
+                        _coalesce(getattr(self.cfg.execution, "swing_hold_min_score_after_min_hold", None), 0.10)
+                    )
+                    net_bps = swing_hold_context.get("net_bps")
+                    net_ok = net_bps is not None and float(net_bps) >= float(min_net_after_hold)
+                    score_ok = held_score is not None and float(held_score) >= float(min_score_after_hold)
+                    swing_post_min_hold_current = bool(net_ok or score_ok)
 
                 safe_to_hold = (
                     all_replacements_blocked
@@ -6870,6 +6963,51 @@ class V5Pipeline:
                     and float(held_score) >= float(protect_replacement_hold_min_score)
                     and not self._held_symbol_has_negative_expectancy_hard_block(sym)
                 )
+
+                if swing_post_min_hold_current:
+                    if audit:
+                        hold_hours = float(swing_hold_context.get("hold_hours") or 0.0)
+                        net_bps = swing_hold_context.get("net_bps")
+                        audit.record_count("swing_hold_current_replacement_blocked_count", symbol=sym)
+                        audit.add_note(
+                            "Swing hold kept after min-hold because replacement was blocked: "
+                            f"{sym} replacement={replacement_symbol} reason={replacement_block_reason} "
+                            f"hold_hours={hold_hours:.2f} net_bps={net_bps}"
+                        )
+                        router_decisions.append(
+                            {
+                                "symbol": sym,
+                                "action": "skip",
+                                "reason": "swing_hold_current_replacement_blocked",
+                                "hold_hours": hold_hours,
+                                "net_bps": float(net_bps) if net_bps is not None else None,
+                                "held_score": float(held_score) if held_score is not None else None,
+                                "replacement_symbol": replacement_symbol,
+                                "replacement_block_reason": replacement_block_reason,
+                                "required_hold_hours": float(swing_hold_context.get("required_hold_hours") or 0.0),
+                                "swing_hold_min_net_bps_after_min_hold": float(
+                                    _coalesce(
+                                        getattr(
+                                            self.cfg.execution,
+                                            "swing_hold_min_net_bps_after_min_hold",
+                                            None,
+                                        ),
+                                        0.0,
+                                    )
+                                ),
+                                "swing_hold_min_score_after_min_hold": float(
+                                    _coalesce(
+                                        getattr(
+                                            self.cfg.execution,
+                                            "swing_hold_min_score_after_min_hold",
+                                            None,
+                                        ),
+                                        0.10,
+                                    )
+                                ),
+                            }
+                        )
+                    continue
 
                 if safe_to_hold:
                     if audit:

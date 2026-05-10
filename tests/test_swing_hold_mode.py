@@ -90,6 +90,35 @@ def _alpha6_payload(symbol: str = "BTC/USDT", *, score: float = 0.60, f4: float 
     }
 
 
+def _strategy_payload(*, trend_signal: dict | None = None, alpha6_signal: dict | None = None) -> dict:
+    strategies = []
+    if trend_signal is not None:
+        strategies.append(
+            {
+                "strategy": "TrendFollowing",
+                "type": "trend",
+                "allocation": 0.5,
+                "total_signals": 1,
+                "buy_signals": 1 if str(trend_signal.get("side", "")).lower() == "buy" else 0,
+                "sell_signals": 1 if str(trend_signal.get("side", "")).lower() == "sell" else 0,
+                "signals": [trend_signal],
+            }
+        )
+    if alpha6_signal is not None:
+        strategies.append(
+            {
+                "strategy": "Alpha6Factor",
+                "type": "alpha_6factor",
+                "allocation": 0.5,
+                "total_signals": 1,
+                "buy_signals": 1 if str(alpha6_signal.get("side", "")).lower() == "buy" else 0,
+                "sell_signals": 1 if str(alpha6_signal.get("side", "")).lower() == "sell" else 0,
+                "signals": [alpha6_signal],
+            }
+        )
+    return {"strategies": strategies}
+
+
 def _base_cfg(tmp_path: Path, symbols: list[str] | None = None) -> AppConfig:
     cfg = AppConfig(symbols=symbols or ["BTC/USDT"])
     cfg.execution.order_store_path = str((tmp_path / "reports" / "orders.sqlite").resolve())
@@ -493,6 +522,176 @@ def test_swing_guard_blocks_zero_target_close_before_min_hold(tmp_path: Path) ->
     assert audit.counts["swing_min_hold_guard_count"] == 1
 
 
+def test_swing_post_min_hold_keeps_current_when_replacement_is_blocked(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT", "BTC/USDT"])
+    cfg.execution.protect_entry_confirm_rounds = 1
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(
+        cfg,
+        tmp_path,
+        _strategy_payload(
+            trend_signal={
+                "symbol": "BTC/USDT",
+                "side": "buy",
+                "score": 0.95,
+                "metadata": {"adx": 35.0},
+            },
+            alpha6_signal={
+                "symbol": "BTC/USDT",
+                "side": "sell",
+                "score": 0.90,
+                "metadata": {
+                    "raw_factors": {
+                        "f4_volume_expansion": -1.0,
+                        "f5_rsi_trend_confirm": 0.10,
+                    }
+                },
+            },
+        ),
+    )
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="swing-post-min-replacement-blocked")
+
+    out = pipe.run(
+        market_data_1h={
+            "SOL/USDT": _series("SOL/USDT", 101.0),
+            "BTC/USDT": _series("BTC/USDT", 50000.0),
+        },
+        positions=[_swing_position("SOL/USDT", entry_ts="2026-05-07T07:00:00Z")],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 0.20, "BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not any(order.symbol == "SOL/USDT" and order.side == "sell" for order in out.orders)
+    assert not any(order.symbol == "BTC/USDT" and order.side == "buy" for order in out.orders)
+    decision = next(
+        d for d in audit.router_decisions if d.get("reason") == "swing_hold_current_replacement_blocked"
+    )
+    assert decision["symbol"] == "SOL/USDT"
+    assert decision["action"] == "skip"
+    assert decision["replacement_symbol"] == "BTC/USDT"
+    assert decision["replacement_block_reason"] == "protect_entry_no_alpha6_confirmation"
+    assert decision["hold_hours"] == 25.0
+    assert decision["net_bps"] > 0.0
+    assert audit.counts["swing_hold_current_replacement_blocked_count"] == 1
+
+
+def test_swing_post_min_hold_allows_close_when_replacement_passes(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT", "BTC/USDT"])
+    cfg.execution.protect_entry_confirm_rounds = 1
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(
+        cfg,
+        tmp_path,
+        _strategy_payload(
+            trend_signal={
+                "symbol": "BTC/USDT",
+                "side": "buy",
+                "score": 0.95,
+                "metadata": {"adx": 35.0},
+            },
+            alpha6_signal={
+                "symbol": "BTC/USDT",
+                "side": "buy",
+                "score": 0.60,
+                "metadata": {
+                    "raw_factors": {
+                        "f4_volume_expansion": 0.50,
+                        "f5_rsi_trend_confirm": 0.35,
+                    }
+                },
+            },
+        ),
+    )
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="swing-post-min-replacement-passes")
+
+    out = pipe.run(
+        market_data_1h={
+            "SOL/USDT": _series("SOL/USDT", 101.0),
+            "BTC/USDT": _series("BTC/USDT", 50000.0),
+        },
+        positions=[_swing_position("SOL/USDT", entry_ts="2026-05-07T07:00:00Z")],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 0.20, "BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert any(order.symbol == "SOL/USDT" and order.side == "sell" for order in out.orders)
+    assert any(order.symbol == "BTC/USDT" and order.side == "buy" for order in out.orders)
+    assert not any(d.get("reason") == "swing_hold_current_replacement_blocked" for d in audit.router_decisions)
+
+
+def test_swing_post_min_hold_allows_close_when_current_is_weak_and_losing(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT", "BTC/USDT"])
+    cfg.execution.protect_entry_confirm_rounds = 1
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(
+        cfg,
+        tmp_path,
+        _strategy_payload(
+            trend_signal={
+                "symbol": "BTC/USDT",
+                "side": "buy",
+                "score": 0.95,
+                "metadata": {"adx": 35.0},
+            },
+            alpha6_signal={
+                "symbol": "BTC/USDT",
+                "side": "sell",
+                "score": 0.90,
+                "metadata": {
+                    "raw_factors": {
+                        "f4_volume_expansion": -1.0,
+                        "f5_rsi_trend_confirm": 0.10,
+                    }
+                },
+            },
+        ),
+    )
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="swing-post-min-current-weak")
+
+    out = pipe.run(
+        market_data_1h={
+            "SOL/USDT": _series("SOL/USDT", 99.0),
+            "BTC/USDT": _series("BTC/USDT", 50000.0),
+        },
+        positions=[_swing_position("SOL/USDT", entry_ts="2026-05-07T07:00:00Z")],
+        cash_usdt=100.0,
+        equity_peak_usdt=200.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 0.05, "BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert any(order.symbol == "SOL/USDT" and order.side == "sell" for order in out.orders)
+    assert not any(d.get("reason") == "swing_hold_current_replacement_blocked" for d in audit.router_decisions)
+
+
 def test_swing_guard_blocks_rank_exit_before_min_hold(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path, ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
     cfg.execution.rank_exit_max_rank = 3
@@ -564,6 +763,7 @@ def test_stop_loss_and_profit_lock_exits_are_not_blocked_by_swing_guard(tmp_path
     )
     assert any("stop_loss" in str((order.meta or {}).get("reason", "")) for order in stop_out.orders)
     assert stop_audit.counts["swing_min_hold_guard_count"] == 0
+    assert not any(d.get("reason") == "swing_hold_current_replacement_blocked" for d in stop_audit.router_decisions)
 
     lock_pipe = _build_pipe(cfg, tmp_path)
     lock_pipe._load_current_auto_risk_level = lambda: "PROTECT"
@@ -582,6 +782,7 @@ def test_stop_loss_and_profit_lock_exits_are_not_blocked_by_swing_guard(tmp_path
     )
     assert any((order.meta or {}).get("reason") == "protect_profit_lock_trailing" for order in lock_out.orders)
     assert lock_audit.counts["swing_min_hold_guard_count"] == 0
+    assert not any(d.get("reason") == "swing_hold_current_replacement_blocked" for d in lock_audit.router_decisions)
 
 
 def test_probe_position_is_not_blocked_by_swing_guard(tmp_path: Path) -> None:

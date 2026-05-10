@@ -800,6 +800,9 @@ SWING_HOLD_CONFIG_KEYS = (
     "swing_allow_exit_on_risk_off",
     "swing_allow_exit_on_stop_loss",
     "swing_allow_exit_on_profit_lock",
+    "swing_hold_current_when_replacement_blocked",
+    "swing_hold_min_net_bps_after_min_hold",
+    "swing_hold_min_score_after_min_hold",
 )
 
 
