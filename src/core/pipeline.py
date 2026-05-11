@@ -1854,6 +1854,44 @@ class V5Pipeline:
             "net_bps": guard.get("net_bps"),
         }
 
+    def _record_same_symbol_pending_exit_memory(
+        self,
+        *,
+        symbol: str,
+        exit_px: Optional[float],
+        exit_reason: str,
+        highest_px_before_exit: Optional[float],
+        net_bps: Optional[float],
+        now_utc: datetime,
+        source: str,
+        audit: Optional[DecisionAudit] = None,
+    ) -> Dict[str, Any]:
+        payload = {
+            "same_symbol_exit_memory_status": "pending_router_exit",
+            "same_symbol_exit_memory_source": str(source or "router"),
+        }
+        try:
+            record_same_symbol_exit_memory(
+                path=self.same_symbol_reentry_memory_path,
+                symbol=symbol,
+                exit_ts_ms=int(now_utc.timestamp() * 1000),
+                exit_px=exit_px,
+                exit_reason=exit_reason,
+                highest_px_before_exit=highest_px_before_exit,
+                net_bps=net_bps,
+                memory_status="pending_router_exit",
+                source=str(source or "router"),
+            )
+        except Exception as exc:
+            payload["same_symbol_exit_memory_status"] = "record_failed"
+            payload["same_symbol_exit_memory_error"] = str(exc)[:120]
+            if audit:
+                audit.add_note(
+                    "same-symbol pending exit memory write failed: "
+                    f"{symbol} reason={exit_reason} source={source} error={str(exc)[:120]}"
+                )
+        return payload
+
     def _active_probe_zero_target_close_skip_decision(
         self,
         *,
@@ -4925,6 +4963,20 @@ class V5Pipeline:
                     "trailing_gap_bps": float(trailing_gap) if trailing_gap is not None else None,
                 }
 
+                if exit_reason == "protect_profit_lock_trailing":
+                    payload.update(
+                        self._record_same_symbol_pending_exit_memory(
+                            symbol=p.symbol,
+                            exit_px=float(current_price),
+                            exit_reason=exit_reason,
+                            highest_px_before_exit=float(observed_high_price),
+                            net_bps=float(net_bps),
+                            now_utc=now_utc,
+                            source="protect_profit_lock_order_generated",
+                            audit=audit,
+                        )
+                    )
+
                 if audit:
                     audit.record_count("protect_profit_lock_active_count", symbol=p.symbol)
                     if stop_raised:
@@ -5420,27 +5472,18 @@ class V5Pipeline:
                     }
                 )
                 if str(meta.get("exit_reason") or meta.get("reason") or "") == "protect_profit_lock_trailing":
-                    try:
-                        record_same_symbol_exit_memory(
-                            path=self.same_symbol_reentry_memory_path,
+                    router_payload.update(
+                        self._record_same_symbol_pending_exit_memory(
                             symbol=order.symbol,
-                            exit_ts_ms=int(now_utc.timestamp() * 1000),
                             exit_px=px_exit or meta.get("current_px") or getattr(order, "signal_price", None),
                             exit_reason="protect_profit_lock_trailing",
                             highest_px_before_exit=meta.get("highest_px_before_exit") or meta.get("current_px") or px_exit,
                             net_bps=meta.get("net_bps"),
-                            memory_status="pending_router_exit",
+                            now_utc=now_utc,
                             source="router_decision",
+                            audit=audit,
                         )
-                        router_payload["same_symbol_exit_memory_status"] = "pending_router_exit"
-                    except Exception as exc:
-                        router_payload["same_symbol_exit_memory_status"] = "record_failed"
-                        router_payload["same_symbol_exit_memory_error"] = str(exc)[:120]
-                        if audit:
-                            audit.add_note(
-                                "same-symbol pending exit memory write failed: "
-                                f"{order.symbol} reason=protect_profit_lock_trailing error={str(exc)[:120]}"
-                            )
+                    )
             exit_router_decisions.append(router_payload)
         exit_symbols = {o.symbol for o in exit_orders}
         
@@ -6629,7 +6672,55 @@ class V5Pipeline:
                     )
                 continue
             
-            # 如果通过所有检查，生成订单
+            # Final same-symbol reentry failsafe before any OPEN_LONG order is created.
+            if side == "buy" and intent == "OPEN_LONG":
+                entry_kind = "btc_leadership_probe" if btc_probe_meta is not None else "normal_entry"
+                final_reentry_guard = evaluate_same_symbol_reentry_guard(
+                    path=self.same_symbol_reentry_memory_path,
+                    symbol=sym,
+                    latest_px=float(px or 0.0),
+                    config=self.cfg,
+                    entry_kind=entry_kind,
+                    now_ms=int(now_utc.timestamp() * 1000),
+                )
+                if bool(final_reentry_guard.get("blocked", False)):
+                    self._record_replacement_block(
+                        audit=audit,
+                        blocked_replacement_reasons=blocked_replacement_reasons,
+                        symbol=sym,
+                        reason="same_symbol_reentry_cooldown",
+                    )
+                    if audit:
+                        audit.record_count("same_symbol_reentry_cooldown_count", symbol=sym)
+                        if btc_probe_meta is not None:
+                            audit.record_count(
+                                "btc_leadership_probe_blocked_count",
+                                symbol=f"{sym}:same_symbol_reentry_cooldown",
+                            )
+                        decision = self._same_symbol_reentry_block_decision(sym, final_reentry_guard)
+                        decision["guard_stage"] = "final_before_order_create"
+                        if btc_probe_meta is not None:
+                            decision.update(btc_probe_meta)
+                            decision["btc_leadership_probe"] = True
+                            decision["blocked_reason"] = "same_symbol_reentry_cooldown"
+                        router_decisions.append(decision)
+                    continue
+                if bool(final_reentry_guard.get("breakout_exception_met", False)) and audit:
+                    already_audited = any(
+                        str(item.get("symbol") or "") == sym
+                        and str(item.get("reason") or "") == "same_symbol_reentry_breakout_bypass"
+                        for item in router_decisions
+                    )
+                    if not already_audited:
+                        audit.record_count("same_symbol_reentry_breakout_bypass_count", symbol=sym)
+                        decision = self._same_symbol_reentry_breakout_bypass_decision(sym, final_reentry_guard)
+                        decision["guard_stage"] = "final_before_order_create"
+                        if btc_probe_meta is not None:
+                            decision.update(btc_probe_meta)
+                            decision["btc_leadership_probe"] = True
+                        router_decisions.append(decision)
+
+            # Build order metadata after all entry guards pass.
             swing_meta: Dict[str, Any] = {}
             if side == "buy" and intent == "OPEN_LONG" and btc_probe_meta is None:
                 if protect_recovery_meta is not None:

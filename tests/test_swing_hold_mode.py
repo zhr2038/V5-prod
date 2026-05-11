@@ -291,6 +291,56 @@ def test_same_symbol_reentry_blocks_normal_swing_entry_after_profit_lock(tmp_pat
     assert not any(d.get("action") == "create" and d.get("symbol") == "SOL/USDT" for d in audit.router_decisions)
 
 
+def test_final_same_symbol_reentry_guard_blocks_late_memory_before_order_create(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path, ["SOL/USDT"])
+    cfg.execution.same_symbol_reentry_apply_to_normal_entry = True
+    cfg.execution.protect_entry_confirm_rounds = 1
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _alpha6_payload("SOL/USDT"))
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"SOL/USDT": 1.0},
+        selected=["SOL/USDT"],
+        entry_candidates=["SOL/USDT"],
+        volatilities={},
+        notes="",
+    )
+
+    def delayed_memory_guard(**kwargs):
+        record_same_symbol_exit_memory(
+            path=derive_runtime_named_json_path(cfg.execution.order_store_path, "same_symbol_reentry_exit_memory"),
+            symbol="SOL/USDT",
+            exit_ts_ms=int(NOW.timestamp() * 1000) - 3600 * 1000,
+            exit_px=102.0,
+            exit_reason="protect_profit_lock_trailing",
+            highest_px_before_exit=103.0,
+            net_bps=128.0,
+            memory_status="pending_router_exit",
+            source="test_late_memory",
+        )
+        return {"active": False, "blocked": False, "breakout_exception_met": False}
+
+    pipe._evaluate_same_symbol_reentry_guard = delayed_memory_guard
+    audit = DecisionAudit(run_id="same-symbol-final-guard-block")
+
+    out = pipe.run(
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", 102.1, high=102.2)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"SOL/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "same_symbol_reentry_cooldown")
+    assert decision["symbol"] == "SOL/USDT"
+    assert decision["action"] == "skip"
+    assert decision["guard_stage"] == "final_before_order_create"
+    assert decision["last_exit_reason"] == "protect_profit_lock_trailing"
+    assert not any(d.get("action") == "create" and d.get("symbol") == "SOL/USDT" for d in audit.router_decisions)
+
+
 def test_same_symbol_reentry_allows_normal_swing_entry_after_cooldown(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path, ["SOL/USDT"])
     cfg.execution.protect_entry_confirm_rounds = 1
