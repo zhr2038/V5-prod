@@ -340,6 +340,10 @@ def copy_recent_runs():
 def copy_current_reports():
     for src_rel, dest_rel, required in CURRENT_REPORT_FILES:
         copy_sanitized(src_rel, dest_rel, required=required)
+    for dest_rel in ("raw/reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_requests.jsonl"):
+        dest = OUT / dest_rel
+        if not dest.is_file():
+            write_text(dest_rel, "")
 
     matched = False
     for base in (ROOT / "reports", ROOT / "reports" / "summaries"):
@@ -6260,6 +6264,8 @@ sanity = {
     "raw/recent_runs has recent24h decision_audit.json": bool(recent_24_decisions),
     "contains raw/state": any((OUT / "raw/state").glob("*.json")),
     "contains raw/recent_runs": any((OUT / "raw/recent_runs").glob("*/decision_audit.json")),
+    "contains raw/reports/quant_lab_usage.jsonl": (OUT / "raw/reports/quant_lab_usage.jsonl").is_file(),
+    "contains raw/reports/quant_lab_requests.jsonl": (OUT / "raw/reports/quant_lab_requests.jsonl").is_file(),
     "contains summaries/probe_lifecycle_audit.csv": (OUT / "summaries/probe_lifecycle_audit.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
     "contains summaries/quant_lab_cost_usage.csv": (OUT / "summaries/quant_lab_cost_usage.csv").is_file(),
@@ -6285,6 +6291,8 @@ failure_check_names = [
     "raw/recent_runs has recent24h decision_audit.json",
     "contains raw/state",
     "contains raw/recent_runs",
+    "contains raw/reports/quant_lab_usage.jsonl",
+    "contains raw/reports/quant_lab_requests.jsonl",
     "contains summaries/probe_lifecycle_audit.csv",
     "contains summaries/quant_lab_compliance.csv",
     "contains summaries/quant_lab_cost_usage.csv",
