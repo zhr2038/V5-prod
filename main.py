@@ -711,6 +711,135 @@ def _resolve_runtime_run_paths(cfg: AppConfig, run_id: str) -> dict[str, Path]:
     }
 
 
+def _resolve_quant_lab_artifact_path(cfg: AppConfig, attr_name: str, base_name: str) -> Path:
+    execution = getattr(cfg, "execution", None)
+    raw_path = str(getattr(execution, attr_name, "") or "").strip()
+    order_store_path = str(getattr(execution, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite")
+    default_rel = f"reports/{base_name}.jsonl"
+    if not raw_path or raw_path == default_rel:
+        return derive_runtime_named_artifact_path(order_store_path, base_name, ".jsonl")
+    return Path(raw_path)
+
+
+def _quant_lab_enabled(cfg: AppConfig) -> bool:
+    execution = getattr(cfg, "execution", None)
+    mode = str(getattr(execution, "mode", "dry_run") or "dry_run").lower()
+    return mode == "live" and bool(getattr(execution, "quant_lab_enabled", False))
+
+
+def _build_quant_lab_guard(cfg: AppConfig, *, run_id: str):
+    from src.execution.quant_lab_client import QuantLabClient
+    from src.execution.quant_lab_guard import QuantLabGuard
+
+    execution = cfg.execution
+    request_path = _resolve_quant_lab_artifact_path(cfg, "quant_lab_requests_path", "quant_lab_requests")
+    usage_path = _resolve_quant_lab_artifact_path(cfg, "quant_lab_usage_path", "quant_lab_usage")
+    client = QuantLabClient(
+        base_url=str(getattr(execution, "quant_lab_base_url", "") or ""),
+        timeout_sec=float(getattr(execution, "quant_lab_timeout_sec", 2.0) or 2.0),
+        token_env=str(getattr(execution, "quant_lab_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"),
+        request_log_path=request_path,
+        run_id=run_id,
+        phase="live_preflight",
+    )
+    return QuantLabGuard(
+        client=client,
+        fail_policy=str(getattr(execution, "quant_lab_fail_policy", "sell_only") or "sell_only"),
+        usage_log_path=usage_path,
+        run_id=run_id,
+        default_alpha_id=str(getattr(execution, "quant_lab_default_alpha_id", "v5") or "v5"),
+        strategy=str(getattr(execution, "quant_lab_strategy", "v5") or "v5"),
+        strategy_version=str(getattr(execution, "quant_lab_strategy_version", "v1") or "v1"),
+        cost_regime=str(getattr(execution, "quant_lab_cost_regime_default", "UNKNOWN") or "UNKNOWN"),
+        cost_quantile=str(getattr(execution, "quant_lab_cost_quantile", "p75") or "p75"),
+        gate_check_enabled=bool(getattr(execution, "quant_lab_gate_check_enabled", False)),
+        phase="live_preflight",
+    )
+
+
+def _refresh_quant_lab_permission_or_raise(
+    cfg: AppConfig,
+    *,
+    run_id: str,
+    audit,
+    runtime_run_dir: Path,
+    log_obj=None,
+):
+    if not _quant_lab_enabled(cfg):
+        return None
+
+    try:
+        guard = _build_quant_lab_guard(cfg, run_id=run_id)
+        decision = guard.refresh_permission(
+            include_health=bool(getattr(cfg.execution, "quant_lab_health_check_enabled", True))
+        )
+        if audit is not None:
+            audit.quant_lab = guard.audit_payload()
+            audit.add_note(
+                "QUANT_LAB_PERMISSION "
+                f"decision={guard.permission_decision} effective={decision} "
+                f"fallback={bool(guard.fallback_used)} fail_policy={guard.fail_policy}"
+            )
+            audit.save(str(runtime_run_dir))
+        if log_obj is not None:
+            log_obj.warning(
+                "quant-lab permission: decision=%s effective=%s fallback=%s",
+                guard.permission_decision,
+                decision,
+                bool(guard.fallback_used),
+            )
+        if bool(guard.fallback_used) and decision == "ABORT":
+            _audit_and_raise(
+                audit,
+                runtime_run_dir,
+                "quant_lab_unavailable",
+                "quant-lab unavailable and execution.quant_lab_fail_policy=abort",
+            )
+        return guard
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        _audit_and_raise(
+            audit,
+            runtime_run_dir,
+            "quant_lab_config",
+            f"quant-lab guard failed during live preflight: {exc}",
+        )
+
+
+def _apply_quant_lab_guard_to_orders(
+    *,
+    guard,
+    orders: list[Order],
+    audit,
+    runtime_run_dir: Path,
+    log_obj=None,
+) -> list[Order]:
+    if guard is None:
+        return list(orders or [])
+    guard.phase = "pre_order"
+    guard.client.phase = "pre_order"
+    filtered, summary = guard.filter_orders(list(orders or []))
+    if audit is not None:
+        audit.quant_lab = guard.audit_payload()
+        audit.add_note(
+            "QUANT_LAB_ORDER_FILTER "
+            f"before={summary.get('orders_before')} after={summary.get('orders_after')} "
+            f"filtered={summary.get('orders_filtered')} effective={summary.get('effective_decision')} "
+            f"fallback={summary.get('fallback_used')}"
+        )
+        audit.save(str(runtime_run_dir))
+    if log_obj is not None and int(summary.get("orders_filtered", 0) or 0) > 0:
+        log_obj.warning(
+            "quant-lab filtered orders: before=%s after=%s filtered=%s effective=%s",
+            summary.get("orders_before"),
+            summary.get("orders_after"),
+            summary.get("orders_filtered"),
+            summary.get("effective_decision"),
+        )
+    return filtered
+
+
 def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1416,6 +1545,7 @@ def main() -> None:
 
     live_okx_client = None
     live_preflight_result = None
+    quant_lab_guard = None
     if live_whitelist:
         live_okx_client, live_preflight_result = _run_live_preflight_or_raise(
             cfg,
@@ -1423,6 +1553,13 @@ def main() -> None:
             acc_store=acc_store,
             audit=audit,
             runtime_run_dir=runtime_run_dir,
+        )
+        quant_lab_guard = _refresh_quant_lab_permission_or_raise(
+            cfg,
+            run_id=run_id,
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+            log_obj=log,
         )
         _sync_live_fills_before_routing(
             cfg,
@@ -2101,6 +2238,20 @@ def main() -> None:
             live_preflight_result=live_preflight_result,
             audit=audit,
             log=log,
+        )
+
+    if is_live and quant_lab_guard is not None:
+        try:
+            regime_state = getattr(out.regime, "state", None)
+            quant_lab_guard.cost_regime = str(getattr(regime_state, "value", regime_state) or "UNKNOWN")
+        except Exception:
+            pass
+        orders = _apply_quant_lab_guard_to_orders(
+            guard=quant_lab_guard,
+            orders=list(orders or []),
+            audit=audit,
+            runtime_run_dir=runtime_run_dir,
+            log_obj=log,
         )
 
     if live_whitelist:

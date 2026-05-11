@@ -55,6 +55,8 @@ CURRENT_REPORT_FILES = [
     ("reports/skipped_candidate_labels.jsonl", "raw/reports/skipped_candidate_labels.jsonl", False),
     ("reports/alt_impulse_shadow_labels.jsonl", "raw/reports/alt_impulse_shadow_labels.jsonl", False),
     ("reports/multi_position_swing_shadow_labels.jsonl", "raw/reports/multi_position_swing_shadow_labels.jsonl", False),
+    ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
+    ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
 SECRET_KEY_RE = re.compile(
     r"(?i)(authorization|api[_-]?(?:key|secret)|secret|token|cookie|pass(?:word|phrase)|private[_-]?key|ok-access-(?:key|sign|passphrase))"
@@ -395,6 +397,27 @@ def load_json(path):
     except Exception as exc:
         collection_errors.append({"source": str(path), "error": f"json_load: {exc!r}"})
         return None
+
+
+def load_jsonl(path):
+    rows = []
+    if not path.is_file():
+        return rows
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line_no, line in enumerate(fh, start=1):
+                text = line.strip()
+                if not text:
+                    continue
+                try:
+                    item = json.loads(text)
+                    if isinstance(item, dict):
+                        rows.append(item)
+                except Exception as exc:
+                    collection_errors.append({"source": str(path), "line": line_no, "error": f"jsonl_load: {exc!r}"})
+    except Exception as exc:
+        collection_errors.append({"source": str(path), "error": f"jsonl_open: {exc!r}"})
+    return rows
 
 
 def flatten_value(value):
@@ -1250,6 +1273,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     high_score_blocked_rows = []
     market_impulse_selection_shadow_rows = []
     factor_contribution_rows = []
+    quant_lab_compliance_rows = []
+    quant_lab_cost_usage_rows = []
+    quant_lab_fallback_rows = []
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
     dust_residual_row_keys = set()
@@ -1298,6 +1324,120 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         audit_ts = run_ts(run_id, audit)
         audit_regime = flatten_value(first_value(audit, ("regime", "market_regime"), not_obs))
         audit_level = flatten_value(first_value(audit, ("current_level", "risk_level"), not_obs))
+        quant_lab = audit.get("quant_lab") if isinstance(audit.get("quant_lab"), dict) else {}
+        if quant_lab:
+            permission = quant_lab.get("permission") if isinstance(quant_lab.get("permission"), dict) else {}
+            filtered_orders = quant_lab.get("filtered_orders") if isinstance(quant_lab.get("filtered_orders"), list) else []
+            cost_estimates = quant_lab.get("cost_estimates") if isinstance(quant_lab.get("cost_estimates"), list) else []
+            filtered_count = sum(1 for row in filtered_orders if isinstance(row, dict) and row.get("filtered"))
+            buy_filtered_count = sum(
+                1
+                for row in filtered_orders
+                if isinstance(row, dict) and row.get("filtered") and str(row.get("side", "")).lower() == "buy"
+            )
+            quant_lab_compliance_rows.append({
+                "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
+                "run_id": run_id,
+                "ts_utc": audit_ts,
+                "event_type": "audit_summary",
+                "permission_decision": flatten_value(permission.get("decision") or not_obs),
+                "effective_decision": flatten_value(permission.get("effective_decision") or not_obs),
+                "order_decision": not_obs,
+                "fail_policy": flatten_value(permission.get("fail_policy") or not_obs),
+                "fallback_used": str(bool(permission.get("fallback_used"))).lower(),
+                "symbol": not_obs,
+                "side": not_obs,
+                "intent": not_obs,
+                "orders_before": not_obs,
+                "orders_after": not_obs,
+                "orders_filtered": filtered_count,
+                "buy_orders_filtered": buy_filtered_count,
+                "filtered": str(bool(filtered_count)).lower(),
+                "filter_reason": not_obs,
+                "diagnosis": "ok" if not permission.get("fallback_used") else "fallback_policy_applied",
+                "raw_json": safe_json(quant_lab),
+            })
+            for row in filtered_orders:
+                if not isinstance(row, dict):
+                    continue
+                quant_lab_compliance_rows.append({
+                    "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
+                    "run_id": run_id,
+                    "ts_utc": audit_ts,
+                    "event_type": "order_filter",
+                    "permission_decision": flatten_value(row.get("permission_decision") or permission.get("decision") or not_obs),
+                    "effective_decision": flatten_value(row.get("effective_decision") or permission.get("effective_decision") or not_obs),
+                    "order_decision": flatten_value(row.get("order_decision") or not_obs),
+                    "fail_policy": flatten_value(permission.get("fail_policy") or not_obs),
+                    "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                    "symbol": flatten_value(row.get("symbol") or not_obs),
+                    "side": flatten_value(row.get("side") or not_obs),
+                    "intent": flatten_value(row.get("intent") or not_obs),
+                    "orders_before": not_obs,
+                    "orders_after": not_obs,
+                    "orders_filtered": not_obs,
+                    "buy_orders_filtered": not_obs,
+                    "filtered": str(bool(row.get("filtered"))).lower(),
+                    "filter_reason": flatten_value(row.get("filter_reason") or not_obs),
+                    "diagnosis": "filtered" if row.get("filtered") else "passed",
+                    "raw_json": safe_json(row),
+                })
+                if row.get("fallback_used"):
+                    quant_lab_fallback_rows.append({
+                        "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
+                        "run_id": run_id,
+                        "ts_utc": audit_ts,
+                        "event_type": "order_filter",
+                        "endpoint": not_obs,
+                        "symbol": flatten_value(row.get("symbol") or not_obs),
+                        "side": flatten_value(row.get("side") or not_obs),
+                        "intent": flatten_value(row.get("intent") or not_obs),
+                        "fail_policy": flatten_value(permission.get("fail_policy") or not_obs),
+                        "effective_decision": flatten_value(row.get("effective_decision") or permission.get("effective_decision") or not_obs),
+                        "fallback_used": "true",
+                        "error": not_obs,
+                        "diagnosis": flatten_value(row.get("filter_reason") or "fallback_policy_applied"),
+                        "raw_json": safe_json(row),
+                    })
+            for row in cost_estimates:
+                if not isinstance(row, dict):
+                    continue
+                quant_lab_cost_usage_rows.append({
+                    "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
+                    "run_id": run_id,
+                    "ts_utc": audit_ts,
+                    "symbol": flatten_value(row.get("symbol") or not_obs),
+                    "side": flatten_value(row.get("side") or not_obs),
+                    "intent": flatten_value(row.get("intent") or not_obs),
+                    "notional_usdt": flatten_value(row.get("notional_usdt") if row.get("notional_usdt") is not None else not_obs),
+                    "alpha_id": flatten_value(row.get("alpha_id") or not_obs),
+                    "cost_bps": flatten_value(row.get("cost_bps") if row.get("cost_bps") is not None else not_obs),
+                    "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
+                    "cost_source": flatten_value(row.get("cost_source") or not_obs),
+                    "quant_lab_decision": flatten_value(row.get("quant_lab_decision") or not_obs),
+                    "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                    "filtered": not_obs,
+                    "filter_reason": not_obs,
+                    "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
+                    "raw_json": safe_json(row),
+                })
+                if row.get("fallback_used"):
+                    quant_lab_fallback_rows.append({
+                        "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
+                        "run_id": run_id,
+                        "ts_utc": audit_ts,
+                        "event_type": "cost_estimate",
+                        "endpoint": "/v1/costs/estimate",
+                        "symbol": flatten_value(row.get("symbol") or not_obs),
+                        "side": flatten_value(row.get("side") or not_obs),
+                        "intent": flatten_value(row.get("intent") or not_obs),
+                        "fail_policy": flatten_value(permission.get("fail_policy") or not_obs),
+                        "effective_decision": flatten_value(permission.get("effective_decision") or not_obs),
+                        "fallback_used": "true",
+                        "error": flatten_value(row.get("error") or not_obs),
+                        "diagnosis": "cost_estimate_fallback",
+                        "raw_json": safe_json(row),
+                    })
         counts = audit.get("counts") if isinstance(audit.get("counts"), dict) else {}
         for field in PROBE_COUNT_FIELDS:
             probe_counts[field] += as_int(counts.get(field))
@@ -5069,6 +5209,93 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         except Exception as exc:
             collection_errors.append({"source": str(log_path), "error": f"log_scan: {exc!r}"})
 
+    for row in load_jsonl(OUT / "raw" / "reports" / "quant_lab_usage.jsonl"):
+        if not isinstance(row, dict):
+            continue
+        event_type = str(row.get("event_type") or not_obs)
+        source = "reports/quant_lab_usage.jsonl"
+        if event_type in {"permission", "order_filter", "run_summary"}:
+            quant_lab_compliance_rows.append({
+                "source": source,
+                "run_id": flatten_value(row.get("run_id") or not_obs),
+                "ts_utc": flatten_value(row.get("ts") or not_obs),
+                "event_type": event_type,
+                "permission_decision": flatten_value(row.get("permission_decision") or row.get("quant_lab_decision") or not_obs),
+                "effective_decision": flatten_value(row.get("effective_decision") or not_obs),
+                "order_decision": flatten_value(row.get("order_decision") or not_obs),
+                "fail_policy": flatten_value(row.get("fail_policy") or not_obs),
+                "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                "symbol": flatten_value(row.get("symbol") or not_obs),
+                "side": flatten_value(row.get("side") or not_obs),
+                "intent": flatten_value(row.get("intent") or not_obs),
+                "orders_before": flatten_value(row.get("orders_before") if row.get("orders_before") is not None else not_obs),
+                "orders_after": flatten_value(row.get("orders_after") if row.get("orders_after") is not None else not_obs),
+                "orders_filtered": flatten_value(row.get("orders_filtered") if row.get("orders_filtered") is not None else not_obs),
+                "buy_orders_filtered": flatten_value(row.get("buy_orders_filtered") if row.get("buy_orders_filtered") is not None else not_obs),
+                "filtered": str(bool(row.get("filtered"))).lower() if "filtered" in row else not_obs,
+                "filter_reason": flatten_value(row.get("filter_reason") or not_obs),
+                "diagnosis": "filtered" if row.get("filtered") else ("fallback_policy_applied" if row.get("fallback_used") else "ok"),
+                "raw_json": safe_json(row),
+            })
+        if event_type == "cost_estimate":
+            quant_lab_cost_usage_rows.append({
+                "source": source,
+                "run_id": flatten_value(row.get("run_id") or not_obs),
+                "ts_utc": flatten_value(row.get("ts") or not_obs),
+                "symbol": flatten_value(row.get("symbol") or not_obs),
+                "side": flatten_value(row.get("side") or not_obs),
+                "intent": flatten_value(row.get("intent") or not_obs),
+                "notional_usdt": flatten_value(row.get("notional_usdt") if row.get("notional_usdt") is not None else not_obs),
+                "alpha_id": flatten_value(row.get("alpha_id") or not_obs),
+                "cost_bps": flatten_value(row.get("cost_bps") if row.get("cost_bps") is not None else not_obs),
+                "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
+                "cost_source": flatten_value(row.get("cost_source") or not_obs),
+                "quant_lab_decision": flatten_value(row.get("quant_lab_decision") or not_obs),
+                "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                "filtered": not_obs,
+                "filter_reason": not_obs,
+                "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
+                "raw_json": safe_json(row),
+            })
+        if row.get("fallback_used"):
+            quant_lab_fallback_rows.append({
+                "source": source,
+                "run_id": flatten_value(row.get("run_id") or not_obs),
+                "ts_utc": flatten_value(row.get("ts") or not_obs),
+                "event_type": event_type,
+                "endpoint": flatten_value(row.get("endpoint") or not_obs),
+                "symbol": flatten_value(row.get("symbol") or not_obs),
+                "side": flatten_value(row.get("side") or not_obs),
+                "intent": flatten_value(row.get("intent") or not_obs),
+                "fail_policy": flatten_value(row.get("fail_policy") or not_obs),
+                "effective_decision": flatten_value(row.get("effective_decision") or row.get("order_decision") or not_obs),
+                "fallback_used": "true",
+                "error": flatten_value(row.get("error") or not_obs),
+                "diagnosis": flatten_value(row.get("filter_reason") or "fallback_policy_applied"),
+                "raw_json": safe_json(row),
+            })
+
+    for row in load_jsonl(OUT / "raw" / "reports" / "quant_lab_requests.jsonl"):
+        if not isinstance(row, dict):
+            continue
+        if not row.get("ok") or row.get("fallback_used"):
+            quant_lab_fallback_rows.append({
+                "source": "reports/quant_lab_requests.jsonl",
+                "run_id": flatten_value(row.get("run_id") or not_obs),
+                "ts_utc": flatten_value(row.get("ts") or not_obs),
+                "event_type": "request",
+                "endpoint": flatten_value(row.get("endpoint") or not_obs),
+                "symbol": flatten_value((row.get("params") or {}).get("symbol") if isinstance(row.get("params"), dict) else not_obs),
+                "side": flatten_value((row.get("params") or {}).get("side") if isinstance(row.get("params"), dict) else not_obs),
+                "intent": not_obs,
+                "fail_policy": not_obs,
+                "effective_decision": not_obs,
+                "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                "error": flatten_value(row.get("error") or (f"http_{row.get('status_code')}" if row.get("status_code") else not_obs)),
+                "diagnosis": "request_not_ok" if not row.get("ok") else "fallback_request",
+                "raw_json": safe_json(row),
+            })
+
     config_runtime_consumption_rows = build_config_runtime_consumption_audit()
     config_runtime_not_consumed_count = sum(
         1 for row in config_runtime_consumption_rows
@@ -5129,6 +5356,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "summaries/config_runtime_consumption_audit.csv",
         config_runtime_consumption_rows,
         ["config_key", "defined_in_schema", "present_in_live_prod", "present_in_effective_config", "consumed_in_runtime_code", "consumer_category", "consumer_files", "diagnosis"],
+    )
+    write_csv(
+        "summaries/quant_lab_compliance.csv",
+        quant_lab_compliance_rows,
+        ["source", "run_id", "ts_utc", "event_type", "permission_decision", "effective_decision", "order_decision", "fail_policy", "fallback_used", "symbol", "side", "intent", "orders_before", "orders_after", "orders_filtered", "buy_orders_filtered", "filtered", "filter_reason", "diagnosis", "raw_json"],
+    )
+    write_csv(
+        "summaries/quant_lab_cost_usage.csv",
+        quant_lab_cost_usage_rows,
+        ["source", "run_id", "ts_utc", "symbol", "side", "intent", "notional_usdt", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "quant_lab_decision", "fallback_used", "filtered", "filter_reason", "diagnosis", "raw_json"],
+    )
+    write_csv(
+        "summaries/quant_lab_fallbacks.csv",
+        quant_lab_fallback_rows,
+        ["source", "run_id", "ts_utc", "event_type", "endpoint", "symbol", "side", "intent", "fail_policy", "effective_decision", "fallback_used", "error", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/rank_exit_consistency.csv",
@@ -5364,6 +5606,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
         "config_runtime_not_consumed_count": config_runtime_not_consumed_count,
+        "quant_lab_compliance_rows": len(quant_lab_compliance_rows),
+        "quant_lab_cost_usage_rows": len(quant_lab_cost_usage_rows),
+        "quant_lab_fallback_rows": len(quant_lab_fallback_rows),
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
         "rank_exit_conflict_count": rank_exit_conflict_count,
         "rank_exit_target_positive_sell_count": rank_exit_target_positive_sell_count,
@@ -6016,6 +6261,9 @@ sanity = {
     "contains raw/state": any((OUT / "raw/state").glob("*.json")),
     "contains raw/recent_runs": any((OUT / "raw/recent_runs").glob("*/decision_audit.json")),
     "contains summaries/probe_lifecycle_audit.csv": (OUT / "summaries/probe_lifecycle_audit.csv").is_file(),
+    "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
+    "contains summaries/quant_lab_cost_usage.csv": (OUT / "summaries/quant_lab_cost_usage.csv").is_file(),
+    "contains summaries/quant_lab_fallbacks.csv": (OUT / "summaries/quant_lab_fallbacks.csv").is_file(),
     "contains summaries/issues_to_fix.json": (OUT / "summaries/issues_to_fix.json").is_file(),
     "warnings": [],
     "high_issue_count": int(summary_meta.get("high_issue_count", 0)),
@@ -6038,6 +6286,9 @@ failure_check_names = [
     "contains raw/state",
     "contains raw/recent_runs",
     "contains summaries/probe_lifecycle_audit.csv",
+    "contains summaries/quant_lab_compliance.csv",
+    "contains summaries/quant_lab_cost_usage.csv",
+    "contains summaries/quant_lab_fallbacks.csv",
     "contains summaries/issues_to_fix.json",
     "no .env files",
     "no unredacted secret assignments",

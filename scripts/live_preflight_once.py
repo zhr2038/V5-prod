@@ -19,6 +19,15 @@ def _resolve_runtime_json_path(raw_path, *, order_store_path: str, base_name: st
     return resolve_runtime_path(raw_path, default=legacy_default)
 
 
+def _resolve_runtime_jsonl_path(raw_path, *, order_store_path: str, base_name: str, legacy_default: str) -> str:
+    from configs.runtime_config import resolve_runtime_path
+    from src.execution.fill_store import derive_runtime_named_artifact_path
+
+    if raw_path is None or str(raw_path).strip() == "" or str(raw_path).strip() == legacy_default:
+        return str(derive_runtime_named_artifact_path(order_store_path, base_name, ".jsonl"))
+    return resolve_runtime_path(raw_path, default=legacy_default)
+
+
 def _resolve_active_config_path(raw_config_path: str | None = None) -> str:
     from configs.runtime_config import load_runtime_config, resolve_runtime_config_path
 
@@ -107,7 +116,46 @@ def main() -> None:
             reconcile_status_path=reconcile_status_path,
         )
         res = pf.run(max_pages=args.max_pages, max_status_age_sec=args.max_status_age_sec)
-        print(json.dumps(res.__dict__, ensure_ascii=False, indent=2))
+        payload = dict(res.__dict__)
+        if bool(getattr(cfg.execution, "quant_lab_enabled", False)):
+            from src.execution.quant_lab_client import QuantLabClient
+            from src.execution.quant_lab_guard import QuantLabGuard
+
+            qclient = QuantLabClient(
+                base_url=str(getattr(cfg.execution, "quant_lab_base_url", "") or ""),
+                timeout_sec=float(getattr(cfg.execution, "quant_lab_timeout_sec", 2.0) or 2.0),
+                token_env=str(getattr(cfg.execution, "quant_lab_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"),
+                request_log_path=_resolve_runtime_jsonl_path(
+                    getattr(cfg.execution, "quant_lab_requests_path", None),
+                    order_store_path=order_store_path,
+                    base_name="quant_lab_requests",
+                    legacy_default="reports/quant_lab_requests.jsonl",
+                ),
+                phase="live_preflight_once",
+            )
+            qguard = QuantLabGuard(
+                client=qclient,
+                fail_policy=str(getattr(cfg.execution, "quant_lab_fail_policy", "sell_only") or "sell_only"),
+                usage_log_path=_resolve_runtime_jsonl_path(
+                    getattr(cfg.execution, "quant_lab_usage_path", None),
+                    order_store_path=order_store_path,
+                    base_name="quant_lab_usage",
+                    legacy_default="reports/quant_lab_usage.jsonl",
+                ),
+                default_alpha_id=str(getattr(cfg.execution, "quant_lab_default_alpha_id", "v5") or "v5"),
+                strategy=str(getattr(cfg.execution, "quant_lab_strategy", "v5") or "v5"),
+                strategy_version=str(getattr(cfg.execution, "quant_lab_strategy_version", "v1") or "v1"),
+                cost_regime=str(getattr(cfg.execution, "quant_lab_cost_regime_default", "UNKNOWN") or "UNKNOWN"),
+                cost_quantile=str(getattr(cfg.execution, "quant_lab_cost_quantile", "p75") or "p75"),
+                phase="live_preflight_once",
+            )
+            decision = qguard.refresh_permission(
+                include_health=bool(getattr(cfg.execution, "quant_lab_health_check_enabled", True))
+            )
+            payload["quant_lab"] = qguard.audit_payload()
+            if bool(qguard.fallback_used) and decision == "ABORT":
+                raise RuntimeError("quant-lab unavailable and execution.quant_lab_fail_policy=abort")
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     finally:
         client.close()
 

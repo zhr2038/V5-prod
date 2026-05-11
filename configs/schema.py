@@ -592,6 +592,22 @@ class ExecutionConfig(BaseModel):
     preflight_max_pages: int = Field(default=5, ge=1)
     max_status_age_sec: int = Field(default=180, ge=1)
     preflight_fail_action: str = Field(default="sell_only", description="sell_only|abort")
+
+    # quant-lab read-only research guard. V5 only performs HTTP GET and never writes quant-lab state.
+    quant_lab_enabled: bool = Field(default=False)
+    quant_lab_base_url: str = Field(default="http://qyun2.hrhome.top:8000")
+    quant_lab_timeout_sec: float = Field(default=2.0, ge=0.1, le=30.0)
+    quant_lab_fail_policy: str = Field(default="sell_only", description="sell_only|abort|allow")
+    quant_lab_token_env: str = Field(default="QUANT_LAB_API_TOKEN")
+    quant_lab_default_alpha_id: str = Field(default="v5")
+    quant_lab_strategy: str = Field(default="v5")
+    quant_lab_strategy_version: str = Field(default="v1")
+    quant_lab_cost_regime_default: str = Field(default="UNKNOWN")
+    quant_lab_cost_quantile: str = Field(default="p75")
+    quant_lab_gate_check_enabled: bool = Field(default=False)
+    quant_lab_health_check_enabled: bool = Field(default=True)
+    quant_lab_usage_path: str = Field(default="reports/quant_lab_usage.jsonl")
+    quant_lab_requests_path: str = Field(default="reports/quant_lab_requests.jsonl")
     
     # Allow trading on small reconcile drift (useful for initialization)
     allow_trade_on_small_reconcile_drift: bool = Field(default=False, description="Allow trading when reconcile has small drift (not hard failures)")
@@ -1163,6 +1179,14 @@ class ExecutionConfig(BaseModel):
         vv = str(v or "sell_only").strip().lower()
         if vv not in {"sell_only", "abort", "allow"}:
             raise ValueError("execution.preflight_fail_action must be 'sell_only', 'abort', or 'allow'")
+        return vv
+
+    @field_validator("quant_lab_fail_policy")
+    @classmethod
+    def _quant_lab_fail_policy(cls, v: str) -> str:
+        vv = str(v or "sell_only").strip().lower()
+        if vv not in {"sell_only", "abort", "allow"}:
+            raise ValueError("execution.quant_lab_fail_policy must be 'sell_only', 'abort', or 'allow'")
         return vv
 
     @field_validator("borrow_block_mode")

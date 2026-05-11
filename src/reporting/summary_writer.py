@@ -53,6 +53,51 @@ def _negative_expectancy_summary_fields(rd: Path) -> Dict[str, int]:
     }
 
 
+def _quant_lab_summary_fields(rd: Path) -> Dict[str, Any]:
+    decision_audit_path = rd / "decision_audit.json"
+    empty = {
+        "enabled": False,
+        "permission_decision": None,
+        "effective_decision": None,
+        "fallback_used": False,
+        "orders_filtered": 0,
+        "buy_orders_filtered": 0,
+        "cost_estimate_count": 0,
+        "cost_fallback_count": 0,
+    }
+    if not decision_audit_path.exists():
+        return {"quant_lab": empty}
+
+    try:
+        payload = json.loads(decision_audit_path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    ql = payload.get("quant_lab", {}) if isinstance(payload, dict) else {}
+    if not isinstance(ql, dict) or not ql:
+        return {"quant_lab": empty}
+
+    permission = ql.get("permission") if isinstance(ql.get("permission"), dict) else {}
+    filtered_orders = ql.get("filtered_orders") if isinstance(ql.get("filtered_orders"), list) else []
+    cost_estimates = ql.get("cost_estimates") if isinstance(ql.get("cost_estimates"), list) else []
+    orders_filtered = [row for row in filtered_orders if isinstance(row, dict) and row.get("filtered")]
+    summary = {
+        "enabled": bool(ql.get("enabled", True)),
+        "permission_decision": permission.get("decision"),
+        "effective_decision": permission.get("effective_decision"),
+        "fallback_used": bool(permission.get("fallback_used")),
+        "fail_policy": permission.get("fail_policy"),
+        "orders_filtered": len(orders_filtered),
+        "buy_orders_filtered": len(
+            [row for row in orders_filtered if str(row.get("side", "")).lower() == "buy"]
+        ),
+        "cost_estimate_count": len(cost_estimates),
+        "cost_fallback_count": len(
+            [row for row in cost_estimates if isinstance(row, dict) and row.get("fallback_used")]
+        ),
+    }
+    return {"quant_lab": summary}
+
+
 def write_summary(
     run_dir: str,
     window_start_ts: int | None = None,
@@ -92,6 +137,7 @@ def write_summary(
         **eqm,
         **tm,
         **_negative_expectancy_summary_fields(rd),
+        **_quant_lab_summary_fields(rd),
     }
 
     (rd / "summary.json").write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -129,6 +175,8 @@ def refresh_summary_metrics(run_dir: str) -> Dict[str, Any]:
     for k, v in {**eqm, **tm}.items():
         summ[k] = v
     for k, v in _negative_expectancy_summary_fields(rd).items():
+        summ[k] = v
+    for k, v in _quant_lab_summary_fields(rd).items():
         summ[k] = v
 
     p.write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
