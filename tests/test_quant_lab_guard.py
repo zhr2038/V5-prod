@@ -58,6 +58,7 @@ def _guard(tmp_path: Path, cfg: AppConfig, client: _Client) -> QuantLabGuard:
 def test_guard_sell_only_filters_buy_and_preserves_sell(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "enforce"
     guard = _guard(tmp_path, cfg, _Client(permission="SELL_ONLY"))
 
     result = guard.check_startup_permission(cfg, "run-1")
@@ -78,6 +79,7 @@ def test_guard_sell_only_filters_buy_and_preserves_sell(tmp_path: Path) -> None:
 def test_guard_abort_filters_all(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "enforce"
     guard = _guard(tmp_path, cfg, _Client(permission="ABORT"))
     result = guard.check_startup_permission(cfg, "run-1")
     kept = guard.filter_orders_by_permission([Order("ETH/USDT", "sell", "CLOSE_LONG", 8.0, 200.0, {})], result)
@@ -102,6 +104,7 @@ def test_guard_unavailable_fail_policies(tmp_path: Path) -> None:
 def test_guard_cost_fallback_to_local(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "enforce"
     cfg.execution.fee_bps = 6
     cfg.execution.slippage_bps = 5
     guard = _guard(tmp_path, cfg, _Client(permission="ALLOW", fail_cost=True))

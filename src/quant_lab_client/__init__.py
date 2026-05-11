@@ -11,6 +11,7 @@ from .exceptions import (
     QuantLabValidationError,
 )
 from .guard import QuantLabGuard, QuantLabGuardResult
+from .mode import QuantLabMode, QuantLabModeResolution, load_quant_lab_mode, resolve_quant_lab_mode
 from .models import CostEstimate, GateDecision, QuantLabHealth, RiskPermission, symbol_to_quant_lab_symbol
 from .permissions import ABORT, ALLOW, ALLOW_LOCAL, SELL_ONLY, combine_permissions, is_order_new_risk
 
@@ -26,6 +27,8 @@ __all__ = [
     "QuantLabError",
     "QuantLabGuard",
     "QuantLabGuardResult",
+    "QuantLabMode",
+    "QuantLabModeResolution",
     "QuantLabHTTPError",
     "QuantLabHealth",
     "QuantLabPermissionError",
@@ -38,6 +41,8 @@ __all__ = [
     "apply_quant_lab_cost_gate",
     "combine_permissions",
     "is_order_new_risk",
+    "load_quant_lab_mode",
+    "resolve_quant_lab_mode",
     "sanitize_quant_lab_obj",
     "summarize_response",
     "symbol_to_quant_lab_symbol",

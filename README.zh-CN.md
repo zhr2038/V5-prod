@@ -16,10 +16,19 @@ quant-lab 不交易、不写账户、不替代 V5 执行。V5 不写 quant-lab l
 
 当前 quant-lab bootstrap gate 是 `QUARANTINE`，risk permission 是 `SELL_ONLY`，因此 V5 当前不应新增 buy/open/rebalance 风险，只允许 sell/close/reduce-only。
 
+上线模式通过 `quant_lab.mode` 和 `state/quant_lab_mode.json` 切换：
+
+- `local_only`：完全跳过 quant-lab。
+- `shadow`：调用 quant-lab 但只记录，不影响交易。
+- `cost_only`：只启用成本过滤。
+- `permission_only`：只启用权限过滤。
+- `enforce`：成本和权限都生效。
+
 ## 常用命令
 
 ```bash
 python scripts/quant_lab_selfcheck.py --config configs/config.yaml
+python scripts/quant_lab_mode.py show --config configs/config.yaml
 python scripts/export_v5_bundle.py --reports-dir reports --out-dir /var/lib/v5/exports/bundles
 ```
 

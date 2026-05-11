@@ -1242,8 +1242,13 @@ class LiveExecutionEngine:
             or quant_lab_meta.get("permission")
             or ""
         ).upper()
-        quant_lab_blocked = quant_lab_permission == "ABORT" or (
-            quant_lab_permission == "SELL_ONLY" and is_order_new_risk(o)
+        permission_gate_enforced = bool(
+            quant_lab_meta.get("permission_gate_enforced")
+            or quant_lab_meta.get("apply_permission_gate")
+        )
+        quant_lab_blocked = permission_gate_enforced and (
+            quant_lab_permission == "ABORT"
+            or (quant_lab_permission == "SELL_ONLY" and is_order_new_risk(o))
         )
         if quant_lab_blocked:
             reason = (

@@ -39,7 +39,7 @@ summaries/
 manifest.json
 ```
 
-`quant_lab_usage.jsonl` records permission, cost, fallback, and order filter events. `quant_lab_cost_usage.csv` normalizes cost estimates. `quant_lab_compliance.csv` checks `ABORT`/`SELL_ONLY` compliance. `quant_lab_fallbacks.csv` lists fallback policy and action taken.
+`quant_lab_usage.jsonl` records permission, cost, fallback, mode, and order filter events. `quant_lab_cost_usage.csv` normalizes cost estimates and includes whether the cost gate was enforced or hypothetical. `quant_lab_compliance.csv` checks `ABORT`/`SELL_ONLY` compliance with `mode`, `hypothetical_violation`, and `actual_violation` so `shadow` observations do not count as live violations. `quant_lab_fallbacks.csv` lists fallback policy, mode, scope, and action taken.
 
 ## Redaction
 

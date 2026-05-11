@@ -505,12 +505,13 @@ budget:
 
 quant_lab:
   enabled: true
+  mode: shadow
   base_url: http://qyun2.hrhome.top:8027
   api_token_env: QUANT_LAB_API_TOKEN
   timeout_seconds: 2.0
   max_retries: 1
   cache_ttl_seconds: 60
-  fail_policy: sell_only
+  fail_policy: allow_local_fallback
 
   risk_permission_enabled: true
   cost_enabled: true
@@ -537,6 +538,9 @@ quant_lab:
   export_bundle_include_config: true
   export_bundle_max_recent_runs: 96
   export_bundle_redact_secrets: true
+  runtime_override_path: state/quant_lab_mode.json
+  allow_runtime_override: true
+  write_mode_audit: true
 
 backtest:
   fee_bps: 10

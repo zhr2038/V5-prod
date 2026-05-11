@@ -734,6 +734,7 @@ def _get_quant_lab_cfg(cfg: AppConfig):
 
     return SimpleNamespace(
         enabled=bool(getattr(execution, "quant_lab_enabled", False)),
+        mode=str(getattr(execution, "quant_lab_mode", "shadow") or "shadow"),
         base_url=str(getattr(execution, "quant_lab_base_url", "http://qyun2.hrhome.top:8027") or "http://qyun2.hrhome.top:8027"),
         api_token_env=str(getattr(execution, "quant_lab_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"),
         timeout_seconds=float(getattr(execution, "quant_lab_timeout_sec", 2.0) or 2.0),
@@ -754,6 +755,9 @@ def _get_quant_lab_cfg(cfg: AppConfig):
         audit_enabled=True,
         audit_path=str(_resolve_quant_lab_artifact_path(cfg, "quant_lab_usage_path", "quant_lab_usage")),
         request_log_path=str(_resolve_quant_lab_artifact_path(cfg, "quant_lab_requests_path", "quant_lab_requests")),
+        runtime_override_path="state/quant_lab_mode.json",
+        allow_runtime_override=True,
+        write_mode_audit=True,
     )
 
 
@@ -848,16 +852,14 @@ def _apply_quant_lab_guard_to_orders(
         q_permission = guard.permission_result.permission
         if q_permission == ALLOW_LOCAL:
             q_permission = "ALLOW"
-        final_permission = combine_permissions(local_permission, q_permission)
-        guard.permission_result.permission = final_permission
-        guard._emit_usage(
-            {
-                "event_type": "final_permission",
-                "permission": q_permission,
-                "local_preflight_permission": local_permission,
-                "final_permission": final_permission,
-                "success": True,
-            }
+        final_permission = (
+            combine_permissions(local_permission, q_permission)
+            if bool(getattr(guard, "apply_permission_gate", False))
+            else str(local_permission or "ALLOW").upper()
+        )
+        guard.record_final_permission(
+            local_preflight_permission=str(local_permission or "ALLOW").upper(),
+            final_permission=final_permission,
         )
     before = len(list(orders or []))
     permission_filtered = guard.filter_orders_by_permission(list(orders or []), guard.permission_result)
@@ -866,7 +868,10 @@ def _apply_quant_lab_guard_to_orders(
     except Exception:
         regime = "normal"
     cost_filtered, _cost_rows = guard.enrich_orders_with_cost(permission_filtered, regime, cfg=cfg)
-    filtered = guard.filter_orders_by_permission(cost_filtered, guard.permission_result)
+    if bool(getattr(guard, "apply_permission_gate", False)):
+        filtered = guard.filter_orders_by_permission(cost_filtered, guard.permission_result)
+    else:
+        filtered = cost_filtered
     summary = guard.summary_payload(orders_before=before, orders_after=len(filtered))
     if audit is not None:
         audit.quant_lab = guard.audit_payload()
@@ -883,7 +888,7 @@ def _apply_quant_lab_guard_to_orders(
             summary.get("orders_before"),
             summary.get("orders_after"),
             summary.get("orders_filtered"),
-            summary.get("effective_decision"),
+            summary.get("final_permission"),
         )
     return filtered
 

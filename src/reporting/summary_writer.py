@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from src.reporting.metrics import (
     compute_equity_metrics,
@@ -57,6 +57,11 @@ def _quant_lab_summary_fields(rd: Path) -> Dict[str, Any]:
     decision_audit_path = rd / "decision_audit.json"
     empty = {
         "enabled": False,
+        "mode": None,
+        "mode_source": None,
+        "called_api": False,
+        "apply_permission_gate": False,
+        "apply_cost_gate": False,
         "permission": None,
         "final_permission": None,
         "permission_decision": None,
@@ -68,6 +73,9 @@ def _quant_lab_summary_fields(rd: Path) -> Dict[str, Any]:
         "cost_fallback_count": 0,
         "filtered_by_cost_count": 0,
         "filtered_by_permission_count": 0,
+        "would_filter_by_permission_count": 0,
+        "would_filter_by_cost_count": 0,
+        "skipped_reason": None,
     }
     if not decision_audit_path.exists():
         return {"quant_lab": empty}
@@ -93,6 +101,11 @@ def _quant_lab_summary_fields(rd: Path) -> Dict[str, Any]:
     )
     summary = {
         "enabled": bool(ql.get("enabled", True)),
+        "mode": ql.get("mode"),
+        "mode_source": ql.get("mode_source"),
+        "called_api": bool(ql.get("called_api", False)),
+        "apply_permission_gate": bool(ql.get("apply_permission_gate", False)),
+        "apply_cost_gate": bool(ql.get("apply_cost_gate", False)),
         "permission": permission_value,
         "final_permission": final_permission,
         "permission_decision": permission_value,
@@ -111,6 +124,9 @@ def _quant_lab_summary_fields(rd: Path) -> Dict[str, Any]:
         ),
         "filtered_by_cost_count": int(ql.get("filtered_by_cost_count", 0) or 0),
         "filtered_by_permission_count": int(ql.get("filtered_by_permission_count", len(orders_filtered)) or 0),
+        "would_filter_by_cost_count": int(ql.get("would_filter_by_cost_count", 0) or 0),
+        "would_filter_by_permission_count": int(ql.get("would_filter_by_permission_count", 0) or 0),
+        "skipped_reason": ql.get("skipped_reason"),
         "orders_filtered": len(orders_filtered) or int(
             ql.get("filtered_by_cost_count", 0) or 0
         ) + int(ql.get("filtered_by_permission_count", 0) or 0),

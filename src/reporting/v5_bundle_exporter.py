@@ -39,6 +39,10 @@ SECRET_MARKERS = (
 COMPLIANCE_FIELDS = (
     "run_id",
     "ts",
+    "mode",
+    "called_api",
+    "permission_gate_enforced",
+    "cost_gate_enforced",
     "quant_lab_permission",
     "final_permission",
     "local_preflight_permission",
@@ -46,6 +50,8 @@ COMPLIANCE_FIELDS = (
     "sell_order_count",
     "filtered_by_permission_count",
     "filtered_by_cost_count",
+    "hypothetical_violation",
+    "actual_violation",
     "violation",
     "violation_reason",
 )
@@ -53,6 +59,10 @@ COMPLIANCE_FIELDS = (
 COST_FIELDS = (
     "run_id",
     "ts",
+    "mode",
+    "cost_gate_enforced",
+    "would_filter",
+    "actually_filtered",
     "symbol",
     "regime",
     "notional_usdt",
@@ -73,7 +83,7 @@ COST_FIELDS = (
     "filter_reason",
 )
 
-FALLBACK_FIELDS = ("run_id", "ts", "event_type", "reason", "fallback_policy", "action_taken")
+FALLBACK_FIELDS = ("run_id", "ts", "mode", "event_type", "reason", "fallback_policy", "fallback_scope", "action_taken")
 
 
 def _utc_stamp() -> str:
@@ -158,6 +168,10 @@ def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             {
                 "run_id": run_id,
                 "ts": row.get("ts") or "",
+                "mode": row.get("mode") or "",
+                "called_api": row.get("called_api", ""),
+                "permission_gate_enforced": row.get("permission_gate_enforced", ""),
+                "cost_gate_enforced": row.get("cost_gate_enforced", ""),
                 "quant_lab_permission": "",
                 "final_permission": "",
                 "local_preflight_permission": "",
@@ -165,12 +179,22 @@ def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
                 "sell_order_count": 0,
                 "filtered_by_permission_count": 0,
                 "filtered_by_cost_count": 0,
+                "hypothetical_violation": "false",
+                "actual_violation": "false",
                 "violation": "false",
                 "violation_reason": "",
             },
         )
         if row.get("ts"):
             item["ts"] = row.get("ts")
+        if row.get("mode"):
+            item["mode"] = row.get("mode")
+        if "called_api" in row:
+            item["called_api"] = row.get("called_api")
+        if "permission_gate_enforced" in row:
+            item["permission_gate_enforced"] = row.get("permission_gate_enforced")
+        if "cost_gate_enforced" in row:
+            item["cost_gate_enforced"] = row.get("cost_gate_enforced")
         permission = row.get("permission") or row.get("quant_lab_permission") or row.get("quant_lab_decision")
         final = row.get("final_permission") or row.get("effective_decision")
         if permission:
@@ -180,20 +204,25 @@ def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
         if row.get("local_preflight_permission"):
             item["local_preflight_permission"] = row.get("local_preflight_permission")
         if row.get("event_type") == "filter_order":
-            if _is_new_risk_row(row) and not row.get("order_filtered"):
+            if _is_new_risk_row(row) and not row.get("actually_filtered") and not row.get("order_filtered"):
                 item["new_risk_order_count"] = int(item["new_risk_order_count"]) + 1
             if str(row.get("side") or "").lower() == "sell":
                 item["sell_order_count"] = int(item["sell_order_count"]) + 1
             reason = str(row.get("filter_reason") or "")
-            if row.get("order_filtered") and ("sell_only" in reason or "abort" in reason):
+            if (row.get("actually_filtered") or row.get("order_filtered")) and ("sell_only" in reason or "abort" in reason):
                 item["filtered_by_permission_count"] = int(item["filtered_by_permission_count"]) + 1
-            if row.get("order_filtered") and "cost" in reason:
+            if (row.get("actually_filtered") or row.get("order_filtered")) and "cost" in reason:
                 item["filtered_by_cost_count"] = int(item["filtered_by_cost_count"]) + 1
+            if row.get("would_filter") and not (row.get("actually_filtered") or row.get("order_filtered")):
+                item["hypothetical_violation"] = "true"
         final_permission = str(item.get("final_permission") or item.get("quant_lab_permission") or "").upper()
-        if final_permission == "ABORT" and int(item["new_risk_order_count"]) > 0:
+        enforced = str(item.get("permission_gate_enforced")).lower() == "true"
+        if enforced and final_permission == "ABORT" and int(item["new_risk_order_count"]) > 0:
+            item["actual_violation"] = "true"
             item["violation"] = "true"
             item["violation_reason"] = "abort_new_risk_order_submitted"
-        if final_permission == "SELL_ONLY" and int(item["new_risk_order_count"]) > 0:
+        if enforced and final_permission == "SELL_ONLY" and int(item["new_risk_order_count"]) > 0:
+            item["actual_violation"] = "true"
             item["violation"] = "true"
             item["violation_reason"] = "sell_only_new_risk_order_submitted"
     return list(by_run.values())
@@ -217,9 +246,11 @@ def _build_fallback_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             {
                 "run_id": row.get("run_id", ""),
                 "ts": row.get("ts", ""),
+                "mode": row.get("mode", ""),
                 "event_type": row.get("event_type", ""),
                 "reason": row.get("fallback_reason") or row.get("reason") or row.get("filter_reason") or "",
                 "fallback_policy": row.get("fallback_policy") or row.get("fail_policy") or "",
+                "fallback_scope": row.get("fallback_scope") or row.get("event_type") or "",
                 "action_taken": row.get("action_taken") or row.get("permission") or row.get("final_permission") or "",
             }
         )
@@ -231,13 +262,16 @@ def _window_summary(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any
     final_permission = None
     cost_model_version = None
     gate_version = None
+    latest_mode = None
     for row in rows:
+        latest_mode = row.get("mode") or latest_mode
         latest_permission = row.get("permission") or row.get("quant_lab_permission") or row.get("quant_lab_decision") or latest_permission
         final_permission = row.get("final_permission") or row.get("effective_decision") or final_permission
         cost_model_version = row.get("cost_model_version") or cost_model_version
         gate_version = row.get("gate_version") or gate_version
     return {
         "quant_lab_enabled": bool(rows or request_rows),
+        "quant_lab_mode": latest_mode,
         "quant_lab_request_count": len(request_rows),
         "quant_lab_error_count": len([row for row in request_rows if row.get("success") is False or row.get("ok") is False]),
         "quant_lab_fallback_count": len([row for row in rows if row.get("fallback_used")]),

@@ -10,6 +10,7 @@ from src.reporting.quant_lab_audit import append_quant_lab_usage, sanitize_quant
 from .client import QuantLabClient
 from .cost_gate import CostGateResult, apply_quant_lab_cost_gate, local_cost_bps_for_order
 from .exceptions import QuantLabError
+from .mode import QuantLabMode, QuantLabModeResolution, resolve_quant_lab_mode
 from .models import CostEstimate, RiskPermission, symbol_to_quant_lab_symbol
 from .permissions import ABORT, ALLOW, ALLOW_LOCAL, SELL_ONLY, normalize_permission
 
@@ -27,6 +28,15 @@ class QuantLabGuardResult:
     response_ts: Optional[str] = None
     error_type: Optional[str] = None
     error_message_sanitized: Optional[str] = None
+    mode: str = "shadow"
+    mode_source: str = "config"
+    mode_override_path: Optional[str] = None
+    called_api: bool = False
+    apply_permission_gate: bool = False
+    apply_cost_gate: bool = False
+    permission_gate_enforced: bool = False
+    cost_gate_enforced: bool = False
+    skipped_reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -82,13 +92,64 @@ class QuantLabGuard:
     run_id: Optional[str] = None
     phase: str = "live"
     permission_result: QuantLabGuardResult = field(
-        default_factory=lambda: QuantLabGuardResult(enabled=False, permission=ALLOW_LOCAL)
+        default_factory=lambda: QuantLabGuardResult(enabled=False, permission=ALLOW_LOCAL, mode="local_only")
+    )
+    mode_resolution: QuantLabModeResolution = field(
+        default_factory=lambda: QuantLabModeResolution(mode=QuantLabMode.LOCAL_ONLY)
     )
     events: List[Dict[str, Any]] = field(default_factory=list)
     cost_rows: List[Dict[str, Any]] = field(default_factory=list)
     filtered_orders: List[Dict[str, Any]] = field(default_factory=list)
     request_count: int = 0
     request_error_count: int = 0
+    local_preflight_permission: Optional[str] = None
+    final_permission: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.cfg is None:
+            return
+        try:
+            self.mode_resolution = resolve_quant_lab_mode(self.cfg)
+        except Exception:
+            return
+
+    def _refresh_mode_from_cfg(self) -> None:
+        if self.cfg is None:
+            return
+        try:
+            self.mode_resolution = resolve_quant_lab_mode(self.cfg)
+        except Exception:
+            return
+
+    @property
+    def mode(self) -> QuantLabMode:
+        return self.mode_resolution.mode
+
+    @property
+    def called_api(self) -> bool:
+        return bool(_get_cfg(self.cfg, "enabled", True)) and bool(self.client is not None and self.mode != QuantLabMode.LOCAL_ONLY)
+
+    @property
+    def apply_permission_gate(self) -> bool:
+        return bool(_get_cfg(self.cfg, "enabled", True)) and self.mode in {QuantLabMode.PERMISSION_ONLY, QuantLabMode.ENFORCE}
+
+    @property
+    def apply_cost_gate(self) -> bool:
+        return bool(_get_cfg(self.cfg, "enabled", True)) and self.mode in {QuantLabMode.COST_ONLY, QuantLabMode.ENFORCE}
+
+    def _mode_fields(self, *, enforced: Optional[bool] = None, hypothetical: Optional[bool] = None) -> Dict[str, Any]:
+        return {
+            "mode": self.mode.value,
+            "mode_source": self.mode_resolution.mode_source,
+            "mode_override_path": self.mode_resolution.override_path,
+            "called_api": self.called_api,
+            "apply_permission_gate": self.apply_permission_gate,
+            "apply_cost_gate": self.apply_cost_gate,
+            "permission_gate_enforced": self.apply_permission_gate,
+            "cost_gate_enforced": self.apply_cost_gate,
+            "enforced": bool(enforced) if enforced is not None else bool(self.apply_permission_gate or self.apply_cost_gate),
+            "hypothetical": bool(hypothetical) if hypothetical is not None else bool(self.mode == QuantLabMode.SHADOW),
+        }
 
     @classmethod
     def from_config(
@@ -99,64 +160,161 @@ class QuantLabGuard:
         phase: str = "live_preflight",
         http_client: Optional[Any] = None,
     ) -> "QuantLabGuard":
-        if not bool(getattr(quant_lab_cfg, "enabled", False)):
-            return cls.disabled(quant_lab_cfg, run_id=run_id)
-        client = QuantLabClient(
-            base_url=str(getattr(quant_lab_cfg, "base_url", "") or ""),
-            api_token=None,
-            timeout_seconds=float(getattr(quant_lab_cfg, "timeout_seconds", 2.0) or 2.0),
-            max_retries=int(getattr(quant_lab_cfg, "max_retries", 1) or 0),
-            cache_ttl_seconds=int(getattr(quant_lab_cfg, "cache_ttl_seconds", 60) or 0),
-            http_client=http_client,
-            request_log_path=str(getattr(quant_lab_cfg, "request_log_path", "reports/quant_lab_requests.jsonl") or "reports/quant_lab_requests.jsonl"),
-            run_id=run_id,
-            phase=phase,
-        )
-        token_env = str(getattr(quant_lab_cfg, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN")
-        import os
+        mode_resolution = resolve_quant_lab_mode(quant_lab_cfg)
+        enabled = bool(getattr(quant_lab_cfg, "enabled", False))
+        if not enabled:
+            return cls.disabled(quant_lab_cfg, run_id=run_id, mode_resolution=mode_resolution)
+        client: Optional[QuantLabClient] = None
+        if mode_resolution.mode != QuantLabMode.LOCAL_ONLY:
+            client = QuantLabClient(
+                base_url=str(getattr(quant_lab_cfg, "base_url", "") or ""),
+                api_token=None,
+                timeout_seconds=float(getattr(quant_lab_cfg, "timeout_seconds", 2.0) or 2.0),
+                max_retries=int(getattr(quant_lab_cfg, "max_retries", 1) or 0),
+                cache_ttl_seconds=int(getattr(quant_lab_cfg, "cache_ttl_seconds", 60) or 0),
+                http_client=http_client,
+                request_log_path=str(getattr(quant_lab_cfg, "request_log_path", "reports/quant_lab_requests.jsonl") or "reports/quant_lab_requests.jsonl"),
+                run_id=run_id,
+                phase=phase,
+            )
+            token_env = str(getattr(quant_lab_cfg, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN")
+            import os
 
-        token = os.getenv(token_env, "").strip()
-        if token:
-            client.api_token = token
+            token = os.getenv(token_env, "").strip()
+            if token:
+                client.api_token = token
         return cls(
             client=client,
             cfg=quant_lab_cfg,
             usage_log_path=str(getattr(quant_lab_cfg, "audit_path", "reports/quant_lab_usage.jsonl") or "reports/quant_lab_usage.jsonl"),
             run_id=run_id,
             phase=phase,
+            mode_resolution=mode_resolution,
         )
 
     @classmethod
-    def disabled(cls, cfg: Any = None, *, run_id: Optional[str] = None) -> "QuantLabGuard":
+    def disabled(
+        cls,
+        cfg: Any = None,
+        *,
+        run_id: Optional[str] = None,
+        mode_resolution: Optional[QuantLabModeResolution] = None,
+    ) -> "QuantLabGuard":
+        resolution = mode_resolution or QuantLabModeResolution(mode=QuantLabMode.LOCAL_ONLY)
         return cls(
             client=None,
             cfg=cfg,
             run_id=run_id,
-            permission_result=QuantLabGuardResult(enabled=False, permission=ALLOW_LOCAL, reasons=["quant_lab_disabled"]),
+            mode_resolution=resolution,
+            permission_result=QuantLabGuardResult(
+                enabled=False,
+                permission=ALLOW_LOCAL,
+                reasons=["quant_lab_disabled"],
+                mode=resolution.mode.value,
+                mode_source=resolution.mode_source,
+                mode_override_path=resolution.override_path,
+                called_api=False,
+                apply_permission_gate=False,
+                apply_cost_gate=False,
+                skipped_reason="quant_lab_disabled",
+            ),
         )
 
     def _emit_usage(self, row: Mapping[str, Any]) -> None:
-        payload = sanitize_quant_lab_obj({"run_id": self.run_id, "phase": self.phase, **dict(row)})
+        payload = sanitize_quant_lab_obj({"run_id": self.run_id, "phase": self.phase, **self._mode_fields(), **dict(row)})
         self.events.append(dict(payload))
         if bool(_get_cfg(self.cfg, "audit_enabled", True)):
             append_quant_lab_usage(self.usage_log_path, payload)
 
+    def record_final_permission(self, *, local_preflight_permission: str, final_permission: str) -> None:
+        self.local_preflight_permission = str(local_preflight_permission or "")
+        self.final_permission = str(final_permission or "")
+        self._emit_usage(
+            {
+                "event_type": "final_permission",
+                "permission": self.permission_result.permission,
+                "quant_lab_permission": self.permission_result.permission,
+                "local_preflight_permission": self.local_preflight_permission,
+                "final_permission": self.final_permission,
+                "success": True,
+                "enforced": self.apply_permission_gate,
+                "hypothetical": not self.apply_permission_gate,
+            }
+        )
+
     def check_startup_permission(self, cfg: Any = None, run_id: Optional[str] = None) -> QuantLabGuardResult:
         if cfg is not None:
             self.cfg = _ql_cfg(cfg)
+            self._refresh_mode_from_cfg()
         if run_id:
             self.run_id = run_id
             if self.client is not None:
                 self.client.run_id = run_id
         qcfg = _ql_cfg(self.cfg)
-        if not bool(getattr(qcfg, "enabled", False)) or self.client is None:
-            result = QuantLabGuardResult(enabled=False, permission=ALLOW_LOCAL, reasons=["quant_lab_disabled"])
+        if self.mode == QuantLabMode.LOCAL_ONLY:
+            result = QuantLabGuardResult(
+                enabled=bool(getattr(qcfg, "enabled", True)),
+                permission=ALLOW_LOCAL,
+                reasons=["quant_lab_local_only"],
+                response_ts=utc_now_iso(),
+                mode=self.mode.value,
+                mode_source=self.mode_resolution.mode_source,
+                mode_override_path=self.mode_resolution.override_path,
+                called_api=False,
+                apply_permission_gate=False,
+                apply_cost_gate=False,
+                permission_gate_enforced=False,
+                cost_gate_enforced=False,
+                skipped_reason="quant_lab_local_only",
+            )
             self.permission_result = result
-            self._emit_usage({"event_type": "live_permission", "permission": ALLOW_LOCAL, "success": True, "fallback_used": False})
+            self._emit_usage(
+                {
+                    "event_type": "live_permission",
+                    "permission": ALLOW_LOCAL,
+                    "quant_lab_permission": ALLOW_LOCAL,
+                    "final_permission": "LOCAL_ONLY",
+                    "success": True,
+                    "called_api": False,
+                    "fallback_used": False,
+                    "skipped_reason": "quant_lab_local_only",
+                }
+            )
+            return result
+
+        if not bool(getattr(qcfg, "enabled", False)) or self.client is None:
+            result = QuantLabGuardResult(
+                enabled=False,
+                permission=ALLOW_LOCAL,
+                reasons=["quant_lab_disabled"],
+                response_ts=utc_now_iso(),
+                mode=self.mode.value,
+                mode_source=self.mode_resolution.mode_source,
+                mode_override_path=self.mode_resolution.override_path,
+                called_api=False,
+                apply_permission_gate=False,
+                apply_cost_gate=False,
+                skipped_reason="quant_lab_disabled",
+            )
+            self.permission_result = result
+            self._emit_usage({"event_type": "live_permission", "permission": ALLOW_LOCAL, "success": True, "fallback_used": False, "called_api": False})
             return result
 
         if not bool(getattr(qcfg, "risk_permission_enabled", True)):
-            result = QuantLabGuardResult(enabled=True, permission=ALLOW, reasons=["risk_permission_disabled"])
+            result = QuantLabGuardResult(
+                enabled=True,
+                permission=ALLOW,
+                reasons=["risk_permission_disabled"],
+                response_ts=utc_now_iso(),
+                mode=self.mode.value,
+                mode_source=self.mode_resolution.mode_source,
+                mode_override_path=self.mode_resolution.override_path,
+                called_api=self.called_api,
+                apply_permission_gate=False,
+                apply_cost_gate=self.apply_cost_gate,
+                permission_gate_enforced=False,
+                cost_gate_enforced=self.apply_cost_gate,
+            )
             self.permission_result = result
             self._emit_usage({"event_type": "live_permission", "permission": ALLOW, "success": True, "fallback_used": False})
             return result
@@ -176,6 +334,14 @@ class QuantLabGuard:
                 gate_version=permission.gate_version,
                 fallback_used=False,
                 response_ts=permission.created_at or utc_now_iso(),
+                mode=self.mode.value,
+                mode_source=self.mode_resolution.mode_source,
+                mode_override_path=self.mode_resolution.override_path,
+                called_api=True,
+                apply_permission_gate=self.apply_permission_gate,
+                apply_cost_gate=self.apply_cost_gate,
+                permission_gate_enforced=self.apply_permission_gate,
+                cost_gate_enforced=self.apply_cost_gate,
             )
             self.permission_result = result
             self._emit_usage(
@@ -187,10 +353,13 @@ class QuantLabGuard:
                     "status": "ok",
                     "success": True,
                     "permission": result.permission,
+                    "quant_lab_permission": result.permission,
                     "allowed_modes": result.allowed_modes,
                     "cost_model_version": result.cost_model_version,
                     "gate_version": result.gate_version,
                     "fallback_used": False,
+                    "enforced": self.apply_permission_gate,
+                    "hypothetical": not self.apply_permission_gate,
                 }
             )
             return result
@@ -208,6 +377,14 @@ class QuantLabGuard:
                 response_ts=utc_now_iso(),
                 error_type=type(exc).__name__,
                 error_message_sanitized=str(sanitize_quant_lab_obj(str(exc)[:300])),
+                mode=self.mode.value,
+                mode_source=self.mode_resolution.mode_source,
+                mode_override_path=self.mode_resolution.override_path,
+                called_api=True,
+                apply_permission_gate=self.apply_permission_gate,
+                apply_cost_gate=self.apply_cost_gate,
+                permission_gate_enforced=self.apply_permission_gate,
+                cost_gate_enforced=self.apply_cost_gate,
             )
             self.permission_result = result
             self._emit_usage(
@@ -217,6 +394,7 @@ class QuantLabGuard:
                     "status": "error",
                     "success": False,
                     "permission": result.permission,
+                    "quant_lab_permission": result.permission,
                     "fallback_used": True,
                     "fallback_reason": result.fallback_reason,
                     "error_type": result.error_type,
@@ -257,23 +435,32 @@ class QuantLabGuard:
         permission = normalize_permission(permission, allow_local=True)
         if permission == ALLOW_LOCAL:
             permission = ALLOW
+        final_permission = self.final_permission or permission
         kept: List[Order] = []
         for order in source:
-            filtered = False
+            would_filter = False
+            actually_filtered = False
             reason = ""
             if permission == ABORT:
-                filtered = True
+                would_filter = True
                 reason = "quant_lab_abort"
             elif permission == SELL_ONLY and not _is_sell_or_close(order):
-                filtered = True
+                would_filter = True
                 reason = "quant_lab_sell_only"
+            if self.apply_permission_gate:
+                actually_filtered = would_filter
             meta = dict(getattr(order, "meta", None) or {})
             qmeta = dict(meta.get("quant_lab") or {})
             qmeta.update(
                 {
                     "permission": self.permission_result.permission,
-                    "final_permission": permission,
-                    "order_filtered": filtered,
+                    "quant_lab_permission": self.permission_result.permission,
+                    "final_permission": final_permission,
+                    "permission_gate_enforced": self.apply_permission_gate,
+                    "cost_gate_enforced": self.apply_cost_gate,
+                    "would_filter_by_permission": would_filter,
+                    "order_filtered": actually_filtered,
+                    "actually_filtered": actually_filtered,
                     "filter_reason": reason,
                     "response_ts": self.permission_result.response_ts or utc_now_iso(),
                 }
@@ -287,14 +474,20 @@ class QuantLabGuard:
                 "intent": getattr(order, "intent", None),
                 "notional_usdt": float(getattr(order, "notional_usdt", 0.0) or 0.0),
                 "permission": self.permission_result.permission,
-                "final_permission": permission,
-                "order_filtered": filtered,
+                "quant_lab_permission": self.permission_result.permission,
+                "final_permission": final_permission,
+                "would_filter": would_filter,
+                "would_filter_by_permission": would_filter,
+                "order_filtered": actually_filtered,
+                "actually_filtered": actually_filtered,
                 "filter_reason": reason,
+                "enforced": self.apply_permission_gate,
+                "hypothetical": bool(would_filter and not self.apply_permission_gate),
             }
             self.filtered_orders.append(dict(sanitize_quant_lab_obj(row)))
-            if filtered:
+            if would_filter or actually_filtered:
                 self._emit_usage(row)
-            else:
+            if not actually_filtered:
                 kept.append(order)
         return kept
 
@@ -306,6 +499,33 @@ class QuantLabGuard:
     ) -> Tuple[List[Order], List[Dict[str, Any]]]:
         source = list(orders or [])
         qcfg = _ql_cfg(cfg)
+        if self.mode == QuantLabMode.LOCAL_ONLY:
+            self._emit_usage(
+                {
+                    "event_type": "cost_estimate",
+                    "status": "local_only",
+                    "success": True,
+                    "called_api": False,
+                    "fallback_used": False,
+                    "source": "local_only",
+                    "cost_source": "local_only",
+                    "skipped_reason": "quant_lab_local_only",
+                }
+            )
+            return source, []
+        if self.mode == QuantLabMode.PERMISSION_ONLY:
+            self._emit_usage(
+                {
+                    "event_type": "cost_estimate",
+                    "status": "permission_only_skip_cost",
+                    "success": True,
+                    "called_api": self.called_api,
+                    "fallback_used": False,
+                    "source": "permission_only",
+                    "cost_source": "permission_only_skip_cost",
+                }
+            )
+            return source, []
         if not bool(getattr(qcfg, "enabled", False)) or not bool(getattr(qcfg, "cost_enabled", True)):
             self._emit_usage({"event_type": "cost_estimate", "status": "disabled", "success": True, "fallback_used": False})
             return source, []
@@ -334,7 +554,7 @@ class QuantLabGuard:
                     fallback_reason = "quant_lab_cost_unavailable_local_fallback"
                 else:
                     fail_policy = str(getattr(qcfg, "fail_policy", "sell_only") or "sell_only").lower()
-                    if fail_policy == "abort":
+                    if fail_policy == "abort" and self.apply_cost_gate:
                         self._emit_usage(
                             {
                                 "event_type": "fallback",
@@ -346,7 +566,7 @@ class QuantLabGuard:
                             }
                         )
                         return [], rows
-                    if fail_policy == "sell_only" and not _is_sell_or_close(order):
+                    if fail_policy == "sell_only" and self.apply_cost_gate and not _is_sell_or_close(order):
                         self._emit_usage(
                             {
                                 "event_type": "filter_order",
@@ -363,6 +583,7 @@ class QuantLabGuard:
                     fallback_reason = "quant_lab_cost_unavailable_local_fallback"
 
             gate: CostGateResult = apply_quant_lab_cost_gate(order, estimate, cfg)
+            actually_filtered = bool(gate.filtered and self.apply_cost_gate)
             row = {
                 "event_type": "cost_estimate",
                 "symbol": getattr(order, "symbol", None),
@@ -383,6 +604,13 @@ class QuantLabGuard:
                 "passed": gate.passed,
                 "filtered": gate.filtered,
                 "filter_reason": gate.reason,
+                "would_filter": bool(gate.filtered),
+                "would_filter_by_cost": bool(gate.filtered),
+                "actually_filtered": actually_filtered,
+                "order_filtered": actually_filtered,
+                "cost_gate_enforced": self.apply_cost_gate,
+                "enforced": self.apply_cost_gate,
+                "hypothetical": bool(gate.filtered and not self.apply_cost_gate),
                 "fallback_used": fallback_used,
                 "fallback_reason": fallback_reason,
                 "success": True,
@@ -409,6 +637,10 @@ class QuantLabGuard:
                     "expected_edge_bps": gate.expected_edge_bps,
                     "min_required_edge_bps": gate.min_required_edge_bps,
                     "cost_gate_passed": gate.passed,
+                    "cost_gate_enforced": self.apply_cost_gate,
+                    "permission_gate_enforced": self.apply_permission_gate,
+                    "would_filter_by_cost": bool(gate.filtered),
+                    "actually_filtered_by_cost": actually_filtered,
                     "fallback_used": bool(qmeta.get("fallback_used") or fallback_used),
                     "fallback_reason": fallback_reason or qmeta.get("fallback_reason"),
                     "response_ts": utc_now_iso(),
@@ -416,7 +648,7 @@ class QuantLabGuard:
             )
             meta["quant_lab"] = qmeta
             order.meta = sanitize_quant_lab_obj(meta)
-            if not gate.filtered:
+            if not actually_filtered:
                 kept.append(order)
             else:
                 self.filtered_orders.append(
@@ -446,24 +678,41 @@ class QuantLabGuard:
         before = len(source)
         filtered = self.filter_orders_by_permission(source, self.permission_result)
         filtered, rows = self.enrich_orders_with_cost(filtered, str(_get_cfg(self.cfg, "cost_regime", "normal") or "normal"), self.cfg)
-        filtered = self.filter_orders_by_permission(filtered, self.permission_result)
+        if self.apply_permission_gate:
+            filtered = self.filter_orders_by_permission(filtered, self.permission_result)
         summary = self.summary_payload(orders_before=before, orders_after=len(filtered))
         return filtered, summary
 
     def summary_payload(self, *, orders_before: Optional[int] = None, orders_after: Optional[int] = None) -> Dict[str, Any]:
         permission = self.permission_result
-        filtered_by_permission = len(
-            [row for row in self.filtered_orders if str(row.get("filter_reason", "")).startswith("quant_lab_sell") or row.get("filter_reason") == "quant_lab_abort"]
-        )
+        permission_rows = [
+            row
+            for row in self.filtered_orders
+            if str(row.get("filter_reason", "")).startswith("quant_lab_sell") or row.get("filter_reason") == "quant_lab_abort"
+        ]
+        would_filter_by_permission = len([row for row in permission_rows if row.get("would_filter") or row.get("would_filter_by_permission")])
+        filtered_by_permission = len([row for row in permission_rows if row.get("actually_filtered") or row.get("order_filtered")])
+        would_filter_by_cost = len([row for row in self.cost_rows if row.get("would_filter") or row.get("would_filter_by_cost")])
         filtered_by_cost = len(
-            [row for row in self.filtered_orders if "cost" in str(row.get("filter_reason", ""))]
+            [row for row in self.cost_rows if row.get("actually_filtered") or row.get("order_filtered")]
         )
         cost_fallback = len([row for row in self.cost_rows if row.get("fallback_used")])
+        final_permission = self.final_permission or ("LOCAL_ONLY" if self.mode == QuantLabMode.LOCAL_ONLY else permission.permission)
         return sanitize_quant_lab_obj(
             {
                 "enabled": bool(permission.enabled),
+                "mode": self.mode.value,
+                "mode_source": self.mode_resolution.mode_source,
+                "mode_override_path": self.mode_resolution.override_path,
+                "called_api": self.called_api,
+                "apply_permission_gate": self.apply_permission_gate,
+                "apply_cost_gate": self.apply_cost_gate,
+                "permission_gate_enforced": self.apply_permission_gate,
+                "cost_gate_enforced": self.apply_cost_gate,
                 "permission": permission.permission,
-                "final_permission": permission.permission,
+                "quant_lab_permission": permission.permission,
+                "local_preflight_permission": self.local_preflight_permission,
+                "final_permission": final_permission,
                 "allowed_modes": permission.allowed_modes,
                 "risk_permission_reasons": permission.reasons,
                 "cost_model_version": permission.cost_model_version
@@ -475,7 +724,9 @@ class QuantLabGuard:
                 "request_error_count": int(self.request_error_count),
                 "cost_request_count": len(self.cost_rows),
                 "cost_fallback_count": cost_fallback,
+                "would_filter_by_permission_count": would_filter_by_permission,
                 "filtered_by_permission_count": filtered_by_permission,
+                "would_filter_by_cost_count": would_filter_by_cost,
                 "filtered_by_cost_count": filtered_by_cost,
                 "orders_before": orders_before,
                 "orders_after": orders_after,
@@ -485,6 +736,8 @@ class QuantLabGuard:
                 "cost_min_edge_multiplier": float(_get_cfg(self.cfg, "cost_min_edge_multiplier", 1.5) or 1.5),
                 "min_cost_bps_floor": float(_get_cfg(self.cfg, "min_cost_bps_floor", 5.0) or 0.0),
                 "last_response_ts": permission.response_ts,
+                "skipped_reason": permission.skipped_reason,
+                "mode_warning": self.mode_resolution.warning,
             }
         )
 

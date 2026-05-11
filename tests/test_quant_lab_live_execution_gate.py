@@ -5,6 +5,7 @@ from pathlib import Path
 from configs.schema import ExecutionConfig
 from src.core.models import Order
 from src.execution.live_execution_engine import LiveExecutionEngine
+from src.execution.okx_private_client import OKXResponse
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
 
@@ -12,6 +13,11 @@ from src.execution.position_store import PositionStore
 class _OKX:
     def place_order(self, *args, **kwargs):
         raise AssertionError("OKX place_order must not be called")
+
+
+class _AcceptOKX:
+    def place_order(self, *args, **kwargs):
+        return OKXResponse(data={"code": "0", "data": [{"sCode": "0", "ordId": "okx-1"}]}, http_status=200)
 
 
 def _engine(tmp_path: Path) -> LiveExecutionEngine:
@@ -28,7 +34,14 @@ def _engine(tmp_path: Path) -> LiveExecutionEngine:
 
 def test_live_execution_rejects_quant_lab_abort(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
-    order = Order("BTC/USDT", "sell", "CLOSE_LONG", 10.0, 100.0, {"quant_lab": {"final_permission": "ABORT", "filter_reason": "quant_lab_abort"}})
+    order = Order(
+        "BTC/USDT",
+        "sell",
+        "CLOSE_LONG",
+        10.0,
+        100.0,
+        {"quant_lab": {"final_permission": "ABORT", "permission_gate_enforced": True, "filter_reason": "quant_lab_abort"}},
+    )
 
     result = engine.place(order)
     row = engine.order_store.get(result.cl_ord_id)
@@ -40,7 +53,14 @@ def test_live_execution_rejects_quant_lab_abort(tmp_path: Path) -> None:
 
 def test_live_execution_rejects_quant_lab_sell_only_buy(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
-    order = Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"quant_lab": {"final_permission": "SELL_ONLY", "filter_reason": "quant_lab_sell_only"}})
+    order = Order(
+        "BTC/USDT",
+        "buy",
+        "OPEN_LONG",
+        10.0,
+        100.0,
+        {"quant_lab": {"final_permission": "SELL_ONLY", "permission_gate_enforced": True, "filter_reason": "quant_lab_sell_only"}},
+    )
 
     result = engine.place(order)
     row = engine.order_store.get(result.cl_ord_id)
@@ -48,3 +68,23 @@ def test_live_execution_rejects_quant_lab_sell_only_buy(tmp_path: Path) -> None:
     assert result.state == "REJECTED"
     assert row.last_error_code == "QUANT_LAB_GATE"
     assert row.submit_gate == "SELL_ONLY"
+
+
+def test_live_execution_ignores_quant_lab_when_permission_gate_not_enforced(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    engine.okx = _AcceptOKX()
+    order = Order(
+        "BTC/USDT",
+        "buy",
+        "OPEN_LONG",
+        10.0,
+        100.0,
+        {"quant_lab": {"final_permission": "ABORT", "permission_gate_enforced": False}},
+    )
+
+    result = engine.place(order)
+    row = engine.order_store.get(result.cl_ord_id)
+
+    assert row is not None
+    assert result.state != "REJECTED" or row.last_error_code != "QUANT_LAB_GATE"
+    assert row.last_error_code != "QUANT_LAB_GATE"

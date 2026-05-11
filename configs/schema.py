@@ -1437,7 +1437,8 @@ class MLLabelerConfig(BaseModel):
 
 
 class QuantLabConfig(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
+    mode: str = "shadow"
     base_url: str = "http://qyun2.hrhome.top:8027"
     api_token_env: Optional[str] = "QUANT_LAB_API_TOKEN"
     timeout_seconds: float = 2.0
@@ -1471,6 +1472,17 @@ class QuantLabConfig(BaseModel):
     export_bundle_include_config: bool = True
     export_bundle_max_recent_runs: int = 96
     export_bundle_redact_secrets: bool = True
+    runtime_override_path: str = "state/quant_lab_mode.json"
+    allow_runtime_override: bool = True
+    write_mode_audit: bool = True
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, v: str) -> str:
+        vv = str(v or "shadow").strip().lower().replace("-", "_")
+        if vv not in {"local_only", "shadow", "cost_only", "permission_only", "enforce"}:
+            raise ValueError("quant_lab.mode must be local_only, shadow, cost_only, permission_only, or enforce")
+        return vv
 
     @field_validator("fail_policy")
     @classmethod
@@ -1543,6 +1555,12 @@ class QuantLabConfig(BaseModel):
         if not (value[0].isalpha() or value[0] == "_") or not all(ch.isalnum() or ch == "_" for ch in value):
             raise ValueError("quant_lab.api_token_env must be a valid environment variable name")
         return value
+
+    @model_validator(mode="after")
+    def _validate_mode_base_url(self) -> "QuantLabConfig":
+        if bool(self.enabled) and self.mode != "local_only" and not str(self.base_url or "").strip():
+            raise ValueError("quant_lab.base_url must be non-empty when quant_lab.enabled=true and mode is not local_only")
+        return self
 
 
 class AppConfig(BaseModel):

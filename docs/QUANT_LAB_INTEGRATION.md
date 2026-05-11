@@ -18,6 +18,14 @@ V5 remains the only component that can execute real trading: OKX private API, or
 
 ## Permissions
 
+V5 has a staged quant-lab mode switch:
+
+- `local_only`: skip quant-lab completely.
+- `shadow`: call quant-lab and record telemetry, but do not filter orders.
+- `cost_only`: apply only quant-lab cost gate.
+- `permission_only`: apply only quant-lab permission.
+- `enforce`: apply permission and cost gates.
+
 `ALLOW`, `SELL_ONLY`, and `ABORT` are combined conservatively:
 
 - Any `ABORT` makes the final permission `ABORT`.
@@ -61,6 +69,7 @@ Fallback events include policy and action taken so quant-lab can later audit why
 
 ```bash
 python scripts/quant_lab_selfcheck.py --config configs/config.yaml
+python scripts/quant_lab_mode.py show --config configs/config.yaml
 tail -f reports/quant_lab_usage.jsonl
 python scripts/export_v5_bundle.py --reports-dir reports --out-dir /var/lib/v5/exports/bundles
 ```
