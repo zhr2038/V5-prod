@@ -4267,6 +4267,210 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             },
         )
 
+    SWING_EARLY_EXIT_REASONS = {
+        "atr_trailing",
+        "zero_target_close",
+        "regime_exit",
+    }
+
+    def roundtrip_payload(row):
+        payload = parse_json_obj(row.get("raw_json"), {})
+        return payload if isinstance(payload, dict) else {}
+
+    def row_has_truthy_key(row, key):
+        if truthy(row.get(key)):
+            return True
+        payload = roundtrip_payload(row)
+        for item in iter_dicts(payload):
+            if key in item and truthy(item.get(key)):
+                return True
+            for meta_key in ("meta_json", "raw_meta", "meta", "metadata", "order_meta"):
+                if meta_key not in item:
+                    continue
+                meta = parse_json_obj(item.get(meta_key), {})
+                if isinstance(meta, dict) and truthy(meta.get(key)):
+                    return True
+        text = flatten_value(payload).lower()
+        return f'"{key}": true' in text
+
+    def swing_required_hold_hours(row):
+        payload = roundtrip_payload(row)
+        for item in iter_dicts(payload):
+            value = as_float(first_value(item, ("swing_min_hold_hours", "required_hold_hours"), not_obs))
+            if value is not None and value > 0:
+                return value
+            for meta_key in ("meta_json", "raw_meta", "meta", "metadata", "order_meta"):
+                meta = parse_json_obj(item.get(meta_key), {}) if isinstance(item, dict) else {}
+                if not isinstance(meta, dict):
+                    continue
+                value = as_float(first_value(meta, ("swing_min_hold_hours", "required_hold_hours"), not_obs))
+                if value is not None and value > 0:
+                    return value
+        configured = config_number("swing_min_hold_hours")
+        return configured if configured is not None and configured > 0 else 24.0
+
+    def is_swing_normal_non_probe_roundtrip(row):
+        if row.get("roundtrip_status") != "closed":
+            return False
+        if is_probe_trade_row(row):
+            return False
+        if not row_has_truthy_key(row, "swing_hold_position"):
+            return False
+        entry_reason = flatten_value(row.get("entry_reason")).strip().lower()
+        return entry_reason in {"ok", "normal", "normal_entry", "protect_recovery", "protect_recovery_swing"}
+
+    def swing_early_exit_reason(exit_reason):
+        text = flatten_value(exit_reason).strip().lower()
+        if text.startswith("stop_loss") or text.startswith("fixed_stop_loss"):
+            return False
+        return text in SWING_EARLY_EXIT_REASONS or text.startswith("rank_exit")
+
+    def configured_roundtrip_cost_bps():
+        configured = config_number("cost_aware_roundtrip_cost_bps")
+        if configured is not None:
+            return configured
+        fee = config_number("fee_bps")
+        slippage = config_number("slippage_bps")
+        if fee is None:
+            fee = 0.0
+        if slippage is None:
+            slippage = 0.0
+        return 2.0 * (fee + slippage)
+
+    def forward_net_bps(symbol, base_dt, base_px, horizon_hours, rt_cost_bps):
+        base_price = as_float(base_px)
+        if base_dt is None or base_price is None or base_price <= 0:
+            return not_obs
+        horizon_dt = base_dt + dt.timedelta(hours=int(horizon_hours))
+        if horizon_dt > NOW:
+            return "pending"
+        future_px, _future_source, _future_reason = future_price_for_symbol(symbol, horizon_dt)
+        if future_px is None:
+            return not_obs
+        return fmt_num(((future_px / base_price) - 1.0) * 10000.0 - rt_cost_bps, 6)
+
+    def better_to_hold_text(future_net_bps, realized_net_bps):
+        if future_net_bps == "pending":
+            return "pending"
+        future_value = as_float(future_net_bps)
+        realized_value = as_float(realized_net_bps)
+        if future_value is None or realized_value is None:
+            return not_obs
+        return str(future_value > realized_value).lower()
+
+    swing_rt_cost_bps = configured_roundtrip_cost_bps()
+    swing_early_exit_rows = []
+    for row in closed_roundtrip_rows:
+        if not is_swing_normal_non_probe_roundtrip(row):
+            continue
+        symbol = row.get("symbol", not_obs)
+        entry_dt = parse_dt_utc(row.get("entry_ts"))
+        exit_dt = parse_dt_utc(row.get("exit_ts"))
+        hold_hours = as_float(row.get("hold_minutes"))
+        if hold_hours is not None:
+            hold_hours = hold_hours / 60.0
+        elif entry_dt is not None and exit_dt is not None:
+            hold_hours = (exit_dt - entry_dt).total_seconds() / 3600.0
+        required_hold = swing_required_hold_hours(row)
+        exit_reason = flatten_value(row.get("exit_reason")).strip()
+        before_min_hold = hold_hours is not None and required_hold is not None and hold_hours < required_hold
+        early_exit = before_min_hold and swing_early_exit_reason(exit_reason)
+        future_24_entry = forward_net_bps(symbol, entry_dt, row.get("entry_px"), 24, swing_rt_cost_bps)
+        future_48_entry = forward_net_bps(symbol, entry_dt, row.get("entry_px"), 48, swing_rt_cost_bps)
+        future_72_entry = forward_net_bps(symbol, entry_dt, row.get("entry_px"), 72, swing_rt_cost_bps)
+        future_24_after_exit = forward_net_bps(symbol, exit_dt, row.get("exit_px"), 24, swing_rt_cost_bps)
+        future_48_after_exit = forward_net_bps(symbol, exit_dt, row.get("exit_px"), 48, swing_rt_cost_bps)
+        swing_early_exit_rows.append({
+            "symbol": symbol,
+            "entry_ts": row.get("entry_ts", not_obs),
+            "exit_ts": row.get("exit_ts", not_obs),
+            "entry_px": row.get("entry_px", not_obs),
+            "exit_px": row.get("exit_px", not_obs),
+            "exit_reason": exit_reason or not_obs,
+            "hold_hours": fmt_num(hold_hours, 6),
+            "required_hold_hours": fmt_num(required_hold, 6),
+            "exited_before_min_hold": str(bool(early_exit)).lower(),
+            "net_bps_at_exit": row.get("net_bps", not_obs),
+            "future_24h_net_bps_from_entry": future_24_entry,
+            "future_48h_net_bps_from_entry": future_48_entry,
+            "future_72h_net_bps_from_entry": future_72_entry,
+            "future_24h_net_bps_after_exit": future_24_after_exit,
+            "future_48h_net_bps_after_exit": future_48_after_exit,
+            "would_have_been_better_to_hold_24h": better_to_hold_text(future_24_entry, row.get("net_bps")),
+            "would_have_been_better_to_hold_48h": better_to_hold_text(future_48_entry, row.get("net_bps")),
+        })
+
+    def swing_avg_numeric_field(rows, field):
+        values = [as_float(row.get(field)) for row in rows]
+        values = [value for value in values if value is not None]
+        return (sum(values) / len(values)) if values else None
+
+    def aggregate_swing_early_exit_by_reason(rows):
+        grouped = defaultdict(list)
+        for row in rows:
+            grouped[row.get("exit_reason") or not_obs].append(row)
+        out = []
+        for reason, group_rows in sorted(grouped.items()):
+            early_rows = [row for row in group_rows if row.get("exited_before_min_hold") == "true"]
+            better_24 = [row for row in early_rows if row.get("would_have_been_better_to_hold_24h") in {"true", "false"}]
+            better_48 = [row for row in early_rows if row.get("would_have_been_better_to_hold_48h") in {"true", "false"}]
+            out.append({
+                "exit_reason": reason,
+                "count": len(group_rows),
+                "early_exit_count": len(early_rows),
+                "avg_net_bps_at_exit": fmt_num(swing_avg_numeric_field(group_rows, "net_bps_at_exit"), 6),
+                "avg_future_24h_net_bps_from_entry": fmt_num(swing_avg_numeric_field(group_rows, "future_24h_net_bps_from_entry"), 6),
+                "avg_future_48h_net_bps_from_entry": fmt_num(swing_avg_numeric_field(group_rows, "future_48h_net_bps_from_entry"), 6),
+                "better_to_hold_24h_count": sum(1 for row in better_24 if row.get("would_have_been_better_to_hold_24h") == "true"),
+                "better_to_hold_24h_rate": fmt_num(
+                    sum(1 for row in better_24 if row.get("would_have_been_better_to_hold_24h") == "true") / len(better_24)
+                    if better_24
+                    else None,
+                    6,
+                ),
+                "better_to_hold_48h_count": sum(1 for row in better_48 if row.get("would_have_been_better_to_hold_48h") == "true"),
+                "better_to_hold_48h_rate": fmt_num(
+                    sum(1 for row in better_48 if row.get("would_have_been_better_to_hold_48h") == "true") / len(better_48)
+                    if better_48
+                    else None,
+                    6,
+                ),
+            })
+        return out
+
+    swing_early_exit_by_reason = aggregate_swing_early_exit_by_reason(swing_early_exit_rows)
+    swing_early_exit_sample_rows = [row for row in swing_early_exit_rows if row.get("exited_before_min_hold") == "true"]
+    swing_early_exit_better_24_rows = [
+        row for row in swing_early_exit_sample_rows
+        if row.get("would_have_been_better_to_hold_24h") in {"true", "false"}
+    ]
+    swing_early_exit_better_24_count = sum(
+        1 for row in swing_early_exit_better_24_rows
+        if row.get("would_have_been_better_to_hold_24h") == "true"
+    )
+    swing_early_exit_better_24_rate = (
+        swing_early_exit_better_24_count / len(swing_early_exit_better_24_rows)
+        if swing_early_exit_better_24_rows
+        else None
+    )
+    if (
+        len(swing_early_exit_sample_rows) >= 3
+        and len(swing_early_exit_better_24_rows) >= 3
+        and swing_early_exit_better_24_rate is not None
+        and swing_early_exit_better_24_rate > 0.6
+    ):
+        add_issue(
+            "medium",
+            "swing_early_exit_premature",
+            "Swing-hold positions exited before min-hold and most observable 24h hold outcomes would have been better.",
+            {
+                "sample_count": len(swing_early_exit_sample_rows),
+                "observable_24h_count": len(swing_early_exit_better_24_rows),
+                "would_have_been_better_to_hold_24h_rate": fmt_num(swing_early_exit_better_24_rate, 6),
+                "by_reason": swing_early_exit_by_reason,
+            },
+        )
+
     SOL_SWING_SYMBOL = "SOL/USDT"
 
     def is_sol_symbol(value):
@@ -4947,6 +5151,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         ["symbol", "count", "avg_net_bps", "win_rate", "avg_hold_minutes"],
     )
     write_csv(
+        "summaries/swing_early_exit_audit.csv",
+        swing_early_exit_rows,
+        ["symbol", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "hold_hours", "required_hold_hours", "exited_before_min_hold", "net_bps_at_exit", "future_24h_net_bps_from_entry", "future_48h_net_bps_from_entry", "future_72h_net_bps_from_entry", "future_24h_net_bps_after_exit", "future_48h_net_bps_after_exit", "would_have_been_better_to_hold_24h", "would_have_been_better_to_hold_48h"],
+    )
+    write_csv(
+        "summaries/swing_early_exit_outcomes_by_reason.csv",
+        swing_early_exit_by_reason,
+        ["exit_reason", "count", "early_exit_count", "avg_net_bps_at_exit", "avg_future_24h_net_bps_from_entry", "avg_future_48h_net_bps_from_entry", "better_to_hold_24h_count", "better_to_hold_24h_rate", "better_to_hold_48h_count", "better_to_hold_48h_rate"],
+    )
+    write_csv(
         "summaries/factor_contribution_audit.csv",
         factor_contribution_rows,
         ["ts_utc", "run_id", "symbol", "final_score", "alpha6_score", "raw_factors", "z_factors", "effective_factor_weights", "contribution_f1_mom_5d", "contribution_f2_mom_20d", "contribution_f3_vol_adj_ret", "contribution_f4_volume_expansion", "contribution_f5_rsi_trend_confirm", "dominant_factor", "dominant_factor_contribution_pct", "router_action", "router_reason", *[f"forward_{int(h)}h_net_bps" for h in label_horizons]],
@@ -5109,6 +5323,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         else None
     )
     protect_sideways_medium_issue_present = any(item.get("code") == "protect_sideways_normal_entry_negative" for item in issues)
+    swing_early_exit_count = len(swing_early_exit_sample_rows)
+    swing_early_exit_atr_trailing_count = sum(
+        1 for row in swing_early_exit_sample_rows
+        if flatten_value(row.get("exit_reason")).strip().lower() == "atr_trailing"
+    )
+    swing_early_exit_medium_issue_present = any(item.get("code") == "swing_early_exit_premature" for item in issues)
     high_score_block_category_counts = dict(sorted(Counter(row.get("high_score_block_category") or not_obs for row in high_score_blocked_rows).items()))
     high_score_recent_24h_rows = [
         row for row in high_score_blocked_rows
@@ -5151,6 +5371,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "protect_sideways_normal_entry_avg_net_bps": protect_sideways_avg_net_bps if protect_sideways_avg_net_bps is not None else not_obs,
         "protect_sideways_normal_entry_win_rate": protect_sideways_win_rate if protect_sideways_win_rate is not None else not_obs,
         "protect_sideways_normal_entry_medium_issue": bool(protect_sideways_medium_issue_present),
+        "swing_early_exit_audit_rows": len(swing_early_exit_rows),
+        "swing_early_exit_count": swing_early_exit_count,
+        "swing_early_exit_atr_trailing_count": swing_early_exit_atr_trailing_count,
+        "swing_early_exit_better_to_hold_24h_rate": swing_early_exit_better_24_rate if swing_early_exit_better_24_rate is not None else not_obs,
+        "swing_early_exit_medium_issue": bool(swing_early_exit_medium_issue_present),
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_labelable_target_count": len(high_score_labelable_rows),
         "high_score_blocked_non_entry_management_count": len(high_score_non_entry_management_rows),
@@ -5279,6 +5504,26 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         protect_sideways_by_symbol_text = "not_applicable_no_protect_sideways_normal_entries"
         protect_sideways_avg_text = "not_applicable_no_protect_sideways_normal_entries"
         protect_sideways_win_rate_text = "not_applicable_no_protect_sideways_normal_entries"
+
+    if swing_early_exit_by_reason:
+        swing_early_exit_by_reason_text = "; ".join(
+            f"{row.get('exit_reason', not_obs)}: count={row.get('count', 0)}, early={row.get('early_exit_count', 0)}, "
+            f"avg_exit={row.get('avg_net_bps_at_exit', not_obs)}, "
+            f"better24_rate={row.get('better_to_hold_24h_rate', not_obs)}"
+            for row in swing_early_exit_by_reason
+        )
+    else:
+        swing_early_exit_by_reason_text = "not_applicable_no_swing_hold_roundtrips"
+    swing_early_exit_atr_text = (
+        f"yes / {swing_early_exit_atr_trailing_count}"
+        if swing_early_exit_atr_trailing_count
+        else "no / 0"
+    )
+    swing_early_exit_better_24_text = (
+        fmt_num(swing_early_exit_better_24_rate, 6)
+        if swing_early_exit_better_24_rate is not None
+        else not_obs
+    )
 
     if high_score_recent_24h_rows:
         high_score_recent_labelable_rows = [
@@ -5588,6 +5833,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- win_rate: {protect_sideways_win_rate_text}",
         f"- by_symbol: {protect_sideways_by_symbol_text}",
         f"- medium issue present: {'yes' if protect_sideways_medium_issue_present else 'no'}",
+        "",
+        "## Swing early exit audit",
+        f"- audit rows: {len(swing_early_exit_rows)}",
+        f"- early exit count: {swing_early_exit_count}",
+        f"- by reason: {swing_early_exit_by_reason_text}",
+        f"- ATR trailing before min_hold: {swing_early_exit_atr_text}",
+        f"- better_to_hold_24h_rate: {swing_early_exit_better_24_text}",
+        f"- medium issue present: {'yes' if swing_early_exit_medium_issue_present else 'no'}",
         "",
         "## Negative expectancy 口径一致性",
         f"- consistency rows: {len(negative_consistency_rows)}",
