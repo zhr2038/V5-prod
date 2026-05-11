@@ -269,6 +269,137 @@ def test_market_impulse_probe_opens_small_probe_in_protect(tmp_path: Path) -> No
     assert shadow["selected_by_priority"] == "BTC/USDT"
 
 
+def test_market_impulse_probe_quality_filter_blocks_btc_alpha6_sell_in_protect(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.706, {"side": "sell", "score": 0.26, "f4": -1.369, "f5": 0.534}),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+            "BNB/USDT": ("buy", 0.74, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-quality-block")
+
+    out = pipe.run(
+        market_data_1h=_market_data_with_btc(81434.8),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "market_impulse_probe_quality_filter")
+    assert decision["symbol"] == "BTC/USDT"
+    assert decision["action"] == "skip"
+    assert decision["alpha6_side"] == "sell"
+    assert decision["alpha6_score"] == 0.26
+    assert decision["f4_volume_expansion"] == -1.369
+    assert decision["f5_rsi_trend_confirm"] == 0.534
+    assert decision["trend_buy_count"] == 4
+    assert decision["btc_trend_score"] == 0.706
+    assert decision["quality_filter_block_reason"] == "btc_alpha6_sell"
+    assert audit.counts["market_impulse_probe_quality_filter_block_count"] == 1
+    assert audit.counts["market_impulse_probe_open_count"] == 0
+
+
+def test_market_impulse_probe_quality_filter_allows_btc_alpha6_buy_with_good_f4_f5(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.72, {"side": "buy", "score": 0.45, "f4": -0.10, "f5": 0.20}),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+            "BNB/USDT": ("buy", 0.74, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-quality-allow")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "BTC/USDT"
+    assert out.orders[0].meta["market_impulse_probe"] is True
+    assert not any(d.get("reason") == "market_impulse_probe_quality_filter" for d in audit.router_decisions)
+
+
+def test_market_impulse_probe_quality_filter_defaults_to_protect_only(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.market_impulse_probe_only_in_protect = False
+    _write_auto_risk_level(cfg.execution.order_store_path, "NORMAL")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.72, {"side": "sell", "score": 0.26, "f4": -1.30, "f5": 0.20}),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-quality-normal-allow")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "BTC/USDT"
+    assert not any(d.get("reason") == "market_impulse_probe_quality_filter" for d in audit.router_decisions)
+
+
+def test_market_impulse_probe_quality_filter_can_apply_outside_protect_when_configured(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.market_impulse_probe_only_in_protect = False
+    cfg.execution.market_impulse_probe_quality_filter_only_in_protect = False
+    _write_auto_risk_level(cfg.execution.order_store_path, "NORMAL")
+    payload = _strategy_payload(
+        {
+            "BTC/USDT": ("buy", 0.72, {"side": "sell", "score": 0.26, "f4": -1.30, "f5": 0.20}),
+            "ETH/USDT": ("buy", 0.82, None),
+            "SOL/USDT": ("buy", 0.78, None),
+        }
+    )
+    pipe = _build_pipe(cfg, tmp_path, payload)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _empty_portfolio()
+    audit = DecisionAudit(run_id="market-impulse-quality-normal-block")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={}),
+        precomputed_regime=_regime(),
+    )
+
+    assert not out.orders
+    assert any(d.get("reason") == "market_impulse_probe_quality_filter" for d in audit.router_decisions)
+
+
 def test_market_impulse_shadow_trend_score_selects_highest_without_changing_live_priority(tmp_path: Path) -> None:
     cfg = _base_cfg(tmp_path)
     _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")

@@ -93,6 +93,7 @@ PROBE_COUNT_FIELDS = [
     "market_impulse_probe_candidate_count",
     "market_impulse_probe_open_count",
     "market_impulse_probe_blocked_count",
+    "market_impulse_probe_quality_filter_block_count",
     "market_impulse_probe_unexecutable_notional_count",
     "btc_leadership_probe_candidate_count",
     "btc_leadership_probe_open_count",
@@ -683,6 +684,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     }
     CONFIG_CONSUMPTION_PREFIXES = (
         "btc_leadership_probe_",
+        "market_impulse_probe_",
         "swing_",
         "protect_recovery_",
         "protect_negative_expectancy_short_cycle_",

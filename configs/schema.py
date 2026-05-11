@@ -844,6 +844,12 @@ class ExecutionConfig(BaseModel):
         le=1.0,
         description="Maximum target weight allowed for dynamically sized market impulse probe entries",
     )
+    market_impulse_probe_quality_filter_enabled: bool = Field(default=True)
+    market_impulse_probe_block_btc_alpha6_sell: bool = Field(default=True)
+    market_impulse_probe_btc_alpha6_sell_block_score: float = Field(default=0.20, ge=-10.0, le=10.0)
+    market_impulse_probe_min_btc_f4_volume: float = Field(default=-0.50, ge=-10.0, le=10.0)
+    market_impulse_probe_min_btc_f5_rsi: float = Field(default=0.0, ge=-10.0, le=10.0)
+    market_impulse_probe_quality_filter_only_in_protect: bool = Field(default=True)
     btc_leadership_probe_enabled: bool = Field(default=True)
     btc_leadership_probe_only_in_protect: bool = Field(default=True)
     btc_leadership_probe_target_w: float = Field(default=0.08, ge=0.0, le=1.0)

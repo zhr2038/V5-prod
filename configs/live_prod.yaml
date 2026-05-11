@@ -363,6 +363,12 @@ execution:
   market_impulse_probe_dynamic_sizing_enabled: true
   market_impulse_probe_min_executable_buffer: 1.05
   market_impulse_probe_max_target_w: 0.10
+  market_impulse_probe_quality_filter_enabled: true
+  market_impulse_probe_block_btc_alpha6_sell: true
+  market_impulse_probe_btc_alpha6_sell_block_score: 0.20
+  market_impulse_probe_min_btc_f4_volume: -0.50
+  market_impulse_probe_min_btc_f5_rsi: 0.00
+  market_impulse_probe_quality_filter_only_in_protect: true
   btc_leadership_probe_enabled: true
   btc_leadership_probe_only_in_protect: true
   btc_leadership_probe_target_w: 0.08

@@ -2491,6 +2491,83 @@ class V5Pipeline:
             )
         return payload
 
+    def _market_impulse_probe_quality_filter_decision(
+        self,
+        *,
+        symbol: str,
+        candidate: Dict[str, Any],
+        strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
+        current_auto_risk_level: Optional[str],
+        trend_buy_count: int,
+        btc_trend_score: Optional[float],
+    ) -> Optional[Dict[str, Any]]:
+        if not bool(getattr(self.cfg.execution, "market_impulse_probe_quality_filter_enabled", True)):
+            return None
+        if bool(getattr(self.cfg.execution, "market_impulse_probe_quality_filter_only_in_protect", True)):
+            if str(current_auto_risk_level or "").upper() != "PROTECT":
+                return None
+        if str(symbol or "") != "BTC/USDT":
+            return None
+
+        alpha6_signal = (strategy_signal_lookup.get("Alpha6Factor") or {}).get("BTC/USDT")
+        values = self._protect_entry_signal_values(alpha6_signal)
+        alpha6_side = candidate.get("alpha6_side") or values.get("alpha6_side")
+        alpha6_score = candidate.get("alpha6_score")
+        if alpha6_score is None:
+            alpha6_score = values.get("alpha6_score")
+        f4_volume_expansion = candidate.get("f4_volume_expansion")
+        if f4_volume_expansion is None:
+            f4_volume_expansion = values.get("f4_volume_expansion")
+        f5_rsi_trend_confirm = candidate.get("f5_rsi_trend_confirm")
+        if f5_rsi_trend_confirm is None:
+            f5_rsi_trend_confirm = values.get("f5_rsi_trend_confirm")
+
+        block_detail = None
+        block_sell = bool(getattr(self.cfg.execution, "market_impulse_probe_block_btc_alpha6_sell", True))
+        sell_block_score = float(
+            _coalesce(getattr(self.cfg.execution, "market_impulse_probe_btc_alpha6_sell_block_score", None), 0.20)
+        )
+        min_f4 = float(
+            _coalesce(getattr(self.cfg.execution, "market_impulse_probe_min_btc_f4_volume", None), -0.50)
+        )
+        min_f5 = float(
+            _coalesce(getattr(self.cfg.execution, "market_impulse_probe_min_btc_f5_rsi", None), 0.0)
+        )
+
+        if (
+            block_sell
+            and str(alpha6_side or "").lower() == "sell"
+            and alpha6_score is not None
+            and float(alpha6_score) >= float(sell_block_score)
+        ):
+            block_detail = "btc_alpha6_sell"
+        elif f4_volume_expansion is not None and float(f4_volume_expansion) < float(min_f4):
+            block_detail = "btc_f4_volume_too_low"
+        elif f5_rsi_trend_confirm is not None and float(f5_rsi_trend_confirm) < float(min_f5):
+            block_detail = "btc_f5_rsi_too_low"
+
+        if block_detail is None:
+            return None
+
+        return {
+            "symbol": "BTC/USDT",
+            "action": "skip",
+            "reason": "market_impulse_probe_quality_filter",
+            "quality_filter_block_reason": block_detail,
+            "alpha6_side": alpha6_side,
+            "alpha6_score": float(alpha6_score) if alpha6_score is not None else None,
+            "f4_volume_expansion": float(f4_volume_expansion) if f4_volume_expansion is not None else None,
+            "f5_rsi_trend_confirm": float(f5_rsi_trend_confirm) if f5_rsi_trend_confirm is not None else None,
+            "trend_buy_count": int(trend_buy_count or 0),
+            "btc_trend_score": btc_trend_score,
+            "market_impulse_probe": True,
+            "market_impulse_probe_quality_filter_enabled": True,
+            "market_impulse_probe_btc_alpha6_sell_block_score": float(sell_block_score),
+            "market_impulse_probe_min_btc_f4_volume": float(min_f4),
+            "market_impulse_probe_min_btc_f5_rsi": float(min_f5),
+            "current_level": current_auto_risk_level,
+        }
+
     def _should_soften_fast_fail_with_market_impulse(
         self,
         *,
@@ -6734,6 +6811,32 @@ class V5Pipeline:
                         break
                     sym = str(candidate.get("symbol") or "")
                     trend_score = float(candidate.get("trend_score") or 0.0)
+                    quality_block = self._market_impulse_probe_quality_filter_decision(
+                        symbol=sym,
+                        candidate=dict(candidate or {}),
+                        strategy_signal_lookup=strategy_signal_lookup,
+                        current_auto_risk_level=current_auto_risk_level,
+                        trend_buy_count=int(market_impulse_probe_context.get("trend_buy_count") or 0),
+                        btc_trend_score=market_impulse_probe_context.get("btc_trend_score"),
+                    )
+                    if quality_block is not None:
+                        if audit:
+                            audit.counts["market_impulse_probe_blocked_count"] = int(
+                                audit.counts.get("market_impulse_probe_blocked_count", 0) or 0
+                            ) + 1
+                            audit.counts["market_impulse_probe_quality_filter_block_count"] = int(
+                                audit.counts.get("market_impulse_probe_quality_filter_block_count", 0) or 0
+                            ) + 1
+                            router_decisions.append(quality_block)
+                            audit.add_note(
+                                "Market impulse probe blocked by quality filter: "
+                                f"{sym} detail={quality_block.get('quality_filter_block_reason')} "
+                                f"alpha6_side={quality_block.get('alpha6_side')} "
+                                f"alpha6_score={quality_block.get('alpha6_score')} "
+                                f"f4={quality_block.get('f4_volume_expansion')} "
+                                f"f5={quality_block.get('f5_rsi_trend_confirm')}"
+                            )
+                        continue
                     allowed_probe, probe_block_reason, bypass_reason = self._market_impulse_probe_negexp_gate(symbol=sym)
                     if not allowed_probe:
                         if audit:

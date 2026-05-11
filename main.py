@@ -747,6 +747,34 @@ BTC_LEADERSHIP_PROBE_CONFIG_KEYS = (
 )
 
 
+MARKET_IMPULSE_PROBE_CONFIG_KEYS = (
+    "market_impulse_probe_enabled",
+    "market_impulse_probe_only_in_protect",
+    "market_impulse_probe_min_trend_buy_count",
+    "market_impulse_probe_require_btc_trend_buy",
+    "market_impulse_probe_min_btc_trend_score",
+    "market_impulse_probe_min_symbol_trend_score",
+    "market_impulse_probe_selection_mode",
+    "market_impulse_probe_max_symbols",
+    "market_impulse_probe_target_w",
+    "market_impulse_probe_cooldown_hours",
+    "market_impulse_probe_allow_single_fast_fail_bypass",
+    "market_impulse_probe_max_fast_fail_cycles_to_bypass",
+    "market_impulse_probe_disallow_active_cooldown",
+    "market_impulse_probe_time_stop_hours",
+    "market_impulse_probe_min_net_expectancy_bps_to_bypass",
+    "market_impulse_probe_dynamic_sizing_enabled",
+    "market_impulse_probe_min_executable_buffer",
+    "market_impulse_probe_max_target_w",
+    "market_impulse_probe_quality_filter_enabled",
+    "market_impulse_probe_block_btc_alpha6_sell",
+    "market_impulse_probe_btc_alpha6_sell_block_score",
+    "market_impulse_probe_min_btc_f4_volume",
+    "market_impulse_probe_min_btc_f5_rsi",
+    "market_impulse_probe_quality_filter_only_in_protect",
+)
+
+
 PROBE_EXIT_CONFIG_KEYS = (
     "probe_exit_enabled",
     "probe_take_profit_net_bps",
@@ -832,6 +860,15 @@ def _btc_leadership_probe_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     return {
         key: getattr(execution, key)
         for key in BTC_LEADERSHIP_PROBE_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
+def _market_impulse_probe_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in MARKET_IMPULSE_PROBE_CONFIG_KEYS
         if hasattr(execution, key)
     }
 
@@ -1083,6 +1120,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             "protect_entry_alpha6_min_score": float(
                 getattr(cfg.execution, "protect_entry_alpha6_min_score", 0.10) or 0.0
             ),
+            **_market_impulse_probe_effective_config(cfg),
             **_btc_leadership_probe_effective_config(cfg),
             **_probe_exit_effective_config(cfg),
             **_protect_profit_lock_effective_config(cfg),
