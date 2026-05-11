@@ -1367,6 +1367,19 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             router_action = flatten_value(item.get("router_action")).lower()
             if not high_score_blocked or router_action != "skip":
                 continue
+            router_reason = first_observed(first_value(item, ("router_reason", "blocked_reason"), not_obs))
+            matching_router_decision = {}
+            for router_item in audit.get("router_decisions") or []:
+                if not isinstance(router_item, dict):
+                    continue
+                if flatten_value(router_item.get("action")).lower() != "skip":
+                    continue
+                if flatten_value(router_item.get("symbol")) != symbol:
+                    continue
+                if flatten_value(router_item.get("reason")) != router_reason:
+                    continue
+                matching_router_decision = router_item
+                break
             high_score_blocked_rows.append({
                 "ts_utc": audit_ts,
                 "run_id": run_id,
@@ -1375,7 +1388,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "selected_rank": first_observed(item.get("selected_rank")),
                 "target_w": first_observed(item.get("target_w")),
                 "router_action": first_observed(item.get("router_action")),
-                "router_reason": first_observed(first_value(item, ("router_reason", "blocked_reason"), not_obs)),
+                "router_reason": router_reason,
                 "high_score_block_category": first_observed(item.get("high_score_block_category")),
                 "trend_score": first_observed(item.get("trend_score")),
                 "trend_side": first_observed(item.get("trend_side")),
@@ -1385,6 +1398,34 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "f5_rsi_trend_confirm": first_observed(item.get("f5_rsi_trend_confirm")),
                 "current_level": first_observed(first_value(item, ("current_level",), audit_level)),
                 "regime": first_observed(first_value(item, ("regime",), audit_regime)),
+                "entry_px": first_observed(
+                    first_value(item, ("entry_px", "latest_px", "current_px", "price", "px"), not_obs),
+                    first_value(matching_router_decision, ("entry_px", "latest_px", "current_px", "price", "px"), not_obs),
+                ),
+                "last_exit_reason": first_observed(
+                    first_value(matching_router_decision, ("last_exit_reason",), not_obs),
+                    first_value(item, ("last_exit_reason",), not_obs),
+                ),
+                "last_exit_px": first_observed(
+                    first_value(matching_router_decision, ("last_exit_px",), not_obs),
+                    first_value(item, ("last_exit_px",), not_obs),
+                ),
+                "highest_px_before_exit": first_observed(
+                    first_value(matching_router_decision, ("highest_px_before_exit",), not_obs),
+                    first_value(item, ("highest_px_before_exit",), not_obs),
+                ),
+                "elapsed_hours": first_observed(
+                    first_value(matching_router_decision, ("elapsed_hours",), not_obs),
+                    first_value(item, ("elapsed_hours",), not_obs),
+                ),
+                "required_cooldown_hours": first_observed(
+                    first_value(matching_router_decision, ("required_cooldown_hours",), not_obs),
+                    first_value(item, ("required_cooldown_hours",), not_obs),
+                ),
+                "breakout_exception_met": first_observed(
+                    first_value(matching_router_decision, ("breakout_exception_met",), not_obs),
+                    first_value(item, ("breakout_exception_met",), not_obs),
+                ),
             })
         for idx, item in enumerate(audit.get("router_decisions") or []):
             if not isinstance(item, dict):
@@ -2322,6 +2363,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "skip_reason",
         "high_score_block_category",
         "final_score",
+        "selected_rank",
         "target_w",
         "trend_score",
         "trend_side",
@@ -2329,6 +2371,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "alpha6_side",
         "f4_volume_expansion",
         "f5_rsi_trend_confirm",
+        "last_exit_reason",
+        "last_exit_px",
+        "highest_px_before_exit",
+        "elapsed_hours",
+        "required_cooldown_hours",
+        "breakout_exception_met",
         "entry_px",
         "rt_cost_bps",
         "current_level",
@@ -2385,10 +2433,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if existing is None or status_rank(row) > status_rank(existing):
             high_score_outcome_by_key[key] = row
 
+    def high_score_outcome_field_value(row, field):
+        value = first_value(row, (field,), not_obs)
+        if field == "label_not_observable_reason" or field.endswith("h_reason"):
+            return "" if value in (None, "") else flatten_value(value)
+        return first_observed(value)
+
     high_score_blocked_outcome_rows = []
     for row in high_score_outcome_by_key.values():
         high_score_blocked_outcome_rows.append({
-            field: first_observed(first_value(row, (field,), not_obs))
+            field: high_score_outcome_field_value(row, field)
             for field in high_score_outcome_fields
         })
 
@@ -2848,6 +2902,133 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         else:
             out["label_not_observable_reason"] = ""
         return out
+
+    def build_high_score_blocked_outcome_row(row):
+        out = {
+            field: first_observed(first_value(row, (field,), not_obs))
+            for field in high_score_outcome_fields
+        }
+        out["intended_side"] = first_observed(out.get("intended_side"), "buy")
+        out["skip_reason"] = high_score_reason_text(row)
+        out["rt_cost_bps"] = first_observed(out.get("rt_cost_bps"), "30")
+
+        entry_px, entry_reason, _entry_source = resolve_alt_shadow_entry_px(row)
+        entry_dt = parse_dt_utc(first_observed(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)))
+        rt_cost_bps = as_float(first_value(out, ("rt_cost_bps",), not_obs))
+        if rt_cost_bps is None:
+            rt_cost_bps = 30.0
+
+        horizon_statuses = []
+        not_observable_reasons = []
+        out["entry_px"] = fmt_num(entry_px, 10) if entry_px is not None else not_obs
+        if entry_reason:
+            not_observable_reasons.append(entry_reason)
+
+        for horizon in label_horizons:
+            h = int(horizon)
+            gross_field = f"label_{h}h_gross_bps"
+            net_field = f"label_{h}h_net_bps"
+            win_field = f"label_{h}h_would_have_won_net"
+            status_field = f"label_{h}h_status"
+            reason_field = f"label_{h}h_reason"
+            existing_value = first_value(row, (net_field,), not_obs)
+            if as_float(existing_value) is not None:
+                out[gross_field] = first_observed(first_value(row, (gross_field,), not_obs))
+                out[net_field] = first_observed(existing_value)
+                out[win_field] = first_observed(first_value(row, (win_field,), str(as_float(existing_value) > 0).lower()))
+                out[status_field] = "complete"
+                out[reason_field] = ""
+                horizon_statuses.append("complete")
+                continue
+            if entry_px is None or entry_dt is None:
+                out[gross_field] = not_obs
+                out[net_field] = not_obs
+                out[win_field] = not_obs
+                out[status_field] = "not_observable"
+                out[reason_field] = entry_reason or "missing_entry_px"
+                horizon_statuses.append("not_observable")
+                not_observable_reasons.append(entry_reason or "missing_entry_px")
+                continue
+            horizon_dt = entry_dt + dt.timedelta(hours=h)
+            if NOW < horizon_dt:
+                out[gross_field] = "pending"
+                out[net_field] = "pending"
+                out[win_field] = "pending"
+                out[status_field] = "pending"
+                out[reason_field] = f"awaiting_horizon_until_{horizon_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+                horizon_statuses.append("pending")
+                continue
+            future_px, _future_source, future_reason = future_price_for_symbol(out["symbol"], horizon_dt)
+            if future_px is None:
+                out[gross_field] = not_obs
+                out[net_field] = not_obs
+                out[win_field] = not_obs
+                out[status_field] = "not_observable"
+                out[reason_field] = future_reason or "missing_future_px"
+                horizon_statuses.append("not_observable")
+                not_observable_reasons.append(future_reason or "missing_future_px")
+                continue
+            gross_bps = ((future_px / entry_px) - 1.0) * 10000.0
+            net_bps = gross_bps - rt_cost_bps
+            out[gross_field] = fmt_num(gross_bps, 6)
+            out[net_field] = fmt_num(net_bps, 6)
+            out[win_field] = str(net_bps > 0).lower()
+            out[status_field] = "complete"
+            out[reason_field] = ""
+            horizon_statuses.append("complete")
+
+        if any(status == "complete" for status in horizon_statuses):
+            out["label_status"] = "complete"
+            out["label_not_observable_reason"] = ""
+        elif any(status == "pending" for status in horizon_statuses):
+            out["label_status"] = "pending"
+            out["label_not_observable_reason"] = ""
+        elif horizon_statuses:
+            out["label_status"] = "not_observable"
+            out["label_not_observable_reason"] = alt_shadow_not_observable_reason(not_observable_reasons)
+        else:
+            out["label_status"] = not_obs
+            out["label_not_observable_reason"] = not_obs
+        return out
+
+    for row in high_score_blocked_rows:
+        if not is_high_score_labelable_reason(high_score_reason_text(row)):
+            continue
+        key = btc_label_key(
+            row.get("run_id"),
+            row.get("ts_utc"),
+            row.get("symbol"),
+            high_score_reason_text(row),
+        )
+        if not key or any(part == not_obs for part in key):
+            continue
+        reason = high_score_reason_text(row)
+        synthesized = build_high_score_blocked_outcome_row(row)
+        if (
+            reason != "same_symbol_reentry_cooldown"
+            and as_float(synthesized.get("entry_px")) is None
+            and synthesized.get("label_status") == "not_observable"
+        ):
+            continue
+        existing = high_score_outcome_by_key.get(key)
+        if existing is None or status_rank(synthesized) > status_rank(existing):
+            high_score_outcome_by_key[key] = synthesized
+
+    high_score_blocked_outcome_rows = []
+    for row in high_score_outcome_by_key.values():
+        high_score_blocked_outcome_rows.append({
+            field: high_score_outcome_field_value(row, field)
+            for field in high_score_outcome_fields
+        })
+    high_score_blocked_outcomes_by_symbol = aggregate_high_score_outcomes(
+        high_score_blocked_outcome_rows,
+        ["symbol", "skip_reason"],
+    )
+    high_score_blocked_outcomes_by_reason = aggregate_high_score_outcomes(
+        high_score_blocked_outcome_rows,
+        ["skip_reason"],
+    )
+    high_score_outcome_loose_index = build_loose_index(high_score_blocked_outcome_rows)
 
     alt_impulse_shadow_fields = [
         "ts_utc",
@@ -3575,7 +3756,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             continue
         loose_key = (key[0], key[2], key[3])
         label = label_index.get(key) or label_loose_index.get(loose_key)
-        outcome = outcome_index.get(key) or outcome_loose_index.get(loose_key)
+        outcome = (
+            outcome_index.get(key)
+            or high_score_outcome_by_key.get(key)
+            or outcome_loose_index.get(loose_key)
+            or high_score_outcome_loose_index.get(loose_key)
+        )
         src = outcome or label or {}
         label_status = flatten_value(first_value(src, ("label_status", "label_24h_status"), not_obs))
         if label_status == not_obs and not (label or outcome):
@@ -4773,7 +4959,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/high_score_blocked_targets.csv",
         high_score_blocked_rows,
-        ["ts_utc", "run_id", "symbol", "final_score", "selected_rank", "target_w", "router_action", "router_reason", "high_score_block_category", "trend_score", "trend_side", "alpha6_score", "alpha6_side", "f4_volume_expansion", "f5_rsi_trend_confirm", "current_level", "regime"],
+        ["ts_utc", "run_id", "symbol", "final_score", "selected_rank", "target_w", "router_action", "router_reason", "high_score_block_category", "trend_score", "trend_side", "alpha6_score", "alpha6_side", "f4_volume_expansion", "f5_rsi_trend_confirm", "last_exit_reason", "last_exit_px", "highest_px_before_exit", "elapsed_hours", "required_cooldown_hours", "breakout_exception_met", "entry_px", "current_level", "regime"],
     )
     write_csv(
         "summaries/high_score_blocked_outcomes.csv",

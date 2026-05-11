@@ -27,6 +27,7 @@ FOCUS_SKIP_REASONS = {
     "risk_off_pos_mult_zero",
     "all_scores_below_threshold",
     "hold_current_no_valid_replacement",
+    "same_symbol_reentry_cooldown",
 }
 BTC_LEADERSHIP_PROBE_SKIP_PREFIX = "btc_leadership_probe_"
 HORIZON_PREFIX = "label_"
@@ -42,6 +43,14 @@ BTC_LEADERSHIP_PROBE_FIELDS = [
     "negative_expectancy_bypassed",
     "closed_cycles",
     "net_expectancy_bps",
+]
+SAME_SYMBOL_REENTRY_FIELDS = [
+    "last_exit_reason",
+    "last_exit_px",
+    "highest_px_before_exit",
+    "elapsed_hours",
+    "required_cooldown_hours",
+    "breakout_exception_met",
 ]
 BTC_LEADERSHIP_PROBE_LABEL_KEY_FIELDS = ("run_id", "ts_utc", "symbol", "skip_reason")
 BTC_LEADERSHIP_PROBE_NOT_OBSERVABLE_SKIP_REASONS = {
@@ -658,6 +667,12 @@ def _build_record(
         "negative_expectancy_bypassed": negative_expectancy_bypassed,
         "closed_cycles": _normalize_int(router_decision.get("closed_cycles")),
         "net_expectancy_bps": net_expectancy_bps,
+        "last_exit_reason": str(router_decision.get("last_exit_reason") or ""),
+        "last_exit_px": _normalize_float(router_decision.get("last_exit_px")),
+        "highest_px_before_exit": _normalize_float(router_decision.get("highest_px_before_exit")),
+        "elapsed_hours": _normalize_float(router_decision.get("elapsed_hours")),
+        "required_cooldown_hours": _normalize_float(router_decision.get("required_cooldown_hours")),
+        "breakout_exception_met": _normalize_bool(router_decision.get("breakout_exception_met")),
         "entry_px": _normalize_float(entry_px),
         "rt_cost_bps": rt_cost_bps,
         "entry_ts_ms": int(entry_ts_ms),
@@ -1140,6 +1155,7 @@ def update_skipped_candidate_tracker(
                 "target_w",
                 "current_level",
                 *BTC_LEADERSHIP_PROBE_FIELDS,
+                *SAME_SYMBOL_REENTRY_FIELDS,
             ):
                 if existing.get(preserve_key) in (None, "") and record.get(preserve_key) not in (None, ""):
                     existing[preserve_key] = record.get(preserve_key)
@@ -1206,6 +1222,7 @@ def update_skipped_candidate_tracker(
         "f4_volume_expansion",
         "f5_rsi_trend_confirm",
         *BTC_LEADERSHIP_PROBE_FIELDS,
+        *SAME_SYMBOL_REENTRY_FIELDS,
         "entry_px",
         "rt_cost_bps",
         *horizon_fields,

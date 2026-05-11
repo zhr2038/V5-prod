@@ -933,6 +933,103 @@ def fixture_high_score_missing_label_root(root):
     return old_run_id
 
 
+def fixture_high_score_same_symbol_reentry_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    old_window_end = window_end - 49 * 3600
+    current_run_id = now.strftime("%Y%m%d_%H")
+    old_run_id = dt.datetime.fromtimestamp(old_window_end, dt.timezone.utc).strftime("%Y%m%d_%H")
+    old_ts = old_window_end + 15
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "diagnostics:\n  extended_label_horizons_hours: [4, 8, 12, 24, 48, 72, 120]\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    current_run = root / "reports/runs/prod" / current_run_id
+    write_json(current_run / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "regime": "Trending",
+        "target_execution_explain": [],
+    })
+    write_text(current_run / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(current_run / "equity.jsonl", "{}\n")
+    write_json(current_run / "summary.json", {"run_id": current_run_id})
+
+    old_run = root / "reports/runs/prod" / old_run_id
+    write_json(old_run / "decision_audit.json", {
+        "now_ts": old_ts,
+        "window_end_ts": old_window_end,
+        "regime": "Trending",
+        "targets_post_risk": {"SOL/USDT": 0.15},
+        "target_execution_explain": [
+            {
+                "symbol": "SOL/USDT",
+                "target_w": 0.15,
+                "final_score": 0.96,
+                "selected_rank": 1,
+                "router_action": "skip",
+                "router_reason": "same_symbol_reentry_cooldown",
+                "high_score_but_not_executed": True,
+                "high_score_block_category": "same_symbol_reentry_cooldown",
+                "trend_score": 0.91,
+                "trend_side": "buy",
+                "alpha6_score": 0.72,
+                "alpha6_side": "buy",
+                "f4_volume_expansion": 0.4,
+                "f5_rsi_trend_confirm": 0.5,
+                "latest_px": 100.0,
+                "current_level": "PROTECT",
+                "regime": "Trending",
+            }
+        ],
+        "router_decisions": [
+            {
+                "symbol": "SOL/USDT",
+                "action": "skip",
+                "reason": "same_symbol_reentry_cooldown",
+                "final_score": 0.96,
+                "selected_rank": 1,
+                "target_w": 0.15,
+                "latest_px": 100.0,
+                "last_exit_reason": "protect_profit_lock_trailing",
+                "last_exit_px": 100.5,
+                "highest_px_before_exit": 101.2,
+                "elapsed_hours": 5.99,
+                "required_cooldown_hours": 6.0,
+                "breakout_exception_met": False,
+            }
+        ],
+    })
+    write_text(old_run / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(old_run / "equity.jsonl", "{}\n")
+    write_json(old_run / "summary.json", {"run_id": old_run_id})
+
+    cache_path = root / "data/cache/SOL_USDT_1H_fixture.csv"
+    write_text(
+        cache_path,
+        "timestamp,open,high,low,close,volume\n"
+        f"{iso(old_window_end)},100,100,100,100,1000\n"
+        f"{iso(old_window_end + 4 * 3600)},102,102,102,102,1000\n"
+        f"{iso(old_window_end + 8 * 3600)},101,101,101,101,1000\n"
+        f"{iso(old_window_end + 12 * 3600)},103,103,103,103,1000\n"
+        f"{iso(old_window_end + 24 * 3600)},105,105,105,105,1000\n"
+        f"{iso(old_window_end + 48 * 3600)},110,110,110,110,1000\n",
+    )
+    return old_run_id
+
+
 def fixture_high_score_non_labelable_management_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -2163,6 +2260,43 @@ def main():
             ]
             assert len(high_score_issues) == 1, issues
             assert window["high_score_blocked_matured_unlabeled_count"] == 1, window
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-high-score-same-symbol-reentry-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_high_score_same_symbol_reentry_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                targets = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/high_score_blocked_targets.csv")).read().decode().splitlines()))
+                outcomes = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/high_score_blocked_outcomes.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+            assert len(targets) == 1, targets
+            assert targets[0]["router_reason"] == "same_symbol_reentry_cooldown", targets
+            assert targets[0]["last_exit_reason"] == "protect_profit_lock_trailing", targets
+            assert len(outcomes) == 1, outcomes
+            outcome = outcomes[0]
+            assert outcome["symbol"] == "SOL/USDT", outcomes
+            assert outcome["skip_reason"] == "same_symbol_reentry_cooldown", outcomes
+            assert outcome["last_exit_reason"] == "protect_profit_lock_trailing", outcomes
+            assert outcome["last_exit_px"] == "100.5", outcomes
+            assert outcome["highest_px_before_exit"] == "101.2", outcomes
+            assert outcome["elapsed_hours"] == "5.99", outcomes
+            assert outcome["required_cooldown_hours"] == "6.0", outcomes
+            assert outcome["breakout_exception_met"] == "False", outcomes
+            assert outcome["label_48h_status"] == "complete", outcomes
+            assert outcome["label_48h_net_bps"] == "970", outcomes
+            assert outcome["label_72h_status"] == "pending", outcomes
+            assert window["high_score_blocked_matured_unlabeled_count"] == 0, window
+            assert not [
+                item for item in issues["issues"]
+                if item.get("code") == "high_score_blocked_matured_without_label"
+                and item.get("context", {}).get("skip_reason") == "same_symbol_reentry_cooldown"
+            ], issues
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

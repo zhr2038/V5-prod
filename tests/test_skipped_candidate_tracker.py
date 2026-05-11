@@ -1099,6 +1099,105 @@ def test_high_score_blocked_management_reasons_are_not_labeled(tmp_path: Path) -
     ]
 
 
+def test_high_score_same_symbol_reentry_cooldown_is_labeled_and_matures(tmp_path: Path) -> None:
+    run_dir = tmp_path / "reports" / "runs" / "20260509_19"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = tmp_path / "data" / "cache"
+    cfg = AppConfig(symbols=["SOL/USDT"])
+    cfg.diagnostics.extended_label_horizons_hours = [4, 8, 12, 24, 48, 72, 120]
+    cfg.diagnostics.skipped_candidate_roundtrip_cost_bps = 30.0
+
+    entry_dt = datetime.fromisoformat("2026-05-09T19:00:00+00:00")
+    entry_ts_ms = int(entry_dt.timestamp() * 1000)
+    audit = DecisionAudit(run_id="20260509_19")
+    audit.now_ts = int(datetime.fromisoformat("2026-05-11T20:00:00+00:00").timestamp())
+    audit.regime = "Trending"
+    audit.targets_post_risk = {"SOL/USDT": 0.15}
+    audit.target_execution_explain = [
+        {
+            "symbol": "SOL/USDT",
+            "target_w": 0.15,
+            "final_score": 0.96,
+            "selected_rank": 1,
+            "router_action": "skip",
+            "router_reason": "same_symbol_reentry_cooldown",
+            "high_score_but_not_executed": True,
+            "high_score_block_category": "same_symbol_reentry_cooldown",
+            "trend_score": 0.91,
+            "trend_side": "buy",
+            "alpha6_score": 0.72,
+            "alpha6_side": "buy",
+            "f4_volume_expansion": 0.4,
+            "f5_rsi_trend_confirm": 0.5,
+            "current_level": "PROTECT",
+        }
+    ]
+    audit.router_decisions = [
+        {
+            "symbol": "SOL/USDT",
+            "action": "skip",
+            "reason": "same_symbol_reentry_cooldown",
+            "final_score": 0.96,
+            "selected_rank": 1,
+            "target_w": 0.15,
+            "last_exit_reason": "protect_profit_lock_trailing",
+            "last_exit_px": 100.5,
+            "highest_px_before_exit": 101.2,
+            "elapsed_hours": 5.99,
+            "required_cooldown_hours": 6.0,
+            "breakout_exception_met": False,
+        }
+    ]
+    _write_cache_csv(
+        cache_dir,
+        "SOL/USDT",
+        [
+            ("2026-05-09T19:00:00Z", 100.0),
+            ("2026-05-09T23:00:00Z", 102.0),
+            ("2026-05-10T03:00:00Z", 101.0),
+            ("2026-05-10T07:00:00Z", 103.0),
+            ("2026-05-10T19:00:00Z", 105.0),
+            ("2026-05-11T19:00:00Z", 110.0),
+        ],
+    )
+
+    result = update_skipped_candidate_tracker(
+        run_dir=run_dir,
+        audit=audit,
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", [entry_ts_ms], [100.0])},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=cache_dir,
+    )
+
+    assert result["new_records"] == 1
+    assert result["high_score_blocked_records"] == 1
+    labels_path = tmp_path / "reports" / "skipped_candidate_labels.jsonl"
+    rows = [json.loads(line) for line in labels_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["run_id"] == "20260509_19"
+    assert row["symbol"] == "SOL/USDT"
+    assert row["skip_reason"] == "same_symbol_reentry_cooldown"
+    assert row["last_exit_reason"] == "protect_profit_lock_trailing"
+    assert row["last_exit_px"] == 100.5
+    assert row["highest_px_before_exit"] == 101.2
+    assert row["elapsed_hours"] == 5.99
+    assert row["required_cooldown_hours"] == 6.0
+    assert row["breakout_exception_met"] is False
+    assert row["label_48h_status"] == "complete"
+    assert row["label_48h_net_bps"] == 970.0
+    assert row["label_72h_status"] == "pending"
+
+    outcomes_path = tmp_path / "reports" / "summaries" / "high_score_blocked_outcomes.csv"
+    with outcomes_path.open("r", encoding="utf-8") as f:
+        outcome_rows = list(csv.DictReader(f))
+    assert len(outcome_rows) == 1
+    assert outcome_rows[0]["skip_reason"] == "same_symbol_reentry_cooldown"
+    assert outcome_rows[0]["last_exit_reason"] == "protect_profit_lock_trailing"
+    assert outcome_rows[0]["label_48h_status"] == "complete"
+
+
 def test_low_score_regular_skip_not_in_high_score_blocked_outcomes(tmp_path: Path) -> None:
     run_dir = tmp_path / "reports" / "runs" / "20260421_15"
     run_dir.mkdir(parents=True, exist_ok=True)
