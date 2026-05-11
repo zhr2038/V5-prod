@@ -503,6 +503,41 @@ budget:
   turnover_budget_per_day: 0.60
   cost_budget_bps_per_day: 40
 
+quant_lab:
+  enabled: true
+  base_url: http://qyun2.hrhome.top:8027
+  api_token_env: QUANT_LAB_API_TOKEN
+  timeout_seconds: 2.0
+  max_retries: 1
+  cache_ttl_seconds: 60
+  fail_policy: sell_only
+
+  risk_permission_enabled: true
+  cost_enabled: true
+  gate_enabled: true
+  feature_enabled: false
+  market_regime_enabled: false
+
+  cost_quantile: p75
+  cost_min_edge_multiplier: 1.5
+  cost_fallback_to_local: true
+  min_cost_bps_floor: 5.0
+
+  strategy_name: v5
+  strategy_version: "5.0.0"
+
+  audit_enabled: true
+  audit_path: reports/quant_lab_usage.jsonl
+  request_log_path: reports/quant_lab_requests.jsonl
+
+  export_bundle_enabled: true
+  export_bundle_dir: /var/lib/v5/exports/bundles
+  export_bundle_window_hours: 72
+  export_bundle_include_logs: true
+  export_bundle_include_config: true
+  export_bundle_max_recent_runs: 96
+  export_bundle_redact_secrets: true
+
 backtest:
   fee_bps: 10
   slippage_bps: 5

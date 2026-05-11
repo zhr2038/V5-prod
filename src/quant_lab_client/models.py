@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Mapping, Optional
+
+
+def _payload(data: Any) -> Mapping[str, Any]:
+    if isinstance(data, Mapping):
+        for key in ("data", "result", "payload"):
+            nested = data.get(key)
+            if isinstance(nested, Mapping):
+                return nested
+        return data
+    return {}
+
+
+def _float(data: Mapping[str, Any], key: str, default: Optional[float] = None) -> Optional[float]:
+    value = data.get(key)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _list(data: Mapping[str, Any], key: str) -> List[Any]:
+    value = data.get(key)
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    return [value]
+
+
+def symbol_to_quant_lab_symbol(symbol: str) -> str:
+    return str(symbol or "").strip().upper().replace("/", "-")
+
+
+@dataclass
+class QuantLabHealth:
+    status: str = ""
+    service: str = ""
+    mode: str = ""
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> "QuantLabHealth":
+        data = _payload(payload)
+        return cls(
+            status=str(data.get("status") or ""),
+            service=str(data.get("service") or ""),
+            mode=str(data.get("mode") or ""),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class RiskPermission:
+    strategy: str = ""
+    version: str = ""
+    permission: str = "ABORT"
+    allowed_modes: List[Any] = field(default_factory=list)
+    max_gross_exposure: Optional[float] = None
+    max_single_weight: Optional[float] = None
+    cost_model_version: Optional[str] = None
+    gate_version: Optional[str] = None
+    reasons: List[Any] = field(default_factory=list)
+    created_at: Optional[str] = None
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> "RiskPermission":
+        data = _payload(payload)
+        return cls(
+            strategy=str(data.get("strategy") or ""),
+            version=str(data.get("version") or ""),
+            permission=str(data.get("permission") or data.get("decision") or "ABORT").upper(),
+            allowed_modes=_list(data, "allowed_modes"),
+            max_gross_exposure=_float(data, "max_gross_exposure"),
+            max_single_weight=_float(data, "max_single_weight"),
+            cost_model_version=str(data.get("cost_model_version") or "") or None,
+            gate_version=str(data.get("gate_version") or "") or None,
+            reasons=_list(data, "reasons") or _list(data, "reason"),
+            created_at=str(data.get("created_at") or data.get("ts") or "") or None,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class CostEstimate:
+    symbol: str = ""
+    regime: str = ""
+    notional_usdt: float = 0.0
+    quantile: str = "p75"
+    fee_bps: float = 0.0
+    slippage_bps: float = 0.0
+    spread_bps: float = 0.0
+    total_cost_bps: float = 0.0
+    cost_bps: float = 0.0
+    fallback_level: Optional[str] = None
+    source: Optional[str] = None
+    sample_count: Optional[int] = None
+    cost_model_version: Optional[str] = None
+    bucket_id: Optional[str] = None
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> "CostEstimate":
+        data = _payload(payload)
+        total = _float(data, "total_cost_bps")
+        if total is None:
+            total = _float(data, "total_bps")
+        if total is None:
+            total = _float(data, "cost_bps", 0.0)
+        sample_count = data.get("sample_count")
+        try:
+            sample_count_i = int(sample_count) if sample_count is not None and sample_count != "" else None
+        except (TypeError, ValueError):
+            sample_count_i = None
+        cost_bps = _float(data, "cost_bps")
+        return cls(
+            symbol=str(data.get("symbol") or ""),
+            regime=str(data.get("regime") or ""),
+            notional_usdt=float(_float(data, "notional_usdt", 0.0) or 0.0),
+            quantile=str(data.get("quantile") or "p75"),
+            fee_bps=float(_float(data, "fee_bps", 0.0) or 0.0),
+            slippage_bps=float(_float(data, "slippage_bps", 0.0) or 0.0),
+            spread_bps=float(_float(data, "spread_bps", 0.0) or 0.0),
+            total_cost_bps=float(total or 0.0),
+            cost_bps=float(cost_bps if cost_bps is not None else (total or 0.0)),
+            fallback_level=str(data.get("fallback_level") or "") or None,
+            source=str(data.get("source") or data.get("cost_source") or "") or None,
+            sample_count=sample_count_i,
+            cost_model_version=str(data.get("cost_model_version") or "") or None,
+            bucket_id=str(data.get("bucket_id") or "") or None,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class GateDecision:
+    alpha_id: str = ""
+    version: Optional[str] = None
+    gate_version: Optional[str] = None
+    status: str = "QUARANTINE"
+    passed: bool = False
+    reasons: List[Any] = field(default_factory=list)
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    next_action: Optional[str] = None
+    created_at: Optional[str] = None
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> "GateDecision":
+        data = _payload(payload)
+        return cls(
+            alpha_id=str(data.get("alpha_id") or ""),
+            version=str(data.get("version") or "") or None,
+            gate_version=str(data.get("gate_version") or "") or None,
+            status=str(data.get("status") or "QUARANTINE").upper(),
+            passed=bool(data.get("passed", False)),
+            reasons=_list(data, "reasons") or _list(data, "reason"),
+            metrics=dict(data.get("metrics") or {}) if isinstance(data.get("metrics"), Mapping) else {},
+            next_action=str(data.get("next_action") or "") or None,
+            created_at=str(data.get("created_at") or data.get("ts") or "") or None,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)

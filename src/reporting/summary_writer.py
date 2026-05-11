@@ -57,13 +57,17 @@ def _quant_lab_summary_fields(rd: Path) -> Dict[str, Any]:
     decision_audit_path = rd / "decision_audit.json"
     empty = {
         "enabled": False,
+        "permission": None,
+        "final_permission": None,
         "permission_decision": None,
         "effective_decision": None,
+        "cost_model_version": None,
+        "gate_version": None,
         "fallback_used": False,
-        "orders_filtered": 0,
-        "buy_orders_filtered": 0,
-        "cost_estimate_count": 0,
+        "cost_request_count": 0,
         "cost_fallback_count": 0,
+        "filtered_by_cost_count": 0,
+        "filtered_by_permission_count": 0,
     }
     if not decision_audit_path.exists():
         return {"quant_lab": empty}
@@ -80,18 +84,41 @@ def _quant_lab_summary_fields(rd: Path) -> Dict[str, Any]:
     filtered_orders = ql.get("filtered_orders") if isinstance(ql.get("filtered_orders"), list) else []
     cost_estimates = ql.get("cost_estimates") if isinstance(ql.get("cost_estimates"), list) else []
     orders_filtered = [row for row in filtered_orders if isinstance(row, dict) and row.get("filtered")]
+    permission_value = ql.get("permission") if isinstance(ql.get("permission"), str) else permission.get("decision")
+    final_permission = (
+        ql.get("final_permission")
+        or ql.get("effective_decision")
+        or permission.get("effective_decision")
+        or permission_value
+    )
     summary = {
         "enabled": bool(ql.get("enabled", True)),
-        "permission_decision": permission.get("decision"),
-        "effective_decision": permission.get("effective_decision"),
-        "fallback_used": bool(permission.get("fallback_used")),
-        "fail_policy": permission.get("fail_policy"),
-        "orders_filtered": len(orders_filtered),
+        "permission": permission_value,
+        "final_permission": final_permission,
+        "permission_decision": permission_value,
+        "effective_decision": final_permission,
+        "cost_model_version": ql.get("cost_model_version"),
+        "gate_version": ql.get("gate_version"),
+        "fallback_used": bool(ql.get("fallback_used") or permission.get("fallback_used")),
+        "fail_policy": ql.get("fail_policy") or permission.get("fail_policy"),
+        "cost_request_count": int(ql.get("cost_request_count", len(cost_estimates)) or 0),
+        "cost_fallback_count": int(
+            ql.get(
+                "cost_fallback_count",
+                len([row for row in cost_estimates if isinstance(row, dict) and row.get("fallback_used")]),
+            )
+            or 0
+        ),
+        "filtered_by_cost_count": int(ql.get("filtered_by_cost_count", 0) or 0),
+        "filtered_by_permission_count": int(ql.get("filtered_by_permission_count", len(orders_filtered)) or 0),
+        "orders_filtered": len(orders_filtered) or int(
+            ql.get("filtered_by_cost_count", 0) or 0
+        ) + int(ql.get("filtered_by_permission_count", 0) or 0),
         "buy_orders_filtered": len(
             [row for row in orders_filtered if str(row.get("side", "")).lower() == "buy"]
         ),
-        "cost_estimate_count": len(cost_estimates),
-        "cost_fallback_count": len(
+        "cost_estimate_count": len(cost_estimates) or int(ql.get("cost_request_count", 0) or 0),
+        "legacy_cost_fallback_count": len(
             [row for row in cost_estimates if isinstance(row, dict) and row.get("fallback_used")]
         ),
     }

@@ -26,6 +26,7 @@ from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
 from src.execution.probe_metadata import position_tags_from_order_meta
 from src.data.okx_instruments import OKXSpotInstrumentsCache, round_down_to_lot
+from src.quant_lab_client.permissions import is_order_new_risk
 
 
 log = logging.getLogger(__name__)
@@ -1232,6 +1233,57 @@ class LiveExecutionEngine:
                 submit_gate=gate,
             )
             self.order_store.update_state(clid, new_state="REJECTED", last_error_code="GATE", last_error_msg="SELL_ONLY")
+            return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
+
+        quant_lab_meta = dict((o.meta or {}).get("quant_lab") or {})
+        quant_lab_permission = str(
+            quant_lab_meta.get("final_permission")
+            or quant_lab_meta.get("order_decision")
+            or quant_lab_meta.get("permission")
+            or ""
+        ).upper()
+        quant_lab_blocked = quant_lab_permission == "ABORT" or (
+            quant_lab_permission == "SELL_ONLY" and is_order_new_risk(o)
+        )
+        if quant_lab_blocked:
+            reason = (
+                str(quant_lab_meta.get("filter_reason") or "")
+                or ("quant_lab_abort" if quant_lab_permission == "ABORT" else "quant_lab_sell_only")
+            )
+            req = {
+                "blocked_by_quant_lab": True,
+                "quant_lab_permission": quant_lab_permission,
+                "quant_lab_reasons": quant_lab_meta.get("risk_permission_reasons")
+                or quant_lab_meta.get("reasons")
+                or [],
+                "reason": reason,
+            }
+            if o.meta:
+                req["_v5_order_meta"] = dict(o.meta)
+            self.order_store.upsert_new(
+                cl_ord_id=clid,
+                run_id=self.run_id,
+                inst_id=inst_id,
+                side=o.side,
+                intent=o.intent,
+                decision_hash=dh,
+                td_mode="cash",
+                ord_type="market",
+                notional_usdt=float(o.notional_usdt),
+                window_start_ts=(o.meta or {}).get("window_start_ts"),
+                window_end_ts=(o.meta or {}).get("window_end_ts"),
+                req=req,
+                reconcile_ok_at_submit=reconcile_ok,
+                kill_switch_at_submit=kill_switch,
+                submit_gate=quant_lab_permission or gate,
+            )
+            self.order_store.update_state(
+                clid,
+                new_state="REJECTED",
+                last_error_code="QUANT_LAB_GATE",
+                last_error_msg=reason,
+                event_type="QUANT_LAB_GATE_BLOCK",
+            )
             return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         existing = self.order_store.get(clid)

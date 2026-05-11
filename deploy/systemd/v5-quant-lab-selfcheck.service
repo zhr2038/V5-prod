@@ -1,0 +1,12 @@
+[Unit]
+Description=V5 quant-lab API selfcheck
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/clawd/v5-prod
+ExecStart=/home/ubuntu/clawd/v5-prod/.venv/bin/python scripts/quant_lab_selfcheck.py --config configs/config.yaml
+NoNewPrivileges=true
+PrivateTmp=true

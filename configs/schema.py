@@ -595,9 +595,9 @@ class ExecutionConfig(BaseModel):
 
     # quant-lab read-only research guard. V5 only performs HTTP GET and never writes quant-lab state.
     quant_lab_enabled: bool = Field(default=False)
-    quant_lab_base_url: str = Field(default="http://qyun2.hrhome.top:8000")
+    quant_lab_base_url: str = Field(default="http://qyun2.hrhome.top:8027")
     quant_lab_timeout_sec: float = Field(default=2.0, ge=0.1, le=30.0)
-    quant_lab_fail_policy: str = Field(default="sell_only", description="sell_only|abort|allow")
+    quant_lab_fail_policy: str = Field(default="sell_only", description="sell_only|abort|allow_local_fallback")
     quant_lab_token_env: str = Field(default="QUANT_LAB_API_TOKEN")
     quant_lab_default_alpha_id: str = Field(default="v5")
     quant_lab_strategy: str = Field(default="v5")
@@ -1185,8 +1185,12 @@ class ExecutionConfig(BaseModel):
     @classmethod
     def _quant_lab_fail_policy(cls, v: str) -> str:
         vv = str(v or "sell_only").strip().lower()
-        if vv not in {"sell_only", "abort", "allow"}:
-            raise ValueError("execution.quant_lab_fail_policy must be 'sell_only', 'abort', or 'allow'")
+        if vv == "allow":
+            vv = "allow_local_fallback"
+        if vv not in {"sell_only", "abort", "allow_local_fallback"}:
+            raise ValueError(
+                "execution.quant_lab_fail_policy must be 'sell_only', 'abort', or 'allow_local_fallback'"
+            )
         return vv
 
     @field_validator("borrow_block_mode")
@@ -1432,6 +1436,115 @@ class MLLabelerConfig(BaseModel):
     )
 
 
+class QuantLabConfig(BaseModel):
+    enabled: bool = False
+    base_url: str = "http://qyun2.hrhome.top:8027"
+    api_token_env: Optional[str] = "QUANT_LAB_API_TOKEN"
+    timeout_seconds: float = 2.0
+    max_retries: int = 1
+    cache_ttl_seconds: int = 60
+
+    fail_policy: str = "sell_only"
+
+    risk_permission_enabled: bool = True
+    cost_enabled: bool = True
+    gate_enabled: bool = True
+    feature_enabled: bool = False
+    market_regime_enabled: bool = False
+
+    cost_quantile: str = "p75"
+    cost_min_edge_multiplier: float = 1.5
+    cost_fallback_to_local: bool = True
+    min_cost_bps_floor: float = 5.0
+
+    strategy_name: str = "v5"
+    strategy_version: str = "5.0.0"
+
+    audit_enabled: bool = True
+    audit_path: str = "reports/quant_lab_usage.jsonl"
+    request_log_path: str = "reports/quant_lab_requests.jsonl"
+
+    export_bundle_enabled: bool = True
+    export_bundle_dir: str = "/var/lib/v5/exports/bundles"
+    export_bundle_window_hours: int = 72
+    export_bundle_include_logs: bool = True
+    export_bundle_include_config: bool = True
+    export_bundle_max_recent_runs: int = 96
+    export_bundle_redact_secrets: bool = True
+
+    @field_validator("fail_policy")
+    @classmethod
+    def _validate_fail_policy(cls, v: str) -> str:
+        vv = str(v or "sell_only").strip().lower()
+        if vv == "allow":
+            vv = "allow_local_fallback"
+        if vv not in {"allow_local_fallback", "sell_only", "abort"}:
+            raise ValueError("quant_lab.fail_policy must be allow_local_fallback, sell_only, or abort")
+        return vv
+
+    @field_validator("cost_quantile")
+    @classmethod
+    def _validate_cost_quantile(cls, v: str) -> str:
+        vv = str(v or "p75").strip().lower()
+        if vv not in {"p50", "p75", "p90"}:
+            raise ValueError("quant_lab.cost_quantile must be p50, p75, or p90")
+        return vv
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def _validate_timeout_seconds(cls, v: float) -> float:
+        value = float(v)
+        if value <= 0 or value > 10:
+            raise ValueError("quant_lab.timeout_seconds must be > 0 and <= 10")
+        return value
+
+    @field_validator("cache_ttl_seconds")
+    @classmethod
+    def _validate_cache_ttl_seconds(cls, v: int) -> int:
+        value = int(v)
+        if value < 0:
+            raise ValueError("quant_lab.cache_ttl_seconds must be >= 0")
+        return value
+
+    @field_validator("cost_min_edge_multiplier")
+    @classmethod
+    def _validate_cost_min_edge_multiplier(cls, v: float) -> float:
+        value = float(v)
+        if value < 1:
+            raise ValueError("quant_lab.cost_min_edge_multiplier must be >= 1")
+        return value
+
+    @field_validator("min_cost_bps_floor")
+    @classmethod
+    def _validate_min_cost_bps_floor(cls, v: float) -> float:
+        value = float(v)
+        if value < 0:
+            raise ValueError("quant_lab.min_cost_bps_floor must be >= 0")
+        return value
+
+    @field_validator("export_bundle_dir")
+    @classmethod
+    def _validate_export_bundle_dir(cls, v: str) -> str:
+        value = str(v or "").strip()
+        normalized = value.replace("\\", "/").strip("/").lower()
+        if normalized in {"reports", "./reports"}:
+            raise ValueError("quant_lab.export_bundle_dir cannot equal reports root")
+        return value
+
+    @field_validator("api_token_env")
+    @classmethod
+    def _validate_api_token_env(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or str(v).strip() == "":
+            return None
+        value = str(v).strip()
+        lowered = value.lower()
+        if "bearer " in lowered or any(ch.isspace() for ch in value):
+            raise ValueError("quant_lab.api_token_env must be an environment variable name, not a token value")
+        if not (value[0].isalpha() or value[0] == "_") or not all(ch.isalnum() or ch == "_" for ch in value):
+            raise ValueError("quant_lab.api_token_env must be a valid environment variable name")
+        return value
+
+
 class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"])
     timeframe_main: str = "1h"
@@ -1443,6 +1556,7 @@ class AppConfig(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     rebalance: RebalanceConfig = Field(default_factory=RebalanceConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    quant_lab: QuantLabConfig = Field(default_factory=QuantLabConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
