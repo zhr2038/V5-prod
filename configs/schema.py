@@ -1464,6 +1464,13 @@ class QuantLabConfig(BaseModel):
     cost_min_edge_multiplier: float = 1.5
     cost_fallback_to_local: bool = True
     min_cost_bps_floor: float = 5.0
+    cost_missing_edge_policy: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "shadow": "record_only",
+            "cost_only": "block",
+            "enforce": "block",
+        }
+    )
 
     strategy_name: str = "v5"
     strategy_version: str = "5.0.0"
@@ -1508,6 +1515,22 @@ class QuantLabConfig(BaseModel):
         if vv not in {"p50", "p75", "p90"}:
             raise ValueError("quant_lab.cost_quantile must be p50, p75, or p90")
         return vv
+
+    @field_validator("cost_missing_edge_policy")
+    @classmethod
+    def _validate_cost_missing_edge_policy(cls, v: Dict[str, str]) -> Dict[str, str]:
+        allowed_modes = {"local_only", "shadow", "cost_only", "permission_only", "enforce"}
+        allowed_policies = {"record_only", "block", "use_score_proxy"}
+        out: Dict[str, str] = {}
+        for raw_mode, raw_policy in dict(v or {}).items():
+            mode = str(raw_mode or "").strip().lower().replace("-", "_")
+            policy = str(raw_policy or "").strip().lower().replace("-", "_")
+            if mode not in allowed_modes:
+                raise ValueError("quant_lab.cost_missing_edge_policy keys must be quant-lab modes")
+            if policy not in allowed_policies:
+                raise ValueError("quant_lab.cost_missing_edge_policy values must be record_only, block, or use_score_proxy")
+            out[mode] = policy
+        return out
 
     @field_validator("timeout_seconds")
     @classmethod

@@ -510,6 +510,10 @@ quant_lab:
   cost_min_edge_multiplier: 1.5
   cost_fallback_to_local: true
   min_cost_bps_floor: 5.0
+  cost_missing_edge_policy:
+    shadow: record_only
+    cost_only: block
+    enforce: block
 
   strategy_name: v5
   strategy_version: "5.0.0"

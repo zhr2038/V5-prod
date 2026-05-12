@@ -88,6 +88,7 @@ COST_FIELDS = (
     "cost_model_version",
     "expected_edge_bps",
     "min_required_edge_bps",
+    "proxy_source",
     "would_filter_by_cost",
     "fallback_used",
     "passed",
@@ -233,6 +234,11 @@ def _would_filter(row: Mapping[str, Any]) -> bool:
     return _truthy(row.get("would_filter")) or _truthy(row.get("would_filter_by_cost")) or _truthy(row.get("would_filter_by_permission"))
 
 
+def _is_cost_filter_reason(reason: Any) -> bool:
+    text = str(reason or "")
+    return "cost" in text or "expected_edge" in text
+
+
 def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     by_run: Dict[str, Dict[str, Any]] = {}
     for row in rows:
@@ -285,7 +291,7 @@ def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             reason = str(row.get("filter_reason") or "")
             if _actual_filtered(row) and ("sell_only" in reason or "abort" in reason):
                 item["filtered_by_permission_count"] = int(item["filtered_by_permission_count"]) + 1
-            if _actual_filtered(row) and "cost" in reason:
+            if _actual_filtered(row) and _is_cost_filter_reason(reason):
                 item["filtered_by_cost_count"] = int(item["filtered_by_cost_count"]) + 1
             if _would_filter(row) and not _actual_filtered(row):
                 item["hypothetical_violation"] = "true"
@@ -367,7 +373,7 @@ def _window_summary(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any
         "quant_lab_actual_filter_count": len([row for row in rows if _actual_filtered(row)]),
         "quant_lab_hypothetical_filter_count": len([row for row in rows if _would_filter(row) and not _actual_filtered(row)]),
         "quant_lab_filtered_by_cost_count": len(
-            [row for row in rows if _actual_filtered(row) and "cost" in str(row.get("filter_reason") or "")]
+            [row for row in rows if _actual_filtered(row) and _is_cost_filter_reason(row.get("filter_reason"))]
         ),
         "quant_lab_filtered_by_permission_count": len(
             [

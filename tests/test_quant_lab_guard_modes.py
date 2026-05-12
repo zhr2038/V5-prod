@@ -108,6 +108,25 @@ def test_shadow_mode_calls_api_but_does_not_filter(tmp_path: Path) -> None:
     assert any(row.get("mode") == "shadow" and row.get("hypothetical") for row in usage)
 
 
+def test_shadow_missing_edge_is_hypothetical_only(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "shadow")
+    client = _ModeClient(permission="ALLOW")
+    guard = _guard(tmp_path, cfg, client)
+
+    guard.check_startup_permission(cfg, "run-mode")
+    kept, rows = guard.enrich_orders_with_cost(
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {})],
+        "normal",
+        cfg,
+    )
+
+    assert len(kept) == 1
+    assert rows[0]["filter_reason"] == "expected_edge_missing_hypothetical"
+    assert rows[0]["would_filter_by_cost"] is True
+    assert rows[0]["actually_filtered"] is False
+    assert rows[0]["hypothetical"] is True
+
+
 def test_cost_only_mode_applies_only_cost_gate(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path, "cost_only")
     client = _ModeClient(permission="SELL_ONLY")
@@ -157,3 +176,39 @@ def test_enforce_mode_applies_permission_and_cost_gates(tmp_path: Path) -> None:
     assert summary["filtered_by_permission_count"] == 1
     assert summary["filtered_by_cost_count"] == 1
 
+
+def test_enforce_missing_edge_buy_blocks(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "enforce")
+    client = _ModeClient(permission="ALLOW")
+    guard = _guard(tmp_path, cfg, client)
+
+    guard.check_startup_permission(cfg, "run-mode")
+    kept, rows = guard.enrich_orders_with_cost(
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {})],
+        "normal",
+        cfg,
+    )
+
+    assert kept == []
+    assert rows[0]["filter_reason"] == "expected_edge_missing_block"
+    assert rows[0]["would_filter_by_cost"] is True
+    assert rows[0]["actually_filtered"] is True
+    assert guard.summary_payload()["filtered_by_cost_count"] == 1
+
+
+def test_enforce_missing_edge_sell_close_does_not_filter(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "enforce")
+    client = _ModeClient(permission="ALLOW")
+    guard = _guard(tmp_path, cfg, client)
+
+    guard.check_startup_permission(cfg, "run-mode")
+    kept, rows = guard.enrich_orders_with_cost(
+        [Order("ETH/USDT", "sell", "CLOSE_LONG", 10.0, 100.0, {})],
+        "normal",
+        cfg,
+    )
+
+    assert len(kept) == 1
+    assert rows[0]["filter_reason"] == "expected_edge_missing_close_no_filter"
+    assert rows[0]["would_filter_by_cost"] is False
+    assert rows[0]["actually_filtered"] is False

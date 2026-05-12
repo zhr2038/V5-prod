@@ -574,7 +574,7 @@ class QuantLabGuard:
                     fallback_used = True
                     fallback_reason = "quant_lab_cost_unavailable_local_fallback"
 
-            gate: CostGateResult = apply_quant_lab_cost_gate(order, estimate, cfg)
+            gate: CostGateResult = apply_quant_lab_cost_gate(order, estimate, cfg, mode=self.mode.value)
             actually_filtered = bool(gate.filtered and self.apply_cost_gate)
             row = {
                 "event_type": "cost_estimate",
@@ -595,6 +595,7 @@ class QuantLabGuard:
                 "cost_model_version": gate.cost_model_version,
                 "expected_edge_bps": gate.expected_edge_bps,
                 "min_required_edge_bps": gate.min_required_edge_bps,
+                "proxy_source": gate.proxy_source,
                 "passed": gate.passed,
                 "filtered": gate.filtered,
                 "filter_reason": gate.reason,
@@ -632,6 +633,7 @@ class QuantLabGuard:
                     "sample_count": gate.sample_count,
                     "expected_edge_bps": gate.expected_edge_bps,
                     "min_required_edge_bps": gate.min_required_edge_bps,
+                    "proxy_source": gate.proxy_source,
                     "cost_gate_passed": gate.passed,
                     "cost_gate_enforced": self.apply_cost_gate,
                     "permission_gate_enforced": self.apply_permission_gate,
@@ -654,7 +656,7 @@ class QuantLabGuard:
                         "side": getattr(order, "side", None),
                         "intent": getattr(order, "intent", None),
                         "order_filtered": True,
-                        "filter_reason": "quant_lab_cost_edge_insufficient",
+                        "filter_reason": gate.reason,
                     }
                 )
                 self._emit_usage(
@@ -664,7 +666,7 @@ class QuantLabGuard:
                         "side": getattr(order, "side", None),
                         "intent": getattr(order, "intent", None),
                         "order_filtered": True,
-                        "filter_reason": "quant_lab_cost_edge_insufficient",
+                        "filter_reason": gate.reason,
                     }
                 )
         return kept, rows

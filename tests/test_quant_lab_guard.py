@@ -105,20 +105,21 @@ def test_guard_cost_fallback_to_local(tmp_path: Path) -> None:
     cfg = AppConfig()
     cfg.quant_lab.enabled = True
     cfg.quant_lab.mode = "enforce"
-    cfg.execution.fee_bps = 6
+    cfg.execution.fee_bps = 10
     cfg.execution.slippage_bps = 5
+    cfg.execution.cost_aware_roundtrip_cost_bps = None
     guard = _guard(tmp_path, cfg, _Client(permission="ALLOW", fail_cost=True))
     guard.check_startup_permission(cfg, "run-1")
 
     kept, rows = guard.enrich_orders_with_cost(
-        [Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 40})],
+        [Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 60})],
         "normal",
         cfg,
     )
 
     assert len(kept) == 1
     assert rows[0]["fallback_used"] is True
-    assert rows[0]["total_cost_bps"] == 22.0
-    assert rows[0]["effective_total_cost_bps"] == 22.0
-    assert rows[0]["local_cost_bps"] == 22.0
+    assert rows[0]["total_cost_bps"] == 30.0
+    assert rows[0]["effective_total_cost_bps"] == 30.0
+    assert rows[0]["local_cost_bps"] == 30.0
     assert rows[0]["local_cost_source"] == "roundtrip_fee_slippage"
