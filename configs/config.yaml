@@ -77,6 +77,7 @@ quant_lab:
   max_retries: 1
   cache_ttl_seconds: 60
   fail_policy: allow_local_fallback
+  allow_local_fallback_in_enforce: false
 
   risk_permission_enabled: true
   cost_enabled: true

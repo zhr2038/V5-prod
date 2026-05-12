@@ -25,6 +25,49 @@ def test_app_config_quant_lab_disabled_by_default() -> None:
     assert AppConfig().quant_lab.enabled is False
 
 
+def test_quant_lab_shadow_allows_local_fallback() -> None:
+    qcfg = QuantLabConfig(mode="shadow", fail_policy="allow_local_fallback")
+
+    assert qcfg.mode == "shadow"
+    assert qcfg.fail_policy == "allow_local_fallback"
+    assert qcfg.allow_local_fallback_in_enforce is False
+
+
+def test_quant_lab_enforce_disallows_local_fallback_by_default() -> None:
+    with pytest.raises(ValueError, match="allow_local_fallback"):
+        QuantLabConfig(mode="enforce", fail_policy="allow_local_fallback")
+
+
+def test_quant_lab_enforce_allows_local_fallback_with_explicit_override() -> None:
+    qcfg = QuantLabConfig(
+        mode="enforce",
+        fail_policy="allow_local_fallback",
+        allow_local_fallback_in_enforce=True,
+    )
+
+    assert qcfg.allow_local_fallback_in_enforce is True
+    assert qcfg.fail_policy == "allow_local_fallback"
+
+
+def test_quant_lab_permission_only_disallows_allow_alias_by_default() -> None:
+    with pytest.raises(ValueError, match="allow_local_fallback"):
+        QuantLabConfig(mode="permission_only", fail_policy="allow")
+
+
+def test_quant_lab_enforce_sell_only_allowed() -> None:
+    qcfg = QuantLabConfig(mode="enforce", fail_policy="sell_only")
+
+    assert qcfg.mode == "enforce"
+    assert qcfg.fail_policy == "sell_only"
+
+
+def test_quant_lab_permission_only_abort_allowed() -> None:
+    qcfg = QuantLabConfig(mode="permission_only", fail_policy="abort")
+
+    assert qcfg.mode == "permission_only"
+    assert qcfg.fail_policy == "abort"
+
+
 def test_live_prod_explicitly_enables_quant_lab_shadow() -> None:
     cfg = load_config("configs/live_prod.yaml")
 

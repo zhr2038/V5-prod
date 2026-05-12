@@ -1450,6 +1450,7 @@ class QuantLabConfig(BaseModel):
     cache_ttl_seconds: int = 60
 
     fail_policy: str = "sell_only"
+    allow_local_fallback_in_enforce: bool = False
 
     risk_permission_enabled: bool = True
     cost_enabled: bool = True
@@ -1564,6 +1565,15 @@ class QuantLabConfig(BaseModel):
     def _validate_mode_base_url(self) -> "QuantLabConfig":
         if bool(self.enabled) and self.mode != "local_only" and not str(self.base_url or "").strip():
             raise ValueError("quant_lab.base_url must be non-empty when quant_lab.enabled=true and mode is not local_only")
+        if (
+            self.mode in {"permission_only", "enforce"}
+            and self.fail_policy == "allow_local_fallback"
+            and not bool(self.allow_local_fallback_in_enforce)
+        ):
+            raise ValueError(
+                "quant_lab.fail_policy=allow_local_fallback is not allowed in permission_only/enforce "
+                "unless quant_lab.allow_local_fallback_in_enforce=true"
+            )
         return self
 
 

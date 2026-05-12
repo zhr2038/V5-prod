@@ -48,3 +48,41 @@ def test_invalid_runtime_override_falls_back_to_config(tmp_path: Path) -> None:
     assert resolution.mode_source == "config_invalid_override"
     assert resolution.warning
 
+
+def test_enforce_runtime_override_rejected_with_allow_local_fallback(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.mode = "shadow"
+    cfg.quant_lab.fail_policy = "allow_local_fallback"
+    cfg.quant_lab.allow_local_fallback_in_enforce = False
+    cfg.quant_lab.runtime_override_path = str(tmp_path / "quant_lab_mode.json")
+    write_quant_lab_mode_override(
+        mode="enforce",
+        reason="operator_manual_override",
+        path=cfg.quant_lab.runtime_override_path,
+    )
+
+    resolution = resolve_quant_lab_mode(cfg)
+
+    assert resolution.mode == QuantLabMode.SHADOW
+    assert resolution.mode_source == "config_unsafe_override"
+    assert "allow_local_fallback" in str(resolution.warning)
+
+
+def test_enforce_runtime_override_accepts_confirmed_allow_local_fallback(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.mode = "shadow"
+    cfg.quant_lab.fail_policy = "allow_local_fallback"
+    cfg.quant_lab.allow_local_fallback_in_enforce = False
+    cfg.quant_lab.runtime_override_path = str(tmp_path / "quant_lab_mode.json")
+    write_quant_lab_mode_override(
+        mode="enforce",
+        reason="operator_manual_override",
+        path=cfg.quant_lab.runtime_override_path,
+        confirm_unsafe_fallback=True,
+    )
+
+    resolution = resolve_quant_lab_mode(cfg)
+
+    assert resolution.mode == QuantLabMode.ENFORCE
+    assert resolution.mode_source == "runtime_override"
+    assert resolution.warning

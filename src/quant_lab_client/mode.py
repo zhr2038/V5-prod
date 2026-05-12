@@ -19,6 +19,9 @@ class QuantLabMode(str, Enum):
     ENFORCE = "enforce"
 
 
+STRICT_PERMISSION_MODES = {QuantLabMode.PERMISSION_ONLY, QuantLabMode.ENFORCE}
+
+
 @dataclass
 class QuantLabModeResolution:
     mode: QuantLabMode
@@ -41,6 +44,21 @@ def normalize_quant_lab_mode(value: Any) -> QuantLabMode:
         if raw == mode.value:
             return mode
     raise ValueError(f"invalid quant_lab mode: {value!r}")
+
+
+def normalize_quant_lab_fail_policy(value: Any) -> str:
+    policy = str(value or "sell_only").strip().lower()
+    if policy == "allow":
+        return "allow_local_fallback"
+    return policy
+
+
+def quant_lab_mode_needs_fallback_confirmation(qcfg: Any, mode: QuantLabMode) -> bool:
+    return (
+        mode in STRICT_PERMISSION_MODES
+        and normalize_quant_lab_fail_policy(getattr(qcfg, "fail_policy", "sell_only")) == "allow_local_fallback"
+        and not bool(getattr(qcfg, "allow_local_fallback_in_enforce", False))
+    )
 
 
 def _ql_cfg(cfg: Any) -> Any:
@@ -72,6 +90,18 @@ def resolve_quant_lab_mode(cfg: Any) -> QuantLabModeResolution:
         if not isinstance(payload, dict):
             raise ValueError("override payload must be an object")
         override_mode = normalize_quant_lab_mode(payload.get("mode"))
+        confirmed_unsafe_fallback = bool(payload.get("confirm_unsafe_fallback"))
+        if quant_lab_mode_needs_fallback_confirmation(qcfg, override_mode) and not confirmed_unsafe_fallback:
+            resolution.mode_source = "config_unsafe_override"
+            resolution.warning = (
+                "unsafe quant-lab mode override ignored: permission_only/enforce with "
+                "fail_policy=allow_local_fallback requires allow_local_fallback_in_enforce=true "
+                "or confirm_unsafe_fallback=true"
+            )
+            return resolution
+        warning = None
+        if quant_lab_mode_needs_fallback_confirmation(qcfg, override_mode) and confirmed_unsafe_fallback:
+            warning = "unsafe allow_local_fallback accepted by runtime override confirmation"
         return QuantLabModeResolution(
             mode=override_mode,
             mode_source="runtime_override",
@@ -79,6 +109,7 @@ def resolve_quant_lab_mode(cfg: Any) -> QuantLabModeResolution:
             override_reason=str(payload.get("reason") or "") or None,
             override_updated_by=str(payload.get("updated_by") or "") or None,
             override_updated_at=str(payload.get("updated_at") or "") or None,
+            warning=warning,
         )
     except Exception as exc:
         resolution.mode_source = "config_invalid_override"
@@ -96,6 +127,7 @@ def write_quant_lab_mode_override(
     reason: str,
     updated_by: str = "operator",
     path: str | Path = "state/quant_lab_mode.json",
+    confirm_unsafe_fallback: bool = False,
 ) -> Path:
     target = resolve_mode_path(path)
     payload = {
@@ -104,6 +136,8 @@ def write_quant_lab_mode_override(
         "updated_by": str(updated_by or "operator"),
         "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
+    if confirm_unsafe_fallback:
+        payload["confirm_unsafe_fallback"] = True
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

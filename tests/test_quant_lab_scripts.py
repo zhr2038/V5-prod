@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from configs.schema import AppConfig
 from scripts import quant_lab_mode
 from scripts import quant_lab_selfcheck
@@ -60,6 +62,56 @@ def test_quant_lab_mode_script_set_and_show(monkeypatch, tmp_path: Path, capsys)
     output = capsys.readouterr().out
     assert '"mode": "local_only"' in output
     assert "P@ssw0rd" not in output
+
+
+def test_quant_lab_mode_script_rejects_enforce_with_unsafe_fallback(monkeypatch, tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.mode = "shadow"
+    cfg.quant_lab.fail_policy = "allow_local_fallback"
+    cfg.quant_lab.allow_local_fallback_in_enforce = False
+    monkeypatch.setattr(quant_lab_mode, "load_config", lambda _path: cfg)
+
+    with pytest.raises(SystemExit) as exc_info:
+        quant_lab_mode.main(
+            [
+                "set",
+                "--mode",
+                "enforce",
+                "--reason",
+                "test",
+                "--path",
+                str(tmp_path / "quant_lab_mode.json"),
+            ]
+        )
+    assert exc_info.value.code == 2
+    assert not (tmp_path / "quant_lab_mode.json").exists()
+
+
+def test_quant_lab_mode_script_accepts_confirmed_enforce_fallback(monkeypatch, tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.mode = "shadow"
+    cfg.quant_lab.fail_policy = "allow_local_fallback"
+    cfg.quant_lab.allow_local_fallback_in_enforce = False
+    monkeypatch.setattr(quant_lab_mode, "load_config", lambda _path: cfg)
+    override = tmp_path / "quant_lab_mode.json"
+
+    rc = quant_lab_mode.main(
+        [
+            "set",
+            "--mode",
+            "enforce",
+            "--reason",
+            "test",
+            "--path",
+            str(override),
+            "--confirm-unsafe-fallback",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(override.read_text(encoding="utf-8"))
+    assert payload["mode"] == "enforce"
+    assert payload["confirm_unsafe_fallback"] is True
 
 
 def test_quant_lab_selfcheck_local_only_skips_client(monkeypatch, tmp_path: Path) -> None:
