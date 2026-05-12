@@ -608,6 +608,10 @@ class ExecutionConfig(BaseModel):
     quant_lab_health_check_enabled: bool = Field(default=True)
     quant_lab_usage_path: str = Field(default="reports/quant_lab_usage.jsonl")
     quant_lab_requests_path: str = Field(default="reports/quant_lab_requests.jsonl")
+    quant_lab_mode: str = Field(default="", description="Legacy optional staged quant-lab mode override")
+    quant_lab_effective_enabled: bool = Field(default=False, description="Runtime-injected effective top-level quant-lab enablement")
+    quant_lab_effective_mode: str = Field(default="", description="Runtime-injected effective quant-lab mode after override resolution")
+    quant_lab_config_source: str = Field(default="", description="Runtime-injected quant-lab config source")
     
     # Allow trading on small reconcile drift (useful for initialization)
     allow_trade_on_small_reconcile_drift: bool = Field(default=False, description="Allow trading when reconcile has small drift (not hard failures)")

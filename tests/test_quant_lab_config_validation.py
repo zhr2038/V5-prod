@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from configs.loader import load_config
@@ -96,3 +98,33 @@ def test_live_prod_has_single_authoritative_quant_lab_source() -> None:
     assert cfg.quant_lab.mode == "shadow"
     assert qcfg.quant_lab_config_source == "top_level"
     assert qcfg.legacy_execution_quant_lab_ignored is False
+
+
+def test_main_injects_runtime_override_mode_into_execution(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "shadow"
+    cfg.quant_lab.runtime_override_path = str(tmp_path / "quant_lab_mode.json")
+    (tmp_path / "quant_lab_mode.json").write_text(
+        '{"mode":"enforce","reason":"test","updated_by":"test","updated_at":"2026-05-11T00:00:00Z"}',
+        encoding="utf-8",
+    )
+
+    main_module._inject_quant_lab_execution_runtime_settings(cfg)
+
+    assert cfg.execution.quant_lab_effective_enabled is True
+    assert cfg.execution.quant_lab_effective_mode == "enforce"
+    assert cfg.execution.quant_lab_config_source == "top_level"
+
+
+def test_main_injects_unknown_mode_for_legacy_without_staged_mode() -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = False
+    cfg.execution.quant_lab_enabled = True
+    cfg.execution.quant_lab_mode = ""
+
+    main_module._inject_quant_lab_execution_runtime_settings(cfg)
+
+    assert cfg.execution.quant_lab_effective_enabled is True
+    assert cfg.execution.quant_lab_effective_mode == "unknown"
+    assert cfg.execution.quant_lab_config_source == "execution_legacy"

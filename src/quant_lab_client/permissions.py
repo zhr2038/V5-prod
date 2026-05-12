@@ -51,7 +51,7 @@ def is_order_new_risk(order: Any) -> bool:
         return False
     if side == "buy":
         return True
-    if intent in {"OPEN_LONG", "OPEN", "ADD_LONG"}:
+    if intent in {"OPEN_LONG", "OPEN", "ADD_LONG", "REBALANCE"}:
         return True
     try:
         target_weight = float(meta.get("target_weight", meta.get("target_w")))

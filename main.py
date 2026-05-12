@@ -820,6 +820,28 @@ def _quant_lab_enabled(cfg: AppConfig) -> bool:
     return mode == "live" and bool(getattr(qcfg, "enabled", False))
 
 
+def _inject_quant_lab_execution_runtime_settings(cfg: AppConfig) -> None:
+    execution = getattr(cfg, "execution", None)
+    if execution is None:
+        return
+    qcfg = _get_quant_lab_cfg(cfg)
+    enabled = bool(getattr(qcfg, "enabled", False))
+    effective_mode = str(getattr(qcfg, "mode", "") or "").strip().lower().replace("-", "_")
+    if enabled and str(getattr(qcfg, "quant_lab_config_source", "")) != "execution_legacy":
+        try:
+            from src.quant_lab_client.mode import resolve_quant_lab_mode
+
+            effective_mode = resolve_quant_lab_mode(qcfg).mode.value
+        except Exception:
+            effective_mode = effective_mode or "unknown"
+    if enabled and str(getattr(qcfg, "quant_lab_config_source", "")) == "execution_legacy":
+        legacy_mode = str(getattr(execution, "quant_lab_mode", "") or "").strip().lower().replace("-", "_")
+        effective_mode = legacy_mode or "unknown"
+    execution.quant_lab_effective_enabled = enabled
+    execution.quant_lab_effective_mode = effective_mode
+    execution.quant_lab_config_source = str(getattr(qcfg, "quant_lab_config_source", "disabled") or "disabled")
+
+
 def _build_quant_lab_guard(cfg: AppConfig, *, run_id: str):
     from copy import copy
     from src.quant_lab_client.guard import QuantLabGuard
@@ -2277,6 +2299,7 @@ def main() -> None:
             
             client = live_okx_client or OKXPrivateClient(exchange=cfg.exchange)
             order_store = OrderStore(cfg.execution.order_store_path)
+            _inject_quant_lab_execution_runtime_settings(cfg)
             live = LiveExecutionEngine(
                 cfg.execution,
                 okx=client,

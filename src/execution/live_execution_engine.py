@@ -74,6 +74,28 @@ def _to_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _normalize_quant_lab_mode(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def _quant_lab_permission_gate_required_from_cfg(cfg: ExecutionConfig) -> bool:
+    effective_enabled = _to_bool(getattr(cfg, "quant_lab_effective_enabled", False))
+    legacy_enabled = _to_bool(getattr(cfg, "quant_lab_enabled", False))
+    enabled = effective_enabled or legacy_enabled
+    if not enabled:
+        return False
+    mode = _normalize_quant_lab_mode(getattr(cfg, "quant_lab_effective_mode", None))
+    if not mode:
+        mode = _normalize_quant_lab_mode(getattr(cfg, "quant_lab_mode", None))
+    if mode in {"permission_only", "enforce"}:
+        return True
+    if mode in {"local_only", "shadow", "cost_only"}:
+        return False
+    # Legacy quant_lab_enabled without staged mode is ambiguous. For new-risk
+    # orders, fail closed rather than allowing a missing middle-platform gate.
+    return True
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -1178,6 +1200,56 @@ class LiveExecutionEngine:
 
         return payload
 
+    def _reject_quant_lab_gate(
+        self,
+        *,
+        clid: str,
+        inst_id: str,
+        order: Order,
+        decision_hash: str,
+        reconcile_ok: bool,
+        kill_switch: bool,
+        submit_gate: str,
+        reason: str,
+        permission: str = "",
+        quant_lab_meta: Optional[Dict[str, Any]] = None,
+    ) -> LiveExecutionResult:
+        req = {
+            "blocked_by_quant_lab": True,
+            "quant_lab_permission": permission,
+            "quant_lab_reasons": (quant_lab_meta or {}).get("risk_permission_reasons")
+            or (quant_lab_meta or {}).get("reasons")
+            or [],
+            "reason": reason,
+        }
+        if order.meta:
+            req["_v5_order_meta"] = dict(order.meta)
+        self.order_store.upsert_new(
+            cl_ord_id=clid,
+            run_id=self.run_id,
+            inst_id=inst_id,
+            side=order.side,
+            intent=order.intent,
+            decision_hash=decision_hash,
+            td_mode="cash",
+            ord_type="market",
+            notional_usdt=float(order.notional_usdt),
+            window_start_ts=(order.meta or {}).get("window_start_ts"),
+            window_end_ts=(order.meta or {}).get("window_end_ts"),
+            req=req,
+            reconcile_ok_at_submit=reconcile_ok,
+            kill_switch_at_submit=kill_switch,
+            submit_gate=submit_gate,
+        )
+        self.order_store.update_state(
+            clid,
+            new_state="REJECTED",
+            last_error_code="QUANT_LAB_GATE",
+            last_error_msg=reason,
+            event_type="QUANT_LAB_GATE_BLOCK",
+        )
+        return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
+
     def place(self, o: Order) -> LiveExecutionResult:
         """Place"""
         gate, reconcile_ok, kill_switch = submit_gate_for_live(self.cfg)
@@ -1242,54 +1314,75 @@ class LiveExecutionEngine:
             or quant_lab_meta.get("permission")
             or ""
         ).upper()
-        permission_gate_enforced = bool(
+        permission_gate_enforced = _to_bool(
             quant_lab_meta.get("permission_gate_enforced")
             or quant_lab_meta.get("apply_permission_gate")
         )
+        new_risk = is_order_new_risk(o)
+        cfg_permission_gate_required = _quant_lab_permission_gate_required_from_cfg(self.cfg)
+        meta_permission_gate_required = permission_gate_enforced
+        permission_gate_required = bool(new_risk and (cfg_permission_gate_required or meta_permission_gate_required))
+        if permission_gate_required:
+            if not quant_lab_meta:
+                return self._reject_quant_lab_gate(
+                    clid=clid,
+                    inst_id=inst_id,
+                    order=o,
+                    decision_hash=dh,
+                    reconcile_ok=reconcile_ok,
+                    kill_switch=kill_switch,
+                    submit_gate=quant_lab_permission or gate,
+                    reason="quant_lab_missing_enforced_meta",
+                    permission=quant_lab_permission,
+                    quant_lab_meta=quant_lab_meta,
+                )
+            if not permission_gate_enforced:
+                return self._reject_quant_lab_gate(
+                    clid=clid,
+                    inst_id=inst_id,
+                    order=o,
+                    decision_hash=dh,
+                    reconcile_ok=reconcile_ok,
+                    kill_switch=kill_switch,
+                    submit_gate=quant_lab_permission or gate,
+                    reason="quant_lab_permission_meta_not_enforced",
+                    permission=quant_lab_permission,
+                    quant_lab_meta=quant_lab_meta,
+                )
+            if not quant_lab_permission:
+                return self._reject_quant_lab_gate(
+                    clid=clid,
+                    inst_id=inst_id,
+                    order=o,
+                    decision_hash=dh,
+                    reconcile_ok=reconcile_ok,
+                    kill_switch=kill_switch,
+                    submit_gate=gate,
+                    reason="quant_lab_missing_enforced_meta",
+                    permission=quant_lab_permission,
+                    quant_lab_meta=quant_lab_meta,
+                )
         quant_lab_blocked = permission_gate_enforced and (
             quant_lab_permission == "ABORT"
-            or (quant_lab_permission == "SELL_ONLY" and is_order_new_risk(o))
+            or (quant_lab_permission == "SELL_ONLY" and new_risk)
         )
         if quant_lab_blocked:
             reason = (
                 str(quant_lab_meta.get("filter_reason") or "")
                 or ("quant_lab_abort" if quant_lab_permission == "ABORT" else "quant_lab_sell_only")
             )
-            req = {
-                "blocked_by_quant_lab": True,
-                "quant_lab_permission": quant_lab_permission,
-                "quant_lab_reasons": quant_lab_meta.get("risk_permission_reasons")
-                or quant_lab_meta.get("reasons")
-                or [],
-                "reason": reason,
-            }
-            if o.meta:
-                req["_v5_order_meta"] = dict(o.meta)
-            self.order_store.upsert_new(
-                cl_ord_id=clid,
-                run_id=self.run_id,
+            return self._reject_quant_lab_gate(
+                clid=clid,
                 inst_id=inst_id,
-                side=o.side,
-                intent=o.intent,
+                order=o,
                 decision_hash=dh,
-                td_mode="cash",
-                ord_type="market",
-                notional_usdt=float(o.notional_usdt),
-                window_start_ts=(o.meta or {}).get("window_start_ts"),
-                window_end_ts=(o.meta or {}).get("window_end_ts"),
-                req=req,
-                reconcile_ok_at_submit=reconcile_ok,
-                kill_switch_at_submit=kill_switch,
+                reconcile_ok=reconcile_ok,
+                kill_switch=kill_switch,
                 submit_gate=quant_lab_permission or gate,
+                reason=reason,
+                permission=quant_lab_permission,
+                quant_lab_meta=quant_lab_meta,
             )
-            self.order_store.update_state(
-                clid,
-                new_state="REJECTED",
-                last_error_code="QUANT_LAB_GATE",
-                last_error_msg=reason,
-                event_type="QUANT_LAB_GATE_BLOCK",
-            )
-            return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         existing = self.order_store.get(clid)
         if existing:
