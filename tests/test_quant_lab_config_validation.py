@@ -73,7 +73,8 @@ def test_live_prod_explicitly_enables_quant_lab_shadow() -> None:
 
     assert cfg.quant_lab.enabled is True
     assert cfg.quant_lab.mode == "shadow"
-    assert cfg.quant_lab.allow_insecure_http_with_token is False
+    assert cfg.quant_lab.api_env_path == "/home/ubuntu/.quant-lab/api.env"
+    assert cfg.quant_lab.allow_insecure_http_with_token is True
 
 
 def test_guard_from_config_disabled_by_default_does_not_create_client() -> None:

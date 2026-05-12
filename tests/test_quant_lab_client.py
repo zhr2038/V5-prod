@@ -146,6 +146,23 @@ def test_public_http_without_token_shadow_allowed(tmp_path: Path) -> None:
     assert "Authorization" not in http.calls[0]["headers"]
 
 
+def test_public_http_token_allowed_with_explicit_config(tmp_path: Path) -> None:
+    http = _HTTP()
+    client = QuantLabClient(
+        base_url="http://qyun2.hrhome.top:8027",
+        api_token="super-secret-token",
+        mode="shadow",
+        allow_insecure_http_with_token=True,
+        http_client=http,
+        request_log_path=tmp_path / "requests.jsonl",
+    )
+
+    client.get_health()
+
+    assert http.calls[0]["headers"]["Authorization"] == "Bearer super-secret-token"
+    assert "super-secret-token" not in (tmp_path / "requests.jsonl").read_text(encoding="utf-8")
+
+
 def test_from_config_public_http_shadow_strips_env_token(monkeypatch, tmp_path: Path) -> None:
     from configs.schema import QuantLabConfig
 
@@ -164,3 +181,26 @@ def test_from_config_public_http_shadow_strips_env_token(monkeypatch, tmp_path: 
     client.get_health()
     assert client.api_token is None
     assert "Authorization" not in http.calls[0]["headers"]
+
+
+def test_from_config_reads_token_from_api_env_path(monkeypatch, tmp_path: Path) -> None:
+    from configs.schema import QuantLabConfig
+
+    http = _HTTP()
+    monkeypatch.delenv("QUANT_LAB_API_TOKEN", raising=False)
+    env_path = tmp_path / "api.env"
+    env_path.write_text('QUANT_LAB_API_TOKEN="super-secret-token"\n', encoding="utf-8")
+    cfg = QuantLabConfig(
+        enabled=True,
+        mode="shadow",
+        base_url="http://qyun2.hrhome.top:8027",
+        api_env_path=str(env_path),
+        allow_insecure_http_with_token=True,
+        request_log_path=str(tmp_path / "requests.jsonl"),
+    )
+
+    client = QuantLabClient.from_config(cfg, http_client=http)
+    client.get_health()
+
+    assert http.calls[0]["headers"]["Authorization"] == "Bearer super-secret-token"
+    assert "super-secret-token" not in (tmp_path / "requests.jsonl").read_text(encoding="utf-8")

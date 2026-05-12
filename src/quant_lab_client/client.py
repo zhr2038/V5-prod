@@ -36,6 +36,35 @@ from .permissions import normalize_permission
 STRICT_GATE_MODES = {"cost_only", "permission_only", "enforce"}
 
 
+def _read_token_from_env_file(path_value: Any, token_env: str) -> Optional[str]:
+    if path_value is None or str(path_value).strip() == "":
+        return None
+    path = Path(str(path_value)).expanduser()
+    if not path.exists() or not path.is_file():
+        return None
+    target_key = str(token_env or "").strip()
+    if not target_key:
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() != target_key:
+            continue
+        token = value.strip().strip('"').strip("'")
+        return token or None
+    return None
+
+
 def summarize_response(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, Mapping):
         return {"type": type(payload).__name__}
@@ -136,6 +165,8 @@ class QuantLabClient:
     ) -> "QuantLabClient":
         token_env = str(getattr(cfg, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN")
         token = os.getenv(token_env, "").strip()
+        if not token:
+            token = _read_token_from_env_file(getattr(cfg, "api_env_path", None), token_env) or ""
         return cls(
             base_url=str(getattr(cfg, "base_url", "") or ""),
             api_token=token or None,
