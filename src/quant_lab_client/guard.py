@@ -8,7 +8,7 @@ from src.core.models import Order
 from src.reporting.quant_lab_audit import append_quant_lab_usage, sanitize_quant_lab_obj, utc_now_iso
 
 from .client import QuantLabClient
-from .cost_gate import CostGateResult, apply_quant_lab_cost_gate, local_cost_bps_for_order
+from .cost_gate import CostGateResult, apply_quant_lab_cost_gate, local_cost_detail_for_order
 from .exceptions import QuantLabError
 from .mode import QuantLabMode, QuantLabModeResolution, resolve_quant_lab_mode
 from .models import CostEstimate, RiskPermission, symbol_to_quant_lab_symbol
@@ -70,7 +70,7 @@ def _is_sell_or_close(order: Order) -> bool:
 
 
 def _local_cost_estimate(order: Order, cfg: Any, *, regime: str, quantile: str) -> CostEstimate:
-    local_cost = local_cost_bps_for_order(order, cfg)
+    local_cost, local_cost_source = local_cost_detail_for_order(order, cfg)
     return CostEstimate(
         symbol=symbol_to_quant_lab_symbol(getattr(order, "symbol", "")),
         regime=str(regime or "normal"),
@@ -80,7 +80,7 @@ def _local_cost_estimate(order: Order, cfg: Any, *, regime: str, quantile: str) 
         cost_bps=local_cost,
         fallback_level="LOCAL_COST_MODEL",
         source="local_fallback",
-        cost_model_version="v5_local_execution_fee_slippage",
+        cost_model_version=f"v5_local_{local_cost_source}",
     )
 
 
@@ -597,6 +597,8 @@ class QuantLabGuard:
                 "spread_bps": gate.spread_bps,
                 "total_cost_bps": gate.total_cost_bps,
                 "effective_total_cost_bps": gate.effective_total_cost_bps,
+                "local_cost_bps": gate.local_cost_bps,
+                "local_cost_source": gate.local_cost_source,
                 "fallback_level": gate.fallback_level,
                 "source": gate.source,
                 "sample_count": gate.sample_count,
@@ -633,6 +635,8 @@ class QuantLabGuard:
                     "spread_bps": gate.spread_bps,
                     "total_cost_bps": gate.total_cost_bps,
                     "effective_total_cost_bps": gate.effective_total_cost_bps,
+                    "local_cost_bps": gate.local_cost_bps,
+                    "local_cost_source": gate.local_cost_source,
                     "fallback_level": gate.fallback_level,
                     "source": gate.source,
                     "sample_count": gate.sample_count,

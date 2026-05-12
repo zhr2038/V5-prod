@@ -72,6 +72,8 @@ COST_FIELDS = (
     "spread_bps",
     "total_cost_bps",
     "effective_total_cost_bps",
+    "local_cost_bps",
+    "local_cost_source",
     "fallback_level",
     "source",
     "sample_count",

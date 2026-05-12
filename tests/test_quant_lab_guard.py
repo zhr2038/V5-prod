@@ -111,11 +111,14 @@ def test_guard_cost_fallback_to_local(tmp_path: Path) -> None:
     guard.check_startup_permission(cfg, "run-1")
 
     kept, rows = guard.enrich_orders_with_cost(
-        [Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 20})],
+        [Order("BTC/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 40})],
         "normal",
         cfg,
     )
 
     assert len(kept) == 1
     assert rows[0]["fallback_used"] is True
-    assert rows[0]["effective_total_cost_bps"] == 11.0
+    assert rows[0]["total_cost_bps"] == 22.0
+    assert rows[0]["effective_total_cost_bps"] == 22.0
+    assert rows[0]["local_cost_bps"] == 22.0
+    assert rows[0]["local_cost_source"] == "roundtrip_fee_slippage"

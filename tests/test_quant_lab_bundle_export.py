@@ -29,6 +29,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "quantile": "p75",
                 "total_cost_bps": 1.0,
                 "effective_total_cost_bps": 5.0,
+                "local_cost_bps": 30.0,
+                "local_cost_source": "execution.cost_aware_roundtrip_cost_bps",
                 "source": "public_spread_proxy",
                 "passed": True,
                 "filtered": False,
@@ -89,3 +91,5 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "cost_gate_enforced" in cost_usage.splitlines()[0]
         assert "would_filter" in cost_usage.splitlines()[0]
         assert "actually_filtered" in cost_usage.splitlines()[0]
+        assert "local_cost_bps" in cost_usage.splitlines()[0]
+        assert "local_cost_source" in cost_usage.splitlines()[0]
