@@ -86,6 +86,30 @@ def test_guard_abort_filters_all(tmp_path: Path) -> None:
     assert kept == []
 
 
+def test_guard_audits_api_env_file_status(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "shadow"
+    client = _Client(permission="ALLOW")
+    client.api_env_path_present = True
+    client.api_env_secure_permissions = False
+    client.api_env_token_loaded = False
+    client.api_env_warning = "api_env_permissions_too_open:0644"
+    guard = _guard(tmp_path, cfg, client)
+
+    guard.check_startup_permission(cfg, "run-1")
+
+    row = json.loads((tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert row["api_env_path_present"] is True
+    assert row["api_env_secure_permissions"] is False
+    assert row["api_env_token_loaded"] is False
+    assert row["api_env_warning"] == "api_env_permissions_too_open:0644"
+    summary = guard.summary_payload()
+    assert summary["api_env_path_present"] is True
+    assert summary["api_env_secure_permissions"] is False
+    assert summary["api_env_token_loaded"] is False
+
+
 def test_guard_unavailable_fail_policies(tmp_path: Path) -> None:
     for policy, expected, fallback in [
         ("sell_only", "SELL_ONLY", True),

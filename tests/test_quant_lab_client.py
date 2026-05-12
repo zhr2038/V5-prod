@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -195,6 +196,7 @@ def test_from_config_reads_token_from_api_env_path(monkeypatch, tmp_path: Path) 
         mode="shadow",
         base_url="http://qyun2.hrhome.top:8027",
         api_env_path=str(env_path),
+        api_env_require_secure_permissions=False,
         allow_insecure_http_with_token=True,
         request_log_path=str(tmp_path / "requests.jsonl"),
     )
@@ -203,4 +205,140 @@ def test_from_config_reads_token_from_api_env_path(monkeypatch, tmp_path: Path) 
     client.get_health()
 
     assert http.calls[0]["headers"]["Authorization"] == "Bearer super-secret-token"
+    assert client.api_env_path_present is True
+    assert client.api_env_secure_permissions is True
+    assert client.api_env_token_loaded is True
     assert "super-secret-token" not in (tmp_path / "requests.jsonl").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not reliable on Windows")
+def test_from_config_api_env_0600_reads_token(monkeypatch, tmp_path: Path) -> None:
+    from configs.schema import QuantLabConfig
+
+    http = _HTTP()
+    monkeypatch.delenv("QUANT_LAB_API_TOKEN", raising=False)
+    env_path = tmp_path / "api.env"
+    env_path.write_text('QUANT_LAB_API_TOKEN="super-secret-token"\n', encoding="utf-8")
+    env_path.chmod(0o600)
+    cfg = QuantLabConfig(
+        enabled=True,
+        mode="shadow",
+        base_url="http://qyun2.hrhome.top:8027",
+        api_env_path=str(env_path),
+        allow_insecure_http_with_token=True,
+        request_log_path=str(tmp_path / "requests.jsonl"),
+    )
+
+    client = QuantLabClient.from_config(cfg, http_client=http)
+    client.get_health()
+
+    assert http.calls[0]["headers"]["Authorization"] == "Bearer super-secret-token"
+    assert client.api_env_secure_permissions is True
+    assert client.api_env_token_loaded is True
+    assert client.api_env_warning is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not reliable on Windows")
+def test_from_config_api_env_0644_shadow_does_not_read_token(monkeypatch, tmp_path: Path) -> None:
+    from configs.schema import QuantLabConfig
+
+    http = _HTTP()
+    monkeypatch.delenv("QUANT_LAB_API_TOKEN", raising=False)
+    env_path = tmp_path / "api.env"
+    env_path.write_text('QUANT_LAB_API_TOKEN="super-secret-token"\n', encoding="utf-8")
+    env_path.chmod(0o644)
+    cfg = QuantLabConfig(
+        enabled=True,
+        mode="shadow",
+        base_url="http://qyun2.hrhome.top:8027",
+        api_env_path=str(env_path),
+        allow_insecure_http_with_token=True,
+        request_log_path=str(tmp_path / "requests.jsonl"),
+    )
+
+    with pytest.warns(RuntimeWarning, match="api_env_path skipped"):
+        client = QuantLabClient.from_config(cfg, http_client=http)
+    client.get_health()
+
+    assert client.api_token is None
+    assert client.api_env_path_present is True
+    assert client.api_env_secure_permissions is False
+    assert client.api_env_token_loaded is False
+    assert client.api_env_warning
+    assert "Authorization" not in http.calls[0]["headers"]
+    assert "super-secret-token" not in (tmp_path / "requests.jsonl").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink tests require reliable symlink support")
+def test_from_config_api_env_symlink_default_does_not_read_token(monkeypatch, tmp_path: Path) -> None:
+    from configs.schema import QuantLabConfig
+
+    http = _HTTP()
+    monkeypatch.delenv("QUANT_LAB_API_TOKEN", raising=False)
+    target = tmp_path / "api.env.real"
+    target.write_text('QUANT_LAB_API_TOKEN="super-secret-token"\n', encoding="utf-8")
+    target.chmod(0o600)
+    link = tmp_path / "api.env"
+    link.symlink_to(target)
+    cfg = QuantLabConfig(
+        enabled=True,
+        mode="shadow",
+        base_url="http://qyun2.hrhome.top:8027",
+        api_env_path=str(link),
+        allow_insecure_http_with_token=True,
+        request_log_path=str(tmp_path / "requests.jsonl"),
+    )
+
+    with pytest.warns(RuntimeWarning, match="api_env_path skipped"):
+        client = QuantLabClient.from_config(cfg, http_client=http)
+    client.get_health()
+
+    assert client.api_token is None
+    assert client.api_env_path_present is True
+    assert client.api_env_secure_permissions is False
+    assert client.api_env_token_loaded is False
+    assert client.api_env_warning == "api_env_symlink_disallowed"
+    assert "Authorization" not in http.calls[0]["headers"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not reliable on Windows")
+def test_from_config_api_env_insecure_enforce_fails_fast(monkeypatch, tmp_path: Path) -> None:
+    from configs.schema import QuantLabConfig
+
+    monkeypatch.delenv("QUANT_LAB_API_TOKEN", raising=False)
+    env_path = tmp_path / "api.env"
+    env_path.write_text('QUANT_LAB_API_TOKEN="super-secret-token"\n', encoding="utf-8")
+    env_path.chmod(0o644)
+    cfg = QuantLabConfig(
+        enabled=True,
+        mode="enforce",
+        fail_policy="sell_only",
+        base_url="http://qyun2.hrhome.top:8027",
+        api_env_path=str(env_path),
+        allow_insecure_http_with_token=True,
+        request_log_path=str(tmp_path / "requests.jsonl"),
+    )
+
+    with pytest.raises(QuantLabValidationError, match="api_env_path is not secure"):
+        QuantLabClient.from_config(cfg, http_client=_HTTP())
+
+
+def test_from_config_missing_api_env_path_is_not_fatal_in_enforce(monkeypatch, tmp_path: Path) -> None:
+    from configs.schema import QuantLabConfig
+
+    monkeypatch.delenv("QUANT_LAB_API_TOKEN", raising=False)
+    cfg = QuantLabConfig(
+        enabled=True,
+        mode="enforce",
+        fail_policy="sell_only",
+        base_url="http://qyun2.hrhome.top:8027",
+        api_env_path=str(tmp_path / "missing.env"),
+        request_log_path=str(tmp_path / "requests.jsonl"),
+    )
+
+    client = QuantLabClient.from_config(cfg, http_client=_HTTP())
+
+    assert client.api_token is None
+    assert client.api_env_path_present is False
+    assert client.api_env_secure_permissions is None
+    assert client.api_env_token_loaded is False

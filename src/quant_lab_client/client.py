@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import warnings
 from ipaddress import ip_address
 import time
@@ -36,19 +37,137 @@ from .permissions import normalize_permission
 STRICT_GATE_MODES = {"cost_only", "permission_only", "enforce"}
 
 
-def _read_token_from_env_file(path_value: Any, token_env: str) -> Optional[str]:
+@dataclass
+class ApiEnvTokenReadResult:
+    token: Optional[str] = None
+    path_present: bool = False
+    secure_permissions: Optional[bool] = None
+    token_loaded: bool = False
+    warning: Optional[str] = None
+    mode: Optional[str] = None
+    symlink: bool = False
+    regular_file: bool = False
+
+
+def _mode_text(mode_bits: Optional[int]) -> Optional[str]:
+    if mode_bits is None:
+        return None
+    return format(int(mode_bits) & 0o777, "04o")
+
+
+def inspect_api_env_file(
+    path_value: Any,
+    *,
+    allow_symlink: bool = False,
+    require_secure_permissions: bool = True,
+) -> ApiEnvTokenReadResult:
     if path_value is None or str(path_value).strip() == "":
-        return None
+        return ApiEnvTokenReadResult()
     path = Path(str(path_value)).expanduser()
-    if not path.exists() or not path.is_file():
-        return None
+    try:
+        st_lstat = path.lstat()
+    except FileNotFoundError:
+        return ApiEnvTokenReadResult(path_present=False)
+    except OSError as exc:
+        return ApiEnvTokenReadResult(path_present=False, secure_permissions=False, warning=f"api_env_stat_failed:{type(exc).__name__}")
+
+    is_symlink = stat.S_ISLNK(st_lstat.st_mode)
+    if is_symlink and not bool(allow_symlink):
+        return ApiEnvTokenReadResult(
+            path_present=True,
+            secure_permissions=False,
+            warning="api_env_symlink_disallowed",
+            mode=_mode_text(stat.S_IMODE(st_lstat.st_mode)),
+            symlink=True,
+            regular_file=False,
+        )
+
+    try:
+        st = path.stat() if is_symlink else st_lstat
+    except OSError as exc:
+        return ApiEnvTokenReadResult(
+            path_present=True,
+            secure_permissions=False,
+            warning=f"api_env_stat_failed:{type(exc).__name__}",
+            mode=_mode_text(stat.S_IMODE(st_lstat.st_mode)),
+            symlink=is_symlink,
+        )
+    mode_bits = stat.S_IMODE(st.st_mode) & 0o777
+    is_regular = stat.S_ISREG(st.st_mode)
+    if not is_regular:
+        return ApiEnvTokenReadResult(
+            path_present=True,
+            secure_permissions=False,
+            warning="api_env_not_regular_file",
+            mode=_mode_text(mode_bits),
+            symlink=is_symlink,
+            regular_file=False,
+        )
+    if bool(require_secure_permissions):
+        if mode_bits & 0o022:
+            return ApiEnvTokenReadResult(
+                path_present=True,
+                secure_permissions=False,
+                warning=f"api_env_group_or_world_writable:{_mode_text(mode_bits)}",
+                mode=_mode_text(mode_bits),
+                symlink=is_symlink,
+                regular_file=True,
+            )
+        if mode_bits > 0o640:
+            return ApiEnvTokenReadResult(
+                path_present=True,
+                secure_permissions=False,
+                warning=f"api_env_permissions_too_open:{_mode_text(mode_bits)}",
+                mode=_mode_text(mode_bits),
+                symlink=is_symlink,
+                regular_file=True,
+            )
+    return ApiEnvTokenReadResult(
+        path_present=True,
+        secure_permissions=True,
+        mode=_mode_text(mode_bits),
+        symlink=is_symlink,
+        regular_file=True,
+    )
+
+
+def read_token_from_env_file(
+    path_value: Any,
+    token_env: str,
+    *,
+    allow_symlink: bool = False,
+    require_secure_permissions: bool = True,
+    mode: str = "shadow",
+) -> ApiEnvTokenReadResult:
+    status = inspect_api_env_file(
+        path_value,
+        allow_symlink=allow_symlink,
+        require_secure_permissions=require_secure_permissions,
+    )
+    if not status.path_present:
+        return status
+    if status.secure_permissions is False:
+        message = status.warning or "api_env_insecure_permissions"
+        if str(mode or "shadow").strip().lower().replace("-", "_") in STRICT_GATE_MODES:
+            raise QuantLabValidationError(f"quant-lab api_env_path is not secure: {message}")
+        warnings.warn(f"quant-lab api_env_path skipped: {message}", RuntimeWarning, stacklevel=2)
+        return status
+    return _read_token_from_env_file_unchecked(path_value, token_env, status)
+
+
+def _read_token_from_env_file_unchecked(path_value: Any, token_env: str, status: ApiEnvTokenReadResult) -> ApiEnvTokenReadResult:
+    if path_value is None or str(path_value).strip() == "":
+        return status
+    path = Path(str(path_value)).expanduser()
     target_key = str(token_env or "").strip()
     if not target_key:
-        return None
+        status.warning = "api_env_token_env_missing"
+        return status
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
+    except OSError as exc:
+        status.warning = f"api_env_read_failed:{type(exc).__name__}"
+        return status
     for raw in lines:
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -61,8 +180,15 @@ def _read_token_from_env_file(path_value: Any, token_env: str) -> Optional[str]:
         if key.strip() != target_key:
             continue
         token = value.strip().strip('"').strip("'")
-        return token or None
-    return None
+        status.token = token or None
+        status.token_loaded = bool(status.token)
+        return status
+    status.warning = "api_env_token_key_missing"
+    return status
+
+
+def _read_token_from_env_file(path_value: Any, token_env: str) -> Optional[str]:
+    return read_token_from_env_file(path_value, token_env).token
 
 
 def summarize_response(payload: Any) -> Dict[str, Any]:
@@ -135,6 +261,10 @@ class QuantLabClient:
     phase: str = "live"
     _cache: TTLCache = field(init=False, repr=False)
     token_auth_disabled_reason: Optional[str] = field(default=None, init=False)
+    api_env_path_present: bool = False
+    api_env_secure_permissions: Optional[bool] = None
+    api_env_token_loaded: bool = False
+    api_env_warning: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.base_url = str(self.base_url or "").strip().rstrip("/")
@@ -165,12 +295,27 @@ class QuantLabClient:
     ) -> "QuantLabClient":
         token_env = str(getattr(cfg, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN")
         token = os.getenv(token_env, "").strip()
+        env_status = ApiEnvTokenReadResult()
+        mode_value = str(mode or getattr(cfg, "mode", "shadow") or "shadow")
         if not token:
-            token = _read_token_from_env_file(getattr(cfg, "api_env_path", None), token_env) or ""
-        return cls(
+            env_status = read_token_from_env_file(
+                getattr(cfg, "api_env_path", None),
+                token_env,
+                allow_symlink=bool(getattr(cfg, "allow_api_env_symlink", False)),
+                require_secure_permissions=bool(getattr(cfg, "api_env_require_secure_permissions", True)),
+                mode=mode_value,
+            )
+            token = env_status.token or ""
+        else:
+            env_status = inspect_api_env_file(
+                getattr(cfg, "api_env_path", None),
+                allow_symlink=bool(getattr(cfg, "allow_api_env_symlink", False)),
+                require_secure_permissions=bool(getattr(cfg, "api_env_require_secure_permissions", True)),
+            )
+        client = cls(
             base_url=str(getattr(cfg, "base_url", "") or ""),
             api_token=token or None,
-            mode=str(mode or getattr(cfg, "mode", "shadow") or "shadow"),
+            mode=mode_value,
             allow_insecure_http_with_token=bool(getattr(cfg, "allow_insecure_http_with_token", False)),
             timeout_seconds=float(getattr(cfg, "timeout_seconds", 2.0) or 2.0),
             max_retries=int(getattr(cfg, "max_retries", 1) or 0),
@@ -180,6 +325,11 @@ class QuantLabClient:
             run_id=run_id,
             phase=phase,
         )
+        client.api_env_path_present = bool(env_status.path_present)
+        client.api_env_secure_permissions = env_status.secure_permissions
+        client.api_env_token_loaded = bool(env_status.token_loaded)
+        client.api_env_warning = env_status.warning
+        return client
 
     @staticmethod
     def _public_http_host(base_url: str) -> Optional[str]:

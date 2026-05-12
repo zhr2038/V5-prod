@@ -34,6 +34,13 @@ SECRET_VALUE_MARKERS = (
     "OK-ACCESS-SIGN",
 )
 
+NON_SECRET_EXACT_KEYS = {
+    "api_env_path_present",
+    "api_env_secure_permissions",
+    "api_env_token_loaded",
+    "api_env_warning",
+}
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -45,7 +52,9 @@ def sanitize_quant_lab_obj(value: Any) -> Any:
         for key, item in value.items():
             key_s = str(key)
             key_l = key_s.lower()
-            if any(part in key_l for part in SECRET_KEY_PARTS):
+            if key_l in NON_SECRET_EXACT_KEYS:
+                out[key_s] = sanitize_quant_lab_obj(item)
+            elif any(part in key_l for part in SECRET_KEY_PARTS):
                 out[key_s] = "<REDACTED>"
             else:
                 out[key_s] = sanitize_quant_lab_obj(item)

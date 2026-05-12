@@ -41,6 +41,10 @@ NON_SECRET_CONFIG_KEYS = {
     "allow_insecure_http_with_token",
     "allow_local_fallback_in_enforce",
     "api_env_path",
+    "api_env_path_present",
+    "api_env_secure_permissions",
+    "api_env_token_loaded",
+    "api_env_warning",
     "api_token_env",
 }
 
@@ -436,11 +440,15 @@ def _quant_lab_config_audit(root: Path, usage_rows: list[Dict[str, Any]]) -> Dic
         "base_url_host": None,
         "api_token_env": None,
         "api_env_path_present": None,
+        "api_env_secure_permissions": latest.get("api_env_secure_permissions"),
+        "api_env_token_loaded": latest.get("api_env_token_loaded"),
+        "api_env_warning": latest.get("api_env_warning"),
         "permission_gate_enforced": latest.get("permission_gate_enforced"),
         "cost_gate_enforced": latest.get("cost_gate_enforced"),
     }
     try:
         from configs.loader import load_config
+        from src.quant_lab_client.client import inspect_api_env_file
 
         cfg_path = root / "configs/live_prod.yaml"
         if not cfg_path.exists():
@@ -464,6 +472,11 @@ def _quant_lab_config_audit(root: Path, usage_rows: list[Dict[str, Any]]) -> Dic
                     mode_source = "config_invalid_override"
             parsed_url = urlparse(str(getattr(qcfg, "base_url", "") or ""))
             api_env_path = getattr(qcfg, "api_env_path", None)
+            api_env_status = inspect_api_env_file(
+                api_env_path,
+                allow_symlink=bool(getattr(qcfg, "allow_api_env_symlink", False)),
+                require_secure_permissions=bool(getattr(qcfg, "api_env_require_secure_permissions", True)),
+            )
             audit.update(
                 {
                     "enabled": bool(getattr(qcfg, "enabled", False)),
@@ -476,7 +489,10 @@ def _quant_lab_config_audit(root: Path, usage_rows: list[Dict[str, Any]]) -> Dic
                     "base_url_scheme": parsed_url.scheme,
                     "base_url_host": parsed_url.hostname,
                     "api_token_env": getattr(qcfg, "api_token_env", None),
-                    "api_env_path_present": bool(api_env_path and Path(str(api_env_path)).exists()),
+                    "api_env_path_present": bool(api_env_status.path_present),
+                    "api_env_secure_permissions": api_env_status.secure_permissions,
+                    "api_env_token_loaded": latest.get("api_env_token_loaded"),
+                    "api_env_warning": latest.get("api_env_warning") or api_env_status.warning,
                 }
             )
     except Exception as exc:
@@ -486,6 +502,9 @@ def _quant_lab_config_audit(root: Path, usage_rows: list[Dict[str, Any]]) -> Dic
             audit["permission_gate_enforced"] = row.get("permission_gate_enforced")
         if audit.get("cost_gate_enforced") in ("", None) and "cost_gate_enforced" in row:
             audit["cost_gate_enforced"] = row.get("cost_gate_enforced")
+        for field in ("api_env_path_present", "api_env_secure_permissions", "api_env_token_loaded", "api_env_warning"):
+            if audit.get(field) in ("", None) and field in row:
+                audit[field] = row.get(field)
     return _sanitize_bundle_obj(audit)
 
 

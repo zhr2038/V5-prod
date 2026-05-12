@@ -138,6 +138,7 @@ class QuantLabGuard:
         return bool(_get_cfg(self.cfg, "enabled", True)) and self.mode in {QuantLabMode.COST_ONLY, QuantLabMode.ENFORCE}
 
     def _mode_fields(self, *, enforced: Optional[bool] = None, hypothetical: Optional[bool] = None) -> Dict[str, Any]:
+        client = self.client
         return {
             "mode": self.mode.value,
             "mode_source": self.mode_resolution.mode_source,
@@ -149,6 +150,10 @@ class QuantLabGuard:
             "apply_cost_gate": self.apply_cost_gate,
             "permission_gate_enforced": self.apply_permission_gate,
             "cost_gate_enforced": self.apply_cost_gate,
+            "api_env_path_present": getattr(client, "api_env_path_present", None) if client is not None else None,
+            "api_env_secure_permissions": getattr(client, "api_env_secure_permissions", None) if client is not None else None,
+            "api_env_token_loaded": getattr(client, "api_env_token_loaded", False) if client is not None else False,
+            "api_env_warning": getattr(client, "api_env_warning", None) if client is not None else None,
             "enforced": bool(enforced) if enforced is not None else bool(self.apply_permission_gate or self.apply_cost_gate),
             "hypothetical": bool(hypothetical) if hypothetical is not None else bool(self.mode == QuantLabMode.SHADOW),
         }
@@ -696,6 +701,7 @@ class QuantLabGuard:
         )
         cost_fallback = len([row for row in self.cost_rows if row.get("fallback_used")])
         final_permission = self.final_permission or ("LOCAL_ONLY" if self.mode == QuantLabMode.LOCAL_ONLY else permission.permission)
+        client = self.client
         return sanitize_quant_lab_obj(
             {
                 "enabled": bool(permission.enabled),
@@ -709,6 +715,10 @@ class QuantLabGuard:
                 "apply_cost_gate": self.apply_cost_gate,
                 "permission_gate_enforced": self.apply_permission_gate,
                 "cost_gate_enforced": self.apply_cost_gate,
+                "api_env_path_present": getattr(client, "api_env_path_present", None) if client is not None else None,
+                "api_env_secure_permissions": getattr(client, "api_env_secure_permissions", None) if client is not None else None,
+                "api_env_token_loaded": getattr(client, "api_env_token_loaded", False) if client is not None else False,
+                "api_env_warning": getattr(client, "api_env_warning", None) if client is not None else None,
                 "permission": permission.permission,
                 "quant_lab_permission": permission.permission,
                 "local_preflight_permission": self.local_preflight_permission,

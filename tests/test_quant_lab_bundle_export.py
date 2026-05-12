@@ -26,6 +26,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "  base_url: http://qyun2.hrhome.top:8027",
                 "  api_token_env: QUANT_LAB_API_TOKEN",
                 "  api_env_path: /home/ubuntu/.quant-lab/api.env",
+                "  api_env_require_secure_permissions: true",
+                "  allow_api_env_symlink: false",
                 "  fail_policy: allow_local_fallback",
                 "  allow_local_fallback_in_enforce: false",
                 "  allow_insecure_http_with_token: true",
@@ -47,6 +49,10 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "mode": "shadow",
                 "mode_source": "runtime_override",
                 "called_api": True,
+                "api_env_path_present": True,
+                "api_env_secure_permissions": True,
+                "api_env_token_loaded": True,
+                "api_env_warning": None,
                 "permission_gate_enforced": False,
                 "cost_gate_enforced": False,
                 "symbol": "BTC/USDT",
@@ -152,9 +158,14 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "request_not_ok" not in fallbacks
         assert "allow_insecure_http_with_token: true" in config_text
         assert "allow_local_fallback_in_enforce: false" in config_text
+        assert "api_env_require_secure_permissions: true" in config_text
+        assert "allow_api_env_symlink: false" in config_text
         assert "api_token_env: QUANT_LAB_API_TOKEN" in config_text
         assert config_audit["mode"] == "shadow"
         assert config_audit["mode_source"] == "runtime_override"
+        assert "api_env_path_present" in config_audit
+        assert "api_env_secure_permissions" in config_audit
+        assert config_audit["api_env_token_loaded"] is True
         assert config_audit["allow_insecure_http_with_token"] is True
         assert config_audit["base_url_scheme"] == "http"
         assert config_audit["base_url_host"] == "qyun2.hrhome.top"
