@@ -4459,6 +4459,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         payload = parse_json_obj(row.get("raw_json"), {})
         return payload if isinstance(payload, dict) else {}
 
+    def iter_embedded_router_payloads(row):
+        payload = roundtrip_payload(row)
+        for section in ("entry_router_decision", "exit_router_decision"):
+            router_payload = payload.get(section)
+            if not isinstance(router_payload, dict):
+                continue
+            yield router_payload
+            embedded = parse_json_obj(router_payload.get("raw_json"), {})
+            if isinstance(embedded, dict):
+                yield embedded
+                embedded_inner = parse_json_obj(embedded.get("raw_json"), {})
+                if isinstance(embedded_inner, dict):
+                    yield embedded_inner
+
     def iter_roundtrip_payload_dicts(row):
         def walk(obj, depth=0):
             if depth > 8:
@@ -4475,6 +4489,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 if isinstance(parsed, (dict, list)):
                     yield from walk(parsed, depth + 1)
 
+        for item in iter_embedded_router_payloads(row):
+            yield item
         yield from walk(roundtrip_payload(row))
 
     def row_has_truthy_key(row, key):

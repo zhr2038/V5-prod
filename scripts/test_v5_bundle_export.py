@@ -1547,8 +1547,15 @@ def fixture_bnb_swing_early_exit_router_raw_root(root):
                 "intent": "OPEN_LONG",
                 "side": "buy",
                 "reason": "ok / normal_entry",
-                "swing_hold_position": True,
-                "swing_min_hold_hours": 24,
+                "raw_json": json.dumps({
+                    "action": "create",
+                    "entry_reason": "normal_entry",
+                    "reason": "ok",
+                    "side": "buy",
+                    "swing_hold_position": True,
+                    "swing_min_hold_hours": 24,
+                    "symbol": "BNB/USDT",
+                }, ensure_ascii=False),
             },
             {
                 "symbol": "BNB/USDT",
@@ -2660,7 +2667,9 @@ def main():
             assert bnb["required_hold_hours"] == "24", bnb
             raw_payload = json.loads(roundtrips[0]["raw_json"])
             assert raw_payload["entry_router_decision"]["reason"] == "ok / normal_entry", raw_payload
-            assert raw_payload["entry_router_decision"]["swing_hold_position"] is True, raw_payload
+            assert raw_payload["entry_router_decision"]["swing_hold_position"] == "not_observable", raw_payload
+            nested_router = json.loads(json.loads(raw_payload["entry_router_decision"]["raw_json"])["raw_json"])
+            assert nested_router["swing_hold_position"] is True, raw_payload
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
