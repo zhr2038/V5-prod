@@ -459,22 +459,6 @@ execution:
   allow_trade_on_small_reconcile_drift: true
   preflight_fail_action: allow  # 或 sell_only, 但配合 allow_trade_on_small_reconcile_drift 使用
 
-  # quant-lab read-only research guard. V5 only calls GET endpoints and fails conservatively.
-  quant_lab_enabled: true
-  quant_lab_base_url: http://qyun2.hrhome.top:8027
-  quant_lab_timeout_sec: 2.0
-  quant_lab_fail_policy: sell_only
-  quant_lab_token_env: QUANT_LAB_API_TOKEN
-  quant_lab_default_alpha_id: v5
-  quant_lab_strategy: v5
-  quant_lab_strategy_version: v1
-  quant_lab_cost_regime_default: UNKNOWN
-  quant_lab_cost_quantile: p75
-  quant_lab_gate_check_enabled: false
-  quant_lab_health_check_enabled: true
-  quant_lab_usage_path: reports/quant_lab_usage.jsonl
-  quant_lab_requests_path: reports/quant_lab_requests.jsonl
-  
   # 借币预防
   borrow_prevention: true
   borrow_block_mode: symbol_only

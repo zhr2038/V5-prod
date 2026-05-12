@@ -43,6 +43,89 @@ def _resolve_active_config_path(raw_config_path: str | None = None) -> str:
     return str(resolved)
 
 
+def _quant_lab_runtime_namespace(quant_lab, **overrides):
+    from types import SimpleNamespace
+
+    if hasattr(quant_lab, "model_dump"):
+        data = quant_lab.model_dump()
+    elif hasattr(quant_lab, "__dict__"):
+        data = dict(vars(quant_lab))
+    else:
+        data = {}
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+def _legacy_execution_quant_lab_active(execution) -> bool:
+    return bool(getattr(execution, "quant_lab_enabled", False))
+
+
+def _legacy_execution_quant_lab_present(execution) -> bool:
+    legacy_keys = {
+        "quant_lab_enabled",
+        "quant_lab_base_url",
+        "quant_lab_timeout_sec",
+        "quant_lab_fail_policy",
+        "quant_lab_token_env",
+        "quant_lab_default_alpha_id",
+        "quant_lab_strategy",
+        "quant_lab_strategy_version",
+        "quant_lab_cost_regime_default",
+        "quant_lab_cost_quantile",
+        "quant_lab_gate_check_enabled",
+        "quant_lab_health_check_enabled",
+        "quant_lab_usage_path",
+        "quant_lab_requests_path",
+    }
+    if execution is None:
+        return False
+    if _legacy_execution_quant_lab_active(execution):
+        return True
+    return any(key in getattr(execution, "model_fields_set", set()) for key in legacy_keys)
+
+
+def _get_quant_lab_runtime_cfg(cfg):
+    qcfg = getattr(cfg, "quant_lab", None)
+    execution = getattr(cfg, "execution", None)
+    if qcfg is not None and bool(getattr(qcfg, "enabled", False)):
+        return _quant_lab_runtime_namespace(
+            qcfg,
+            quant_lab_config_source="top_level",
+            legacy_execution_quant_lab_ignored=_legacy_execution_quant_lab_present(execution),
+        )
+    if execution is None or not _legacy_execution_quant_lab_active(execution):
+        return qcfg
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        enabled=True,
+        mode=str(getattr(execution, "quant_lab_mode", "shadow") or "shadow"),
+        base_url=str(getattr(execution, "quant_lab_base_url", "http://qyun2.hrhome.top:8027") or "http://qyun2.hrhome.top:8027"),
+        api_token_env=str(getattr(execution, "quant_lab_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"),
+        timeout_seconds=float(getattr(execution, "quant_lab_timeout_sec", 2.0) or 2.0),
+        max_retries=1,
+        cache_ttl_seconds=60,
+        fail_policy=str(getattr(execution, "quant_lab_fail_policy", "sell_only") or "sell_only"),
+        risk_permission_enabled=True,
+        cost_enabled=True,
+        gate_enabled=bool(getattr(execution, "quant_lab_gate_check_enabled", False)),
+        cost_quantile=str(getattr(execution, "quant_lab_cost_quantile", "p75") or "p75"),
+        cost_min_edge_multiplier=1.5,
+        cost_fallback_to_local=True,
+        min_cost_bps_floor=5.0,
+        strategy_name=str(getattr(execution, "quant_lab_strategy", "v5") or "v5"),
+        strategy_version=str(getattr(execution, "quant_lab_strategy_version", "5.0.0") or "5.0.0"),
+        audit_enabled=True,
+        audit_path="reports/quant_lab_usage.jsonl",
+        request_log_path="reports/quant_lab_requests.jsonl",
+        runtime_override_path="state/quant_lab_mode.json",
+        allow_runtime_override=True,
+        write_mode_audit=True,
+        quant_lab_config_source="execution_legacy",
+        legacy_execution_quant_lab_ignored=False,
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
@@ -117,37 +200,10 @@ def main() -> None:
         )
         res = pf.run(max_pages=args.max_pages, max_status_age_sec=args.max_status_age_sec)
         payload = dict(res.__dict__)
-        qcfg = getattr(cfg, "quant_lab", None)
-        q_enabled = bool(getattr(qcfg, "enabled", False)) or bool(getattr(cfg.execution, "quant_lab_enabled", False))
-        if q_enabled:
-            from copy import copy
-            from types import SimpleNamespace
+        qcfg_runtime = _get_quant_lab_runtime_cfg(cfg)
+        if bool(getattr(qcfg_runtime, "enabled", False)):
             from src.quant_lab_client.guard import QuantLabGuard
 
-            if qcfg is not None and bool(getattr(qcfg, "enabled", False)):
-                qcfg_runtime = copy(qcfg)
-            else:
-                qcfg_runtime = SimpleNamespace(
-                    enabled=True,
-                    base_url=str(getattr(cfg.execution, "quant_lab_base_url", "http://qyun2.hrhome.top:8027") or "http://qyun2.hrhome.top:8027"),
-                    api_token_env=str(getattr(cfg.execution, "quant_lab_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN"),
-                    timeout_seconds=float(getattr(cfg.execution, "quant_lab_timeout_sec", 2.0) or 2.0),
-                    max_retries=1,
-                    cache_ttl_seconds=60,
-                    fail_policy=str(getattr(cfg.execution, "quant_lab_fail_policy", "sell_only") or "sell_only"),
-                    risk_permission_enabled=True,
-                    cost_enabled=True,
-                    gate_enabled=bool(getattr(cfg.execution, "quant_lab_gate_check_enabled", False)),
-                    cost_quantile=str(getattr(cfg.execution, "quant_lab_cost_quantile", "p75") or "p75"),
-                    cost_min_edge_multiplier=1.5,
-                    cost_fallback_to_local=True,
-                    min_cost_bps_floor=5.0,
-                    strategy_name=str(getattr(cfg.execution, "quant_lab_strategy", "v5") or "v5"),
-                    strategy_version=str(getattr(cfg.execution, "quant_lab_strategy_version", "5.0.0") or "5.0.0"),
-                    audit_enabled=True,
-                    audit_path="reports/quant_lab_usage.jsonl",
-                    request_log_path="reports/quant_lab_requests.jsonl",
-                )
             qcfg_runtime.request_log_path = _resolve_runtime_jsonl_path(
                 getattr(qcfg_runtime, "request_log_path", None),
                 order_store_path=order_store_path,

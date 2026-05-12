@@ -723,12 +723,62 @@ def _resolve_quant_lab_artifact_path(cfg: AppConfig, attr_name: str, base_name: 
     return Path(raw_path)
 
 
+_LEGACY_EXECUTION_QUANT_LAB_KEYS = (
+    "quant_lab_enabled",
+    "quant_lab_base_url",
+    "quant_lab_timeout_sec",
+    "quant_lab_fail_policy",
+    "quant_lab_token_env",
+    "quant_lab_default_alpha_id",
+    "quant_lab_strategy",
+    "quant_lab_strategy_version",
+    "quant_lab_cost_regime_default",
+    "quant_lab_cost_quantile",
+    "quant_lab_gate_check_enabled",
+    "quant_lab_health_check_enabled",
+    "quant_lab_usage_path",
+    "quant_lab_requests_path",
+)
+
+
+def _legacy_execution_quant_lab_active(execution: object) -> bool:
+    return bool(getattr(execution, "quant_lab_enabled", False))
+
+
+def _legacy_execution_quant_lab_present(execution: object) -> bool:
+    if execution is None:
+        return False
+    if _legacy_execution_quant_lab_active(execution):
+        return True
+    return any(
+        key in getattr(execution, "model_fields_set", set())
+        for key in _LEGACY_EXECUTION_QUANT_LAB_KEYS
+    )
+
+
+def _quant_lab_namespace(quant_lab: object, **overrides):
+    from types import SimpleNamespace
+
+    if hasattr(quant_lab, "model_dump"):
+        data = quant_lab.model_dump()
+    elif hasattr(quant_lab, "__dict__"):
+        data = dict(vars(quant_lab))
+    else:
+        data = {}
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 def _get_quant_lab_cfg(cfg: AppConfig):
     quant_lab = getattr(cfg, "quant_lab", None)
     execution = getattr(cfg, "execution", None)
     if quant_lab is not None and bool(getattr(quant_lab, "enabled", False)):
-        return quant_lab
-    if execution is None or not bool(getattr(execution, "quant_lab_enabled", False)):
+        return _quant_lab_namespace(
+            quant_lab,
+            quant_lab_config_source="top_level",
+            legacy_execution_quant_lab_ignored=_legacy_execution_quant_lab_present(execution),
+        )
+    if execution is None or not _legacy_execution_quant_lab_active(execution):
         return quant_lab
     from types import SimpleNamespace
 
@@ -758,6 +808,8 @@ def _get_quant_lab_cfg(cfg: AppConfig):
         runtime_override_path="state/quant_lab_mode.json",
         allow_runtime_override=True,
         write_mode_audit=True,
+        quant_lab_config_source="execution_legacy",
+        legacy_execution_quant_lab_ignored=False,
     )
 
 

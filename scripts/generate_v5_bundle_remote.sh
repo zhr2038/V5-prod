@@ -636,6 +636,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
     live_config_keys = collect_config_keys_from_yaml_text(live_config_text)
 
+    def live_section_text(section_name):
+        match = re.search(
+            rf"(?ms)^{re.escape(section_name)}:\s*\n(.*?)(?=^[A-Za-z_][A-Za-z0-9_]*:\s*|\Z)",
+            live_config_text or "",
+        )
+        return match.group(1) if match else ""
+
+    top_level_quant_lab_authoritative = bool(
+        re.search(r"(?m)^\s{2}enabled\s*:\s*true\s*(?:#.*)?$", live_section_text("quant_lab"), re.IGNORECASE)
+    )
+
     DEFAULT_LABEL_HORIZONS = [4, 8, 12, 24, 48, 72, 120]
     LEGACY_LABEL_HORIZONS = [4, 8, 12, 24]
 
@@ -709,6 +720,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "market_impulse_probe_time_stop_hours",
         "probe_exit_enabled",
     }
+    LEGACY_EXECUTION_QUANT_LAB_KEYS = {
+        "quant_lab_enabled",
+        "quant_lab_base_url",
+        "quant_lab_timeout_sec",
+        "quant_lab_fail_policy",
+        "quant_lab_token_env",
+        "quant_lab_default_alpha_id",
+        "quant_lab_strategy",
+        "quant_lab_strategy_version",
+        "quant_lab_cost_regime_default",
+        "quant_lab_cost_quantile",
+        "quant_lab_gate_check_enabled",
+        "quant_lab_health_check_enabled",
+        "quant_lab_usage_path",
+        "quant_lab_requests_path",
+    }
+    CONFIG_CONSUMPTION_FIXED_KEYS |= LEGACY_EXECUTION_QUANT_LAB_KEYS
     CONFIG_CONSUMPTION_PREFIXES = (
         "btc_leadership_probe_",
         "market_impulse_probe_",
@@ -857,7 +885,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 consumer_category = "not_consumed"
                 consumer_files = []
             consumed = bool(consumer_files)
-            if (present_live or present_effective) and consumed and consumer_category == "live_runtime":
+            legacy_quant_lab_inactive = bool(key in LEGACY_EXECUTION_QUANT_LAB_KEYS and top_level_quant_lab_authoritative)
+            if legacy_quant_lab_inactive:
+                consumer_category = "legacy_inactive"
+                consumer_files = []
+                consumed = False
+                diagnosis = "legacy_execution_quant_lab_inactive_top_level_authoritative"
+            elif (present_live or present_effective) and consumed and consumer_category == "live_runtime":
                 diagnosis = "live_runtime_consumed"
             elif (present_live or present_effective) and consumed and consumer_category == "diagnostics":
                 diagnosis = "diagnostics_consumed"

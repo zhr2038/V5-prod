@@ -382,6 +382,9 @@ def fixture_config_runtime_consumption_root(root):
                 "  protect_negative_expectancy_short_cycle_guard_enabled: true",
                 "  open_long_entry_guard_fail_open_buy: false",
                 "  open_long_entry_guard_fail_open_sell: true",
+                "quant_lab:",
+                "  enabled: true",
+                "  mode: shadow",
                 "diagnostics:",
                 "  multi_position_swing_shadow_enabled: true",
                 "  alt_impulse_shadow_enabled: true",
@@ -2976,6 +2979,8 @@ def main():
             assert by_key["multi_position_swing_shadow_enabled"]["diagnosis"] == "diagnostics_consumed", by_key["multi_position_swing_shadow_enabled"]
             assert by_key["alt_impulse_shadow_enabled"]["consumer_category"] == "diagnostics", by_key["alt_impulse_shadow_enabled"]
             assert by_key["alt_impulse_shadow_enabled"]["diagnosis"] == "diagnostics_consumed", by_key["alt_impulse_shadow_enabled"]
+            assert by_key["quant_lab_fail_policy"]["consumer_category"] == "legacy_inactive", by_key["quant_lab_fail_policy"]
+            assert by_key["quant_lab_fail_policy"]["diagnosis"] == "legacy_execution_quant_lab_inactive_top_level_authoritative", by_key["quant_lab_fail_policy"]
             assert by_key["probe_exit_enabled"]["present_in_live_prod"] == "false", by_key["probe_exit_enabled"]
             low_issues = [
                 item for item in issues["issues"]
