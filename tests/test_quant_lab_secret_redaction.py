@@ -15,7 +15,20 @@ def test_bundle_redacts_secret_values(tmp_path: Path) -> None:
     (reports / "quant_lab_usage.jsonl").write_text("", encoding="utf-8")
     (reports / "quant_lab_requests.jsonl").write_text("", encoding="utf-8")
     (configs / "config.yaml").write_text(
-        "exchange:\n  api_key: REALKEY\n  api_secret: REALSECRET\n  passphrase: REALPASS\nquant_lab:\n  api_token_env: QUANT_LAB_API_TOKEN\n",
+        "\n".join(
+            [
+                "exchange:",
+                "  api_key: REALKEY",
+                "  api_secret: REALSECRET",
+                "  passphrase: REALPASS",
+                "quant_lab:",
+                "  api_token_env: QUANT_LAB_API_TOKEN",
+                "  api_env_path: /home/ubuntu/.quant-lab/api.env",
+                "  allow_insecure_http_with_token: true",
+                "  allow_local_fallback_in_enforce: false",
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -27,5 +40,8 @@ def test_bundle_redacts_secret_values(tmp_path: Path) -> None:
     assert "REALKEY" not in text
     assert "REALSECRET" not in text
     assert "REALPASS" not in text
-    assert "QUANT_LAB_API_TOKEN" not in text
+    assert "api_token_env: QUANT_LAB_API_TOKEN" in text
+    assert "api_env_path: /home/ubuntu/.quant-lab/api.env" in text
+    assert "allow_insecure_http_with_token: true" in text
+    assert "allow_local_fallback_in_enforce: false" in text
     assert "<REDACTED>" in text

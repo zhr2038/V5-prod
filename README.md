@@ -1190,3 +1190,13 @@ Private / All rights reserved
 ```
 
 如果该仓库用于个人研究或生产系统，建议明确写明使用范围和责任边界。
+## Quant-lab 中台检查
+
+每日 follow-up bundle 会输出 `summaries/quant_lab_config_audit.json`、`summaries/window_summary.json`、`summaries/quant_lab_compliance.csv`、`summaries/quant_lab_cost_usage.csv` 和 `summaries/quant_lab_fallbacks.csv`。
+
+- `quant_lab_mode` / `quant_lab_mode_source`：确认模式来自配置还是 `state/quant_lab_mode.json`。
+- `permission_gate_enforced` / `cost_gate_enforced`：确认中台门禁是否真正生效。
+- `quant_lab_actual_filter_count` / `quant_lab_hypothetical_filter_count`：区分真实拦单和 shadow 观察。
+- `quant_lab_request_success_count` / `quant_lab_request_error_count`：确认 API 请求是否成功。
+- `quant_lab_fallback_count`：只统计真实 fallback。
+- `allow_insecure_http_with_token` / `api_token_env` / `api_env_path_present`：确认公网 token 配置是否显式开启。

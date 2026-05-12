@@ -11,6 +11,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
+from urllib.parse import urlparse
 
 from src.reporting.quant_lab_audit import read_quant_lab_usage, sanitize_quant_lab_obj
 
@@ -35,6 +36,13 @@ SECRET_MARKERS = (
     "EXCHANGE_PASSPHRASE",
     "QUANT_LAB_API_TOKEN",
 )
+
+NON_SECRET_CONFIG_KEYS = {
+    "allow_insecure_http_with_token",
+    "allow_local_fallback_in_enforce",
+    "api_env_path",
+    "api_token_env",
+}
 
 COMPLIANCE_FIELDS = (
     "run_id",
@@ -80,6 +88,8 @@ COST_FIELDS = (
     "cost_model_version",
     "expected_edge_bps",
     "min_required_edge_bps",
+    "would_filter_by_cost",
+    "fallback_used",
     "passed",
     "filtered",
     "filter_reason",
@@ -99,6 +109,10 @@ def _since_iso(window_hours: int) -> str:
 def _redact_text(text: str) -> str:
     out_lines: list[str] = []
     for line in text.splitlines():
+        key = _assignment_key(line)
+        if key in NON_SECRET_CONFIG_KEYS:
+            out_lines.append(line)
+            continue
         lowered = line.lower()
         if any(marker.lower() in lowered for marker in SECRET_MARKERS):
             if ":" in line:
@@ -112,6 +126,19 @@ def _redact_text(text: str) -> str:
         else:
             out_lines.append(line)
     return "\n".join(out_lines) + ("\n" if text.endswith("\n") else "")
+
+
+def _assignment_key(line: str) -> str:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return ""
+    if stripped.startswith("export "):
+        stripped = stripped[len("export ") :].strip()
+    if ":" in stripped:
+        return stripped.split(":", 1)[0].strip()
+    if "=" in stripped:
+        return stripped.split("=", 1)[0].strip()
+    return ""
 
 
 def _read_text_redacted(path: Path) -> str:
@@ -133,6 +160,21 @@ def _write_csv(path: Path, fields: Iterable[str], rows: Iterable[Mapping[str, An
         writer.writeheader()
         for row in rows:
             writer.writerow({field: sanitize_quant_lab_obj(row).get(field, "") for field in writer.fieldnames})
+
+
+def _sanitize_bundle_obj(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        out: Dict[str, Any] = {}
+        for key, item in value.items():
+            key_s = str(key)
+            if key_s in NON_SECRET_CONFIG_KEYS:
+                out[key_s] = item
+            else:
+                out[key_s] = sanitize_quant_lab_obj({key_s: _sanitize_bundle_obj(item)}).get(key_s)
+        return out
+    if isinstance(value, list):
+        return [_sanitize_bundle_obj(item) for item in value]
+    return sanitize_quant_lab_obj(value)
 
 
 def _read_jsonl(path: Path) -> list[Dict[str, Any]]:
@@ -159,6 +201,36 @@ def _is_new_risk_row(row: Mapping[str, Any]) -> bool:
     side = str(row.get("side") or "").lower()
     intent = str(row.get("intent") or "").upper()
     return side == "buy" or intent in {"OPEN_LONG", "REBALANCE"}
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "ok", "success"}
+    return False
+
+
+def _request_success(row: Mapping[str, Any]) -> bool:
+    if _truthy(row.get("success")) or _truthy(row.get("ok")):
+        return True
+    status = row.get("status_code")
+    try:
+        if status is not None and 200 <= int(status) < 300:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
+
+
+def _actual_filtered(row: Mapping[str, Any]) -> bool:
+    return _truthy(row.get("actually_filtered")) or _truthy(row.get("order_filtered"))
+
+
+def _would_filter(row: Mapping[str, Any]) -> bool:
+    return _truthy(row.get("would_filter")) or _truthy(row.get("would_filter_by_cost")) or _truthy(row.get("would_filter_by_permission"))
 
 
 def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -206,16 +278,16 @@ def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
         if row.get("local_preflight_permission"):
             item["local_preflight_permission"] = row.get("local_preflight_permission")
         if row.get("event_type") == "filter_order":
-            if _is_new_risk_row(row) and not row.get("actually_filtered") and not row.get("order_filtered"):
+            if _is_new_risk_row(row) and not _actual_filtered(row):
                 item["new_risk_order_count"] = int(item["new_risk_order_count"]) + 1
             if str(row.get("side") or "").lower() == "sell":
                 item["sell_order_count"] = int(item["sell_order_count"]) + 1
             reason = str(row.get("filter_reason") or "")
-            if (row.get("actually_filtered") or row.get("order_filtered")) and ("sell_only" in reason or "abort" in reason):
+            if _actual_filtered(row) and ("sell_only" in reason or "abort" in reason):
                 item["filtered_by_permission_count"] = int(item["filtered_by_permission_count"]) + 1
-            if (row.get("actually_filtered") or row.get("order_filtered")) and "cost" in reason:
+            if _actual_filtered(row) and "cost" in reason:
                 item["filtered_by_cost_count"] = int(item["filtered_by_cost_count"]) + 1
-            if row.get("would_filter") and not (row.get("actually_filtered") or row.get("order_filtered")):
+            if _would_filter(row) and not _actual_filtered(row):
                 item["hypothetical_violation"] = "true"
         final_permission = str(item.get("final_permission") or item.get("quant_lab_permission") or "").upper()
         enforced = str(item.get("permission_gate_enforced")).lower() == "true"
@@ -235,14 +307,22 @@ def _build_cost_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     for row in rows:
         if row.get("event_type") != "cost_estimate":
             continue
-        out.append({field: row.get(field, "") for field in COST_FIELDS})
+        merged: Dict[str, Any] = dict(row)
+        for nested_key in ("cost", "quant_lab", "cost_estimate"):
+            nested = row.get(nested_key)
+            if isinstance(nested, Mapping):
+                for key, value in nested.items():
+                    merged.setdefault(str(key), value)
+        merged.setdefault("would_filter_by_cost", merged.get("would_filter", ""))
+        merged.setdefault("actually_filtered", merged.get("order_filtered", ""))
+        out.append({field: merged.get(field, "") for field in COST_FIELDS})
     return out
 
 
 def _build_fallback_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     out: list[Dict[str, Any]] = []
     for row in rows:
-        if not row.get("fallback_used") and row.get("event_type") != "fallback":
+        if not _truthy(row.get("fallback_used")) and row.get("event_type") != "fallback":
             continue
         out.append(
             {
@@ -265,26 +345,35 @@ def _window_summary(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any
     cost_model_version = None
     gate_version = None
     latest_mode = None
+    latest_mode_source = None
     for row in rows:
         latest_mode = row.get("mode") or latest_mode
+        latest_mode_source = row.get("mode_source") or latest_mode_source
         latest_permission = row.get("permission") or row.get("quant_lab_permission") or row.get("quant_lab_decision") or latest_permission
         final_permission = row.get("final_permission") or row.get("effective_decision") or final_permission
         cost_model_version = row.get("cost_model_version") or cost_model_version
         gate_version = row.get("gate_version") or gate_version
+    request_success_count = len([row for row in request_rows if _request_success(row)])
+    request_error_count = len(request_rows) - request_success_count
     return {
         "quant_lab_enabled": bool(rows or request_rows),
         "quant_lab_mode": latest_mode,
+        "quant_lab_mode_source": latest_mode_source,
         "quant_lab_request_count": len(request_rows),
-        "quant_lab_error_count": len([row for row in request_rows if row.get("success") is False or row.get("ok") is False]),
-        "quant_lab_fallback_count": len([row for row in rows if row.get("fallback_used")]),
+        "quant_lab_request_success_count": request_success_count,
+        "quant_lab_request_error_count": request_error_count,
+        "quant_lab_error_count": request_error_count,
+        "quant_lab_fallback_count": len([row for row in rows if _truthy(row.get("fallback_used")) or row.get("event_type") == "fallback"]),
+        "quant_lab_actual_filter_count": len([row for row in rows if _actual_filtered(row)]),
+        "quant_lab_hypothetical_filter_count": len([row for row in rows if _would_filter(row) and not _actual_filtered(row)]),
         "quant_lab_filtered_by_cost_count": len(
-            [row for row in rows if row.get("order_filtered") and "cost" in str(row.get("filter_reason") or "")]
+            [row for row in rows if _actual_filtered(row) and "cost" in str(row.get("filter_reason") or "")]
         ),
         "quant_lab_filtered_by_permission_count": len(
             [
                 row
                 for row in rows
-                if row.get("order_filtered")
+                if _actual_filtered(row)
                 and ("sell_only" in str(row.get("filter_reason") or "") or "abort" in str(row.get("filter_reason") or ""))
             ]
         ),
@@ -307,7 +396,7 @@ def _issues(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any]], cost
         add("quant_lab_missing_usage_log", "medium", "reports/quant_lab_usage.jsonl is missing or empty")
     if not cost_rows:
         add("quant_lab_missing_cost_usage", "medium", "no cost_estimate telemetry in window")
-    if any(row.get("success") is False for row in request_rows):
+    if any(not _request_success(row) for row in request_rows):
         add("quant_lab_api_unavailable", "medium", "quant-lab request errors were observed")
     latest_permission = next((row.get("final_permission") or row.get("permission") for row in reversed(rows) if row.get("final_permission") or row.get("permission")), "")
     if str(latest_permission).upper() == "ABORT":
@@ -316,15 +405,82 @@ def _issues(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any]], cost
         add("quant_lab_permission_sell_only", "medium", "latest quant-lab permission is SELL_ONLY")
     if any(str(row.get("violation")) == "true" for row in compliance_rows):
         add("quant_lab_gate_compliance_violation", "high", "orders violated quant-lab permission in the window")
-    if len([row for row in rows if row.get("fallback_used")]) >= 3:
+    if len([row for row in rows if _truthy(row.get("fallback_used")) or row.get("event_type") == "fallback"]) >= 3:
         add("quant_lab_cost_fallback_high", "medium", "quant-lab fallback count is elevated")
     if any(row.get("filtered") for row in cost_rows):
         add("quant_lab_cost_gate_filtered_trade", "low", "quant-lab cost gate filtered at least one order")
-    if len([row for row in request_rows if row.get("success") is False]) >= 3:
+    if len([row for row in request_rows if not _request_success(row)]) >= 3:
         add("quant_lab_request_error_high", "medium", "quant-lab request error count is elevated")
     if any(str(row.get("source") or "").lower() == "public_spread_proxy" for row in cost_rows):
         add("quant_lab_public_proxy_cost_only", "medium", "quant-lab cost source is public_spread_proxy")
     return issues
+
+
+def _quant_lab_config_audit(root: Path, usage_rows: list[Dict[str, Any]]) -> Dict[str, Any]:
+    latest = usage_rows[-1] if usage_rows else {}
+    audit: Dict[str, Any] = {
+        "enabled": bool(usage_rows),
+        "mode": latest.get("mode"),
+        "mode_source": latest.get("mode_source"),
+        "runtime_override_path": "state/quant_lab_mode.json",
+        "fail_policy": latest.get("fail_policy"),
+        "allow_local_fallback_in_enforce": None,
+        "allow_insecure_http_with_token": None,
+        "base_url_scheme": None,
+        "base_url_host": None,
+        "api_token_env": None,
+        "api_env_path_present": None,
+        "permission_gate_enforced": latest.get("permission_gate_enforced"),
+        "cost_gate_enforced": latest.get("cost_gate_enforced"),
+    }
+    try:
+        from configs.loader import load_config
+
+        cfg_path = root / "configs/live_prod.yaml"
+        if not cfg_path.exists():
+            cfg_path = root / "configs/config.yaml"
+        if cfg_path.exists():
+            cfg = load_config(str(cfg_path))
+            qcfg = cfg.quant_lab
+            mode = str(getattr(qcfg, "mode", "shadow") or "shadow")
+            mode_source = "config"
+            override_path_value = str(getattr(qcfg, "runtime_override_path", "state/quant_lab_mode.json") or "state/quant_lab_mode.json")
+            override_path = Path(override_path_value)
+            if not override_path.is_absolute():
+                override_path = root / override_path
+            if bool(getattr(qcfg, "allow_runtime_override", True)) and override_path.exists():
+                try:
+                    payload = json.loads(override_path.read_text(encoding="utf-8"))
+                    if isinstance(payload, dict) and payload.get("mode"):
+                        mode = str(payload.get("mode") or mode)
+                        mode_source = "runtime_override"
+                except Exception:
+                    mode_source = "config_invalid_override"
+            parsed_url = urlparse(str(getattr(qcfg, "base_url", "") or ""))
+            api_env_path = getattr(qcfg, "api_env_path", None)
+            audit.update(
+                {
+                    "enabled": bool(getattr(qcfg, "enabled", False)),
+                    "mode": mode,
+                    "mode_source": mode_source,
+                    "runtime_override_path": override_path_value,
+                    "fail_policy": getattr(qcfg, "fail_policy", None),
+                    "allow_local_fallback_in_enforce": bool(getattr(qcfg, "allow_local_fallback_in_enforce", False)),
+                    "allow_insecure_http_with_token": bool(getattr(qcfg, "allow_insecure_http_with_token", False)),
+                    "base_url_scheme": parsed_url.scheme,
+                    "base_url_host": parsed_url.hostname,
+                    "api_token_env": getattr(qcfg, "api_token_env", None),
+                    "api_env_path_present": bool(api_env_path and Path(str(api_env_path)).exists()),
+                }
+            )
+    except Exception as exc:
+        audit["config_audit_error"] = type(exc).__name__
+    for row in reversed(usage_rows):
+        if audit.get("permission_gate_enforced") in ("", None) and "permission_gate_enforced" in row:
+            audit["permission_gate_enforced"] = row.get("permission_gate_enforced")
+        if audit.get("cost_gate_enforced") in ("", None) and "cost_gate_enforced" in row:
+            audit["cost_gate_enforced"] = row.get("cost_gate_enforced")
+    return _sanitize_bundle_obj(audit)
 
 
 def _add_file(tf: tarfile.TarFile, arcname: str, data: str | bytes) -> None:
@@ -382,9 +538,19 @@ def export_v5_bundle(
         window_summary = _window_summary(usage_rows, request_rows, compliance_rows)
         _write_text(staging / "summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2))
         _write_text(
+            staging / "summaries/quant_lab_config_audit.json",
+            json.dumps(_quant_lab_config_audit(root, usage_rows), ensure_ascii=False, indent=2),
+        )
+        _write_text(
             staging / "summaries/issues_to_fix.json",
             json.dumps(_issues(usage_rows, request_rows, cost_rows, compliance_rows), ensure_ascii=False, indent=2),
         )
+        state_path = root / "state/quant_lab_mode.json"
+        if state_path.exists():
+            _write_text(staging / "raw/state/quant_lab_mode.json", _read_text_redacted(state_path))
+        effective_path = reports / "effective_live_config.json"
+        if effective_path.exists():
+            _write_text(staging / "raw/reports/effective_live_config.json", _read_text_redacted(effective_path))
         if include_config:
             for rel in ("configs/config.yaml", "configs/live_prod.yaml"):
                 path = root / rel
