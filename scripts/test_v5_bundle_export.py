@@ -1504,6 +1504,69 @@ def fixture_swing_early_exit_root(root):
     return run_id
 
 
+def fixture_bnb_swing_early_exit_router_raw_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    window_end = int(now.timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+    entry_ts = window_end - 6 * 3600
+    exit_ts = entry_ts + 5 * 3600
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n"
+        "  swing_hold_enabled: true\n"
+        "  swing_min_hold_hours: 24\n"
+        "  fee_bps: 0\n"
+        "  slippage_bps: 0\n",
+    )
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "current_level": "PROTECT",
+        "regime": "Trending",
+        "router_decisions": [
+            {
+                "symbol": "BNB/USDT",
+                "action": "create",
+                "intent": "OPEN_LONG",
+                "side": "buy",
+                "reason": "ok / normal_entry",
+                "swing_hold_position": True,
+                "swing_min_hold_hours": 24,
+            },
+            {
+                "symbol": "BNB/USDT",
+                "action": "create",
+                "intent": "CLOSE_LONG",
+                "side": "sell",
+                "reason": "atr_trailing",
+                "source_reason": "atr_trailing",
+            },
+        ],
+    })
+    write_text(
+        run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,raw_meta\n"
+        f"{iso(entry_ts)},{run_id},BNB/USDT,OPEN_LONG,buy,1,400,400,0,\n"
+        f"{iso(exit_ts)},{run_id},BNB/USDT,CLOSE_LONG,sell,1,398,398,0,\n",
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+    return run_id
+
+
 def fixture_multi_position_swing_shadow_from_audit_root(root):
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     entry_dt = now - dt.timedelta(hours=50)
@@ -2571,6 +2634,29 @@ def main():
             assert "## Swing early exit audit" in readme, readme
             assert "early exit count: 3" in readme, readme
             assert "ATR trailing before min_hold: yes / 1" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-bnb-swing-early-exit-router-raw-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_bnb_swing_early_exit_router_raw_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/swing_early_exit_audit.csv")).read().decode().splitlines()))
+                roundtrips = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/trades_roundtrips.csv")).read().decode().splitlines()))
+            assert len(rows) == 1, rows
+            bnb = rows[0]
+            assert bnb["symbol"] == "BNB/USDT", bnb
+            assert bnb["exit_reason"] == "atr_trailing", bnb
+            assert bnb["exited_before_min_hold"] == "true", bnb
+            assert float(bnb["hold_hours"]) == 5.0, bnb
+            assert bnb["required_hold_hours"] == "24", bnb
+            raw_payload = json.loads(roundtrips[0]["raw_json"])
+            assert raw_payload["entry_router_decision"]["reason"] == "ok / normal_entry", raw_payload
+            assert raw_payload["entry_router_decision"]["swing_hold_position"] is True, raw_payload
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

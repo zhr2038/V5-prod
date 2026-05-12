@@ -1662,6 +1662,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "raw_reason": reason,
                     "source_reason": source_reason,
                     "probe_type": router_trade_probe_type(item, trade_reason),
+                    "swing_hold_position": item.get("swing_hold_position", not_obs),
+                    "swing_min_hold_hours": first_value(item, ("swing_min_hold_hours", "required_hold_hours"), not_obs),
                     "raw_json": raw_json,
                 })
                 if router_intent == "OPEN_LONG" and symbol != not_obs:
@@ -4448,6 +4450,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     SWING_EARLY_EXIT_REASONS = {
         "atr_trailing",
         "zero_target_close",
+        "rank_exit",
         "regime_exit",
     }
 
@@ -4455,11 +4458,29 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         payload = parse_json_obj(row.get("raw_json"), {})
         return payload if isinstance(payload, dict) else {}
 
+    def iter_roundtrip_payload_dicts(row):
+        def walk(obj, depth=0):
+            if depth > 8:
+                return
+            if isinstance(obj, dict):
+                yield obj
+                for value in obj.values():
+                    yield from walk(value, depth + 1)
+            elif isinstance(obj, list):
+                for item in obj:
+                    yield from walk(item, depth + 1)
+            elif isinstance(obj, str):
+                parsed = parse_json_obj(obj, None)
+                if isinstance(parsed, (dict, list)):
+                    yield from walk(parsed, depth + 1)
+
+        yield from walk(roundtrip_payload(row))
+
     def row_has_truthy_key(row, key):
         if truthy(row.get(key)):
             return True
         payload = roundtrip_payload(row)
-        for item in iter_dicts(payload):
+        for item in iter_roundtrip_payload_dicts(row):
             if key in item and truthy(item.get(key)):
                 return True
             for meta_key in ("meta_json", "raw_meta", "meta", "metadata", "order_meta"):
@@ -4469,11 +4490,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 if isinstance(meta, dict) and truthy(meta.get(key)):
                     return True
         text = flatten_value(payload).lower()
-        return f'"{key}": true' in text
+        return (
+            f'"{key}": true' in text
+            or f'\\"{key}\\": true' in text
+            or re.search(rf"{re.escape(key)}\s*[:=]\s*(true|1|yes)", text) is not None
+        )
 
     def swing_required_hold_hours(row):
+        value = as_float(first_value(row, ("swing_min_hold_hours", "required_hold_hours"), not_obs))
+        if value is not None and value > 0:
+            return value
         payload = roundtrip_payload(row)
-        for item in iter_dicts(payload):
+        for item in iter_roundtrip_payload_dicts(row):
             value = as_float(first_value(item, ("swing_min_hold_hours", "required_hold_hours"), not_obs))
             if value is not None and value > 0:
                 return value
@@ -4492,10 +4520,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             return False
         if is_probe_trade_row(row):
             return False
-        if not row_has_truthy_key(row, "swing_hold_position"):
-            return False
-        entry_reason = flatten_value(row.get("entry_reason")).strip().lower()
-        return entry_reason in {"ok", "normal", "normal_entry", "protect_recovery", "protect_recovery_swing"}
+        return row_has_truthy_key(row, "swing_hold_position")
 
     def swing_early_exit_reason(exit_reason):
         text = flatten_value(exit_reason).strip().lower()
