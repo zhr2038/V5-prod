@@ -361,6 +361,98 @@ def fixture_negative_expectancy_missing_root(root):
     write_json(root / "reports/negative_expectancy_cooldown.json", {"stats": {}})
 
 
+def fixture_quant_lab_summary_root(root):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+
+    write_text(root / "configs/live_prod.yaml", "quant_lab:\n  enabled: true\n  mode: shadow\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {"window_end_ts": window_end, "router_decisions": []})
+    write_text(run_dir / "trades.csv", "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n")
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
+
+    usage_rows = [
+        {
+            "ts": iso(window_end),
+            "run_id": run_id,
+            "event_type": "cost_estimate",
+            "symbol": "BNB/USDT",
+            "success": True,
+            "fallback_used": False,
+        },
+        {
+            "ts": iso(window_end + 1),
+            "run_id": run_id,
+            "event_type": "fallback",
+            "fallback_used": True,
+            "fallback_reason": "quant_lab_unavailable_sell_only",
+            "action_taken": "sell_only",
+        },
+    ]
+    write_text(root / "reports/quant_lab_usage.jsonl", "\n".join(json.dumps(row) for row in usage_rows) + "\n")
+
+    request_rows = [
+        {
+            "ts": iso(window_end + 2),
+            "run_id": run_id,
+            "method": "GET",
+            "endpoint_path": "/v1/health",
+            "success": True,
+            "status_code": 200,
+        },
+        {
+            "ts": iso(window_end + 3),
+            "run_id": run_id,
+            "method": "POST",
+            "endpoint_path": "/v1/risk/live-permission",
+            "success": True,
+            "status_code": 200,
+        },
+        {
+            "ts": iso(window_end + 4),
+            "run_id": run_id,
+            "method": "GET",
+            "endpoint_path": "/v1/costs/estimate",
+            "ok": True,
+            "status_code": 200,
+        },
+        {
+            "ts": iso(window_end + 5),
+            "run_id": run_id,
+            "method": "GET",
+            "endpoint_path": "/v1/costs/estimate",
+            "success": False,
+            "status_code": 503,
+            "error_type": "http_error",
+        },
+        {
+            "ts": iso(window_end + 6),
+            "run_id": run_id,
+            "method": "GET",
+            "endpoint_path": "/v1/costs/estimate",
+            "success": False,
+            "status_code": 503,
+            "error_type": "http_error",
+            "fallback_used": True,
+            "fallback_reason": "quant_lab_request_local_fallback",
+        },
+    ]
+    write_text(root / "reports/quant_lab_requests.jsonl", "\n".join(json.dumps(row) for row in request_rows) + "\n")
+
+
 def fixture_config_runtime_consumption_root(root):
     now = dt.datetime.now(dt.timezone.utc)
     window_end = int(now.replace(minute=0, second=0, microsecond=0).timestamp())
@@ -2345,6 +2437,32 @@ def main():
             assert "是否真实成交: no / 0" in readme, readme
             assert "closed roundtrip gross/net bps: not_applicable_no_trades" in readme, readme
             assert "probe lifecycle: not_applicable_no_probe_trade" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-quant-lab-summary-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_quant_lab_summary_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                fallback_text = tf.extractfile(extract_member(tf, "summaries/quant_lab_fallbacks.csv")).read().decode()
+                fallback_rows = list(csv.DictReader(fallback_text.splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+
+            assert "/v1/health" not in fallback_text, fallback_text
+            assert "/v1/risk/live-permission" not in fallback_text, fallback_text
+            assert "request_not_ok" not in fallback_text, fallback_text
+            assert len(fallback_rows) == 2, fallback_rows
+            assert any(row["diagnosis"] == "quant_lab_unavailable_sell_only" for row in fallback_rows), fallback_rows
+            assert any(row["diagnosis"] == "quant_lab_request_local_fallback" for row in fallback_rows), fallback_rows
+            assert window["quant_lab_request_success_count"] == 3, window
+            assert window["quant_lab_request_error_count"] == 2, window
+            assert window["quant_lab_actual_fallback_count"] == 2, window
+            assert window["quant_lab_fallback_count"] == 2, window
+            assert window["quant_lab_fallback_rows"] == 2, window
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

@@ -115,6 +115,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         json.dumps({"ts": "2026-05-11T13:00:00Z", "run_id": "r1", "method": "GET", "endpoint_path": "/v1/costs/estimate", "success": True})
         + "\n"
         + json.dumps({"ts": "2026-05-11T13:00:01Z", "run_id": "r1", "method": "GET", "endpoint_path": "/v1/health", "ok": True, "status_code": 200})
+        + "\n"
+        + json.dumps({"ts": "2026-05-11T13:00:02Z", "run_id": "r1", "method": "POST", "endpoint_path": "/v1/risk/live-permission", "success": True, "status_code": 200})
         + "\n",
         encoding="utf-8",
     )
@@ -176,8 +178,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert config_audit["base_url_host"] == "qyun2.hrhome.top"
         assert window["quant_lab_mode"] == "shadow"
         assert window["quant_lab_mode_source"] == "runtime_override"
-        assert window["quant_lab_request_success_count"] == 2
+        assert window["quant_lab_request_success_count"] == 3
         assert window["quant_lab_request_error_count"] == 0
         assert window["quant_lab_actual_filter_count"] == 0
         assert window["quant_lab_hypothetical_filter_count"] == 1
         assert window["quant_lab_fallback_count"] == 0
+        assert window["quant_lab_actual_fallback_count"] == 0

@@ -1066,6 +1066,37 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             return "false"
         return str(bool(value)).lower()
 
+    def truthy_observed(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = flatten_value(value).strip().lower()
+        return text in {"1", "true", "yes", "y", "ok", "success"}
+
+    def quant_lab_request_success(row):
+        if not isinstance(row, dict):
+            return False
+        if truthy_observed(row.get("success")) or truthy_observed(row.get("ok")):
+            return True
+        if row.get("error_type") not in (None, "", not_obs):
+            return False
+        status = row.get("status_code")
+        try:
+            return status is not None and 200 <= int(status) < 300
+        except (TypeError, ValueError):
+            return False
+
+    def quant_lab_is_fallback(row):
+        if not isinstance(row, dict):
+            return False
+        return (
+            truthy_observed(row.get("fallback_used"))
+            or flatten_value(row.get("event_type")) == "fallback"
+            or row.get("fallback_reason") not in (None, "", not_obs)
+            or row.get("action_taken") not in (None, "", not_obs)
+        )
+
     def btc_label_key(run_id, ts_utc, symbol, skip_reason):
         return (
             flatten_value(run_id) or not_obs,
@@ -1327,6 +1358,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     quant_lab_compliance_rows = []
     quant_lab_cost_usage_rows = []
     quant_lab_fallback_rows = []
+    quant_lab_request_success_count = 0
+    quant_lab_request_error_count = 0
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
     dust_residual_row_keys = set()
@@ -1433,7 +1466,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "diagnosis": "filtered" if row.get("filtered") else "passed",
                     "raw_json": safe_json(row),
                 })
-                if row.get("fallback_used"):
+                if quant_lab_is_fallback(row):
                     quant_lab_fallback_rows.append({
                         "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
                         "run_id": run_id,
@@ -1445,7 +1478,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                         "intent": flatten_value(row.get("intent") or not_obs),
                         "fail_policy": flatten_value(permission.get("fail_policy") or not_obs),
                         "effective_decision": flatten_value(row.get("effective_decision") or permission.get("effective_decision") or not_obs),
-                        "fallback_used": "true",
+                        "fallback_used": str(quant_lab_is_fallback(row)).lower(),
                         "error": not_obs,
                         "diagnosis": flatten_value(row.get("filter_reason") or "fallback_policy_applied"),
                         "raw_json": safe_json(row),
@@ -1477,7 +1510,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
                     "raw_json": safe_json(row),
                 })
-                if row.get("fallback_used"):
+                if quant_lab_is_fallback(row):
                     quant_lab_fallback_rows.append({
                         "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
                         "run_id": run_id,
@@ -1489,9 +1522,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                         "intent": flatten_value(row.get("intent") or not_obs),
                         "fail_policy": flatten_value(permission.get("fail_policy") or not_obs),
                         "effective_decision": flatten_value(permission.get("effective_decision") or not_obs),
-                        "fallback_used": "true",
+                        "fallback_used": str(quant_lab_is_fallback(row)).lower(),
                         "error": flatten_value(row.get("error") or not_obs),
-                        "diagnosis": "cost_estimate_fallback",
+                        "diagnosis": flatten_value(row.get("fallback_reason") or row.get("filter_reason") or "cost_estimate_fallback"),
                         "raw_json": safe_json(row),
                     })
         counts = audit.get("counts") if isinstance(audit.get("counts"), dict) else {}
@@ -5359,42 +5392,47 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
                 "raw_json": safe_json(row),
             })
-        if row.get("fallback_used"):
+        if quant_lab_is_fallback(row):
             quant_lab_fallback_rows.append({
                 "source": source,
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
                 "event_type": event_type,
-                "endpoint": flatten_value(row.get("endpoint") or not_obs),
+                "endpoint": flatten_value(first_observed(row.get("endpoint"), row.get("endpoint_path"), row.get("path"))),
                 "symbol": flatten_value(row.get("symbol") or not_obs),
                 "side": flatten_value(row.get("side") or not_obs),
                 "intent": flatten_value(row.get("intent") or not_obs),
                 "fail_policy": flatten_value(row.get("fail_policy") or not_obs),
                 "effective_decision": flatten_value(row.get("effective_decision") or row.get("order_decision") or not_obs),
-                "fallback_used": "true",
-                "error": flatten_value(row.get("error") or not_obs),
-                "diagnosis": flatten_value(row.get("filter_reason") or "fallback_policy_applied"),
+                "fallback_used": str(quant_lab_is_fallback(row)).lower(),
+                "error": flatten_value(first_observed(row.get("error"), row.get("error_type"))),
+                "diagnosis": flatten_value(row.get("fallback_reason") or row.get("filter_reason") or row.get("action_taken") or "fallback_policy_applied"),
                 "raw_json": safe_json(row),
             })
 
     for row in load_jsonl(OUT / "raw" / "reports" / "quant_lab_requests.jsonl"):
         if not isinstance(row, dict):
             continue
-        if not row.get("ok") or row.get("fallback_used"):
+        request_success = quant_lab_request_success(row)
+        if request_success:
+            quant_lab_request_success_count += 1
+        else:
+            quant_lab_request_error_count += 1
+        if quant_lab_is_fallback(row):
             quant_lab_fallback_rows.append({
                 "source": "reports/quant_lab_requests.jsonl",
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
-                "event_type": "request",
-                "endpoint": flatten_value(row.get("endpoint") or not_obs),
+                "event_type": flatten_value(row.get("event_type") or "request"),
+                "endpoint": flatten_value(first_observed(row.get("endpoint"), row.get("endpoint_path"), row.get("path"))),
                 "symbol": flatten_value((row.get("params") or {}).get("symbol") if isinstance(row.get("params"), dict) else not_obs),
                 "side": flatten_value((row.get("params") or {}).get("side") if isinstance(row.get("params"), dict) else not_obs),
                 "intent": not_obs,
                 "fail_policy": not_obs,
                 "effective_decision": not_obs,
-                "fallback_used": str(bool(row.get("fallback_used"))).lower(),
-                "error": flatten_value(row.get("error") or (f"http_{row.get('status_code')}" if row.get("status_code") else not_obs)),
-                "diagnosis": "request_not_ok" if not row.get("ok") else "fallback_request",
+                "fallback_used": str(quant_lab_is_fallback(row)).lower(),
+                "error": flatten_value(first_observed(row.get("error"), row.get("error_type"), f"http_{row.get('status_code')}" if not request_success and row.get("status_code") else not_obs)),
+                "diagnosis": flatten_value(row.get("fallback_reason") or row.get("action_taken") or "fallback_request"),
                 "raw_json": safe_json(row),
             })
 
@@ -5711,6 +5749,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "quant_lab_compliance_rows": len(quant_lab_compliance_rows),
         "quant_lab_cost_usage_rows": len(quant_lab_cost_usage_rows),
         "quant_lab_fallback_rows": len(quant_lab_fallback_rows),
+        "quant_lab_request_success_count": quant_lab_request_success_count,
+        "quant_lab_request_error_count": quant_lab_request_error_count,
+        "quant_lab_actual_fallback_count": len(quant_lab_fallback_rows),
+        "quant_lab_fallback_count": len(quant_lab_fallback_rows),
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
         "rank_exit_conflict_count": rank_exit_conflict_count,
         "rank_exit_target_positive_sell_count": rank_exit_target_positive_sell_count,

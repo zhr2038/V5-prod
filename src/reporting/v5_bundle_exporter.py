@@ -222,6 +222,8 @@ def _truthy(value: Any) -> bool:
 def _request_success(row: Mapping[str, Any]) -> bool:
     if _truthy(row.get("success")) or _truthy(row.get("ok")):
         return True
+    if row.get("error_type"):
+        return False
     status = row.get("status_code")
     try:
         if status is not None and 200 <= int(status) < 300:
@@ -229,6 +231,15 @@ def _request_success(row: Mapping[str, Any]) -> bool:
     except (TypeError, ValueError):
         pass
     return False
+
+
+def _is_fallback_row(row: Mapping[str, Any]) -> bool:
+    return (
+        _truthy(row.get("fallback_used"))
+        or row.get("event_type") == "fallback"
+        or bool(row.get("fallback_reason"))
+        or bool(row.get("action_taken"))
+    )
 
 
 def _actual_filtered(row: Mapping[str, Any]) -> bool:
@@ -334,7 +345,7 @@ def _build_cost_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
 def _build_fallback_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     out: list[Dict[str, Any]] = []
     for row in rows:
-        if not _truthy(row.get("fallback_used")) and row.get("event_type") != "fallback":
+        if not _is_fallback_row(row):
             continue
         out.append(
             {
@@ -367,6 +378,7 @@ def _window_summary(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any
         gate_version = row.get("gate_version") or gate_version
     request_success_count = len([row for row in request_rows if _request_success(row)])
     request_error_count = len(request_rows) - request_success_count
+    actual_fallback_count = len([row for row in rows if _is_fallback_row(row)])
     return {
         "quant_lab_enabled": bool(rows or request_rows),
         "quant_lab_mode": latest_mode,
@@ -375,7 +387,8 @@ def _window_summary(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any
         "quant_lab_request_success_count": request_success_count,
         "quant_lab_request_error_count": request_error_count,
         "quant_lab_error_count": request_error_count,
-        "quant_lab_fallback_count": len([row for row in rows if _truthy(row.get("fallback_used")) or row.get("event_type") == "fallback"]),
+        "quant_lab_fallback_count": actual_fallback_count,
+        "quant_lab_actual_fallback_count": actual_fallback_count,
         "quant_lab_actual_filter_count": len([row for row in rows if _actual_filtered(row)]),
         "quant_lab_hypothetical_filter_count": len([row for row in rows if _would_filter(row) and not _actual_filtered(row)]),
         "quant_lab_filtered_by_cost_count": len(
@@ -417,7 +430,7 @@ def _issues(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any]], cost
         add("quant_lab_permission_sell_only", "medium", "latest quant-lab permission is SELL_ONLY")
     if any(str(row.get("violation")) == "true" for row in compliance_rows):
         add("quant_lab_gate_compliance_violation", "high", "orders violated quant-lab permission in the window")
-    if len([row for row in rows if _truthy(row.get("fallback_used")) or row.get("event_type") == "fallback"]) >= 3:
+    if len([row for row in rows if _is_fallback_row(row)]) >= 3:
         add("quant_lab_cost_fallback_high", "medium", "quant-lab fallback count is elevated")
     if any(row.get("filtered") for row in cost_rows):
         add("quant_lab_cost_gate_filtered_trade", "low", "quant-lab cost gate filtered at least one order")
