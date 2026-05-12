@@ -51,6 +51,7 @@ def test_quant_lab_mode_script_set_and_show(monkeypatch, tmp_path: Path, capsys)
     assert rc == 0
     payload = json.loads(override.read_text(encoding="utf-8"))
     assert payload["mode"] == "local_only"
+    assert payload["confirmed"] is False
 
     cfg = AppConfig()
     cfg.quant_lab.mode = "shadow"
@@ -62,6 +63,121 @@ def test_quant_lab_mode_script_set_and_show(monkeypatch, tmp_path: Path, capsys)
     output = capsys.readouterr().out
     assert '"mode": "local_only"' in output
     assert "P@ssw0rd" not in output
+
+
+def test_quant_lab_mode_script_shadow_does_not_require_confirmation(tmp_path: Path) -> None:
+    override = tmp_path / "quant_lab_mode.json"
+
+    rc = quant_lab_mode.main(["set", "--mode", "shadow", "--reason", "test", "--path", str(override)])
+
+    assert rc == 0
+    payload = json.loads(override.read_text(encoding="utf-8"))
+    assert payload["mode"] == "shadow"
+    assert payload["confirmed"] is False
+    assert "confirmation_method" not in payload
+
+
+def test_quant_lab_mode_script_rejects_enforce_without_confirmation(monkeypatch, tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.fail_policy = "sell_only"
+    monkeypatch.setattr(quant_lab_mode, "load_config", lambda _path: cfg)
+
+    with pytest.raises(SystemExit) as exc_info:
+        quant_lab_mode.main(
+            [
+                "set",
+                "--mode",
+                "enforce",
+                "--reason",
+                "test",
+                "--path",
+                str(tmp_path / "quant_lab_mode.json"),
+            ]
+        )
+
+    assert exc_info.value.code == 2
+    assert not (tmp_path / "quant_lab_mode.json").exists()
+
+
+def test_quant_lab_mode_script_accepts_enforce_confirmation(monkeypatch, tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.fail_policy = "sell_only"
+    monkeypatch.setattr(quant_lab_mode, "load_config", lambda _path: cfg)
+    override = tmp_path / "quant_lab_mode.json"
+
+    rc = quant_lab_mode.main(
+        [
+            "set",
+            "--mode",
+            "enforce",
+            "--reason",
+            "test",
+            "--path",
+            str(override),
+            "--confirm-enforce",
+            "YES",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(override.read_text(encoding="utf-8"))
+    assert payload["mode"] == "enforce"
+    assert payload["confirmed"] is True
+    assert payload["confirmation_method"] == "cli:confirm_enforce"
+
+
+def test_quant_lab_mode_script_accepts_enforce_env_confirmation(monkeypatch, tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.fail_policy = "sell_only"
+    monkeypatch.setattr(quant_lab_mode, "load_config", lambda _path: cfg)
+    monkeypatch.setenv("V5_QUANT_LAB_CONFIRM_ENFORCE", "YES")
+    override = tmp_path / "quant_lab_mode.json"
+
+    rc = quant_lab_mode.main(["set", "--mode", "enforce", "--reason", "test", "--path", str(override)])
+
+    assert rc == 0
+    payload = json.loads(override.read_text(encoding="utf-8"))
+    assert payload["confirmed"] is True
+    assert payload["confirmation_method"] == "env:V5_QUANT_LAB_CONFIRM_ENFORCE"
+
+
+def test_quant_lab_mode_script_gated_modes_require_confirmation(monkeypatch, tmp_path: Path) -> None:
+    cfg = AppConfig()
+    monkeypatch.setattr(quant_lab_mode, "load_config", lambda _path: cfg)
+
+    with pytest.raises(SystemExit):
+        quant_lab_mode.main(
+            [
+                "set",
+                "--mode",
+                "cost_only",
+                "--reason",
+                "test",
+                "--path",
+                str(tmp_path / "cost_only.json"),
+            ]
+        )
+
+    override = tmp_path / "permission_only.json"
+    rc = quant_lab_mode.main(
+        [
+            "set",
+            "--mode",
+            "permission_only",
+            "--reason",
+            "test",
+            "--path",
+            str(override),
+            "--confirm-gated-mode",
+            "YES",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(override.read_text(encoding="utf-8"))
+    assert payload["mode"] == "permission_only"
+    assert payload["confirmed"] is True
+    assert payload["confirmation_method"] == "cli:confirm_gated_mode"
 
 
 def test_quant_lab_mode_script_rejects_enforce_with_unsafe_fallback(monkeypatch, tmp_path: Path) -> None:
@@ -81,6 +197,8 @@ def test_quant_lab_mode_script_rejects_enforce_with_unsafe_fallback(monkeypatch,
                 "test",
                 "--path",
                 str(tmp_path / "quant_lab_mode.json"),
+                "--confirm-enforce",
+                "YES",
             ]
         )
     assert exc_info.value.code == 2
@@ -104,6 +222,8 @@ def test_quant_lab_mode_script_accepts_confirmed_enforce_fallback(monkeypatch, t
             "test",
             "--path",
             str(override),
+            "--confirm-enforce",
+            "YES",
             "--confirm-unsafe-fallback",
         ]
     )
@@ -111,6 +231,8 @@ def test_quant_lab_mode_script_accepts_confirmed_enforce_fallback(monkeypatch, t
     assert rc == 0
     payload = json.loads(override.read_text(encoding="utf-8"))
     assert payload["mode"] == "enforce"
+    assert payload["confirmed"] is True
+    assert payload["confirmation_method"] == "cli:confirm_enforce"
     assert payload["confirm_unsafe_fallback"] is True
 
 

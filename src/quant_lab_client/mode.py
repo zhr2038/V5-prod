@@ -128,6 +128,8 @@ def write_quant_lab_mode_override(
     updated_by: str = "operator",
     path: str | Path = "state/quant_lab_mode.json",
     confirm_unsafe_fallback: bool = False,
+    confirmed: bool = False,
+    confirmation_method: Optional[str] = None,
 ) -> Path:
     target = resolve_mode_path(path)
     payload = {
@@ -135,7 +137,10 @@ def write_quant_lab_mode_override(
         "reason": str(reason or ""),
         "updated_by": str(updated_by or "operator"),
         "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "confirmed": bool(confirmed),
     }
+    if confirmation_method:
+        payload["confirmation_method"] = str(confirmation_method)
     if confirm_unsafe_fallback:
         payload["confirm_unsafe_fallback"] = True
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -24,6 +24,36 @@ def _mode_values() -> list[str]:
     return [mode.value for mode in QuantLabMode]
 
 
+def _is_yes(value: str | None) -> bool:
+    return str(value or "").strip().upper() == "YES"
+
+
+def _confirmation_for_mode(mode: QuantLabMode, args: argparse.Namespace) -> tuple[bool, str | None, str | None]:
+    if mode == QuantLabMode.ENFORCE:
+        if _is_yes(args.confirm_enforce):
+            return True, "cli:confirm_enforce", None
+        if _is_yes(os.getenv("V5_QUANT_LAB_CONFIRM_ENFORCE")):
+            return True, "env:V5_QUANT_LAB_CONFIRM_ENFORCE", None
+        return (
+            False,
+            None,
+            "setting quant-lab mode=enforce requires --confirm-enforce YES "
+            "or V5_QUANT_LAB_CONFIRM_ENFORCE=YES",
+        )
+    if mode in {QuantLabMode.COST_ONLY, QuantLabMode.PERMISSION_ONLY}:
+        if _is_yes(args.confirm_gated_mode):
+            return True, "cli:confirm_gated_mode", None
+        if _is_yes(os.getenv("V5_QUANT_LAB_CONFIRM_GATED_MODE")):
+            return True, "env:V5_QUANT_LAB_CONFIRM_GATED_MODE", None
+        return (
+            False,
+            None,
+            "setting quant-lab mode=cost_only/permission_only requires --confirm-gated-mode YES "
+            "or V5_QUANT_LAB_CONFIRM_GATED_MODE=YES",
+        )
+    return False, None, None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Show or set V5 quant-lab integration mode")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -38,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
     set_cmd.add_argument("--path", default="state/quant_lab_mode.json")
     set_cmd.add_argument("--config", default="configs/config.yaml")
     set_cmd.add_argument("--confirm-unsafe-fallback", action="store_true")
+    set_cmd.add_argument("--confirm-enforce", default=None, metavar="YES")
+    set_cmd.add_argument("--confirm-gated-mode", default=None, metavar="YES")
 
     args = parser.parse_args(argv)
     if args.command == "show":
@@ -48,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_config(args.config)
     target_mode = QuantLabMode(args.mode)
+    confirmed, confirmation_method, confirmation_error = _confirmation_for_mode(target_mode, args)
+    if confirmation_error:
+        parser.error(confirmation_error)
     if quant_lab_mode_needs_fallback_confirmation(cfg.quant_lab, target_mode) and not args.confirm_unsafe_fallback:
         parser.error(
             "--confirm-unsafe-fallback is required when setting quant-lab mode to "
@@ -60,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         updated_by=args.updated_by,
         path=args.path,
         confirm_unsafe_fallback=args.confirm_unsafe_fallback,
+        confirmed=confirmed,
+        confirmation_method=confirmation_method,
     )
     payload = json.loads(resolve_mode_path(target).read_text(encoding="utf-8"))
     payload["path"] = str(resolve_mode_path(target))
