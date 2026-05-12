@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -477,6 +479,7 @@ def _run_alt_short_cycle_guard_case(
     symbol: str = "BNB/USDT",
     current_level: str = "PROTECT",
     stats: dict,
+    final_score=1.0,
 ):
     cfg = _base_cfg(tmp_path)
     cfg.execution.negative_expectancy_score_penalty_enabled = False
@@ -494,6 +497,8 @@ def _run_alt_short_cycle_guard_case(
     cfg.execution.protect_alt_short_cycle_apply_to_probe = False
     cfg.execution.protect_entry_confirm_rounds = 1
     cfg.execution.cost_aware_entry_enabled = False
+    cfg.execution.cost_aware_score_per_bps = 0.0030
+    cfg.execution.cost_aware_min_score_floor = 0.18
     _write_auto_risk_level(cfg.execution.order_store_path, current_level)
     pipe = _build_pipe(cfg, tmp_path, _strategy_payload_for_symbol(symbol, score=0.60))
     pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _selected_symbol_portfolio(symbol)
@@ -506,7 +511,11 @@ def _run_alt_short_cycle_guard_case(
         cash_usdt=100.0,
         equity_peak_usdt=120.0,
         audit=audit,
-        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={symbol: 1.0}),
+        precomputed_alpha=AlphaSnapshot(
+            raw_factors={},
+            z_factors={},
+            scores={} if final_score is None else {symbol: float(final_score)},
+        ),
         precomputed_regime=_regime(),
     )
     return out, audit
@@ -565,6 +574,44 @@ def test_protect_alt_short_cycle_allows_positive_expectancy_bnb(tmp_path: Path) 
     assert not any(
         d.get("reason") == "protect_alt_short_cycle_negative_expectancy" for d in audit.router_decisions
     )
+
+
+def test_buy_order_meta_includes_expected_edge_score_proxy(tmp_path: Path) -> None:
+    out, _audit = _run_alt_short_cycle_guard_case(
+        tmp_path,
+        final_score=0.59,
+        stats={
+            "closed_cycles": 2,
+            "net_expectancy_bps": 10.0,
+            "fast_fail_net_expectancy_bps": -5.0,
+        },
+    )
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.intent == "OPEN_LONG")
+    assert order.meta["final_score"] == 0.59
+    assert order.meta["alpha6_score"] == 0.60
+    assert order.meta["trend_score"] == 0.90
+    assert order.meta["expected_edge_source"] == "final_score_proxy"
+    assert order.meta["expected_edge_bps"] == pytest.approx((0.59 - 0.18) / 0.0030)
+    assert order.meta["alpha6_expected_edge_bps_proxy"] == pytest.approx((0.60 - 0.18) / 0.0030)
+
+
+def test_buy_order_meta_keeps_expected_edge_not_observable_when_final_score_missing(tmp_path: Path) -> None:
+    out, _audit = _run_alt_short_cycle_guard_case(
+        tmp_path,
+        final_score=None,
+        stats={
+            "closed_cycles": 2,
+            "net_expectancy_bps": 10.0,
+            "fast_fail_net_expectancy_bps": -5.0,
+        },
+    )
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.intent == "OPEN_LONG")
+    assert order.meta["final_score"] == "not_observable"
+    assert order.meta["expected_edge_bps"] == "not_observable"
+    assert order.meta["expected_edge_source"] == "not_observable"
+    assert order.meta["alpha6_expected_edge_bps_proxy"] == pytest.approx((0.60 - 0.18) / 0.0030)
 
 
 def test_protect_alt_short_cycle_ignores_symbols_outside_config(tmp_path: Path) -> None:
@@ -646,6 +693,8 @@ def test_protect_alt_short_cycle_does_not_intercept_exit(tmp_path: Path) -> None
     )
 
     assert any(order.symbol == "BNB/USDT" and order.intent == "CLOSE_LONG" for order in out.orders)
+    close_order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.intent == "CLOSE_LONG")
+    assert "expected_edge_bps" not in close_order.meta
     assert not any(
         d.get("reason") == "protect_alt_short_cycle_negative_expectancy" for d in audit.router_decisions
     )

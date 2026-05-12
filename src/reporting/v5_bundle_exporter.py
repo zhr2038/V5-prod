@@ -91,6 +91,7 @@ COST_FIELDS = (
     "sample_count",
     "cost_model_version",
     "expected_edge_bps",
+    "expected_edge_source",
     "min_required_edge_bps",
     "proxy_source",
     "would_filter_by_cost",
@@ -325,6 +326,7 @@ def _build_cost_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
                     merged.setdefault(str(key), value)
         merged.setdefault("would_filter_by_cost", merged.get("would_filter", ""))
         merged.setdefault("actually_filtered", merged.get("order_filtered", ""))
+        merged.setdefault("expected_edge_source", merged.get("proxy_source", ""))
         out.append({field: merged.get(field, "") for field in COST_FIELDS})
     return out
 

@@ -64,6 +64,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "local_cost_bps": 30.0,
                 "local_cost_source": "execution.cost_aware_roundtrip_cost_bps",
                 "source": "public_spread_proxy",
+                "expected_edge_bps": 60.0,
+                "expected_edge_source": "final_score_proxy",
+                "min_required_edge_bps": 45.0,
                 "passed": True,
                 "filtered": False,
                 "would_filter": False,
@@ -155,6 +158,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "fallback_used" in cost_usage.splitlines()[0]
         assert "local_cost_bps" in cost_usage.splitlines()[0]
         assert "local_cost_source" in cost_usage.splitlines()[0]
+        assert "expected_edge_source" in cost_usage.splitlines()[0]
+        assert "final_score_proxy" in cost_usage
         assert "request_not_ok" not in fallbacks
         assert "allow_insecure_http_with_token: true" in config_text
         assert "allow_local_fallback_in_enforce: false" in config_text

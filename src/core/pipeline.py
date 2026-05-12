@@ -678,11 +678,77 @@ class V5Pipeline:
         return None
 
     @staticmethod
+    def _signal_expected_net_bps(signal: Optional[Dict[str, Any]]) -> Optional[float]:
+        if not isinstance(signal, dict):
+            return None
+        for source in (signal, signal.get("metadata") if isinstance(signal.get("metadata"), dict) else {}):
+            if not isinstance(source, dict):
+                continue
+            for key in ("expected_net_bps", "expected_edge_bps", "edge_bps"):
+                value = source.get(key)
+                if value is None:
+                    continue
+                try:
+                    return float(value)
+                except Exception:
+                    continue
+        return None
+
+    @staticmethod
     def _signal_side(signal: Optional[Dict[str, Any]]) -> Optional[str]:
         if not isinstance(signal, dict):
             return None
         side = str(signal.get("side", "") or "").strip().lower()
         return side or None
+
+    def _expected_edge_metadata_for_buy(
+        self,
+        *,
+        symbol: str,
+        final_score: Any,
+        strategy_signal_lookup: Dict[str, Dict[str, Dict[str, Any]]],
+        explicit_expected_net_bps: Any = None,
+    ) -> Dict[str, Any]:
+        not_obs = "not_observable"
+        sym = str(symbol or "").strip()
+        alpha6_signal = (strategy_signal_lookup.get("Alpha6Factor") or {}).get(sym)
+        trend_signal = (strategy_signal_lookup.get("TrendFollowing") or {}).get(sym)
+        final_score_f = _float_or_none(final_score)
+        alpha6_score = self._signal_score(alpha6_signal)
+        trend_score = self._signal_score(trend_signal)
+
+        expected_edge_bps = _float_or_none(explicit_expected_net_bps)
+        expected_edge_source = "strategy_expected_net_bps" if expected_edge_bps is not None else None
+        if expected_edge_bps is None:
+            for strategy_name, signal in (
+                ("Alpha6Factor", alpha6_signal),
+                ("TrendFollowing", trend_signal),
+            ):
+                expected_edge_bps = self._signal_expected_net_bps(signal)
+                if expected_edge_bps is not None:
+                    expected_edge_source = f"{strategy_name}.expected_net_bps"
+                    break
+
+        score_per_bps = _float_or_none(getattr(self.cfg.execution, "cost_aware_score_per_bps", None))
+        score_floor = _float_or_none(getattr(self.cfg.execution, "cost_aware_min_score_floor", None))
+        if score_floor is None:
+            score_floor = 0.0
+        if expected_edge_bps is None and final_score_f is not None and score_per_bps is not None and score_per_bps > 0:
+            expected_edge_bps = max(0.0, float(final_score_f) - float(score_floor)) / float(score_per_bps)
+            expected_edge_source = "final_score_proxy"
+
+        meta: Dict[str, Any] = {
+            "final_score": float(final_score_f) if final_score_f is not None else not_obs,
+            "alpha6_score": float(alpha6_score) if alpha6_score is not None else not_obs,
+            "trend_score": float(trend_score) if trend_score is not None else not_obs,
+            "expected_edge_bps": float(expected_edge_bps) if expected_edge_bps is not None else not_obs,
+            "expected_edge_source": expected_edge_source or not_obs,
+            "cost_aware_score_per_bps": float(score_per_bps) if score_per_bps is not None else not_obs,
+            "cost_aware_min_score_floor": float(score_floor),
+        }
+        if alpha6_score is not None and score_per_bps is not None and score_per_bps > 0:
+            meta["alpha6_expected_edge_bps_proxy"] = max(0.0, float(alpha6_score) - float(score_floor)) / float(score_per_bps)
+        return meta
 
     @staticmethod
     def _alpha6_rsi_confirm(signal: Optional[Dict[str, Any]]) -> Optional[float]:
@@ -6859,6 +6925,14 @@ class V5Pipeline:
                 meta.update(dust_add_size_ignore_info)
             if side == "buy":
                 meta["clip_min_notional"] = float(clip_min_notional)
+                if intent in {"OPEN_LONG", "REBALANCE"}:
+                    meta.update(
+                        self._expected_edge_metadata_for_buy(
+                            symbol=sym,
+                            final_score=alpha.scores.get(sym),
+                            strategy_signal_lookup=strategy_signal_lookup,
+                        )
+                    )
                 if btc_probe_meta is not None:
                     meta.update(btc_probe_meta)
                 probe_tags = probe_tags_from_order_meta(meta, entry_px=px, entry_ts=utc_now_iso())
@@ -6930,6 +7004,17 @@ class V5Pipeline:
                     "bypass_turnover_cap_for_exit": bool(bypass_turnover_cap_for_exit),
                     **dust_add_size_ignore_info,
                 }
+                if side == "buy":
+                    for key in (
+                        "final_score",
+                        "alpha6_score",
+                        "trend_score",
+                        "expected_edge_bps",
+                        "expected_edge_source",
+                        "alpha6_expected_edge_bps_proxy",
+                    ):
+                        if key in meta:
+                            decision[key] = meta.get(key)
                 if side == "buy" and btc_probe_meta is not None:
                     audit.record_count("btc_leadership_probe_open_count", symbol=sym)
                     decision.update(btc_probe_meta)
@@ -7140,6 +7225,14 @@ class V5Pipeline:
                         "market_impulse_probe_time_stop_hours": int(probe_time_stop_hours),
                         "reason": "market_impulse_probe",
                     }
+                    meta.update(
+                        self._expected_edge_metadata_for_buy(
+                            symbol=sym,
+                            final_score=alpha.scores.get(sym),
+                            strategy_signal_lookup=strategy_signal_lookup,
+                            explicit_expected_net_bps=candidate.get("expected_net_bps"),
+                        )
+                    )
                     probe_tags = probe_tags_from_order_meta(meta, entry_px=px, entry_ts=utc_now_iso())
                     if probe_tags is not None:
                         meta.update(probe_tags)
@@ -7201,6 +7294,11 @@ class V5Pipeline:
                                 "effective_probe_target_w": float(effective_probe_target_w),
                                 "cooldown_until": int(cooldown_until_ms),
                                 "trend_score": trend_score,
+                                "final_score": meta.get("final_score"),
+                                "alpha6_score": meta.get("alpha6_score"),
+                                "expected_edge_bps": meta.get("expected_edge_bps"),
+                                "expected_edge_source": meta.get("expected_edge_source"),
+                                "alpha6_expected_edge_bps_proxy": meta.get("alpha6_expected_edge_bps_proxy"),
                             }
                         )
 

@@ -1054,6 +1054,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 return flatten_value(value)
         return not_obs
 
+    def bool_observed(value):
+        if value in (None, "", not_obs):
+            return not_obs
+        if isinstance(value, bool):
+            return str(value).lower()
+        text = flatten_value(value).strip().lower()
+        if text in {"1", "true", "yes", "y"}:
+            return "true"
+        if text in {"0", "false", "no", "n"}:
+            return "false"
+        return str(bool(value)).lower()
+
     def btc_label_key(run_id, ts_utc, symbol, skip_reason):
         return (
             flatten_value(run_id) or not_obs,
@@ -1450,13 +1462,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "intent": flatten_value(row.get("intent") or not_obs),
                     "notional_usdt": flatten_value(row.get("notional_usdt") if row.get("notional_usdt") is not None else not_obs),
                     "alpha_id": flatten_value(row.get("alpha_id") or not_obs),
-                    "cost_bps": flatten_value(row.get("cost_bps") if row.get("cost_bps") is not None else not_obs),
+                    "cost_bps": flatten_value(first_observed(row.get("cost_bps"), row.get("total_cost_bps"), row.get("effective_total_cost_bps"))),
                     "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
-                    "cost_source": flatten_value(row.get("cost_source") or not_obs),
+                    "cost_source": flatten_value(first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"))),
+                    "expected_edge_bps": flatten_value(row.get("expected_edge_bps") if row.get("expected_edge_bps") is not None else not_obs),
+                    "expected_edge_source": flatten_value(first_observed(row.get("expected_edge_source"), row.get("proxy_source"))),
+                    "min_required_edge_bps": flatten_value(row.get("min_required_edge_bps") if row.get("min_required_edge_bps") is not None else not_obs),
+                    "would_filter_by_cost": bool_observed(first_observed(row.get("would_filter_by_cost"), row.get("would_filter"))),
+                    "actually_filtered": bool_observed(first_observed(row.get("actually_filtered"), row.get("order_filtered"))),
                     "quant_lab_decision": flatten_value(row.get("quant_lab_decision") or not_obs),
                     "fallback_used": str(bool(row.get("fallback_used"))).lower(),
-                    "filtered": not_obs,
-                    "filter_reason": not_obs,
+                    "filtered": str(bool(row.get("filtered"))).lower() if "filtered" in row else not_obs,
+                    "filter_reason": flatten_value(row.get("filter_reason") or not_obs),
                     "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
                     "raw_json": safe_json(row),
                 })
@@ -5327,13 +5344,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "intent": flatten_value(row.get("intent") or not_obs),
                 "notional_usdt": flatten_value(row.get("notional_usdt") if row.get("notional_usdt") is not None else not_obs),
                 "alpha_id": flatten_value(row.get("alpha_id") or not_obs),
-                "cost_bps": flatten_value(row.get("cost_bps") if row.get("cost_bps") is not None else not_obs),
+                "cost_bps": flatten_value(first_observed(row.get("cost_bps"), row.get("total_cost_bps"), row.get("effective_total_cost_bps"))),
                 "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
-                "cost_source": flatten_value(row.get("cost_source") or not_obs),
+                "cost_source": flatten_value(first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"))),
+                "expected_edge_bps": flatten_value(row.get("expected_edge_bps") if row.get("expected_edge_bps") is not None else not_obs),
+                "expected_edge_source": flatten_value(first_observed(row.get("expected_edge_source"), row.get("proxy_source"))),
+                "min_required_edge_bps": flatten_value(row.get("min_required_edge_bps") if row.get("min_required_edge_bps") is not None else not_obs),
+                "would_filter_by_cost": bool_observed(first_observed(row.get("would_filter_by_cost"), row.get("would_filter"))),
+                "actually_filtered": bool_observed(first_observed(row.get("actually_filtered"), row.get("order_filtered"))),
                 "quant_lab_decision": flatten_value(row.get("quant_lab_decision") or not_obs),
                 "fallback_used": str(bool(row.get("fallback_used"))).lower(),
-                "filtered": not_obs,
-                "filter_reason": not_obs,
+                "filtered": str(bool(row.get("filtered"))).lower() if "filtered" in row else not_obs,
+                "filter_reason": flatten_value(row.get("filter_reason") or not_obs),
                 "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
                 "raw_json": safe_json(row),
             })
@@ -5445,7 +5467,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/quant_lab_cost_usage.csv",
         quant_lab_cost_usage_rows,
-        ["source", "run_id", "ts_utc", "symbol", "side", "intent", "notional_usdt", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "quant_lab_decision", "fallback_used", "filtered", "filter_reason", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "symbol", "side", "intent", "notional_usdt", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "actually_filtered", "quant_lab_decision", "fallback_used", "filtered", "filter_reason", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/quant_lab_fallbacks.csv",

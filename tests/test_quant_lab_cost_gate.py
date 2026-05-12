@@ -16,7 +16,14 @@ def _cfg() -> AppConfig:
 
 
 def test_cost_gate_filters_low_edge() -> None:
-    order = Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, {"expected_edge_bps": 10.0})
+    order = Order(
+        "BTC/USDT",
+        "buy",
+        "OPEN_LONG",
+        100.0,
+        100.0,
+        {"expected_edge_bps": 10.0, "expected_edge_source": "final_score_proxy"},
+    )
     estimate = CostEstimate(symbol="BTC-USDT", regime="normal", total_cost_bps=1.0, source="public_spread_proxy")
     result = apply_quant_lab_cost_gate(order, estimate, _cfg())
 
@@ -25,6 +32,7 @@ def test_cost_gate_filters_low_edge() -> None:
     assert result.local_cost_source == "roundtrip_fee_slippage"
     assert result.effective_total_cost_bps == 22.0
     assert result.min_required_edge_bps == 33.0
+    assert result.expected_edge_source == "final_score_proxy"
     assert result.filtered is True
 
 
@@ -95,6 +103,7 @@ def test_missing_edge_can_use_score_proxy() -> None:
     cfg.quant_lab.mode = "enforce"
     cfg.quant_lab.cost_missing_edge_policy["enforce"] = "use_score_proxy"
     cfg.execution.cost_aware_score_per_bps = 0.0025
+    cfg.execution.cost_aware_min_score_floor = 0.08
     cfg.execution.cost_aware_roundtrip_cost_bps = 30
     order = Order("BTC/USDT", "buy", "OPEN_LONG", 100.0, 100.0, {"final_score": 0.2})
 
@@ -107,7 +116,8 @@ def test_missing_edge_can_use_score_proxy() -> None:
 
     assert result.filtered is False
     assert result.reason == "cost_gate_proxy_passed"
-    assert result.expected_edge_bps == 80.0
+    assert result.expected_edge_bps == 48.0
+    assert result.expected_edge_source == "order.meta.final_score"
     assert result.proxy_source == "order.meta.final_score"
 
 
