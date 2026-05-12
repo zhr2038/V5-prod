@@ -1437,7 +1437,7 @@ class MLLabelerConfig(BaseModel):
 
 
 class QuantLabConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     mode: str = "shadow"
     base_url: str = "http://qyun2.hrhome.top:8027"
     api_token_env: Optional[str] = "QUANT_LAB_API_TOKEN"
