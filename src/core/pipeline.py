@@ -445,6 +445,7 @@ class V5Pipeline:
                 bool(getattr(cfg.execution, 'negative_expectancy_open_block_enabled', False)),
                 bool(getattr(cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
                 bool(getattr(cfg.execution, 'protect_negative_expectancy_short_cycle_guard_enabled', False)),
+                bool(getattr(cfg.execution, 'protect_alt_short_cycle_guard_enabled', False)),
             ]
         )
         raw_negexp_state_path = str(
@@ -2973,6 +2974,7 @@ class V5Pipeline:
                 bool(getattr(self.cfg.execution, 'negative_expectancy_open_block_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
                 bool(getattr(self.cfg.execution, 'protect_negative_expectancy_short_cycle_guard_enabled', False)),
+                bool(getattr(self.cfg.execution, 'protect_alt_short_cycle_guard_enabled', False)),
             ]
         )
         if not neg_feedback_enabled:
@@ -3115,6 +3117,76 @@ class V5Pipeline:
                 "current_level": str(current_auto_risk_level or ""),
             }
         return None
+
+    @staticmethod
+    def _normalized_config_symbol(value: Any) -> str:
+        return str(value or "").strip().replace("-", "/").upper()
+
+    def _protect_alt_short_cycle_negative_expectancy_context(
+        self,
+        *,
+        symbol: str,
+        stat: Dict[str, Any],
+        current_auto_risk_level: Optional[str],
+        is_probe: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        if not bool(getattr(self.cfg.execution, "protect_alt_short_cycle_guard_enabled", False)):
+            return None
+        if str(current_auto_risk_level or "").upper() != "PROTECT":
+            return None
+        if bool(is_probe):
+            if not bool(getattr(self.cfg.execution, "protect_alt_short_cycle_apply_to_probe", False)):
+                return None
+        elif not bool(getattr(self.cfg.execution, "protect_alt_short_cycle_apply_to_normal_entry", True)):
+            return None
+
+        configured_symbols = getattr(
+            self.cfg.execution,
+            "protect_alt_short_cycle_symbols",
+            ["BNB/USDT", "ETH/USDT"],
+        ) or []
+        configured = {
+            self._normalized_config_symbol(item)
+            for item in configured_symbols
+            if str(item or "").strip()
+        }
+        if self._normalized_config_symbol(symbol) not in configured:
+            return None
+
+        min_cycles = int(getattr(self.cfg.execution, "protect_alt_short_cycle_min_cycles", 2) or 2)
+        closed_cycles = int((stat or {}).get("closed_cycles") or 0)
+        if closed_cycles < min_cycles:
+            return None
+
+        net_floor_bps = float(
+            _coalesce(getattr(self.cfg.execution, "protect_alt_short_cycle_net_floor_bps", -20.0), -20.0)
+        )
+        fast_fail_floor_bps = float(
+            _coalesce(
+                getattr(self.cfg.execution, "protect_alt_short_cycle_fast_fail_floor_bps", -30.0),
+                -30.0,
+            )
+        )
+        net_expectancy_bps = self._negative_expectancy_bps(stat or {})
+        fast_fail_net_expectancy_bps = self._negative_expectancy_bps(stat or {}, fast_fail=True)
+        net_breach = float(net_expectancy_bps) <= float(net_floor_bps)
+        fast_fail_breach = float(fast_fail_net_expectancy_bps) <= float(fast_fail_floor_bps)
+        if not (net_breach or fast_fail_breach):
+            return None
+
+        return {
+            "symbol": str(symbol),
+            "action": "skip",
+            "reason": "protect_alt_short_cycle_negative_expectancy",
+            "closed_cycles": int(closed_cycles),
+            "net_expectancy_bps": float(net_expectancy_bps),
+            "fast_fail_net_expectancy_bps": float(fast_fail_net_expectancy_bps),
+            "net_floor_bps": float(net_floor_bps),
+            "fast_fail_floor_bps": float(fast_fail_floor_bps),
+            "min_cycles": int(min_cycles),
+            "current_level": str(current_auto_risk_level or ""),
+            "breach": "net_expectancy_bps" if net_breach else "fast_fail_net_expectancy_bps",
+        }
 
     def _apply_negative_expectancy_score_penalty(
         self,
@@ -4039,6 +4111,7 @@ class V5Pipeline:
                 bool(getattr(self.cfg.execution, 'negative_expectancy_open_block_enabled', False)),
                 bool(getattr(self.cfg.execution, 'negative_expectancy_fast_fail_open_block_enabled', False)),
                 bool(getattr(self.cfg.execution, 'protect_negative_expectancy_short_cycle_guard_enabled', False)),
+                bool(getattr(self.cfg.execution, 'protect_alt_short_cycle_guard_enabled', False)),
             ]
         )
         neg_cd_enabled = bool(getattr(self.cfg.execution, 'negative_expectancy_cooldown_enabled', False))
@@ -6087,6 +6160,32 @@ class V5Pipeline:
                     router_decisions.append(decision)
 
             if side == "buy" and intent == "OPEN_LONG":
+                alt_short_cycle_block = self._protect_alt_short_cycle_negative_expectancy_context(
+                    symbol=sym,
+                    stat=neg_stats or {},
+                    current_auto_risk_level=current_auto_risk_level,
+                    is_probe=btc_probe_meta is not None,
+                )
+                if alt_short_cycle_block is not None:
+                    self._record_replacement_block(
+                        audit=audit,
+                        blocked_replacement_reasons=blocked_replacement_reasons,
+                        symbol=sym,
+                        reason="protect_alt_short_cycle_negative_expectancy",
+                    )
+                    if audit:
+                        audit.record_count("protect_alt_short_cycle_negative_expectancy_count", symbol=sym)
+                        audit.record_gate("protect_alt_short_cycle_negative_expectancy", symbol=sym)
+                        if btc_probe_meta is not None:
+                            audit.record_count(
+                                "btc_leadership_probe_blocked_count",
+                                symbol=f"{sym}:protect_alt_short_cycle_negative_expectancy",
+                            )
+                            alt_short_cycle_block.update(btc_probe_meta)
+                            alt_short_cycle_block["blocked_reason"] = "protect_alt_short_cycle_negative_expectancy"
+                        router_decisions.append(alt_short_cycle_block)
+                    continue
+
                 short_cycle_block = self._protect_negative_expectancy_short_cycle_block_context(
                     symbol=sym,
                     stat=neg_stats or {},

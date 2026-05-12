@@ -1151,6 +1151,13 @@ class ExecutionConfig(BaseModel):
     )
     protect_negative_expectancy_short_cycle_apply_to_normal_entry: bool = Field(default=True)
     protect_negative_expectancy_short_cycle_apply_to_probe: bool = Field(default=False)
+    protect_alt_short_cycle_guard_enabled: bool = Field(default=True)
+    protect_alt_short_cycle_symbols: List[str] = Field(default_factory=lambda: ["BNB/USDT", "ETH/USDT"])
+    protect_alt_short_cycle_min_cycles: int = Field(default=2, ge=1, le=200)
+    protect_alt_short_cycle_net_floor_bps: float = Field(default=-20.0, ge=-10000, le=10000)
+    protect_alt_short_cycle_fast_fail_floor_bps: float = Field(default=-30.0, ge=-10000, le=10000)
+    protect_alt_short_cycle_apply_to_normal_entry: bool = Field(default=True)
+    protect_alt_short_cycle_apply_to_probe: bool = Field(default=False)
 
     order_state_machine_path: str = Field(
         default="reports/order_state_machine.json",

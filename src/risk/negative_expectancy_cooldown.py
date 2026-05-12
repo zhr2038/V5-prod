@@ -107,6 +107,29 @@ def negative_expectancy_config_fingerprint(config: Any) -> str:
             "protect_negative_expectancy_short_cycle_apply_to_probe": bool(
                 getattr(execution_cfg, "protect_negative_expectancy_short_cycle_apply_to_probe", False)
             ),
+            "protect_alt_short_cycle_guard_enabled": bool(
+                getattr(execution_cfg, "protect_alt_short_cycle_guard_enabled", False)
+            ),
+            "protect_alt_short_cycle_symbols": [
+                str(sym)
+                for sym in (getattr(execution_cfg, "protect_alt_short_cycle_symbols", []) or [])
+                if str(sym).strip()
+            ],
+            "protect_alt_short_cycle_min_cycles": int(
+                getattr(execution_cfg, "protect_alt_short_cycle_min_cycles", 2) or 2
+            ),
+            "protect_alt_short_cycle_net_floor_bps": float(
+                getattr(execution_cfg, "protect_alt_short_cycle_net_floor_bps", -20.0) or 0.0
+            ),
+            "protect_alt_short_cycle_fast_fail_floor_bps": float(
+                getattr(execution_cfg, "protect_alt_short_cycle_fast_fail_floor_bps", -30.0) or 0.0
+            ),
+            "protect_alt_short_cycle_apply_to_normal_entry": bool(
+                getattr(execution_cfg, "protect_alt_short_cycle_apply_to_normal_entry", True)
+            ),
+            "protect_alt_short_cycle_apply_to_probe": bool(
+                getattr(execution_cfg, "protect_alt_short_cycle_apply_to_probe", False)
+            ),
         },
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

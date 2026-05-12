@@ -1111,6 +1111,17 @@ PROTECT_NEGATIVE_EXPECTANCY_SHORT_CYCLE_CONFIG_KEYS = (
 )
 
 
+PROTECT_ALT_SHORT_CYCLE_CONFIG_KEYS = (
+    "protect_alt_short_cycle_guard_enabled",
+    "protect_alt_short_cycle_symbols",
+    "protect_alt_short_cycle_min_cycles",
+    "protect_alt_short_cycle_net_floor_bps",
+    "protect_alt_short_cycle_fast_fail_floor_bps",
+    "protect_alt_short_cycle_apply_to_normal_entry",
+    "protect_alt_short_cycle_apply_to_probe",
+)
+
+
 def _btc_leadership_probe_effective_config(cfg: AppConfig) -> Dict[str, Any]:
     execution = getattr(cfg, "execution", None)
     return {
@@ -1183,6 +1194,15 @@ def _protect_negative_expectancy_short_cycle_effective_config(cfg: AppConfig) ->
     }
 
 
+def _protect_alt_short_cycle_effective_config(cfg: AppConfig) -> Dict[str, Any]:
+    execution = getattr(cfg, "execution", None)
+    return {
+        key: getattr(execution, key)
+        for key in PROTECT_ALT_SHORT_CYCLE_CONFIG_KEYS
+        if hasattr(execution, key)
+    }
+
+
 def _negative_expectancy_state_path_for_config(cfg: AppConfig) -> Path:
     execution = getattr(cfg, "execution", None)
     order_store_path = str(getattr(execution, "order_store_path", "reports/orders.sqlite") or "reports/orders.sqlite")
@@ -1217,6 +1237,7 @@ def _negative_expectancy_feedback_enabled(cfg: AppConfig) -> bool:
             bool(getattr(execution, "negative_expectancy_open_block_enabled", False)),
             bool(getattr(execution, "negative_expectancy_fast_fail_open_block_enabled", False)),
             bool(getattr(execution, "protect_negative_expectancy_short_cycle_guard_enabled", False)),
+            bool(getattr(execution, "protect_alt_short_cycle_guard_enabled", False)),
         ]
     )
 
@@ -1384,6 +1405,7 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             **_swing_hold_effective_config(cfg),
             **_protect_recovery_multi_position_effective_config(cfg),
             **_protect_negative_expectancy_short_cycle_effective_config(cfg),
+            **_protect_alt_short_cycle_effective_config(cfg),
             **_negative_expectancy_release_effective_config(cfg),
         },
     }

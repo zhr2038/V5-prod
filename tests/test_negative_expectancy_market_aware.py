@@ -10,9 +10,10 @@ sys.path.insert(0, str(ROOT))
 
 from configs.schema import AppConfig, RegimeState
 from src.alpha.alpha_engine import AlphaSnapshot
-from src.core.models import MarketSeries
+from src.core.models import MarketSeries, Order
 from src.core.pipeline import V5Pipeline
 from src.execution.fill_store import derive_runtime_auto_risk_eval_path
+from src.execution.position_store import Position
 from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
 import src.core.pipeline as pipeline_module
@@ -102,6 +103,56 @@ def _strategy_payload(*, market_impulse: bool, include_alpha6_buy: bool = True):
     return {"strategies": strategies}
 
 
+def _strategy_payload_for_symbol(symbol: str, *, score: float = 0.60):
+    return {
+        "strategies": [
+            {
+                "strategy": "TrendFollowing",
+                "type": "trend",
+                "allocation": 0.5,
+                "total_signals": 1,
+                "buy_signals": 1,
+                "sell_signals": 0,
+                "signals": [
+                    {
+                        "symbol": symbol,
+                        "side": "buy",
+                        "score": 0.90,
+                        "confidence": 0.8,
+                        "metadata": {"adx": 35.0},
+                    }
+                ],
+            },
+            {
+                "strategy": "Alpha6Factor",
+                "type": "alpha_6factor",
+                "allocation": 0.5,
+                "total_signals": 1,
+                "buy_signals": 1,
+                "sell_signals": 0,
+                "signals": [
+                    {
+                        "symbol": symbol,
+                        "side": "buy",
+                        "score": score,
+                        "confidence": 0.8,
+                        "metadata": {
+                            "raw_factors": {
+                                "f4_volume_expansion": 1.246,
+                                "f5_rsi_trend_confirm": 0.695,
+                            },
+                            "z_factors": {
+                                "f4_volume_expansion": 1.246,
+                                "f5_rsi_trend_confirm": 0.695,
+                            },
+                        },
+                    }
+                ],
+            },
+        ]
+    }
+
+
 class _DummyNegexp:
     def __init__(self, *, blocked=None, stats=None):
         self._blocked = blocked or {}
@@ -179,6 +230,16 @@ def _selected_bnb_portfolio():
         target_weights={"BNB/USDT": 0.15},
         selected=["BNB/USDT"],
         entry_candidates=["BNB/USDT"],
+        volatilities={},
+        notes="",
+    )
+
+
+def _selected_symbol_portfolio(symbol: str):
+    return SimpleNamespace(
+        target_weights={symbol: 0.15},
+        selected=[symbol],
+        entry_candidates=[symbol],
         volatilities={},
         notes="",
     )
@@ -314,6 +375,7 @@ def _run_short_cycle_guard_case(tmp_path: Path, *, current_level: str, stats: di
     cfg.execution.protect_negative_expectancy_short_cycle_floor_bps = -80.0
     cfg.execution.protect_negative_expectancy_short_cycle_apply_to_normal_entry = True
     cfg.execution.protect_negative_expectancy_short_cycle_apply_to_probe = False
+    cfg.execution.protect_alt_short_cycle_guard_enabled = False
     _write_auto_risk_level(cfg.execution.order_store_path, current_level)
     pipe = _build_pipe(cfg, tmp_path, _strategy_payload(market_impulse=False))
     pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _selected_bnb_portfolio()
@@ -367,6 +429,7 @@ def test_short_cycle_guard_does_not_apply_to_probe_by_default(tmp_path: Path) ->
     cfg = _base_cfg(tmp_path)
     cfg.execution.protect_negative_expectancy_short_cycle_guard_enabled = True
     cfg.execution.protect_negative_expectancy_short_cycle_apply_to_probe = False
+    cfg.execution.protect_alt_short_cycle_guard_enabled = False
     pipe = _build_pipe(cfg, tmp_path, _strategy_payload(market_impulse=True))
 
     assert (
@@ -406,3 +469,183 @@ def test_short_cycle_guard_requires_floor_breach(tmp_path: Path) -> None:
     )
     assert not audit.counts.get("protect_negative_expectancy_short_cycle_block_count", 0)
     assert out.orders or any(str(d.get("reason", "")).startswith("protect_entry_") for d in audit.router_decisions)
+
+
+def _run_alt_short_cycle_guard_case(
+    tmp_path: Path,
+    *,
+    symbol: str = "BNB/USDT",
+    current_level: str = "PROTECT",
+    stats: dict,
+):
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.negative_expectancy_score_penalty_enabled = False
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
+    cfg.execution.protect_negative_expectancy_short_cycle_guard_enabled = False
+    cfg.execution.protect_negative_expectancy_short_cycle_min_cycles = 2
+    cfg.execution.protect_negative_expectancy_short_cycle_floor_bps = -80.0
+    cfg.execution.protect_alt_short_cycle_guard_enabled = True
+    cfg.execution.protect_alt_short_cycle_symbols = ["BNB/USDT", "ETH/USDT"]
+    cfg.execution.protect_alt_short_cycle_min_cycles = 2
+    cfg.execution.protect_alt_short_cycle_net_floor_bps = -20.0
+    cfg.execution.protect_alt_short_cycle_fast_fail_floor_bps = -30.0
+    cfg.execution.protect_alt_short_cycle_apply_to_normal_entry = True
+    cfg.execution.protect_alt_short_cycle_apply_to_probe = False
+    cfg.execution.protect_entry_confirm_rounds = 1
+    cfg.execution.cost_aware_entry_enabled = False
+    _write_auto_risk_level(cfg.execution.order_store_path, current_level)
+    pipe = _build_pipe(cfg, tmp_path, _strategy_payload_for_symbol(symbol, score=0.60))
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _selected_symbol_portfolio(symbol)
+    pipe.negative_expectancy_cooldown = _DummyNegexp(stats={symbol: stats})
+    audit = DecisionAudit(run_id=f"alt-short-cycle-{symbol.replace('/', '-')}")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={symbol: 1.0}),
+        precomputed_regime=_regime(),
+    )
+    return out, audit
+
+
+def test_protect_alt_short_cycle_blocks_bnb_fast_fail_negative_expectancy(tmp_path: Path) -> None:
+    out, audit = _run_alt_short_cycle_guard_case(
+        tmp_path,
+        stats={
+            "closed_cycles": 2,
+            "net_expectancy_bps": -17.15,
+            "fast_fail_net_expectancy_bps": -36.55,
+        },
+    )
+
+    assert not out.orders
+    decision = next(
+        d for d in audit.router_decisions if d.get("reason") == "protect_alt_short_cycle_negative_expectancy"
+    )
+    assert decision["symbol"] == "BNB/USDT"
+    assert decision["closed_cycles"] == 2
+    assert decision["net_expectancy_bps"] == -17.15
+    assert decision["fast_fail_net_expectancy_bps"] == -36.55
+    assert decision["net_floor_bps"] == -20.0
+    assert decision["fast_fail_floor_bps"] == -30.0
+    assert audit.counts["protect_alt_short_cycle_negative_expectancy_count"] == 1
+
+
+def test_protect_alt_short_cycle_requires_min_cycles(tmp_path: Path) -> None:
+    out, audit = _run_alt_short_cycle_guard_case(
+        tmp_path,
+        stats={
+            "closed_cycles": 1,
+            "net_expectancy_bps": -100.0,
+            "fast_fail_net_expectancy_bps": -100.0,
+        },
+    )
+
+    assert any(order.symbol == "BNB/USDT" and order.intent == "OPEN_LONG" for order in out.orders)
+    assert not any(
+        d.get("reason") == "protect_alt_short_cycle_negative_expectancy" for d in audit.router_decisions
+    )
+
+
+def test_protect_alt_short_cycle_allows_positive_expectancy_bnb(tmp_path: Path) -> None:
+    out, audit = _run_alt_short_cycle_guard_case(
+        tmp_path,
+        stats={
+            "closed_cycles": 2,
+            "net_expectancy_bps": 10.0,
+            "fast_fail_net_expectancy_bps": -5.0,
+        },
+    )
+
+    assert any(order.symbol == "BNB/USDT" and order.intent == "OPEN_LONG" for order in out.orders)
+    assert not any(
+        d.get("reason") == "protect_alt_short_cycle_negative_expectancy" for d in audit.router_decisions
+    )
+
+
+def test_protect_alt_short_cycle_ignores_symbols_outside_config(tmp_path: Path) -> None:
+    out, audit = _run_alt_short_cycle_guard_case(
+        tmp_path,
+        symbol="SOL/USDT",
+        stats={
+            "closed_cycles": 2,
+            "net_expectancy_bps": -120.0,
+            "fast_fail_net_expectancy_bps": -120.0,
+        },
+    )
+
+    assert any(order.symbol == "SOL/USDT" and order.intent == "OPEN_LONG" for order in out.orders)
+    assert not any(
+        d.get("reason") == "protect_alt_short_cycle_negative_expectancy" for d in audit.router_decisions
+    )
+
+
+def test_protect_alt_short_cycle_does_not_intercept_exit(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.negative_expectancy_score_penalty_enabled = False
+    cfg.execution.negative_expectancy_open_block_enabled = False
+    cfg.execution.negative_expectancy_fast_fail_open_block_enabled = False
+    cfg.execution.protect_alt_short_cycle_guard_enabled = True
+    cfg.execution.protect_alt_short_cycle_symbols = ["BNB/USDT", "ETH/USDT"]
+    cfg.execution.protect_alt_short_cycle_min_cycles = 2
+    cfg.execution.protect_alt_short_cycle_net_floor_bps = -20.0
+    cfg.execution.protect_alt_short_cycle_fast_fail_floor_bps = -30.0
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _strategy_payload_for_symbol("BNB/USDT", score=0.60))
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={},
+        selected=[],
+        entry_candidates=[],
+        volatilities={},
+        notes="",
+    )
+    pipe.exit_policy.evaluate = lambda positions, market_data, regime_state: [
+        Order(
+            symbol="BNB/USDT",
+            side="sell",
+            intent="CLOSE_LONG",
+            notional_usdt=50.0,
+            signal_price=650.0,
+            meta={"reason": "atr_trailing"},
+        )
+    ]
+    pipe.negative_expectancy_cooldown = _DummyNegexp(
+        stats={
+            "BNB/USDT": {
+                "closed_cycles": 2,
+                "net_expectancy_bps": -120.0,
+                "fast_fail_net_expectancy_bps": -120.0,
+            }
+        }
+    )
+    audit = DecisionAudit(run_id="alt-short-cycle-exit")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[
+            Position(
+                symbol="BNB/USDT",
+                qty=0.1,
+                avg_px=650.0,
+                entry_ts="2026-05-11T00:00:00Z",
+                highest_px=660.0,
+                last_update_ts="2026-05-11T01:00:00Z",
+                last_mark_px=650.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BNB/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert any(order.symbol == "BNB/USDT" and order.intent == "CLOSE_LONG" for order in out.orders)
+    assert not any(
+        d.get("reason") == "protect_alt_short_cycle_negative_expectancy" for d in audit.router_decisions
+    )

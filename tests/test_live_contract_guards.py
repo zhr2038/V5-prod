@@ -355,6 +355,8 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
         assert key in payload["execution"]
     for key in main_module.PROTECT_RECOVERY_MULTI_POSITION_CONFIG_KEYS:
         assert key in payload["execution"]
+    for key in main_module.PROTECT_ALT_SHORT_CYCLE_CONFIG_KEYS:
+        assert key in payload["execution"]
     assert payload["execution"]["btc_leadership_probe_enabled"] is True
     assert payload["execution"]["btc_leadership_probe_min_alpha6_score"] == pytest.approx(0.30)
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
@@ -471,6 +473,13 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["protect_recovery_min_positive_whitelist_4h_count"] == 3
     assert payload["execution"]["protect_recovery_allowed_symbols"] == ["BTC/USDT", "SOL/USDT", "ETH/USDT"]
     assert payload["execution"]["protect_recovery_disallow_symbols_with_negative_expectancy"] is True
+    assert payload["execution"]["protect_alt_short_cycle_guard_enabled"] is True
+    assert payload["execution"]["protect_alt_short_cycle_symbols"] == ["BNB/USDT", "ETH/USDT"]
+    assert payload["execution"]["protect_alt_short_cycle_min_cycles"] == 2
+    assert payload["execution"]["protect_alt_short_cycle_net_floor_bps"] == pytest.approx(-20.0)
+    assert payload["execution"]["protect_alt_short_cycle_fast_fail_floor_bps"] == pytest.approx(-30.0)
+    assert payload["execution"]["protect_alt_short_cycle_apply_to_normal_entry"] is True
+    assert payload["execution"]["protect_alt_short_cycle_apply_to_probe"] is False
     assert payload["execution"]["negative_expectancy_release_start_ts"] == 2_000_000_000
     assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""

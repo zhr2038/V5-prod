@@ -380,6 +380,7 @@ def fixture_config_runtime_consumption_root(root):
                 "  swing_min_hold_hours: 24",
                 "  protect_recovery_multi_position_enabled: false",
                 "  protect_negative_expectancy_short_cycle_guard_enabled: true",
+                "  protect_alt_short_cycle_guard_enabled: true",
                 "  open_long_entry_guard_fail_open_buy: false",
                 "  open_long_entry_guard_fail_open_sell: true",
                 "quant_lab:",
@@ -405,6 +406,7 @@ def fixture_config_runtime_consumption_root(root):
                 "swing_min_hold_hours: int = 24",
                 "protect_recovery_multi_position_enabled: bool = False",
                 "protect_negative_expectancy_short_cycle_guard_enabled: bool = True",
+                "protect_alt_short_cycle_guard_enabled: bool = True",
                 "open_long_entry_guard_fail_open_buy: bool = False",
                 "open_long_entry_guard_fail_open_sell: bool = True",
                 "multi_position_swing_shadow_enabled: bool = True",
@@ -435,6 +437,7 @@ def fixture_config_runtime_consumption_root(root):
                 "    getattr(cfg.execution, 'swing_hold_enabled', True)",
                 "    getattr(cfg.execution, 'protect_recovery_multi_position_enabled', False)",
                 "    getattr(cfg.execution, 'protect_negative_expectancy_short_cycle_guard_enabled', False)",
+                "    getattr(cfg.execution, 'protect_alt_short_cycle_guard_enabled', False)",
                 "",
             ]
         ),
@@ -484,6 +487,7 @@ def fixture_config_runtime_consumption_root(root):
                 "swing_min_hold_hours": 24,
                 "protect_recovery_multi_position_enabled": False,
                 "protect_negative_expectancy_short_cycle_guard_enabled": True,
+                "protect_alt_short_cycle_guard_enabled": True,
                 "open_long_entry_guard_fail_open_buy": False,
                 "open_long_entry_guard_fail_open_sell": True,
             },
@@ -3058,6 +3062,7 @@ def main():
             assert by_key["swing_min_hold_hours"]["consumer_files"] == "main.py", by_key["swing_min_hold_hours"]
             assert by_key["protect_recovery_multi_position_enabled"]["consumer_category"] == "live_runtime", by_key["protect_recovery_multi_position_enabled"]
             assert by_key["protect_negative_expectancy_short_cycle_guard_enabled"]["consumer_category"] == "live_runtime", by_key["protect_negative_expectancy_short_cycle_guard_enabled"]
+            assert by_key["protect_alt_short_cycle_guard_enabled"]["consumer_category"] == "live_runtime", by_key["protect_alt_short_cycle_guard_enabled"]
             assert by_key["open_long_entry_guard_fail_open_buy"]["consumer_files"] == "src/execution/live_execution_engine.py", by_key["open_long_entry_guard_fail_open_buy"]
             assert by_key["open_long_entry_guard_fail_open_sell"]["consumer_category"] == "live_runtime", by_key["open_long_entry_guard_fail_open_sell"]
             assert by_key["multi_position_swing_shadow_enabled"]["present_in_live_prod"] == "true", by_key["multi_position_swing_shadow_enabled"]

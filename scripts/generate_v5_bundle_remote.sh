@@ -743,6 +743,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "swing_",
         "protect_recovery_",
         "protect_negative_expectancy_short_cycle_",
+        "protect_alt_short_cycle_",
         "open_long_entry_guard_fail_open_",
         "multi_position_swing_shadow_",
         "alt_impulse_shadow_",
