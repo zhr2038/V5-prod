@@ -1451,6 +1451,7 @@ class QuantLabConfig(BaseModel):
 
     fail_policy: str = "sell_only"
     allow_local_fallback_in_enforce: bool = False
+    allow_insecure_http_with_token: bool = False
 
     risk_permission_enabled: bool = True
     cost_enabled: bool = True

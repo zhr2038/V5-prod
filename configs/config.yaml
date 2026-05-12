@@ -78,6 +78,7 @@ quant_lab:
   cache_ttl_seconds: 60
   fail_policy: allow_local_fallback
   allow_local_fallback_in_enforce: false
+  allow_insecure_http_with_token: false
 
   risk_permission_enabled: true
   cost_enabled: true

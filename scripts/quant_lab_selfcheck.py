@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
-    client = QuantLabClient.from_config(qcfg, run_id="selfcheck", phase="selfcheck")
+    client = QuantLabClient.from_config(qcfg, run_id="selfcheck", phase="selfcheck", mode=mode_resolution.mode.value)
     health = client.get_health()
     permission = client.get_live_permission(strategy=qcfg.strategy_name, version=qcfg.strategy_version)
     cost = client.estimate_cost(

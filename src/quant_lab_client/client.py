@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import warnings
+from ipaddress import ip_address
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -29,6 +31,9 @@ from .models import (
     symbol_to_quant_lab_symbol,
 )
 from .permissions import normalize_permission
+
+
+STRICT_GATE_MODES = {"cost_only", "permission_only", "enforce"}
 
 
 def summarize_response(payload: Any) -> Dict[str, Any]:
@@ -90,6 +95,8 @@ class QuantLabResponse:
 class QuantLabClient:
     base_url: str
     api_token: Optional[str] = None
+    mode: str = "shadow"
+    allow_insecure_http_with_token: bool = False
     timeout_seconds: float = 2.0
     max_retries: int = 1
     cache_ttl_seconds: int = 60
@@ -98,6 +105,7 @@ class QuantLabClient:
     run_id: Optional[str] = None
     phase: str = "live"
     _cache: TTLCache = field(init=False, repr=False)
+    token_auth_disabled_reason: Optional[str] = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         self.base_url = str(self.base_url or "").strip().rstrip("/")
@@ -105,6 +113,9 @@ class QuantLabClient:
             raise QuantLabValidationError("quant-lab base_url is required")
         if not (self.base_url.startswith("http://") or self.base_url.startswith("https://")):
             raise QuantLabValidationError("quant-lab base_url must start with http:// or https://")
+        self.mode = str(self.mode or "shadow").strip().lower().replace("-", "_")
+        self.api_token = str(self.api_token or "").strip() or None
+        self._validate_token_transport()
         self.timeout_seconds = float(self.timeout_seconds or 2.0)
         if self.timeout_seconds <= 0 or self.timeout_seconds > 10:
             raise QuantLabValidationError("quant-lab timeout_seconds must be > 0 and <= 10")
@@ -114,19 +125,66 @@ class QuantLabClient:
         self._cache = TTLCache(ttl_seconds=self.cache_ttl_seconds)
 
     @classmethod
-    def from_config(cls, cfg: Any, *, run_id: Optional[str] = None, phase: str = "live") -> "QuantLabClient":
+    def from_config(
+        cls,
+        cfg: Any,
+        *,
+        run_id: Optional[str] = None,
+        phase: str = "live",
+        http_client: Optional[Any] = None,
+        mode: Optional[str] = None,
+    ) -> "QuantLabClient":
         token_env = str(getattr(cfg, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN")
         token = os.getenv(token_env, "").strip()
         return cls(
             base_url=str(getattr(cfg, "base_url", "") or ""),
             api_token=token or None,
+            mode=str(mode or getattr(cfg, "mode", "shadow") or "shadow"),
+            allow_insecure_http_with_token=bool(getattr(cfg, "allow_insecure_http_with_token", False)),
             timeout_seconds=float(getattr(cfg, "timeout_seconds", 2.0) or 2.0),
             max_retries=int(getattr(cfg, "max_retries", 1) or 0),
             cache_ttl_seconds=int(getattr(cfg, "cache_ttl_seconds", 60) or 0),
+            http_client=http_client,
             request_log_path=str(getattr(cfg, "request_log_path", "reports/quant_lab_requests.jsonl") or "reports/quant_lab_requests.jsonl"),
             run_id=run_id,
             phase=phase,
         )
+
+    @staticmethod
+    def _public_http_host(base_url: str) -> Optional[str]:
+        parsed = urlparse(base_url)
+        if parsed.scheme.lower() != "http":
+            return None
+        host = str(parsed.hostname or "").strip().lower()
+        if not host:
+            return "<missing>"
+        if host == "localhost":
+            return None
+        try:
+            addr = ip_address(host)
+        except ValueError:
+            return host
+        if addr.is_loopback or addr.is_private:
+            return None
+        return host
+
+    def _validate_token_transport(self) -> None:
+        if not self.api_token:
+            return
+        if bool(self.allow_insecure_http_with_token):
+            return
+        public_http_host = self._public_http_host(self.base_url)
+        if public_http_host is None:
+            return
+        message = (
+            "quant-lab api_token is configured for public HTTP base_url; "
+            "token will not be sent in shadow/local_only mode and is forbidden in gated modes"
+        )
+        if self.mode in STRICT_GATE_MODES:
+            raise QuantLabValidationError(message)
+        self.api_token = None
+        self.token_auth_disabled_reason = "public_http_token_stripped"
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/json"}

@@ -168,23 +168,13 @@ class QuantLabGuard:
             return cls.disabled(quant_lab_cfg, run_id=run_id, mode_resolution=mode_resolution)
         client: Optional[QuantLabClient] = None
         if mode_resolution.mode != QuantLabMode.LOCAL_ONLY:
-            client = QuantLabClient(
-                base_url=str(getattr(quant_lab_cfg, "base_url", "") or ""),
-                api_token=None,
-                timeout_seconds=float(getattr(quant_lab_cfg, "timeout_seconds", 2.0) or 2.0),
-                max_retries=int(getattr(quant_lab_cfg, "max_retries", 1) or 0),
-                cache_ttl_seconds=int(getattr(quant_lab_cfg, "cache_ttl_seconds", 60) or 0),
-                http_client=http_client,
-                request_log_path=str(getattr(quant_lab_cfg, "request_log_path", "reports/quant_lab_requests.jsonl") or "reports/quant_lab_requests.jsonl"),
+            client = QuantLabClient.from_config(
+                quant_lab_cfg,
                 run_id=run_id,
                 phase=phase,
+                http_client=http_client,
+                mode=mode_resolution.mode.value,
             )
-            token_env = str(getattr(quant_lab_cfg, "api_token_env", "QUANT_LAB_API_TOKEN") or "QUANT_LAB_API_TOKEN")
-            import os
-
-            token = os.getenv(token_env, "").strip()
-            if token:
-                client.api_token = token
         return cls(
             client=client,
             cfg=quant_lab_cfg,
