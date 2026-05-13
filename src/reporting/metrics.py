@@ -13,6 +13,16 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+@dataclass
+class TradeCsvReadResult:
+    rows: List[Dict[str, Any]]
+    file_exists: bool
+    file_rows: int
+    counted_rows: int
+    warnings: List[str]
+    parse_error: Optional[str] = None
+
+
 def _resolve_path(path: str | Path) -> Path:
     resolved = Path(path)
     if not resolved.is_absolute():
@@ -107,6 +117,92 @@ def read_trades_csv(path: str) -> List[Dict[str, Any]]:
         return [dict(row) for row in r]
 
 
+def read_trades_csv_detailed(path: str) -> TradeCsvReadResult:
+    """Read trades.csv with validation metadata for run summaries.
+
+    The legacy read_trades_csv helper intentionally returns raw DictReader rows.
+    Summary/budget accounting needs stricter behavior: count only effective fill
+    rows, surface parse problems, and derive notional from qty*price when needed.
+    """
+
+    p = _resolve_path(path)
+    if not p.exists():
+        return TradeCsvReadResult(
+            rows=[],
+            file_exists=False,
+            file_rows=0,
+            counted_rows=0,
+            warnings=[],
+        )
+
+    rows: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    raw_rows = 0
+    try:
+        with p.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f, strict=True)
+            if reader.fieldnames is None:
+                warnings.append("trades.csv has no header")
+                return TradeCsvReadResult(
+                    rows=[],
+                    file_exists=True,
+                    file_rows=0,
+                    counted_rows=0,
+                    warnings=warnings,
+                    parse_error="missing_header",
+                )
+
+            fieldnames = {str(name or "").strip() for name in (reader.fieldnames or [])}
+            if "notional_usdt" not in fieldnames and not {"qty", "price"}.issubset(fieldnames):
+                warnings.append("trades.csv missing notional_usdt and qty/price columns")
+
+            for line_no, row in enumerate(reader, start=2):
+                raw_rows += 1
+                if row is None:
+                    warnings.append(f"trades.csv row {line_no} is empty or malformed")
+                    continue
+                if None in row:
+                    warnings.append(f"trades.csv row {line_no} has extra columns")
+                    continue
+
+                cleaned = {str(k).strip(): v for k, v in row.items() if k is not None}
+                if not any(str(value or "").strip() for value in cleaned.values()):
+                    continue
+
+                notional = _to_opt_f(cleaned.get("notional_usdt"))
+                if notional is None or abs(float(notional)) <= 0.0:
+                    qty = _to_opt_f(cleaned.get("qty"))
+                    price = _to_opt_f(cleaned.get("price"))
+                    if qty is not None and price is not None and abs(float(qty) * float(price)) > 0.0:
+                        cleaned["notional_usdt"] = str(abs(float(qty) * float(price)))
+                        notional = abs(float(qty) * float(price))
+
+                if notional is None or abs(float(notional)) <= 0.0:
+                    warnings.append(f"trades.csv row {line_no} not counted: missing positive notional")
+                    continue
+
+                rows.append(cleaned)
+    except Exception as exc:
+        msg = f"trades.csv parse failed: {exc!r}"
+        warnings.append(msg)
+        return TradeCsvReadResult(
+            rows=[],
+            file_exists=True,
+            file_rows=raw_rows,
+            counted_rows=0,
+            warnings=warnings,
+            parse_error=msg,
+        )
+
+    return TradeCsvReadResult(
+        rows=rows,
+        file_exists=True,
+        file_rows=raw_rows,
+        counted_rows=len(rows),
+        warnings=warnings,
+    )
+
+
 def _to_f(x: Any) -> float:
     try:
         if x is None:
@@ -136,7 +232,10 @@ def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[flo
     if not trades:
         return {
             "num_trades": 0,
+            "notional_usdt_total": 0.0,
+            "turnover_usdt": 0.0,
             "turnover_ratio": 0.0,
+            "fee_usdt_total": 0.0,
             "fees_usdt_total": 0.0,
             "slippage_usdt_total": 0.0,
             "cost_usdt_total": 0.0,
@@ -160,6 +259,7 @@ def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[flo
 
     turnover = float(sum(notionals)) / float(avg_equity or 1.0) if avg_equity else None
 
+    notional_total = float(sum(notionals))
     fee_total = float(sum(fees))
     slp_total = float(sum(slp_vals))
     cost_total = fee_total + slp_total
@@ -169,7 +269,10 @@ def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[flo
     return {
         "num_trades": int(len(trades)),
         "num_round_trips": int(len(realized)),
+        "notional_usdt_total": notional_total,
+        "turnover_usdt": notional_total,
         "turnover_ratio": turnover,
+        "fee_usdt_total": fee_total,
         "fees_usdt_total": fee_total,
         "slippage_usdt_total": slp_total,
         "slippage_coverage": (float(len(slp_vals)) / float(len(trades))) if trades else None,

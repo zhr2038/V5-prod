@@ -8,7 +8,7 @@ from src.reporting.metrics import (
     compute_equity_metrics,
     compute_trade_metrics,
     read_equity_jsonl,
-    read_trades_csv,
+    read_trades_csv_detailed,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -141,6 +141,31 @@ def _quant_lab_summary_fields(rd: Path) -> Dict[str, Any]:
     return {"quant_lab": summary}
 
 
+def _trade_metrics_from_file(rd: Path, avg_equity: float | None) -> Dict[str, Any]:
+    trade_read = read_trades_csv_detailed(str(rd / "trades.csv"))
+    tm = compute_trade_metrics(trade_read.rows, avg_equity=avg_equity)
+    if trade_read.parse_error:
+        source = "trades_csv_parse_error"
+    elif trade_read.file_exists and trade_read.file_rows > 0:
+        source = "trades_csv"
+    elif trade_read.file_exists:
+        source = "trades_csv_empty"
+    else:
+        source = "trades_csv_missing"
+
+    tm.update(
+        {
+            "trades_file_exists": bool(trade_read.file_exists),
+            "trades_file_rows": int(trade_read.file_rows),
+            "trades_counted_rows": int(trade_read.counted_rows),
+            "trade_metrics_source": source,
+            "trade_metrics_warnings": list(trade_read.warnings),
+            "trade_metrics_warning_count": int(len(trade_read.warnings)),
+        }
+    )
+    return tm
+
+
 def write_summary(
     run_dir: str,
     window_start_ts: int | None = None,
@@ -148,15 +173,13 @@ def write_summary(
 ) -> Dict[str, Any]:
     rd = _resolve_run_dir(run_dir)
     eq_rows = read_equity_jsonl(str(rd / "equity.jsonl"))
-    trades = read_trades_csv(str(rd / "trades.csv"))
-
     avg_equity = None
     if eq_rows:
         xs = [float(r.get("equity") or 0.0) for r in eq_rows]
         avg_equity = sum(xs) / len(xs) if xs else None
 
     eqm = compute_equity_metrics(eq_rows)
-    tm = compute_trade_metrics(trades, avg_equity=avg_equity)
+    tm = _trade_metrics_from_file(rd, avg_equity=avg_equity)
     
     # 确定窗口时间：优先使用传入的窗口，否则使用equity.jsonl范围
     equity_first_ts = eq_rows[0].get("ts") if eq_rows else None
@@ -203,15 +226,13 @@ def refresh_summary_metrics(run_dir: str) -> Dict[str, Any]:
     summ = json.loads(p.read_text(encoding="utf-8"))
 
     eq_rows = read_equity_jsonl(str(rd / "equity.jsonl"))
-    trades = read_trades_csv(str(rd / "trades.csv"))
-
     avg_equity = None
     if eq_rows:
         xs = [float(r.get("equity") or 0.0) for r in eq_rows]
         avg_equity = sum(xs) / len(xs) if xs else None
 
     eqm = compute_equity_metrics(eq_rows)
-    tm = compute_trade_metrics(trades, avg_equity=avg_equity)
+    tm = _trade_metrics_from_file(rd, avg_equity=avg_equity)
 
     # patch
     summ["avg_equity"] = avg_equity

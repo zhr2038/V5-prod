@@ -2587,13 +2587,19 @@ def main() -> None:
             from src.reporting.budget_state import derive_ymd_utc_from_summary, update_daily_budget_state
             from src.reporting.summary_writer import attach_budget
             from src.reporting.decision_audit import load_decision_audit
-            from src.reporting.metrics import read_trades_csv
+            from src.reporting.metrics import read_trades_csv_detailed
 
-            trades = read_trades_csv(str(runtime_run_dir / "trades.csv"))
-            notionals = [abs(float(t.get("notional_usdt") or 0.0)) for t in trades]
-            turnover_inc = float(sum(notionals))
-            cost_inc = float(sum(float(t.get("fee_usdt") or 0.0) + float(t.get("slippage_usdt") or 0.0) for t in trades))
-            fills_count_inc = int(len([x for x in notionals if x > 0]))
+            trade_read = read_trades_csv_detailed(str(runtime_run_dir / "trades.csv"))
+            if trade_read.warnings:
+                log.warning("summary trade metrics warnings: %s", trade_read.warnings)
+            notionals = [abs(float(t.get("notional_usdt") or 0.0)) for t in trade_read.rows]
+            turnover_inc = float(summ.get("turnover_usdt") or summ.get("notional_usdt_total") or sum(notionals))
+            cost_inc = float(
+                summ.get("cost_usdt_total")
+                if summ.get("cost_usdt_total") is not None
+                else sum(float(t.get("fee_usdt") or 0.0) + float(t.get("slippage_usdt") or 0.0) for t in trade_read.rows)
+            )
+            fills_count_inc = int(summ.get("trades_counted_rows") or summ.get("num_trades") or len([x for x in notionals if x > 0]))
 
             ymd = derive_ymd_utc_from_summary(summ)
             st = update_daily_budget_state(
