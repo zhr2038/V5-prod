@@ -55,6 +55,7 @@ CURRENT_REPORT_FILES = [
     ("reports/skipped_candidate_labels.jsonl", "raw/reports/skipped_candidate_labels.jsonl", False),
     ("reports/alt_impulse_shadow_labels.jsonl", "raw/reports/alt_impulse_shadow_labels.jsonl", False),
     ("reports/multi_position_swing_shadow_labels.jsonl", "raw/reports/multi_position_swing_shadow_labels.jsonl", False),
+    ("reports/protect_sol_exception_shadow_labels.jsonl", "raw/reports/protect_sol_exception_shadow_labels.jsonl", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
@@ -713,6 +714,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if legacy_label_horizons != LEGACY_LABEL_HORIZONS
         else normalize_horizon_list(config_int_list("extended_label_horizons_hours"), DEFAULT_LABEL_HORIZONS)
     )
+    protect_sol_exception_horizons = normalize_horizon_list(
+        config_int_list("protect_sol_exception_horizons_hours"),
+        [4, 8, 12, 24, 48, 72],
+    )
 
     CONFIG_CONSUMPTION_FIXED_KEYS = {
         "split_orders",
@@ -754,6 +759,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     CONFIG_CONSUMPTION_DIAGNOSTICS_PREFIXES = (
         "multi_position_swing_shadow_",
         "alt_impulse_shadow_",
+        "protect_sol_exception_",
     )
 
     def key_pattern(key):
@@ -2692,6 +2698,43 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             multi_shadow_text + ("\n" if multi_shadow_text else ""),
         )
 
+    def protect_sol_exception_shadow_row_key(row):
+        return (
+            flatten_value(first_value(row, ("experiment_name",), "protect_sol_exception_v1")) or "protect_sol_exception_v1",
+            flatten_value(first_value(row, ("run_id",), not_obs)) or not_obs,
+            canonical_ts_utc(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)),
+            flatten_value(first_value(row, ("symbol",), not_obs)) or not_obs,
+            flatten_value(first_value(row, ("original_block_reason", "skip_reason", "reason"), not_obs)) or not_obs,
+            flatten_value(first_value(row, ("f3_weight_candidate",), not_obs)) or not_obs,
+            flatten_value(first_value(row, ("f4_weight_candidate",), not_obs)) or not_obs,
+        )
+
+    protect_sol_exception_shadow_label_rows = []
+    protect_sol_exception_shadow_labels_path = OUT / "raw" / "reports" / "protect_sol_exception_shadow_labels.jsonl"
+    if protect_sol_exception_shadow_labels_path.is_file():
+        for line in protect_sol_exception_shadow_labels_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+                if isinstance(item, dict):
+                    protect_sol_exception_shadow_label_rows.append(item)
+            except Exception:
+                collection_errors.append({"source": str(protect_sol_exception_shadow_labels_path), "error": "invalid jsonl row"})
+    protect_sol_exception_shadow_label_rows, protect_sol_exception_shadow_duplicate_count = dedupe_rows_by_key(
+        protect_sol_exception_shadow_label_rows,
+        protect_sol_exception_shadow_row_key,
+    )
+    if protect_sol_exception_shadow_labels_path.is_file():
+        protect_sol_text = "\n".join(
+            json.dumps(sanitize_obj(row), ensure_ascii=False, sort_keys=True)
+            for row in protect_sol_exception_shadow_label_rows
+        )
+        write_text(
+            "raw/reports/protect_sol_exception_shadow_labels.jsonl",
+            protect_sol_text + ("\n" if protect_sol_text else ""),
+        )
+
     def loose_label_key(row):
         return (
             flatten_value(first_value(row, ("run_id",), not_obs)) or not_obs,
@@ -2796,6 +2839,101 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
     def truthy(value):
         return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+    def protect_sol_exception_shadow_outcome_row(row):
+        payload = dict(row)
+        payload["original_block_reason"] = first_observed(
+            first_value(payload, ("original_block_reason", "skip_reason", "reason"), not_obs)
+        )
+        for horizon in protect_sol_exception_horizons:
+            h = int(horizon)
+            if as_float(payload.get(f"would_pnl_bps_{h}h")) is None:
+                payload[f"would_pnl_bps_{h}h"] = flatten_value(
+                    first_value(payload, (f"label_{h}h_net_bps",), not_obs)
+                )
+        return payload
+
+    protect_sol_exception_shadow_rows = [
+        protect_sol_exception_shadow_outcome_row(row)
+        for row in protect_sol_exception_shadow_label_rows
+    ]
+
+    def protect_sol_candidate_key(row):
+        return (
+            flatten_value(first_value(row, ("run_id",), not_obs)) or not_obs,
+            canonical_ts_utc(first_value(row, ("ts_utc", "entry_ts", "timestamp", "ts"), not_obs)),
+            flatten_value(first_value(row, ("symbol",), not_obs)) or not_obs,
+            flatten_value(first_value(row, ("original_block_reason", "skip_reason", "reason"), not_obs)) or not_obs,
+        )
+
+    def aggregate_protect_sol_exception_shadow(rows, horizons, *, include_variant=False):
+        min_samples = int(config_number("protect_sol_exception_min_complete_samples_warning") or 5)
+        buckets = defaultdict(list)
+        for row in rows:
+            for horizon in horizons:
+                key = [
+                    flatten_value(first_value(row, ("symbol",), not_obs)) or not_obs,
+                    flatten_value(first_value(row, ("original_block_reason", "skip_reason", "reason"), not_obs)) or not_obs,
+                    int(horizon),
+                ]
+                if include_variant:
+                    key.extend(
+                        [
+                            flatten_value(first_value(row, ("f3_weight_candidate",), not_obs)) or not_obs,
+                            flatten_value(first_value(row, ("f4_weight_candidate",), not_obs)) or not_obs,
+                        ]
+                    )
+                buckets[tuple(key)].append(row)
+        out = []
+        for key, bucket_rows in sorted(buckets.items(), key=lambda item: item[0]):
+            horizon = int(key[2])
+            net_key = f"would_pnl_bps_{horizon}h"
+            status_key = f"label_{horizon}h_status"
+            values = [as_float(row.get(net_key)) for row in bucket_rows]
+            usable = [value for value in values if value is not None]
+            unique_keys = {protect_sol_candidate_key(row) for row in bucket_rows}
+            complete_unique_keys = {
+                protect_sol_candidate_key(row)
+                for row in bucket_rows
+                if as_float(row.get(net_key)) is not None
+            }
+            avg_net = sum(usable) / len(usable) if usable else None
+            payload = {
+                "symbol": key[0],
+                "original_block_reason": key[1],
+                "horizon_hours": horizon,
+                "count": len(bucket_rows),
+                "unique_candidate_count": len(unique_keys),
+                "complete_count": len(usable),
+                "complete_unique_candidate_count": len(complete_unique_keys),
+                "pending_count": sum(1 for row in bucket_rows if flatten_value(row.get(status_key)) == "pending"),
+                "not_observable_count": sum(1 for row in bucket_rows if flatten_value(row.get(status_key)) == "not_observable"),
+                "avg_would_pnl_bps": round(avg_net, 6) if avg_net is not None else not_obs,
+                "win_rate": round(sum(1 for value in usable if value > 0) / len(usable), 6) if usable else not_obs,
+                "current_strategy_net_bps": 0.0,
+                "better_than_current_strategy": str(bool(avg_net is not None and avg_net > 0.0)).lower(),
+                "sample_warning": (
+                    f"insufficient_samples_min_{min_samples}"
+                    if len(complete_unique_keys) < min_samples
+                    else ""
+                ),
+            }
+            if include_variant:
+                payload["f3_weight_candidate"] = key[3]
+                payload["f4_weight_candidate"] = key[4]
+            out.append(payload)
+        return out
+
+    protect_sol_exception_shadow_by_horizon = aggregate_protect_sol_exception_shadow(
+        protect_sol_exception_shadow_rows,
+        protect_sol_exception_horizons,
+        include_variant=False,
+    )
+    protect_sol_exception_factor_weight_shadow_rows = aggregate_protect_sol_exception_shadow(
+        protect_sol_exception_shadow_rows,
+        protect_sol_exception_horizons,
+        include_variant=True,
+    )
 
     HIGH_SCORE_NON_ENTRY_MANAGEMENT_REASONS = {
         "rank_exit_target_still_positive",
@@ -5866,6 +6004,102 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         high_score_blocked_outcomes_by_horizon,
         ["horizon_hours", "count", "pending_count", "not_observable_count", "complete_count", "avg_net_bps", "win_rate"],
     )
+    protect_sol_exception_horizon_fields = []
+    for horizon in protect_sol_exception_horizons:
+        h = int(horizon)
+        protect_sol_exception_horizon_fields.extend(
+            [
+                f"would_pnl_bps_{h}h",
+                f"label_{h}h_gross_bps",
+                f"label_{h}h_net_bps",
+                f"label_{h}h_would_have_won_net",
+                f"label_{h}h_status",
+                f"label_{h}h_reason",
+            ]
+        )
+    write_csv(
+        "summaries/protect_sol_exception_shadow_outcomes.csv",
+        protect_sol_exception_shadow_rows,
+        [
+            "experiment_name",
+            "enabled_shadow_only",
+            "enable_live_experiment",
+            "ts_utc",
+            "run_id",
+            "symbol",
+            "intended_side",
+            "would_enter",
+            "would_size_notional",
+            "would_exit_time",
+            "entry_px",
+            "original_block_reason",
+            "experiment_reason",
+            "final_score",
+            "target_w",
+            "alpha6_score",
+            "trend_score",
+            "f3_vol_adj_ret",
+            "f4_volume_expansion",
+            "f5_rsi_trend_confirm",
+            "f3_weight_candidate",
+            "f4_weight_candidate",
+            "f3_z_factor",
+            "f4_z_factor",
+            "shadow_alpha6_score_candidate",
+            "shadow_alpha6_score_delta",
+            "btc_leadership_relax_allowed",
+            "alt_impulse_relax_allowed",
+            "eth_relax_allowed",
+            "current_level",
+            "regime",
+            "rt_cost_bps",
+            *protect_sol_exception_horizon_fields,
+            "label_status",
+            "label_not_observable_reason",
+        ],
+    )
+    write_csv(
+        "summaries/protect_sol_exception_shadow_outcomes_by_symbol_reason_horizon.csv",
+        protect_sol_exception_shadow_by_horizon,
+        [
+            "symbol",
+            "original_block_reason",
+            "horizon_hours",
+            "count",
+            "unique_candidate_count",
+            "complete_count",
+            "complete_unique_candidate_count",
+            "pending_count",
+            "not_observable_count",
+            "avg_would_pnl_bps",
+            "win_rate",
+            "current_strategy_net_bps",
+            "better_than_current_strategy",
+            "sample_warning",
+        ],
+    )
+    write_csv(
+        "summaries/protect_sol_exception_factor_weight_shadow.csv",
+        protect_sol_exception_factor_weight_shadow_rows,
+        [
+            "symbol",
+            "original_block_reason",
+            "horizon_hours",
+            "f3_weight_candidate",
+            "f4_weight_candidate",
+            "count",
+            "unique_candidate_count",
+            "complete_count",
+            "complete_unique_candidate_count",
+            "pending_count",
+            "not_observable_count",
+            "avg_would_pnl_bps",
+            "win_rate",
+            "current_strategy_net_bps",
+            "better_than_current_strategy",
+            "sample_warning",
+        ],
+    )
     write_csv(
         "summaries/alt_impulse_shadow_outcomes.csv",
         alt_impulse_shadow_rows,
@@ -6006,6 +6240,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if parse_dt_utc(row.get("ts_utc")) is not None and parse_dt_utc(row.get("ts_utc")).timestamp() >= RECENT_24H
     ]
     multi_position_swing_status_counts = Counter(row.get("label_status") or not_obs for row in multi_position_swing_shadow_rows)
+    protect_sol_exception_status_counts = Counter(row.get("label_status") or not_obs for row in protect_sol_exception_shadow_rows)
+    protect_sol_exception_sample_warning_count = sum(
+        1 for row in protect_sol_exception_shadow_by_horizon
+        if flatten_value(row.get("sample_warning"))
+    )
 
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
@@ -6074,6 +6313,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "multi_position_swing_shadow_complete_count": int(multi_position_swing_status_counts.get("complete", 0)),
         "multi_position_swing_shadow_pending_count": int(multi_position_swing_status_counts.get("pending", 0)),
         "multi_position_swing_shadow_not_observable_count": int(multi_position_swing_status_counts.get("not_observable", 0)),
+        "protect_sol_exception_shadow_label_count": len(protect_sol_exception_shadow_rows),
+        "protect_sol_exception_shadow_duplicate_count": protect_sol_exception_shadow_duplicate_count,
+        "protect_sol_exception_shadow_complete_count": int(protect_sol_exception_status_counts.get("complete", 0)),
+        "protect_sol_exception_shadow_pending_count": int(protect_sol_exception_status_counts.get("pending", 0)),
+        "protect_sol_exception_shadow_not_observable_count": int(protect_sol_exception_status_counts.get("not_observable", 0)),
+        "protect_sol_exception_shadow_sample_warning_count": protect_sol_exception_sample_warning_count,
         "market_impulse_selection_shadow_rows": len(market_impulse_selection_shadow_rows),
         "factor_contribution_audit_rows": len(factor_contribution_rows),
         "factor_contribution_factor_count": len(factor_contribution_outcomes_by_factor),
@@ -6477,6 +6722,24 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
 
     factor_contribution_summary = factor_contribution_summary_text()
 
+    def protect_sol_exception_shadow_text():
+        if not protect_sol_exception_shadow_by_horizon:
+            return "not_observable_no_shadow_samples"
+        parts = []
+        for row in protect_sol_exception_shadow_by_horizon:
+            if int(as_float(row.get("horizon_hours")) or 0) not in {24, 48, 72}:
+                continue
+            parts.append(
+                f"{row.get('original_block_reason', not_obs)} {row.get('horizon_hours', not_obs)}h "
+                f"unique={row.get('unique_candidate_count', 0)} "
+                f"avg={row.get('avg_would_pnl_bps', not_obs)} "
+                f"better={row.get('better_than_current_strategy', not_obs)} "
+                f"warning={row.get('sample_warning', '') or 'none'}"
+            )
+        return "; ".join(parts) if parts else "not_observable_no_24h_48h_72h_rows"
+
+    protect_sol_exception_summary_text = protect_sol_exception_shadow_text()
+
     readme = [
         f"# V5 live follow-up bundle {STAMP}",
         "",
@@ -6521,6 +6784,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- ATR trailing before min_hold: {swing_early_exit_atr_text}",
         f"- better_to_hold_24h_rate: {swing_early_exit_better_24_text}",
         f"- medium issue present: {'yes' if swing_early_exit_medium_issue_present else 'no'}",
+        "",
+        "## PROTECT SOL exception shadow",
+        f"- experiment_name: {flatten_value(find_config_value(effective_data, 'protect_sol_exception_experiment_name') or 'protect_sol_exception_v1')}",
+        f"- shadow_only: {str(config_bool('protect_sol_exception_enabled_shadow_only', True)).lower()}",
+        f"- enable_live_experiment: {str(config_bool('protect_sol_exception_enable_live_experiment', False)).lower()}",
+        f"- label_count: {len(protect_sol_exception_shadow_rows)}",
+        f"- by_horizon: {protect_sol_exception_summary_text}",
+        f"- factor_weight_candidates: f3={config_string_list('protect_sol_exception_f3_weight_candidates', ['0.20', '0.25'])}, f4={config_string_list('protect_sol_exception_f4_weight_candidates', ['0.25', '0.30'])}",
         "",
         "## Negative expectancy 口径一致性",
         f"- consistency rows: {len(negative_consistency_rows)}",

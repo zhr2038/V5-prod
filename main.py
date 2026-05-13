@@ -1351,6 +1351,7 @@ def _negative_expectancy_release_effective_config(cfg: AppConfig) -> Dict[str, A
 
 
 def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
+    diagnostics = getattr(cfg, "diagnostics", None)
     return {
         "symbols": list(cfg.symbols or []),
         "universe": {
@@ -1411,6 +1412,39 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             **_protect_negative_expectancy_short_cycle_effective_config(cfg),
             **_protect_alt_short_cycle_effective_config(cfg),
             **_negative_expectancy_release_effective_config(cfg),
+        },
+        "diagnostics": {
+            "protect_sol_exception_experiment_name": str(
+                getattr(diagnostics, "protect_sol_exception_experiment_name", "protect_sol_exception_v1")
+                or "protect_sol_exception_v1"
+            ),
+            "protect_sol_exception_enabled_shadow_only": bool(
+                getattr(diagnostics, "protect_sol_exception_enabled_shadow_only", True)
+            ),
+            "protect_sol_exception_enable_live_experiment": bool(
+                getattr(diagnostics, "protect_sol_exception_enable_live_experiment", False)
+            ),
+            "protect_sol_exception_horizons_hours": list(
+                getattr(diagnostics, "protect_sol_exception_horizons_hours", [4, 8, 12, 24, 48, 72])
+                or [4, 8, 12, 24, 48, 72]
+            ),
+            "protect_sol_exception_rt_cost_bps": float(
+                getattr(diagnostics, "protect_sol_exception_rt_cost_bps", 30.0) or 0.0
+            ),
+            "protect_sol_exception_min_f4_volume_expansion": float(
+                getattr(diagnostics, "protect_sol_exception_min_f4_volume_expansion", 0.0) or 0.0
+            ),
+            "protect_sol_exception_min_complete_samples_warning": int(
+                getattr(diagnostics, "protect_sol_exception_min_complete_samples_warning", 5) or 0
+            ),
+            "protect_sol_exception_f3_weight_candidates": list(
+                getattr(diagnostics, "protect_sol_exception_f3_weight_candidates", [0.20, 0.25])
+                or [0.20, 0.25]
+            ),
+            "protect_sol_exception_f4_weight_candidates": list(
+                getattr(diagnostics, "protect_sol_exception_f4_weight_candidates", [0.25, 0.30])
+                or [0.25, 0.30]
+            ),
         },
     }
 
@@ -2226,6 +2260,27 @@ def main() -> None:
             )
     except Exception as e:
         log.warning(f"multi-position swing shadow evaluator failed: {e}")
+
+    # Read-only SOL exception shadow evaluator. It labels hypothetical entries only.
+    try:
+        from src.reporting.protect_sol_exception_shadow import update_protect_sol_exception_shadow_evaluator
+
+        sol_shadow_result = update_protect_sol_exception_shadow_evaluator(
+            run_dir=str(runtime_run_dir),
+            audit=audit,
+            market_data_1h=md_1h,
+            cfg=cfg,
+            current_level=pipe._load_current_auto_risk_level(),
+            cache_dir=PROJECT_ROOT / "data" / "cache",
+        )
+        if sol_shadow_result.get("enabled"):
+            log.info(
+                "PROTECT_SOL_EXCEPTION_SHADOW new_records=%s total_records=%s",
+                int(sol_shadow_result.get("new_records", 0) or 0),
+                int(sol_shadow_result.get("total_records", 0) or 0),
+            )
+    except Exception as e:
+        log.warning(f"protect SOL exception shadow evaluator failed: {e}")
 
     # Update account peak equity
     # (equity is logged inside pipeline; recompute here quickly)

@@ -2352,6 +2352,50 @@ def extract_member(tf, suffix):
     return matches[0]
 
 
+def fixture_protect_sol_exception_shadow_root(root):
+    run_id = fixture_root(root)
+    label = {
+        "experiment_name": "protect_sol_exception_v1",
+        "enabled_shadow_only": True,
+        "enable_live_experiment": False,
+        "ts_utc": iso(int(dt.datetime.now(dt.timezone.utc).timestamp()) - 25 * 3600),
+        "run_id": run_id,
+        "symbol": "SOL/USDT",
+        "intended_side": "buy",
+        "would_enter": True,
+        "would_size_notional": 12.0,
+        "would_exit_time": "24h=2026-05-02T00:00:00Z",
+        "entry_px": 100.0,
+        "original_block_reason": "protect_entry_rsi_confirm_too_weak",
+        "skip_reason": "protect_entry_rsi_confirm_too_weak",
+        "experiment_reason": "sol_high_score_f4_positive_protect_exception_shadow",
+        "final_score": 0.88,
+        "target_w": 0.12,
+        "alpha6_score": 0.28,
+        "trend_score": 0.75,
+        "f3_vol_adj_ret": -0.2,
+        "f4_volume_expansion": 0.12,
+        "f5_rsi_trend_confirm": 0.25,
+        "f3_weight_candidate": 0.20,
+        "f4_weight_candidate": 0.25,
+        "shadow_alpha6_score_candidate": 0.31,
+        "shadow_alpha6_score_delta": 0.03,
+        "btc_leadership_relax_allowed": False,
+        "alt_impulse_relax_allowed": False,
+        "eth_relax_allowed": False,
+        "rt_cost_bps": 30,
+        "label_24h_net_bps": 120.0,
+        "label_24h_status": "complete",
+        "would_pnl_bps_24h": 120.0,
+        "label_status": "complete",
+    }
+    write_text(
+        root / "reports/protect_sol_exception_shadow_labels.jsonl",
+        json.dumps(label, ensure_ascii=False) + "\n" + json.dumps(label, ensure_ascii=False) + "\n",
+    )
+    return run_id
+
+
 def run_bundle(root):
     script_path = str(SCRIPT)
     if len(script_path) >= 3 and script_path[1] == ":":
@@ -3425,6 +3469,37 @@ def main():
             assert window["probe_trade_net_bps"]["avg"] == "not_observable", window
             high_issues = [item for item in issues["issues"] if item.get("severity") == "high"]
             assert high_issues == [], high_issues
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-protect-sol-exception-shadow-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_protect_sol_exception_shadow_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/protect_sol_exception_shadow_outcomes.csv")).read().decode().splitlines()))
+                by_horizon = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/protect_sol_exception_shadow_outcomes_by_symbol_reason_horizon.csv")).read().decode().splitlines()))
+                factor_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/protect_sol_exception_factor_weight_shadow.csv")).read().decode().splitlines()))
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["symbol"] == "SOL/USDT", row
+            assert row["would_enter"] == "True", row
+            assert row["enable_live_experiment"] == "False", row
+            assert row["original_block_reason"] == "protect_entry_rsi_confirm_too_weak", row
+            assert row["would_pnl_bps_24h"] == "120.0", row
+            h24 = next(item for item in by_horizon if item["horizon_hours"] == "24")
+            assert h24["better_than_current_strategy"] == "true", h24
+            assert h24["unique_candidate_count"] == "1", h24
+            assert factor_rows and factor_rows[0]["f3_weight_candidate"] == "0.2", factor_rows
+            assert window["protect_sol_exception_shadow_label_count"] == 1, window
+            assert window["protect_sol_exception_shadow_duplicate_count"] == 1, window
+            assert "## PROTECT SOL exception shadow" in readme, readme
+            assert "enable_live_experiment: false" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

@@ -1392,11 +1392,54 @@ class DiagnosticsConfig(BaseModel):
         default=True,
         description="Enable read-only shadow selection diagnostics for market impulse probe candidates",
     )
+    protect_sol_exception_experiment_name: str = Field(
+        default="protect_sol_exception_v1",
+        description="Read-only experiment name for SOL-only PROTECT exception shadow labels",
+    )
+    protect_sol_exception_enabled_shadow_only: bool = Field(
+        default=True,
+        description="Enable SOL exception as shadow-only diagnostics; never places live orders",
+    )
+    protect_sol_exception_enable_live_experiment: bool = Field(
+        default=False,
+        description="Explicit live experiment flag; default false and currently only surfaced in audit/reporting",
+    )
+    protect_sol_exception_horizons_hours: List[int] = Field(
+        default_factory=lambda: [4, 8, 12, 24, 48, 72],
+        description="Forward-label horizons (hours) for SOL exception shadow outcomes",
+    )
+    protect_sol_exception_rt_cost_bps: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=10000.0,
+        description="Round-trip cost used when labeling SOL exception shadow outcomes",
+    )
+    protect_sol_exception_min_f4_volume_expansion: float = Field(
+        default=0.0,
+        ge=-10.0,
+        le=10.0,
+        description="Minimum f4 volume expansion; value must be strictly greater than this threshold",
+    )
+    protect_sol_exception_min_complete_samples_warning: int = Field(
+        default=5,
+        ge=1,
+        le=1000,
+        description="Warn when completed SOL exception shadow samples are below this count",
+    )
+    protect_sol_exception_f3_weight_candidates: List[float] = Field(
+        default_factory=lambda: [0.20, 0.25],
+        description="Read-only f3_vol_adj_ret weight candidates for SOL exception shadow attribution",
+    )
+    protect_sol_exception_f4_weight_candidates: List[float] = Field(
+        default_factory=lambda: [0.25, 0.30],
+        description="Read-only f4_volume_expansion weight candidates for SOL exception shadow attribution",
+    )
 
     @field_validator(
         "skipped_candidate_horizons_hours",
         "extended_label_horizons_hours",
         "multi_position_swing_shadow_horizons_hours",
+        "protect_sol_exception_horizons_hours",
     )
     @classmethod
     def _validate_label_horizons_hours(cls, v: List[int]) -> List[int]:
@@ -1431,6 +1474,24 @@ class DiagnosticsConfig(BaseModel):
             out.append(symbol)
         if not out:
             raise ValueError("shadow symbols cannot be empty")
+        return out
+
+    @field_validator("protect_sol_exception_f3_weight_candidates", "protect_sol_exception_f4_weight_candidates")
+    @classmethod
+    def _validate_protect_sol_exception_weight_candidates(cls, v: List[float]) -> List[float]:
+        out: List[float] = []
+        seen = set()
+        for raw in v or []:
+            value = float(raw)
+            if value < 0.0 or value > 1.0:
+                raise ValueError("protect SOL exception weight candidates must be between 0 and 1")
+            key = round(value, 10)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(value)
+        if not out:
+            raise ValueError("protect SOL exception weight candidates cannot be empty")
         return out
 
 

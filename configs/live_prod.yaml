@@ -233,6 +233,15 @@ diagnostics:
   multi_position_swing_shadow_horizons_hours: [24, 48, 72]
   multi_position_swing_shadow_rt_cost_bps: 30
   market_impulse_selection_shadow_enabled: true
+  protect_sol_exception_experiment_name: protect_sol_exception_v1
+  protect_sol_exception_enabled_shadow_only: true
+  protect_sol_exception_enable_live_experiment: false
+  protect_sol_exception_horizons_hours: [4, 8, 12, 24, 48, 72]
+  protect_sol_exception_rt_cost_bps: 30
+  protect_sol_exception_min_f4_volume_expansion: 0.0
+  protect_sol_exception_min_complete_samples_warning: 5
+  protect_sol_exception_f3_weight_candidates: [0.20, 0.25]
+  protect_sol_exception_f4_weight_candidates: [0.25, 0.30]
 
 execution:
   mode: live
