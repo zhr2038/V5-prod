@@ -43,6 +43,31 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
     (reports / "quant_lab_usage.jsonl").write_text(
         json.dumps(
             {
+                "ts": "2026-05-11T12:59:59Z",
+                "run_id": "r1",
+                "event_type": "live_permission",
+                "mode": "shadow",
+                "local_mode": "shadow",
+                "mode_source": "runtime_override",
+                "called_api": True,
+                "permission_gate_enforced": False,
+                "cost_gate_enforced": False,
+                "raw_permission_decision": "ABORT",
+                "quant_lab_permission": "ABORT",
+                "effective_permission_decision": "ALLOW",
+                "final_permission": "ALLOW",
+                "would_block_if_enforced": True,
+                "fallback_used": False,
+                "fallback_reason": None,
+                "remote_permission_as_of_ts": "2026-05-11T12:59:58Z",
+                "remote_permission_expires_at": "2026-05-11T13:09:58Z",
+                "remote_permission_status": "active",
+                "contract_version": "v5.quant_lab.telemetry.v2",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
                 "ts": "2026-05-11T13:00:00Z",
                 "run_id": "r1",
                 "event_type": "cost_estimate",
@@ -56,21 +81,33 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "permission_gate_enforced": False,
                 "cost_gate_enforced": False,
                 "symbol": "BTC/USDT",
+                "normalized_symbol": "BTC-USDT",
+                "venue": "OKX",
+                "instrument_type": "spot",
+                "side": "buy",
+                "strategy_id": "v5",
+                "request_id": "cost-1",
                 "regime": "normal",
                 "notional_usdt": 200,
                 "quantile": "p75",
                 "total_cost_bps": 1.0,
                 "effective_total_cost_bps": 5.0,
+                "total_cost_bps_p50": 0.8,
+                "total_cost_bps_p75": 1.0,
+                "total_cost_bps_p90": 2.0,
                 "local_cost_bps": 30.0,
                 "local_cost_source": "execution.cost_aware_roundtrip_cost_bps",
                 "source": "public_spread_proxy",
+                "cost_source": "public_spread_proxy",
                 "expected_edge_bps": 60.0,
                 "expected_edge_source": "final_score_proxy",
                 "min_required_edge_bps": 45.0,
+                "required_edge_bps": 45.0,
                 "passed": True,
                 "filtered": False,
                 "would_filter": False,
                 "would_filter_by_cost": False,
+                "would_block_by_cost": False,
                 "actually_filtered": False,
                 "fallback_used": False,
             }
@@ -117,6 +154,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         + json.dumps({"ts": "2026-05-11T13:00:01Z", "run_id": "r1", "method": "GET", "endpoint_path": "/v1/health", "ok": True, "status_code": 200})
         + "\n"
         + json.dumps({"ts": "2026-05-11T13:00:02Z", "run_id": "r1", "method": "POST", "endpoint_path": "/v1/risk/live-permission", "success": True, "status_code": 200})
+        + "\n"
+        + json.dumps({"ts": "2026-05-11T13:00:03Z", "run_id": "r1", "method": "GET", "endpoint_path": "/v1/costs/estimate", "success": False, "error_type": "QuantLabTimeout"})
         + "\n",
         encoding="utf-8",
     )
@@ -148,11 +187,30 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "called_api" in compliance.splitlines()[0]
         assert "permission_gate_enforced" in compliance.splitlines()[0]
         assert "cost_gate_enforced" in compliance.splitlines()[0]
+        assert "raw_permission_decision" in compliance.splitlines()[0]
+        assert "effective_permission_decision" in compliance.splitlines()[0]
+        assert "would_block_if_enforced" in compliance.splitlines()[0]
+        assert "remote_permission_status" in compliance.splitlines()[0]
         assert "shadow" in compliance
+        assert "ABORT" in compliance
+        assert "ALLOW" in compliance
         assert "hypothetical_violation" in compliance
         assert "actual_violation" in compliance
         assert "true,false,false" in compliance
         assert "mode" in cost_usage.splitlines()[0]
+        assert "normalized_symbol" in cost_usage.splitlines()[0]
+        assert "venue" in cost_usage.splitlines()[0]
+        assert "instrument_type" in cost_usage.splitlines()[0]
+        assert "strategy_id" in cost_usage.splitlines()[0]
+        assert "request_id" in cost_usage.splitlines()[0]
+        assert "cost_source" in cost_usage.splitlines()[0]
+        assert "cost_model_version" in cost_usage.splitlines()[0]
+        assert "total_cost_bps_p50" in cost_usage.splitlines()[0]
+        assert "total_cost_bps_p75" in cost_usage.splitlines()[0]
+        assert "total_cost_bps_p90" in cost_usage.splitlines()[0]
+        assert "required_edge_bps" in cost_usage.splitlines()[0]
+        assert "would_block_by_cost" in cost_usage.splitlines()[0]
+        assert "fallback_reason" in cost_usage.splitlines()[0]
         assert "cost_gate_enforced" in cost_usage.splitlines()[0]
         assert "would_filter" in cost_usage.splitlines()[0]
         assert "actually_filtered" in cost_usage.splitlines()[0]
@@ -161,8 +219,11 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "local_cost_bps" in cost_usage.splitlines()[0]
         assert "local_cost_source" in cost_usage.splitlines()[0]
         assert "expected_edge_source" in cost_usage.splitlines()[0]
+        assert "BTC-USDT" in cost_usage
+        assert "public_spread_proxy" in cost_usage
         assert "final_score_proxy" in cost_usage
         assert "request_not_ok" not in fallbacks
+        assert "QuantLabTimeout" in fallbacks
         assert "allow_insecure_http_with_token: true" in config_text
         assert "allow_local_fallback_in_enforce: false" in config_text
         assert "api_env_require_secure_permissions: true" in config_text
@@ -179,8 +240,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert window["quant_lab_mode"] == "shadow"
         assert window["quant_lab_mode_source"] == "runtime_override"
         assert window["quant_lab_request_success_count"] == 3
-        assert window["quant_lab_request_error_count"] == 0
+        assert window["quant_lab_request_error_count"] == 1
         assert window["quant_lab_actual_filter_count"] == 0
-        assert window["quant_lab_hypothetical_filter_count"] == 1
-        assert window["quant_lab_fallback_count"] == 0
-        assert window["quant_lab_actual_fallback_count"] == 0
+        assert window["quant_lab_hypothetical_filter_count"] >= 1
+        assert window["quant_lab_fallback_count"] == 1
+        assert window["quant_lab_actual_fallback_count"] == 1

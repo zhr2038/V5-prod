@@ -31,7 +31,7 @@ class _ModeClient:
             reasons=["required_alpha_gate_quarantine"] if self.permission == "SELL_ONLY" else [],
         )
 
-    def estimate_cost(self, *, symbol: str, regime: str, notional_usdt: float, quantile: str):
+    def estimate_cost(self, *, symbol: str, regime: str, notional_usdt: float, quantile: str, **kwargs):
         self.cost_calls += 1
         return CostEstimate(
             symbol=symbol.replace("/", "-"),
@@ -106,6 +106,25 @@ def test_shadow_mode_calls_api_but_does_not_filter(tmp_path: Path) -> None:
     assert summary["filtered_by_cost_count"] == 0
     usage = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
     assert any(row.get("mode") == "shadow" and row.get("hypothetical") for row in usage)
+
+
+def test_shadow_raw_abort_records_effective_allow_and_would_block(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, "shadow")
+    client = _ModeClient(permission="ABORT")
+    guard = _guard(tmp_path, cfg, client)
+
+    result = guard.check_startup_permission(cfg, "run-mode")
+    guard.record_final_permission(local_preflight_permission="ALLOW", final_permission="ALLOW")
+
+    assert result.permission == "ABORT"
+    assert result.effective_permission_decision == "ALLOW"
+    assert result.would_block_if_enforced is True
+    rows = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    final = [row for row in rows if row.get("event_type") == "final_permission"][-1]
+    assert final["raw_permission_decision"] == "ABORT"
+    assert final["effective_permission_decision"] == "ALLOW"
+    assert final["would_block_if_enforced"] is True
+    assert final["permission_gate_enforced"] is False
 
 
 def test_shadow_missing_edge_is_hypothetical_only(tmp_path: Path) -> None:

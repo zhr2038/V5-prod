@@ -31,7 +31,22 @@ class _HTTP:
         if url.endswith("/v1/risk/live-permission"):
             return _Response({"strategy": "v5", "version": "5.0.0", "permission": "SELL_ONLY", "reasons": ["required_alpha_gate_quarantine"]})
         if url.endswith("/v1/costs/estimate"):
-            return _Response({"symbol": "BTC-USDT", "regime": "normal", "notional_usdt": 200, "quantile": "p75", "total_cost_bps": 1.2, "source": "public_spread_proxy"})
+            params = params or {}
+            return _Response(
+                {
+                    "symbol": params.get("normalized_symbol") or params.get("symbol") or "BTC-USDT",
+                    "regime": "normal",
+                    "notional_usdt": 200,
+                    "quantile": "p75",
+                    "total_cost_bps": 1.2,
+                    "total_cost_bps_p50": 1.0,
+                    "total_cost_bps_p75": 1.2,
+                    "total_cost_bps_p90": 2.0,
+                    "required_edge_bps": 1.8,
+                    "source": "public_spread_proxy",
+                    "cost_model_version": "cost_bucket_daily:2026-05-11",
+                }
+            )
         return _Response({"alpha_id": "v5", "status": "QUARANTINE", "passed": False})
 
 
@@ -62,6 +77,61 @@ def test_quant_lab_client_uses_get_and_redacts_token(tmp_path: Path) -> None:
     assert rows[0]["endpoint_path"] == "/v1/health"
     assert "Authorization" not in text
     assert rows[1]["query_keys"] == ["strategy", "version"]
+    cost_params = http.calls[2]["params"]
+    assert cost_params["symbol"] == "BTC-USDT"
+    assert cost_params["normalized_symbol"] == "BTC-USDT"
+    assert cost_params["venue"] == "OKX"
+    assert cost_params["instrument_type"] == "spot"
+    assert cost_params["strategy_id"] == "v5"
+    assert "expected_edge_bps" in cost_params
+    assert "request_id" in cost_params
+
+
+def test_cost_request_normalizes_concatenated_usdt_symbol(tmp_path: Path) -> None:
+    http = _HTTP()
+    client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        http_client=http,
+        request_log_path=tmp_path / "requests.jsonl",
+        run_id="run-1",
+    )
+
+    cost = client.estimate_cost(
+        symbol="BNBUSDT",
+        regime="normal",
+        notional_usdt=200,
+        quantile="p75",
+        side="buy",
+        strategy_id="v5",
+        expected_edge_bps=8.0,
+        request_id="cost-1",
+    )
+
+    params = http.calls[0]["params"]
+    assert params["symbol"] == "BNB-USDT"
+    assert params["normalized_symbol"] == "BNB-USDT"
+    assert params["side"] == "buy"
+    assert params["expected_edge_bps"] == 8.0
+    assert params["request_id"] == "cost-1"
+    assert cost.symbol == "BNB-USDT"
+    assert cost.total_cost_bps_p75 == 1.2
+    assert cost.required_edge_bps == 1.8
+
+
+@pytest.mark.parametrize("symbol", ["BNB/USDT", "BNB-USDT", "BNBUSDT"])
+def test_cost_request_normalizes_bnb_symbol_variants(tmp_path: Path, symbol: str) -> None:
+    http = _HTTP()
+    client = QuantLabClient(
+        base_url="https://quant-lab.local",
+        http_client=http,
+        request_log_path=tmp_path / f"{symbol.replace('/', '_').replace('-', '_')}.jsonl",
+    )
+
+    client.estimate_cost(symbol=symbol, regime="normal", notional_usdt=200, quantile="p75")
+
+    params = http.calls[0]["params"]
+    assert params["symbol"] == "BNB-USDT"
+    assert params["normalized_symbol"] == "BNB-USDT"
 
 
 def test_quant_lab_health_requires_read_only(tmp_path: Path) -> None:

@@ -35,7 +35,7 @@ class _Client:
             gate_version="bootstrap.quarantine.v1",
         )
 
-    def estimate_cost(self, *, symbol: str, regime: str, notional_usdt: float, quantile: str):
+    def estimate_cost(self, *, symbol: str, regime: str, notional_usdt: float, quantile: str, **kwargs):
         if self.fail_cost:
             raise RuntimeError("cost unavailable")
         return CostEstimate(

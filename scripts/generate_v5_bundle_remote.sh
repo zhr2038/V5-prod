@@ -1090,6 +1090,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     def quant_lab_is_fallback(row):
         if not isinstance(row, dict):
             return False
+        if quant_lab_request_success(row):
+            return False
+        error_text = flatten_value(first_observed(row.get("error_type"), row.get("error"), "")).lower()
+        if any(marker in error_text for marker in ("timeout", "connection", "unavailable", "invalid")):
+            return True
         return (
             truthy_observed(row.get("fallback_used"))
             or flatten_value(row.get("event_type")) == "fallback"
@@ -1410,7 +1415,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         audit_level = flatten_value(first_value(audit, ("current_level", "risk_level"), not_obs))
         quant_lab = audit.get("quant_lab") if isinstance(audit.get("quant_lab"), dict) else {}
         if quant_lab:
-            permission = quant_lab.get("permission") if isinstance(quant_lab.get("permission"), dict) else {}
+            permission = quant_lab.get("permission") if isinstance(quant_lab.get("permission"), dict) else quant_lab
             filtered_orders = quant_lab.get("filtered_orders") if isinstance(quant_lab.get("filtered_orders"), list) else []
             cost_estimates = quant_lab.get("cost_estimates") if isinstance(quant_lab.get("cost_estimates"), list) else []
             filtered_count = sum(1 for row in filtered_orders if isinstance(row, dict) and row.get("filtered"))
@@ -1424,8 +1429,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "run_id": run_id,
                 "ts_utc": audit_ts,
                 "event_type": "audit_summary",
-                "permission_decision": flatten_value(permission.get("decision") or not_obs),
-                "effective_decision": flatten_value(permission.get("effective_decision") or not_obs),
+                "mode": flatten_value(first_observed(quant_lab.get("mode"), permission.get("mode"), not_obs)),
+                "local_mode": flatten_value(first_observed(quant_lab.get("local_mode"), quant_lab.get("mode"), permission.get("mode"), not_obs)),
+                "permission_gate_enforced": bool_observed(first_observed(quant_lab.get("permission_gate_enforced"), permission.get("permission_gate_enforced"))),
+                "cost_gate_enforced": bool_observed(first_observed(quant_lab.get("cost_gate_enforced"), permission.get("cost_gate_enforced"))),
+                "raw_permission_decision": flatten_value(first_observed(quant_lab.get("raw_permission_decision"), quant_lab.get("quant_lab_permission"), permission.get("decision"), quant_lab.get("permission"), not_obs)),
+                "effective_permission_decision": flatten_value(first_observed(quant_lab.get("effective_permission_decision"), quant_lab.get("final_permission"), permission.get("effective_decision"), not_obs)),
+                "would_block_if_enforced": bool_observed(quant_lab.get("would_block_if_enforced")),
+                "fallback_reason": flatten_value(first_observed(quant_lab.get("fallback_reason"), permission.get("fallback_reason"), not_obs)),
+                "remote_permission_as_of_ts": flatten_value(first_observed(quant_lab.get("remote_permission_as_of_ts"), quant_lab.get("last_response_ts"), not_obs)),
+                "remote_permission_expires_at": flatten_value(quant_lab.get("remote_permission_expires_at") or not_obs),
+                "remote_permission_status": flatten_value(quant_lab.get("remote_permission_status") or not_obs),
+                "contract_version": flatten_value(quant_lab.get("contract_version") or not_obs),
+                "permission_decision": flatten_value(first_observed(permission.get("decision"), quant_lab.get("raw_permission_decision"), quant_lab.get("quant_lab_permission"), quant_lab.get("permission"), not_obs)),
+                "effective_decision": flatten_value(first_observed(permission.get("effective_decision"), quant_lab.get("effective_permission_decision"), quant_lab.get("final_permission"), not_obs)),
                 "order_decision": not_obs,
                 "fail_policy": flatten_value(permission.get("fail_policy") or not_obs),
                 "fallback_used": str(bool(permission.get("fallback_used"))).lower(),
@@ -1449,8 +1466,20 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "run_id": run_id,
                     "ts_utc": audit_ts,
                     "event_type": "order_filter",
-                    "permission_decision": flatten_value(row.get("permission_decision") or permission.get("decision") or not_obs),
-                    "effective_decision": flatten_value(row.get("effective_decision") or permission.get("effective_decision") or not_obs),
+                    "mode": flatten_value(first_observed(row.get("mode"), quant_lab.get("mode"), not_obs)),
+                    "local_mode": flatten_value(first_observed(row.get("local_mode"), row.get("mode"), quant_lab.get("mode"), not_obs)),
+                    "permission_gate_enforced": bool_observed(first_observed(row.get("permission_gate_enforced"), quant_lab.get("permission_gate_enforced"))),
+                    "cost_gate_enforced": bool_observed(first_observed(row.get("cost_gate_enforced"), quant_lab.get("cost_gate_enforced"))),
+                    "raw_permission_decision": flatten_value(first_observed(row.get("raw_permission_decision"), row.get("quant_lab_permission"), row.get("permission_decision"), permission.get("decision"), quant_lab.get("permission"), not_obs)),
+                    "effective_permission_decision": flatten_value(first_observed(row.get("effective_permission_decision"), row.get("final_permission"), permission.get("effective_decision"), quant_lab.get("final_permission"), not_obs)),
+                    "would_block_if_enforced": bool_observed(row.get("would_block_if_enforced")),
+                    "fallback_reason": flatten_value(first_observed(row.get("fallback_reason"), permission.get("fallback_reason"), not_obs)),
+                    "remote_permission_as_of_ts": flatten_value(first_observed(row.get("remote_permission_as_of_ts"), quant_lab.get("remote_permission_as_of_ts"), quant_lab.get("last_response_ts"), not_obs)),
+                    "remote_permission_expires_at": flatten_value(first_observed(row.get("remote_permission_expires_at"), quant_lab.get("remote_permission_expires_at"), not_obs)),
+                    "remote_permission_status": flatten_value(first_observed(row.get("remote_permission_status"), quant_lab.get("remote_permission_status"), not_obs)),
+                    "contract_version": flatten_value(first_observed(row.get("contract_version"), quant_lab.get("contract_version"), not_obs)),
+                    "permission_decision": flatten_value(first_observed(row.get("permission_decision"), row.get("raw_permission_decision"), row.get("quant_lab_permission"), permission.get("decision"), quant_lab.get("permission"), not_obs)),
+                    "effective_decision": flatten_value(first_observed(row.get("effective_decision"), row.get("effective_permission_decision"), row.get("final_permission"), permission.get("effective_decision"), quant_lab.get("final_permission"), not_obs)),
                     "order_decision": flatten_value(row.get("order_decision") or not_obs),
                     "fail_policy": flatten_value(permission.get("fail_policy") or not_obs),
                     "fallback_used": str(bool(row.get("fallback_used"))).lower(),
@@ -1486,25 +1515,44 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             for row in cost_estimates:
                 if not isinstance(row, dict):
                     continue
+                required_edge = first_observed(row.get("required_edge_bps"), row.get("min_required_edge_bps"), not_obs)
+                cost_source = first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"), not_obs)
                 quant_lab_cost_usage_rows.append({
                     "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
                     "run_id": run_id,
                     "ts_utc": audit_ts,
+                    "mode": flatten_value(first_observed(row.get("mode"), quant_lab.get("mode"), not_obs)),
                     "symbol": flatten_value(row.get("symbol") or not_obs),
+                    "normalized_symbol": flatten_value(row.get("normalized_symbol") or not_obs),
+                    "venue": flatten_value(row.get("venue") or not_obs),
+                    "instrument_type": flatten_value(row.get("instrument_type") or not_obs),
                     "side": flatten_value(row.get("side") or not_obs),
                     "intent": flatten_value(row.get("intent") or not_obs),
                     "notional_usdt": flatten_value(row.get("notional_usdt") if row.get("notional_usdt") is not None else not_obs),
+                    "quantile": flatten_value(row.get("quantile") or not_obs),
+                    "strategy_id": flatten_value(first_observed(row.get("strategy_id"), row.get("alpha_id"), not_obs)),
+                    "request_id": flatten_value(row.get("request_id") or not_obs),
                     "alpha_id": flatten_value(row.get("alpha_id") or not_obs),
                     "cost_bps": flatten_value(first_observed(row.get("cost_bps"), row.get("total_cost_bps"), row.get("effective_total_cost_bps"))),
                     "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
-                    "cost_source": flatten_value(first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"))),
+                    "cost_source": flatten_value(cost_source),
+                    "cost_model_version": flatten_value(row.get("cost_model_version") or not_obs),
+                    "total_cost_bps": flatten_value(row.get("total_cost_bps") if row.get("total_cost_bps") is not None else not_obs),
+                    "effective_total_cost_bps": flatten_value(row.get("effective_total_cost_bps") if row.get("effective_total_cost_bps") is not None else not_obs),
+                    "total_cost_bps_p50": flatten_value(row.get("total_cost_bps_p50") if row.get("total_cost_bps_p50") is not None else not_obs),
+                    "total_cost_bps_p75": flatten_value(row.get("total_cost_bps_p75") if row.get("total_cost_bps_p75") is not None else not_obs),
+                    "total_cost_bps_p90": flatten_value(row.get("total_cost_bps_p90") if row.get("total_cost_bps_p90") is not None else not_obs),
+                    "required_edge_bps": flatten_value(required_edge),
                     "expected_edge_bps": flatten_value(row.get("expected_edge_bps") if row.get("expected_edge_bps") is not None else not_obs),
                     "expected_edge_source": flatten_value(first_observed(row.get("expected_edge_source"), row.get("proxy_source"))),
                     "min_required_edge_bps": flatten_value(row.get("min_required_edge_bps") if row.get("min_required_edge_bps") is not None else not_obs),
                     "would_filter_by_cost": bool_observed(first_observed(row.get("would_filter_by_cost"), row.get("would_filter"))),
+                    "would_block_by_cost": bool_observed(first_observed(row.get("would_block_by_cost"), row.get("would_filter_by_cost"), row.get("would_filter"))),
                     "actually_filtered": bool_observed(first_observed(row.get("actually_filtered"), row.get("order_filtered"))),
+                    "cost_gate_enforced": bool_observed(first_observed(row.get("cost_gate_enforced"), quant_lab.get("cost_gate_enforced"))),
                     "quant_lab_decision": flatten_value(row.get("quant_lab_decision") or not_obs),
                     "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                    "fallback_reason": flatten_value(row.get("fallback_reason") or not_obs),
                     "filtered": str(bool(row.get("filtered"))).lower() if "filtered" in row else not_obs,
                     "filter_reason": flatten_value(row.get("filter_reason") or not_obs),
                     "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
@@ -5344,17 +5392,42 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             continue
         event_type = str(row.get("event_type") or not_obs)
         source = "reports/quant_lab_usage.jsonl"
-        if event_type in {"permission", "order_filter", "run_summary"}:
+        if event_type in {"permission", "order_filter", "run_summary", "live_permission", "filter_order", "final_permission"}:
+            raw_permission_decision = first_observed(
+                row.get("raw_permission_decision"),
+                row.get("quant_lab_permission"),
+                row.get("permission"),
+                row.get("quant_lab_decision"),
+                not_obs,
+            )
+            effective_permission_decision = first_observed(
+                row.get("effective_permission_decision"),
+                row.get("final_permission"),
+                row.get("effective_decision"),
+                not_obs,
+            )
             quant_lab_compliance_rows.append({
                 "source": source,
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
                 "event_type": event_type,
-                "permission_decision": flatten_value(row.get("permission_decision") or row.get("quant_lab_decision") or not_obs),
-                "effective_decision": flatten_value(row.get("effective_decision") or not_obs),
+                "mode": flatten_value(row.get("mode") or not_obs),
+                "local_mode": flatten_value(first_observed(row.get("local_mode"), row.get("mode"), not_obs)),
+                "permission_gate_enforced": bool_observed(row.get("permission_gate_enforced")),
+                "cost_gate_enforced": bool_observed(row.get("cost_gate_enforced")),
+                "raw_permission_decision": flatten_value(raw_permission_decision),
+                "effective_permission_decision": flatten_value(effective_permission_decision),
+                "would_block_if_enforced": bool_observed(row.get("would_block_if_enforced")),
+                "fallback_reason": flatten_value(row.get("fallback_reason") or not_obs),
+                "remote_permission_as_of_ts": flatten_value(row.get("remote_permission_as_of_ts") or not_obs),
+                "remote_permission_expires_at": flatten_value(row.get("remote_permission_expires_at") or not_obs),
+                "remote_permission_status": flatten_value(row.get("remote_permission_status") or not_obs),
+                "contract_version": flatten_value(row.get("contract_version") or not_obs),
+                "permission_decision": flatten_value(first_observed(row.get("permission_decision"), raw_permission_decision, not_obs)),
+                "effective_decision": flatten_value(first_observed(row.get("effective_decision"), effective_permission_decision, not_obs)),
                 "order_decision": flatten_value(row.get("order_decision") or not_obs),
                 "fail_policy": flatten_value(row.get("fail_policy") or not_obs),
-                "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                "fallback_used": bool_observed(row.get("fallback_used")),
                 "symbol": flatten_value(row.get("symbol") or not_obs),
                 "side": flatten_value(row.get("side") or not_obs),
                 "intent": flatten_value(row.get("intent") or not_obs),
@@ -5368,25 +5441,44 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "raw_json": safe_json(row),
             })
         if event_type == "cost_estimate":
+            required_edge = first_observed(row.get("required_edge_bps"), row.get("min_required_edge_bps"), not_obs)
+            cost_source = first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"), not_obs)
             quant_lab_cost_usage_rows.append({
                 "source": source,
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
+                "mode": flatten_value(row.get("mode") or not_obs),
                 "symbol": flatten_value(row.get("symbol") or not_obs),
+                "normalized_symbol": flatten_value(row.get("normalized_symbol") or not_obs),
+                "venue": flatten_value(row.get("venue") or not_obs),
+                "instrument_type": flatten_value(row.get("instrument_type") or not_obs),
                 "side": flatten_value(row.get("side") or not_obs),
                 "intent": flatten_value(row.get("intent") or not_obs),
                 "notional_usdt": flatten_value(row.get("notional_usdt") if row.get("notional_usdt") is not None else not_obs),
+                "quantile": flatten_value(row.get("quantile") or not_obs),
+                "strategy_id": flatten_value(first_observed(row.get("strategy_id"), row.get("alpha_id"), not_obs)),
+                "request_id": flatten_value(row.get("request_id") or not_obs),
                 "alpha_id": flatten_value(row.get("alpha_id") or not_obs),
                 "cost_bps": flatten_value(first_observed(row.get("cost_bps"), row.get("total_cost_bps"), row.get("effective_total_cost_bps"))),
                 "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
-                "cost_source": flatten_value(first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"))),
+                "cost_source": flatten_value(cost_source),
+                "cost_model_version": flatten_value(row.get("cost_model_version") or not_obs),
+                "total_cost_bps": flatten_value(row.get("total_cost_bps") if row.get("total_cost_bps") is not None else not_obs),
+                "effective_total_cost_bps": flatten_value(row.get("effective_total_cost_bps") if row.get("effective_total_cost_bps") is not None else not_obs),
+                "total_cost_bps_p50": flatten_value(row.get("total_cost_bps_p50") if row.get("total_cost_bps_p50") is not None else not_obs),
+                "total_cost_bps_p75": flatten_value(row.get("total_cost_bps_p75") if row.get("total_cost_bps_p75") is not None else not_obs),
+                "total_cost_bps_p90": flatten_value(row.get("total_cost_bps_p90") if row.get("total_cost_bps_p90") is not None else not_obs),
+                "required_edge_bps": flatten_value(required_edge),
                 "expected_edge_bps": flatten_value(row.get("expected_edge_bps") if row.get("expected_edge_bps") is not None else not_obs),
                 "expected_edge_source": flatten_value(first_observed(row.get("expected_edge_source"), row.get("proxy_source"))),
                 "min_required_edge_bps": flatten_value(row.get("min_required_edge_bps") if row.get("min_required_edge_bps") is not None else not_obs),
                 "would_filter_by_cost": bool_observed(first_observed(row.get("would_filter_by_cost"), row.get("would_filter"))),
+                "would_block_by_cost": bool_observed(first_observed(row.get("would_block_by_cost"), row.get("would_filter_by_cost"), row.get("would_filter"))),
                 "actually_filtered": bool_observed(first_observed(row.get("actually_filtered"), row.get("order_filtered"))),
+                "cost_gate_enforced": bool_observed(row.get("cost_gate_enforced")),
                 "quant_lab_decision": flatten_value(row.get("quant_lab_decision") or not_obs),
-                "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                "fallback_used": bool_observed(row.get("fallback_used")),
+                "fallback_reason": flatten_value(row.get("fallback_reason") or not_obs),
                 "filtered": str(bool(row.get("filtered"))).lower() if "filtered" in row else not_obs,
                 "filter_reason": flatten_value(row.get("filter_reason") or not_obs),
                 "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
@@ -5500,12 +5592,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/quant_lab_compliance.csv",
         quant_lab_compliance_rows,
-        ["source", "run_id", "ts_utc", "event_type", "permission_decision", "effective_decision", "order_decision", "fail_policy", "fallback_used", "symbol", "side", "intent", "orders_before", "orders_after", "orders_filtered", "buy_orders_filtered", "filtered", "filter_reason", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "event_type", "mode", "local_mode", "permission_gate_enforced", "cost_gate_enforced", "raw_permission_decision", "effective_permission_decision", "would_block_if_enforced", "fallback_used", "fallback_reason", "remote_permission_as_of_ts", "remote_permission_expires_at", "remote_permission_status", "contract_version", "permission_decision", "effective_decision", "order_decision", "fail_policy", "symbol", "side", "intent", "orders_before", "orders_after", "orders_filtered", "buy_orders_filtered", "filtered", "filter_reason", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/quant_lab_cost_usage.csv",
         quant_lab_cost_usage_rows,
-        ["source", "run_id", "ts_utc", "symbol", "side", "intent", "notional_usdt", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "actually_filtered", "quant_lab_decision", "fallback_used", "filtered", "filter_reason", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "mode", "symbol", "normalized_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "strategy_id", "request_id", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "cost_model_version", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_reason", "filtered", "filter_reason", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/quant_lab_fallbacks.csv",

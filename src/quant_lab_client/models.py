@@ -24,6 +24,14 @@ def _float(data: Mapping[str, Any], key: str, default: Optional[float] = None) -
         return default
 
 
+def _first_float(data: Mapping[str, Any], *keys: str, default: Optional[float] = None) -> Optional[float]:
+    for key in keys:
+        value = _float(data, key)
+        if value is not None:
+            return value
+    return default
+
+
 def _list(data: Mapping[str, Any], key: str) -> List[Any]:
     value = data.get(key)
     if isinstance(value, list):
@@ -33,8 +41,20 @@ def _list(data: Mapping[str, Any], key: str) -> List[Any]:
     return [value]
 
 
+_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "BTC", "ETH", "OKB")
+
+
 def symbol_to_quant_lab_symbol(symbol: str) -> str:
-    return str(symbol or "").strip().upper().replace("/", "-")
+    raw = str(symbol or "").strip().upper().replace("_", "-").replace("/", "-")
+    if not raw:
+        return ""
+    if "-" in raw:
+        parts = [part for part in raw.split("-") if part]
+        return "-".join(parts) if parts else raw
+    for quote in _QUOTE_SUFFIXES:
+        if raw.endswith(quote) and len(raw) > len(quote):
+            return f"{raw[:-len(quote)]}-{quote}"
+    return raw
 
 
 @dataclass
@@ -68,6 +88,9 @@ class RiskPermission:
     gate_version: Optional[str] = None
     reasons: List[Any] = field(default_factory=list)
     created_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    status: Optional[str] = None
+    contract_version: Optional[str] = None
 
     @classmethod
     def from_payload(cls, payload: Any) -> "RiskPermission":
@@ -83,6 +106,9 @@ class RiskPermission:
             gate_version=str(data.get("gate_version") or "") or None,
             reasons=_list(data, "reasons") or _list(data, "reason"),
             created_at=str(data.get("created_at") or data.get("ts") or "") or None,
+            expires_at=str(data.get("expires_at") or data.get("permission_expires_at") or "") or None,
+            status=str(data.get("status") or data.get("permission_status") or "") or None,
+            contract_version=str(data.get("contract_version") or "") or None,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -105,6 +131,12 @@ class CostEstimate:
     sample_count: Optional[int] = None
     cost_model_version: Optional[str] = None
     bucket_id: Optional[str] = None
+    total_cost_bps_p50: Optional[float] = None
+    total_cost_bps_p75: Optional[float] = None
+    total_cost_bps_p90: Optional[float] = None
+    required_edge_bps: Optional[float] = None
+    fallback_reason: Optional[str] = None
+    raw_response: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_payload(cls, payload: Any) -> "CostEstimate":
@@ -135,6 +167,12 @@ class CostEstimate:
             sample_count=sample_count_i,
             cost_model_version=str(data.get("cost_model_version") or "") or None,
             bucket_id=str(data.get("bucket_id") or "") or None,
+            total_cost_bps_p50=_first_float(data, "total_cost_bps_p50", "p50_total_cost_bps", "cost_bps_p50"),
+            total_cost_bps_p75=_first_float(data, "total_cost_bps_p75", "p75_total_cost_bps", "cost_bps_p75"),
+            total_cost_bps_p90=_first_float(data, "total_cost_bps_p90", "p90_total_cost_bps", "cost_bps_p90"),
+            required_edge_bps=_first_float(data, "required_edge_bps", "min_required_edge_bps"),
+            fallback_reason=str(data.get("fallback_reason") or "") or None,
+            raw_response=dict(data),
         )
 
     def to_dict(self) -> Dict[str, Any]:

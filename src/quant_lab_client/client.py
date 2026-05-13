@@ -207,9 +207,15 @@ def summarize_response(payload: Any) -> Dict[str, Any]:
         "fallback_level",
         "sample_count",
         "total_cost_bps",
+        "total_cost_bps_p50",
+        "total_cost_bps_p75",
+        "total_cost_bps_p90",
+        "required_edge_bps",
         "cost_bps",
         "symbol",
+        "normalized_symbol",
         "alpha_id",
+        "contract_version",
     )
     summary = {key: payload.get(key) for key in keys if key in payload}
     for nested_key in ("data", "result", "payload"):
@@ -530,19 +536,36 @@ class QuantLabClient:
         regime: str,
         notional_usdt: float,
         quantile: str = "p75",
+        side: str = "",
+        strategy_id: str = "v5",
+        expected_edge_bps: Optional[float] = None,
+        request_id: Optional[str] = None,
+        venue: str = "OKX",
+        instrument_type: str = "spot",
     ) -> CostEstimate:
+        normalized_symbol = symbol_to_quant_lab_symbol(symbol)
+        cost_request_id = str(request_id or "").strip()
+        if not cost_request_id:
+            cost_request_id = f"{self.run_id or 'v5'}:{normalized_symbol}:{time.time_ns()}"
         response = self.get_json(
             "/v1/costs/estimate",
             params={
-                "symbol": symbol_to_quant_lab_symbol(symbol),
+                "symbol": normalized_symbol,
+                "normalized_symbol": normalized_symbol,
+                "venue": str(venue or "OKX").strip() or "OKX",
+                "instrument_type": str(instrument_type or "spot").strip() or "spot",
+                "side": str(side or "").strip().lower(),
                 "regime": str(regime or "normal").strip() or "normal",
                 "notional_usdt": float(notional_usdt or 0.0),
                 "quantile": str(quantile or "p75").strip() or "p75",
+                "strategy_id": str(strategy_id or "v5").strip() or "v5",
+                "expected_edge_bps": expected_edge_bps if expected_edge_bps is not None else "",
+                "request_id": cost_request_id,
             },
         )
         estimate = CostEstimate.from_payload(response.data)
         if not estimate.symbol:
-            estimate.symbol = symbol_to_quant_lab_symbol(symbol)
+            estimate.symbol = normalized_symbol
         if not estimate.regime:
             estimate.regime = str(regime or "normal")
         if not estimate.notional_usdt:
@@ -579,14 +602,30 @@ class QuantLabClient:
         signal_price: Optional[float] = None,
         alpha_id: Optional[str] = None,
         notional_bucket: Optional[str] = None,
+        expected_edge_bps: Optional[float] = None,
+        request_id: Optional[str] = None,
+        strategy_id: Optional[str] = None,
+        venue: str = "OKX",
+        instrument_type: str = "spot",
     ) -> QuantLabResponse:
+        normalized_symbol = symbol_to_quant_lab_symbol(symbol)
+        cost_request_id = str(request_id or "").strip()
+        if not cost_request_id:
+            cost_request_id = f"{self.run_id or 'v5'}:{normalized_symbol}:{time.time_ns()}"
         return self.get_json(
             "/v1/costs/estimate",
             params={
-                "symbol": symbol_to_quant_lab_symbol(symbol),
+                "symbol": normalized_symbol,
+                "normalized_symbol": normalized_symbol,
+                "venue": str(venue or "OKX").strip() or "OKX",
+                "instrument_type": str(instrument_type or "spot").strip() or "spot",
+                "side": str(side or "").strip().lower(),
                 "regime": str(regime or "normal").strip() or "normal",
                 "notional_usdt": float(notional_usdt or 0.0),
                 "quantile": str(quantile or "p75").strip() or "p75",
+                "strategy_id": str(strategy_id or alpha_id or "v5").strip() or "v5",
+                "expected_edge_bps": expected_edge_bps if expected_edge_bps is not None else "",
+                "request_id": cost_request_id,
                 "notional_bucket": notional_bucket,
             },
         )

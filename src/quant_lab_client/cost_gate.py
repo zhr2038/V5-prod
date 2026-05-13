@@ -59,6 +59,10 @@ def _order_expected_edge(order: Any) -> tuple[Optional[float], Optional[str]]:
     return None, None
 
 
+def order_expected_edge_detail(order: Any) -> tuple[Optional[float], Optional[str]]:
+    return _order_expected_edge(order)
+
+
 def _score_proxy_edge_bps(order: Any, cfg: Any) -> tuple[Optional[float], Optional[str]]:
     meta = dict(getattr(order, "meta", None) or {})
     proxy = _safe_non_negative_float(meta.get("expected_edge_bps_proxy"))

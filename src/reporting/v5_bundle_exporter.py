@@ -52,9 +52,19 @@ COMPLIANCE_FIELDS = (
     "run_id",
     "ts",
     "mode",
+    "local_mode",
     "called_api",
     "permission_gate_enforced",
     "cost_gate_enforced",
+    "raw_permission_decision",
+    "effective_permission_decision",
+    "would_block_if_enforced",
+    "fallback_used",
+    "fallback_reason",
+    "remote_permission_as_of_ts",
+    "remote_permission_expires_at",
+    "remote_permission_status",
+    "contract_version",
     "quant_lab_permission",
     "final_permission",
     "local_preflight_permission",
@@ -76,6 +86,12 @@ COST_FIELDS = (
     "would_filter",
     "actually_filtered",
     "symbol",
+    "normalized_symbol",
+    "venue",
+    "instrument_type",
+    "side",
+    "strategy_id",
+    "request_id",
     "regime",
     "notional_usdt",
     "quantile",
@@ -88,14 +104,21 @@ COST_FIELDS = (
     "local_cost_source",
     "fallback_level",
     "source",
+    "cost_source",
     "sample_count",
     "cost_model_version",
+    "total_cost_bps_p50",
+    "total_cost_bps_p75",
+    "total_cost_bps_p90",
     "expected_edge_bps",
     "expected_edge_source",
     "min_required_edge_bps",
+    "required_edge_bps",
     "proxy_source",
     "would_filter_by_cost",
+    "would_block_by_cost",
     "fallback_used",
+    "fallback_reason",
     "passed",
     "filtered",
     "filter_reason",
@@ -234,6 +257,11 @@ def _request_success(row: Mapping[str, Any]) -> bool:
 
 
 def _is_fallback_row(row: Mapping[str, Any]) -> bool:
+    if _request_success(row):
+        return False
+    error_text = str(row.get("error_type") or row.get("error") or "").lower()
+    if any(marker in error_text for marker in ("timeout", "connection", "unavailable", "invalid")):
+        return True
     return (
         _truthy(row.get("fallback_used"))
         or row.get("event_type") == "fallback"
@@ -247,7 +275,12 @@ def _actual_filtered(row: Mapping[str, Any]) -> bool:
 
 
 def _would_filter(row: Mapping[str, Any]) -> bool:
-    return _truthy(row.get("would_filter")) or _truthy(row.get("would_filter_by_cost")) or _truthy(row.get("would_filter_by_permission"))
+    return (
+        _truthy(row.get("would_filter"))
+        or _truthy(row.get("would_filter_by_cost"))
+        or _truthy(row.get("would_filter_by_permission"))
+        or _truthy(row.get("would_block_if_enforced"))
+    )
 
 
 def _is_cost_filter_reason(reason: Any) -> bool:
@@ -265,9 +298,19 @@ def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
                 "run_id": run_id,
                 "ts": row.get("ts") or "",
                 "mode": row.get("mode") or "",
+                "local_mode": row.get("local_mode") or row.get("mode") or "",
                 "called_api": row.get("called_api", ""),
                 "permission_gate_enforced": row.get("permission_gate_enforced", ""),
                 "cost_gate_enforced": row.get("cost_gate_enforced", ""),
+                "raw_permission_decision": "",
+                "effective_permission_decision": "",
+                "would_block_if_enforced": "false",
+                "fallback_used": "false",
+                "fallback_reason": "",
+                "remote_permission_as_of_ts": "",
+                "remote_permission_expires_at": "",
+                "remote_permission_status": "",
+                "contract_version": "",
                 "quant_lab_permission": "",
                 "final_permission": "",
                 "local_preflight_permission": "",
@@ -285,14 +328,41 @@ def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             item["ts"] = row.get("ts")
         if row.get("mode"):
             item["mode"] = row.get("mode")
+        if row.get("local_mode") or row.get("mode"):
+            item["local_mode"] = row.get("local_mode") or row.get("mode")
         if "called_api" in row:
             item["called_api"] = row.get("called_api")
         if "permission_gate_enforced" in row:
             item["permission_gate_enforced"] = row.get("permission_gate_enforced")
         if "cost_gate_enforced" in row:
             item["cost_gate_enforced"] = row.get("cost_gate_enforced")
-        permission = row.get("permission") or row.get("quant_lab_permission") or row.get("quant_lab_decision")
-        final = row.get("final_permission") or row.get("effective_decision")
+        explicit_raw_permission = row.get("raw_permission_decision") or row.get("quant_lab_permission") or row.get("quant_lab_decision")
+        raw_permission = explicit_raw_permission or (row.get("permission") if not item.get("raw_permission_decision") else "")
+        effective_permission = (
+            row.get("effective_permission_decision")
+            or row.get("final_permission")
+            or row.get("effective_decision")
+        )
+        permission = row.get("permission") or row.get("quant_lab_permission") or raw_permission
+        final = row.get("final_permission") or effective_permission
+        if raw_permission:
+            item["raw_permission_decision"] = raw_permission
+        if effective_permission:
+            item["effective_permission_decision"] = effective_permission
+        if "would_block_if_enforced" in row:
+            item["would_block_if_enforced"] = str(_truthy(row.get("would_block_if_enforced"))).lower()
+        if "fallback_used" in row:
+            item["fallback_used"] = str(_truthy(row.get("fallback_used"))).lower()
+        if row.get("fallback_reason"):
+            item["fallback_reason"] = row.get("fallback_reason")
+        for field in (
+            "remote_permission_as_of_ts",
+            "remote_permission_expires_at",
+            "remote_permission_status",
+            "contract_version",
+        ):
+            if row.get(field):
+                item[field] = row.get(field)
         if permission:
             item["quant_lab_permission"] = permission
         if final:
@@ -311,6 +381,8 @@ def _build_compliance_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
                 item["filtered_by_cost_count"] = int(item["filtered_by_cost_count"]) + 1
             if _would_filter(row) and not _actual_filtered(row):
                 item["hypothetical_violation"] = "true"
+        elif _truthy(row.get("would_block_if_enforced")) and not _truthy(row.get("permission_gate_enforced")):
+            item["hypothetical_violation"] = "true"
         final_permission = str(item.get("final_permission") or item.get("quant_lab_permission") or "").upper()
         enforced = str(item.get("permission_gate_enforced")).lower() == "true"
         if enforced and final_permission == "ABORT" and int(item["new_risk_order_count"]) > 0:
@@ -336,7 +408,10 @@ def _build_cost_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
                 for key, value in nested.items():
                     merged.setdefault(str(key), value)
         merged.setdefault("would_filter_by_cost", merged.get("would_filter", ""))
+        merged.setdefault("would_block_by_cost", merged.get("would_filter_by_cost", ""))
         merged.setdefault("actually_filtered", merged.get("order_filtered", ""))
+        merged.setdefault("cost_source", merged.get("source", merged.get("local_cost_source", "")))
+        merged.setdefault("required_edge_bps", merged.get("min_required_edge_bps", ""))
         merged.setdefault("expected_edge_source", merged.get("proxy_source", ""))
         out.append({field: merged.get(field, "") for field in COST_FIELDS})
     return out
@@ -353,7 +428,7 @@ def _build_fallback_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
                 "ts": row.get("ts", ""),
                 "mode": row.get("mode", ""),
                 "event_type": row.get("event_type", ""),
-                "reason": row.get("fallback_reason") or row.get("reason") or row.get("filter_reason") or "",
+                "reason": row.get("fallback_reason") or row.get("reason") or row.get("filter_reason") or row.get("error_type") or "",
                 "fallback_policy": row.get("fallback_policy") or row.get("fail_policy") or "",
                 "fallback_scope": row.get("fallback_scope") or row.get("event_type") or "",
                 "action_taken": row.get("action_taken") or row.get("permission") or row.get("final_permission") or "",
@@ -378,7 +453,7 @@ def _window_summary(rows: list[Dict[str, Any]], request_rows: list[Dict[str, Any
         gate_version = row.get("gate_version") or gate_version
     request_success_count = len([row for row in request_rows if _request_success(row)])
     request_error_count = len(request_rows) - request_success_count
-    actual_fallback_count = len([row for row in rows if _is_fallback_row(row)])
+    actual_fallback_count = len([row for row in rows + request_rows if _is_fallback_row(row)])
     return {
         "quant_lab_enabled": bool(rows or request_rows),
         "quant_lab_mode": latest_mode,
@@ -562,7 +637,7 @@ def export_v5_bundle(
     request_rows = _filter_window(_read_jsonl(requests_path), since)
     compliance_rows = _build_compliance_rows(usage_rows)
     cost_rows = _build_cost_rows(usage_rows)
-    fallback_rows = _build_fallback_rows(usage_rows)
+    fallback_rows = _build_fallback_rows(usage_rows + request_rows)
 
     stamp = _utc_stamp()
     bundle_name = f"v5_live_followup_bundle_{stamp}.tar.gz"
