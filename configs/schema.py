@@ -1040,6 +1040,16 @@ class ExecutionConfig(BaseModel):
         le=7 * 24 * 60,
         description="Minimum holding minutes before regime-exit is allowed (0=disable)",
     )
+    swing_min_hold_exit_guard_enabled: bool = Field(
+        default=True,
+        description="Block soft swing exits before swing_min_hold_hours while allowing hard risk exits",
+    )
+    swing_min_hold_hours: float = Field(
+        default=24.0,
+        ge=0.0,
+        le=30 * 24,
+        description="Minimum hold hours for ordinary non-probe swing positions before soft exits may close",
+    )
 
     # Proactive churn cap: limit effective rebalance turnover per cycle.
     max_rebalance_turnover_per_cycle: Optional[float] = Field(

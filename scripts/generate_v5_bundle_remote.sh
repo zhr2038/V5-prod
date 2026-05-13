@@ -749,6 +749,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "alt_impulse_shadow_",
         "protect_profit_lock_",
         "same_symbol_reentry_",
+        "swing_min_hold_",
     )
     CONFIG_CONSUMPTION_DIAGNOSTICS_PREFIXES = (
         "multi_position_swing_shadow_",
@@ -1047,6 +1048,84 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if reason in PROBE_EXIT_REASONS:
             return "probe"
         return not_obs
+
+    def exit_priority_for_reason(reason):
+        reason = flatten_value(reason)
+        if not reason or reason == not_obs:
+            return "unknown"
+        hard_exact = {
+            "hard_stop_loss",
+            "stop_loss",
+            "fixed_stop_loss",
+            "profit_taking_stop_loss_hit",
+            "regime_exit",
+            "risk_off",
+            "risk_off_forced_close",
+            "kill_switch",
+            "manual_kill",
+            "manual_kill_switch",
+            "reconcile_fail",
+            "reconcile_failure",
+            "exchange_account_anomaly",
+            "account_anomaly",
+            "exchange_anomaly",
+        }
+        if reason in hard_exact or reason.startswith(("dynamic_stop_", "hard_stop_", "risk_off_", "reconcile_", "kill_switch_", "exchange_", "account_")):
+            return "hard"
+        soft_exact = {"atr_trailing", "profit_take", "take_profit", "soft_stop", "weak_signal_exit", "protect_profit_lock_trailing", "time_stop"}
+        if reason in soft_exact or reason.startswith(("profit_taking_", "profit_partial_", "rank_exit_", "weak_signal_", "soft_stop_")):
+            return "soft"
+        return "unknown"
+
+    def bool_text(value):
+        if isinstance(value, bool):
+            return str(value).lower()
+        text = flatten_value(value).strip().lower()
+        if text in {"true", "1", "yes"}:
+            return "true"
+        if text in {"false", "0", "no"}:
+            return "false"
+        return text if text else not_obs
+
+    def observe_symbol_price(symbol, ts_value, px_value, source):
+        symbol = flatten_value(symbol)
+        px = as_float(px_value)
+        ts_dt = parse_dt_utc(ts_value)
+        if symbol == not_obs or px is None or ts_dt is None:
+            return
+        price_observations_by_symbol[symbol].append(
+            {
+                "ts_dt": ts_dt,
+                "ts_utc": ts_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "price": px,
+                "source": source,
+            }
+        )
+
+    def estimate_held_24h_outcome(symbol, entry_dt, entry_px, actual_gross_bps, actual_net_bps):
+        entry_px_f = as_float(entry_px)
+        if entry_dt is None or entry_px_f is None or entry_px_f <= 0:
+            return ("not_observable_no_entry_time_or_price", None, None, None)
+        target_dt = entry_dt + dt.timedelta(hours=24)
+        observations = sorted(
+            price_observations_by_symbol.get(symbol, []),
+            key=lambda item: item["ts_dt"],
+        )
+        for obs in observations:
+            if obs["ts_dt"] < target_dt:
+                continue
+            lag_hours = (obs["ts_dt"] - target_dt).total_seconds() / 3600.0
+            if lag_hours > 2.0:
+                break
+            gross_bps_24h = (float(obs["price"]) - entry_px_f) / entry_px_f * 10000.0
+            cost_bps = 0.0
+            actual_gross_f = as_float(actual_gross_bps)
+            actual_net_f = as_float(actual_net_bps)
+            if actual_gross_f is not None and actual_net_f is not None:
+                cost_bps = max(0.0, actual_gross_f - actual_net_f)
+            net_bps_24h = gross_bps_24h - cost_bps
+            return ("observed_from_recent_run_price", net_bps_24h, gross_bps_24h, obs)
+        return ("not_observable_no_24h_price", None, None, None)
 
     def first_observed(*values):
         for value in values:
@@ -1357,6 +1436,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     maturity_rows = []
     open_position_rows = []
     dust_residual_roundtrip_rows = []
+    early_exit_rows = []
     high_score_blocked_rows = []
     market_impulse_selection_shadow_rows = []
     factor_contribution_rows = []
@@ -1382,6 +1462,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     trade_read_errors = 0
     latest_symbol_context = {}
     event_candidate_price_by_symbol = {}
+    price_observations_by_symbol = defaultdict(list)
     entry_context_by_run_symbol = {}
     audit_by_run = {}
 
@@ -1722,6 +1803,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 px_value = first_value(item, ("latest_px", "last_px", "current_px", "price", "px"), not_obs)
                 if as_float(px_value) is not None:
                     context["current_px"] = flatten_value(px_value)
+                    observe_symbol_price(symbol, audit_ts, px_value, "router_decision")
             reason_counts[reason] += 1
             if reason == "btc_leadership_probe_alpha6_score_too_low":
                 probe_counts["btc_leadership_probe_alpha6_score_too_low_count"] += 1
@@ -1745,6 +1827,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "side": flatten_value(item.get("side")),
                 "drift": flatten_value(item.get("drift")),
                 "deadband": flatten_value(item.get("deadband")),
+                "hold_hours": flatten_value(item.get("hold_hours", not_obs)),
+                "min_hold_hours": flatten_value(item.get("min_hold_hours", not_obs)),
+                "exit_allowed_before_min_hold": bool_text(item.get("exit_allowed_before_min_hold", not_obs)),
+                "exit_blocked_by_min_hold": bool_text(item.get("exit_blocked_by_min_hold", not_obs)),
+                "exit_priority": flatten_value(item.get("exit_priority", not_obs)),
+                "early_exit_opportunity_cost_bps": flatten_value(item.get("early_exit_opportunity_cost_bps", not_obs)),
                 "raw_json": raw_json,
             }
             router_rows.append(row)
@@ -1987,6 +2075,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             notional = qty * price
         fee = as_float(first_value(item, ("fee_usdt", "fee", "commission_usdt", "commission"), not_obs))
         source_file = str(trade_path.relative_to(OUT))
+        observe_symbol_price(symbol, timestamp, price, f"trade:{source_file}")
         event = {
             "event_id": f"{source_file}:{idx + 1}",
             "run_id": run_id,
@@ -2161,6 +2250,38 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "exit_router_decision": sanitize_obj(close_event.get("router_info", {})),
             "matched_qty": matched_qty,
         }
+        exit_router = close_event.get("router_info", {}) if isinstance(close_event.get("router_info"), dict) else {}
+        hold_hours = hold_minutes / 60.0 if hold_minutes is not None else None
+        exit_priority = first_observed(exit_router.get("exit_priority"), exit_priority_for_reason(exit_reason))
+        min_hold_hours = first_observed(exit_router.get("min_hold_hours"), config_number("swing_min_hold_hours"), not_obs)
+        exit_allowed_before_min_hold = first_observed(
+            exit_router.get("exit_allowed_before_min_hold"),
+            str(exit_priority == "hard").lower() if exit_priority != not_obs else not_obs,
+        )
+        exit_blocked_by_min_hold = first_observed(exit_router.get("exit_blocked_by_min_hold"), "false")
+        would_status, would_24h_net_bps_raw, would_24h_gross_bps_raw, would_obs = estimate_held_24h_outcome(
+            open_event["symbol"],
+            open_event.get("ts_dt"),
+            entry_px,
+            gross_bps,
+            net_bps,
+        )
+        if would_obs:
+            raw_payload["would_have_held_24h_observation"] = sanitize_obj(
+                {
+                    "ts_utc": would_obs.get("ts_utc"),
+                    "price": would_obs.get("price"),
+                    "source": would_obs.get("source"),
+                    "gross_bps": would_24h_gross_bps_raw,
+                }
+            )
+        actual_net_f = as_float(net_bps)
+        early_cost_calc = (
+            would_24h_net_bps_raw - actual_net_f
+            if would_24h_net_bps_raw is not None and actual_net_f is not None
+            else None
+        )
+        early_cost_bps = first_observed(exit_router.get("early_exit_opportunity_cost_bps"), early_cost_calc, not_obs)
         return {
             "run_id": close_event["run_id"],
             "source_file": f"{open_event['source_file']};{close_event['source_file']}",
@@ -2184,6 +2305,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "gross_bps": fmt_num(gross_bps, 4),
             "net_bps": fmt_num(net_bps, 4),
             "hold_minutes": fmt_num(hold_minutes, 3),
+            "hold_hours": fmt_num(hold_hours, 4),
+            "min_hold_hours": flatten_value(min_hold_hours),
+            "exit_allowed_before_min_hold": bool_text(exit_allowed_before_min_hold),
+            "exit_blocked_by_min_hold": bool_text(exit_blocked_by_min_hold),
+            "exit_priority": exit_priority,
+            "early_exit_opportunity_cost_bps": flatten_value(early_cost_bps),
+            "would_have_held_24h_status": would_status,
+            "would_have_held_24h_net_bps": fmt_num(would_24h_net_bps_raw, 4),
             "remaining_value_usdt": fmt_num(residual_value, 12),
             "dust_threshold_usdt": fmt_num(dust_threshold, 12),
             "raw_json": safe_json(raw_payload),
@@ -4438,6 +4567,69 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 open_position_rows.append(open_position)
 
     closed_roundtrip_rows = [row for row in trade_rows if row.get("roundtrip_status") == "closed"]
+    configured_swing_min_hold_hours = config_number("swing_min_hold_hours")
+    if configured_swing_min_hold_hours is None:
+        configured_swing_min_hold_hours = 24.0
+    for row in closed_roundtrip_rows:
+        hold_hours = as_float(row.get("hold_hours"))
+        if hold_hours is None:
+            hold_minutes = as_float(row.get("hold_minutes"))
+            hold_hours = hold_minutes / 60.0 if hold_minutes is not None else None
+        exit_reason = flatten_value(row.get("exit_reason"))
+        exit_priority = first_observed(row.get("exit_priority"), exit_priority_for_reason(exit_reason))
+        min_hold_hours = first_observed(row.get("min_hold_hours"), configured_swing_min_hold_hours)
+        min_hold_f = as_float(min_hold_hours)
+        is_early_soft_exit = (
+            exit_priority == "soft"
+            and hold_hours is not None
+            and min_hold_f is not None
+            and hold_hours < min_hold_f
+        )
+        if is_early_soft_exit:
+            early_exit_rows.append({
+                "ts_utc": first_observed(row.get("exit_ts"), row.get("timestamp")),
+                "run_id": row.get("run_id", not_obs),
+                "symbol": row.get("symbol", not_obs),
+                "event_type": "closed_soft_exit_before_min_hold",
+                "exit_reason": exit_reason,
+                "exit_priority": exit_priority,
+                "hold_hours": fmt_num(hold_hours, 4),
+                "min_hold_hours": flatten_value(min_hold_hours),
+                "exit_allowed_before_min_hold": bool_text(row.get("exit_allowed_before_min_hold")),
+                "exit_blocked_by_min_hold": bool_text(row.get("exit_blocked_by_min_hold")),
+                "actual_net_bps": row.get("net_bps", not_obs),
+                "would_have_held_24h_status": row.get("would_have_held_24h_status", "not_observable_no_24h_price"),
+                "would_have_held_24h_net_bps": row.get("would_have_held_24h_net_bps", not_obs),
+                "early_exit_opportunity_cost_bps": row.get("early_exit_opportunity_cost_bps", not_obs),
+                "diagnosis": "soft_exit_violated_swing_min_hold",
+                "raw_json": row.get("raw_json", "{}"),
+            })
+
+    for row in router_rows:
+        if row.get("reason") != "swing_min_hold_exit_block":
+            continue
+        try:
+            raw = json.loads(row.get("raw_json") or "{}")
+        except Exception:
+            raw = {}
+        early_exit_rows.append({
+            "ts_utc": row.get("audit_timestamp", not_obs),
+            "run_id": row.get("run_id", not_obs),
+            "symbol": row.get("symbol", not_obs),
+            "event_type": "pending_soft_exit_blocked_by_min_hold",
+            "exit_reason": first_observed(row.get("source_reason"), first_value(raw, ("source_reason",), not_obs)),
+            "exit_priority": first_observed(first_value(raw, ("exit_priority",), not_obs), "soft"),
+            "hold_hours": flatten_value(first_value(raw, ("hold_hours",), not_obs)),
+            "min_hold_hours": flatten_value(first_value(raw, ("min_hold_hours",), configured_swing_min_hold_hours)),
+            "exit_allowed_before_min_hold": bool_text(first_value(raw, ("exit_allowed_before_min_hold",), False)),
+            "exit_blocked_by_min_hold": bool_text(first_value(raw, ("exit_blocked_by_min_hold",), True)),
+            "actual_net_bps": not_obs,
+            "would_have_held_24h_status": "pending_not_matured_or_no_24h_price",
+            "would_have_held_24h_net_bps": not_obs,
+            "early_exit_opportunity_cost_bps": flatten_value(first_value(raw, ("early_exit_opportunity_cost_bps",), not_obs)),
+            "diagnosis": "soft_exit_blocked_by_swing_min_hold",
+            "raw_json": row.get("raw_json", "{}"),
+        })
 
     def entry_run_id_from_roundtrip_source(source_file):
         text = flatten_value(source_file).replace("\\", "/")
@@ -5537,12 +5729,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/router_decisions.csv",
         router_rows,
-        ["run_id", "audit_timestamp", "index", "symbol", "action", "reason", "source_reason", "stage", "side", "drift", "deadband", "raw_json"],
+        ["run_id", "audit_timestamp", "index", "symbol", "action", "reason", "source_reason", "stage", "side", "drift", "deadband", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "early_exit_opportunity_cost_bps", "raw_json"],
     )
     write_csv(
         "summaries/trades_roundtrips.csv",
         trade_rows,
-        ["run_id", "source_file", "row_number", "timestamp", "symbol", "side", "qty", "price", "entry_ts", "entry_px", "exit_ts", "exit_px", "entry_reason", "exit_reason", "probe_type", "roundtrip_status", "gross_pnl_usdt", "fee_total_usdt", "net_pnl_usdt", "gross_bps", "net_bps", "hold_minutes", "remaining_value_usdt", "dust_threshold_usdt", "raw_json"],
+        ["run_id", "source_file", "row_number", "timestamp", "symbol", "side", "qty", "price", "entry_ts", "entry_px", "exit_ts", "exit_px", "entry_reason", "exit_reason", "probe_type", "roundtrip_status", "gross_pnl_usdt", "fee_total_usdt", "net_pnl_usdt", "gross_bps", "net_bps", "hold_minutes", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "early_exit_opportunity_cost_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "remaining_value_usdt", "dust_threshold_usdt", "raw_json"],
+    )
+    write_csv(
+        "summaries/early_exit_cases.csv",
+        early_exit_rows,
+        ["ts_utc", "run_id", "symbol", "event_type", "exit_reason", "exit_priority", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "actual_net_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "early_exit_opportunity_cost_bps", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/dust_residual_roundtrips.csv",
@@ -5848,6 +6045,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
         "rank_exit_conflict_count": rank_exit_conflict_count,
         "rank_exit_target_positive_sell_count": rank_exit_target_positive_sell_count,
+        "early_exit_case_count": len(early_exit_rows),
         "protect_sideways_normal_entry_count": len(protect_sideways_normal_entry_rows),
         "protect_sideways_normal_entry_avg_net_bps": protect_sideways_avg_net_bps if protect_sideways_avg_net_bps is not None else not_obs,
         "protect_sideways_normal_entry_win_rate": protect_sideways_win_rate if protect_sideways_win_rate is not None else not_obs,
@@ -6293,6 +6491,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- latest_24h 是否真实成交: {latest_24h_real_trade_text}",
         f"- last_72h 是否真实成交: {last_72h_real_trade_text}",
         f"- closed roundtrip gross/net bps: {closed_roundtrip_gross_net_text}",
+        f"- early soft exit cases before swing min_hold: {len(early_exit_rows)}",
         f"- probe trade gross/net bps: {gross_net_text}",
         f"- probe lifecycle: {probe_lifecycle_text}",
         f"- 是否按 probe exit policy 退出: {probe_exit_policy_text}",

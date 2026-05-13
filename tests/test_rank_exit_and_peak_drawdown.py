@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -17,6 +17,14 @@ from src.regime.regime_engine import RegimeResult
 from src.reporting.decision_audit import DecisionAudit
 from src.risk.profit_taking import PositionProfitState, ProfitTakingManager
 import src.core.pipeline as pipeline_module
+
+
+class _FixedClock:
+    def __init__(self, now: datetime):
+        self._now = now
+
+    def now(self) -> datetime:
+        return self._now
 
 
 def _ms(ts_s: int) -> int:
@@ -63,6 +71,116 @@ def _build_pipe(cfg: AppConfig, tmp_path: Path) -> V5Pipeline:
     pipe.profit_taking.state_file = tmp_path / "profit_taking_state.json"
     pipe.profit_taking.positions = {}
     return pipe
+
+
+def _run_swing_min_hold_exit_case(
+    tmp_path: Path,
+    *,
+    hold_hours: float,
+    exit_reason: str,
+):
+    now = datetime(2026, 5, 2, 5, 0, tzinfo=timezone.utc)
+    entry_ts = (now - timedelta(hours=hold_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cfg = AppConfig(symbols=["BNB/USDT"])
+    cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.swing_min_hold_exit_guard_enabled = True
+    cfg.execution.swing_min_hold_hours = 24.0
+    cfg.execution.protect_profit_lock_enabled = False
+    cfg.execution.probe_exit_enabled = False
+
+    pipe = _build_pipe(cfg, tmp_path)
+    pipe.clock = _FixedClock(now)
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BNB/USDT": 0.012},
+        selected=["BNB/USDT"],
+        volatilities={},
+        notes="",
+    )
+    pipe.exit_policy.evaluate = lambda positions, market_data, regime_state: [
+        pipeline_module.Order(
+            symbol="BNB/USDT",
+            side="sell",
+            intent="CLOSE_LONG",
+            notional_usdt=12.0,
+            signal_price=600.0,
+            meta={"reason": exit_reason},
+        )
+    ]
+    market_data = {"BNB/USDT": _series("BNB/USDT", 600.0)}
+    positions = [
+        Position(
+            symbol="BNB/USDT",
+            qty=0.02,
+            avg_px=600.0,
+            entry_ts=entry_ts,
+            highest_px=630.0,
+            last_update_ts=entry_ts,
+            last_mark_px=600.0,
+            unrealized_pnl_pct=0.0,
+        )
+    ]
+    audit = DecisionAudit(run_id=f"swing-min-hold-{exit_reason}-{hold_hours}")
+    out = pipe.run(
+        market_data_1h=market_data,
+        positions=positions,
+        cash_usdt=988.0,
+        equity_peak_usdt=1000.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BNB/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+    return out, audit
+
+
+def test_swing_min_hold_blocks_atr_trailing_before_24h(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(tmp_path, hold_hours=5.0, exit_reason="atr_trailing")
+
+    assert not any(order.symbol == "BNB/USDT" and order.side == "sell" for order in out.orders)
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "swing_min_hold_exit_block")
+    assert decision["source_reason"] == "atr_trailing"
+    assert decision["hold_hours"] == pytest.approx(5.0)
+    assert decision["min_hold_hours"] == pytest.approx(24.0)
+    assert decision["exit_allowed_before_min_hold"] is False
+    assert decision["exit_blocked_by_min_hold"] is True
+    assert decision["exit_priority"] == "soft"
+    assert audit.counts["swing_min_hold_exit_block_count"] == 1
+
+
+def test_swing_min_hold_allows_hard_stop_loss_before_24h(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(tmp_path, hold_hours=5.0, exit_reason="hard_stop_loss")
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert order.meta["exit_priority"] == "hard"
+    assert order.meta["exit_allowed_before_min_hold"] is True
+    assert order.meta["exit_blocked_by_min_hold"] is False
+    assert order.meta["hold_hours"] == pytest.approx(5.0)
+    assert any(
+        d.get("source_reason") == "hard_stop_loss"
+        and d.get("exit_priority") == "hard"
+        and d.get("exit_allowed_before_min_hold") is True
+        for d in audit.router_decisions
+    )
+
+
+def test_swing_min_hold_allows_atr_trailing_after_24h(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(tmp_path, hold_hours=25.0, exit_reason="atr_trailing")
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert order.meta["exit_priority"] == "soft"
+    assert order.meta["exit_allowed_before_min_hold"] is False
+    assert order.meta["exit_blocked_by_min_hold"] is False
+    assert order.meta["hold_hours"] == pytest.approx(25.0)
+    assert not any(d.get("reason") == "swing_min_hold_exit_block" for d in audit.router_decisions)
+
+
+def test_swing_min_hold_allows_kill_switch_exit_at_any_hold(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(tmp_path, hold_hours=1.0, exit_reason="kill_switch")
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert order.meta["exit_priority"] == "hard"
+    assert order.meta["exit_allowed_before_min_hold"] is True
+    assert order.meta["exit_blocked_by_min_hold"] is False
+    assert not any(d.get("reason") == "swing_min_hold_exit_block" for d in audit.router_decisions)
 
 
 def test_rank_exit_does_not_close_when_target_still_positive_even_in_strict_mode(tmp_path):

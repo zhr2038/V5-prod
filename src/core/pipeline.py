@@ -1396,6 +1396,47 @@ class V5Pipeline:
             "insufficient_cash",
         }
 
+    @staticmethod
+    def _exit_priority_for_reason(reason: str) -> str:
+        norm = str(reason or "").strip()
+        if not norm:
+            return "unknown"
+        hard_exact = {
+            "hard_stop_loss",
+            "stop_loss",
+            "fixed_stop_loss",
+            "profit_taking_stop_loss_hit",
+            "regime_exit",
+            "risk_off",
+            "risk_off_forced_close",
+            "kill_switch",
+            "manual_kill",
+            "manual_kill_switch",
+            "reconcile_fail",
+            "reconcile_failure",
+            "exchange_account_anomaly",
+            "account_anomaly",
+            "exchange_anomaly",
+        }
+        if norm in hard_exact or norm.startswith(("dynamic_stop_", "hard_stop_", "risk_off_", "reconcile_", "kill_switch_", "exchange_", "account_")):
+            return "hard"
+        soft_exact = {
+            "atr_trailing",
+            "profit_take",
+            "take_profit",
+            "soft_stop",
+            "weak_signal_exit",
+            "protect_profit_lock_trailing",
+            "time_stop",
+        }
+        if norm in soft_exact or norm.startswith(("profit_taking_", "profit_partial_", "rank_exit_", "weak_signal_", "soft_stop_")):
+            return "soft"
+        return "unknown"
+
+    @staticmethod
+    def _exit_allowed_before_min_hold(reason: str) -> bool:
+        return V5Pipeline._exit_priority_for_reason(reason) == "hard"
+
     def _held_symbol_has_negative_expectancy_hard_block(self, symbol: str) -> bool:
         try:
             if not any(
@@ -5488,6 +5529,9 @@ class V5Pipeline:
             for eo in exit_orders:
                 reason = str((eo.meta or {}).get('reason', '') or '')
                 if reason == 'regime_exit':
+                    if self._exit_allowed_before_min_hold(reason):
+                        filtered_exit_orders.append(eo)
+                        continue
                     held_min = held_minutes_by_symbol.get(eo.symbol)
                     if held_min is not None and held_min < float(min_hold_regime_exit):
                         if audit:
@@ -5540,7 +5584,81 @@ class V5Pipeline:
                     best[o.symbol] = (prio, o)
             exit_orders = [v[1] for v in best.values()]
 
+        swing_min_hold_blocked_decisions: List[Dict[str, Any]] = []
+        swing_min_hold_enabled = bool(getattr(self.cfg.execution, "swing_min_hold_exit_guard_enabled", True))
+        swing_min_hold_hours = float(_coalesce(getattr(self.cfg.execution, "swing_min_hold_hours", None), 24.0) or 0.0)
+        if exit_orders and swing_min_hold_enabled and swing_min_hold_hours > 0.0:
+            pos_by_symbol = {str(p.symbol): p for p in active_positions}
+            guarded_exit_orders = []
+            for order in exit_orders:
+                meta = dict(order.meta or {})
+                reason = str(meta.get("reason") or "")
+                priority = self._exit_priority_for_reason(reason)
+                allowed_before_min_hold = self._exit_allowed_before_min_hold(reason)
+                position = pos_by_symbol.get(str(order.symbol))
+                is_probe_exit = bool(meta.get("probe_exit", False) or meta.get("probe_type"))
+                if not is_probe_exit and position is not None:
+                    try:
+                        is_probe_exit = self._probe_metadata_for_position(position, probe_state=probe_state) is not None
+                    except Exception:
+                        is_probe_exit = False
+
+                hold_hours = meta.get("hold_hours", meta.get("held_hours"))
+                try:
+                    hold_hours = float(hold_hours) if hold_hours is not None else None
+                except Exception:
+                    hold_hours = None
+                if hold_hours is None:
+                    held_min = held_minutes_by_symbol.get(order.symbol)
+                    if held_min is not None:
+                        hold_hours = float(held_min) / 60.0
+
+                blocked_by_min_hold = (
+                    not is_probe_exit
+                    and priority == "soft"
+                    and hold_hours is not None
+                    and float(hold_hours) < float(swing_min_hold_hours)
+                )
+                meta.update(
+                    {
+                        "hold_hours": hold_hours,
+                        "min_hold_hours": float(swing_min_hold_hours),
+                        "exit_allowed_before_min_hold": bool(allowed_before_min_hold),
+                        "exit_blocked_by_min_hold": bool(blocked_by_min_hold),
+                        "exit_priority": priority,
+                        "early_exit_opportunity_cost_bps": None,
+                    }
+                )
+                order.meta = meta
+                if blocked_by_min_hold:
+                    decision = {
+                        "symbol": order.symbol,
+                        "action": "skip",
+                        "reason": "swing_min_hold_exit_block",
+                        "source_reason": reason,
+                        "side": order.side,
+                        "intent": order.intent,
+                        "hold_hours": hold_hours,
+                        "min_hold_hours": float(swing_min_hold_hours),
+                        "exit_allowed_before_min_hold": False,
+                        "exit_blocked_by_min_hold": True,
+                        "exit_priority": priority,
+                        "early_exit_opportunity_cost_bps": None,
+                    }
+                    swing_min_hold_blocked_decisions.append(decision)
+                    if audit:
+                        audit.record_count("swing_min_hold_exit_block_count", symbol=order.symbol)
+                        audit.add_note(
+                            "Swing min-hold blocked soft exit: "
+                            f"{order.symbol} reason={reason} hold_hours={float(hold_hours):.2f} "
+                            f"< min_hold_hours={float(swing_min_hold_hours):.2f}"
+                        )
+                    continue
+                guarded_exit_orders.append(order)
+            exit_orders = guarded_exit_orders
+
         exit_router_decisions = []
+        exit_router_decisions.extend(swing_min_hold_blocked_decisions)
         if exit_orders:
             filtered_exit_orders = []
             for order in exit_orders:
@@ -5585,6 +5703,12 @@ class V5Pipeline:
                 "intent": order.intent,
                 "notional": float(order.notional_usdt or 0.0),
                 "bypass_turnover_cap_for_exit": True,
+                "hold_hours": meta.get("hold_hours", meta.get("held_hours")),
+                "min_hold_hours": meta.get("min_hold_hours"),
+                "exit_allowed_before_min_hold": meta.get("exit_allowed_before_min_hold"),
+                "exit_blocked_by_min_hold": meta.get("exit_blocked_by_min_hold"),
+                "exit_priority": meta.get("exit_priority"),
+                "early_exit_opportunity_cost_bps": meta.get("early_exit_opportunity_cost_bps"),
             }
             if bool(meta.get("probe_exit", False)):
                 router_payload.update(
@@ -5655,6 +5779,11 @@ class V5Pipeline:
                         "highest_net_bps": meta.get("highest_net_bps"),
                         "effective_stop_px": meta.get("effective_stop_px"),
                         "hold_hours": meta.get("hold_hours", meta.get("held_hours")),
+                        "min_hold_hours": meta.get("min_hold_hours"),
+                        "exit_allowed_before_min_hold": meta.get("exit_allowed_before_min_hold"),
+                        "exit_blocked_by_min_hold": meta.get("exit_blocked_by_min_hold"),
+                        "exit_priority": meta.get("exit_priority"),
+                        "early_exit_opportunity_cost_bps": meta.get("early_exit_opportunity_cost_bps"),
                         "exit_reason": meta.get("exit_reason", meta.get("reason")),
                     }
                 )

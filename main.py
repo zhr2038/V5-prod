@@ -1380,6 +1380,10 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             "min_hold_minutes_before_regime_exit": int(
                 getattr(cfg.execution, "min_hold_minutes_before_regime_exit", 0) or 0
             ),
+            "swing_min_hold_exit_guard_enabled": bool(
+                getattr(cfg.execution, "swing_min_hold_exit_guard_enabled", True)
+            ),
+            "swing_min_hold_hours": float(getattr(cfg.execution, "swing_min_hold_hours", 24.0) or 0.0),
             "max_rebalance_turnover_per_cycle": (
                 None
                 if getattr(cfg.execution, "max_rebalance_turnover_per_cycle", None) is None
