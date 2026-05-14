@@ -81,6 +81,45 @@ PROBE_EXIT_REASONS = {
     "probe_time_stop",
     "market_impulse_probe_time_stop",
 }
+SOURCE_SNAPSHOT_PATHS = (
+    "main.py",
+    "event_driven_check.py",
+    "src",
+    "scripts",
+    "configs",
+    "pyproject.toml",
+    "requirements.txt",
+    "requirements-lock.txt",
+    "requirements.lock",
+    "poetry.lock",
+    "uv.lock",
+)
+STRATEGY_SNAPSHOT_PATHS = (
+    "main.py",
+    "src/core/pipeline.py",
+    "src/strategy",
+    "src/alpha",
+    "src/factors",
+    "src/risk",
+)
+DEPENDENCY_LOCK_PATHS = (
+    "requirements.txt",
+    "requirements-lock.txt",
+    "requirements.lock",
+    "pyproject.toml",
+    "poetry.lock",
+    "uv.lock",
+    "Pipfile.lock",
+    "conda-lock.yml",
+    "environment.yml",
+)
+DEPLOYMENT_VERSION_PATHS = (
+    "deployment_version",
+    "deployment_version.txt",
+    "DEPLOYMENT_VERSION",
+    "VERSION",
+    ".deployment_version",
+)
 FLAT_EXIT_SIGNAL_REASONS = PROBE_EXIT_REASONS | {"stop_loss", "atr_trailing"}
 BTC_LEADERSHIP_LABELABLE_REASONS = {
     "btc_leadership_probe_alpha6_score_too_low",
@@ -458,7 +497,7 @@ def write_csv(path, rows, fieldnames):
             writer.writerow(row)
 
 
-def build_summaries(copied_runs, copied_logs, recent_24_decisions):
+def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_meta):
     not_obs = "not_observable"
 
     def as_float(value):
@@ -6914,11 +6953,30 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         return "; ".join(parts) if parts else "not_observable_no_24h_48h_72h_rows"
 
     protect_sol_exception_summary_text = protect_sol_exception_shadow_text()
+    provenance_status = flatten_value(provenance_meta.get("provenance_status") or not_obs)
+    code_provenance_text = flatten_value(provenance_meta.get("code_provenance") or not_obs)
+    config_hash_text = flatten_value(provenance_meta.get("config_hash") or not_obs)
+    effective_config_hash_text = flatten_value(provenance_meta.get("effective_live_config_hash") or not_obs)
+    strategy_hash_text = flatten_value(provenance_meta.get("strategy_hash") or not_obs)
 
     readme = [
         f"# V5 live follow-up bundle {STAMP}",
         "",
         "This bundle contains read-only, sanitized production evidence for daily live follow-up.",
+        "",
+        "## Code provenance",
+        f"- code provenance ok / degraded: {code_provenance_text}",
+        f"- provenance_status: {provenance_status}",
+        f"- git_branch: {provenance_meta.get('git_branch', not_obs)}",
+        f"- git_commit: {provenance_meta.get('git_commit', not_obs)}",
+        f"- git_dirty: {provenance_meta.get('git_dirty', not_obs)}",
+        f"- source_snapshot_hash: {provenance_meta.get('source_snapshot_hash', not_obs)}",
+        f"- source_tree_file_count: {provenance_meta.get('source_tree_file_count', not_obs)}",
+        f"- config hash: {config_hash_text}",
+        f"- effective_live_config_hash: {effective_config_hash_text}",
+        f"- strategy_version: {provenance_meta.get('strategy_version', not_obs)}",
+        f"- strategy hash: {strategy_hash_text}",
+        f"- quant_lab_contract_version: {provenance_meta.get('quant_lab_contract_version', not_obs)}",
         "",
         "## Probe 生命周期检查",
         f"- 今天是否有 market_impulse_probe / btc_leadership_probe: market_impulse_probe={bool(market_probe_seen or probe_counts['market_impulse_probe_candidate_count'] or probe_counts['market_impulse_probe_open_count'])}, btc_leadership_probe={bool(btc_seen_in_decision_audit or probe_counts['btc_leadership_probe_candidate_count'] or probe_counts['btc_leadership_probe_open_count'] or probe_counts['btc_leadership_probe_blocked_count'])}",
@@ -7114,6 +7172,189 @@ def file_inventory():
     return rows
 
 
+def hash_text(value):
+    if value in (None, "", "not_observable", "not_git"):
+        return "not_observable"
+    return hashlib.sha256(str(value).encode("utf-8", errors="replace")).hexdigest()
+
+
+def hash_file(path):
+    try:
+        if path.is_file():
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+    except Exception as exc:
+        collection_errors.append({"source": str(path), "error": f"hash_file: {exc!r}"})
+    return "not_observable"
+
+
+def iter_snapshot_files(root, rel_paths):
+    seen = set()
+    excluded_dirs = {
+        ".git",
+        ".venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        "backups",
+        "archive",
+        "reports",
+        "logs",
+        "data",
+        "models",
+    }
+    for rel in rel_paths:
+        base = root / rel
+        if not base.exists():
+            continue
+        files = [base] if base.is_file() else sorted(path for path in base.rglob("*") if path.is_file())
+        for path in files:
+            parts = set(path.relative_to(root).parts)
+            if parts & excluded_dirs:
+                continue
+            rel_path = path.relative_to(root).as_posix()
+            if rel_path in seen:
+                continue
+            seen.add(rel_path)
+            yield rel_path, path
+
+
+def combined_files_hash(root, rel_paths):
+    digest = hashlib.sha256()
+    count = 0
+    for rel, path in iter_snapshot_files(root, rel_paths):
+        try:
+            data = path.read_bytes()
+        except Exception as exc:
+            collection_errors.append({"source": str(path), "error": f"snapshot_hash: {exc!r}"})
+            continue
+        digest.update(rel.encode("utf-8", errors="replace"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(data).hexdigest().encode("ascii"))
+        digest.update(b"\n")
+        count += 1
+    if count == 0:
+        return "not_observable", 0
+    return digest.hexdigest(), count
+
+
+def read_deployment_version_file(root):
+    for rel in DEPLOYMENT_VERSION_PATHS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        try:
+            text = sanitize_text(path.read_text(encoding="utf-8", errors="replace")).strip()
+        except Exception as exc:
+            collection_errors.append({"source": str(path), "error": f"deployment_version_read: {exc!r}"})
+            text = "not_observable"
+        return rel, text[:4000]
+    return "not_observable", "not_observable"
+
+
+def find_nested_value(obj, names):
+    if isinstance(obj, dict):
+        for name in names:
+            if name in obj and obj[name] not in (None, ""):
+                return obj[name]
+        for value in obj.values():
+            found = find_nested_value(value, names)
+            if found not in (None, "", "not_observable"):
+                return found
+    elif isinstance(obj, list):
+        for value in obj:
+            found = find_nested_value(value, names)
+            if found not in (None, "", "not_observable"):
+                return found
+    return "not_observable"
+
+
+def find_yaml_scalar(text, names):
+    for name in names:
+        match = re.search(rf"(?m)^\s*{re.escape(name)}\s*:\s*([^#\n]+)", text or "")
+        if match:
+            return match.group(1).strip().strip("\"'")
+    return "not_observable"
+
+
+def first_jsonl_nested_value(path, names):
+    for row in load_jsonl(path):
+        found = find_nested_value(row, names)
+        if found not in (None, "", "not_observable"):
+            return found
+    return "not_observable"
+
+
+def build_provenance_meta():
+    _, inside_out, _ = run_readonly("git rev-parse --is-inside-work-tree 2>/dev/null || echo false")
+    is_git = inside_out.splitlines()[0].strip().lower() == "true" if inside_out else False
+    _, branch_out, _ = run_readonly("git rev-parse --abbrev-ref HEAD 2>/dev/null || echo not_git")
+    _, commit_out, _ = run_readonly("git rev-parse HEAD 2>/dev/null || echo not_git")
+    branch = branch_out.splitlines()[0].strip() if branch_out else "not_git"
+    commit = commit_out.splitlines()[0].strip() if commit_out else "not_git"
+    if not is_git or branch in ("", "not_git") or commit in ("", "not_git"):
+        is_git = False
+        branch = "not_git"
+        commit = "not_git"
+
+    if is_git:
+        _, dirty_out, _ = run_readonly("git status --short 2>/dev/null || true")
+        git_dirty = bool((dirty_out or "").strip())
+        _, remote_out, _ = run_readonly("git remote get-url origin 2>/dev/null || true")
+        provenance_status = "git_dirty_degraded" if git_dirty else "git_clean"
+        code_provenance = "degraded" if git_dirty else "ok"
+        remote_hash = hash_text(remote_out.splitlines()[0].strip() if remote_out else "")
+    else:
+        git_dirty = "not_observable"
+        remote_hash = "not_observable"
+        provenance_status = "not_git_degraded"
+        code_provenance = "degraded"
+
+    source_hash, source_count = combined_files_hash(ROOT, SOURCE_SNAPSHOT_PATHS)
+    strategy_hash, strategy_count = combined_files_hash(ROOT, STRATEGY_SNAPSHOT_PATHS)
+    dependency_hash, dependency_count = combined_files_hash(ROOT, DEPENDENCY_LOCK_PATHS)
+    deployment_path, deployment_content = read_deployment_version_file(ROOT)
+    live_config_path = ROOT / "configs/live_prod.yaml"
+    effective_config_path = OUT / "raw/reports/effective_live_config.json"
+    try:
+        live_config_text = live_config_path.read_text(encoding="utf-8", errors="replace") if live_config_path.is_file() else ""
+    except Exception as exc:
+        collection_errors.append({"source": str(live_config_path), "error": f"live_config_read: {exc!r}"})
+        live_config_text = ""
+    effective_config = load_json(effective_config_path) if effective_config_path.is_file() else None
+    strategy_version = find_nested_value(effective_config, ("strategy_version", "quant_lab_strategy_version"))
+    if strategy_version == "not_observable":
+        strategy_version = find_yaml_scalar(live_config_text, ("strategy_version", "quant_lab_strategy_version"))
+    quant_lab_contract_version = find_nested_value(effective_config, ("quant_lab_contract_version", "contract_version"))
+    if quant_lab_contract_version == "not_observable":
+        quant_lab_contract_version = first_jsonl_nested_value(
+            OUT / "raw/reports/quant_lab_usage.jsonl",
+            ("contract_version", "quant_lab_contract_version"),
+        )
+
+    return {
+        "provenance_status": provenance_status,
+        "code_provenance": code_provenance,
+        "git_branch": branch,
+        "git_commit": commit,
+        "git_dirty": git_dirty,
+        "git_remote_url_hash": remote_hash,
+        "build_timestamp": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "python_version": sys.version.replace("\n", " "),
+        "dependency_lock_hash": dependency_hash,
+        "dependency_lock_file_count": dependency_count,
+        "config_hash": hash_file(live_config_path),
+        "effective_live_config_hash": hash_file(effective_config_path),
+        "strategy_version": str(strategy_version),
+        "strategy_hash": strategy_hash,
+        "strategy_file_count": strategy_count,
+        "quant_lab_contract_version": str(quant_lab_contract_version),
+        "source_snapshot_hash": source_hash,
+        "source_tree_file_count": source_count,
+        "deployment_version_file_path": deployment_path,
+        "deployment_version_file": deployment_content,
+    }
+
+
 if not ROOT.is_dir():
     fail(f"production root not found: {ROOT}")
 
@@ -7127,20 +7368,20 @@ commands.extend([
     f"cd {ROOT}",
     "git rev-parse --abbrev-ref HEAD",
     "git rev-parse HEAD",
+    "collect code provenance metadata",
     "copy exact reports state files",
     "copy reports/runs[/prod] last72h lightweight files",
     "copy sanitized log tails last72h",
 ])
-_, branch, _ = run_readonly("git rev-parse --abbrev-ref HEAD 2>/dev/null || echo not_git")
-_, commit, _ = run_readonly("git rev-parse HEAD 2>/dev/null || echo not_git")
 
 copy_sanitized("configs/live_prod.yaml", "raw/config_live_prod.yaml", required=True)
 for src_rel, dest_rel, required in STATE_FILES:
     copy_sanitized(src_rel, dest_rel, required=required)
 copy_current_reports()
+provenance_meta = build_provenance_meta()
 copied_runs, recent_24_decisions = copy_recent_runs()
 copied_logs = copy_logs()
-summary_meta = build_summaries(copied_runs, copied_logs, recent_24_decisions)
+summary_meta = build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_meta)
 
 sanity = {
     "raw/state/kill_switch.json exists": (OUT / "raw/state/kill_switch.json").is_file(),
@@ -7155,6 +7396,9 @@ sanity = {
     "contains summaries/quant_lab_cost_usage.csv": (OUT / "summaries/quant_lab_cost_usage.csv").is_file(),
     "contains summaries/quant_lab_fallbacks.csv": (OUT / "summaries/quant_lab_fallbacks.csv").is_file(),
     "contains summaries/issues_to_fix.json": (OUT / "summaries/issues_to_fix.json").is_file(),
+    "provenance_status": provenance_meta.get("provenance_status", "not_observable"),
+    "code provenance ok/degraded": provenance_meta.get("code_provenance", "not_observable"),
+    "provenance_status explicit": provenance_meta.get("provenance_status") not in (None, "", "ok", "not_observable"),
     "warnings": [],
     "high_issue_count": int(summary_meta.get("high_issue_count", 0)),
     "medium_issue_count": int(summary_meta.get("medium_issue_count", 0)),
@@ -7163,6 +7407,8 @@ sanity = {
 }
 if summary_meta.get("roundtrip_warning"):
     sanity["warnings"].append("trades exist but roundtrip/open trade rows are missing")
+if provenance_meta.get("code_provenance") == "degraded":
+    sanity["warnings"].append(f"code provenance degraded: {provenance_meta.get('provenance_status')}")
 secret_matches = scan_unredacted_secrets()
 if secret_matches:
     sanity["no .env files"] = not any(match["reason"] == ".env file present" for match in secret_matches)
@@ -7182,6 +7428,7 @@ failure_check_names = [
     "contains summaries/quant_lab_cost_usage.csv",
     "contains summaries/quant_lab_fallbacks.csv",
     "contains summaries/issues_to_fix.json",
+    "provenance_status explicit",
     "no .env files",
     "no unredacted secret assignments",
 ]
@@ -7200,8 +7447,26 @@ inventory_before_manifest = file_inventory()
 manifest = {
     "host": socket.gethostname(),
     "cwd": str(ROOT),
-    "git_branch": branch.splitlines()[0] if branch else "not_git",
-    "git_commit": commit.splitlines()[0] if commit else "not_git",
+    "provenance_status": provenance_meta.get("provenance_status", "not_observable"),
+    "code_provenance": provenance_meta.get("code_provenance", "not_observable"),
+    "git_branch": provenance_meta.get("git_branch", "not_git"),
+    "git_commit": provenance_meta.get("git_commit", "not_git"),
+    "git_dirty": provenance_meta.get("git_dirty", "not_observable"),
+    "git_remote_url_hash": provenance_meta.get("git_remote_url_hash", "not_observable"),
+    "build_timestamp": provenance_meta.get("build_timestamp", NOW.strftime("%Y-%m-%dT%H:%M:%SZ")),
+    "python_version": provenance_meta.get("python_version", sys.version.replace("\n", " ")),
+    "dependency_lock_hash": provenance_meta.get("dependency_lock_hash", "not_observable"),
+    "dependency_lock_file_count": provenance_meta.get("dependency_lock_file_count", 0),
+    "config_hash": provenance_meta.get("config_hash", "not_observable"),
+    "effective_live_config_hash": provenance_meta.get("effective_live_config_hash", "not_observable"),
+    "strategy_version": provenance_meta.get("strategy_version", "not_observable"),
+    "strategy_hash": provenance_meta.get("strategy_hash", "not_observable"),
+    "strategy_file_count": provenance_meta.get("strategy_file_count", 0),
+    "quant_lab_contract_version": provenance_meta.get("quant_lab_contract_version", "not_observable"),
+    "source_snapshot_hash": provenance_meta.get("source_snapshot_hash", "not_observable"),
+    "source_tree_file_count": provenance_meta.get("source_tree_file_count", 0),
+    "deployment_version_file_path": provenance_meta.get("deployment_version_file_path", "not_observable"),
+    "deployment_version_file": provenance_meta.get("deployment_version_file", "not_observable"),
     "sampling_end_utc": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
     "last_72h_start_utc": WINDOW_72H_START.strftime("%Y-%m-%dT%H:%M:%SZ"),
     "last_72h_end_utc": WINDOW_72H_END.strftime("%Y-%m-%dT%H:%M:%SZ"),
