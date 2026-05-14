@@ -2890,13 +2890,15 @@ def main():
             assert by_reason_map["atr_trailing"]["early_exit_count"] == "1", by_reason
             assert by_reason_map["atr_trailing"]["better_to_hold_24h_rate"] == "1", by_reason
             assert by_reason_map["stop_loss"]["early_exit_count"] == "0", by_reason
-            medium_issues = [
+            high_issues = [
                 item for item in issues["issues"]
-                if item.get("severity") == "medium" and item.get("code") == "swing_early_exit_premature"
+                if item.get("severity") == "high" and item.get("code") == "swing_soft_exit_before_min_hold_filled"
             ]
-            assert len(medium_issues) == 1, issues
+            assert len(high_issues) == 1, issues
             assert window["swing_early_exit_audit_rows"] == 4, window
             assert window["swing_early_exit_count"] == 3, window
+            assert window["swing_filled_soft_exit_before_min_hold_count"] == 3, window
+            assert window["swing_blocked_by_min_hold_count"] == 0, window
             assert window["swing_early_exit_atr_trailing_count"] == 1, window
             assert window["swing_early_exit_medium_issue"] is True, window
             assert "## Swing early exit audit" in readme, readme
@@ -2920,6 +2922,7 @@ def main():
             assert bnb["symbol"] == "BNB/USDT", bnb
             assert bnb["exit_reason"] == "atr_trailing", bnb
             assert bnb["exited_before_min_hold"] == "true", bnb
+            assert bnb["exit_priority"] == "soft", bnb
             assert float(bnb["hold_hours"]) == 5.0, bnb
             assert bnb["required_hold_hours"] == "24", bnb
             raw_payload = json.loads(roundtrips[0]["raw_json"])

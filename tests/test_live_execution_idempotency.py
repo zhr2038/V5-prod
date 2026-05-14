@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import tempfile
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,7 +22,7 @@ from src.execution.live_execution_engine import (
     submit_gate_for_live,
 )
 from src.execution.order_store import OrderStore
-from src.execution.position_store import PositionStore
+from src.execution.position_store import Position, PositionStore
 
 
 class FakeOKX:
@@ -920,6 +921,110 @@ def test_live_execution_rejects_external_rank_exit_without_router_validation_fla
         assert result.state == "REJECTED"
         assert okx.place_calls == 0
         assert row.last_error_code == "rank_exit_missing_router_validation"
+
+
+def test_live_execution_blocks_soft_swing_exit_before_min_hold() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["BNB"] = {"eq": "1", "availBal": "1", "cashBal": "1", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        entry_dt = datetime.now(timezone.utc) - timedelta(hours=5)
+        entry_ts = entry_dt.isoformat().replace("+00:00", "Z")
+        pos.upsert_position(
+            Position(
+                symbol="BNB/USDT",
+                qty=0.02,
+                avg_px=600.0,
+                entry_ts=entry_ts,
+                highest_px=630.0,
+                last_update_ts=entry_ts,
+                last_mark_px=600.0,
+                unrealized_pnl_pct=0.0,
+                tags_json=json.dumps(
+                    {
+                        "swing_hold_position": True,
+                        "swing_entry_ts": entry_ts,
+                        "swing_min_hold_hours": 24,
+                        "entry_reason": "normal_entry",
+                    }
+                ),
+            )
+        )
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            swing_min_hold_exit_guard_enabled=True,
+            swing_min_hold_hours=24,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        result = eng.place(
+            Order(
+                symbol="BNB/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=12.0,
+                signal_price=600.0,
+                meta={"decision_hash": "bnb-atr-before-min-hold", "reason": "atr_trailing"},
+            )
+        )
+
+        row = store.get(result.cl_ord_id)
+        req = json.loads(row.req_json)
+        guard = req["swing_min_hold_guard"]
+        assert result.state == "REJECTED"
+        assert okx.place_calls == 0
+        assert row.last_error_code == "swing_min_hold_exit_block"
+        assert guard["source_reason"] == "atr_trailing"
+        assert guard["exit_priority"] == "soft"
+        assert guard["exit_allowed_before_min_hold"] is False
+        assert guard["exit_blocked_by_min_hold"] is True
+        assert guard["min_hold_block_reason"] == "soft_exit_before_swing_min_hold"
+
+
+def test_live_execution_allows_hard_swing_exit_before_min_hold() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        okx = FakeOKX()
+        okx.balance_by_ccy["BNB"] = {"eq": "1", "availBal": "1", "cashBal": "1", "liab": "0"}
+        store = OrderStore(path=f"{td}/orders.sqlite")
+        pos = PositionStore(path=f"{td}/pos.sqlite")
+        entry_dt = datetime.now(timezone.utc) - timedelta(hours=5)
+        entry_ts = entry_dt.isoformat().replace("+00:00", "Z")
+        pos.upsert_position(
+            Position(
+                symbol="BNB/USDT",
+                qty=0.02,
+                avg_px=600.0,
+                entry_ts=entry_ts,
+                highest_px=630.0,
+                last_update_ts=entry_ts,
+                last_mark_px=600.0,
+                unrealized_pnl_pct=0.0,
+                tags_json=json.dumps({"swing_hold_position": True, "swing_entry_ts": entry_ts, "swing_min_hold_hours": 24}),
+            )
+        )
+        cfg = ExecutionConfig(
+            reconcile_status_path=f"{td}/reconcile_status.json",
+            kill_switch_path=f"{td}/kill_switch.json",
+            swing_min_hold_exit_guard_enabled=True,
+            swing_min_hold_hours=24,
+        )
+        eng = LiveExecutionEngine(cfg, okx=okx, order_store=store, position_store=pos, run_id="r")
+
+        result = eng.place(
+            Order(
+                symbol="BNB/USDT",
+                side="sell",
+                intent="CLOSE_LONG",
+                notional_usdt=12.0,
+                signal_price=600.0,
+                meta={"decision_hash": "bnb-hard-before-min-hold", "reason": "hard_stop_loss"},
+            )
+        )
+
+        assert result.state in {"OPEN", "FILLED"}
+        assert okx.place_calls == 1
 
 
 def test_buy_guard_respects_zero_borrow_liability_epsilon(monkeypatch) -> None:

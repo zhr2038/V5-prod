@@ -7,6 +7,7 @@ import time
 
 import requests
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,7 +25,7 @@ from src.monitoring.api_telemetry import classify_api_status, is_rate_limited, r
 from src.execution.okx_private_client import OKXPrivateClient, OKXPrivateClientError, OKXResponse
 from src.execution.order_store import OrderStore
 from src.execution.position_store import PositionStore
-from src.execution.probe_metadata import position_tags_from_order_meta
+from src.execution.probe_metadata import PROBE_POSITION_TYPES, position_tags_from_order_meta, probe_type_from_meta
 from src.data.okx_instruments import OKXSpotInstrumentsCache, round_down_to_lot
 from src.quant_lab_client.permissions import is_order_new_risk
 
@@ -64,6 +65,40 @@ def _load_json(path: str) -> Optional[Dict[str, Any]]:
 
 def _coalesce(value: Any, default: Any) -> Any:
     return default if value is None else value
+
+
+def _parse_iso_utc(value: Any) -> Optional[datetime]:
+    try:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _safe_json_obj(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(str(value or "{}"))
+    except Exception:
+        parsed = {}
+    return dict(parsed) if isinstance(parsed, dict) else {}
 
 
 def _to_bool(value: Any) -> bool:
@@ -880,6 +915,150 @@ class LiveExecutionEngine:
             return
         raise SafetyReject(f"rank_exit_missing_router_validation: {o.symbol} reason={reason}")
 
+    @staticmethod
+    def _exit_priority_for_reason(reason: str) -> str:
+        norm = str(reason or "").strip()
+        if not norm:
+            return "unknown"
+        hard_exact = {
+            "hard_stop_loss",
+            "stop_loss",
+            "fixed_stop_loss",
+            "profit_taking_stop_loss_hit",
+            "regime_exit",
+            "risk_off",
+            "risk_off_forced_close",
+            "kill_switch",
+            "manual_kill",
+            "manual_kill_switch",
+            "reconcile_fail",
+            "reconcile_failure",
+            "exchange_account_anomaly",
+            "account_anomaly",
+            "exchange_anomaly",
+        }
+        if norm in hard_exact or norm.startswith(
+            (
+                "dynamic_stop_",
+                "hard_stop_",
+                "risk_off_",
+                "reconcile_",
+                "kill_switch_",
+                "exchange_",
+                "account_",
+                "profit_taking_stop_loss_hit",
+            )
+        ):
+            return "hard"
+        soft_exact = {
+            "atr_trailing",
+            "profit_take",
+            "take_profit",
+            "soft_stop",
+            "weak_signal_exit",
+            "protect_profit_lock_trailing",
+            "time_stop",
+            "zero_target_close",
+            "normal_zero_target_close",
+            "target_rebalance_sell",
+            "force_close_unscored",
+            "target_churn",
+        }
+        if norm in soft_exact or norm.startswith(
+            (
+                "profit_taking_",
+                "profit_partial_",
+                "rank_exit_",
+                "weak_signal_",
+                "soft_stop_",
+                "zero_target",
+                "normal_zero_target",
+                "replacement_target",
+            )
+        ):
+            return "soft"
+        return "unknown"
+
+    def _exit_allowed_before_min_hold(self, reason: str) -> bool:
+        norm = str(reason or "").strip().lower()
+        if norm.startswith("protect_profit_lock"):
+            return bool(getattr(self.cfg, "swing_allow_exit_on_profit_lock", True))
+        return self._exit_priority_for_reason(reason) == "hard"
+
+    def _swing_min_hold_live_block_context(self, o: Order) -> Optional[Dict[str, Any]]:
+        side = str(getattr(o, "side", "") or "").lower()
+        intent = str(getattr(o, "intent", "") or "").upper()
+        if side != "sell" or intent != "CLOSE_LONG":
+            return None
+        if not bool(getattr(self.cfg, "swing_min_hold_exit_guard_enabled", True)):
+            return None
+
+        meta = dict(getattr(o, "meta", None) or {})
+        reason = str(meta.get("reason") or meta.get("exit_reason") or "").strip()
+        priority = self._exit_priority_for_reason(reason)
+        allowed_before_min_hold = self._exit_allowed_before_min_hold(reason)
+        if priority != "soft" or allowed_before_min_hold:
+            return None
+        if bool(meta.get("probe_exit", False)) or probe_type_from_meta(meta) in PROBE_POSITION_TYPES:
+            return None
+
+        position = self.position_store.get(o.symbol)
+        if position is None or float(getattr(position, "qty", 0.0) or 0.0) <= 0.0:
+            return None
+        tags = _safe_json_obj(getattr(position, "tags_json", "{}"))
+        if probe_type_from_meta(tags) in PROBE_POSITION_TYPES:
+            return None
+
+        min_hold_hours = _safe_float(meta.get("min_hold_hours"))
+        if min_hold_hours is None:
+            min_hold_hours = _safe_float(tags.get("swing_min_hold_hours"))
+        if min_hold_hours is None:
+            min_hold_hours = _safe_float(getattr(self.cfg, "swing_min_hold_hours", None))
+        if min_hold_hours is None or min_hold_hours <= 0:
+            return None
+
+        hold_hours = _safe_float(meta.get("hold_hours"))
+        if hold_hours is None:
+            hold_hours = _safe_float(meta.get("held_hours"))
+        if hold_hours is None:
+            entry_dt = _parse_iso_utc(
+                tags.get("swing_entry_ts")
+                or tags.get("entry_ts")
+                or getattr(position, "entry_ts", None)
+            )
+            if entry_dt is not None:
+                hold_hours = max(0.0, (datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600.0)
+        if hold_hours is None:
+            return None
+
+        swing_tagged = bool(
+            _to_bool(meta.get("swing_hold_position"))
+            or _to_bool(tags.get("swing_hold_position"))
+            or tags.get("swing_entry_ts") is not None
+            or meta.get("swing_entry_ts") is not None
+        )
+        if not swing_tagged and not bool(getattr(self.cfg, "swing_hold_enabled", True)):
+            return None
+
+        blocked = float(hold_hours) < float(min_hold_hours)
+        context = {
+            "symbol": o.symbol,
+            "action": "skip",
+            "reason": "swing_min_hold_exit_block",
+            "source_reason": reason,
+            "side": side,
+            "intent": intent,
+            "hold_hours": float(hold_hours),
+            "min_hold_hours": float(min_hold_hours),
+            "exit_priority": priority,
+            "exit_allowed_before_min_hold": bool(allowed_before_min_hold),
+            "exit_blocked_by_min_hold": bool(blocked),
+            "min_hold_block_reason": "soft_exit_before_swing_min_hold" if blocked else "",
+        }
+        meta.update(context)
+        o.meta = meta
+        return context if blocked else None
+
     def _build_place_payload(self, o: Order, *, inst_id: str, cl_ord_id: str) -> Dict[str, Any]:
         # Minimal market order payload.
         side = str(o.side)
@@ -1305,6 +1484,45 @@ class LiveExecutionEngine:
                 submit_gate=gate,
             )
             self.order_store.update_state(clid, new_state="REJECTED", last_error_code="GATE", last_error_msg="SELL_ONLY")
+            return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
+
+        swing_min_hold_block = self._swing_min_hold_live_block_context(o)
+        if swing_min_hold_block is not None:
+            self.order_store.upsert_new(
+                cl_ord_id=clid,
+                run_id=self.run_id,
+                inst_id=inst_id,
+                side=o.side,
+                intent=o.intent,
+                decision_hash=dh,
+                td_mode="cash",
+                ord_type="market",
+                notional_usdt=float(o.notional_usdt),
+                window_start_ts=(o.meta or {}).get("window_start_ts"),
+                window_end_ts=(o.meta or {}).get("window_end_ts"),
+                req={
+                    "blocked_by_policy": True,
+                    "reason": "swing_min_hold_exit_block",
+                    "swing_min_hold_guard": swing_min_hold_block,
+                    "_v5_order_meta": dict(o.meta or {}),
+                },
+                reconcile_ok_at_submit=reconcile_ok,
+                kill_switch_at_submit=kill_switch,
+                submit_gate=gate,
+            )
+            self.order_store.update_state(
+                clid,
+                new_state="REJECTED",
+                last_error_code="swing_min_hold_exit_block",
+                last_error_msg=(
+                    f"soft_exit_before_swing_min_hold: {o.symbol} "
+                    f"reason={swing_min_hold_block.get('source_reason')} "
+                    f"hold_hours={float(swing_min_hold_block.get('hold_hours') or 0.0):.4f} "
+                    f"< min_hold_hours={float(swing_min_hold_block.get('min_hold_hours') or 0.0):.4f}"
+                ),
+                event_type="POLICY_REJECT",
+            )
+            log.warning("SWING_MIN_HOLD_LIVE_BLOCK: %s", swing_min_hold_block)
             return LiveExecutionResult(cl_ord_id=clid, state="REJECTED")
 
         quant_lab_meta = dict((o.meta or {}).get("quant_lab") or {})

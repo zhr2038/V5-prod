@@ -1076,10 +1076,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "account_anomaly",
             "exchange_anomaly",
         }
-        if reason in hard_exact or reason.startswith(("dynamic_stop_", "hard_stop_", "risk_off_", "reconcile_", "kill_switch_", "exchange_", "account_")):
+        if reason in hard_exact or reason.startswith(("dynamic_stop_", "hard_stop_", "risk_off_", "reconcile_", "kill_switch_", "exchange_", "account_", "profit_taking_stop_loss_hit")):
             return "hard"
-        soft_exact = {"atr_trailing", "profit_take", "take_profit", "soft_stop", "weak_signal_exit", "protect_profit_lock_trailing", "time_stop"}
-        if reason in soft_exact or reason.startswith(("profit_taking_", "profit_partial_", "rank_exit_", "weak_signal_", "soft_stop_")):
+        soft_exact = {"atr_trailing", "profit_take", "take_profit", "soft_stop", "weak_signal_exit", "protect_profit_lock_trailing", "time_stop", "zero_target_close", "normal_zero_target_close", "target_rebalance_sell", "force_close_unscored", "target_churn"}
+        if reason in soft_exact or reason.startswith(("profit_taking_", "profit_partial_", "rank_exit_", "weak_signal_", "soft_stop_", "zero_target", "normal_zero_target", "replacement_target")):
             return "soft"
         return "unknown"
 
@@ -1857,6 +1857,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "exit_allowed_before_min_hold": bool_text(item.get("exit_allowed_before_min_hold", not_obs)),
                 "exit_blocked_by_min_hold": bool_text(item.get("exit_blocked_by_min_hold", not_obs)),
                 "exit_priority": flatten_value(item.get("exit_priority", not_obs)),
+                "min_hold_block_reason": flatten_value(item.get("min_hold_block_reason", not_obs)),
                 "early_exit_opportunity_cost_bps": flatten_value(item.get("early_exit_opportunity_cost_bps", not_obs)),
                 "raw_json": raw_json,
             }
@@ -2284,6 +2285,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             str(exit_priority == "hard").lower() if exit_priority != not_obs else not_obs,
         )
         exit_blocked_by_min_hold = first_observed(exit_router.get("exit_blocked_by_min_hold"), "false")
+        min_hold_block_reason = first_observed(exit_router.get("min_hold_block_reason"), "")
         would_status, would_24h_net_bps_raw, would_24h_gross_bps_raw, would_obs = estimate_held_24h_outcome(
             open_event["symbol"],
             open_event.get("ts_dt"),
@@ -2335,6 +2337,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "exit_allowed_before_min_hold": bool_text(exit_allowed_before_min_hold),
             "exit_blocked_by_min_hold": bool_text(exit_blocked_by_min_hold),
             "exit_priority": exit_priority,
+            "min_hold_block_reason": flatten_value(min_hold_block_reason),
             "early_exit_opportunity_cost_bps": flatten_value(early_cost_bps),
             "would_have_held_24h_status": would_status,
             "would_have_held_24h_net_bps": fmt_num(would_24h_net_bps_raw, 4),
@@ -4851,6 +4854,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "min_hold_hours": flatten_value(min_hold_hours),
                 "exit_allowed_before_min_hold": bool_text(row.get("exit_allowed_before_min_hold")),
                 "exit_blocked_by_min_hold": bool_text(row.get("exit_blocked_by_min_hold")),
+                "min_hold_block_reason": row.get("min_hold_block_reason", ""),
                 "actual_net_bps": row.get("net_bps", not_obs),
                 "would_have_held_24h_status": row.get("would_have_held_24h_status", "not_observable_no_24h_price"),
                 "would_have_held_24h_net_bps": row.get("would_have_held_24h_net_bps", not_obs),
@@ -4877,6 +4881,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "min_hold_hours": flatten_value(first_value(raw, ("min_hold_hours",), configured_swing_min_hold_hours)),
             "exit_allowed_before_min_hold": bool_text(first_value(raw, ("exit_allowed_before_min_hold",), False)),
             "exit_blocked_by_min_hold": bool_text(first_value(raw, ("exit_blocked_by_min_hold",), True)),
+            "min_hold_block_reason": flatten_value(first_value(raw, ("min_hold_block_reason",), "soft_exit_before_swing_min_hold")),
             "actual_net_bps": not_obs,
             "would_have_held_24h_status": "pending_not_matured_or_no_24h_price",
             "would_have_held_24h_net_bps": not_obs,
@@ -5137,6 +5142,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             hold_hours = (exit_dt - entry_dt).total_seconds() / 3600.0
         required_hold = swing_required_hold_hours(row)
         exit_reason = flatten_value(row.get("exit_reason")).strip()
+        exit_priority = first_observed(row.get("exit_priority"), exit_priority_for_reason(exit_reason))
+        exit_allowed_before_min_hold = first_observed(
+            row.get("exit_allowed_before_min_hold"),
+            str(exit_priority == "hard").lower() if exit_priority != not_obs else not_obs,
+        )
+        exit_blocked_by_min_hold = first_observed(row.get("exit_blocked_by_min_hold"), "false")
+        min_hold_block_reason = first_observed(row.get("min_hold_block_reason"), "")
         before_min_hold = hold_hours is not None and required_hold is not None and hold_hours < required_hold
         early_exit = before_min_hold and swing_early_exit_reason(exit_reason)
         future_24_entry = forward_net_bps(symbol, entry_dt, row.get("entry_px"), 24, swing_rt_cost_bps)
@@ -5154,6 +5166,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             "hold_hours": fmt_num(hold_hours, 6),
             "required_hold_hours": fmt_num(required_hold, 6),
             "exited_before_min_hold": str(bool(early_exit)).lower(),
+            "exit_priority": exit_priority,
+            "exit_allowed_before_min_hold": bool_text(exit_allowed_before_min_hold),
+            "exit_blocked_by_min_hold": bool_text(exit_blocked_by_min_hold),
+            "min_hold_block_reason": flatten_value(min_hold_block_reason),
             "net_bps_at_exit": row.get("net_bps", not_obs),
             "future_24h_net_bps_from_entry": future_24_entry,
             "future_48h_net_bps_from_entry": future_48_entry,
@@ -5217,6 +5233,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if swing_early_exit_better_24_rows
         else None
     )
+    swing_filled_soft_exit_before_min_hold_count = len(swing_early_exit_sample_rows)
+    swing_blocked_by_min_hold_count = sum(
+        1 for row in early_exit_rows
+        if row.get("event_type") == "pending_soft_exit_blocked_by_min_hold"
+        or row.get("exit_blocked_by_min_hold") == "true"
+    )
+    if swing_filled_soft_exit_before_min_hold_count > 0:
+        add_issue(
+            "high",
+            "swing_soft_exit_before_min_hold_filled",
+            "A soft swing exit filled before min-hold; router/live guard should have blocked it.",
+            {
+                "filled_soft_exit_before_min_hold_count": swing_filled_soft_exit_before_min_hold_count,
+                "blocked_by_min_hold_count": swing_blocked_by_min_hold_count,
+                "sample_rows": swing_early_exit_sample_rows[:10],
+            },
+        )
     if (
         len(swing_early_exit_sample_rows) >= 3
         and len(swing_early_exit_better_24_rows) >= 3
@@ -5997,17 +6030,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/router_decisions.csv",
         router_rows,
-        ["run_id", "audit_timestamp", "index", "symbol", "action", "reason", "source_reason", "stage", "side", "drift", "deadband", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "early_exit_opportunity_cost_bps", "raw_json"],
+        ["run_id", "audit_timestamp", "index", "symbol", "action", "reason", "source_reason", "stage", "side", "drift", "deadband", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "min_hold_block_reason", "early_exit_opportunity_cost_bps", "raw_json"],
     )
     write_csv(
         "summaries/trades_roundtrips.csv",
         trade_rows,
-        ["run_id", "source_file", "row_number", "timestamp", "symbol", "side", "qty", "price", "entry_ts", "entry_px", "exit_ts", "exit_px", "entry_reason", "exit_reason", "probe_type", "roundtrip_status", "gross_pnl_usdt", "fee_total_usdt", "net_pnl_usdt", "gross_bps", "net_bps", "hold_minutes", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "early_exit_opportunity_cost_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "remaining_value_usdt", "dust_threshold_usdt", "raw_json"],
+        ["run_id", "source_file", "row_number", "timestamp", "symbol", "side", "qty", "price", "entry_ts", "entry_px", "exit_ts", "exit_px", "entry_reason", "exit_reason", "probe_type", "roundtrip_status", "gross_pnl_usdt", "fee_total_usdt", "net_pnl_usdt", "gross_bps", "net_bps", "hold_minutes", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "exit_priority", "min_hold_block_reason", "early_exit_opportunity_cost_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "remaining_value_usdt", "dust_threshold_usdt", "raw_json"],
     )
     write_csv(
         "summaries/early_exit_cases.csv",
         early_exit_rows,
-        ["ts_utc", "run_id", "symbol", "event_type", "exit_reason", "exit_priority", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "actual_net_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "early_exit_opportunity_cost_bps", "diagnosis", "raw_json"],
+        ["ts_utc", "run_id", "symbol", "event_type", "exit_reason", "exit_priority", "hold_hours", "min_hold_hours", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "min_hold_block_reason", "actual_net_bps", "would_have_held_24h_status", "would_have_held_24h_net_bps", "early_exit_opportunity_cost_bps", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/dust_residual_roundtrips.csv",
@@ -6097,7 +6130,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/swing_early_exit_audit.csv",
         swing_early_exit_rows,
-        ["symbol", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "hold_hours", "required_hold_hours", "exited_before_min_hold", "net_bps_at_exit", "future_24h_net_bps_from_entry", "future_48h_net_bps_from_entry", "future_72h_net_bps_from_entry", "future_24h_net_bps_after_exit", "future_48h_net_bps_after_exit", "would_have_been_better_to_hold_24h", "would_have_been_better_to_hold_48h"],
+        ["symbol", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "hold_hours", "required_hold_hours", "exited_before_min_hold", "exit_priority", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "min_hold_block_reason", "net_bps_at_exit", "future_24h_net_bps_from_entry", "future_48h_net_bps_from_entry", "future_72h_net_bps_from_entry", "future_24h_net_bps_after_exit", "future_48h_net_bps_after_exit", "would_have_been_better_to_hold_24h", "would_have_been_better_to_hold_48h"],
     )
     write_csv(
         "summaries/swing_early_exit_outcomes_by_reason.csv",
@@ -6431,6 +6464,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "protect_sideways_normal_entry_medium_issue": bool(protect_sideways_medium_issue_present),
         "swing_early_exit_audit_rows": len(swing_early_exit_rows),
         "swing_early_exit_count": swing_early_exit_count,
+        "swing_blocked_by_min_hold_count": swing_blocked_by_min_hold_count,
+        "swing_filled_soft_exit_before_min_hold_count": swing_filled_soft_exit_before_min_hold_count,
         "swing_early_exit_atr_trailing_count": swing_early_exit_atr_trailing_count,
         "swing_early_exit_better_to_hold_24h_rate": swing_early_exit_better_24_rate if swing_early_exit_better_24_rate is not None else not_obs,
         "swing_early_exit_medium_issue": bool(swing_early_exit_medium_issue_present),
@@ -6920,6 +6955,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "## Swing early exit audit",
         f"- audit rows: {len(swing_early_exit_rows)}",
         f"- early exit count: {swing_early_exit_count}",
+        f"- blocked_by_min_hold count: {swing_blocked_by_min_hold_count}",
+        f"- filled soft exit before min_hold count: {swing_filled_soft_exit_before_min_hold_count}",
         f"- by reason: {swing_early_exit_by_reason_text}",
         f"- ATR trailing before min_hold: {swing_early_exit_atr_text}",
         f"- better_to_hold_24h_rate: {swing_early_exit_better_24_text}",

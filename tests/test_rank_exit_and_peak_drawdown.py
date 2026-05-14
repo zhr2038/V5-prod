@@ -78,6 +78,7 @@ def _run_swing_min_hold_exit_case(
     *,
     hold_hours: float,
     exit_reason: str,
+    cfg_mutator=None,
 ):
     now = datetime(2026, 5, 2, 5, 0, tzinfo=timezone.utc)
     entry_ts = (now - timedelta(hours=hold_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -87,6 +88,8 @@ def _run_swing_min_hold_exit_case(
     cfg.execution.swing_min_hold_hours = 24.0
     cfg.execution.protect_profit_lock_enabled = False
     cfg.execution.probe_exit_enabled = False
+    if cfg_mutator is not None:
+        cfg_mutator(cfg)
 
     pipe = _build_pipe(cfg, tmp_path)
     pipe.clock = _FixedClock(now)
@@ -143,6 +146,7 @@ def test_swing_min_hold_blocks_atr_trailing_before_24h(tmp_path):
     assert decision["exit_allowed_before_min_hold"] is False
     assert decision["exit_blocked_by_min_hold"] is True
     assert decision["exit_priority"] == "soft"
+    assert decision["min_hold_block_reason"] == "soft_exit_before_swing_min_hold"
     assert audit.counts["swing_min_hold_exit_block_count"] == 1
 
 
@@ -160,6 +164,17 @@ def test_swing_min_hold_allows_hard_stop_loss_before_24h(tmp_path):
         and d.get("exit_allowed_before_min_hold") is True
         for d in audit.router_decisions
     )
+
+
+def test_swing_min_hold_allows_risk_off_before_24h(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(tmp_path, hold_hours=5.0, exit_reason="risk_off")
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert order.meta["exit_priority"] == "hard"
+    assert order.meta["exit_allowed_before_min_hold"] is True
+    assert order.meta["exit_blocked_by_min_hold"] is False
+    assert order.meta["hold_hours"] == pytest.approx(5.0)
+    assert not any(d.get("reason") == "swing_min_hold_exit_block" for d in audit.router_decisions)
 
 
 def test_swing_min_hold_allows_atr_trailing_after_24h(tmp_path):
@@ -181,6 +196,29 @@ def test_swing_min_hold_allows_kill_switch_exit_at_any_hold(tmp_path):
     assert order.meta["exit_allowed_before_min_hold"] is True
     assert order.meta["exit_blocked_by_min_hold"] is False
     assert not any(d.get("reason") == "swing_min_hold_exit_block" for d in audit.router_decisions)
+
+
+def test_swing_min_hold_profit_lock_obeys_config(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(
+        tmp_path,
+        hold_hours=5.0,
+        exit_reason="protect_profit_lock_trailing",
+    )
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert order.meta["exit_priority"] == "soft"
+    assert order.meta["exit_allowed_before_min_hold"] is True
+    assert order.meta["exit_blocked_by_min_hold"] is False
+
+    blocked_out, blocked_audit = _run_swing_min_hold_exit_case(
+        tmp_path,
+        hold_hours=5.0,
+        exit_reason="protect_profit_lock_trailing",
+        cfg_mutator=lambda cfg: setattr(cfg.execution, "swing_allow_exit_on_profit_lock", False),
+    )
+    assert not any(order.symbol == "BNB/USDT" and order.side == "sell" for order in blocked_out.orders)
+    decision = next(d for d in blocked_audit.router_decisions if d.get("reason") == "swing_min_hold_exit_block")
+    assert decision["source_reason"] == "protect_profit_lock_trailing"
+    assert decision["exit_blocked_by_min_hold"] is True
 
 
 def test_rank_exit_does_not_close_when_target_still_positive_even_in_strict_mode(tmp_path):
