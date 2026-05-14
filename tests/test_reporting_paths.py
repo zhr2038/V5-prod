@@ -5,7 +5,30 @@ import json
 import pytest
 
 from src.core import run_logger
-from src.reporting import decision_audit, metrics, reporting, summary_writer, trade_log
+from src.reporting import budget_state, decision_audit, metrics, reporting, summary_writer, trade_log
+
+
+TRADE_HEADER = (
+    "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,"
+    "slippage_usdt,realized_pnl_usdt,realized_pnl_pct"
+)
+
+
+def _write_equity(run_dir, ts="2026-05-12T00:00:00Z", equity=100.0):
+    (run_dir / "equity.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"ts": ts, "equity": equity}),
+                json.dumps({"ts": "2026-05-12T01:00:00Z", "equity": equity}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_trades(run_dir, rows):
+    (run_dir / "trades.csv").write_text("\n".join([TRADE_HEADER, *rows]) + "\n", encoding="utf-8")
 
 
 def test_trade_log_writer_resolves_relative_run_dir_from_project_root(monkeypatch, tmp_path):
@@ -103,6 +126,110 @@ def test_write_summary_counts_single_bnb_trade_from_trades_csv(monkeypatch, tmp_
     assert summary["cost_usdt_total"] == 0.012
 
 
+def test_write_summary_counts_20260512_06_bnb_buy_fixture(monkeypatch, tmp_path):
+    monkeypatch.setattr(summary_writer, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+
+    run_dir = tmp_path / "reports" / "runs" / "20260512_06"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-12T06:00:00Z", equity=100.0)
+    _write_trades(
+        run_dir,
+        [
+            "2026-05-11T22:01:00.596000Z,20260512_06,BNB/USDT,OPEN_LONG,buy,"
+            "0.0241,663.9,15.99999,0.01599999,0.001205,,"
+        ],
+    )
+
+    summary = summary_writer.write_summary("reports/runs/20260512_06")
+
+    assert summary["trades_file_exists"] is True
+    assert summary["trades_file_rows"] == 1
+    assert summary["trades_counted_rows"] == 1
+    assert summary["trade_metrics_source"] == "trades_csv"
+    assert summary["trade_metrics_warning"] == ""
+    assert summary["num_trades"] == 1
+    assert summary["turnover_usdt"] == pytest.approx(15.99999)
+    assert summary["fees_usdt_total"] == pytest.approx(0.01599999)
+    assert summary["slippage_usdt_total"] == pytest.approx(0.001205)
+    assert summary["cost_usdt_total"] == pytest.approx(0.01720499)
+
+
+def test_write_summary_counts_20260512_11_bnb_sell_fixture(monkeypatch, tmp_path):
+    monkeypatch.setattr(summary_writer, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+
+    run_dir = tmp_path / "reports" / "runs" / "20260512_11"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-12T11:00:00Z", equity=100.0)
+    _write_trades(
+        run_dir,
+        [
+            "2026-05-12T03:00:41.218000Z,20260512_11,BNB/USDT,CLOSE_LONG,sell,"
+            "0.024075,662.8,15.95691,0.01595691,0.00120375,,"
+        ],
+    )
+
+    summary = summary_writer.write_summary("reports/runs/20260512_11")
+
+    assert summary["trades_file_exists"] is True
+    assert summary["trades_file_rows"] == 1
+    assert summary["trades_counted_rows"] == 1
+    assert summary["trade_metrics_source"] == "trades_csv"
+    assert summary["trade_metrics_warning"] == ""
+    assert summary["num_trades"] == 1
+    assert summary["turnover_usdt"] == pytest.approx(15.95691)
+    assert summary["fees_usdt_total"] == pytest.approx(0.01595691)
+    assert summary["slippage_usdt_total"] == pytest.approx(0.00120375)
+    assert summary["cost_usdt_total"] == pytest.approx(0.01716066)
+
+
+def test_daily_budget_counts_20260512_buy_sell_fills_from_summary_metrics(monkeypatch, tmp_path):
+    monkeypatch.setattr(summary_writer, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(budget_state, "PROJECT_ROOT", tmp_path)
+
+    fixtures = {
+        "20260512_06": (
+            "2026-05-11T22:01:00.596000Z,20260512_06,BNB/USDT,OPEN_LONG,buy,"
+            "0.0241,663.9,15.99999,0.01599999,0.001205,,"
+        ),
+        "20260512_11": (
+            "2026-05-12T03:00:41.218000Z,20260512_11,BNB/USDT,CLOSE_LONG,sell,"
+            "0.024075,662.8,15.95691,0.01595691,0.00120375,,"
+        ),
+    }
+
+    state = None
+    for run_id, trade_row in fixtures.items():
+        run_dir = tmp_path / "reports" / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        _write_equity(run_dir, ts="2026-05-12T00:00:00Z", equity=100.0)
+        _write_trades(run_dir, [trade_row])
+        summary = summary_writer.write_summary(f"reports/runs/{run_id}", window_end_ts=1778544000)
+        trade_read = metrics.read_trades_csv_detailed(str(run_dir / "trades.csv"))
+        notionals = [abs(float(row["notional_usdt"])) for row in trade_read.rows]
+        state = budget_state.update_daily_budget_state(
+            base_dir="reports/budget_state",
+            ymd_utc="20260512",
+            run_id=run_id,
+            turnover_inc=float(summary["turnover_usdt"]),
+            cost_inc_usdt=float(summary["cost_usdt_total"]),
+            fills_count_inc=int(summary["trades_counted_rows"]),
+            notionals_inc=notionals,
+            avg_equity=summary.get("avg_equity"),
+            turnover_budget_per_day=1.0,
+            cost_budget_bps_per_day=100.0,
+            small_trade_notional_cutoff=10.0,
+        )
+
+    assert state is not None
+    assert state.fills_count_today == 2
+    assert state.turnover_used == pytest.approx(31.9569)
+    assert state.cost_used_usdt == pytest.approx(0.03436565)
+    assert state.to_dict()["fills_count_today"] == 2
+
+
 def test_write_summary_counts_bnb_buy_sell_turnover_and_fee(monkeypatch, tmp_path):
     monkeypatch.setattr(summary_writer, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
@@ -165,6 +292,7 @@ def test_write_summary_warns_on_malformed_trades_csv(monkeypatch, tmp_path):
     assert summary["num_trades"] == 0
     assert summary["trade_metrics_source"] == "trades_csv_parse_error"
     assert summary["trade_metrics_warning_count"] > 0
+    assert "parse failed" in summary["trade_metrics_warning"]
     assert any("parse failed" in item for item in summary["trade_metrics_warnings"])
 
 

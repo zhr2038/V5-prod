@@ -159,6 +159,7 @@ def _trade_metrics_from_file(rd: Path, avg_equity: float | None) -> Dict[str, An
             "trades_file_rows": int(trade_read.file_rows),
             "trades_counted_rows": int(trade_read.counted_rows),
             "trade_metrics_source": source,
+            "trade_metrics_warning": "; ".join(str(item) for item in trade_read.warnings),
             "trade_metrics_warnings": list(trade_read.warnings),
             "trade_metrics_warning_count": int(len(trade_read.warnings)),
         }

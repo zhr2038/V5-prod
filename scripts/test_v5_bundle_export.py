@@ -231,6 +231,7 @@ def fixture_dust_residual_root(root):
         run_dir / "trades.csv",
         f"ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n{iso(ts + 20)},{run_id},BTC/USDT,OPEN_LONG,buy,0.00020939,76412.1,15.999751719,0.016\n",
     )
+    write_json(run_dir / "summary.json", {"run_id": run_id, "num_trades": 1, "turnover_usdt": 15.999751719, "fees_usdt_total": 0.016, "slippage_usdt_total": 0, "cost_usdt_total": 0.016})
 
     run_id, run_dir, ts = run_dir_for(4)
     write_json(run_dir / "decision_audit.json", {
@@ -243,6 +244,7 @@ def fixture_dust_residual_root(root):
         run_dir / "trades.csv",
         f"ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n{iso(ts + 20)},{run_id},BTC/USDT,CLOSE_LONG,sell,0.00020905,78100,16.332805,0.0163\n",
     )
+    write_json(run_dir / "summary.json", {"run_id": run_id, "num_trades": 1, "turnover_usdt": 16.332805, "fees_usdt_total": 0.0163, "slippage_usdt_total": 0, "cost_usdt_total": 0.0163})
 
     run_id, run_dir, ts = run_dir_for(3)
     write_json(run_dir / "decision_audit.json", {
@@ -255,6 +257,7 @@ def fixture_dust_residual_root(root):
         run_dir / "trades.csv",
         f"ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n{iso(ts + 20)},{run_id},BTC/USDT,CLOSE_LONG,sell,0.00000021,78277.4,0.016438254,0.00002\n",
     )
+    write_json(run_dir / "summary.json", {"run_id": run_id, "num_trades": 1, "turnover_usdt": 0.016438254, "fees_usdt_total": 0.00002, "slippage_usdt_total": 0, "cost_usdt_total": 0.00002})
     return run_id
 
 
@@ -451,6 +454,68 @@ def fixture_quant_lab_summary_root(root):
         },
     ]
     write_text(root / "reports/quant_lab_requests.jsonl", "\n".join(json.dumps(row) for row in request_rows) + "\n")
+
+
+def fixture_summary_trade_count_mismatch_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    open_dt = now - dt.timedelta(hours=5)
+    close_dt = now - dt.timedelta(hours=4)
+    open_run_id = open_dt.strftime("%Y%m%d_%H")
+    close_run_id = close_dt.strftime("%Y%m%d_%H")
+
+    write_text(root / "configs/live_prod.yaml", "probe_time_stop_hours: 4\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    open_run = root / "reports/runs/prod" / open_run_id
+    write_json(open_run / "decision_audit.json", {"window_end_ts": int(open_dt.timestamp()), "router_decisions": []})
+    write_text(
+        open_run / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt\n"
+        f"{iso(int(open_dt.timestamp()) + 60)},{open_run_id},BNB/USDT,OPEN_LONG,buy,0.0241,663.9,15.99999,0.01599999,0.001205\n",
+    )
+    write_text(open_run / "equity.jsonl", "{}\n")
+    write_json(
+        open_run / "summary.json",
+        {
+            "run_id": open_run_id,
+            "num_trades": 0,
+            "fees_usdt_total": 0,
+            "slippage_usdt_total": 0,
+            "cost_usdt_total": 0,
+            "turnover_usdt": 0,
+            "budget": {"fills_count_today": 0},
+        },
+    )
+
+    close_run = root / "reports/runs/prod" / close_run_id
+    write_json(close_run / "decision_audit.json", {"window_end_ts": int(close_dt.timestamp()), "router_decisions": []})
+    write_text(
+        close_run / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt\n"
+        f"{iso(int(close_dt.timestamp()) + 60)},{close_run_id},BNB/USDT,CLOSE_LONG,sell,0.024075,662.8,15.95691,0.01595691,0.00120375\n",
+    )
+    write_text(close_run / "equity.jsonl", "{}\n")
+    write_json(
+        close_run / "summary.json",
+        {
+            "run_id": close_run_id,
+            "num_trades": 0,
+            "fees_usdt_total": 0,
+            "slippage_usdt_total": 0,
+            "cost_usdt_total": 0,
+            "turnover_usdt": 0,
+            "budget": {"fills_count_today": 0},
+        },
+    )
 
 
 def fixture_config_runtime_consumption_root(root):
@@ -2507,6 +2572,36 @@ def main():
             assert window["quant_lab_actual_fallback_count"] == 2, window
             assert window["quant_lab_fallback_count"] == 2, window
             assert window["quant_lab_fallback_rows"] == 2, window
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-summary-trade-count-mismatch-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_summary_trade_count_mismatch_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/summary_trade_count_mismatch.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 2, rows
+            assert {row["trades_counted_rows"] for row in rows} == {"1"}, rows
+            assert {row["summary_num_trades"] for row in rows} == {"0"}, rows
+            assert all(row["diagnosis"] == "high_issue_summary_trade_count_mismatch" for row in rows), rows
+            assert any(row["trades_cost_usdt_total"] == "0.01720499" for row in rows), rows
+            assert any(row["trades_cost_usdt_total"] == "0.01716066" for row in rows), rows
+            summary_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "summary_trade_count_mismatch"
+            ]
+            assert len(summary_issues) == 2, issues
+            assert window["summary_trade_count_mismatch_count"] == 2, window
+            assert window["summary_trade_count_mismatch_high_issue_count"] == 2, window
+            assert "## Summary trade metrics check" in readme, readme
+            assert "summary_trade_count_mismatch rows: 2" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
