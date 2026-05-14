@@ -140,7 +140,9 @@ def test_shadow_missing_edge_is_hypothetical_only(tmp_path: Path) -> None:
     )
 
     assert len(kept) == 1
-    assert rows[0]["filter_reason"] == "expected_edge_missing_hypothetical"
+    assert rows[0]["filter_reason"] == "expected_edge_missing_no_filter"
+    assert rows[0]["warning"] == "expected_edge_missing_cost_gate_not_verified"
+    assert rows[0]["cost_gate_verified"] is False
     assert rows[0]["would_filter_by_cost"] is True
     assert rows[0]["actually_filtered"] is False
     assert rows[0]["hypothetical"] is True

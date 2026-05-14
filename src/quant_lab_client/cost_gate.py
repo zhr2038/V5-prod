@@ -235,7 +235,7 @@ def apply_quant_lab_cost_gate(order: Any, cost_estimate: CostEstimate, cfg: Any,
         return CostGateResult(
             passed=False,
             filtered=True,
-            reason="expected_edge_missing_hypothetical",
+            reason="expected_edge_missing_no_filter",
             symbol=cost_estimate.symbol,
             regime=cost_estimate.regime,
             notional_usdt=float(cost_estimate.notional_usdt or 0.0),

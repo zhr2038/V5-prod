@@ -1177,6 +1177,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
             return False
         if quant_lab_request_success(row):
             return False
+        fallback_reason = flatten_value(row.get("fallback_reason")).strip().lower()
+        if fallback_reason == "global_default_cost" and not truthy_observed(row.get("fallback_used")) and flatten_value(row.get("event_type")) != "fallback":
+            return False
         error_text = flatten_value(first_observed(row.get("error_type"), row.get("error"), "")).lower()
         if any(marker in error_text for marker in ("timeout", "connection", "unavailable", "invalid")):
             return True
@@ -1451,6 +1454,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     quant_lab_fallback_rows = []
     quant_lab_request_success_count = 0
     quant_lab_request_error_count = 0
+    trade_file_stats_by_run = {}
+    summary_trade_count_mismatch_rows = []
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
     dust_residual_row_keys = set()
@@ -1604,13 +1609,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     continue
                 required_edge = first_observed(row.get("required_edge_bps"), row.get("min_required_edge_bps"), not_obs)
                 cost_source = first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"), not_obs)
+                fallback_level = first_observed(row.get("fallback_level"), not_obs)
+                degraded_cost = flatten_value(cost_source).strip().lower() == "global_default" or flatten_value(fallback_level).strip().upper() == "GLOBAL_DEFAULT"
+                cost_diagnosis = "global_default_cost" if degraded_cost else flatten_value(row.get("diagnosis") or ("fallback_cost" if row.get("fallback_used") else "ok"))
                 quant_lab_cost_usage_rows.append({
                     "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
                     "run_id": run_id,
                     "ts_utc": audit_ts,
                     "mode": flatten_value(first_observed(row.get("mode"), quant_lab.get("mode"), not_obs)),
                     "symbol": flatten_value(row.get("symbol") or not_obs),
+                    "request_symbol": flatten_value(first_observed(row.get("request_symbol"), row.get("symbol"), not_obs)),
                     "normalized_symbol": flatten_value(row.get("normalized_symbol") or not_obs),
+                    "response_symbol": flatten_value(first_observed(row.get("response_symbol"), row.get("normalized_symbol"), row.get("symbol"), not_obs)),
                     "venue": flatten_value(row.get("venue") or not_obs),
                     "instrument_type": flatten_value(row.get("instrument_type") or not_obs),
                     "side": flatten_value(row.get("side") or not_obs),
@@ -1619,13 +1629,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "quantile": flatten_value(row.get("quantile") or not_obs),
                     "strategy_id": flatten_value(first_observed(row.get("strategy_id"), row.get("alpha_id"), not_obs)),
                     "request_id": flatten_value(row.get("request_id") or not_obs),
+                    "requested_regime": flatten_value(first_observed(row.get("requested_regime"), row.get("regime"), not_obs)),
+                    "matched_regime": flatten_value(first_observed(row.get("matched_regime"), row.get("regime"), not_obs)),
                     "alpha_id": flatten_value(row.get("alpha_id") or not_obs),
                     "cost_bps": flatten_value(first_observed(row.get("cost_bps"), row.get("total_cost_bps"), row.get("effective_total_cost_bps"))),
                     "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
                     "cost_source": flatten_value(cost_source),
                     "cost_model_version": flatten_value(row.get("cost_model_version") or not_obs),
+                    "fallback_level": flatten_value(fallback_level),
+                    "sample_count": flatten_value(row.get("sample_count") if row.get("sample_count") is not None else not_obs),
                     "total_cost_bps": flatten_value(row.get("total_cost_bps") if row.get("total_cost_bps") is not None else not_obs),
                     "effective_total_cost_bps": flatten_value(row.get("effective_total_cost_bps") if row.get("effective_total_cost_bps") is not None else not_obs),
+                    "selected_total_cost_bps": flatten_value(row.get("selected_total_cost_bps") if row.get("selected_total_cost_bps") is not None else first_observed(row.get("total_cost_bps"), not_obs)),
                     "total_cost_bps_p50": flatten_value(row.get("total_cost_bps_p50") if row.get("total_cost_bps_p50") is not None else not_obs),
                     "total_cost_bps_p75": flatten_value(row.get("total_cost_bps_p75") if row.get("total_cost_bps_p75") is not None else not_obs),
                     "total_cost_bps_p90": flatten_value(row.get("total_cost_bps_p90") if row.get("total_cost_bps_p90") is not None else not_obs),
@@ -1639,10 +1654,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                     "cost_gate_enforced": bool_observed(first_observed(row.get("cost_gate_enforced"), quant_lab.get("cost_gate_enforced"))),
                     "quant_lab_decision": flatten_value(row.get("quant_lab_decision") or not_obs),
                     "fallback_used": str(bool(row.get("fallback_used"))).lower(),
+                    "fallback_used_for_cost_model": str(bool(row.get("fallback_used") or degraded_cost)).lower(),
                     "fallback_reason": flatten_value(row.get("fallback_reason") or not_obs),
+                    "degraded_cost_model": str(bool(degraded_cost)).lower(),
                     "filtered": str(bool(row.get("filtered"))).lower() if "filtered" in row else not_obs,
                     "filter_reason": flatten_value(row.get("filter_reason") or not_obs),
-                    "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
+                    "warning": flatten_value(row.get("warning") or not_obs),
+                    "cost_gate_verified": bool_observed(row.get("cost_gate_verified")),
+                    "diagnosis": cost_diagnosis,
                     "raw_json": safe_json(row),
                 })
                 if quant_lab_is_fallback(row):
@@ -2400,11 +2419,108 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         try:
             with trade_path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
                 reader = csv.DictReader(fh)
+                file_rows = 0
+                counted_rows = 0
+                notional_total = 0.0
+                fee_total = 0.0
+                slippage_total = 0.0
                 for idx, item in enumerate(reader):
-                    raw_trade_events.append(build_trade_event(trade_path, run_id, idx, item))
+                    file_rows += 1
+                    event = build_trade_event(trade_path, run_id, idx, item)
+                    raw_trade_events.append(event)
+                    notional = as_float(event.get("notional_usdt"))
+                    if notional is None or abs(notional) <= 0.0:
+                        continue
+                    counted_rows += 1
+                    notional_total += abs(float(notional))
+                    fee_total += float(as_float(event.get("fee_usdt")) or 0.0)
+                    slippage_total += float(as_float(first_value(item, ("slippage_usdt", "slippage"), not_obs)) or 0.0)
+                trade_file_stats_by_run[run_id] = {
+                    "run_id": run_id,
+                    "trades_file_exists": True,
+                    "trades_file_rows": file_rows,
+                    "trades_counted_rows": counted_rows,
+                    "trades_turnover_usdt": notional_total,
+                    "trades_fees_usdt_total": fee_total,
+                    "trades_slippage_usdt_total": slippage_total,
+                    "trades_cost_usdt_total": fee_total + slippage_total,
+                    "parse_error": "",
+                    "source_file": str(trade_path.relative_to(OUT)),
+                }
         except Exception as exc:
             trade_read_errors += 1
+            trade_file_stats_by_run[run_id] = {
+                "run_id": run_id,
+                "trades_file_exists": True,
+                "trades_file_rows": 0,
+                "trades_counted_rows": 0,
+                "trades_turnover_usdt": 0.0,
+                "trades_fees_usdt_total": 0.0,
+                "trades_slippage_usdt_total": 0.0,
+                "trades_cost_usdt_total": 0.0,
+                "parse_error": repr(exc),
+                "source_file": str(trade_path.relative_to(OUT)),
+            }
             collection_errors.append({"source": str(trade_path), "error": f"trade_csv: {exc!r}"})
+
+    for run_id, stats in sorted(trade_file_stats_by_run.items()):
+        summary_path = OUT / "raw" / "recent_runs" / run_id / "summary.json"
+        summary = load_json(summary_path) if summary_path.is_file() else None
+        if not isinstance(summary, dict):
+            summary = {}
+        summary_num_trades = as_int(summary.get("num_trades"))
+        summary_turnover = as_float(first_observed(summary.get("turnover_usdt"), summary.get("notional_usdt_total")))
+        summary_fees = as_float(first_observed(summary.get("fees_usdt_total"), summary.get("fee_usdt_total")))
+        summary_slippage = as_float(summary.get("slippage_usdt_total"))
+        summary_cost = as_float(summary.get("cost_usdt_total"))
+        count_mismatch = int(stats["trades_counted_rows"]) != int(summary_num_trades)
+        cost_mismatch = (
+            summary_cost is not None
+            and abs(float(stats["trades_cost_usdt_total"]) - float(summary_cost)) > 1e-9
+        )
+        high_mismatch = int(stats["trades_counted_rows"]) > 0 and int(summary_num_trades) == 0
+        if not (count_mismatch or cost_mismatch):
+            continue
+        diagnosis = "summary_trade_count_mismatch"
+        if high_mismatch:
+            diagnosis = "high_issue_summary_trade_count_mismatch"
+        elif cost_mismatch:
+            diagnosis = "summary_trade_cost_mismatch"
+        row = {
+            "run_id": run_id,
+            "source_file": stats["source_file"],
+            "trades_file_exists": str(bool(stats["trades_file_exists"])).lower(),
+            "trades_file_rows": stats["trades_file_rows"],
+            "trades_counted_rows": stats["trades_counted_rows"],
+            "summary_num_trades": summary_num_trades if summary_path.is_file() else not_obs,
+            "trades_turnover_usdt": fmt_num(stats["trades_turnover_usdt"], 12),
+            "summary_turnover_usdt": fmt_num(summary_turnover, 12),
+            "trades_fees_usdt_total": fmt_num(stats["trades_fees_usdt_total"], 12),
+            "summary_fees_usdt_total": fmt_num(summary_fees, 12),
+            "trades_slippage_usdt_total": fmt_num(stats["trades_slippage_usdt_total"], 12),
+            "summary_slippage_usdt_total": fmt_num(summary_slippage, 12),
+            "trades_cost_usdt_total": fmt_num(stats["trades_cost_usdt_total"], 12),
+            "summary_cost_usdt_total": fmt_num(summary_cost, 12),
+            "count_mismatch": str(bool(count_mismatch)).lower(),
+            "cost_mismatch": str(bool(cost_mismatch)).lower(),
+            "diagnosis": diagnosis,
+            "parse_error": stats.get("parse_error") or "",
+        }
+        summary_trade_count_mismatch_rows.append(row)
+        if high_mismatch:
+            add_issue(
+                "high",
+                "summary_trade_count_mismatch",
+                "trades.csv has counted fill rows but summary.json reports num_trades=0.",
+                {
+                    "run_id": run_id,
+                    "source_file": stats["source_file"],
+                    "trades_file_rows": stats["trades_file_rows"],
+                    "trades_counted_rows": stats["trades_counted_rows"],
+                    "summary_num_trades": summary_num_trades,
+                    "summary_path": str(summary_path.relative_to(OUT)) if summary_path.exists() else not_obs,
+                },
+            )
 
     raw_trade_events.sort(key=lambda event: (
         event["symbol"],
@@ -5773,13 +5889,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         if event_type == "cost_estimate":
             required_edge = first_observed(row.get("required_edge_bps"), row.get("min_required_edge_bps"), not_obs)
             cost_source = first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"), not_obs)
+            fallback_level = first_observed(row.get("fallback_level"), not_obs)
+            degraded_cost = flatten_value(cost_source).strip().lower() == "global_default" or flatten_value(fallback_level).strip().upper() == "GLOBAL_DEFAULT"
+            cost_diagnosis = "global_default_cost" if degraded_cost else flatten_value(row.get("diagnosis") or ("fallback_cost" if row.get("fallback_used") else "ok"))
             quant_lab_cost_usage_rows.append({
                 "source": source,
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
                 "mode": flatten_value(row.get("mode") or not_obs),
                 "symbol": flatten_value(row.get("symbol") or not_obs),
+                "request_symbol": flatten_value(first_observed(row.get("request_symbol"), row.get("symbol"), not_obs)),
                 "normalized_symbol": flatten_value(row.get("normalized_symbol") or not_obs),
+                "response_symbol": flatten_value(first_observed(row.get("response_symbol"), row.get("normalized_symbol"), row.get("symbol"), not_obs)),
                 "venue": flatten_value(row.get("venue") or not_obs),
                 "instrument_type": flatten_value(row.get("instrument_type") or not_obs),
                 "side": flatten_value(row.get("side") or not_obs),
@@ -5788,13 +5909,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "quantile": flatten_value(row.get("quantile") or not_obs),
                 "strategy_id": flatten_value(first_observed(row.get("strategy_id"), row.get("alpha_id"), not_obs)),
                 "request_id": flatten_value(row.get("request_id") or not_obs),
+                "requested_regime": flatten_value(first_observed(row.get("requested_regime"), row.get("regime"), not_obs)),
+                "matched_regime": flatten_value(first_observed(row.get("matched_regime"), row.get("regime"), not_obs)),
                 "alpha_id": flatten_value(row.get("alpha_id") or not_obs),
                 "cost_bps": flatten_value(first_observed(row.get("cost_bps"), row.get("total_cost_bps"), row.get("effective_total_cost_bps"))),
                 "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
                 "cost_source": flatten_value(cost_source),
                 "cost_model_version": flatten_value(row.get("cost_model_version") or not_obs),
+                "fallback_level": flatten_value(fallback_level),
+                "sample_count": flatten_value(row.get("sample_count") if row.get("sample_count") is not None else not_obs),
                 "total_cost_bps": flatten_value(row.get("total_cost_bps") if row.get("total_cost_bps") is not None else not_obs),
                 "effective_total_cost_bps": flatten_value(row.get("effective_total_cost_bps") if row.get("effective_total_cost_bps") is not None else not_obs),
+                "selected_total_cost_bps": flatten_value(row.get("selected_total_cost_bps") if row.get("selected_total_cost_bps") is not None else first_observed(row.get("total_cost_bps"), not_obs)),
                 "total_cost_bps_p50": flatten_value(row.get("total_cost_bps_p50") if row.get("total_cost_bps_p50") is not None else not_obs),
                 "total_cost_bps_p75": flatten_value(row.get("total_cost_bps_p75") if row.get("total_cost_bps_p75") is not None else not_obs),
                 "total_cost_bps_p90": flatten_value(row.get("total_cost_bps_p90") if row.get("total_cost_bps_p90") is not None else not_obs),
@@ -5808,10 +5934,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
                 "cost_gate_enforced": bool_observed(row.get("cost_gate_enforced")),
                 "quant_lab_decision": flatten_value(row.get("quant_lab_decision") or not_obs),
                 "fallback_used": bool_observed(row.get("fallback_used")),
+                "fallback_used_for_cost_model": str(bool(truthy_observed(row.get("fallback_used")) or degraded_cost)).lower(),
                 "fallback_reason": flatten_value(row.get("fallback_reason") or not_obs),
+                "degraded_cost_model": str(bool(degraded_cost)).lower(),
                 "filtered": str(bool(row.get("filtered"))).lower() if "filtered" in row else not_obs,
                 "filter_reason": flatten_value(row.get("filter_reason") or not_obs),
-                "diagnosis": "fallback_cost" if row.get("fallback_used") else "ok",
+                "warning": flatten_value(row.get("warning") or not_obs),
+                "cost_gate_verified": bool_observed(row.get("cost_gate_verified")),
+                "diagnosis": cost_diagnosis,
                 "raw_json": safe_json(row),
             })
         if quant_lab_is_fallback(row):
@@ -5920,6 +6050,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         ["symbol", "roundtrip_closed_count", "roundtrip_net_pnl_sum_usdt", "roundtrip_weighted_net_bps", "negexp_closed_cycles", "negexp_net_pnl_sum_usdt", "negexp_net_expectancy_bps", "negexp_fast_fail_net_expectancy_bps", "pnl_mismatch_usdt", "bps_mismatch", "mismatch_suspected", "diagnosis"],
     )
     write_csv(
+        "summaries/summary_trade_count_mismatch.csv",
+        summary_trade_count_mismatch_rows,
+        ["run_id", "source_file", "trades_file_exists", "trades_file_rows", "trades_counted_rows", "summary_num_trades", "trades_turnover_usdt", "summary_turnover_usdt", "trades_fees_usdt_total", "summary_fees_usdt_total", "trades_slippage_usdt_total", "summary_slippage_usdt_total", "trades_cost_usdt_total", "summary_cost_usdt_total", "count_mismatch", "cost_mismatch", "diagnosis", "parse_error"],
+    )
+    write_csv(
         "summaries/config_runtime_consumption_audit.csv",
         config_runtime_consumption_rows,
         ["config_key", "defined_in_schema", "present_in_live_prod", "present_in_effective_config", "consumed_in_runtime_code", "consumer_category", "consumer_files", "diagnosis"],
@@ -5932,7 +6067,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
     write_csv(
         "summaries/quant_lab_cost_usage.csv",
         quant_lab_cost_usage_rows,
-        ["source", "run_id", "ts_utc", "mode", "symbol", "normalized_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "strategy_id", "request_id", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "cost_model_version", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_reason", "filtered", "filter_reason", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "mode", "symbol", "request_symbol", "normalized_symbol", "response_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "strategy_id", "request_id", "requested_regime", "matched_regime", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "fallback_level", "cost_model_version", "sample_count", "selected_total_cost_bps", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_used_for_cost_model", "fallback_reason", "degraded_cost_model", "filtered", "filter_reason", "warning", "cost_gate_verified", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/quant_lab_fallbacks.csv",
@@ -6270,6 +6405,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         "dust_residual_position_count": dust_residual_position_count,
         "dust_residual_roundtrip_count": dust_residual_roundtrip_count,
         "dust_threshold_usdt": global_dust_threshold_usdt,
+        "summary_trade_count_mismatch_count": len(summary_trade_count_mismatch_rows),
+        "summary_trade_count_mismatch_high_issue_count": sum(
+            1 for row in summary_trade_count_mismatch_rows
+            if str(row.get("diagnosis") or "").startswith("high_issue")
+        ),
         "negative_expectancy_consistency_rows": len(negative_consistency_rows),
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
@@ -6797,6 +6937,11 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions):
         f"- consistency rows: {len(negative_consistency_rows)}",
         f"- mismatch_suspected_count: {negative_expectancy_mismatch_count}",
         f"- high issue present: {'yes' if negative_expectancy_mismatch_count else 'no'}",
+        "",
+        "## Summary trade metrics check",
+        f"- summary_trade_count_mismatch rows: {len(summary_trade_count_mismatch_rows)}",
+        f"- high issue present: {'yes' if any(str(row.get('diagnosis') or '').startswith('high_issue') for row in summary_trade_count_mismatch_rows) else 'no'}",
+        f"- output: summaries/summary_trade_count_mismatch.csv",
         "",
         "## Skipped candidate extended forward labels",
         f"- horizons_hours: {','.join(str(int(h)) for h in label_horizons)}",

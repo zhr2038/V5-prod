@@ -86,12 +86,16 @@ COST_FIELDS = (
     "would_filter",
     "actually_filtered",
     "symbol",
+    "request_symbol",
     "normalized_symbol",
+    "response_symbol",
     "venue",
     "instrument_type",
     "side",
     "strategy_id",
     "request_id",
+    "requested_regime",
+    "matched_regime",
     "regime",
     "notional_usdt",
     "quantile",
@@ -107,6 +111,7 @@ COST_FIELDS = (
     "cost_source",
     "sample_count",
     "cost_model_version",
+    "selected_total_cost_bps",
     "total_cost_bps_p50",
     "total_cost_bps_p75",
     "total_cost_bps_p90",
@@ -118,7 +123,12 @@ COST_FIELDS = (
     "would_filter_by_cost",
     "would_block_by_cost",
     "fallback_used",
+    "fallback_used_for_cost_model",
     "fallback_reason",
+    "degraded_cost_model",
+    "diagnosis",
+    "warning",
+    "cost_gate_verified",
     "passed",
     "filtered",
     "filter_reason",
@@ -258,6 +268,9 @@ def _request_success(row: Mapping[str, Any]) -> bool:
 
 def _is_fallback_row(row: Mapping[str, Any]) -> bool:
     if _request_success(row):
+        return False
+    fallback_reason = str(row.get("fallback_reason") or "").strip().lower()
+    if fallback_reason == "global_default_cost" and not _truthy(row.get("fallback_used")) and row.get("event_type") != "fallback":
         return False
     error_text = str(row.get("error_type") or row.get("error") or "").lower()
     if any(marker in error_text for marker in ("timeout", "connection", "unavailable", "invalid")):
@@ -410,9 +423,23 @@ def _build_cost_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
         merged.setdefault("would_filter_by_cost", merged.get("would_filter", ""))
         merged.setdefault("would_block_by_cost", merged.get("would_filter_by_cost", ""))
         merged.setdefault("actually_filtered", merged.get("order_filtered", ""))
+        merged.setdefault("request_symbol", merged.get("symbol", ""))
+        merged.setdefault("response_symbol", merged.get("normalized_symbol", merged.get("symbol", "")))
+        merged.setdefault("requested_regime", merged.get("regime", ""))
+        merged.setdefault("matched_regime", merged.get("regime", ""))
         merged.setdefault("cost_source", merged.get("source", merged.get("local_cost_source", "")))
         merged.setdefault("required_edge_bps", merged.get("min_required_edge_bps", ""))
+        merged.setdefault("selected_total_cost_bps", merged.get("total_cost_bps", ""))
         merged.setdefault("expected_edge_source", merged.get("proxy_source", ""))
+        source_text = str(merged.get("cost_source") or merged.get("source") or "").strip().lower()
+        fallback_level_text = str(merged.get("fallback_level") or "").strip().upper()
+        degraded = source_text == "global_default" or fallback_level_text == "GLOBAL_DEFAULT"
+        merged.setdefault("degraded_cost_model", degraded)
+        merged.setdefault("fallback_used_for_cost_model", bool(_truthy(merged.get("fallback_used")) or degraded))
+        merged.setdefault("diagnosis", "global_default_cost" if degraded else "")
+        if str(merged.get("filter_reason") or "") == "expected_edge_missing_no_filter":
+            merged.setdefault("warning", "expected_edge_missing_cost_gate_not_verified")
+            merged.setdefault("cost_gate_verified", False)
         out.append({field: merged.get(field, "") for field in COST_FIELDS})
     return out
 

@@ -85,6 +85,22 @@ def _permission_would_block(permission: str) -> bool:
     return normalized in {ABORT, SELL_ONLY}
 
 
+def _degraded_cost_model(estimate: CostEstimate) -> bool:
+    source = str(estimate.source or "").strip().lower()
+    fallback_level = str(estimate.fallback_level or "").strip().upper()
+    return source == "global_default" or fallback_level == "GLOBAL_DEFAULT"
+
+
+def _cost_model_diagnosis(*, degraded: bool, fallback_used: bool, gate_reason: str) -> str:
+    if degraded:
+        return "global_default_cost"
+    if fallback_used:
+        return "cost_fallback"
+    if gate_reason == "expected_edge_missing_no_filter":
+        return "expected_edge_missing_not_verified"
+    return "ok"
+
+
 def _local_cost_estimate(order: Order, cfg: Any, *, regime: str, quantile: str) -> CostEstimate:
     local_cost, local_cost_source = local_cost_detail_for_order(order, cfg)
     return CostEstimate(
@@ -737,16 +753,30 @@ class QuantLabGuard:
 
             gate: CostGateResult = apply_quant_lab_cost_gate(order, estimate, cfg, mode=self.mode.value)
             actually_filtered = bool(gate.filtered and self.apply_cost_gate)
+            degraded_cost_model = _degraded_cost_model(estimate)
+            fallback_used_for_cost_model = bool(fallback_used or degraded_cost_model)
+            required_edge_bps = estimate.required_edge_bps if estimate.required_edge_bps is not None else gate.min_required_edge_bps
+            warning = "expected_edge_missing_cost_gate_not_verified" if gate.reason == "expected_edge_missing_no_filter" else None
+            diagnosis = _cost_model_diagnosis(
+                degraded=degraded_cost_model,
+                fallback_used=fallback_used,
+                gate_reason=gate.reason,
+            )
+            cost_fallback_reason = fallback_reason or estimate.fallback_reason or ("global_default_cost" if degraded_cost_model else None)
             row = {
                 "event_type": "cost_estimate",
                 "symbol": original_symbol,
+                "request_symbol": original_symbol,
                 "normalized_symbol": normalized_symbol,
+                "response_symbol": estimate.symbol,
                 "venue": "OKX",
                 "instrument_type": "spot",
                 "side": side,
                 "intent": getattr(order, "intent", None),
                 "strategy_id": strategy_id,
                 "request_id": request_id,
+                "requested_regime": str(regime or "normal"),
+                "matched_regime": estimate.regime or gate.regime,
                 "regime": gate.regime,
                 "notional_usdt": gate.notional_usdt,
                 "quantile": gate.quantile,
@@ -762,19 +792,20 @@ class QuantLabGuard:
                 "cost_source": gate.source,
                 "sample_count": gate.sample_count,
                 "cost_model_version": gate.cost_model_version,
+                "selected_total_cost_bps": estimate.total_cost_bps,
                 "total_cost_bps_p50": estimate.total_cost_bps_p50,
                 "total_cost_bps_p75": estimate.total_cost_bps_p75,
                 "total_cost_bps_p90": estimate.total_cost_bps_p90,
                 "expected_edge_bps": gate.expected_edge_bps,
                 "expected_edge_source": gate.expected_edge_source or gate.proxy_source,
                 "min_required_edge_bps": gate.min_required_edge_bps,
-                "required_edge_bps": estimate.required_edge_bps
-                if estimate.required_edge_bps is not None
-                else gate.min_required_edge_bps,
+                "required_edge_bps": required_edge_bps,
                 "proxy_source": gate.proxy_source,
                 "passed": gate.passed,
                 "filtered": gate.filtered,
                 "filter_reason": gate.reason,
+                "warning": warning,
+                "cost_gate_verified": gate.reason != "expected_edge_missing_no_filter",
                 "would_filter": bool(gate.filtered),
                 "would_filter_by_cost": bool(gate.filtered),
                 "would_block_by_cost": bool(gate.filtered),
@@ -784,7 +815,10 @@ class QuantLabGuard:
                 "enforced": self.apply_cost_gate,
                 "hypothetical": bool(gate.filtered and not self.apply_cost_gate),
                 "fallback_used": fallback_used,
-                "fallback_reason": fallback_reason or estimate.fallback_reason,
+                "fallback_used_for_cost_model": fallback_used_for_cost_model,
+                "fallback_reason": cost_fallback_reason,
+                "degraded_cost_model": degraded_cost_model,
+                "diagnosis": diagnosis,
                 "success": True,
             }
             rows.append(dict(sanitize_quant_lab_obj(row)))
@@ -802,11 +836,15 @@ class QuantLabGuard:
                     or qmeta.get("final_permission")
                     or self.permission_result.permission,
                     "would_block_if_enforced": qmeta.get("would_block_if_enforced", False),
+                    "request_symbol": original_symbol,
                     "normalized_symbol": normalized_symbol,
+                    "response_symbol": estimate.symbol,
                     "venue": "OKX",
                     "instrument_type": "spot",
                     "strategy_id": strategy_id,
                     "request_id": request_id,
+                    "requested_regime": str(regime or "normal"),
+                    "matched_regime": estimate.regime or gate.regime,
                     "cost_model_version": gate.cost_model_version,
                     "cost_quantile": gate.quantile,
                     "fee_bps": gate.fee_bps,
@@ -820,24 +858,28 @@ class QuantLabGuard:
                     "source": gate.source,
                     "cost_source": gate.source,
                     "sample_count": gate.sample_count,
+                    "selected_total_cost_bps": estimate.total_cost_bps,
                     "total_cost_bps_p50": estimate.total_cost_bps_p50,
                     "total_cost_bps_p75": estimate.total_cost_bps_p75,
                     "total_cost_bps_p90": estimate.total_cost_bps_p90,
                     "expected_edge_bps": gate.expected_edge_bps,
                     "expected_edge_source": gate.expected_edge_source or gate.proxy_source,
                     "min_required_edge_bps": gate.min_required_edge_bps,
-                    "required_edge_bps": estimate.required_edge_bps
-                    if estimate.required_edge_bps is not None
-                    else gate.min_required_edge_bps,
+                    "required_edge_bps": required_edge_bps,
                     "proxy_source": gate.proxy_source,
                     "cost_gate_passed": gate.passed,
+                    "cost_gate_verified": gate.reason != "expected_edge_missing_no_filter",
                     "cost_gate_enforced": self.apply_cost_gate,
                     "permission_gate_enforced": self.apply_permission_gate,
                     "would_filter_by_cost": bool(gate.filtered),
                     "would_block_by_cost": bool(gate.filtered),
                     "actually_filtered_by_cost": actually_filtered,
                     "fallback_used": bool(qmeta.get("fallback_used") or fallback_used),
-                    "fallback_reason": fallback_reason or estimate.fallback_reason or qmeta.get("fallback_reason"),
+                    "fallback_used_for_cost_model": fallback_used_for_cost_model,
+                    "fallback_reason": cost_fallback_reason or qmeta.get("fallback_reason"),
+                    "degraded_cost_model": degraded_cost_model,
+                    "diagnosis": diagnosis,
+                    "warning": warning,
                     "response_ts": utc_now_iso(),
                 }
             )

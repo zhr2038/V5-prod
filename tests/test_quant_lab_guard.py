@@ -13,11 +13,26 @@ from src.quant_lab_client.models import CostEstimate, RiskPermission
 class _Client:
     phase = "live"
 
-    def __init__(self, *, permission="SELL_ONLY", fail_permission=False, fail_cost=False) -> None:
+    def __init__(
+        self,
+        *,
+        permission="SELL_ONLY",
+        fail_permission=False,
+        fail_cost=False,
+        cost_source="public_spread_proxy",
+        fallback_level="PUBLIC_SPREAD_PROXY",
+        sample_count=100,
+        cost_model_version="cost_bucket_daily:2026-05-11",
+    ) -> None:
         self.permission = permission
         self.fail_permission = fail_permission
         self.fail_cost = fail_cost
+        self.cost_source = cost_source
+        self.fallback_level = fallback_level
+        self.sample_count = sample_count
+        self.cost_model_version = cost_model_version
         self.run_id = "r"
+        self.cost_kwargs = []
 
     def get_health(self):
         return SimpleNamespace(status="ok", mode="read-only")
@@ -38,16 +53,20 @@ class _Client:
     def estimate_cost(self, *, symbol: str, regime: str, notional_usdt: float, quantile: str, **kwargs):
         if self.fail_cost:
             raise RuntimeError("cost unavailable")
+        self.cost_kwargs.append({"symbol": symbol, "regime": regime, "notional_usdt": notional_usdt, "quantile": quantile, **kwargs})
         return CostEstimate(
             symbol=symbol.replace("/", "-"),
             regime=regime,
             notional_usdt=notional_usdt,
             quantile=quantile,
-            total_cost_bps=1.0,
-            source="public_spread_proxy",
-            fallback_level="PUBLIC_SPREAD_PROXY",
-            sample_count=100,
-            cost_model_version="cost_bucket_daily:2026-05-11",
+            total_cost_bps=25.0 if self.cost_source == "global_default" else 1.0,
+            source=self.cost_source,
+            fallback_level=self.fallback_level,
+            sample_count=self.sample_count,
+            cost_model_version=self.cost_model_version,
+            total_cost_bps_p50=20.0 if self.cost_source == "global_default" else 0.8,
+            total_cost_bps_p75=25.0 if self.cost_source == "global_default" else 1.0,
+            total_cost_bps_p90=30.0 if self.cost_source == "global_default" else 2.0,
         )
 
 
@@ -147,3 +166,80 @@ def test_guard_cost_fallback_to_local(tmp_path: Path) -> None:
     assert rows[0]["effective_total_cost_bps"] == 30.0
     assert rows[0]["local_cost_bps"] == 30.0
     assert rows[0]["local_cost_source"] == "roundtrip_fee_slippage"
+    assert rows[0]["fallback_used"] is True
+
+
+def test_guard_public_spread_proxy_cost_is_not_degraded(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "shadow"
+    client = _Client(permission="ALLOW", cost_source="public_spread_proxy", fallback_level="PUBLIC_SPREAD_PROXY")
+    guard = _guard(tmp_path, cfg, client)
+    guard.check_startup_permission(cfg, "run-1")
+
+    kept, rows = guard.enrich_orders_with_cost(
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 60})],
+        "normal",
+        cfg,
+    )
+
+    assert len(kept) == 1
+    assert rows[0]["request_symbol"] == "BNB/USDT"
+    assert rows[0]["normalized_symbol"] == "BNB-USDT"
+    assert rows[0]["response_symbol"] == "BNB-USDT"
+    assert rows[0]["cost_source"] == "public_spread_proxy"
+    assert rows[0]["degraded_cost_model"] is False
+    assert rows[0]["fallback_used_for_cost_model"] is False
+    assert rows[0]["cost_gate_enforced"] is False
+    assert client.cost_kwargs[0]["symbol"] == "BNB/USDT"
+
+
+def test_guard_global_default_cost_is_degraded_not_normal(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "shadow"
+    client = _Client(
+        permission="ALLOW",
+        cost_source="global_default",
+        fallback_level="GLOBAL_DEFAULT",
+        sample_count=0,
+        cost_model_version="global_default_v0",
+    )
+    guard = _guard(tmp_path, cfg, client)
+    guard.check_startup_permission(cfg, "run-1")
+
+    kept, rows = guard.enrich_orders_with_cost(
+        [Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {"expected_edge_bps": 60})],
+        "normal",
+        cfg,
+    )
+
+    assert len(kept) == 1
+    row = rows[0]
+    assert row["cost_source"] == "global_default"
+    assert row["fallback_level"] == "GLOBAL_DEFAULT"
+    assert row["sample_count"] == 0
+    assert row["cost_model_version"] == "global_default_v0"
+    assert row["selected_total_cost_bps"] == 25.0
+    assert row["degraded_cost_model"] is True
+    assert row["fallback_used"] is False
+    assert row["fallback_used_for_cost_model"] is True
+    assert row["fallback_reason"] == "global_default_cost"
+    assert row["diagnosis"] == "global_default_cost"
+
+
+def test_guard_missing_edge_shadow_warns_and_is_not_verified(tmp_path: Path) -> None:
+    cfg = AppConfig()
+    cfg.quant_lab.enabled = True
+    cfg.quant_lab.mode = "shadow"
+    guard = _guard(tmp_path, cfg, _Client(permission="ALLOW"))
+    guard.check_startup_permission(cfg, "run-1")
+
+    kept, rows = guard.enrich_orders_with_cost([Order("BNB/USDT", "buy", "OPEN_LONG", 10.0, 100.0, {})], "normal", cfg)
+
+    assert len(kept) == 1
+    assert rows[0]["filter_reason"] == "expected_edge_missing_no_filter"
+    assert rows[0]["warning"] == "expected_edge_missing_cost_gate_not_verified"
+    assert rows[0]["cost_gate_verified"] is False
+    assert rows[0]["would_block_by_cost"] is True
+    assert rows[0]["cost_gate_enforced"] is False

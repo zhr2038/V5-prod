@@ -49,7 +49,7 @@ def test_cost_gate_allows_high_edge_and_missing_edge() -> None:
     assert high_edge.passed is True
     assert missing.passed is False
     assert missing.filtered is True
-    assert missing.reason == "expected_edge_missing_hypothetical"
+    assert missing.reason == "expected_edge_missing_no_filter"
 
 
 def test_local_cost_defaults_to_roundtrip_fee_slippage() -> None:
