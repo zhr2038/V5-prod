@@ -71,6 +71,7 @@ class _Client:
 
 
 def _guard(tmp_path: Path, cfg: AppConfig, client: _Client) -> QuantLabGuard:
+    cfg.quant_lab.enforce_readiness_enabled = False
     return QuantLabGuard(client=client, cfg=cfg.quant_lab, usage_log_path=tmp_path / "usage.jsonl", run_id="run-1")
 
 
@@ -92,7 +93,12 @@ def test_guard_sell_only_filters_buy_and_preserves_sell(tmp_path: Path) -> None:
     assert result.permission == "SELL_ONLY"
     assert [order.symbol for order in kept] == ["ETH/USDT"]
     rows = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert any(row.get("event_type") == "filter_order" and row.get("order_filtered") for row in rows)
+    assert any(
+        row.get("event_type") == "permission_audit"
+        and row.get("legacy_event_type") == "filter_order"
+        and row.get("order_filtered")
+        for row in rows
+    )
 
 
 def test_guard_abort_filters_all(tmp_path: Path) -> None:

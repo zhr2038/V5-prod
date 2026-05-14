@@ -243,6 +243,8 @@ def refresh_summary_metrics(run_dir: str) -> Dict[str, Any]:
         summ[k] = v
     for k, v in _quant_lab_summary_fields(rd).items():
         summ[k] = v
+    if isinstance(summ.get("budget"), dict) and int(tm.get("fills_count_today") or 0) > 0:
+        summ["budget"]["fills_count_today"] = int(tm.get("fills_count_today") or 0)
 
     p.write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
     return summ
@@ -255,6 +257,12 @@ def attach_budget(run_dir: str, budget: Dict[str, Any]) -> Dict[str, Any]:
     if not p.exists():
         raise FileNotFoundError(str(p))
     summ = json.loads(p.read_text(encoding="utf-8"))
+    tm = _trade_metrics_from_file(rd, avg_equity=summ.get("avg_equity"))
+    for k, v in tm.items():
+        summ[k] = v
+    if int(tm.get("fills_count_today") or 0) > 0:
+        budget = dict(budget or {})
+        budget["fills_count_today"] = int(tm.get("fills_count_today") or 0)
     summ["budget"] = budget
     p.write_text(json.dumps(summ, ensure_ascii=False, indent=2), encoding="utf-8")
     return summ

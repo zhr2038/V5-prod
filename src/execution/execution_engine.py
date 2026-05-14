@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 from contextlib import closing
-from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import List, Optional
@@ -13,7 +12,7 @@ from src.core.models import ExecutionReport, Order
 from src.execution.probe_metadata import position_tags_from_order_meta
 from src.execution.same_symbol_reentry_guard import record_same_symbol_exit_memory
 from src.execution.position_store import PositionStore
-from src.execution.account_store import AccountStore, AccountState
+from src.execution.account_store import AccountStore
 from src.execution.fill_store import derive_runtime_cost_events_dir, derive_runtime_named_json_path
 from src.utils.time import utc_now_iso, utc_now_timestamp
 
@@ -205,15 +204,21 @@ class ExecutionEngine:
                     self.trade_log.append_fill(
                         Fill(
                             ts=ts,
+                            ts_utc=ts,
                             run_id=self.run_id,
                             symbol=o.symbol,
+                            normalized_symbol=o.symbol.replace("/", "-"),
                             intent=o.intent,
                             side=o.side,
+                            action=o.intent,
                             qty=float(fill_qty),
                             price=px,
                             notional_usdt=float(executed_notional),
+                            fee=float(fee),
+                            fee_ccy="USDT",
                             fee_usdt=float(fee),
                             slippage_usdt=float(slp),
+                            strategy_id="v5",
                             realized_pnl_usdt=realized_usdt,
                             realized_pnl_pct=realized_pct,
                         )

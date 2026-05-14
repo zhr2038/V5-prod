@@ -76,15 +76,24 @@ def test_quant_lab_client_uses_get_and_redacts_token(tmp_path: Path) -> None:
     assert rows[0]["method"] == "GET"
     assert rows[0]["endpoint_path"] == "/v1/health"
     assert "Authorization" not in text
-    assert rows[1]["query_keys"] == ["strategy", "version"]
+    assert rows[1]["event_type"] == "request"
+    assert rows[1]["fallback_used"] is False
+    assert {"strategy", "version", "request_id", "event_id", "ts_utc"} <= set(rows[1]["query_keys"])
     cost_params = http.calls[2]["params"]
-    assert cost_params["symbol"] == "BTC-USDT"
+    assert cost_params["symbol"] == "BTC/USDT"
+    assert cost_params["request_symbol"] == "BTC/USDT"
     assert cost_params["normalized_symbol"] == "BTC-USDT"
     assert cost_params["venue"] == "OKX"
     assert cost_params["instrument_type"] == "spot"
     assert cost_params["strategy_id"] == "v5"
     assert "expected_edge_bps" in cost_params
     assert "request_id" in cost_params
+    assert "event_id" in cost_params
+    assert cost_params["run_id"] == "run-1"
+    assert "ts_utc" in cost_params
+    assert cost_params["requested_regime"] == "normal"
+    assert cost_params["requested_quantile"] == "p75"
+    assert cost_params["contract_version"] == "v5.quant_lab.telemetry.v2"
 
 
 def test_cost_request_normalizes_concatenated_usdt_symbol(tmp_path: Path) -> None:
@@ -108,7 +117,7 @@ def test_cost_request_normalizes_concatenated_usdt_symbol(tmp_path: Path) -> Non
     )
 
     params = http.calls[0]["params"]
-    assert params["symbol"] == "BNB-USDT"
+    assert params["symbol"] == "BNBUSDT"
     assert params["normalized_symbol"] == "BNB-USDT"
     assert params["side"] == "buy"
     assert params["expected_edge_bps"] == 8.0
@@ -130,7 +139,7 @@ def test_cost_request_normalizes_bnb_symbol_variants(tmp_path: Path, symbol: str
     client.estimate_cost(symbol=symbol, regime="normal", notional_usdt=200, quantile="p75")
 
     params = http.calls[0]["params"]
-    assert params["symbol"] == "BNB-USDT"
+    assert params["symbol"] == symbol
     assert params["normalized_symbol"] == "BNB-USDT"
 
 

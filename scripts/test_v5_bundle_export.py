@@ -2695,15 +2695,25 @@ def main():
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/summary_trade_count_mismatch.csv")).read().decode().splitlines()))
+                report_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "reports/summary_trade_count_mismatch.csv")).read().decode().splitlines()))
+                trade_metrics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/trade_metrics.csv")).read().decode().splitlines()))
+                fill_metrics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/fill_metrics.csv")).read().decode().splitlines()))
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(rows) == 2, rows
+            assert len(report_rows) == 2, report_rows
             assert {row["trades_counted_rows"] for row in rows} == {"1"}, rows
             assert {row["summary_num_trades"] for row in rows} == {"0"}, rows
             assert all(row["diagnosis"] == "high_issue_summary_trade_count_mismatch" for row in rows), rows
+            assert all(row["high_issue"] == "true" for row in rows), rows
             assert any(row["trades_cost_usdt_total"] == "0.01720499" for row in rows), rows
             assert any(row["trades_cost_usdt_total"] == "0.01716066" for row in rows), rows
+            assert len(trade_metrics) == 2, trade_metrics
+            assert len(fill_metrics) == 2, fill_metrics
+            assert {row["normalized_symbol"] for row in fill_metrics} == {"BNB-USDT"}, fill_metrics
+            assert {row["trade_export_schema_version"] for row in trade_metrics} == {"v5.trade_export.v1"}, trade_metrics
             summary_issues = [
                 item for item in issues["issues"]
                 if item.get("severity") == "high" and item.get("code") == "summary_trade_count_mismatch"
@@ -2711,6 +2721,10 @@ def main():
             assert len(summary_issues) == 2, issues
             assert window["summary_trade_count_mismatch_count"] == 2, window
             assert window["summary_trade_count_mismatch_high_issue_count"] == 2, window
+            assert window["trade_metrics_rows"] == 2, window
+            assert window["fill_metrics_rows"] == 2, window
+            assert manifest["trade_export_schema_version"] == "v5.trade_export.v1", manifest
+            assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1", manifest
             assert "## Summary trade metrics check" in readme, readme
             assert "summary_trade_count_mismatch rows: 2" in readme, readme
         finally:

@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from src.core.models import Order
-from src.reporting.quant_lab_audit import append_quant_lab_usage, sanitize_quant_lab_obj, utc_now_iso
+from src.reporting.quant_lab_audit import (
+    EVENT_TYPE_FALLBACK,
+    EVENT_TYPE_PERMISSION_AUDIT,
+    EVENT_TYPE_REQUEST,
+    append_quant_lab_usage,
+    normalize_quant_lab_event,
+    sanitize_quant_lab_obj,
+    utc_now_iso,
+)
 
 from .client import QuantLabClient
 from .cost_gate import CostGateResult, apply_quant_lab_cost_gate, local_cost_detail_for_order, order_expected_edge_detail
 from .exceptions import QuantLabError
-from .mode import QuantLabMode, QuantLabModeResolution, resolve_quant_lab_mode
+from .mode import QuantLabMode, QuantLabModeResolution, evaluate_enforce_readiness, resolve_quant_lab_mode
 from .models import CostEstimate, RiskPermission, symbol_to_quant_lab_symbol
 from .permissions import ABORT, ALLOW, ALLOW_LOCAL, SELL_ONLY, normalize_permission
 
@@ -41,13 +50,29 @@ class QuantLabGuardResult:
     cost_gate_enforced: bool = False
     skipped_reason: Optional[str] = None
     raw_permission_decision: Optional[str] = None
+    raw_permission_status: Optional[str] = None
+    raw_permission_enforceable: Optional[bool] = None
     local_mode: Optional[str] = None
     effective_permission_decision: Optional[str] = None
     would_block_if_enforced: bool = False
+    shadow_override_reason: Optional[str] = None
     remote_permission_as_of_ts: Optional[str] = None
     remote_permission_expires_at: Optional[str] = None
     remote_permission_status: Optional[str] = None
+    remote_permission_source_bundle_ts: Optional[str] = None
+    remote_permission_telemetry_latest_ts: Optional[str] = None
+    remote_permission_contract_version: Optional[str] = None
+    permission_contract_violation: bool = False
     contract_version: str = CONTRACT_VERSION
+    request_id: Optional[str] = None
+    original_event_id: Optional[str] = None
+    quant_lab_requested_mode: Optional[str] = None
+    quant_lab_effective_mode: Optional[str] = None
+    enforce_readiness_status: Optional[str] = None
+    enforce_blocked_reasons: List[str] = field(default_factory=list)
+    enforce_blocked_reason: Optional[str] = None
+    contract_version_match: Optional[bool] = None
+    telemetry_schema_version_match: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -85,10 +110,62 @@ def _permission_would_block(permission: str) -> bool:
     return normalized in {ABORT, SELL_ONLY}
 
 
+def _parse_utc(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    text = str(ts).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _status_upper(status: Optional[str]) -> str:
+    return str(status or "").strip().upper()
+
+
+def _permission_not_fresh(status: Optional[str], expires_at: Optional[str]) -> Tuple[bool, bool, Optional[str], str]:
+    status_u = _status_upper(status)
+    expired_by_time = False
+    contract_violation = False
+    reason = None
+    expires_dt = _parse_utc(expires_at)
+    if expires_dt is not None and expires_dt <= datetime.now(timezone.utc):
+        expired_by_time = True
+        reason = "remote_permission_not_fresh"
+        if status_u.startswith("ACTIVE"):
+            contract_violation = True
+    if status_u.startswith("STALE") or status_u.startswith("EXPIRED") or status_u == "NO_FRESH_PERMISSION":
+        reason = "remote_permission_not_fresh"
+        return True, contract_violation, reason, status_u
+    if expired_by_time:
+        return True, contract_violation, reason, f"EXPIRED_{status_u}" if status_u else "EXPIRED"
+    return False, contract_violation, reason, status_u
+
+
+def _effective_permission_for_mode(raw_permission: str, status: Optional[str], expires_at: Optional[str], apply_gate: bool) -> Tuple[str, bool, Optional[str], str]:
+    raw = normalize_permission(raw_permission)
+    if not apply_gate:
+        return ALLOW, False, "quant_lab_shadow_mode", _status_upper(status)
+    not_fresh, contract_violation, reason, effective_status = _permission_not_fresh(status, expires_at)
+    if not_fresh:
+        return SELL_ONLY, contract_violation, reason, effective_status
+    return raw, contract_violation, None, effective_status
+
+
 def _degraded_cost_model(estimate: CostEstimate) -> bool:
     source = str(estimate.source or "").strip().lower()
     fallback_level = str(estimate.fallback_level or "").strip().upper()
-    return source == "global_default" or fallback_level == "GLOBAL_DEFAULT"
+    cost_model_version = str(estimate.cost_model_version or "").strip().lower()
+    raw_source = str(estimate.raw_response.get("cost_source") or "").strip().lower() if isinstance(estimate.raw_response, Mapping) else ""
+    return source == "global_default" or raw_source == "global_default" or fallback_level == "GLOBAL_DEFAULT" or cost_model_version == "global_default_v0"
 
 
 def _cost_model_diagnosis(*, degraded: bool, fallback_used: bool, gate_reason: str) -> str:
@@ -169,13 +246,38 @@ class QuantLabGuard:
     def apply_cost_gate(self) -> bool:
         return bool(_get_cfg(self.cfg, "enabled", True)) and self.mode in {QuantLabMode.COST_ONLY, QuantLabMode.ENFORCE}
 
+    def _apply_enforce_readiness(self, permission: Optional[RiskPermission] = None) -> None:
+        requested = self.mode_resolution.requested_mode or self.mode_resolution.mode
+        if requested != QuantLabMode.ENFORCE:
+            return
+        readiness = evaluate_enforce_readiness(self.cfg, permission=permission)
+        self.mode_resolution.enforce_readiness = readiness
+        if readiness.status == "READY":
+            self.mode_resolution.mode = QuantLabMode.ENFORCE
+            return
+        self.mode_resolution.mode = QuantLabMode.SHADOW
+        if "enforce_blocked" not in str(self.mode_resolution.mode_source):
+            self.mode_resolution.mode_source = f"{self.mode_resolution.mode_source}_enforce_blocked"
+        self.mode_resolution.warning = (
+            "quant-lab enforce requested but readiness is BLOCKED; effective mode downgraded to shadow"
+        )
+
     def _mode_fields(self, *, enforced: Optional[bool] = None, hypothetical: Optional[bool] = None) -> Dict[str, Any]:
         client = self.client
+        requested_mode = (self.mode_resolution.requested_mode or self.mode).value
+        readiness = self.mode_resolution.enforce_readiness
         return {
             "mode": self.mode.value,
             "local_mode": self.mode.value,
+            "quant_lab_requested_mode": requested_mode,
+            "quant_lab_effective_mode": self.mode.value,
             "mode_source": self.mode_resolution.mode_source,
             "mode_override_path": self.mode_resolution.override_path,
+            "enforce_readiness_status": readiness.status if readiness is not None else None,
+            "enforce_blocked_reasons": list(readiness.reasons) if readiness is not None else [],
+            "enforce_blocked_reason": ";".join(readiness.reasons) if readiness is not None and readiness.reasons else None,
+            "contract_version_match": readiness.contract_version_match if readiness is not None else None,
+            "telemetry_schema_version_match": readiness.telemetry_schema_version_match if readiness is not None else None,
             "contract_version": CONTRACT_VERSION,
             "quant_lab_config_source": _get_cfg(self.cfg, "quant_lab_config_source", "unknown"),
             "legacy_execution_quant_lab_ignored": bool(_get_cfg(self.cfg, "legacy_execution_quant_lab_ignored", False)),
@@ -249,6 +351,7 @@ class QuantLabGuard:
                 apply_cost_gate=False,
                 skipped_reason="quant_lab_disabled",
                 raw_permission_decision=ALLOW_LOCAL,
+                raw_permission_status="DISABLED",
                 local_mode=resolution.mode.value,
                 effective_permission_decision="LOCAL_ONLY",
                 would_block_if_enforced=False,
@@ -270,20 +373,38 @@ class QuantLabGuard:
         self._emit_usage(
             {
                 "event_type": "final_permission",
+                "request_id": self.permission_result.request_id,
+                "original_request_id": self.permission_result.request_id,
+                "original_event_id": self.permission_result.original_event_id,
                 "permission": self.permission_result.permission,
-                "quant_lab_permission": self.permission_result.permission,
+                "quant_lab_permission": raw_permission,
                 "raw_permission_decision": raw_permission,
+                "raw_permission_status": self.permission_result.raw_permission_status,
+                "raw_permission_enforceable": self.permission_result.raw_permission_enforceable,
                 "local_mode": self.mode.value,
                 "local_preflight_permission": self.local_preflight_permission,
                 "final_permission": self.final_permission,
                 "effective_permission_decision": self.final_permission,
                 "would_block_if_enforced": would_block,
+                "shadow_override_reason": self.permission_result.shadow_override_reason,
                 "fallback_used": bool(self.permission_result.fallback_used),
                 "fallback_reason": self.permission_result.fallback_reason,
                 "remote_permission_as_of_ts": self.permission_result.remote_permission_as_of_ts or self.permission_result.response_ts,
                 "remote_permission_expires_at": self.permission_result.remote_permission_expires_at,
                 "remote_permission_status": self.permission_result.remote_permission_status,
-                "contract_version": CONTRACT_VERSION,
+                "remote_permission_source_bundle_ts": self.permission_result.remote_permission_source_bundle_ts,
+                "remote_permission_telemetry_latest_ts": self.permission_result.remote_permission_telemetry_latest_ts,
+                "remote_permission_contract_version": self.permission_result.remote_permission_contract_version,
+                "permission_contract_violation": self.permission_result.permission_contract_violation,
+                "contract_version": self.permission_result.contract_version or CONTRACT_VERSION,
+                "quant_lab_requested_mode": self.permission_result.quant_lab_requested_mode
+                or (self.mode_resolution.requested_mode or self.mode).value,
+                "quant_lab_effective_mode": self.permission_result.quant_lab_effective_mode or self.mode.value,
+                "enforce_readiness_status": self.permission_result.enforce_readiness_status,
+                "enforce_blocked_reasons": self.permission_result.enforce_blocked_reasons,
+                "enforce_blocked_reason": self.permission_result.enforce_blocked_reason,
+                "contract_version_match": self.permission_result.contract_version_match,
+                "telemetry_schema_version_match": self.permission_result.telemetry_schema_version_match,
                 "success": True,
                 "enforced": self.apply_permission_gate,
                 "hypothetical": not self.apply_permission_gate,
@@ -417,23 +538,59 @@ class QuantLabGuard:
             )
             return result
 
+        strategy_name = str(getattr(qcfg, "strategy_name", "v5") or "v5")
+        strategy_version = str(getattr(qcfg, "strategy_version", "5.0.0") or "5.0.0")
+        permission_request_id = f"{self.run_id or 'run'}:permission:{strategy_name}:{strategy_version}"
+        permission_request_event = normalize_quant_lab_event(
+            {
+                "run_id": self.run_id,
+                "event_type": EVENT_TYPE_REQUEST,
+                "request_id": permission_request_id,
+                "endpoint_path": "/v1/risk/live-permission",
+            },
+            default_event_type=EVENT_TYPE_REQUEST,
+        )
+
         try:
             self.request_count += 1
-            permission: RiskPermission = self.client.get_live_permission(
-                strategy=str(getattr(qcfg, "strategy_name", "v5") or "v5"),
-                version=str(getattr(qcfg, "strategy_version", "5.0.0") or "5.0.0"),
-            )
+            try:
+                permission: RiskPermission = self.client.get_live_permission(
+                    strategy=strategy_name,
+                    version=strategy_version,
+                    request_id=permission_request_id,
+                    event_id=permission_request_event["event_id"],
+                    ts_utc=permission_request_event["ts_utc"],
+                )
+            except TypeError:
+                permission = self.client.get_live_permission(strategy=strategy_name, version=strategy_version)
             raw_permission = normalize_permission(permission.permission)
-            effective_permission = raw_permission if self.apply_permission_gate else ALLOW
+            self._apply_enforce_readiness(permission)
+            effective_permission, permission_contract_violation, permission_reason, effective_status = _effective_permission_for_mode(
+                raw_permission,
+                permission.permission_status or permission.status,
+                permission.expires_at,
+                self.apply_permission_gate,
+            )
+            shadow_override_reason = "quant_lab_shadow_mode" if not self.apply_permission_gate else None
+            reasons = list(permission.risk_reason_codes or permission.reasons or [])
+            if permission_reason and permission_reason not in reasons:
+                reasons.append(permission_reason)
+            readiness = self.mode_resolution.enforce_readiness
+            if readiness is not None and readiness.status != "READY":
+                for reason in readiness.reasons:
+                    if reason not in reasons:
+                        reasons.append(reason)
+            raw_status = permission.permission_status or permission.status
+            remote_contract_version = permission.contract_version or CONTRACT_VERSION
             result = QuantLabGuardResult(
                 enabled=True,
-                permission=raw_permission,
+                permission=effective_permission if self.apply_permission_gate else raw_permission,
                 allowed_modes=list(permission.allowed_modes or []),
-                reasons=list(permission.reasons or []),
+                reasons=reasons,
                 cost_model_version=permission.cost_model_version,
                 gate_version=permission.gate_version,
                 fallback_used=False,
-                response_ts=permission.created_at or utc_now_iso(),
+                response_ts=permission.as_of_ts or permission.created_at or utc_now_iso(),
                 mode=self.mode.value,
                 mode_source=self.mode_resolution.mode_source,
                 mode_override_path=self.mode_resolution.override_path,
@@ -443,37 +600,75 @@ class QuantLabGuard:
                 permission_gate_enforced=self.apply_permission_gate,
                 cost_gate_enforced=self.apply_cost_gate,
                 raw_permission_decision=raw_permission,
+                raw_permission_status=raw_status,
+                raw_permission_enforceable=permission.enforceable,
                 local_mode=self.mode.value,
                 effective_permission_decision=effective_permission,
                 would_block_if_enforced=_permission_would_block(raw_permission),
-                remote_permission_as_of_ts=permission.created_at,
+                shadow_override_reason=shadow_override_reason,
+                remote_permission_as_of_ts=permission.as_of_ts or permission.created_at,
                 remote_permission_expires_at=permission.expires_at,
-                remote_permission_status=permission.status,
-                contract_version=permission.contract_version or CONTRACT_VERSION,
+                remote_permission_status=effective_status or raw_status,
+                remote_permission_source_bundle_ts=permission.source_bundle_ts,
+                remote_permission_telemetry_latest_ts=permission.telemetry_latest_ts,
+                remote_permission_contract_version=remote_contract_version,
+                permission_contract_violation=permission_contract_violation,
+                contract_version=remote_contract_version,
+                request_id=permission_request_id,
+                original_event_id=permission_request_event["event_id"],
+                quant_lab_requested_mode=(self.mode_resolution.requested_mode or self.mode).value,
+                quant_lab_effective_mode=self.mode.value,
+                enforce_readiness_status=readiness.status if readiness is not None else None,
+                enforce_blocked_reasons=list(readiness.reasons) if readiness is not None else [],
+                enforce_blocked_reason=";".join(readiness.reasons) if readiness is not None and readiness.reasons else None,
+                contract_version_match=readiness.contract_version_match if readiness is not None else None,
+                telemetry_schema_version_match=readiness.telemetry_schema_version_match if readiness is not None else None,
             )
             self.permission_result = result
             self._emit_usage(
                 {
-                    "event_type": "live_permission",
-                    "strategy": str(getattr(qcfg, "strategy_name", "v5") or "v5"),
-                    "strategy_version": str(getattr(qcfg, "strategy_version", "5.0.0") or "5.0.0"),
+                    "event_type": EVENT_TYPE_PERMISSION_AUDIT,
+                    "legacy_event_type": "live_permission",
+                    "request_id": permission_request_id,
+                    "original_request_id": permission_request_id,
+                    "original_event_id": permission_request_event["event_id"],
+                    "strategy": strategy_name,
+                    "strategy_version": strategy_version,
                     "endpoint": "/v1/risk/live-permission",
+                    "endpoint_path": "/v1/risk/live-permission",
                     "status": "ok",
                     "success": True,
                     "permission": result.permission,
-                    "quant_lab_permission": result.permission,
+                    "quant_lab_permission": raw_permission,
                     "raw_permission_decision": raw_permission,
+                    "raw_permission_status": raw_status,
+                    "raw_permission_enforceable": permission.enforceable,
                     "local_mode": self.mode.value,
                     "final_permission": effective_permission,
                     "effective_permission_decision": effective_permission,
                     "would_block_if_enforced": result.would_block_if_enforced,
+                    "shadow_override_reason": shadow_override_reason,
                     "fallback_used": False,
                     "fallback_reason": None,
                     "remote_permission_as_of_ts": result.remote_permission_as_of_ts or result.response_ts,
                     "remote_permission_expires_at": result.remote_permission_expires_at,
                     "remote_permission_status": result.remote_permission_status,
+                    "remote_permission_source_bundle_ts": result.remote_permission_source_bundle_ts,
+                    "remote_permission_telemetry_latest_ts": result.remote_permission_telemetry_latest_ts,
+                    "remote_permission_contract_version": result.remote_permission_contract_version,
+                    "permission_contract_violation": result.permission_contract_violation,
                     "contract_version": result.contract_version,
+                    "quant_lab_requested_mode": result.quant_lab_requested_mode,
+                    "quant_lab_effective_mode": result.quant_lab_effective_mode,
+                    "enforce_readiness_status": result.enforce_readiness_status,
+                    "enforce_blocked_reasons": result.enforce_blocked_reasons,
+                    "enforce_blocked_reason": result.enforce_blocked_reason,
+                    "contract_version_match": result.contract_version_match,
+                    "telemetry_schema_version_match": result.telemetry_schema_version_match,
                     "allowed_modes": result.allowed_modes,
+                    "max_gross_exposure_usdt": permission.max_gross_exposure_usdt,
+                    "max_single_order_usdt": permission.max_single_order_usdt,
+                    "risk_reason_codes": list(permission.risk_reason_codes or []),
                     "cost_model_version": result.cost_model_version,
                     "gate_version": result.gate_version,
                     "enforced": self.apply_permission_gate,
@@ -483,6 +678,8 @@ class QuantLabGuard:
             return result
         except Exception as exc:
             self.request_error_count += 1
+            self._apply_enforce_readiness(None)
+            readiness = self.mode_resolution.enforce_readiness
             action = _fail_policy_action(str(getattr(qcfg, "fail_policy", "sell_only") or "sell_only"))
             permission = ALLOW if action == ALLOW_LOCAL else action
             effective_permission = permission if self.apply_permission_gate else ALLOW
@@ -512,12 +709,26 @@ class QuantLabGuard:
                 remote_permission_expires_at=None,
                 remote_permission_status="unavailable",
                 contract_version=CONTRACT_VERSION,
+                request_id=permission_request_id,
+                original_event_id=permission_request_event["event_id"],
+                quant_lab_requested_mode=(self.mode_resolution.requested_mode or self.mode).value,
+                quant_lab_effective_mode=self.mode.value,
+                enforce_readiness_status=readiness.status if readiness is not None else None,
+                enforce_blocked_reasons=list(readiness.reasons) if readiness is not None else [],
+                enforce_blocked_reason=";".join(readiness.reasons) if readiness is not None and readiness.reasons else None,
+                contract_version_match=readiness.contract_version_match if readiness is not None else None,
+                telemetry_schema_version_match=readiness.telemetry_schema_version_match if readiness is not None else None,
             )
             self.permission_result = result
             self._emit_usage(
                 {
-                    "event_type": "fallback",
+                    "event_type": EVENT_TYPE_FALLBACK,
+                    "legacy_event_type": "fallback",
+                    "request_id": permission_request_id,
+                    "original_request_id": permission_request_id,
+                    "original_event_id": permission_request_event["event_id"],
                     "endpoint": "/v1/risk/live-permission",
+                    "endpoint_path": "/v1/risk/live-permission",
                     "status": "error",
                     "success": False,
                     "permission": result.permission,
@@ -533,6 +744,13 @@ class QuantLabGuard:
                     "remote_permission_expires_at": None,
                     "remote_permission_status": "unavailable",
                     "contract_version": CONTRACT_VERSION,
+                    "quant_lab_requested_mode": result.quant_lab_requested_mode,
+                    "quant_lab_effective_mode": result.quant_lab_effective_mode,
+                    "enforce_readiness_status": result.enforce_readiness_status,
+                    "enforce_blocked_reasons": result.enforce_blocked_reasons,
+                    "enforce_blocked_reason": result.enforce_blocked_reason,
+                    "contract_version_match": result.contract_version_match,
+                    "telemetry_schema_version_match": result.telemetry_schema_version_match,
                     "error_type": result.error_type,
                     "error_message_sanitized": result.error_message_sanitized,
                 }
@@ -543,12 +761,24 @@ class QuantLabGuard:
         if include_health and self.client is not None and bool(_get_cfg(self.cfg, "enabled", True)):
             try:
                 self.client.get_health()
-                self._emit_usage({"event_type": "health", "endpoint": "/v1/health", "success": True, "status": "ok"})
+                self._emit_usage(
+                    {
+                        "event_type": "health_check",
+                        "legacy_event_type": "health",
+                        "endpoint": "/v1/health",
+                        "endpoint_path": "/v1/health",
+                        "success": True,
+                        "fallback_used": False,
+                        "status": "ok",
+                    }
+                )
             except Exception as exc:
                 self._emit_usage(
                     {
-                        "event_type": "health",
+                        "event_type": "health_check",
+                        "legacy_event_type": "health",
                         "endpoint": "/v1/health",
+                        "endpoint_path": "/v1/health",
                         "success": False,
                         "error_type": type(exc).__name__,
                         "error_message_sanitized": str(sanitize_quant_lab_obj(str(exc)[:300])),
@@ -571,7 +801,7 @@ class QuantLabGuard:
         permission = normalize_permission(permission, allow_local=True)
         if permission == ALLOW_LOCAL:
             permission = ALLOW
-        final_permission = self.final_permission or permission
+        final_permission = self.final_permission or self.permission_result.effective_permission_decision or permission
         raw_permission = self.permission_result.raw_permission_decision or self.permission_result.permission
         kept: List[Order] = []
         for order in source:
@@ -591,17 +821,24 @@ class QuantLabGuard:
             qmeta.update(
                 {
                     "permission": self.permission_result.permission,
-                    "quant_lab_permission": self.permission_result.permission,
+                    "quant_lab_permission": raw_permission,
                     "raw_permission_decision": raw_permission,
+                    "raw_permission_status": self.permission_result.raw_permission_status,
+                    "raw_permission_enforceable": self.permission_result.raw_permission_enforceable,
                     "local_mode": self.mode.value,
                     "final_permission": final_permission,
                     "effective_permission_decision": final_permission,
                     "would_block_if_enforced": would_filter,
+                    "shadow_override_reason": self.permission_result.shadow_override_reason,
                     "fallback_used": bool(self.permission_result.fallback_used),
                     "fallback_reason": self.permission_result.fallback_reason,
                     "remote_permission_as_of_ts": self.permission_result.remote_permission_as_of_ts or self.permission_result.response_ts,
                     "remote_permission_expires_at": self.permission_result.remote_permission_expires_at,
                     "remote_permission_status": self.permission_result.remote_permission_status,
+                    "remote_permission_source_bundle_ts": self.permission_result.remote_permission_source_bundle_ts,
+                    "remote_permission_telemetry_latest_ts": self.permission_result.remote_permission_telemetry_latest_ts,
+                    "remote_permission_contract_version": self.permission_result.remote_permission_contract_version,
+                    "permission_contract_violation": self.permission_result.permission_contract_violation,
                     "contract_version": self.permission_result.contract_version,
                     "permission_gate_enforced": self.apply_permission_gate,
                     "cost_gate_enforced": self.apply_cost_gate,
@@ -616,22 +853,32 @@ class QuantLabGuard:
             order.meta = sanitize_quant_lab_obj(meta)
             row = {
                 "event_type": "filter_order",
+                "request_id": self.permission_result.request_id,
+                "original_request_id": self.permission_result.request_id,
+                "original_event_id": self.permission_result.original_event_id,
                 "symbol": getattr(order, "symbol", None),
                 "side": getattr(order, "side", None),
                 "intent": getattr(order, "intent", None),
                 "notional_usdt": float(getattr(order, "notional_usdt", 0.0) or 0.0),
                 "permission": self.permission_result.permission,
-                "quant_lab_permission": self.permission_result.permission,
+                "quant_lab_permission": raw_permission,
                 "raw_permission_decision": raw_permission,
+                "raw_permission_status": self.permission_result.raw_permission_status,
+                "raw_permission_enforceable": self.permission_result.raw_permission_enforceable,
                 "local_mode": self.mode.value,
                 "final_permission": final_permission,
                 "effective_permission_decision": final_permission,
                 "would_block_if_enforced": would_filter,
+                "shadow_override_reason": self.permission_result.shadow_override_reason,
                 "fallback_used": bool(self.permission_result.fallback_used),
                 "fallback_reason": self.permission_result.fallback_reason,
                 "remote_permission_as_of_ts": self.permission_result.remote_permission_as_of_ts or self.permission_result.response_ts,
                 "remote_permission_expires_at": self.permission_result.remote_permission_expires_at,
                 "remote_permission_status": self.permission_result.remote_permission_status,
+                "remote_permission_source_bundle_ts": self.permission_result.remote_permission_source_bundle_ts,
+                "remote_permission_telemetry_latest_ts": self.permission_result.remote_permission_telemetry_latest_ts,
+                "remote_permission_contract_version": self.permission_result.remote_permission_contract_version,
+                "permission_contract_violation": self.permission_result.permission_contract_violation,
                 "contract_version": self.permission_result.contract_version,
                 "would_filter": would_filter,
                 "would_filter_by_permission": would_filter,
@@ -699,6 +946,17 @@ class QuantLabGuard:
             side = str(getattr(order, "side", "") or "").lower()
             expected_edge_for_request, _expected_edge_source = order_expected_edge_detail(order)
             request_id = f"{self.run_id or 'run'}:cost:{idx}:{normalized_symbol}"
+            cost_request_event = normalize_quant_lab_event(
+                {
+                    "run_id": self.run_id,
+                    "event_type": EVENT_TYPE_REQUEST,
+                    "request_id": request_id,
+                    "endpoint_path": "/v1/costs/estimate",
+                    "symbol": original_symbol,
+                    "normalized_symbol": normalized_symbol,
+                },
+                default_event_type=EVENT_TYPE_REQUEST,
+            )
             try:
                 if self.client is None:
                     raise QuantLabError("quant-lab client disabled")
@@ -712,6 +970,8 @@ class QuantLabGuard:
                     strategy_id=strategy_id,
                     expected_edge_bps=expected_edge_for_request,
                     request_id=request_id,
+                    event_id=cost_request_event["event_id"],
+                    ts_utc=cost_request_event["ts_utc"],
                     venue="OKX",
                     instrument_type="spot",
                 )
@@ -721,12 +981,39 @@ class QuantLabGuard:
                     estimate = _local_cost_estimate(order, cfg, regime=regime, quantile=quantile)
                     fallback_used = True
                     fallback_reason = "quant_lab_cost_unavailable_local_fallback"
+                    self._emit_usage(
+                        {
+                            "event_type": EVENT_TYPE_FALLBACK,
+                            "legacy_event_type": "fallback",
+                            "request_id": request_id,
+                            "original_request_id": request_id,
+                            "original_event_id": cost_request_event["event_id"],
+                            "endpoint_path": "/v1/costs/estimate",
+                            "endpoint": "/v1/costs/estimate",
+                            "symbol": original_symbol,
+                            "normalized_symbol": normalized_symbol,
+                            "side": side,
+                            "success": False,
+                            "fallback_used": True,
+                            "fallback_reason": fallback_reason,
+                            "fallback_policy": str(getattr(qcfg, "fail_policy", "sell_only") or "sell_only"),
+                            "fallback_scope": "cost_usage",
+                            "action_taken": "local_cost_model",
+                            "error_type": type(exc).__name__,
+                            "error_message_sanitized": str(sanitize_quant_lab_obj(str(exc)[:300])),
+                        }
+                    )
                 else:
                     fail_policy = str(getattr(qcfg, "fail_policy", "sell_only") or "sell_only").lower()
                     if fail_policy == "abort" and self.apply_cost_gate:
                         self._emit_usage(
                             {
-                                "event_type": "fallback",
+                                "event_type": EVENT_TYPE_FALLBACK,
+                                "legacy_event_type": "fallback",
+                                "request_id": request_id,
+                                "original_request_id": request_id,
+                                "original_event_id": cost_request_event["event_id"],
+                                "endpoint_path": "/v1/costs/estimate",
                                 "reason": "quant_lab_cost_unavailable_abort",
                                 "fallback_policy": fail_policy,
                                 "action_taken": "abort_orders",
@@ -739,6 +1026,9 @@ class QuantLabGuard:
                         self._emit_usage(
                             {
                                 "event_type": "filter_order",
+                                "request_id": request_id,
+                                "original_request_id": request_id,
+                                "original_event_id": cost_request_event["event_id"],
                                 "symbol": getattr(order, "symbol", None),
                                 "permission": SELL_ONLY,
                                 "final_permission": SELL_ONLY,
@@ -750,6 +1040,28 @@ class QuantLabGuard:
                     estimate = _local_cost_estimate(order, cfg, regime=regime, quantile=quantile)
                     fallback_used = True
                     fallback_reason = "quant_lab_cost_unavailable_local_fallback"
+                    self._emit_usage(
+                        {
+                            "event_type": EVENT_TYPE_FALLBACK,
+                            "legacy_event_type": "fallback",
+                            "request_id": request_id,
+                            "original_request_id": request_id,
+                            "original_event_id": cost_request_event["event_id"],
+                            "endpoint_path": "/v1/costs/estimate",
+                            "endpoint": "/v1/costs/estimate",
+                            "symbol": original_symbol,
+                            "normalized_symbol": normalized_symbol,
+                            "side": side,
+                            "success": False,
+                            "fallback_used": True,
+                            "fallback_reason": fallback_reason,
+                            "fallback_policy": fail_policy,
+                            "fallback_scope": "cost_usage",
+                            "action_taken": "local_cost_model",
+                            "error_type": type(exc).__name__,
+                            "error_message_sanitized": str(sanitize_quant_lab_obj(str(exc)[:300])),
+                        }
+                    )
 
             gate: CostGateResult = apply_quant_lab_cost_gate(order, estimate, cfg, mode=self.mode.value)
             actually_filtered = bool(gate.filtered and self.apply_cost_gate)
@@ -765,6 +1077,7 @@ class QuantLabGuard:
             cost_fallback_reason = fallback_reason or estimate.fallback_reason or ("global_default_cost" if degraded_cost_model else None)
             row = {
                 "event_type": "cost_estimate",
+                "contract_version": CONTRACT_VERSION,
                 "symbol": original_symbol,
                 "request_symbol": original_symbol,
                 "normalized_symbol": normalized_symbol,
@@ -775,8 +1088,11 @@ class QuantLabGuard:
                 "intent": getattr(order, "intent", None),
                 "strategy_id": strategy_id,
                 "request_id": request_id,
+                "original_request_id": request_id,
+                "original_event_id": cost_request_event["event_id"],
                 "requested_regime": str(regime or "normal"),
-                "matched_regime": estimate.regime or gate.regime,
+                "requested_quantile": quantile,
+                "matched_regime": estimate.matched_regime or estimate.regime or gate.regime,
                 "regime": gate.regime,
                 "notional_usdt": gate.notional_usdt,
                 "quantile": gate.quantile,
@@ -792,6 +1108,8 @@ class QuantLabGuard:
                 "cost_source": gate.source,
                 "sample_count": gate.sample_count,
                 "cost_model_version": gate.cost_model_version,
+                "cost_contract_version": CONTRACT_VERSION,
+                "as_of_ts": estimate.as_of_ts,
                 "selected_total_cost_bps": estimate.total_cost_bps,
                 "total_cost_bps_p50": estimate.total_cost_bps_p50,
                 "total_cost_bps_p75": estimate.total_cost_bps_p75,
@@ -830,12 +1148,26 @@ class QuantLabGuard:
                 {
                     "permission": self.permission_result.permission,
                     "raw_permission_decision": self.permission_result.raw_permission_decision or self.permission_result.permission,
+                    "raw_permission_status": self.permission_result.raw_permission_status,
+                    "raw_permission_enforceable": self.permission_result.raw_permission_enforceable,
                     "local_mode": self.mode.value,
-                    "final_permission": qmeta.get("final_permission") or self.permission_result.permission,
+                    "final_permission": qmeta.get("final_permission")
+                    or self.permission_result.effective_permission_decision
+                    or self.permission_result.permission,
                     "effective_permission_decision": qmeta.get("effective_permission_decision")
                     or qmeta.get("final_permission")
+                    or self.permission_result.effective_permission_decision
                     or self.permission_result.permission,
                     "would_block_if_enforced": qmeta.get("would_block_if_enforced", False),
+                    "shadow_override_reason": self.permission_result.shadow_override_reason,
+                    "remote_permission_as_of_ts": self.permission_result.remote_permission_as_of_ts
+                    or self.permission_result.response_ts,
+                    "remote_permission_expires_at": self.permission_result.remote_permission_expires_at,
+                    "remote_permission_status": self.permission_result.remote_permission_status,
+                    "remote_permission_source_bundle_ts": self.permission_result.remote_permission_source_bundle_ts,
+                    "remote_permission_telemetry_latest_ts": self.permission_result.remote_permission_telemetry_latest_ts,
+                    "remote_permission_contract_version": self.permission_result.remote_permission_contract_version,
+                    "permission_contract_violation": self.permission_result.permission_contract_violation,
                     "request_symbol": original_symbol,
                     "normalized_symbol": normalized_symbol,
                     "response_symbol": estimate.symbol,
@@ -844,8 +1176,11 @@ class QuantLabGuard:
                     "strategy_id": strategy_id,
                     "request_id": request_id,
                     "requested_regime": str(regime or "normal"),
-                    "matched_regime": estimate.regime or gate.regime,
+                    "requested_quantile": quantile,
+                    "matched_regime": estimate.matched_regime or estimate.regime or gate.regime,
                     "cost_model_version": gate.cost_model_version,
+                    "cost_contract_version": CONTRACT_VERSION,
+                    "as_of_ts": estimate.as_of_ts,
                     "cost_quantile": gate.quantile,
                     "fee_bps": gate.fee_bps,
                     "slippage_bps": gate.slippage_bps,
@@ -891,6 +1226,9 @@ class QuantLabGuard:
                 self.filtered_orders.append(
                     {
                         "event_type": "filter_order",
+                        "request_id": request_id,
+                        "original_request_id": request_id,
+                        "original_event_id": cost_request_event["event_id"],
                         "symbol": getattr(order, "symbol", None),
                         "side": getattr(order, "side", None),
                         "intent": getattr(order, "intent", None),
@@ -901,6 +1239,9 @@ class QuantLabGuard:
                 self._emit_usage(
                     {
                         "event_type": "filter_order",
+                        "request_id": request_id,
+                        "original_request_id": request_id,
+                        "original_event_id": cost_request_event["event_id"],
                         "symbol": getattr(order, "symbol", None),
                         "side": getattr(order, "side", None),
                         "intent": getattr(order, "intent", None),
@@ -934,12 +1275,17 @@ class QuantLabGuard:
             [row for row in self.cost_rows if row.get("actually_filtered") or row.get("order_filtered")]
         )
         cost_fallback = len([row for row in self.cost_rows if row.get("fallback_used")])
-        final_permission = self.final_permission or ("LOCAL_ONLY" if self.mode == QuantLabMode.LOCAL_ONLY else permission.permission)
+        final_permission = self.final_permission or (
+            "LOCAL_ONLY" if self.mode == QuantLabMode.LOCAL_ONLY else permission.effective_permission_decision or permission.permission
+        )
+        raw_permission = permission.raw_permission_decision or permission.permission
         client = self.client
         return sanitize_quant_lab_obj(
             {
                 "enabled": bool(permission.enabled),
                 "mode": self.mode.value,
+                "quant_lab_requested_mode": (self.mode_resolution.requested_mode or self.mode).value,
+                "quant_lab_effective_mode": self.mode.value,
                 "mode_source": self.mode_resolution.mode_source,
                 "mode_override_path": self.mode_resolution.override_path,
                 "quant_lab_config_source": _get_cfg(self.cfg, "quant_lab_config_source", "unknown"),
@@ -954,16 +1300,23 @@ class QuantLabGuard:
                 "api_env_token_loaded": getattr(client, "api_env_token_loaded", False) if client is not None else False,
                 "api_env_warning": getattr(client, "api_env_warning", None) if client is not None else None,
                 "permission": permission.permission,
-                "quant_lab_permission": permission.permission,
-                "raw_permission_decision": permission.raw_permission_decision or permission.permission,
+                "quant_lab_permission": raw_permission,
+                "raw_permission_decision": raw_permission,
+                "raw_permission_status": permission.raw_permission_status,
+                "raw_permission_enforceable": permission.raw_permission_enforceable,
                 "local_mode": self.mode.value,
                 "local_preflight_permission": self.local_preflight_permission,
                 "final_permission": final_permission,
                 "effective_permission_decision": final_permission,
                 "would_block_if_enforced": permission.would_block_if_enforced,
+                "shadow_override_reason": permission.shadow_override_reason,
                 "remote_permission_as_of_ts": permission.remote_permission_as_of_ts or permission.response_ts,
                 "remote_permission_expires_at": permission.remote_permission_expires_at,
                 "remote_permission_status": permission.remote_permission_status,
+                "remote_permission_source_bundle_ts": permission.remote_permission_source_bundle_ts,
+                "remote_permission_telemetry_latest_ts": permission.remote_permission_telemetry_latest_ts,
+                "remote_permission_contract_version": permission.remote_permission_contract_version,
+                "permission_contract_violation": permission.permission_contract_violation,
                 "contract_version": permission.contract_version,
                 "allowed_modes": permission.allowed_modes,
                 "risk_permission_reasons": permission.reasons,
@@ -990,6 +1343,29 @@ class QuantLabGuard:
                 "last_response_ts": permission.response_ts,
                 "skipped_reason": permission.skipped_reason,
                 "mode_warning": self.mode_resolution.warning,
+                "enforce_readiness_status": (
+                    self.mode_resolution.enforce_readiness.status if self.mode_resolution.enforce_readiness is not None else None
+                ),
+                "enforce_blocked_reasons": (
+                    list(self.mode_resolution.enforce_readiness.reasons)
+                    if self.mode_resolution.enforce_readiness is not None
+                    else []
+                ),
+                "enforce_blocked_reason": (
+                    ";".join(self.mode_resolution.enforce_readiness.reasons)
+                    if self.mode_resolution.enforce_readiness is not None and self.mode_resolution.enforce_readiness.reasons
+                    else None
+                ),
+                "contract_version_match": (
+                    self.mode_resolution.enforce_readiness.contract_version_match
+                    if self.mode_resolution.enforce_readiness is not None
+                    else None
+                ),
+                "telemetry_schema_version_match": (
+                    self.mode_resolution.enforce_readiness.telemetry_schema_version_match
+                    if self.mode_resolution.enforce_readiness is not None
+                    else None
+                ),
             }
         )
 

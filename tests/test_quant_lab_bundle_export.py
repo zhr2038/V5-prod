@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import csv
 import json
 import tarfile
 from pathlib import Path
@@ -49,19 +50,33 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "mode": "shadow",
                 "local_mode": "shadow",
                 "mode_source": "runtime_override",
+                "quant_lab_requested_mode": "enforce",
+                "quant_lab_effective_mode": "shadow",
+                "enforce_readiness_status": "BLOCKED",
+                "enforce_blocked_reasons": ["global_default_cost_count_high"],
+                "enforce_blocked_reason": "global_default_cost_count_high",
+                "contract_version_match": True,
+                "telemetry_schema_version_match": True,
                 "called_api": True,
                 "permission_gate_enforced": False,
                 "cost_gate_enforced": False,
                 "raw_permission_decision": "ABORT",
+                "raw_permission_status": "ACTIVE_ABORT",
+                "raw_permission_enforceable": True,
                 "quant_lab_permission": "ABORT",
                 "effective_permission_decision": "ALLOW",
                 "final_permission": "ALLOW",
                 "would_block_if_enforced": True,
+                "shadow_override_reason": "quant_lab_shadow_mode",
                 "fallback_used": False,
                 "fallback_reason": None,
                 "remote_permission_as_of_ts": "2026-05-11T12:59:58Z",
                 "remote_permission_expires_at": "2026-05-11T13:09:58Z",
-                "remote_permission_status": "active",
+                "remote_permission_status": "ACTIVE_ABORT",
+                "remote_permission_source_bundle_ts": "2026-05-11T12:58:00Z",
+                "remote_permission_telemetry_latest_ts": "2026-05-11T12:57:00Z",
+                "remote_permission_contract_version": "v5.quant_lab.telemetry.v2",
+                "permission_contract_violation": False,
                 "contract_version": "v5.quant_lab.telemetry.v2",
             }
         )
@@ -128,6 +143,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "permission_gate_enforced": False,
                 "cost_gate_enforced": False,
                 "would_filter": True,
+                "would_block_if_enforced": True,
                 "actually_filtered": False,
                 "order_filtered": False,
                 "filter_reason": "quant_lab_sell_only",
@@ -159,6 +175,22 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    run_dir = reports / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "trades.csv").write_text(
+        "\n".join(
+            [
+                "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,slippage_usdt",
+                "2026-05-11T13:00:04Z,r1,BNB/USDT,OPEN_LONG,buy,0.02,600,12,0.012,0.001",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "summary.json").write_text(
+        json.dumps({"run_id": "r1", "num_trades": 0, "budget": {"fills_count_today": 0}}),
+        encoding="utf-8",
+    )
 
     bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=72)
     sha_path = Path(str(bundle) + ".sha256")
@@ -171,29 +203,55 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "raw/quant_lab/quant_lab_usage.jsonl" in names
         assert "raw/quant_lab/quant_lab_requests.jsonl" in names
         assert "summaries/quant_lab_compliance.csv" in names
+        assert "summaries/quant_lab_permission_audit.csv" in names
+        assert "summaries/quant_lab_mode_audit.csv" in names
         assert "summaries/quant_lab_cost_usage.csv" in names
         assert "summaries/quant_lab_fallbacks.csv" in names
+        assert "summaries/enforce_readiness_snapshot.json" in names
         assert "summaries/quant_lab_config_audit.json" in names
+        assert "summaries/trade_metrics.csv" in names
+        assert "summaries/fill_metrics.csv" in names
+        assert "reports/summary_trade_count_mismatch.csv" in names
         assert "summaries/window_summary.json" in names
         assert "raw/state/quant_lab_mode.json" in names
         assert not any(Path(name).name == ".env" for name in names)
         compliance = tf.extractfile("summaries/quant_lab_compliance.csv").read().decode("utf-8")
+        permission_audit = tf.extractfile("summaries/quant_lab_permission_audit.csv").read().decode("utf-8")
+        mode_audit = tf.extractfile("summaries/quant_lab_mode_audit.csv").read().decode("utf-8")
         cost_usage = tf.extractfile("summaries/quant_lab_cost_usage.csv").read().decode("utf-8")
         fallbacks = tf.extractfile("summaries/quant_lab_fallbacks.csv").read().decode("utf-8")
         config_text = tf.extractfile("raw/config/live_prod.yaml").read().decode("utf-8")
         config_audit = json.loads(tf.extractfile("summaries/quant_lab_config_audit.json").read().decode("utf-8"))
+        readiness_snapshot = json.loads(tf.extractfile("summaries/enforce_readiness_snapshot.json").read().decode("utf-8"))
+        trade_metrics = list(csv.DictReader(tf.extractfile("summaries/trade_metrics.csv").read().decode("utf-8").splitlines()))
+        fill_metrics = list(csv.DictReader(tf.extractfile("summaries/fill_metrics.csv").read().decode("utf-8").splitlines()))
+        mismatch_rows = list(csv.DictReader(tf.extractfile("reports/summary_trade_count_mismatch.csv").read().decode("utf-8").splitlines()))
+        manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
         window = json.loads(tf.extractfile("summaries/window_summary.json").read().decode("utf-8"))
         assert "mode" in compliance.splitlines()[0]
         assert "called_api" in compliance.splitlines()[0]
         assert "permission_gate_enforced" in compliance.splitlines()[0]
         assert "cost_gate_enforced" in compliance.splitlines()[0]
         assert "raw_permission_decision" in compliance.splitlines()[0]
+        assert "raw_permission_status" in compliance.splitlines()[0]
+        assert "raw_permission_enforceable" in compliance.splitlines()[0]
         assert "effective_permission_decision" in compliance.splitlines()[0]
         assert "would_block_if_enforced" in compliance.splitlines()[0]
+        assert "shadow_override_reason" in compliance.splitlines()[0]
         assert "remote_permission_status" in compliance.splitlines()[0]
+        assert "remote_permission_source_bundle_ts" in compliance.splitlines()[0]
+        assert "remote_permission_contract_version" in compliance.splitlines()[0]
+        assert "permission_contract_violation" in compliance.splitlines()[0]
         assert "shadow" in compliance
         assert "ABORT" in compliance
         assert "ALLOW" in compliance
+        assert "ACTIVE_ABORT" in permission_audit
+        assert "quant_lab_shadow_mode" in permission_audit
+        assert "quant_lab_requested_mode" in mode_audit.splitlines()[0]
+        assert "enforce_readiness_status" in mode_audit.splitlines()[0]
+        assert "enforce" in mode_audit
+        assert "BLOCKED" in mode_audit
+        assert "global_default_cost_count_high" in mode_audit
         assert "hypothetical_violation" in compliance
         assert "actual_violation" in compliance
         assert "true,false,false" in compliance
@@ -240,6 +298,13 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "allow_api_env_symlink: false" in config_text
         assert "api_token_env: QUANT_LAB_API_TOKEN" in config_text
         assert config_audit["mode"] == "shadow"
+        assert trade_metrics[0]["num_trades"] == "1"
+        assert trade_metrics[0]["fills_count_today"] == "1"
+        assert fill_metrics[0]["normalized_symbol"] == "BNB-USDT"
+        assert mismatch_rows[0]["high_issue"] == "true"
+        assert manifest["trade_export_schema_version"] == "v5.trade_export.v1"
+        assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1"
+        assert window["fill_metrics_rows"] == 1
         assert config_audit["mode_source"] == "runtime_override"
         assert "api_env_path_present" in config_audit
         assert "api_env_secure_permissions" in config_audit
@@ -249,9 +314,20 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert config_audit["base_url_host"] == "qyun2.hrhome.top"
         assert window["quant_lab_mode"] == "shadow"
         assert window["quant_lab_mode_source"] == "runtime_override"
+        assert window["quant_lab_requested_mode"] == "enforce"
+        assert window["quant_lab_effective_mode"] == "shadow"
+        assert window["enforce_readiness_status"] == "BLOCKED"
+        assert window["contract_version_match"] is True
         assert window["quant_lab_request_success_count"] == 3
         assert window["quant_lab_request_error_count"] == 1
         assert window["quant_lab_actual_filter_count"] == 0
         assert window["quant_lab_hypothetical_filter_count"] >= 1
+        assert window["would_block_if_enforced_count"] >= 1
+        assert window["effective_block_count"] == 0
+        assert window["permission_contract_violation_count"] == 0
         assert window["quant_lab_fallback_count"] == 1
         assert window["quant_lab_actual_fallback_count"] == 1
+        assert readiness_snapshot["quant_lab_requested_mode"] == "enforce"
+        assert readiness_snapshot["quant_lab_effective_mode"] == "shadow"
+        assert readiness_snapshot["status"] == "BLOCKED"
+        assert readiness_snapshot["contract_version_match"] is True

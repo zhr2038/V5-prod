@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "contract_version": "v5.quant_lab.telemetry.v2",
+  "event_id": "fixture-risk-permission-active",
+  "request_id": "fixture-run-001:permission",
+  "run_id": "fixture-run-001",
+  "ts_utc": "2026-05-14T00:02:00Z",
+  "strategy": "v5",
+  "version": "5.0.0",
+  "permission": "SELL_ONLY",
+  "allowed_modes": ["sell_only"],
+  "max_gross_exposure": 0.0,
+  "max_single_weight": 0.0,
+  "cost_model_version": "cost_bucket_daily:2026-05-14",
+  "gate_version": "bootstrap.quarantine.v1",
+  "reasons": ["required_alpha_gate_quarantine"],
+  "created_at": "2026-05-14T00:02:00Z",
+  "expires_at": "2026-05-14T00:07:00Z",
+  "status": "active"
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 from configs.schema import AppConfig
@@ -25,6 +26,10 @@ def _series(symbol: str, start_s: int, prices: dict[int, float]) -> MarketSeries
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
     return list(csv.DictReader(path.read_text(encoding="utf-8").splitlines()))
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def _cfg() -> AppConfig:
@@ -145,7 +150,10 @@ def test_protect_sol_exception_shadow_records_sol_only_and_labels_matured(tmp_pa
     assert {row["symbol"] for row in rows} == {"SOL/USDT"}
     assert {row["original_block_reason"] for row in rows} == {"protect_entry_rsi_confirm_too_weak"}
     assert {row["would_enter"] for row in rows} == {"True"}
+    assert {row["shadow_only"] for row in rows} == {"True"}
     assert {row["enable_live_experiment"] for row in rows} == {"False"}
+    assert {row["alpha6_side"] for row in rows} == {"buy"}
+    assert {row["would_target_w"] for row in rows} == {"0.12"}
     assert {row["would_size_notional"] for row in rows} == {"12.0"}
     assert {row["label_status"] for row in rows} == {"complete"}
     assert {row["would_pnl_bps_24h"] for row in rows} == {"970.0"}
@@ -157,13 +165,34 @@ def test_protect_sol_exception_shadow_records_sol_only_and_labels_matured(tmp_pa
     assert h24["symbol"] == "SOL/USDT"
     assert h24["better_than_current_strategy"] == "True"
     assert h24["sample_warning"] == "insufficient_samples_min_5"
+    assert h24["live_ready_suggestion"] == "False"
 
 
-def test_protect_sol_exception_shadow_requires_positive_f4(tmp_path: Path):
+def test_protect_sol_exception_shadow_records_alpha6_score_too_low_with_zero_f4(tmp_path: Path):
     cfg = _cfg()
     start_s = 1_779_000_000
     audit = _audit("r1", start_s)
+    audit.target_execution_explain[0]["router_reason"] = "protect_entry_alpha6_score_too_low"
     audit.target_execution_explain[0]["f4_volume_expansion"] = 0.0
+    result = update_protect_sol_exception_shadow_evaluator(
+        run_dir=tmp_path / "reports" / "runs" / "r1",
+        audit=audit,
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0, 24: 110.0})},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "cache",
+    )
+    assert result["new_records"] == 4
+    rows = _read_csv(tmp_path / "reports" / "summaries" / "protect_sol_exception_shadow_outcomes.csv")
+    assert {row["original_block_reason"] for row in rows} == {"protect_entry_alpha6_score_too_low"}
+    assert {row["f4_volume_expansion"] for row in rows} == {"0.0"}
+
+
+def test_protect_sol_exception_shadow_requires_non_negative_f4(tmp_path: Path):
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    audit = _audit("r1", start_s)
+    audit.target_execution_explain[0]["f4_volume_expansion"] = -0.01
     result = update_protect_sol_exception_shadow_evaluator(
         run_dir=tmp_path / "reports" / "runs" / "r1",
         audit=audit,
@@ -174,6 +203,9 @@ def test_protect_sol_exception_shadow_requires_positive_f4(tmp_path: Path):
     )
     assert result["new_records"] == 0
     assert result["total_records"] == 0
+    labels = _read_jsonl(tmp_path / "reports" / "protect_sol_exception_shadow_labels.jsonl")
+    assert labels[0]["event_type"] == "heartbeat"
+    assert labels[0]["no_sample_reason"] == "no_matching_sol_protect_exception_candidates"
 
 
 def test_protect_sol_exception_shadow_only_in_protect(tmp_path: Path):
@@ -191,3 +223,44 @@ def test_protect_sol_exception_shadow_only_in_protect(tmp_path: Path):
     )
     assert result["new_records"] == 0
     assert result["total_records"] == 0
+
+
+def test_protect_sol_exception_shadow_ignores_non_sol_and_writes_heartbeat(tmp_path: Path):
+    cfg = _cfg()
+    start_s = 1_779_000_000
+    audit = _audit("r1", start_s)
+    audit.target_execution_explain = [
+        {
+            "symbol": symbol,
+            "router_action": "skip",
+            "router_reason": "protect_entry_rsi_confirm_too_weak",
+            "final_score": 0.90,
+            "target_w": 0.12,
+            "entry_px": 100.0,
+            "alpha6_side": "buy",
+            "f4_volume_expansion": 0.2,
+            "current_level": "PROTECT",
+        }
+        for symbol in ("ETH/USDT", "BTC/USDT", "BNB/USDT")
+    ]
+    result = update_protect_sol_exception_shadow_evaluator(
+        run_dir=tmp_path / "reports" / "runs" / "r1",
+        audit=audit,
+        market_data_1h={"SOL/USDT": _series("SOL/USDT", start_s, {0: 100.0, 24: 110.0})},
+        cfg=cfg,
+        current_level="PROTECT",
+        cache_dir=tmp_path / "cache",
+    )
+    assert result["new_records"] == 0
+    assert result["total_records"] == 0
+    assert result["heartbeat_records"] == 1
+    assert _read_csv(tmp_path / "reports" / "summaries" / "protect_sol_exception_shadow_outcomes.csv") == []
+    labels = _read_jsonl(tmp_path / "reports" / "protect_sol_exception_shadow_labels.jsonl")
+    assert len(labels) == 1
+    assert labels[0]["event_type"] == "heartbeat"
+    assert labels[0]["shadow_only"] is True
+    assert labels[0]["enable_live_experiment"] is False
+
+
+def test_protect_sol_exception_live_experiment_defaults_false():
+    assert AppConfig().diagnostics.protect_sol_exception_enable_live_experiment is False

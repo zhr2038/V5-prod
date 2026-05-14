@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "contract_version": "v5.quant_lab.telemetry.v2",
+  "event_id": "fixture-cost-request-bnb-dash",
+  "request_id": "fixture-run-001:cost:1:BNB-USDT",
+  "run_id": "fixture-run-001",
+  "ts_utc": "2026-05-14T00:01:00Z",
+  "symbol": "BNB-USDT",
+  "normalized_symbol": "BNB-USDT",
+  "venue": "OKX",
+  "instrument_type": "spot",
+  "side": "buy",
+  "regime": "normal",
+  "notional_usdt": 200.0,
+  "quantile": "p75",
+  "strategy_id": "v5",
+  "expected_edge_bps": 60.0,
+  "requested_regime": "normal",
+  "requested_quantile": "p75"
+}

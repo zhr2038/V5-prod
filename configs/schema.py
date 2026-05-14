@@ -1418,7 +1418,7 @@ class DiagnosticsConfig(BaseModel):
         default=0.0,
         ge=-10.0,
         le=10.0,
-        description="Minimum f4 volume expansion; value must be strictly greater than this threshold",
+        description="Minimum f4 volume expansion; value must be greater than or equal to this threshold",
     )
     protect_sol_exception_min_complete_samples_warning: int = Field(
         default=5,
@@ -1563,6 +1563,13 @@ class QuantLabConfig(BaseModel):
     runtime_override_path: str = "state/quant_lab_mode.json"
     allow_runtime_override: bool = True
     write_mode_audit: bool = True
+    enforce_readiness_enabled: bool = True
+    enforce_readiness_path: str = "state/quant_lab_enforce_readiness.json"
+    enforce_readiness_max_cost_degraded_rate: float = 0.0
+    enforce_readiness_max_global_default_cost_count: int = 0
+    enforce_readiness_max_fallback_rate: float = 0.0
+    enforce_readiness_required_contract_version: str = "v5.quant_lab.telemetry.v2"
+    enforce_readiness_required_schema_version: str = "1.0.0"
 
     @field_validator("mode")
     @classmethod
@@ -1636,6 +1643,22 @@ class QuantLabConfig(BaseModel):
         value = float(v)
         if value < 0:
             raise ValueError("quant_lab.min_cost_bps_floor must be >= 0")
+        return value
+
+    @field_validator("enforce_readiness_max_cost_degraded_rate", "enforce_readiness_max_fallback_rate")
+    @classmethod
+    def _validate_enforce_readiness_rates(cls, v: float) -> float:
+        value = float(v)
+        if value < 0 or value > 1:
+            raise ValueError("quant_lab enforce readiness rates must be between 0 and 1")
+        return value
+
+    @field_validator("enforce_readiness_max_global_default_cost_count")
+    @classmethod
+    def _validate_enforce_readiness_counts(cls, v: int) -> int:
+        value = int(v)
+        if value < 0:
+            raise ValueError("quant_lab.enforce_readiness_max_global_default_cost_count must be >= 0")
         return value
 
     @field_validator("export_bundle_dir")

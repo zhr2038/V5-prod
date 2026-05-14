@@ -36,6 +36,47 @@ def test_trade_log_writer_resolves_relative_run_dir_from_project_root(monkeypatc
     writer = trade_log.TradeLogWriter("reports/runs/test_run")
     assert writer.run_dir == (tmp_path / "reports" / "runs" / "test_run").resolve()
     assert writer.path == (tmp_path / "reports" / "runs" / "test_run" / "trades.csv").resolve()
+    header = writer.path.read_text(encoding="utf-8").splitlines()[0].split(",")
+    for field in (
+        "run_id",
+        "ts_utc",
+        "symbol",
+        "normalized_symbol",
+        "side",
+        "action",
+        "qty",
+        "price",
+        "notional_usdt",
+        "fee",
+        "fee_ccy",
+        "fee_usdt",
+        "slippage_usdt",
+        "order_id",
+        "trade_id",
+        "strategy_id",
+        "position_id",
+    ):
+        assert field in header
+    writer.append_fill(
+        trade_log.Fill(
+            ts="2026-05-13T00:00:00Z",
+            run_id="test_run",
+            symbol="BNBUSDT",
+            intent="OPEN_LONG",
+            side="buy",
+            qty=0.02,
+            price=600.0,
+            notional_usdt=12.0,
+            fee_usdt=None,
+            slippage_usdt=None,
+        )
+    )
+    row = dict(zip(header, writer.path.read_text(encoding="utf-8").splitlines()[1].split(",")))
+    assert row["ts_utc"] == "2026-05-13T00:00:00Z"
+    assert row["normalized_symbol"] == "BNB-USDT"
+    assert row["fee_usdt"] == "null"
+    assert row["slippage_usdt"] == "null"
+    assert row["order_id"] == "null"
 
 
 def test_write_summary_resolves_relative_run_dir_from_project_root(monkeypatch, tmp_path):
@@ -120,6 +161,7 @@ def test_write_summary_counts_single_bnb_trade_from_trades_csv(monkeypatch, tmp_
     assert summary["trades_counted_rows"] == 1
     assert summary["trade_metrics_source"] == "trades_csv"
     assert summary["num_trades"] == 1
+    assert summary["fills_count_today"] == 1
     assert summary["notional_usdt_total"] == 12.0
     assert summary["turnover_usdt"] == 12.0
     assert summary["fees_usdt_total"] == 0.012
@@ -149,6 +191,7 @@ def test_write_summary_counts_20260512_06_bnb_buy_fixture(monkeypatch, tmp_path)
     assert summary["trade_metrics_source"] == "trades_csv"
     assert summary["trade_metrics_warning"] == ""
     assert summary["num_trades"] == 1
+    assert summary["fills_count_today"] == 1
     assert summary["turnover_usdt"] == pytest.approx(15.99999)
     assert summary["fees_usdt_total"] == pytest.approx(0.01599999)
     assert summary["slippage_usdt_total"] == pytest.approx(0.001205)
@@ -178,6 +221,7 @@ def test_write_summary_counts_20260512_11_bnb_sell_fixture(monkeypatch, tmp_path
     assert summary["trade_metrics_source"] == "trades_csv"
     assert summary["trade_metrics_warning"] == ""
     assert summary["num_trades"] == 1
+    assert summary["fills_count_today"] == 1
     assert summary["turnover_usdt"] == pytest.approx(15.95691)
     assert summary["fees_usdt_total"] == pytest.approx(0.01595691)
     assert summary["slippage_usdt_total"] == pytest.approx(0.00120375)
@@ -260,6 +304,7 @@ def test_write_summary_counts_bnb_buy_sell_turnover_and_fee(monkeypatch, tmp_pat
     summary = summary_writer.write_summary("reports/runs/test_run_bnb_roundtrip")
 
     assert summary["num_trades"] == 2
+    assert summary["fills_count_today"] == 2
     assert summary["trades_counted_rows"] == 2
     assert summary["notional_usdt_total"] == 24.2
     assert summary["turnover_usdt"] == 24.2
@@ -294,6 +339,29 @@ def test_write_summary_warns_on_malformed_trades_csv(monkeypatch, tmp_path):
     assert summary["trade_metrics_warning_count"] > 0
     assert "parse failed" in summary["trade_metrics_warning"]
     assert any("parse failed" in item for item in summary["trade_metrics_warnings"])
+
+
+def test_attach_budget_keeps_fills_count_today_in_sync_with_trades(monkeypatch, tmp_path):
+    monkeypatch.setattr(summary_writer, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+
+    run_dir = tmp_path / "reports" / "runs" / "test_budget_reconcile"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-13T00:00:00Z", equity=100.0)
+    _write_trades(
+        run_dir,
+        ["2026-05-13T00:10:00Z,test_budget_reconcile,BNB/USDT,OPEN_LONG,buy,0.02,600,12,0.012,0.001,,"],
+    )
+    summary_writer.write_summary("reports/runs/test_budget_reconcile")
+
+    summary = summary_writer.attach_budget(
+        "reports/runs/test_budget_reconcile",
+        {"fills_count_today": 0, "turnover_used": 0.0},
+    )
+
+    assert summary["num_trades"] == 1
+    assert summary["fills_count_today"] == 1
+    assert summary["budget"]["fills_count_today"] == 1
 
 
 def test_write_summary_sorts_unsorted_equity_rows_by_timestamp(monkeypatch, tmp_path):

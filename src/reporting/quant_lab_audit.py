@@ -1,10 +1,42 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+
+SCHEMA_VERSION = "1.0.0"
+CONTRACT_VERSION = "v5.quant_lab.telemetry.v2"
+EVENT_ID_GENERATION_VERSION = "quant_lab_event_id_v1"
+EVENT_TYPE_REQUEST = "request"
+EVENT_TYPE_FALLBACK = "fallback"
+EVENT_TYPE_COST_USAGE = "cost_usage"
+EVENT_TYPE_PERMISSION_AUDIT = "permission_audit"
+EVENT_TYPE_COMPLIANCE = "compliance"
+EVENT_TYPE_HEALTH_CHECK = "health_check"
+EVENT_TYPES = {
+    EVENT_TYPE_REQUEST,
+    EVENT_TYPE_FALLBACK,
+    EVENT_TYPE_COST_USAGE,
+    EVENT_TYPE_PERMISSION_AUDIT,
+    EVENT_TYPE_COMPLIANCE,
+    EVENT_TYPE_HEALTH_CHECK,
+}
+EVENT_TYPE_ALIASES = {
+    "quant_lab_request": EVENT_TYPE_REQUEST,
+    "cost_estimate_request": EVENT_TYPE_REQUEST,
+    "request_not_ok": EVENT_TYPE_REQUEST,
+    "health": EVENT_TYPE_HEALTH_CHECK,
+    "live_permission": EVENT_TYPE_PERMISSION_AUDIT,
+    "final_permission": EVENT_TYPE_PERMISSION_AUDIT,
+    "filter_order": EVENT_TYPE_PERMISSION_AUDIT,
+    "order_filter": EVENT_TYPE_PERMISSION_AUDIT,
+    "permission": EVENT_TYPE_PERMISSION_AUDIT,
+    "run_summary": EVENT_TYPE_COMPLIANCE,
+    "cost_estimate": EVENT_TYPE_COST_USAGE,
+}
 
 SECRET_KEY_PARTS = (
     "api_key",
@@ -46,6 +78,93 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _stable_digest(payload: Mapping[str, Any], fields: Iterable[str]) -> str:
+    material = {field: payload.get(field) for field in fields if payload.get(field) not in (None, "")}
+    raw = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def normalize_quant_lab_event(row: Mapping[str, Any], *, default_event_type: str) -> Dict[str, Any]:
+    payload = dict(row)
+    ts = str(payload.get("ts_utc") or payload.get("ts") or utc_now_iso())
+    input_event_type = str(payload.get("event_type") or default_event_type)
+    event_type = EVENT_TYPE_ALIASES.get(input_event_type, input_event_type)
+    if event_type not in EVENT_TYPES:
+        event_type = EVENT_TYPE_ALIASES.get(default_event_type, default_event_type)
+    if event_type not in EVENT_TYPES:
+        event_type = EVENT_TYPE_PERMISSION_AUDIT
+    payload["schema_version"] = str(payload.get("schema_version") or SCHEMA_VERSION)
+    payload["contract_version"] = str(payload.get("contract_version") or CONTRACT_VERSION)
+    payload["event_id_generation_version"] = str(
+        payload.get("event_id_generation_version") or EVENT_ID_GENERATION_VERSION
+    )
+    payload["run_id"] = str(payload.get("run_id") or "unknown")
+    payload["legacy_event_type"] = str(payload.get("legacy_event_type") or input_event_type)
+    payload["event_type"] = event_type
+    payload["ts_utc"] = ts
+    payload["ts"] = str(payload.get("ts") or ts)
+    if not payload.get("endpoint_path") and payload.get("endpoint"):
+        payload["endpoint_path"] = payload.get("endpoint")
+    payload.setdefault("endpoint_path", "")
+    payload.setdefault("status_code", None)
+    payload.setdefault("latency_ms", None)
+    if "success" not in payload:
+        payload["success"] = False if event_type == EVENT_TYPE_FALLBACK or payload.get("error_type") else True
+    if event_type == EVENT_TYPE_FALLBACK:
+        payload["fallback_used"] = True
+    else:
+        payload["fallback_used"] = bool(payload.get("fallback_used", False))
+    payload.setdefault("error_type", None)
+    error_message = (
+        payload.get("error_message_short")
+        or payload.get("error_message_sanitized")
+        or payload.get("error")
+        or ""
+    )
+    payload["error_message_short"] = str(sanitize_quant_lab_obj(str(error_message)[:240])) if error_message else ""
+    payload.setdefault("original_request_id", payload.get("request_id") if event_type == EVENT_TYPE_FALLBACK else "")
+    payload.setdefault("original_event_id", "")
+    if not payload.get("request_id"):
+        payload["request_id"] = "qlreq_" + _stable_digest(
+            payload,
+            (
+                "event_id_generation_version",
+                "schema_version",
+                "contract_version",
+                "run_id",
+                "endpoint_path",
+                "endpoint",
+                "symbol",
+                "normalized_symbol",
+                "ts_utc",
+            ),
+        )[:24]
+    if not payload.get("event_id"):
+        payload["event_id"] = "qlevent_" + _stable_digest(
+            payload,
+            (
+                "event_id_generation_version",
+                "schema_version",
+                "contract_version",
+                "run_id",
+                "event_type",
+                "legacy_event_type",
+                "request_id",
+                "endpoint_path",
+                "endpoint",
+                "symbol",
+                "normalized_symbol",
+                "ts_utc",
+                "status_code",
+                "filter_reason",
+                "error_type",
+            ),
+        )[:32]
+    if event_type == EVENT_TYPE_FALLBACK and not payload.get("original_event_id"):
+        payload["original_event_id"] = payload["event_id"]
+    return payload
+
+
 def sanitize_quant_lab_obj(value: Any) -> Any:
     if isinstance(value, Mapping):
         out: Dict[str, Any] = {}
@@ -78,13 +197,15 @@ def _append_jsonl(path: str | Path, row: Mapping[str, Any]) -> None:
 
 
 def append_quant_lab_usage(path: str | Path, row: Mapping[str, Any]) -> None:
-    payload = {"ts": utc_now_iso(), **dict(row)}
+    payload = normalize_quant_lab_event(row, default_event_type=EVENT_TYPE_PERMISSION_AUDIT)
     _append_jsonl(path, payload)
 
 
 def append_quant_lab_request(path: str | Path, row: Mapping[str, Any]) -> None:
-    payload = {"ts": utc_now_iso(), "method": "GET", **dict(row)}
+    payload = normalize_quant_lab_event({"method": "GET", **dict(row)}, default_event_type=EVENT_TYPE_REQUEST)
     payload["method"] = "GET"
+    if payload.get("status_code") == 200 and payload.get("success") is True:
+        payload["fallback_used"] = False
     _append_jsonl(path, payload)
 
 

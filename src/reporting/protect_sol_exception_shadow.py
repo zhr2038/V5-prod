@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -15,7 +14,6 @@ from src.reporting.skipped_candidate_tracker import (
     _default_ohlcv_provider_for_cfg,
     _find_close_at_or_after,
     _iso_from_ms,
-    _label_horizons,
     _normalize_bool,
     _normalize_float,
     _normalize_horizons,
@@ -23,6 +21,7 @@ from src.reporting.skipped_candidate_tracker import (
     _resolve_reports_dir,
     _series_for_symbol,
     _signal_factor,
+    _signal_side,
     _summaries_dir,
     _update_labels,
     _write_csv,
@@ -57,6 +56,57 @@ def _truthy(value: Any) -> bool:
     if parsed is not None:
         return bool(parsed)
     return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _is_heartbeat(record: Mapping[str, Any]) -> bool:
+    return (
+        str(record.get("event_type") or "").strip().lower() == "heartbeat"
+        or str(record.get("label_status") or "").strip().lower() == "heartbeat"
+        or _truthy(record.get("heartbeat"))
+    )
+
+
+def _risk_off_text(value: Any) -> bool:
+    text = str(value or "").strip().lower().replace("_", "-")
+    return text in {"risk-off", "riskoff"} or text.startswith("risk-off")
+
+
+def _is_risk_off_context(audit: DecisionAudit, item: Mapping[str, Any], current_level: Optional[str]) -> bool:
+    for key in ("risk_off", "is_risk_off", "risk_off_close_only"):
+        if _truthy(item.get(key)):
+            return True
+    for value in (
+        getattr(audit, "regime", None),
+        getattr(audit, "regime_state", None),
+        item.get("regime"),
+        item.get("regime_state"),
+        item.get("market_regime"),
+        item.get("target_zero_reason"),
+        current_level,
+    ):
+        if _risk_off_text(value):
+            return True
+    return False
+
+
+def _has_active_cooldown(item: Mapping[str, Any], *, asof_ts_ms: int) -> bool:
+    for key in (
+        "active_cooldown",
+        "cooldown_active",
+        "negative_expectancy_cooldown_active",
+        "same_symbol_reentry_cooldown_active",
+    ):
+        if _truthy(item.get(key)):
+            return True
+    for key in ("remain_seconds", "cooldown_remaining_seconds", "cooldown_remain_seconds"):
+        value = _normalize_float(item.get(key))
+        if value is not None and value > 0.0:
+            return True
+    for key in ("cooldown_until_ms", "cooldown_until_ts_ms", "cooldown_until"):
+        until_ms = _coerce_epoch_ms(item.get(key))
+        if until_ms is not None and until_ms > int(asof_ts_ms or 0):
+            return True
+    return False
 
 
 def _asof_ts_ms(audit: DecisionAudit, market_data_1h: Dict[str, MarketSeries]) -> int:
@@ -249,6 +299,54 @@ def _shadow_alpha6_score(
     return (float(live_score) + delta, delta, f3_z, f4_z)
 
 
+def _heartbeat_record(
+    *,
+    audit: DecisionAudit,
+    cfg: AppConfig,
+    market_data_1h: Dict[str, MarketSeries],
+    current_level: Optional[str],
+    reason: str,
+) -> dict[str, Any]:
+    diagnostics = _diagnostics_cfg(cfg)
+    experiment_name = str(
+        getattr(diagnostics, "protect_sol_exception_experiment_name", EXPERIMENT_NAME)
+        or EXPERIMENT_NAME
+    )
+    enabled_shadow_only = bool(getattr(diagnostics, "protect_sol_exception_enabled_shadow_only", True))
+    enable_live_experiment = bool(getattr(diagnostics, "protect_sol_exception_enable_live_experiment", False))
+    horizons = _shadow_horizons(diagnostics)
+    asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
+    record: dict[str, Any] = {
+        "event_type": "heartbeat",
+        "heartbeat": True,
+        "experiment_name": experiment_name,
+        "enabled_shadow_only": enabled_shadow_only,
+        "shadow_only": True,
+        "enable_live_experiment": enable_live_experiment,
+        "ts_utc": _iso_from_ms(asof_ts_ms) if asof_ts_ms > 0 else "",
+        "entry_ts_ms": asof_ts_ms,
+        "run_id": str(getattr(audit, "run_id", "") or ""),
+        "symbol": SOL_SYMBOL,
+        "original_block_reason": reason,
+        "experiment_reason": "protect_sol_exception_shadow_heartbeat",
+        "no_sample_reason": reason,
+        "would_enter": False,
+        "would_target_w": None,
+        "target_w": None,
+        "final_score": None,
+        "alpha6_score": None,
+        "f4_volume_expansion": None,
+        "f5_rsi_trend_confirm": None,
+        "current_level": str(current_level or getattr(audit, "current_level", "") or ""),
+        "regime": str(getattr(audit, "regime", "") or ""),
+        "label_status": "heartbeat",
+        "label_not_observable_reason": reason,
+    }
+    for horizon in horizons:
+        record[f"would_pnl_bps_{int(horizon)}h"] = None
+    return record
+
+
 def _collect_shadow_candidates(
     *,
     audit: DecisionAudit,
@@ -299,16 +397,17 @@ def _collect_shadow_candidates(
         router_action = str(item.get("router_action") or item.get("action") or "").strip().lower()
         if router_action and router_action != "skip":
             continue
-        final_score = _normalize_float(item.get("final_score"))
-        high_score = _truthy(item.get("high_score_but_not_executed")) or (
-            final_score is not None and final_score >= 0.80
-        )
-        if not high_score:
+        if _is_risk_off_context(audit, item, current_level):
+            continue
+        if _has_active_cooldown(item, asof_ts_ms=asof_ts_ms):
             continue
 
         signal = _strategy_signal_for_symbol(audit, symbol)
+        alpha6_side = str(item.get("alpha6_side") or "").strip().lower() or _signal_side(signal)
+        if alpha6_side != "buy":
+            continue
         f4_volume_expansion = _factor_from_item_or_signal(item, signal, "f4_volume_expansion")
-        if f4_volume_expansion is None or f4_volume_expansion <= min_f4:
+        if f4_volume_expansion is None or f4_volume_expansion < min_f4:
             continue
 
         entry_px = _entry_px(
@@ -319,6 +418,7 @@ def _collect_shadow_candidates(
             cache_dir=cache_dir,
             cached=cached,
         )
+        final_score = _normalize_float(item.get("final_score"))
         alpha6_score = _normalize_float(item.get("alpha6_score"))
         if alpha6_score is None:
             alpha6_score = _score_from_signal(signal)
@@ -327,16 +427,19 @@ def _collect_shadow_candidates(
         base = {
             "experiment_name": experiment_name,
             "enabled_shadow_only": enabled_shadow_only,
+            "shadow_only": True,
             "enable_live_experiment": enable_live_experiment,
             "ts_utc": ts_utc,
             "entry_ts_ms": asof_ts_ms,
             "run_id": str(getattr(audit, "run_id", "") or ""),
             "symbol": symbol,
             "intended_side": "buy",
+            "alpha6_side": alpha6_side,
             "skip_reason": reason,
             "original_block_reason": reason,
-            "experiment_reason": "sol_high_score_f4_positive_protect_exception_shadow",
+            "experiment_reason": "sol_protect_exception_shadow",
             "would_enter": True,
+            "would_target_w": target_w,
             "would_size_notional": round(would_size_notional, 8) if would_size_notional is not None else None,
             "would_exit_time": _would_exit_time(asof_ts_ms, horizons) if asof_ts_ms > 0 else "",
             "entry_px": entry_px,
@@ -425,12 +528,15 @@ def _summary_fields(horizons: Iterable[int]) -> list[str]:
     return [
         "experiment_name",
         "enabled_shadow_only",
+        "shadow_only",
         "enable_live_experiment",
         "ts_utc",
         "run_id",
         "symbol",
         "intended_side",
+        "alpha6_side",
         "would_enter",
+        "would_target_w",
         "would_size_notional",
         "would_exit_time",
         "entry_px",
@@ -491,6 +597,8 @@ def _aggregate_by_horizon(
             for row in rows
             if _normalize_float(row.get(net_key)) is not None
         }
+        complete_unique_candidate_count = len(complete_candidate_keys)
+        avg_would_pnl_bps = sum(usable) / len(usable) if usable else None
         payload = {
             "symbol": key[0],
             "original_block_reason": key[1],
@@ -498,17 +606,22 @@ def _aggregate_by_horizon(
             "count": len(rows),
             "unique_candidate_count": len({_candidate_key(row) for row in rows}),
             "complete_count": len(usable),
-            "complete_unique_candidate_count": len(complete_candidate_keys),
+            "complete_unique_candidate_count": complete_unique_candidate_count,
             "pending_count": sum(1 for row in rows if str(row.get(f"{HORIZON_PREFIX}{horizon}h_status") or "") == "pending"),
             "not_observable_count": sum(1 for row in rows if str(row.get(f"{HORIZON_PREFIX}{horizon}h_status") or "") == "not_observable"),
-            "avg_would_pnl_bps": round(sum(usable) / len(usable), 6) if usable else None,
+            "avg_would_pnl_bps": round(avg_would_pnl_bps, 6) if avg_would_pnl_bps is not None else None,
             "win_rate": round(sum(1 for value in usable if float(value) > 0.0) / len(usable), 6) if usable else None,
             "current_strategy_net_bps": 0.0,
-            "better_than_current_strategy": bool(usable and (sum(usable) / len(usable)) > 0.0),
+            "better_than_current_strategy": bool(avg_would_pnl_bps is not None and avg_would_pnl_bps > 0.0),
             "sample_warning": (
                 f"insufficient_samples_min_{int(min_samples)}"
-                if len(complete_candidate_keys) < int(min_samples)
+                if complete_unique_candidate_count < int(min_samples)
                 else ""
+            ),
+            "live_ready_suggestion": bool(
+                complete_unique_candidate_count >= int(min_samples)
+                and avg_would_pnl_bps is not None
+                and avg_would_pnl_bps > 0.0
             ),
         }
         if include_variant:
@@ -560,25 +673,38 @@ def update_protect_sol_exception_shadow_evaluator(
                 if existing.get(preserve_key) in (None, "") and value not in (None, ""):
                     existing[preserve_key] = value
 
+    if not new_records:
+        heartbeat = _heartbeat_record(
+            audit=audit,
+            cfg=cfg,
+            market_data_1h=market_data_1h,
+            current_level=current_level,
+            reason="no_matching_sol_protect_exception_candidates",
+        )
+        records_by_key[_labels_key(heartbeat)] = heartbeat
+
     records = list(records_by_key.values())
+    sample_records = [record for record in records if not _is_heartbeat(record)]
     asof_ts_ms = _asof_ts_ms(audit, market_data_1h)
     if ohlcv_provider is None:
         ohlcv_provider = _default_ohlcv_provider_for_cfg(cfg)
-    if records:
+    if sample_records:
         _update_labels(
-            records=records,
+            records=sample_records,
             cache_dir=cache_root,
             horizons=horizons,
             market_data_1h=market_data_1h,
             asof_ts_ms=asof_ts_ms,
             ohlcv_provider=ohlcv_provider,
         )
-        for record in records:
+        for record in sample_records:
             _sync_would_pnl_fields(record, horizons)
+    if records:
         records.sort(
             key=lambda row: (
                 _record_entry_ts_ms(row),
                 str(row.get("run_id") or ""),
+                str(row.get("event_type") or ""),
                 str(row.get("symbol") or ""),
                 str(row.get("original_block_reason") or ""),
                 float(row.get("f3_weight_candidate") or 0.0),
@@ -588,14 +714,14 @@ def update_protect_sol_exception_shadow_evaluator(
         _write_records(labels_path, records)
 
     csv_rows = []
-    for row in records:
+    for row in sample_records:
         payload = dict(row)
         payload.pop("entry_ts_ms", None)
         csv_rows.append(payload)
     _write_csv(summaries_dir / "protect_sol_exception_shadow_outcomes.csv", csv_rows, _summary_fields(horizons))
     _write_csv(
         summaries_dir / "protect_sol_exception_shadow_outcomes_by_symbol_reason_horizon.csv",
-        _aggregate_by_horizon(records, horizons=horizons, min_samples=min_samples, include_variant=False),
+        _aggregate_by_horizon(sample_records, horizons=horizons, min_samples=min_samples, include_variant=False),
         [
             "symbol",
             "original_block_reason",
@@ -611,11 +737,12 @@ def update_protect_sol_exception_shadow_evaluator(
             "current_strategy_net_bps",
             "better_than_current_strategy",
             "sample_warning",
+            "live_ready_suggestion",
         ],
     )
     _write_csv(
         summaries_dir / "protect_sol_exception_factor_weight_shadow.csv",
-        _aggregate_by_horizon(records, horizons=horizons, min_samples=min_samples, include_variant=True),
+        _aggregate_by_horizon(sample_records, horizons=horizons, min_samples=min_samples, include_variant=True),
         [
             "symbol",
             "original_block_reason",
@@ -633,12 +760,14 @@ def update_protect_sol_exception_shadow_evaluator(
             "current_strategy_net_bps",
             "better_than_current_strategy",
             "sample_warning",
+            "live_ready_suggestion",
         ],
     )
     return {
         "enabled": True,
         "new_records": int(inserted),
-        "total_records": int(len(records)),
+        "total_records": int(len(sample_records)),
+        "heartbeat_records": int(len(records) - len(sample_records)),
         "labels_path": str(labels_path),
         "summaries_dir": str(summaries_dir),
     }

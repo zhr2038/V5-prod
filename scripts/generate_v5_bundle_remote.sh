@@ -120,6 +120,11 @@ DEPLOYMENT_VERSION_PATHS = (
     "VERSION",
     ".deployment_version",
 )
+QUANT_LAB_SCHEMA_VERSION = "1.0.0"
+QUANT_LAB_CONTRACT_VERSION = "v5.quant_lab.telemetry.v2"
+QUANT_LAB_EVENT_ID_GENERATION_VERSION = "quant_lab_event_id_v1"
+TRADE_EXPORT_SCHEMA_VERSION = "v5.trade_export.v1"
+SUMMARY_METRICS_VERSION = "v5.summary_metrics.v1"
 FLAT_EXIT_SIGNAL_REASONS = PROBE_EXIT_REASONS | {"stop_loss", "atr_trailing"}
 BTC_LEADERSHIP_LABELABLE_REASONS = {
     "btc_leadership_probe_alpha6_score_too_low",
@@ -1198,6 +1203,21 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         text = flatten_value(value).strip().lower()
         return text in {"1", "true", "yes", "y", "ok", "success"}
 
+    def quant_lab_event_kind(row):
+        if not isinstance(row, dict):
+            return ""
+        legacy = flatten_value(row.get("legacy_event_type") or "").strip()
+        if legacy:
+            return legacy
+        event_type = flatten_value(row.get("event_type") or "").strip()
+        if event_type == "cost_usage":
+            return "cost_estimate"
+        if event_type == "permission_audit":
+            return flatten_value(row.get("permission_audit_type") or "permission")
+        if event_type == "health_check":
+            return "health"
+        return event_type
+
     def quant_lab_request_success(row):
         if not isinstance(row, dict):
             return False
@@ -1217,14 +1237,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if quant_lab_request_success(row):
             return False
         fallback_reason = flatten_value(row.get("fallback_reason")).strip().lower()
-        if fallback_reason == "global_default_cost" and not truthy_observed(row.get("fallback_used")) and flatten_value(row.get("event_type")) != "fallback":
+        if fallback_reason == "global_default_cost" and not truthy_observed(row.get("fallback_used")) and quant_lab_event_kind(row) != "fallback":
             return False
         error_text = flatten_value(first_observed(row.get("error_type"), row.get("error"), "")).lower()
         if any(marker in error_text for marker in ("timeout", "connection", "unavailable", "invalid")):
             return True
         return (
             truthy_observed(row.get("fallback_used"))
-            or flatten_value(row.get("event_type")) == "fallback"
+            or quant_lab_event_kind(row) == "fallback"
             or row.get("fallback_reason") not in (None, "", not_obs)
             or row.get("action_taken") not in (None, "", not_obs)
         )
@@ -1303,6 +1323,23 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if side == "sell":
             return "CLOSE_LONG"
         return intent or not_obs
+
+    def normalize_trade_symbol_for_contract(value):
+        text = flatten_value(value).strip().upper()
+        if not text or text == not_obs:
+            return "null"
+        if "/" in text:
+            return text.replace("/", "-")
+        if "-" in text:
+            return text
+        if text.endswith("USDT") and len(text) > 4:
+            return f"{text[:-4]}-USDT"
+        return text
+
+    def csv_null(value):
+        if value in (None, "", not_obs):
+            return "null"
+        return value
 
     def router_trade_reason(item, intent):
         reason = flatten_value(item.get("reason"))
@@ -1489,11 +1526,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     market_impulse_selection_shadow_rows = []
     factor_contribution_rows = []
     quant_lab_compliance_rows = []
+    quant_lab_permission_audit_rows = []
+    quant_lab_mode_audit_rows = []
     quant_lab_cost_usage_rows = []
     quant_lab_fallback_rows = []
     quant_lab_request_success_count = 0
     quant_lab_request_error_count = 0
     trade_file_stats_by_run = {}
+    trade_metrics_rows = []
+    fill_metrics_rows = []
     summary_trade_count_mismatch_rows = []
     audit_high_score_but_not_executed_count = 0
     dust_residual_position_keys = set()
@@ -1562,16 +1603,34 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "event_type": "audit_summary",
                 "mode": flatten_value(first_observed(quant_lab.get("mode"), permission.get("mode"), not_obs)),
                 "local_mode": flatten_value(first_observed(quant_lab.get("local_mode"), quant_lab.get("mode"), permission.get("mode"), not_obs)),
+                "mode_source": flatten_value(first_observed(quant_lab.get("mode_source"), permission.get("mode_source"), not_obs)),
+                "quant_lab_requested_mode": flatten_value(first_observed(quant_lab.get("quant_lab_requested_mode"), quant_lab.get("requested_mode"), permission.get("quant_lab_requested_mode"), not_obs)),
+                "quant_lab_effective_mode": flatten_value(first_observed(quant_lab.get("quant_lab_effective_mode"), quant_lab.get("mode"), permission.get("quant_lab_effective_mode"), not_obs)),
+                "called_api": bool_observed(first_observed(quant_lab.get("called_api"), permission.get("called_api"))),
+                "apply_permission_gate": bool_observed(first_observed(quant_lab.get("apply_permission_gate"), permission.get("apply_permission_gate"))),
+                "apply_cost_gate": bool_observed(first_observed(quant_lab.get("apply_cost_gate"), permission.get("apply_cost_gate"))),
                 "permission_gate_enforced": bool_observed(first_observed(quant_lab.get("permission_gate_enforced"), permission.get("permission_gate_enforced"))),
                 "cost_gate_enforced": bool_observed(first_observed(quant_lab.get("cost_gate_enforced"), permission.get("cost_gate_enforced"))),
+                "enforce_readiness_status": flatten_value(first_observed(quant_lab.get("enforce_readiness_status"), permission.get("enforce_readiness_status"), not_obs)),
+                "enforce_blocked_reasons": flatten_value(first_observed(quant_lab.get("enforce_blocked_reasons"), quant_lab.get("enforce_blocked_reason"), permission.get("enforce_blocked_reasons"), not_obs)),
+                "enforce_blocked_reason": flatten_value(first_observed(quant_lab.get("enforce_blocked_reason"), permission.get("enforce_blocked_reason"), not_obs)),
+                "contract_version_match": bool_observed(first_observed(quant_lab.get("contract_version_match"), permission.get("contract_version_match"))),
+                "telemetry_schema_version_match": bool_observed(first_observed(quant_lab.get("telemetry_schema_version_match"), permission.get("telemetry_schema_version_match"))),
                 "raw_permission_decision": flatten_value(first_observed(quant_lab.get("raw_permission_decision"), quant_lab.get("quant_lab_permission"), permission.get("decision"), quant_lab.get("permission"), not_obs)),
+                "raw_permission_status": flatten_value(first_observed(quant_lab.get("raw_permission_status"), permission.get("raw_permission_status"), not_obs)),
+                "raw_permission_enforceable": bool_observed(first_observed(quant_lab.get("raw_permission_enforceable"), permission.get("raw_permission_enforceable"))),
                 "effective_permission_decision": flatten_value(first_observed(quant_lab.get("effective_permission_decision"), quant_lab.get("final_permission"), permission.get("effective_decision"), not_obs)),
                 "would_block_if_enforced": bool_observed(quant_lab.get("would_block_if_enforced")),
+                "shadow_override_reason": flatten_value(first_observed(quant_lab.get("shadow_override_reason"), permission.get("shadow_override_reason"), not_obs)),
                 "fallback_reason": flatten_value(first_observed(quant_lab.get("fallback_reason"), permission.get("fallback_reason"), not_obs)),
                 "remote_permission_as_of_ts": flatten_value(first_observed(quant_lab.get("remote_permission_as_of_ts"), quant_lab.get("last_response_ts"), not_obs)),
                 "remote_permission_expires_at": flatten_value(quant_lab.get("remote_permission_expires_at") or not_obs),
                 "remote_permission_status": flatten_value(quant_lab.get("remote_permission_status") or not_obs),
-                "contract_version": flatten_value(quant_lab.get("contract_version") or not_obs),
+                "remote_permission_source_bundle_ts": flatten_value(first_observed(quant_lab.get("remote_permission_source_bundle_ts"), permission.get("remote_permission_source_bundle_ts"), not_obs)),
+                "remote_permission_telemetry_latest_ts": flatten_value(first_observed(quant_lab.get("remote_permission_telemetry_latest_ts"), permission.get("remote_permission_telemetry_latest_ts"), not_obs)),
+                "remote_permission_contract_version": flatten_value(first_observed(quant_lab.get("remote_permission_contract_version"), permission.get("remote_permission_contract_version"), quant_lab.get("contract_version"), not_obs)),
+                "permission_contract_violation": bool_observed(first_observed(quant_lab.get("permission_contract_violation"), permission.get("permission_contract_violation"))),
+                "contract_version": flatten_value(quant_lab.get("contract_version") or permission.get("contract_version") or not_obs),
                 "permission_decision": flatten_value(first_observed(permission.get("decision"), quant_lab.get("raw_permission_decision"), quant_lab.get("quant_lab_permission"), quant_lab.get("permission"), not_obs)),
                 "effective_decision": flatten_value(first_observed(permission.get("effective_decision"), quant_lab.get("effective_permission_decision"), quant_lab.get("final_permission"), not_obs)),
                 "order_decision": not_obs,
@@ -1599,16 +1658,34 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     "event_type": "order_filter",
                     "mode": flatten_value(first_observed(row.get("mode"), quant_lab.get("mode"), not_obs)),
                     "local_mode": flatten_value(first_observed(row.get("local_mode"), row.get("mode"), quant_lab.get("mode"), not_obs)),
+                    "mode_source": flatten_value(first_observed(row.get("mode_source"), quant_lab.get("mode_source"), not_obs)),
+                    "quant_lab_requested_mode": flatten_value(first_observed(row.get("quant_lab_requested_mode"), quant_lab.get("quant_lab_requested_mode"), quant_lab.get("requested_mode"), not_obs)),
+                    "quant_lab_effective_mode": flatten_value(first_observed(row.get("quant_lab_effective_mode"), quant_lab.get("quant_lab_effective_mode"), row.get("mode"), quant_lab.get("mode"), not_obs)),
+                    "called_api": bool_observed(first_observed(row.get("called_api"), quant_lab.get("called_api"))),
+                    "apply_permission_gate": bool_observed(first_observed(row.get("apply_permission_gate"), quant_lab.get("apply_permission_gate"))),
+                    "apply_cost_gate": bool_observed(first_observed(row.get("apply_cost_gate"), quant_lab.get("apply_cost_gate"))),
                     "permission_gate_enforced": bool_observed(first_observed(row.get("permission_gate_enforced"), quant_lab.get("permission_gate_enforced"))),
                     "cost_gate_enforced": bool_observed(first_observed(row.get("cost_gate_enforced"), quant_lab.get("cost_gate_enforced"))),
+                    "enforce_readiness_status": flatten_value(first_observed(row.get("enforce_readiness_status"), quant_lab.get("enforce_readiness_status"), not_obs)),
+                    "enforce_blocked_reasons": flatten_value(first_observed(row.get("enforce_blocked_reasons"), row.get("enforce_blocked_reason"), quant_lab.get("enforce_blocked_reasons"), not_obs)),
+                    "enforce_blocked_reason": flatten_value(first_observed(row.get("enforce_blocked_reason"), quant_lab.get("enforce_blocked_reason"), not_obs)),
+                    "contract_version_match": bool_observed(first_observed(row.get("contract_version_match"), quant_lab.get("contract_version_match"))),
+                    "telemetry_schema_version_match": bool_observed(first_observed(row.get("telemetry_schema_version_match"), quant_lab.get("telemetry_schema_version_match"))),
                     "raw_permission_decision": flatten_value(first_observed(row.get("raw_permission_decision"), row.get("quant_lab_permission"), row.get("permission_decision"), permission.get("decision"), quant_lab.get("permission"), not_obs)),
+                    "raw_permission_status": flatten_value(first_observed(row.get("raw_permission_status"), quant_lab.get("raw_permission_status"), permission.get("raw_permission_status"), not_obs)),
+                    "raw_permission_enforceable": bool_observed(first_observed(row.get("raw_permission_enforceable"), quant_lab.get("raw_permission_enforceable"), permission.get("raw_permission_enforceable"))),
                     "effective_permission_decision": flatten_value(first_observed(row.get("effective_permission_decision"), row.get("final_permission"), permission.get("effective_decision"), quant_lab.get("final_permission"), not_obs)),
                     "would_block_if_enforced": bool_observed(row.get("would_block_if_enforced")),
+                    "shadow_override_reason": flatten_value(first_observed(row.get("shadow_override_reason"), quant_lab.get("shadow_override_reason"), permission.get("shadow_override_reason"), not_obs)),
                     "fallback_reason": flatten_value(first_observed(row.get("fallback_reason"), permission.get("fallback_reason"), not_obs)),
                     "remote_permission_as_of_ts": flatten_value(first_observed(row.get("remote_permission_as_of_ts"), quant_lab.get("remote_permission_as_of_ts"), quant_lab.get("last_response_ts"), not_obs)),
                     "remote_permission_expires_at": flatten_value(first_observed(row.get("remote_permission_expires_at"), quant_lab.get("remote_permission_expires_at"), not_obs)),
                     "remote_permission_status": flatten_value(first_observed(row.get("remote_permission_status"), quant_lab.get("remote_permission_status"), not_obs)),
-                    "contract_version": flatten_value(first_observed(row.get("contract_version"), quant_lab.get("contract_version"), not_obs)),
+                    "remote_permission_source_bundle_ts": flatten_value(first_observed(row.get("remote_permission_source_bundle_ts"), quant_lab.get("remote_permission_source_bundle_ts"), permission.get("remote_permission_source_bundle_ts"), not_obs)),
+                    "remote_permission_telemetry_latest_ts": flatten_value(first_observed(row.get("remote_permission_telemetry_latest_ts"), quant_lab.get("remote_permission_telemetry_latest_ts"), permission.get("remote_permission_telemetry_latest_ts"), not_obs)),
+                    "remote_permission_contract_version": flatten_value(first_observed(row.get("remote_permission_contract_version"), quant_lab.get("remote_permission_contract_version"), permission.get("remote_permission_contract_version"), quant_lab.get("contract_version"), not_obs)),
+                    "permission_contract_violation": bool_observed(first_observed(row.get("permission_contract_violation"), quant_lab.get("permission_contract_violation"), permission.get("permission_contract_violation"))),
+                    "contract_version": flatten_value(first_observed(row.get("contract_version"), quant_lab.get("contract_version"), permission.get("contract_version"), not_obs)),
                     "permission_decision": flatten_value(first_observed(row.get("permission_decision"), row.get("raw_permission_decision"), row.get("quant_lab_permission"), permission.get("decision"), quant_lab.get("permission"), not_obs)),
                     "effective_decision": flatten_value(first_observed(row.get("effective_decision"), row.get("effective_permission_decision"), row.get("final_permission"), permission.get("effective_decision"), quant_lab.get("final_permission"), not_obs)),
                     "order_decision": flatten_value(row.get("order_decision") or not_obs),
@@ -1649,7 +1726,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 required_edge = first_observed(row.get("required_edge_bps"), row.get("min_required_edge_bps"), not_obs)
                 cost_source = first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"), not_obs)
                 fallback_level = first_observed(row.get("fallback_level"), not_obs)
-                degraded_cost = flatten_value(cost_source).strip().lower() == "global_default" or flatten_value(fallback_level).strip().upper() == "GLOBAL_DEFAULT"
+                cost_model_version_value = flatten_value(row.get("cost_model_version") or not_obs).strip().lower()
+                degraded_cost = (
+                    flatten_value(cost_source).strip().lower() == "global_default"
+                    or flatten_value(fallback_level).strip().upper() == "GLOBAL_DEFAULT"
+                    or cost_model_version_value == "global_default_v0"
+                )
                 cost_diagnosis = "global_default_cost" if degraded_cost else flatten_value(row.get("diagnosis") or ("fallback_cost" if row.get("fallback_used") else "ok"))
                 quant_lab_cost_usage_rows.append({
                     "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
@@ -1666,6 +1748,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     "intent": flatten_value(row.get("intent") or not_obs),
                     "notional_usdt": flatten_value(row.get("notional_usdt") if row.get("notional_usdt") is not None else not_obs),
                     "quantile": flatten_value(row.get("quantile") or not_obs),
+                    "requested_quantile": flatten_value(first_observed(row.get("requested_quantile"), row.get("quantile"), not_obs)),
                     "strategy_id": flatten_value(first_observed(row.get("strategy_id"), row.get("alpha_id"), not_obs)),
                     "request_id": flatten_value(row.get("request_id") or not_obs),
                     "requested_regime": flatten_value(first_observed(row.get("requested_regime"), row.get("regime"), not_obs)),
@@ -1675,6 +1758,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
                     "cost_source": flatten_value(cost_source),
                     "cost_model_version": flatten_value(row.get("cost_model_version") or not_obs),
+                    "cost_contract_version": flatten_value(first_observed(row.get("cost_contract_version"), row.get("contract_version"), QUANT_LAB_CONTRACT_VERSION)),
+                    "as_of_ts": flatten_value(first_observed(row.get("as_of_ts"), row.get("response_ts"), not_obs)),
                     "fallback_level": flatten_value(fallback_level),
                     "sample_count": flatten_value(row.get("sample_count") if row.get("sample_count") is not None else not_obs),
                     "total_cost_bps": flatten_value(row.get("total_cost_bps") if row.get("total_cost_bps") is not None else not_obs),
@@ -2466,17 +2551,45 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 notional_total = 0.0
                 fee_total = 0.0
                 slippage_total = 0.0
+                trade_warnings = []
                 for idx, item in enumerate(reader):
                     file_rows += 1
                     event = build_trade_event(trade_path, run_id, idx, item)
                     raw_trade_events.append(event)
+                    symbol_value = first_value(item, ("symbol", "instId", "inst_id", "instrument"), event.get("symbol"))
+                    fill_metrics_rows.append({
+                        "run_id": csv_null(first_value(item, ("run_id",), run_id)),
+                        "ts_utc": csv_null(first_value(item, ("ts_utc", "timestamp", "ts", "time"), event.get("timestamp"))),
+                        "symbol": csv_null(symbol_value),
+                        "normalized_symbol": csv_null(first_value(item, ("normalized_symbol",), normalize_trade_symbol_for_contract(symbol_value))),
+                        "side": csv_null(first_value(item, ("side",), event.get("side"))),
+                        "action": csv_null(first_value(item, ("action", "intent"), event.get("intent"))),
+                        "qty": csv_null(first_value(item, ("qty", "amount", "sz"), event.get("qty"))),
+                        "price": csv_null(first_value(item, ("price", "px"), event.get("price"))),
+                        "notional_usdt": csv_null(first_value(item, ("notional_usdt", "notional", "cost"), event.get("notional_usdt"))),
+                        "fee": csv_null(first_value(item, ("fee", "commission"), not_obs)),
+                        "fee_ccy": csv_null(first_value(item, ("fee_ccy", "feeCcy", "commission_asset"), not_obs)),
+                        "fee_usdt": csv_null(first_value(item, ("fee_usdt", "commission_usdt"), event.get("fee_usdt"))),
+                        "slippage_usdt": csv_null(first_value(item, ("slippage_usdt", "slippage"), not_obs)),
+                        "order_id": csv_null(first_value(item, ("order_id", "ord_id", "cl_ord_id"), not_obs)),
+                        "trade_id": csv_null(first_value(item, ("trade_id", "fill_id"), not_obs)),
+                        "strategy_id": csv_null(first_value(item, ("strategy_id",), "v5")),
+                        "position_id": csv_null(first_value(item, ("position_id",), not_obs)),
+                        "trade_export_schema_version": first_value(item, ("trade_export_schema_version",), TRADE_EXPORT_SCHEMA_VERSION),
+                    })
                     notional = as_float(event.get("notional_usdt"))
                     if notional is None or abs(notional) <= 0.0:
                         continue
                     counted_rows += 1
                     notional_total += abs(float(notional))
-                    fee_total += float(as_float(event.get("fee_usdt")) or 0.0)
-                    slippage_total += float(as_float(first_value(item, ("slippage_usdt", "slippage"), not_obs)) or 0.0)
+                    fee_value = as_float(event.get("fee_usdt"))
+                    slippage_value = as_float(first_value(item, ("slippage_usdt", "slippage"), not_obs))
+                    if fee_value is None:
+                        trade_warnings.append(f"trades.csv row {idx + 2} missing fee_usdt")
+                    if slippage_value is None:
+                        trade_warnings.append(f"trades.csv row {idx + 2} missing slippage_usdt")
+                    fee_total += float(fee_value or 0.0)
+                    slippage_total += float(slippage_value or 0.0)
                 trade_file_stats_by_run[run_id] = {
                     "run_id": run_id,
                     "trades_file_exists": True,
@@ -2487,8 +2600,26 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     "trades_slippage_usdt_total": slippage_total,
                     "trades_cost_usdt_total": fee_total + slippage_total,
                     "parse_error": "",
+                    "trade_metrics_warning": "; ".join(trade_warnings),
+                    "trade_metrics_warning_count": len(trade_warnings),
                     "source_file": str(trade_path.relative_to(OUT)),
                 }
+                trade_metrics_rows.append({
+                    "run_id": run_id,
+                    "trades_file_exists": "true",
+                    "trades_file_rows": file_rows,
+                    "trades_counted_rows": counted_rows,
+                    "num_trades": counted_rows,
+                    "turnover_usdt": fmt_num(notional_total, 12),
+                    "fees_usdt_total": fmt_num(fee_total, 12),
+                    "slippage_usdt_total": fmt_num(slippage_total, 12),
+                    "cost_usdt_total": fmt_num(fee_total + slippage_total, 12),
+                    "fills_count_today": counted_rows,
+                    "trade_metrics_warning": "; ".join(trade_warnings),
+                    "trade_metrics_warning_count": len(trade_warnings),
+                    "trade_export_schema_version": TRADE_EXPORT_SCHEMA_VERSION,
+                    "summary_metrics_version": SUMMARY_METRICS_VERSION,
+                })
         except Exception as exc:
             trade_read_errors += 1
             trade_file_stats_by_run[run_id] = {
@@ -2501,8 +2632,26 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "trades_slippage_usdt_total": 0.0,
                 "trades_cost_usdt_total": 0.0,
                 "parse_error": repr(exc),
+                "trade_metrics_warning": f"trades.csv parse failed: {exc!r}",
+                "trade_metrics_warning_count": 1,
                 "source_file": str(trade_path.relative_to(OUT)),
             }
+            trade_metrics_rows.append({
+                "run_id": run_id,
+                "trades_file_exists": "true",
+                "trades_file_rows": 0,
+                "trades_counted_rows": 0,
+                "num_trades": 0,
+                "turnover_usdt": "null",
+                "fees_usdt_total": "null",
+                "slippage_usdt_total": "null",
+                "cost_usdt_total": "null",
+                "fills_count_today": 0,
+                "trade_metrics_warning": f"trades.csv parse failed: {exc!r}",
+                "trade_metrics_warning_count": 1,
+                "trade_export_schema_version": TRADE_EXPORT_SCHEMA_VERSION,
+                "summary_metrics_version": SUMMARY_METRICS_VERSION,
+            })
             collection_errors.append({"source": str(trade_path), "error": f"trade_csv: {exc!r}"})
 
     for run_id, stats in sorted(trade_file_stats_by_run.items()):
@@ -2545,8 +2694,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "summary_cost_usdt_total": fmt_num(summary_cost, 12),
             "count_mismatch": str(bool(count_mismatch)).lower(),
             "cost_mismatch": str(bool(cost_mismatch)).lower(),
+            "high_issue": str(bool(high_mismatch)).lower(),
             "diagnosis": diagnosis,
             "parse_error": stats.get("parse_error") or "",
+            "trade_metrics_warning": stats.get("trade_metrics_warning") or "",
         }
         summary_trade_count_mismatch_rows.append(row)
         if high_mismatch:
@@ -2883,6 +3034,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         protect_sol_exception_shadow_label_rows,
         protect_sol_exception_shadow_row_key,
     )
+
+    def protect_sol_exception_shadow_is_heartbeat(row):
+        return (
+            flatten_value(row.get("event_type")).lower() == "heartbeat"
+            or flatten_value(row.get("label_status")).lower() == "heartbeat"
+            or flatten_value(row.get("heartbeat")).lower() in {"1", "true", "yes", "y"}
+        )
+
+    protect_sol_exception_shadow_heartbeat_rows = [
+        row for row in protect_sol_exception_shadow_label_rows
+        if protect_sol_exception_shadow_is_heartbeat(row)
+    ]
+    protect_sol_exception_shadow_sample_label_rows = [
+        row for row in protect_sol_exception_shadow_label_rows
+        if not protect_sol_exception_shadow_is_heartbeat(row)
+    ]
     if protect_sol_exception_shadow_labels_path.is_file():
         protect_sol_text = "\n".join(
             json.dumps(sanitize_obj(row), ensure_ascii=False, sort_keys=True)
@@ -3013,7 +3180,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     protect_sol_exception_shadow_rows = [
         protect_sol_exception_shadow_outcome_row(row)
-        for row in protect_sol_exception_shadow_label_rows
+        for row in protect_sol_exception_shadow_sample_label_rows
     ]
 
     def protect_sol_candidate_key(row):
@@ -3056,6 +3223,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 if as_float(row.get(net_key)) is not None
             }
             avg_net = sum(usable) / len(usable) if usable else None
+            complete_unique_count = len(complete_unique_keys)
             payload = {
                 "symbol": key[0],
                 "original_block_reason": key[1],
@@ -3063,7 +3231,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "count": len(bucket_rows),
                 "unique_candidate_count": len(unique_keys),
                 "complete_count": len(usable),
-                "complete_unique_candidate_count": len(complete_unique_keys),
+                "complete_unique_candidate_count": complete_unique_count,
                 "pending_count": sum(1 for row in bucket_rows if flatten_value(row.get(status_key)) == "pending"),
                 "not_observable_count": sum(1 for row in bucket_rows if flatten_value(row.get(status_key)) == "not_observable"),
                 "avg_would_pnl_bps": round(avg_net, 6) if avg_net is not None else not_obs,
@@ -3072,9 +3240,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "better_than_current_strategy": str(bool(avg_net is not None and avg_net > 0.0)).lower(),
                 "sample_warning": (
                     f"insufficient_samples_min_{min_samples}"
-                    if len(complete_unique_keys) < min_samples
+                    if complete_unique_count < min_samples
                     else ""
                 ),
+                "live_ready_suggestion": str(
+                    bool(complete_unique_count >= min_samples and avg_net is not None and avg_net > 0.0)
+                ).lower(),
             }
             if include_variant:
                 payload["f3_weight_candidate"] = key[3]
@@ -5909,8 +6080,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if not isinstance(row, dict):
             continue
         event_type = str(row.get("event_type") or not_obs)
+        event_kind = quant_lab_event_kind(row)
         source = "reports/quant_lab_usage.jsonl"
-        if event_type in {"permission", "order_filter", "run_summary", "live_permission", "filter_order", "final_permission"}:
+        if event_kind in {"permission", "order_filter", "run_summary", "live_permission", "filter_order", "final_permission"}:
             raw_permission_decision = first_observed(
                 row.get("raw_permission_decision"),
                 row.get("quant_lab_permission"),
@@ -5928,19 +6100,47 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "source": source,
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
-                "event_type": event_type,
+                "event_type": "permission_audit" if event_type == "permission_audit" else event_type,
+                "event_id": flatten_value(row.get("event_id") or not_obs),
+                "request_id": flatten_value(row.get("request_id") or not_obs),
+                "original_request_id": flatten_value(row.get("original_request_id") or not_obs),
+                "original_event_id": flatten_value(row.get("original_event_id") or not_obs),
+                "endpoint_path": flatten_value(first_observed(row.get("endpoint_path"), row.get("endpoint"), not_obs)),
+                "status_code": flatten_value(row.get("status_code") if row.get("status_code") is not None else not_obs),
+                "success": bool_observed(row.get("success")),
+                "latency_ms": flatten_value(row.get("latency_ms") if row.get("latency_ms") is not None else not_obs),
+                "error_type": flatten_value(row.get("error_type") or not_obs),
+                "error_message_short": flatten_value(first_observed(row.get("error_message_short"), row.get("error_message_sanitized"), not_obs)),
                 "mode": flatten_value(row.get("mode") or not_obs),
                 "local_mode": flatten_value(first_observed(row.get("local_mode"), row.get("mode"), not_obs)),
+                "mode_source": flatten_value(row.get("mode_source") or not_obs),
+                "quant_lab_requested_mode": flatten_value(first_observed(row.get("quant_lab_requested_mode"), row.get("requested_mode"), not_obs)),
+                "quant_lab_effective_mode": flatten_value(first_observed(row.get("quant_lab_effective_mode"), row.get("effective_mode"), row.get("mode"), not_obs)),
+                "called_api": bool_observed(row.get("called_api")),
+                "apply_permission_gate": bool_observed(row.get("apply_permission_gate")),
+                "apply_cost_gate": bool_observed(row.get("apply_cost_gate")),
                 "permission_gate_enforced": bool_observed(row.get("permission_gate_enforced")),
                 "cost_gate_enforced": bool_observed(row.get("cost_gate_enforced")),
+                "enforce_readiness_status": flatten_value(row.get("enforce_readiness_status") or not_obs),
+                "enforce_blocked_reasons": flatten_value(first_observed(row.get("enforce_blocked_reasons"), row.get("enforce_blocked_reason"), not_obs)),
+                "enforce_blocked_reason": flatten_value(row.get("enforce_blocked_reason") or not_obs),
+                "contract_version_match": bool_observed(row.get("contract_version_match")),
+                "telemetry_schema_version_match": bool_observed(row.get("telemetry_schema_version_match")),
                 "raw_permission_decision": flatten_value(raw_permission_decision),
+                "raw_permission_status": flatten_value(row.get("raw_permission_status") or not_obs),
+                "raw_permission_enforceable": bool_observed(row.get("raw_permission_enforceable")),
                 "effective_permission_decision": flatten_value(effective_permission_decision),
                 "would_block_if_enforced": bool_observed(row.get("would_block_if_enforced")),
+                "shadow_override_reason": flatten_value(row.get("shadow_override_reason") or not_obs),
                 "fallback_reason": flatten_value(row.get("fallback_reason") or not_obs),
                 "remote_permission_as_of_ts": flatten_value(row.get("remote_permission_as_of_ts") or not_obs),
                 "remote_permission_expires_at": flatten_value(row.get("remote_permission_expires_at") or not_obs),
                 "remote_permission_status": flatten_value(row.get("remote_permission_status") or not_obs),
-                "contract_version": flatten_value(row.get("contract_version") or not_obs),
+                "remote_permission_source_bundle_ts": flatten_value(row.get("remote_permission_source_bundle_ts") or not_obs),
+                "remote_permission_telemetry_latest_ts": flatten_value(row.get("remote_permission_telemetry_latest_ts") or not_obs),
+                "remote_permission_contract_version": flatten_value(first_observed(row.get("remote_permission_contract_version"), row.get("contract_version"), not_obs)),
+                "permission_contract_violation": bool_observed(row.get("permission_contract_violation")),
+                "contract_version": flatten_value(row.get("contract_version") or row.get("remote_permission_contract_version") or not_obs),
                 "permission_decision": flatten_value(first_observed(row.get("permission_decision"), raw_permission_decision, not_obs)),
                 "effective_decision": flatten_value(first_observed(row.get("effective_decision"), effective_permission_decision, not_obs)),
                 "order_decision": flatten_value(row.get("order_decision") or not_obs),
@@ -5958,17 +6158,43 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "diagnosis": "filtered" if row.get("filtered") else ("fallback_policy_applied" if row.get("fallback_used") else "ok"),
                 "raw_json": safe_json(row),
             })
-        if event_type == "cost_estimate":
+        if event_kind == "cost_estimate":
             required_edge = first_observed(row.get("required_edge_bps"), row.get("min_required_edge_bps"), not_obs)
             cost_source = first_observed(row.get("cost_source"), row.get("source"), row.get("local_cost_source"), not_obs)
             fallback_level = first_observed(row.get("fallback_level"), not_obs)
-            degraded_cost = flatten_value(cost_source).strip().lower() == "global_default" or flatten_value(fallback_level).strip().upper() == "GLOBAL_DEFAULT"
+            cost_model_version_value = flatten_value(row.get("cost_model_version") or not_obs).strip().lower()
+            degraded_cost = (
+                flatten_value(cost_source).strip().lower() == "global_default"
+                or flatten_value(fallback_level).strip().upper() == "GLOBAL_DEFAULT"
+                or cost_model_version_value == "global_default_v0"
+            )
             cost_diagnosis = "global_default_cost" if degraded_cost else flatten_value(row.get("diagnosis") or ("fallback_cost" if row.get("fallback_used") else "ok"))
             quant_lab_cost_usage_rows.append({
                 "source": source,
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
+                "event_type": "cost_usage",
+                "event_id": flatten_value(row.get("event_id") or not_obs),
+                "request_id": flatten_value(row.get("request_id") or not_obs),
+                "endpoint_path": flatten_value(first_observed(row.get("endpoint_path"), row.get("endpoint"), "/v1/costs/estimate")),
+                "status_code": flatten_value(row.get("status_code") if row.get("status_code") is not None else not_obs),
+                "success": bool_observed(first_observed(row.get("success"), True)),
+                "latency_ms": flatten_value(row.get("latency_ms") if row.get("latency_ms") is not None else not_obs),
+                "error_type": flatten_value(row.get("error_type") or not_obs),
+                "error_message_short": flatten_value(first_observed(row.get("error_message_short"), row.get("error_message_sanitized"), not_obs)),
                 "mode": flatten_value(row.get("mode") or not_obs),
+                "mode_source": flatten_value(row.get("mode_source") or not_obs),
+                "quant_lab_requested_mode": flatten_value(first_observed(row.get("quant_lab_requested_mode"), row.get("requested_mode"), not_obs)),
+                "quant_lab_effective_mode": flatten_value(first_observed(row.get("quant_lab_effective_mode"), row.get("effective_mode"), row.get("mode"), not_obs)),
+                "called_api": bool_observed(row.get("called_api")),
+                "apply_permission_gate": bool_observed(row.get("apply_permission_gate")),
+                "apply_cost_gate": bool_observed(row.get("apply_cost_gate")),
+                "permission_gate_enforced": bool_observed(row.get("permission_gate_enforced")),
+                "enforce_readiness_status": flatten_value(row.get("enforce_readiness_status") or not_obs),
+                "enforce_blocked_reasons": flatten_value(first_observed(row.get("enforce_blocked_reasons"), row.get("enforce_blocked_reason"), not_obs)),
+                "enforce_blocked_reason": flatten_value(row.get("enforce_blocked_reason") or not_obs),
+                "contract_version_match": bool_observed(row.get("contract_version_match")),
+                "telemetry_schema_version_match": bool_observed(row.get("telemetry_schema_version_match")),
                 "symbol": flatten_value(row.get("symbol") or not_obs),
                 "request_symbol": flatten_value(first_observed(row.get("request_symbol"), row.get("symbol"), not_obs)),
                 "normalized_symbol": flatten_value(row.get("normalized_symbol") or not_obs),
@@ -5979,6 +6205,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "intent": flatten_value(row.get("intent") or not_obs),
                 "notional_usdt": flatten_value(row.get("notional_usdt") if row.get("notional_usdt") is not None else not_obs),
                 "quantile": flatten_value(row.get("quantile") or not_obs),
+                "requested_quantile": flatten_value(first_observed(row.get("requested_quantile"), row.get("quantile"), not_obs)),
                 "strategy_id": flatten_value(first_observed(row.get("strategy_id"), row.get("alpha_id"), not_obs)),
                 "request_id": flatten_value(row.get("request_id") or not_obs),
                 "requested_regime": flatten_value(first_observed(row.get("requested_regime"), row.get("regime"), not_obs)),
@@ -5988,6 +6215,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "cost_usdt": flatten_value(row.get("cost_usdt") if row.get("cost_usdt") is not None else not_obs),
                 "cost_source": flatten_value(cost_source),
                 "cost_model_version": flatten_value(row.get("cost_model_version") or not_obs),
+                "cost_contract_version": flatten_value(first_observed(row.get("cost_contract_version"), row.get("contract_version"), QUANT_LAB_CONTRACT_VERSION)),
+                "as_of_ts": flatten_value(first_observed(row.get("as_of_ts"), row.get("response_ts"), not_obs)),
                 "fallback_level": flatten_value(fallback_level),
                 "sample_count": flatten_value(row.get("sample_count") if row.get("sample_count") is not None else not_obs),
                 "total_cost_bps": flatten_value(row.get("total_cost_bps") if row.get("total_cost_bps") is not None else not_obs),
@@ -6021,8 +6250,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "source": source,
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
-                "event_type": event_type,
+                "event_type": "fallback",
+                "event_id": flatten_value(row.get("event_id") or not_obs),
+                "request_id": flatten_value(row.get("request_id") or not_obs),
+                "original_request_id": flatten_value(first_observed(row.get("original_request_id"), row.get("request_id"), not_obs)),
+                "original_event_id": flatten_value(first_observed(row.get("original_event_id"), row.get("event_id"), not_obs)),
                 "endpoint": flatten_value(first_observed(row.get("endpoint"), row.get("endpoint_path"), row.get("path"))),
+                "endpoint_path": flatten_value(first_observed(row.get("endpoint_path"), row.get("endpoint"), row.get("path"))),
+                "status_code": flatten_value(row.get("status_code") if row.get("status_code") is not None else not_obs),
+                "success": bool_observed(row.get("success")),
+                "latency_ms": flatten_value(row.get("latency_ms") if row.get("latency_ms") is not None else not_obs),
                 "symbol": flatten_value(row.get("symbol") or not_obs),
                 "side": flatten_value(row.get("side") or not_obs),
                 "intent": flatten_value(row.get("intent") or not_obs),
@@ -6030,6 +6267,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "effective_decision": flatten_value(row.get("effective_decision") or row.get("order_decision") or not_obs),
                 "fallback_used": str(quant_lab_is_fallback(row)).lower(),
                 "error": flatten_value(first_observed(row.get("error"), row.get("error_type"))),
+                "error_type": flatten_value(first_observed(row.get("error_type"), row.get("error"), not_obs)),
+                "error_message_short": flatten_value(first_observed(row.get("error_message_short"), row.get("error_message_sanitized"), row.get("error"), not_obs)),
                 "diagnosis": flatten_value(row.get("fallback_reason") or row.get("filter_reason") or row.get("action_taken") or "fallback_policy_applied"),
                 "raw_json": safe_json(row),
             })
@@ -6047,8 +6286,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "source": "reports/quant_lab_requests.jsonl",
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
-                "event_type": flatten_value(row.get("event_type") or "request"),
+                "event_type": "fallback",
+                "event_id": flatten_value(row.get("event_id") or not_obs),
+                "request_id": flatten_value(row.get("request_id") or not_obs),
+                "original_request_id": flatten_value(first_observed(row.get("original_request_id"), row.get("request_id"), not_obs)),
+                "original_event_id": flatten_value(first_observed(row.get("original_event_id"), row.get("event_id"), not_obs)),
                 "endpoint": flatten_value(first_observed(row.get("endpoint"), row.get("endpoint_path"), row.get("path"))),
+                "endpoint_path": flatten_value(first_observed(row.get("endpoint_path"), row.get("endpoint"), row.get("path"))),
+                "status_code": flatten_value(row.get("status_code") if row.get("status_code") is not None else not_obs),
+                "success": bool_observed(row.get("success")),
+                "latency_ms": flatten_value(row.get("latency_ms") if row.get("latency_ms") is not None else not_obs),
                 "symbol": flatten_value((row.get("params") or {}).get("symbol") if isinstance(row.get("params"), dict) else not_obs),
                 "side": flatten_value((row.get("params") or {}).get("side") if isinstance(row.get("params"), dict) else not_obs),
                 "intent": not_obs,
@@ -6056,9 +6303,59 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "effective_decision": not_obs,
                 "fallback_used": str(quant_lab_is_fallback(row)).lower(),
                 "error": flatten_value(first_observed(row.get("error"), row.get("error_type"), f"http_{row.get('status_code')}" if not request_success and row.get("status_code") else not_obs)),
+                "error_type": flatten_value(first_observed(row.get("error_type"), row.get("error"), f"http_{row.get('status_code')}" if not request_success and row.get("status_code") else not_obs)),
+                "error_message_short": flatten_value(first_observed(row.get("error_message_short"), row.get("error_message_sanitized"), row.get("error"), not_obs)),
                 "diagnosis": flatten_value(row.get("fallback_reason") or row.get("action_taken") or "fallback_request"),
                 "raw_json": safe_json(row),
             })
+
+    quant_lab_permission_audit_rows = list(quant_lab_compliance_rows)
+    def quant_lab_mode_audit_row(row):
+        requested_mode = first_observed(row.get("quant_lab_requested_mode"), row.get("requested_mode"), row.get("mode"), not_obs)
+        effective_mode = first_observed(row.get("quant_lab_effective_mode"), row.get("effective_mode"), row.get("mode"), not_obs)
+        blocked_reasons = first_observed(row.get("enforce_blocked_reasons"), row.get("enforce_blocked_reason"), not_obs)
+        return {
+            "source": flatten_value(row.get("source") or not_obs),
+            "run_id": flatten_value(row.get("run_id") or not_obs),
+            "ts_utc": flatten_value(row.get("ts_utc") or row.get("ts") or not_obs),
+            "event_type": flatten_value(row.get("event_type") or not_obs),
+            "event_id": flatten_value(row.get("event_id") or not_obs),
+            "request_id": flatten_value(row.get("request_id") or not_obs),
+            "mode": flatten_value(row.get("mode") or not_obs),
+            "mode_source": flatten_value(row.get("mode_source") or not_obs),
+            "quant_lab_requested_mode": flatten_value(requested_mode),
+            "quant_lab_effective_mode": flatten_value(effective_mode),
+            "called_api": bool_observed(row.get("called_api")),
+            "apply_permission_gate": bool_observed(row.get("apply_permission_gate")),
+            "apply_cost_gate": bool_observed(row.get("apply_cost_gate")),
+            "permission_gate_enforced": bool_observed(row.get("permission_gate_enforced")),
+            "cost_gate_enforced": bool_observed(row.get("cost_gate_enforced")),
+            "enforce_readiness_status": flatten_value(row.get("enforce_readiness_status") or not_obs),
+            "enforce_blocked_reasons": flatten_value(blocked_reasons),
+            "enforce_blocked_reason": flatten_value(row.get("enforce_blocked_reason") or not_obs),
+            "contract_version_match": bool_observed(row.get("contract_version_match")),
+            "telemetry_schema_version_match": bool_observed(row.get("telemetry_schema_version_match")),
+            "raw_permission_decision": flatten_value(row.get("raw_permission_decision") or row.get("permission_decision") or not_obs),
+            "effective_permission_decision": flatten_value(row.get("effective_permission_decision") or row.get("effective_decision") or not_obs),
+            "would_block_if_enforced": bool_observed(row.get("would_block_if_enforced")),
+            "fallback_used": bool_observed(row.get("fallback_used")),
+            "fallback_reason": flatten_value(row.get("fallback_reason") or not_obs),
+        }
+
+    for row in quant_lab_compliance_rows + quant_lab_cost_usage_rows + quant_lab_fallback_rows:
+        if any(
+            first_observed(row.get(field), not_obs) != not_obs
+            for field in (
+                "mode",
+                "mode_source",
+                "quant_lab_requested_mode",
+                "quant_lab_effective_mode",
+                "enforce_readiness_status",
+                "enforce_blocked_reasons",
+                "enforce_blocked_reason",
+            )
+        ):
+            quant_lab_mode_audit_rows.append(quant_lab_mode_audit_row(row))
 
     config_runtime_consumption_rows = build_config_runtime_consumption_audit()
     config_runtime_not_consumed_count = sum(
@@ -6124,7 +6421,22 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/summary_trade_count_mismatch.csv",
         summary_trade_count_mismatch_rows,
-        ["run_id", "source_file", "trades_file_exists", "trades_file_rows", "trades_counted_rows", "summary_num_trades", "trades_turnover_usdt", "summary_turnover_usdt", "trades_fees_usdt_total", "summary_fees_usdt_total", "trades_slippage_usdt_total", "summary_slippage_usdt_total", "trades_cost_usdt_total", "summary_cost_usdt_total", "count_mismatch", "cost_mismatch", "diagnosis", "parse_error"],
+        ["run_id", "source_file", "trades_file_exists", "trades_file_rows", "trades_counted_rows", "summary_num_trades", "trades_turnover_usdt", "summary_turnover_usdt", "trades_fees_usdt_total", "summary_fees_usdt_total", "trades_slippage_usdt_total", "summary_slippage_usdt_total", "trades_cost_usdt_total", "summary_cost_usdt_total", "count_mismatch", "cost_mismatch", "high_issue", "diagnosis", "parse_error", "trade_metrics_warning"],
+    )
+    write_csv(
+        "reports/summary_trade_count_mismatch.csv",
+        summary_trade_count_mismatch_rows,
+        ["run_id", "source_file", "trades_file_exists", "trades_file_rows", "trades_counted_rows", "summary_num_trades", "trades_turnover_usdt", "summary_turnover_usdt", "trades_fees_usdt_total", "summary_fees_usdt_total", "trades_slippage_usdt_total", "summary_slippage_usdt_total", "trades_cost_usdt_total", "summary_cost_usdt_total", "count_mismatch", "cost_mismatch", "high_issue", "diagnosis", "parse_error", "trade_metrics_warning"],
+    )
+    write_csv(
+        "summaries/trade_metrics.csv",
+        trade_metrics_rows,
+        ["run_id", "trades_file_exists", "trades_file_rows", "trades_counted_rows", "num_trades", "turnover_usdt", "fees_usdt_total", "slippage_usdt_total", "cost_usdt_total", "fills_count_today", "trade_metrics_warning", "trade_metrics_warning_count", "trade_export_schema_version", "summary_metrics_version"],
+    )
+    write_csv(
+        "summaries/fill_metrics.csv",
+        fill_metrics_rows,
+        ["run_id", "ts_utc", "symbol", "normalized_symbol", "side", "action", "qty", "price", "notional_usdt", "fee", "fee_ccy", "fee_usdt", "slippage_usdt", "order_id", "trade_id", "strategy_id", "position_id", "trade_export_schema_version"],
     )
     write_csv(
         "summaries/config_runtime_consumption_audit.csv",
@@ -6134,17 +6446,27 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/quant_lab_compliance.csv",
         quant_lab_compliance_rows,
-        ["source", "run_id", "ts_utc", "event_type", "mode", "local_mode", "permission_gate_enforced", "cost_gate_enforced", "raw_permission_decision", "effective_permission_decision", "would_block_if_enforced", "fallback_used", "fallback_reason", "remote_permission_as_of_ts", "remote_permission_expires_at", "remote_permission_status", "contract_version", "permission_decision", "effective_decision", "order_decision", "fail_policy", "symbol", "side", "intent", "orders_before", "orders_after", "orders_filtered", "buy_orders_filtered", "filtered", "filter_reason", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "original_request_id", "original_event_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "local_mode", "permission_gate_enforced", "cost_gate_enforced", "raw_permission_decision", "raw_permission_status", "raw_permission_enforceable", "effective_permission_decision", "would_block_if_enforced", "shadow_override_reason", "fallback_used", "fallback_reason", "remote_permission_as_of_ts", "remote_permission_expires_at", "remote_permission_status", "remote_permission_source_bundle_ts", "remote_permission_telemetry_latest_ts", "remote_permission_contract_version", "permission_contract_violation", "contract_version", "permission_decision", "effective_decision", "order_decision", "fail_policy", "symbol", "side", "intent", "orders_before", "orders_after", "orders_filtered", "buy_orders_filtered", "filtered", "filter_reason", "diagnosis", "raw_json"],
+    )
+    write_csv(
+        "summaries/quant_lab_permission_audit.csv",
+        quant_lab_permission_audit_rows,
+        ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "original_request_id", "original_event_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "local_mode", "permission_gate_enforced", "raw_permission_decision", "raw_permission_status", "raw_permission_enforceable", "effective_permission_decision", "would_block_if_enforced", "shadow_override_reason", "fallback_used", "fallback_reason", "remote_permission_as_of_ts", "remote_permission_expires_at", "remote_permission_status", "remote_permission_source_bundle_ts", "remote_permission_telemetry_latest_ts", "remote_permission_contract_version", "permission_contract_violation", "contract_version", "symbol", "side", "intent", "filtered", "filter_reason", "diagnosis", "raw_json"],
+    )
+    write_csv(
+        "summaries/quant_lab_mode_audit.csv",
+        quant_lab_mode_audit_rows,
+        ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "mode", "mode_source", "quant_lab_requested_mode", "quant_lab_effective_mode", "called_api", "apply_permission_gate", "apply_cost_gate", "permission_gate_enforced", "cost_gate_enforced", "enforce_readiness_status", "enforce_blocked_reasons", "enforce_blocked_reason", "contract_version_match", "telemetry_schema_version_match", "raw_permission_decision", "effective_permission_decision", "would_block_if_enforced", "fallback_used", "fallback_reason"],
     )
     write_csv(
         "summaries/quant_lab_cost_usage.csv",
         quant_lab_cost_usage_rows,
-        ["source", "run_id", "ts_utc", "mode", "symbol", "request_symbol", "normalized_symbol", "response_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "strategy_id", "request_id", "requested_regime", "matched_regime", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "fallback_level", "cost_model_version", "sample_count", "selected_total_cost_bps", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_used_for_cost_model", "fallback_reason", "degraded_cost_model", "filtered", "filter_reason", "warning", "cost_gate_verified", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "symbol", "request_symbol", "normalized_symbol", "response_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "requested_quantile", "strategy_id", "requested_regime", "matched_regime", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "fallback_level", "cost_model_version", "cost_contract_version", "as_of_ts", "sample_count", "selected_total_cost_bps", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_used_for_cost_model", "fallback_reason", "degraded_cost_model", "filtered", "filter_reason", "warning", "cost_gate_verified", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/quant_lab_fallbacks.csv",
         quant_lab_fallback_rows,
-        ["source", "run_id", "ts_utc", "event_type", "endpoint", "symbol", "side", "intent", "fail_policy", "effective_decision", "fallback_used", "error", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "original_request_id", "original_event_id", "endpoint", "endpoint_path", "status_code", "success", "latency_ms", "symbol", "side", "intent", "fail_policy", "effective_decision", "fallback_used", "error", "error_type", "error_message_short", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/rank_exit_consistency.csv",
@@ -6230,12 +6552,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         [
             "experiment_name",
             "enabled_shadow_only",
+            "shadow_only",
             "enable_live_experiment",
             "ts_utc",
             "run_id",
             "symbol",
             "intended_side",
+            "alpha6_side",
             "would_enter",
+            "would_target_w",
             "would_size_notional",
             "would_exit_time",
             "entry_px",
@@ -6283,6 +6608,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "current_strategy_net_bps",
             "better_than_current_strategy",
             "sample_warning",
+            "live_ready_suggestion",
         ],
     )
     write_csv(
@@ -6305,6 +6631,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "current_strategy_net_bps",
             "better_than_current_strategy",
             "sample_warning",
+            "live_ready_suggestion",
         ],
     )
     write_csv(
@@ -6452,6 +6779,71 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         1 for row in protect_sol_exception_shadow_by_horizon
         if flatten_value(row.get("sample_warning"))
     )
+    def quant_lab_cost_row_degraded(row):
+        cost_source = flatten_value(first_observed(row.get("cost_source"), row.get("source"), not_obs)).strip().lower()
+        fallback_level = flatten_value(row.get("fallback_level") or "").strip().upper()
+        cost_model_version_value = flatten_value(row.get("cost_model_version") or "").strip().lower()
+        return (
+            truthy_observed(row.get("degraded_cost_model"))
+            or cost_source == "global_default"
+            or fallback_level == "GLOBAL_DEFAULT"
+            or cost_model_version_value == "global_default_v0"
+        )
+
+    def quant_lab_symbol_cost_hit(row):
+        if quant_lab_cost_row_degraded(row):
+            return False
+        normalized = flatten_value(row.get("normalized_symbol") or "").strip().upper()
+        response_symbol = flatten_value(first_observed(row.get("response_symbol"), row.get("symbol"), "")).strip().upper()
+        if normalized and response_symbol and normalized != response_symbol:
+            return False
+        sample_count = as_float(row.get("sample_count"))
+        if sample_count is not None and sample_count <= 0:
+            return False
+        return bool(normalized or response_symbol)
+
+    cost_degraded_count = sum(1 for row in quant_lab_cost_usage_rows if quant_lab_cost_row_degraded(row))
+    global_default_cost_count = sum(
+        1 for row in quant_lab_cost_usage_rows
+        if flatten_value(first_observed(row.get("cost_source"), row.get("source"), not_obs)).strip().lower() == "global_default"
+        or flatten_value(row.get("fallback_level") or "").strip().upper() == "GLOBAL_DEFAULT"
+        or flatten_value(row.get("cost_model_version") or "").strip().lower() == "global_default_v0"
+    )
+    symbol_cost_hit_count = sum(1 for row in quant_lab_cost_usage_rows if quant_lab_symbol_cost_hit(row))
+    cost_contract_version = next(
+        (
+            flatten_value(first_observed(row.get("cost_contract_version"), row.get("contract_version"), ""))
+            for row in reversed(quant_lab_cost_usage_rows)
+            if first_observed(row.get("cost_contract_version"), row.get("contract_version"), "") not in (None, "")
+        ),
+        QUANT_LAB_CONTRACT_VERSION,
+    )
+    def quant_lab_permission_status_stale(row):
+        status = flatten_value(first_observed(row.get("remote_permission_status"), row.get("raw_permission_status"), "")).strip().upper()
+        return status.startswith("STALE") or status.startswith("EXPIRED") or status == "NO_FRESH_PERMISSION"
+
+    would_block_if_enforced_count = sum(
+        1 for row in quant_lab_permission_audit_rows
+        if row.get("event_type") in {"filter_order", "order_filter"} and truthy_observed(row.get("would_block_if_enforced"))
+    )
+    if would_block_if_enforced_count == 0:
+        would_block_if_enforced_count = sum(
+            1 for row in quant_lab_permission_audit_rows
+            if truthy_observed(row.get("would_block_if_enforced"))
+        )
+    effective_block_count = sum(
+        1 for row in quant_lab_permission_audit_rows
+        if truthy_observed(row.get("permission_gate_enforced")) and truthy_observed(row.get("filtered"))
+    )
+    permission_contract_violation_count = sum(
+        1 for row in quant_lab_permission_audit_rows
+        if truthy_observed(row.get("permission_contract_violation"))
+    )
+    stale_permission_count = sum(1 for row in quant_lab_permission_audit_rows if quant_lab_permission_status_stale(row))
+    latest_quant_lab_mode_row = next(
+        (row for row in reversed(quant_lab_mode_audit_rows) if row.get("mode") not in (None, "", not_obs)),
+        quant_lab_mode_audit_rows[-1] if quant_lab_mode_audit_rows else {},
+    )
 
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
@@ -6482,17 +6874,43 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             1 for row in summary_trade_count_mismatch_rows
             if str(row.get("diagnosis") or "").startswith("high_issue")
         ),
+        "trade_metrics_rows": len(trade_metrics_rows),
+        "fill_metrics_rows": len(fill_metrics_rows),
         "negative_expectancy_consistency_rows": len(negative_consistency_rows),
         "negative_expectancy_mismatch_count": negative_expectancy_mismatch_count,
         "config_runtime_consumption_rows": len(config_runtime_consumption_rows),
         "config_runtime_not_consumed_count": config_runtime_not_consumed_count,
         "quant_lab_compliance_rows": len(quant_lab_compliance_rows),
+        "quant_lab_permission_audit_rows": len(quant_lab_permission_audit_rows),
+        "quant_lab_mode_audit_rows": len(quant_lab_mode_audit_rows),
+        "quant_lab_mode": latest_quant_lab_mode_row.get("mode", not_obs),
+        "quant_lab_mode_source": latest_quant_lab_mode_row.get("mode_source", not_obs),
+        "quant_lab_requested_mode": latest_quant_lab_mode_row.get("quant_lab_requested_mode", latest_quant_lab_mode_row.get("mode", not_obs)),
+        "quant_lab_effective_mode": latest_quant_lab_mode_row.get("quant_lab_effective_mode", latest_quant_lab_mode_row.get("mode", not_obs)),
+        "enforce_readiness_status": latest_quant_lab_mode_row.get("enforce_readiness_status", not_obs),
+        "enforce_blocked_reasons": latest_quant_lab_mode_row.get("enforce_blocked_reasons", not_obs),
+        "enforce_blocked_reason": latest_quant_lab_mode_row.get("enforce_blocked_reason", not_obs),
+        "contract_version_match": latest_quant_lab_mode_row.get("contract_version_match", not_obs),
+        "telemetry_schema_version_match": latest_quant_lab_mode_row.get("telemetry_schema_version_match", not_obs),
+        "permission_contract_violation_count": permission_contract_violation_count,
+        "stale_permission_count": stale_permission_count,
+        "would_block_if_enforced_count": would_block_if_enforced_count,
+        "effective_block_count": effective_block_count,
         "quant_lab_cost_usage_rows": len(quant_lab_cost_usage_rows),
         "quant_lab_fallback_rows": len(quant_lab_fallback_rows),
         "quant_lab_request_success_count": quant_lab_request_success_count,
         "quant_lab_request_error_count": quant_lab_request_error_count,
         "quant_lab_actual_fallback_count": len(quant_lab_fallback_rows),
         "quant_lab_fallback_count": len(quant_lab_fallback_rows),
+        "cost_degraded_count": cost_degraded_count,
+        "global_default_cost_count": global_default_cost_count,
+        "symbol_cost_hit_count": symbol_cost_hit_count,
+        "cost_contract_version": cost_contract_version,
+        "quant_lab_cost_degraded_count": cost_degraded_count,
+        "quant_lab_global_default_cost_count": global_default_cost_count,
+        "quant_lab_symbol_cost_hit_count": symbol_cost_hit_count,
+        "telemetry_contract_version": QUANT_LAB_CONTRACT_VERSION,
+        "telemetry_schema_version": QUANT_LAB_SCHEMA_VERSION,
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
         "rank_exit_conflict_count": rank_exit_conflict_count,
         "rank_exit_target_positive_sell_count": rank_exit_target_positive_sell_count,
@@ -6528,6 +6946,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "multi_position_swing_shadow_pending_count": int(multi_position_swing_status_counts.get("pending", 0)),
         "multi_position_swing_shadow_not_observable_count": int(multi_position_swing_status_counts.get("not_observable", 0)),
         "protect_sol_exception_shadow_label_count": len(protect_sol_exception_shadow_rows),
+        "protect_sol_exception_shadow_heartbeat_count": len(protect_sol_exception_shadow_heartbeat_rows),
+        "protect_sol_exception_shadow_no_sample_reasons": dict(
+            sorted(
+                Counter(
+                    flatten_value(first_value(row, ("no_sample_reason", "original_block_reason"), not_obs)) or not_obs
+                    for row in protect_sol_exception_shadow_heartbeat_rows
+                ).items()
+            )
+        ),
         "protect_sol_exception_shadow_duplicate_count": protect_sol_exception_shadow_duplicate_count,
         "protect_sol_exception_shadow_complete_count": int(protect_sol_exception_status_counts.get("complete", 0)),
         "protect_sol_exception_shadow_pending_count": int(protect_sol_exception_status_counts.get("pending", 0)),
@@ -6563,6 +6990,24 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "collection_error_count": len(collection_errors),
     }
     write_text("summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2) + "\n")
+    enforce_readiness_snapshot = {
+        "quant_lab_requested_mode": window_summary.get("quant_lab_requested_mode", not_obs),
+        "quant_lab_effective_mode": window_summary.get("quant_lab_effective_mode", not_obs),
+        "mode_source": window_summary.get("quant_lab_mode_source", not_obs),
+        "status": window_summary.get("enforce_readiness_status", not_obs),
+        "blocked_reasons": window_summary.get("enforce_blocked_reasons", not_obs),
+        "enforce_blocked_reason": window_summary.get("enforce_blocked_reason", not_obs),
+        "contract_version_match": window_summary.get("contract_version_match", not_obs),
+        "telemetry_schema_version_match": window_summary.get("telemetry_schema_version_match", not_obs),
+        "cost_degraded_count": window_summary.get("cost_degraded_count", 0),
+        "global_default_cost_count": window_summary.get("global_default_cost_count", 0),
+        "quant_lab_fallback_count": window_summary.get("quant_lab_fallback_count", 0),
+        "quant_lab_request_count": quant_lab_request_success_count + quant_lab_request_error_count,
+        "summary_trade_count_mismatch_count": len(summary_trade_count_mismatch_rows),
+        "telemetry_contract_version": QUANT_LAB_CONTRACT_VERSION,
+        "telemetry_schema_version": QUANT_LAB_SCHEMA_VERSION,
+    }
+    write_text("summaries/enforce_readiness_snapshot.json", json.dumps(enforce_readiness_snapshot, ensure_ascii=False, indent=2) + "\n")
 
     if trade_observation_status == "no_trades":
         latest_24h_real_trade_text = "no / 0"
@@ -6938,6 +7383,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     def protect_sol_exception_shadow_text():
         if not protect_sol_exception_shadow_by_horizon:
+            if protect_sol_exception_shadow_heartbeat_rows:
+                reasons = Counter(
+                    flatten_value(first_value(row, ("no_sample_reason", "original_block_reason"), not_obs)) or not_obs
+                    for row in protect_sol_exception_shadow_heartbeat_rows
+                )
+                return "heartbeat_no_samples: " + ", ".join(f"{reason}={count}" for reason, count in sorted(reasons.items()))
             return "not_observable_no_shadow_samples"
         parts = []
         for row in protect_sol_exception_shadow_by_horizon:
@@ -6958,7 +7409,6 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     config_hash_text = flatten_value(provenance_meta.get("config_hash") or not_obs)
     effective_config_hash_text = flatten_value(provenance_meta.get("effective_live_config_hash") or not_obs)
     strategy_hash_text = flatten_value(provenance_meta.get("strategy_hash") or not_obs)
-
     readme = [
         f"# V5 live follow-up bundle {STAMP}",
         "",
@@ -7025,6 +7475,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- shadow_only: {str(config_bool('protect_sol_exception_enabled_shadow_only', True)).lower()}",
         f"- enable_live_experiment: {str(config_bool('protect_sol_exception_enable_live_experiment', False)).lower()}",
         f"- label_count: {len(protect_sol_exception_shadow_rows)}",
+        f"- heartbeat_count: {len(protect_sol_exception_shadow_heartbeat_rows)}",
         f"- by_horizon: {protect_sol_exception_summary_text}",
         f"- factor_weight_candidates: f3={config_string_list('protect_sol_exception_f3_weight_candidates', ['0.20', '0.25'])}, f4={config_string_list('protect_sol_exception_f4_weight_candidates', ['0.25', '0.30'])}",
         "",
@@ -7036,7 +7487,9 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "## Summary trade metrics check",
         f"- summary_trade_count_mismatch rows: {len(summary_trade_count_mismatch_rows)}",
         f"- high issue present: {'yes' if any(str(row.get('diagnosis') or '').startswith('high_issue') for row in summary_trade_count_mismatch_rows) else 'no'}",
-        f"- output: summaries/summary_trade_count_mismatch.csv",
+        f"- output: summaries/summary_trade_count_mismatch.csv and reports/summary_trade_count_mismatch.csv",
+        f"- trade_metrics rows: {len(trade_metrics_rows)}",
+        f"- fill_metrics rows: {len(fill_metrics_rows)}",
         "",
         "## Skipped candidate extended forward labels",
         f"- horizons_hours: {','.join(str(int(h)) for h in label_horizons)}",
@@ -7330,6 +7783,8 @@ def build_provenance_meta():
             OUT / "raw/reports/quant_lab_usage.jsonl",
             ("contract_version", "quant_lab_contract_version"),
         )
+    if quant_lab_contract_version == "not_observable":
+        quant_lab_contract_version = QUANT_LAB_CONTRACT_VERSION
 
     return {
         "provenance_status": provenance_status,
@@ -7344,6 +7799,13 @@ def build_provenance_meta():
         "dependency_lock_file_count": dependency_count,
         "config_hash": hash_file(live_config_path),
         "effective_live_config_hash": hash_file(effective_config_path),
+        "schema_version": QUANT_LAB_SCHEMA_VERSION,
+        "contract_version": str(quant_lab_contract_version),
+        "telemetry_schema_version": QUANT_LAB_SCHEMA_VERSION,
+        "telemetry_contract_version": str(quant_lab_contract_version),
+        "event_id_generation_version": QUANT_LAB_EVENT_ID_GENERATION_VERSION,
+        "trade_export_schema_version": TRADE_EXPORT_SCHEMA_VERSION,
+        "summary_metrics_version": SUMMARY_METRICS_VERSION,
         "strategy_version": str(strategy_version),
         "strategy_hash": strategy_hash,
         "strategy_file_count": strategy_count,
@@ -7393,6 +7855,9 @@ sanity = {
     "contains raw/reports/quant_lab_requests.jsonl": (OUT / "raw/reports/quant_lab_requests.jsonl").is_file(),
     "contains summaries/probe_lifecycle_audit.csv": (OUT / "summaries/probe_lifecycle_audit.csv").is_file(),
     "contains summaries/quant_lab_compliance.csv": (OUT / "summaries/quant_lab_compliance.csv").is_file(),
+    "contains summaries/quant_lab_permission_audit.csv": (OUT / "summaries/quant_lab_permission_audit.csv").is_file(),
+    "contains summaries/quant_lab_mode_audit.csv": (OUT / "summaries/quant_lab_mode_audit.csv").is_file(),
+    "contains summaries/enforce_readiness_snapshot.json": (OUT / "summaries/enforce_readiness_snapshot.json").is_file(),
     "contains summaries/quant_lab_cost_usage.csv": (OUT / "summaries/quant_lab_cost_usage.csv").is_file(),
     "contains summaries/quant_lab_fallbacks.csv": (OUT / "summaries/quant_lab_fallbacks.csv").is_file(),
     "contains summaries/issues_to_fix.json": (OUT / "summaries/issues_to_fix.json").is_file(),
@@ -7425,6 +7890,9 @@ failure_check_names = [
     "contains raw/reports/quant_lab_requests.jsonl",
     "contains summaries/probe_lifecycle_audit.csv",
     "contains summaries/quant_lab_compliance.csv",
+    "contains summaries/quant_lab_permission_audit.csv",
+    "contains summaries/quant_lab_mode_audit.csv",
+    "contains summaries/enforce_readiness_snapshot.json",
     "contains summaries/quant_lab_cost_usage.csv",
     "contains summaries/quant_lab_fallbacks.csv",
     "contains summaries/issues_to_fix.json",
@@ -7459,6 +7927,13 @@ manifest = {
     "dependency_lock_file_count": provenance_meta.get("dependency_lock_file_count", 0),
     "config_hash": provenance_meta.get("config_hash", "not_observable"),
     "effective_live_config_hash": provenance_meta.get("effective_live_config_hash", "not_observable"),
+    "schema_version": provenance_meta.get("schema_version", QUANT_LAB_SCHEMA_VERSION),
+    "contract_version": provenance_meta.get("contract_version", provenance_meta.get("quant_lab_contract_version", QUANT_LAB_CONTRACT_VERSION)),
+    "telemetry_schema_version": provenance_meta.get("telemetry_schema_version", QUANT_LAB_SCHEMA_VERSION),
+    "telemetry_contract_version": provenance_meta.get("telemetry_contract_version", provenance_meta.get("contract_version", QUANT_LAB_CONTRACT_VERSION)),
+    "event_id_generation_version": provenance_meta.get("event_id_generation_version", QUANT_LAB_EVENT_ID_GENERATION_VERSION),
+    "trade_export_schema_version": provenance_meta.get("trade_export_schema_version", TRADE_EXPORT_SCHEMA_VERSION),
+    "summary_metrics_version": provenance_meta.get("summary_metrics_version", SUMMARY_METRICS_VERSION),
     "strategy_version": provenance_meta.get("strategy_version", "not_observable"),
     "strategy_hash": provenance_meta.get("strategy_hash", "not_observable"),
     "strategy_file_count": provenance_meta.get("strategy_file_count", 0),
