@@ -50,6 +50,7 @@ def _cfg(tmp_path: Path, mode: str) -> AppConfig:
     cfg.quant_lab.enabled = True
     cfg.quant_lab.mode = mode
     cfg.quant_lab.runtime_override_path = str(tmp_path / f"{mode}_override.json")
+    cfg.quant_lab.enforce_readiness_enabled = False
     cfg.quant_lab.cost_min_edge_multiplier = 1.5
     cfg.quant_lab.min_cost_bps_floor = 5.0
     cfg.execution.fee_bps = 0.0
@@ -120,7 +121,11 @@ def test_shadow_raw_abort_records_effective_allow_and_would_block(tmp_path: Path
     assert result.effective_permission_decision == "ALLOW"
     assert result.would_block_if_enforced is True
     rows = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
-    final = [row for row in rows if row.get("event_type") == "final_permission"][-1]
+    final = [
+        row
+        for row in rows
+        if row.get("event_type") == "permission_audit" and row.get("legacy_event_type") == "final_permission"
+    ][-1]
     assert final["raw_permission_decision"] == "ABORT"
     assert final["effective_permission_decision"] == "ALLOW"
     assert final["would_block_if_enforced"] is True

@@ -13,7 +13,11 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from src.reporting.quant_lab_audit import (
+    CONTRACT_VERSION,
+    EVENT_TYPE_REQUEST,
+    SCHEMA_VERSION,
     append_quant_lab_request,
+    normalize_quant_lab_event,
     sanitize_quant_lab_obj,
 )
 
@@ -401,12 +405,19 @@ class QuantLabClient:
             {
                 "run_id": self.run_id,
                 "phase": self.phase,
+                "request_id": dict(params or {}).get("request_id"),
+                "event_id": dict(params or {}).get("event_id"),
+                "ts_utc": dict(params or {}).get("ts_utc"),
+                "contract_version": dict(params or {}).get("contract_version"),
+                "event_type": EVENT_TYPE_REQUEST,
                 "endpoint_path": endpoint_path,
                 "query_keys": sorted(str(k) for k, v in dict(params or {}).items() if v is not None),
                 "status_code": status_code,
                 "latency_ms": latency_ms,
                 "success": bool(success),
+                "fallback_used": False,
                 "error_type": error_type,
+                "error_message_short": error_type or "",
                 "cached": bool(cached),
                 "response_summary": dict(response_summary or {}),
             },
@@ -520,10 +531,43 @@ class QuantLabClient:
             raise QuantLabValidationError(f"quant-lab health mode must be read-only, got {health.mode!r}")
         return health
 
-    def get_live_permission(self, *, strategy: str, version: str) -> RiskPermission:
+    def get_live_permission(
+        self,
+        *,
+        strategy: str,
+        version: str,
+        request_id: Optional[str] = None,
+        event_id: Optional[str] = None,
+        ts_utc: Optional[str] = None,
+    ) -> RiskPermission:
+        strategy_text = str(strategy or "").strip()
+        version_text = str(version or "").strip()
+        permission_request_id = str(request_id or "").strip() or f"{self.run_id or 'v5'}:permission:{strategy_text}:{version_text}"
+        request_event = normalize_quant_lab_event(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "contract_version": CONTRACT_VERSION,
+                "run_id": self.run_id,
+                "event_type": EVENT_TYPE_REQUEST,
+                "request_id": permission_request_id,
+                "event_id": str(event_id or "").strip() or None,
+                "ts_utc": str(ts_utc or "").strip() or None,
+                "endpoint_path": "/v1/risk/live-permission",
+            },
+            default_event_type=EVENT_TYPE_REQUEST,
+        )
         response = self.get_json(
             "/v1/risk/live-permission",
-            params={"strategy": str(strategy or "").strip(), "version": str(version or "").strip()},
+            params={
+                "schema_version": request_event["schema_version"],
+                "contract_version": request_event["contract_version"],
+                "event_id": request_event["event_id"],
+                "request_id": permission_request_id,
+                "run_id": self.run_id or "",
+                "ts_utc": request_event["ts_utc"],
+                "strategy": strategy_text,
+                "version": version_text,
+            },
         )
         permission = RiskPermission.from_payload(response.data)
         permission.permission = normalize_permission(permission.permission)
@@ -540,27 +584,56 @@ class QuantLabClient:
         strategy_id: str = "v5",
         expected_edge_bps: Optional[float] = None,
         request_id: Optional[str] = None,
+        event_id: Optional[str] = None,
+        ts_utc: Optional[str] = None,
         venue: str = "OKX",
         instrument_type: str = "spot",
     ) -> CostEstimate:
         normalized_symbol = symbol_to_quant_lab_symbol(symbol)
+        request_symbol = str(symbol or "").strip()
+        requested_regime = str(regime or "normal").strip() or "normal"
+        requested_quantile = str(quantile or "p75").strip() or "p75"
+        strategy = str(strategy_id or "v5").strip() or "v5"
         cost_request_id = str(request_id or "").strip()
         if not cost_request_id:
             cost_request_id = f"{self.run_id or 'v5'}:{normalized_symbol}:{time.time_ns()}"
+        request_event = normalize_quant_lab_event(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "contract_version": CONTRACT_VERSION,
+                "run_id": self.run_id,
+                "event_type": EVENT_TYPE_REQUEST,
+                "request_id": cost_request_id,
+                "event_id": str(event_id or "").strip() or None,
+                "ts_utc": str(ts_utc or "").strip() or None,
+                "endpoint_path": "/v1/costs/estimate",
+                "symbol": request_symbol,
+                "normalized_symbol": normalized_symbol,
+            },
+            default_event_type=EVENT_TYPE_REQUEST,
+        )
         response = self.get_json(
             "/v1/costs/estimate",
             params={
-                "symbol": normalized_symbol,
+                "schema_version": request_event["schema_version"],
+                "contract_version": request_event["contract_version"],
+                "event_id": request_event["event_id"],
+                "request_id": cost_request_id,
+                "run_id": self.run_id or "",
+                "ts_utc": request_event["ts_utc"],
+                "symbol": request_symbol,
+                "request_symbol": request_symbol,
                 "normalized_symbol": normalized_symbol,
                 "venue": str(venue or "OKX").strip() or "OKX",
                 "instrument_type": str(instrument_type or "spot").strip() or "spot",
                 "side": str(side or "").strip().lower(),
-                "regime": str(regime or "normal").strip() or "normal",
+                "regime": requested_regime,
+                "requested_regime": requested_regime,
                 "notional_usdt": float(notional_usdt or 0.0),
-                "quantile": str(quantile or "p75").strip() or "p75",
-                "strategy_id": str(strategy_id or "v5").strip() or "v5",
+                "quantile": requested_quantile,
+                "requested_quantile": requested_quantile,
+                "strategy_id": strategy,
                 "expected_edge_bps": expected_edge_bps if expected_edge_bps is not None else "",
-                "request_id": cost_request_id,
             },
         )
         estimate = CostEstimate.from_payload(response.data)
@@ -604,28 +677,57 @@ class QuantLabClient:
         notional_bucket: Optional[str] = None,
         expected_edge_bps: Optional[float] = None,
         request_id: Optional[str] = None,
+        event_id: Optional[str] = None,
+        ts_utc: Optional[str] = None,
         strategy_id: Optional[str] = None,
         venue: str = "OKX",
         instrument_type: str = "spot",
     ) -> QuantLabResponse:
         normalized_symbol = symbol_to_quant_lab_symbol(symbol)
+        request_symbol = str(symbol or "").strip()
+        requested_regime = str(regime or "normal").strip() or "normal"
+        requested_quantile = str(quantile or "p75").strip() or "p75"
+        strategy = str(strategy_id or alpha_id or "v5").strip() or "v5"
         cost_request_id = str(request_id or "").strip()
         if not cost_request_id:
             cost_request_id = f"{self.run_id or 'v5'}:{normalized_symbol}:{time.time_ns()}"
+        request_event = normalize_quant_lab_event(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "contract_version": CONTRACT_VERSION,
+                "run_id": self.run_id,
+                "event_type": EVENT_TYPE_REQUEST,
+                "request_id": cost_request_id,
+                "event_id": str(event_id or "").strip() or None,
+                "ts_utc": str(ts_utc or "").strip() or None,
+                "endpoint_path": "/v1/costs/estimate",
+                "symbol": request_symbol,
+                "normalized_symbol": normalized_symbol,
+            },
+            default_event_type=EVENT_TYPE_REQUEST,
+        )
         return self.get_json(
             "/v1/costs/estimate",
             params={
-                "symbol": normalized_symbol,
+                "schema_version": request_event["schema_version"],
+                "contract_version": request_event["contract_version"],
+                "event_id": request_event["event_id"],
+                "request_id": cost_request_id,
+                "run_id": self.run_id or "",
+                "ts_utc": request_event["ts_utc"],
+                "symbol": request_symbol,
+                "request_symbol": request_symbol,
                 "normalized_symbol": normalized_symbol,
                 "venue": str(venue or "OKX").strip() or "OKX",
                 "instrument_type": str(instrument_type or "spot").strip() or "spot",
                 "side": str(side or "").strip().lower(),
-                "regime": str(regime or "normal").strip() or "normal",
+                "regime": requested_regime,
+                "requested_regime": requested_regime,
                 "notional_usdt": float(notional_usdt or 0.0),
-                "quantile": str(quantile or "p75").strip() or "p75",
-                "strategy_id": str(strategy_id or alpha_id or "v5").strip() or "v5",
+                "quantile": requested_quantile,
+                "requested_quantile": requested_quantile,
+                "strategy_id": strategy,
                 "expected_edge_bps": expected_edge_bps if expected_edge_bps is not None else "",
-                "request_id": cost_request_id,
                 "notional_bucket": notional_bucket,
             },
         )

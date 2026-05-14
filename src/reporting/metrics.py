@@ -6,11 +6,14 @@ import math
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+TRADE_EXPORT_SCHEMA_VERSION = "v5.trade_export.v1"
+SUMMARY_METRICS_VERSION = "v5.summary_metrics.v1"
 
 
 @dataclass
@@ -181,6 +184,11 @@ def read_trades_csv_detailed(path: str) -> TradeCsvReadResult:
                     warnings.append(f"trades.csv row {line_no} not counted: missing positive notional")
                     continue
 
+                if _to_opt_f(cleaned.get("fee_usdt")) is None:
+                    warnings.append(f"trades.csv row {line_no} missing fee_usdt")
+                if _to_opt_f(cleaned.get("slippage_usdt")) is None:
+                    warnings.append(f"trades.csv row {line_no} missing slippage_usdt")
+
                 rows.append(cleaned)
     except Exception as exc:
         msg = f"trades.csv parse failed: {exc!r}"
@@ -231,7 +239,10 @@ def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[flo
     """Compute trade metrics"""
     if not trades:
         return {
+            "trade_export_schema_version": TRADE_EXPORT_SCHEMA_VERSION,
+            "summary_metrics_version": SUMMARY_METRICS_VERSION,
             "num_trades": 0,
+            "fills_count_today": 0,
             "notional_usdt_total": 0.0,
             "turnover_usdt": 0.0,
             "turnover_ratio": 0.0,
@@ -267,7 +278,10 @@ def compute_trade_metrics(trades: List[Dict[str, Any]], avg_equity: Optional[flo
     cost_ratio = float(cost_total) / float(avg_equity or 1.0) if avg_equity else None
 
     return {
+        "trade_export_schema_version": TRADE_EXPORT_SCHEMA_VERSION,
+        "summary_metrics_version": SUMMARY_METRICS_VERSION,
         "num_trades": int(len(trades)),
+        "fills_count_today": int(len(trades)),
         "num_round_trips": int(len(realized)),
         "notional_usdt_total": notional_total,
         "turnover_usdt": notional_total,

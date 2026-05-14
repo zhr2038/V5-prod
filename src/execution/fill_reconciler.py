@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -523,6 +522,9 @@ class FillReconciler:
                     deadband_pct=((sym_ctx or {}).get("deadband") if isinstance(sym_ctx, dict) else None),
                     drift=((sym_ctx or {}).get("drift") if isinstance(sym_ctx, dict) else None),
                     cl_ord_id=str(row.cl_ord_id),
+                    order_id=str(oid_f or row.ord_id or row.cl_ord_id),
+                    trade_id=str(trade_id),
+                    strategy_id="v5",
                     order_store_path=str(getattr(self.order_store, 'path', 'reports/orders.sqlite')),
                 )
                 self.fill_store.mark_processed(inst_id, trade_id)

@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0.0",
+  "contract_version": "v5.quant_lab.telemetry.v2",
+  "event_id": "fixture-request-success-200",
+  "request_id": "fixture-run-001:cost:0:BNB-USDT",
+  "run_id": "fixture-run-001",
+  "ts_utc": "2026-05-14T00:04:00Z",
+  "ts": "2026-05-14T00:04:00Z",
+  "event_type": "request",
+  "method": "GET",
+  "endpoint_path": "/v1/costs/estimate",
+  "query_keys": ["contract_version", "event_id", "expected_edge_bps", "instrument_type", "normalized_symbol", "notional_usdt", "quantile", "regime", "request_id", "request_symbol", "requested_quantile", "requested_regime", "run_id", "side", "strategy_id", "symbol", "ts_utc", "venue"],
+  "status_code": 200,
+  "latency_ms": 22.5,
+  "success": true,
+  "fallback_used": false,
+  "error_type": null,
+  "error_message_short": "",
+  "cached": false,
+  "response_summary": {
+    "symbol": "BNB-USDT",
+    "source": "public_spread_proxy",
+    "total_cost_bps": 1.2
+  }
+}

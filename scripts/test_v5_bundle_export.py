@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import csv
 import datetime as dt
+import hashlib
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -25,6 +27,14 @@ def write_text(path, text):
 
 def iso(ts):
     return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def bash_path(path):
+    raw = str(path)
+    if len(raw) >= 3 and raw[1] == ":":
+        tail = raw[3:].replace("\\", "/")
+        return f"/mnt/{raw[0].lower()}/{tail}"
+    return raw.replace("\\", "/")
 
 
 def fixture_root(root):
@@ -454,6 +464,60 @@ def fixture_quant_lab_summary_root(root):
         },
     ]
     write_text(root / "reports/quant_lab_requests.jsonl", "\n".join(json.dumps(row) for row in request_rows) + "\n")
+
+
+def fixture_provenance_root(root):
+    run_id = fixture_root(root)
+    write_text(root / "main.py", "print('fixture')\n")
+    write_text(root / "src/core/pipeline.py", "PIPELINE_VERSION = 'fixture'\n")
+    write_text(root / "src/strategy/multi_strategy_system.py", "STRATEGY_VERSION = 'fixture'\n")
+    write_text(root / "src/alpha/alpha_engine.py", "ALPHA_VERSION = 'fixture'\n")
+    write_text(root / "src/factors/fixture_factor.py", "FACTOR_VERSION = 'fixture'\n")
+    write_text(root / "src/risk/risk_engine.py", "RISK_VERSION = 'fixture'\n")
+    write_text(root / "scripts/fixture_export.py", "print('fixture export')\n")
+    write_text(root / "requirements.txt", "numpy==1.0.0\n")
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n  quant_lab_strategy_version: '5.2.3'\nquant_lab:\n  contract_version: 'ql-contract-fixture'\n",
+    )
+    write_json(
+        root / "reports/effective_live_config.json",
+        {
+            "execution": {"quant_lab_strategy_version": "5.2.3"},
+            "quant_lab": {"contract_version": "ql-contract-fixture"},
+        },
+    )
+    write_text(root / "deployment_version.txt", "deploy-fixture-20260514\n")
+    return run_id
+
+
+def fixture_git_provenance_root(root):
+    fixture_provenance_root(root)
+    root_posix = bash_path(root)
+    subprocess.run(
+        [
+            "bash",
+            "-lc",
+            "set -euo pipefail; "
+            f"cd {shlex.quote(root_posix)}; "
+            "git init -q; "
+            "git checkout -q -b main; "
+            "git config user.email codex@example.com; "
+            "git config user.name Codex; "
+            "git remote add origin https://example.com/v5-prod.git; "
+            "git add .; "
+            "git commit -q -m provenance-fixture; "
+            "git rev-parse HEAD",
+        ],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return subprocess.check_output(
+        ["bash", "-lc", f"cd {shlex.quote(root_posix)} && git rev-parse HEAD"],
+        text=True,
+    ).strip()
 
 
 def fixture_summary_trade_count_mismatch_root(root):
@@ -2462,18 +2526,8 @@ def fixture_protect_sol_exception_shadow_root(root):
 
 
 def run_bundle(root):
-    script_path = str(SCRIPT)
-    if len(script_path) >= 3 and script_path[1] == ":":
-        tail = script_path[3:].replace("\\", "/")
-        script_path = f"/mnt/{script_path[0].lower()}/{tail}"
-    else:
-        script_path = script_path.replace("\\", "/")
-    root_path = str(root)
-    if len(root_path) >= 3 and root_path[1] == ":":
-        tail = root_path[3:].replace("\\", "/")
-        root_path = f"/mnt/{root_path[0].lower()}/{tail}"
-    else:
-        root_path = root_path.replace("\\", "/")
+    script_path = bash_path(SCRIPT)
+    root_path = bash_path(root)
     proc = subprocess.run(
         ["bash", script_path, root_path],
         env=os.environ.copy(),
@@ -2577,6 +2631,63 @@ def main():
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
             shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
 
+    with tempfile.TemporaryDirectory(prefix="v5-provenance-non-git-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_provenance_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert manifest["git_branch"] == "not_git", manifest
+            assert manifest["git_commit"] == "not_git", manifest
+            assert manifest["provenance_status"] == "not_git_degraded", manifest
+            assert manifest["code_provenance"] == "degraded", manifest
+            assert manifest["source_snapshot_hash"] != "not_observable", manifest
+            assert int(manifest["source_tree_file_count"]) > 0, manifest
+            assert manifest["dependency_lock_hash"] != "not_observable", manifest
+            assert manifest["config_hash"] != "not_observable", manifest
+            assert manifest["effective_live_config_hash"] != "not_observable", manifest
+            assert manifest["strategy_hash"] != "not_observable", manifest
+            assert manifest["strategy_version"] == "5.2.3", manifest
+            assert manifest["quant_lab_contract_version"] == "ql-contract-fixture", manifest
+            assert manifest["deployment_version_file_path"] == "deployment_version.txt", manifest
+            assert manifest["deployment_version_file"] == "deploy-fixture-20260514", manifest
+            assert manifest["sanity_checks"]["provenance_status explicit"] is True, manifest
+            assert manifest["sanity_checks"]["code provenance ok/degraded"] == "degraded", manifest
+            assert "## Code provenance" in readme, readme
+            assert "code provenance ok / degraded: degraded" in readme, readme
+            assert "config hash:" in readme, readme
+            assert "strategy hash:" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-provenance-git-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        commit = fixture_git_provenance_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert manifest["git_branch"] == "main", manifest
+            assert manifest["git_commit"] == commit, manifest
+            assert manifest["git_dirty"] is False, manifest
+            assert manifest["provenance_status"] == "git_clean", manifest
+            assert manifest["code_provenance"] == "ok", manifest
+            assert manifest["git_remote_url_hash"] == hashlib.sha256(b"https://example.com/v5-prod.git").hexdigest(), manifest
+            assert manifest["source_snapshot_hash"] != "not_observable", manifest
+            assert manifest["sanity_checks"]["provenance_status explicit"] is True, manifest
+            assert manifest["sanity_checks"]["code provenance ok/degraded"] == "ok", manifest
+            assert "code provenance ok / degraded: ok" in readme, readme
+            assert f"git_commit: {commit}" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
     with tempfile.TemporaryDirectory(prefix="v5-summary-trade-count-mismatch-") as tmp:
         root = pathlib.Path(tmp) / "root"
         fixture_summary_trade_count_mismatch_root(root)
@@ -2584,15 +2695,25 @@ def main():
         try:
             with tarfile.open(bundle, "r:gz") as tf:
                 rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/summary_trade_count_mismatch.csv")).read().decode().splitlines()))
+                report_rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "reports/summary_trade_count_mismatch.csv")).read().decode().splitlines()))
+                trade_metrics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/trade_metrics.csv")).read().decode().splitlines()))
+                fill_metrics = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/fill_metrics.csv")).read().decode().splitlines()))
                 issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                manifest = json.loads(tf.extractfile(extract_member(tf, "manifest.json")).read().decode())
                 readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
             assert len(rows) == 2, rows
+            assert len(report_rows) == 2, report_rows
             assert {row["trades_counted_rows"] for row in rows} == {"1"}, rows
             assert {row["summary_num_trades"] for row in rows} == {"0"}, rows
             assert all(row["diagnosis"] == "high_issue_summary_trade_count_mismatch" for row in rows), rows
+            assert all(row["high_issue"] == "true" for row in rows), rows
             assert any(row["trades_cost_usdt_total"] == "0.01720499" for row in rows), rows
             assert any(row["trades_cost_usdt_total"] == "0.01716066" for row in rows), rows
+            assert len(trade_metrics) == 2, trade_metrics
+            assert len(fill_metrics) == 2, fill_metrics
+            assert {row["normalized_symbol"] for row in fill_metrics} == {"BNB-USDT"}, fill_metrics
+            assert {row["trade_export_schema_version"] for row in trade_metrics} == {"v5.trade_export.v1"}, trade_metrics
             summary_issues = [
                 item for item in issues["issues"]
                 if item.get("severity") == "high" and item.get("code") == "summary_trade_count_mismatch"
@@ -2600,6 +2721,10 @@ def main():
             assert len(summary_issues) == 2, issues
             assert window["summary_trade_count_mismatch_count"] == 2, window
             assert window["summary_trade_count_mismatch_high_issue_count"] == 2, window
+            assert window["trade_metrics_rows"] == 2, window
+            assert window["fill_metrics_rows"] == 2, window
+            assert manifest["trade_export_schema_version"] == "v5.trade_export.v1", manifest
+            assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1", manifest
             assert "## Summary trade metrics check" in readme, readme
             assert "summary_trade_count_mismatch rows: 2" in readme, readme
         finally:

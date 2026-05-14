@@ -10,7 +10,7 @@ from src.execution.fill_store import (
     derive_runtime_cost_events_dir,
     derive_runtime_spread_snapshots_dir,
 )
-from src.reporting.trade_log import Fill, TradeLogWriter
+from src.reporting.trade_log import Fill, TradeLogWriter, normalize_symbol
 from src.reporting.cost_events import append_cost_event
 from src.reporting.spread_snapshot_store import SpreadSnapshotStore
 from src.execution.order_store import OrderStore
@@ -156,20 +156,26 @@ def export_fill(
     drift: Optional[float] = None,
     spread_store: Optional[SpreadSnapshotStore] = None,
     cl_ord_id: Optional[str] = None,
+    order_id: Optional[str] = None,
+    trade_id: Optional[str] = None,
+    strategy_id: Optional[str] = "v5",
+    position_id: Optional[str] = None,
+    action: Optional[str] = None,
     order_store_path: str = "reports/orders.sqlite",
 ) -> ExportResult:
     """Export a single fill into trades.csv (per run) and cost_events NDJSON (daily).
 
-    Slippage is left as 0.0 for now (will be improved using spread snapshots).
+    Slippage is computed from submit/snapshot mid when available; otherwise null.
     """
 
     symbol = inst_id_to_symbol(inst_id)
+    normalized_symbol = normalize_symbol(symbol)
     qty = float(_dec(fill_sz))
     px = float(_dec(fill_px))
     notional = float((_dec(fill_sz) * _dec(fill_px)))
 
     fee_cost = fee_cost_usdt(fee=str(fee) if fee is not None else "0", fee_ccy=str(fee_ccy) if fee_ccy is not None else "", inst_id=inst_id, fill_px=fill_px)
-    fee_usdt = float(fee_cost) if fee_cost is not None else 0.0
+    fee_usdt = float(fee_cost) if fee_cost is not None else None
 
     # Slippage reference (priority): mid_at_submit -> spread snapshot -> None
     mid, bid, ask, meta_ts_ms = _read_submit_meta(symbol=symbol, cl_ord_id=cl_ord_id, order_store_path=order_store_path)
@@ -201,15 +207,24 @@ def export_fill(
     tl.append_fill(
         Fill(
             ts=_iso_utc_from_ts_ms(int(fill_ts_ms)),
+            ts_utc=_iso_utc_from_ts_ms(int(fill_ts_ms)),
             run_id=str(run_id),
             symbol=str(symbol),
+            normalized_symbol=str(normalized_symbol),
             intent=str(intent),
             side=str(side),
+            action=str(action or intent or side),
             qty=float(qty),
             price=float(px),
             notional_usdt=float(notional),
-            fee_usdt=float(fee_usdt),
+            fee=(None if fee is None else str(fee)),
+            fee_ccy=(None if fee_ccy is None else str(fee_ccy)),
+            fee_usdt=(None if fee_usdt is None else float(fee_usdt)),
             slippage_usdt=(None if slip_usdt is None else float(slip_usdt)),
+            order_id=str(order_id or cl_ord_id) if (order_id or cl_ord_id) else None,
+            trade_id=str(trade_id) if trade_id else None,
+            strategy_id=str(strategy_id or "v5"),
+            position_id=str(position_id) if position_id else None,
             realized_pnl_usdt=None,
             realized_pnl_pct=None,
         )

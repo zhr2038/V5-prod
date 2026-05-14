@@ -32,14 +32,21 @@ raw/
     v5_runtime.log
 summaries/
   quant_lab_compliance.csv
+  quant_lab_permission_audit.csv
+  quant_lab_mode_audit.csv
   quant_lab_cost_usage.csv
   quant_lab_fallbacks.csv
+  enforce_readiness_snapshot.json
   window_summary.json
   issues_to_fix.json
 manifest.json
 ```
 
 `quant_lab_usage.jsonl` records permission, cost, fallback, mode, and order filter events. `quant_lab_cost_usage.csv` normalizes cost estimates and includes whether the cost gate was enforced or hypothetical. `quant_lab_compliance.csv` checks `ABORT`/`SELL_ONLY` compliance with `mode`, `hypothetical_violation`, and `actual_violation` so `shadow` observations do not count as live violations. `quant_lab_fallbacks.csv` lists fallback policy, mode, scope, and action taken.
+
+`window_summary.json` includes Quant Lab cost-contract counters: `cost_degraded_count`, `global_default_cost_count`, `symbol_cost_hit_count`, and `cost_contract_version`. A `global_default` source, `GLOBAL_DEFAULT` fallback level, or `global_default_v0` model version is counted as a degraded cost model even when the HTTP request itself succeeded.
+
+`quant_lab_mode_audit.csv` and `enforce_readiness_snapshot.json` record the requested mode, effective mode, readiness status, enforce blocked reasons, and contract/schema version checks. If `enforce` is requested while readiness is not `READY`, V5 reports `quant_lab_requested_mode=enforce`, `quant_lab_effective_mode=shadow`, and the blocked reason list.
 
 ## Redaction
 
@@ -49,6 +56,10 @@ The bundle must not include `.env` files or unredacted secrets. Redacted markers
 
 ```json
 {
+  "schema_version": "1.0.0",
+  "contract_version": "v5.quant_lab.telemetry.v2",
+  "config_hash": "<sha256>",
+  "strategy_version": "5.0.0",
   "sanity_checks": {
     "no_env_files": true,
     "no_unredacted_secret_assignments": true,
