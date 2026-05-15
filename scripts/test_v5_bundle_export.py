@@ -399,6 +399,18 @@ def fixture_quant_lab_summary_root(root):
 
     usage_rows = [
         {
+            "ts": iso(window_end - 48 * 3600),
+            "run_id": "legacy_bnb_cost",
+            "event_type": "cost_estimate",
+            "symbol": "BNB/USDT",
+            "success": True,
+            "fallback_used": False,
+            "cost_source": "global_default",
+            "cost_model_version": "global_default_v0",
+            "fallback_level": "GLOBAL_DEFAULT",
+            "cost_contract_version": "v5.quant_lab.telemetry.v2",
+        },
+        {
             "ts": iso(window_end),
             "run_id": run_id,
             "event_type": "cost_estimate",
@@ -408,6 +420,23 @@ def fixture_quant_lab_summary_root(root):
         },
         {
             "ts": iso(window_end + 1),
+            "run_id": run_id,
+            "event_type": "cost_estimate",
+            "schema_version": "1.0.0",
+            "contract_version": "v5.quant_lab.telemetry.v2",
+            "event_id_generation_version": "quant_lab_event_id_v1",
+            "symbol": "BTC/USDT",
+            "normalized_symbol": "BTC-USDT",
+            "response_symbol": "BTC-USDT",
+            "success": True,
+            "fallback_used": False,
+            "cost_source": "mixed_actual_proxy",
+            "cost_model_version": "mixed_actual_proxy_v1",
+            "cost_contract_version": "v5.quant_lab.telemetry.v2",
+            "sample_count": 6,
+        },
+        {
+            "ts": iso(window_end + 2),
             "run_id": run_id,
             "event_type": "fallback",
             "fallback_used": True,
@@ -2790,6 +2819,7 @@ def main():
                 fallback_text = tf.extractfile(extract_member(tf, "summaries/quant_lab_fallbacks.csv")).read().decode()
                 fallback_rows = list(csv.DictReader(fallback_text.splitlines()))
                 window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readiness = json.loads(tf.extractfile(extract_member(tf, "summaries/enforce_readiness_snapshot.json")).read().decode())
 
             assert "/v1/health" not in fallback_text, fallback_text
             assert "/v1/risk/live-permission" not in fallback_text, fallback_text
@@ -2802,6 +2832,14 @@ def main():
             assert window["quant_lab_actual_fallback_count"] == 2, window
             assert window["quant_lab_fallback_count"] == 2, window
             assert window["quant_lab_fallback_rows"] == 2, window
+            assert window["global_default_cost_count"] == 1, window
+            assert window["legacy_global_default_cost_count"] == 1, window
+            assert window["current_contract_global_default_cost_count"] == 0, window
+            assert window["post_deployment_global_default_cost_count"] == 0, window
+            assert window["cost_usage_current_contract_rows"] == 1, window
+            assert window["cost_usage_legacy_rows"] == 2, window
+            assert readiness["global_default_cost_count"] == 0, readiness
+            assert readiness["post_deployment_global_default_cost_count"] == 0, readiness
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

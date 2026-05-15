@@ -147,6 +147,14 @@ def _as_int(value: Any) -> Optional[int]:
     return int(number) if number is not None else None
 
 
+def _first_int(*values: Any) -> Optional[int]:
+    for value in values:
+        number = _as_int(value)
+        if number is not None:
+            return number
+    return None
+
+
 def _truthy(value: Any) -> Optional[bool]:
     if value is None or value == "":
         return None
@@ -231,8 +239,18 @@ def evaluate_enforce_readiness(
     if permission_enforceable is not True:
         reasons.append("remote_permission_not_enforceable")
 
-    cost_rows = _as_int(snapshot.get("quant_lab_cost_usage_rows", snapshot.get("cost_usage_rows")))
-    degraded_count = _as_int(snapshot.get("cost_degraded_count", snapshot.get("quant_lab_cost_degraded_count")))
+    cost_rows = _first_int(
+        snapshot.get("post_deployment_cost_usage_rows"),
+        snapshot.get("cost_usage_current_contract_rows"),
+        snapshot.get("readiness_cost_usage_rows"),
+        snapshot.get("quant_lab_cost_usage_rows", snapshot.get("cost_usage_rows")),
+    )
+    degraded_count = _first_int(
+        snapshot.get("post_deployment_cost_degraded_count"),
+        snapshot.get("current_contract_cost_degraded_count"),
+        snapshot.get("readiness_cost_degraded_count"),
+        snapshot.get("cost_degraded_count", snapshot.get("quant_lab_cost_degraded_count")),
+    )
     if snapshot.get("cost_degraded_rate") not in (None, ""):
         cost_degraded_rate = _as_float(snapshot.get("cost_degraded_rate"))
     elif cost_rows and degraded_count is not None:
@@ -245,7 +263,12 @@ def evaluate_enforce_readiness(
     elif cost_degraded_rate > max_cost_degraded_rate:
         reasons.append("cost_degraded_rate_high")
 
-    global_default_count = _as_int(snapshot.get("global_default_cost_count", snapshot.get("quant_lab_global_default_cost_count")))
+    global_default_count = _first_int(
+        snapshot.get("post_deployment_global_default_cost_count"),
+        snapshot.get("current_contract_global_default_cost_count"),
+        snapshot.get("readiness_global_default_cost_count"),
+        snapshot.get("global_default_cost_count", snapshot.get("quant_lab_global_default_cost_count")),
+    )
     max_global_default_count = int(getattr(qcfg, "enforce_readiness_max_global_default_cost_count", 0) or 0)
     if global_default_count is None:
         reasons.append("global_default_cost_count_missing")

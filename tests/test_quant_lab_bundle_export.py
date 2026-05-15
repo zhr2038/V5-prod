@@ -86,6 +86,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
                 "ts": "2026-05-11T13:00:00Z",
                 "run_id": "r1",
                 "event_type": "cost_estimate",
+                "schema_version": "1.0.0",
+                "contract_version": "v5.quant_lab.telemetry.v2",
+                "event_id_generation_version": "quant_lab_event_id_v1",
                 "mode": "shadow",
                 "mode_source": "runtime_override",
                 "called_api": True,
@@ -333,3 +336,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert readiness_snapshot["quant_lab_effective_mode"] == "shadow"
         assert readiness_snapshot["status"] == "BLOCKED"
         assert readiness_snapshot["contract_version_match"] is True
+        assert readiness_snapshot["global_default_cost_count"] == 0
+        assert readiness_snapshot["current_contract_global_default_cost_count"] == 0
+        assert readiness_snapshot["legacy_global_default_cost_count"] == 0
+        assert window["cost_usage_current_contract_rows"] == 1
+        assert window["cost_usage_legacy_rows"] == 0
+        assert window["post_deployment_global_default_cost_count"] == 0

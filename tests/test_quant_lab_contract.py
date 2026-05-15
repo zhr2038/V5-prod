@@ -5,6 +5,7 @@ import shutil
 import tarfile
 import csv
 import io
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +17,7 @@ from src.quant_lab_client.models import CostEstimate, RiskPermission, symbol_to_
 from src.reporting import metrics, summary_writer
 from src.reporting.quant_lab_audit import (
     CONTRACT_VERSION,
+    EVENT_ID_GENERATION_VERSION,
     EVENT_TYPES,
     SCHEMA_VERSION,
     append_quant_lab_request,
@@ -206,6 +208,9 @@ def test_cost_usage_summary_counts_degraded_and_symbol_hits() -> None:
         "event_type": "cost_estimate",
         "run_id": "fixture-run-001",
         "ts": "2026-05-14T00:00:01Z",
+        "schema_version": SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "event_id_generation_version": EVENT_ID_GENERATION_VERSION,
         "request_symbol": "BNB/USDT",
         "normalized_symbol": "BNB-USDT",
         "response_symbol": "BNB-USDT",
@@ -217,6 +222,9 @@ def test_cost_usage_summary_counts_degraded_and_symbol_hits() -> None:
         "event_type": "cost_estimate",
         "run_id": "fixture-run-001",
         "ts": "2026-05-14T00:01:01Z",
+        "schema_version": SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "event_id_generation_version": EVENT_ID_GENERATION_VERSION,
         "request_symbol": "BNB/USDT",
         "normalized_symbol": "BNB-USDT",
         "response_symbol": "BNB-USDT",
@@ -231,8 +239,55 @@ def test_cost_usage_summary_counts_degraded_and_symbol_hits() -> None:
     assert cost_rows[1]["degraded_cost_model"] is True
     assert summary["cost_degraded_count"] == 1
     assert summary["global_default_cost_count"] == 1
+    assert summary["current_contract_global_default_cost_count"] == 1
+    assert summary["legacy_global_default_cost_count"] == 0
+    assert summary["post_deployment_global_default_cost_count"] == 1
     assert summary["symbol_cost_hit_count"] == 1
     assert summary["cost_contract_version"] == CONTRACT_VERSION
+
+
+def test_cost_usage_summary_separates_legacy_global_default_from_current_contract() -> None:
+    now = "2026-05-14T12:00:00Z"
+    legacy_bnb = {
+        "event_type": "cost_estimate",
+        "run_id": "legacy-bnb",
+        "ts": "2026-05-12T12:00:00Z",
+        "symbol": "BNB/USDT",
+        "cost_source": "global_default",
+        "cost_model_version": "global_default_v0",
+        "cost_contract_version": CONTRACT_VERSION,
+    }
+    current_btc = {
+        "event_type": "cost_estimate",
+        "run_id": "current-btc",
+        "ts": now,
+        "schema_version": SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "event_id_generation_version": EVENT_ID_GENERATION_VERSION,
+        "symbol": "BTC/USDT",
+        "normalized_symbol": "BTC-USDT",
+        "response_symbol": "BTC-USDT",
+        "cost_source": "mixed_actual_proxy",
+        "cost_model_version": "mixed_actual_proxy_v1",
+        "cost_contract_version": CONTRACT_VERSION,
+        "sample_count": 8,
+    }
+
+    summary = _window_summary(
+        [legacy_bnb, current_btc],
+        [],
+        [],
+        now=datetime.fromisoformat(now.replace("Z", "+00:00")),
+    )
+
+    assert summary["global_default_cost_count"] == 1
+    assert summary["legacy_global_default_cost_count"] == 1
+    assert summary["current_contract_global_default_cost_count"] == 0
+    assert summary["latest_24h_global_default_cost_count"] == 0
+    assert summary["post_deployment_global_default_cost_count"] == 0
+    assert summary["cost_usage_legacy_rows"] == 1
+    assert summary["cost_usage_current_contract_rows"] == 1
+    assert summary["cost_usage_latest_24h_rows"] == 1
 
 
 def test_shadow_raw_abort_records_effective_allow_and_would_block(tmp_path: Path) -> None:

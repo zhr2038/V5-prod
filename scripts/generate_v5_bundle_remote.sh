@@ -1739,6 +1739,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                     "source": f"decision_audit:{audit_path.relative_to(OUT).as_posix()}",
                     "run_id": run_id,
                     "ts_utc": audit_ts,
+                    "schema_version": flatten_value(first_observed(row.get("schema_version"), quant_lab.get("schema_version"), not_obs)),
+                    "contract_version": flatten_value(first_observed(row.get("contract_version"), row.get("cost_contract_version"), quant_lab.get("contract_version"), not_obs)),
+                    "event_id_generation_version": flatten_value(first_observed(row.get("event_id_generation_version"), quant_lab.get("event_id_generation_version"), not_obs)),
+                    "source_snapshot_hash": flatten_value(first_observed(row.get("source_snapshot_hash"), quant_lab.get("source_snapshot_hash"), not_obs)),
                     "mode": flatten_value(first_observed(row.get("mode"), quant_lab.get("mode"), not_obs)),
                     "symbol": flatten_value(row.get("symbol") or not_obs),
                     "request_symbol": flatten_value(first_observed(row.get("request_symbol"), row.get("symbol"), not_obs)),
@@ -6328,6 +6332,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
                 "run_id": flatten_value(row.get("run_id") or not_obs),
                 "ts_utc": flatten_value(row.get("ts") or not_obs),
                 "event_type": "cost_usage",
+                "schema_version": flatten_value(row.get("schema_version") or not_obs),
+                "contract_version": flatten_value(first_observed(row.get("contract_version"), row.get("cost_contract_version"), not_obs)),
+                "event_id_generation_version": flatten_value(row.get("event_id_generation_version") or not_obs),
+                "source_snapshot_hash": flatten_value(row.get("source_snapshot_hash") or not_obs),
                 "event_id": flatten_value(row.get("event_id") or not_obs),
                 "request_id": flatten_value(row.get("request_id") or not_obs),
                 "endpoint_path": flatten_value(first_observed(row.get("endpoint_path"), row.get("endpoint"), "/v1/costs/estimate")),
@@ -6769,7 +6777,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/quant_lab_cost_usage.csv",
         quant_lab_cost_usage_rows,
-        ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "symbol", "request_symbol", "normalized_symbol", "response_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "requested_quantile", "strategy_id", "requested_regime", "matched_regime", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "fallback_level", "cost_model_version", "cost_contract_version", "as_of_ts", "sample_count", "selected_total_cost_bps", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_used_for_cost_model", "fallback_reason", "degraded_cost_model", "filtered", "filter_reason", "warning", "cost_gate_verified", "diagnosis", "raw_json"],
+        ["source", "run_id", "ts_utc", "event_type", "schema_version", "contract_version", "event_id_generation_version", "source_snapshot_hash", "event_id", "request_id", "endpoint_path", "status_code", "success", "latency_ms", "error_type", "error_message_short", "mode", "symbol", "request_symbol", "normalized_symbol", "response_symbol", "venue", "instrument_type", "side", "intent", "notional_usdt", "quantile", "requested_quantile", "strategy_id", "requested_regime", "matched_regime", "alpha_id", "cost_bps", "cost_usdt", "cost_source", "fallback_level", "cost_model_version", "cost_contract_version", "as_of_ts", "sample_count", "selected_total_cost_bps", "total_cost_bps", "effective_total_cost_bps", "total_cost_bps_p50", "total_cost_bps_p75", "total_cost_bps_p90", "required_edge_bps", "expected_edge_bps", "expected_edge_source", "min_required_edge_bps", "would_filter_by_cost", "would_block_by_cost", "actually_filtered", "cost_gate_enforced", "quant_lab_decision", "fallback_used", "fallback_used_for_cost_model", "fallback_reason", "degraded_cost_model", "filtered", "filter_reason", "warning", "cost_gate_verified", "diagnosis", "raw_json"],
     )
     write_csv(
         "summaries/quant_lab_fallbacks.csv",
@@ -7114,6 +7122,34 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             or cost_model_version_value == "global_default_v0"
         )
 
+    def quant_lab_cost_row_global_default(row):
+        cost_source = flatten_value(first_observed(row.get("cost_source"), row.get("source"), not_obs)).strip().lower()
+        fallback_level = flatten_value(row.get("fallback_level") or "").strip().upper()
+        cost_model_version_value = flatten_value(row.get("cost_model_version") or "").strip().lower()
+        return (
+            cost_source == "global_default"
+            or fallback_level == "GLOBAL_DEFAULT"
+            or cost_model_version_value == "global_default_v0"
+        )
+
+    def quant_lab_cost_row_current_contract(row):
+        schema_version = flatten_value(row.get("schema_version") or "").strip()
+        contract_version = flatten_value(first_observed(row.get("cost_contract_version"), row.get("contract_version"), "")).strip()
+        event_generation = flatten_value(row.get("event_id_generation_version") or "").strip()
+        return (
+            schema_version == QUANT_LAB_SCHEMA_VERSION
+            and contract_version == QUANT_LAB_CONTRACT_VERSION
+            and event_generation == QUANT_LAB_EVENT_ID_GENERATION_VERSION
+        )
+
+    def quant_lab_cost_row_source_hash(row):
+        return flatten_value(first_observed(
+            row.get("source_snapshot_hash"),
+            row.get("deployment_source_snapshot_hash"),
+            row.get("source_generation_hash"),
+            "",
+        )).strip()
+
     def quant_lab_symbol_cost_hit(row):
         if quant_lab_cost_row_degraded(row):
             return False
@@ -7126,13 +7162,41 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return False
         return bool(normalized or response_symbol)
 
-    cost_degraded_count = sum(1 for row in quant_lab_cost_usage_rows if quant_lab_cost_row_degraded(row))
-    global_default_cost_count = sum(
-        1 for row in quant_lab_cost_usage_rows
-        if flatten_value(first_observed(row.get("cost_source"), row.get("source"), not_obs)).strip().lower() == "global_default"
-        or flatten_value(row.get("fallback_level") or "").strip().upper() == "GLOBAL_DEFAULT"
-        or flatten_value(row.get("cost_model_version") or "").strip().lower() == "global_default_v0"
+    current_contract_cost_rows = [row for row in quant_lab_cost_usage_rows if quant_lab_cost_row_current_contract(row)]
+    legacy_cost_rows = [row for row in quant_lab_cost_usage_rows if not quant_lab_cost_row_current_contract(row)]
+    latest_24h_cost_rows = [
+        row for row in quant_lab_cost_usage_rows
+        if parse_dt_utc(row.get("ts_utc")) is not None and parse_dt_utc(row.get("ts_utc")).timestamp() >= RECENT_24H
+    ]
+    current_source_hash = flatten_value(provenance_meta.get("source_snapshot_hash") or not_obs)
+    current_source_hash_observable = current_source_hash not in ("", not_obs, "null")
+    current_rows_with_hash = [row for row in current_contract_cost_rows if quant_lab_cost_row_source_hash(row)]
+    if current_source_hash_observable and current_rows_with_hash:
+        post_deployment_cost_rows = [
+            row for row in current_contract_cost_rows
+            if quant_lab_cost_row_source_hash(row) == current_source_hash
+        ]
+        post_deployment_scope = "source_snapshot_hash"
+    else:
+        post_deployment_cost_rows = current_contract_cost_rows
+        post_deployment_scope = "current_contract_schema_event_generation"
+    post_deployment_ts_values = [
+        parse_dt_utc(row.get("ts_utc")) for row in post_deployment_cost_rows
+        if parse_dt_utc(row.get("ts_utc")) is not None
+    ]
+    post_deployment_start_utc = (
+        min(post_deployment_ts_values).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if post_deployment_ts_values else not_obs
     )
+    cost_degraded_count = sum(1 for row in quant_lab_cost_usage_rows if quant_lab_cost_row_degraded(row))
+    current_contract_cost_degraded_count = sum(1 for row in current_contract_cost_rows if quant_lab_cost_row_degraded(row))
+    latest_24h_cost_degraded_count = sum(1 for row in latest_24h_cost_rows if quant_lab_cost_row_degraded(row))
+    post_deployment_cost_degraded_count = sum(1 for row in post_deployment_cost_rows if quant_lab_cost_row_degraded(row))
+    global_default_cost_count = sum(1 for row in quant_lab_cost_usage_rows if quant_lab_cost_row_global_default(row))
+    legacy_global_default_cost_count = sum(1 for row in legacy_cost_rows if quant_lab_cost_row_global_default(row))
+    current_contract_global_default_cost_count = sum(1 for row in current_contract_cost_rows if quant_lab_cost_row_global_default(row))
+    latest_24h_global_default_cost_count = sum(1 for row in latest_24h_cost_rows if quant_lab_cost_row_global_default(row))
+    post_deployment_global_default_cost_count = sum(1 for row in post_deployment_cost_rows if quant_lab_cost_row_global_default(row))
     symbol_cost_hit_count = sum(1 for row in quant_lab_cost_usage_rows if quant_lab_symbol_cost_hit(row))
     cost_contract_version = next(
         (
@@ -7261,13 +7325,30 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "quant_lab_request_error_count": quant_lab_request_error_count,
         "quant_lab_actual_fallback_count": len(quant_lab_fallback_rows),
         "quant_lab_fallback_count": len(quant_lab_fallback_rows),
+        "cost_usage_legacy_rows": len(legacy_cost_rows),
+        "cost_usage_current_contract_rows": len(current_contract_cost_rows),
+        "cost_usage_latest_24h_rows": len(latest_24h_cost_rows),
+        "post_deployment_cost_usage_rows": len(post_deployment_cost_rows),
         "cost_degraded_count": cost_degraded_count,
+        "current_contract_cost_degraded_count": current_contract_cost_degraded_count,
+        "latest_24h_cost_degraded_count": latest_24h_cost_degraded_count,
+        "post_deployment_cost_degraded_count": post_deployment_cost_degraded_count,
         "global_default_cost_count": global_default_cost_count,
+        "legacy_global_default_cost_count": legacy_global_default_cost_count,
+        "current_contract_global_default_cost_count": current_contract_global_default_cost_count,
+        "latest_24h_global_default_cost_count": latest_24h_global_default_cost_count,
+        "post_deployment_global_default_cost_count": post_deployment_global_default_cost_count,
         "symbol_cost_hit_count": symbol_cost_hit_count,
         "cost_contract_version": cost_contract_version,
         "quant_lab_cost_degraded_count": cost_degraded_count,
         "quant_lab_global_default_cost_count": global_default_cost_count,
         "quant_lab_symbol_cost_hit_count": symbol_cost_hit_count,
+        "readiness_cost_usage_rows": len(post_deployment_cost_rows),
+        "readiness_cost_degraded_count": post_deployment_cost_degraded_count,
+        "readiness_global_default_cost_count": post_deployment_global_default_cost_count,
+        "cost_usage_post_deployment_scope": post_deployment_scope,
+        "cost_usage_current_source_snapshot_hash": current_source_hash,
+        "post_deployment_cost_usage_start_utc": post_deployment_start_utc,
         "telemetry_contract_version": QUANT_LAB_CONTRACT_VERSION,
         "telemetry_schema_version": QUANT_LAB_SCHEMA_VERSION,
         "rank_exit_sell_count": len(rank_exit_consistency_rows),
@@ -7361,8 +7442,17 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "enforce_blocked_reason": window_summary.get("enforce_blocked_reason", not_obs),
         "contract_version_match": window_summary.get("contract_version_match", not_obs),
         "telemetry_schema_version_match": window_summary.get("telemetry_schema_version_match", not_obs),
-        "cost_degraded_count": window_summary.get("cost_degraded_count", 0),
-        "global_default_cost_count": window_summary.get("global_default_cost_count", 0),
+        "quant_lab_cost_usage_rows": window_summary.get("post_deployment_cost_usage_rows", window_summary.get("cost_usage_current_contract_rows", window_summary.get("quant_lab_cost_usage_rows", 0))),
+        "cost_degraded_count": window_summary.get("post_deployment_cost_degraded_count", window_summary.get("current_contract_cost_degraded_count", window_summary.get("cost_degraded_count", 0))),
+        "global_default_cost_count": window_summary.get("post_deployment_global_default_cost_count", window_summary.get("current_contract_global_default_cost_count", window_summary.get("global_default_cost_count", 0))),
+        "legacy_global_default_cost_count": window_summary.get("legacy_global_default_cost_count", 0),
+        "current_contract_global_default_cost_count": window_summary.get("current_contract_global_default_cost_count", 0),
+        "latest_24h_global_default_cost_count": window_summary.get("latest_24h_global_default_cost_count", 0),
+        "post_deployment_global_default_cost_count": window_summary.get("post_deployment_global_default_cost_count", 0),
+        "cost_usage_legacy_rows": window_summary.get("cost_usage_legacy_rows", 0),
+        "cost_usage_current_contract_rows": window_summary.get("cost_usage_current_contract_rows", 0),
+        "cost_usage_latest_24h_rows": window_summary.get("cost_usage_latest_24h_rows", 0),
+        "post_deployment_cost_usage_rows": window_summary.get("post_deployment_cost_usage_rows", 0),
         "quant_lab_fallback_count": window_summary.get("quant_lab_fallback_count", 0),
         "quant_lab_request_count": quant_lab_request_success_count + quant_lab_request_error_count,
         "summary_trade_count_mismatch_count": len(summary_trade_count_mismatch_rows),
@@ -7819,6 +7909,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- strategy_version: {provenance_meta.get('strategy_version', not_obs)}",
         f"- strategy hash: {strategy_hash_text}",
         f"- quant_lab_contract_version: {provenance_meta.get('quant_lab_contract_version', not_obs)}",
+        "",
+        "## Quant-lab cost readiness",
+        f"- global_default_cost_count_total_72h: {window_summary.get('global_default_cost_count', not_obs)}",
+        f"- legacy_global_default_cost_count: {window_summary.get('legacy_global_default_cost_count', not_obs)}",
+        f"- current_contract_global_default_cost_count: {window_summary.get('current_contract_global_default_cost_count', not_obs)}",
+        f"- latest_24h_global_default_cost_count: {window_summary.get('latest_24h_global_default_cost_count', not_obs)}",
+        f"- post_deployment_global_default_cost_count: {window_summary.get('post_deployment_global_default_cost_count', not_obs)}",
+        f"- readiness rows: post_deployment={window_summary.get('post_deployment_cost_usage_rows', not_obs)}, scope={window_summary.get('cost_usage_post_deployment_scope', not_obs)}",
         "",
         "## Probe 生命周期检查",
         f"- 今天是否有 market_impulse_probe / btc_leadership_probe: market_impulse_probe={bool(market_probe_seen or probe_counts['market_impulse_probe_candidate_count'] or probe_counts['market_impulse_probe_open_count'])}, btc_leadership_probe={bool(btc_seen_in_decision_audit or probe_counts['btc_leadership_probe_candidate_count'] or probe_counts['btc_leadership_probe_open_count'] or probe_counts['btc_leadership_probe_blocked_count'])}",

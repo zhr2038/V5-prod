@@ -115,3 +115,74 @@ def test_readiness_high_global_default_cost_blocks_enforce(tmp_path: Path) -> No
     assert result.status == "BLOCKED"
     assert result.global_default_cost_count == 1
     assert "global_default_cost_count_high" in result.reasons
+
+
+def test_readiness_ignores_legacy_global_default_when_current_contract_is_clean(tmp_path: Path) -> None:
+    cfg = _cfg(
+        tmp_path,
+        _ready_snapshot(
+            quant_lab_cost_usage_rows=2,
+            cost_degraded_count=1,
+            global_default_cost_count=1,
+            cost_usage_legacy_rows=1,
+            cost_usage_current_contract_rows=1,
+            post_deployment_cost_usage_rows=1,
+            legacy_global_default_cost_count=1,
+            current_contract_global_default_cost_count=0,
+            post_deployment_global_default_cost_count=0,
+            current_contract_cost_degraded_count=0,
+            post_deployment_cost_degraded_count=0,
+        ),
+    )
+
+    result = evaluate_enforce_readiness(
+        cfg.quant_lab,
+        readiness_payload=_ready_snapshot(
+            quant_lab_cost_usage_rows=2,
+            cost_degraded_count=1,
+            global_default_cost_count=1,
+            cost_usage_legacy_rows=1,
+            cost_usage_current_contract_rows=1,
+            post_deployment_cost_usage_rows=1,
+            legacy_global_default_cost_count=1,
+            current_contract_global_default_cost_count=0,
+            post_deployment_global_default_cost_count=0,
+            current_contract_cost_degraded_count=0,
+            post_deployment_cost_degraded_count=0,
+        ),
+    )
+
+    assert result.status == "READY"
+    assert result.global_default_cost_count == 0
+    assert "global_default_cost_count_high" not in result.reasons
+    assert "cost_degraded_rate_high" not in result.reasons
+
+
+def test_readiness_blocks_current_contract_global_default(tmp_path: Path) -> None:
+    cfg = _cfg(
+        tmp_path,
+        _ready_snapshot(
+            cost_usage_current_contract_rows=1,
+            post_deployment_cost_usage_rows=1,
+            current_contract_global_default_cost_count=1,
+            post_deployment_global_default_cost_count=1,
+            current_contract_cost_degraded_count=1,
+            post_deployment_cost_degraded_count=1,
+        ),
+    )
+
+    result = evaluate_enforce_readiness(
+        cfg.quant_lab,
+        readiness_payload=_ready_snapshot(
+            cost_usage_current_contract_rows=1,
+            post_deployment_cost_usage_rows=1,
+            current_contract_global_default_cost_count=1,
+            post_deployment_global_default_cost_count=1,
+            current_contract_cost_degraded_count=1,
+            post_deployment_cost_degraded_count=1,
+        ),
+    )
+
+    assert result.status == "BLOCKED"
+    assert result.global_default_cost_count == 1
+    assert "global_default_cost_count_high" in result.reasons

@@ -159,6 +159,8 @@ COST_FIELDS = (
     "ts_utc",
     "schema_version",
     "contract_version",
+    "event_id_generation_version",
+    "source_snapshot_hash",
     "event_id",
     "request_id",
     "endpoint_path",
@@ -547,6 +549,28 @@ def _read_jsonl(path: Path) -> list[Dict[str, Any]]:
 
 def _filter_window(rows: list[Dict[str, Any]], since_ts: str) -> list[Dict[str, Any]]:
     return [row for row in rows if not row.get("ts") or str(row.get("ts")) >= since_ts]
+
+
+def _parse_utc_dt(value: Any) -> Optional[datetime]:
+    if value in (None, "", "not_observable"):
+        return None
+    try:
+        text = str(value).strip()
+        if not text:
+            return None
+        if re.fullmatch(r"\d+(?:\.\d+)?", text):
+            raw = float(text)
+            if raw > 10_000_000_000:
+                raw /= 1000.0
+            return datetime.fromtimestamp(raw, tz=timezone.utc)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
 
 
 def _is_new_risk_row(row: Mapping[str, Any]) -> bool:
@@ -982,6 +1006,18 @@ def _enforce_readiness_snapshot(
         (row for row in reversed(mode_rows) if row.get("enforce_readiness_status") not in (None, "")),
         mode_rows[-1] if mode_rows else {},
     )
+    readiness_cost_rows = window_summary.get(
+        "post_deployment_cost_usage_rows",
+        window_summary.get("cost_usage_current_contract_rows", window_summary.get("quant_lab_cost_usage_rows", 0)),
+    )
+    readiness_degraded_count = window_summary.get(
+        "post_deployment_cost_degraded_count",
+        window_summary.get("current_contract_cost_degraded_count", window_summary.get("cost_degraded_count", 0)),
+    )
+    readiness_global_default_count = window_summary.get(
+        "post_deployment_global_default_cost_count",
+        window_summary.get("current_contract_global_default_cost_count", window_summary.get("global_default_cost_count", 0)),
+    )
     return {
         "quant_lab_requested_mode": latest.get("quant_lab_requested_mode") or window_summary.get("quant_lab_requested_mode"),
         "quant_lab_effective_mode": latest.get("quant_lab_effective_mode") or window_summary.get("quant_lab_effective_mode"),
@@ -992,8 +1028,17 @@ def _enforce_readiness_snapshot(
         "contract_version_match": latest.get("contract_version_match") or window_summary.get("contract_version_match"),
         "telemetry_schema_version_match": latest.get("telemetry_schema_version_match")
         or window_summary.get("telemetry_schema_version_match"),
-        "cost_degraded_count": window_summary.get("cost_degraded_count", 0),
-        "global_default_cost_count": window_summary.get("global_default_cost_count", 0),
+        "quant_lab_cost_usage_rows": readiness_cost_rows,
+        "cost_degraded_count": readiness_degraded_count,
+        "global_default_cost_count": readiness_global_default_count,
+        "legacy_global_default_cost_count": window_summary.get("legacy_global_default_cost_count", 0),
+        "current_contract_global_default_cost_count": window_summary.get("current_contract_global_default_cost_count", 0),
+        "latest_24h_global_default_cost_count": window_summary.get("latest_24h_global_default_cost_count", 0),
+        "post_deployment_global_default_cost_count": window_summary.get("post_deployment_global_default_cost_count", 0),
+        "cost_usage_legacy_rows": window_summary.get("cost_usage_legacy_rows", 0),
+        "cost_usage_current_contract_rows": window_summary.get("cost_usage_current_contract_rows", 0),
+        "cost_usage_latest_24h_rows": window_summary.get("cost_usage_latest_24h_rows", 0),
+        "post_deployment_cost_usage_rows": window_summary.get("post_deployment_cost_usage_rows", 0),
         "quant_lab_fallback_count": window_summary.get("quant_lab_fallback_count", 0),
         "quant_lab_request_count": window_summary.get("quant_lab_request_count", 0),
         "summary_trade_count_mismatch_count": window_summary.get("summary_trade_count_mismatch_count", 0),
@@ -1007,6 +1052,9 @@ def _window_summary(
     request_rows: list[Dict[str, Any]],
     compliance_rows: list[Dict[str, Any]],
     permission_rows: Optional[list[Dict[str, Any]]] = None,
+    *,
+    current_source_snapshot_hash: Optional[str] = None,
+    now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     latest_permission = None
     final_permission = None
@@ -1068,6 +1116,30 @@ def _window_summary(
         cost_model_version_value = str(row.get("cost_model_version") or "").strip().lower()
         return _truthy(row.get("degraded_cost_model")) or source == "global_default" or fallback_level == "GLOBAL_DEFAULT" or cost_model_version_value == "global_default_v0"
 
+    def is_global_default_cost(row: Mapping[str, Any]) -> bool:
+        return (
+            str(row.get("cost_source") or row.get("source") or "").strip().lower() == "global_default"
+            or str(row.get("fallback_level") or "").strip().upper() == "GLOBAL_DEFAULT"
+            or str(row.get("cost_model_version") or "").strip().lower() == "global_default_v0"
+        )
+
+    def is_current_cost_contract(row: Mapping[str, Any]) -> bool:
+        schema = str(row.get("schema_version") or "").strip()
+        contract = str(row.get("cost_contract_version") or row.get("contract_version") or "").strip()
+        event_generation = str(row.get("event_id_generation_version") or "").strip()
+        return schema == SCHEMA_VERSION and contract == CONTRACT_VERSION and event_generation == EVENT_ID_GENERATION_VERSION
+
+    def row_source_hash(row: Mapping[str, Any]) -> str:
+        return str(
+            row.get("source_snapshot_hash")
+            or row.get("deployment_source_snapshot_hash")
+            or row.get("source_generation_hash")
+            or ""
+        ).strip()
+
+    def cost_row_ts(row: Mapping[str, Any]) -> Optional[datetime]:
+        return _parse_utc_dt(row.get("ts_utc") or row.get("ts"))
+
     def is_symbol_cost_hit(row: Mapping[str, Any]) -> bool:
         if is_degraded_cost(row):
             return False
@@ -1082,16 +1154,34 @@ def _window_summary(
             pass
         return bool(normalized or response_symbol)
 
+    now_dt = now or datetime.now(timezone.utc)
+    latest_24h_start = now_dt - timedelta(hours=24)
+    current_contract_rows = [row for row in cost_event_rows if is_current_cost_contract(row)]
+    legacy_cost_rows = [row for row in cost_event_rows if not is_current_cost_contract(row)]
+    latest_24h_rows = [
+        row
+        for row in cost_event_rows
+        if (cost_row_ts(row) is not None and cost_row_ts(row) >= latest_24h_start)
+    ]
+    current_source_hash = str(current_source_snapshot_hash or "").strip()
+    current_source_hash_observable = current_source_hash not in {"", "not_observable", "null"}
+    hashed_current_rows = [row for row in current_contract_rows if row_source_hash(row)]
+    if current_source_hash_observable and hashed_current_rows:
+        post_deployment_rows = [row for row in current_contract_rows if row_source_hash(row) == current_source_hash]
+        post_deployment_scope = "source_snapshot_hash"
+    else:
+        post_deployment_rows = current_contract_rows
+        post_deployment_scope = "current_contract_schema_event_generation"
+    post_deployment_start = min((cost_row_ts(row) for row in post_deployment_rows if cost_row_ts(row) is not None), default=None)
     cost_degraded_count = len([row for row in cost_event_rows if is_degraded_cost(row)])
-    global_default_cost_count = len(
-        [
-            row
-            for row in cost_event_rows
-            if str(row.get("cost_source") or row.get("source") or "").strip().lower() == "global_default"
-            or str(row.get("fallback_level") or "").strip().upper() == "GLOBAL_DEFAULT"
-            or str(row.get("cost_model_version") or "").strip().lower() == "global_default_v0"
-        ]
-    )
+    current_contract_cost_degraded_count = len([row for row in current_contract_rows if is_degraded_cost(row)])
+    latest_24h_cost_degraded_count = len([row for row in latest_24h_rows if is_degraded_cost(row)])
+    post_deployment_cost_degraded_count = len([row for row in post_deployment_rows if is_degraded_cost(row)])
+    global_default_cost_count = len([row for row in cost_event_rows if is_global_default_cost(row)])
+    legacy_global_default_cost_count = len([row for row in legacy_cost_rows if is_global_default_cost(row)])
+    current_contract_global_default_cost_count = len([row for row in current_contract_rows if is_global_default_cost(row)])
+    latest_24h_global_default_cost_count = len([row for row in latest_24h_rows if is_global_default_cost(row)])
+    post_deployment_global_default_cost_count = len([row for row in post_deployment_rows if is_global_default_cost(row)])
     symbol_cost_hit_count = len([row for row in cost_event_rows if is_symbol_cost_hit(row)])
     cost_contract_version = next(
         (row.get("cost_contract_version") or row.get("contract_version") for row in reversed(cost_event_rows) if row.get("cost_contract_version") or row.get("contract_version")),
@@ -1139,13 +1229,30 @@ def _window_summary(
         "quant_lab_cost_model_version": cost_model_version,
         "quant_lab_gate_version": gate_version,
         "quant_lab_cost_usage_rows": len(cost_event_rows),
+        "cost_usage_legacy_rows": len(legacy_cost_rows),
+        "cost_usage_current_contract_rows": len(current_contract_rows),
+        "cost_usage_latest_24h_rows": len(latest_24h_rows),
+        "post_deployment_cost_usage_rows": len(post_deployment_rows),
         "cost_degraded_count": cost_degraded_count,
+        "current_contract_cost_degraded_count": current_contract_cost_degraded_count,
+        "latest_24h_cost_degraded_count": latest_24h_cost_degraded_count,
+        "post_deployment_cost_degraded_count": post_deployment_cost_degraded_count,
         "global_default_cost_count": global_default_cost_count,
+        "legacy_global_default_cost_count": legacy_global_default_cost_count,
+        "current_contract_global_default_cost_count": current_contract_global_default_cost_count,
+        "latest_24h_global_default_cost_count": latest_24h_global_default_cost_count,
+        "post_deployment_global_default_cost_count": post_deployment_global_default_cost_count,
         "symbol_cost_hit_count": symbol_cost_hit_count,
         "cost_contract_version": cost_contract_version,
         "quant_lab_cost_degraded_count": cost_degraded_count,
         "quant_lab_global_default_cost_count": global_default_cost_count,
         "quant_lab_symbol_cost_hit_count": symbol_cost_hit_count,
+        "readiness_cost_usage_rows": len(post_deployment_rows),
+        "readiness_cost_degraded_count": post_deployment_cost_degraded_count,
+        "readiness_global_default_cost_count": post_deployment_global_default_cost_count,
+        "cost_usage_post_deployment_scope": post_deployment_scope,
+        "cost_usage_current_source_snapshot_hash": current_source_hash or "not_observable",
+        "post_deployment_cost_usage_start_utc": post_deployment_start.isoformat().replace("+00:00", "Z") if post_deployment_start else "not_observable",
         "telemetry_contract_version": CONTRACT_VERSION,
         "telemetry_schema_version": SCHEMA_VERSION,
     }
@@ -1293,6 +1400,28 @@ def _hash_file(path: Path) -> str:
     return "not_observable"
 
 
+def _hash_source_snapshot(root: Path) -> str:
+    candidates: list[Path] = []
+    for rel in ("main.py", "event_driven_check.py", "src", "scripts", "configs", "pyproject.toml", "requirements.txt"):
+        path = root / rel
+        if path.is_file():
+            candidates.append(path)
+        elif path.is_dir():
+            candidates.extend(item for item in path.rglob("*") if item.is_file() and ".git" not in item.parts)
+    digest = hashlib.sha256()
+    seen = False
+    for path in sorted(candidates):
+        try:
+            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+            seen = True
+        except Exception:
+            continue
+    return digest.hexdigest() if seen else "not_observable"
+
+
 def _find_nested_value(obj: Any, names: Iterable[str]) -> Any:
     if isinstance(obj, Mapping):
         for name in names:
@@ -1365,6 +1494,7 @@ def _manifest_metadata(root: Path, reports: Path, usage_rows: list[Dict[str, Any
         "summary_metrics_version": SUMMARY_METRICS_VERSION,
         "config_hash": _hash_file(config_path),
         "strategy_version": str(strategy_version or "not_observable"),
+        "source_snapshot_hash": _hash_source_snapshot(root),
     }
 
 
@@ -1393,6 +1523,7 @@ def export_v5_bundle(
     trade_metrics_rows, fill_metrics_rows, mismatch_rows = _build_trade_bundle_rows(reports)
     summary_high_issue_count = len([row for row in mismatch_rows if str(row.get("high_issue")) == "true"])
     run_summary_invalid = summary_high_issue_count > 0
+    manifest_meta = _manifest_metadata(root, reports, usage_rows)
 
     stamp = _utc_stamp()
     bundle_name = f"v5_live_followup_bundle_{stamp}.tar.gz"
@@ -1414,7 +1545,13 @@ def export_v5_bundle(
             SUMMARY_TRADE_COUNT_MISMATCH_FIELDS,
             mismatch_rows,
         )
-        window_summary = _window_summary(usage_rows, request_rows, compliance_rows, permission_rows)
+        window_summary = _window_summary(
+            usage_rows,
+            request_rows,
+            compliance_rows,
+            permission_rows,
+            current_source_snapshot_hash=str(manifest_meta.get("source_snapshot_hash") or "not_observable"),
+        )
         window_summary.update(
             {
                 "trade_metrics_rows": len(trade_metrics_rows),
@@ -1469,7 +1606,6 @@ def export_v5_bundle(
             if log_path.exists():
                 _write_text(staging / "raw/logs/v5_runtime.log", _read_text_redacted(log_path))
         findings = _secret_scan_findings(staging)
-        manifest_meta = _manifest_metadata(root, reports, usage_rows)
         manifest = {
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "reports_dir": str(reports),
