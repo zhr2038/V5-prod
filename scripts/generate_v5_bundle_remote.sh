@@ -5657,6 +5657,18 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             )
         elif not neg:
             diagnosis = "not_observable_negative_expectancy_symbol_missing"
+            if int(rt.get("count") or 0) > 0:
+                add_issue(
+                    "medium",
+                    "negative_expectancy_symbol_missing",
+                    "Roundtrip summary has closed cycles for a symbol that is absent from negative expectancy state.",
+                    {
+                        "symbol": symbol,
+                        "roundtrip_closed_count": int(rt["count"]),
+                        "roundtrip_net_pnl_sum_usdt": fmt_num(rt_net_pnl, 12),
+                        "roundtrip_weighted_net_bps": fmt_num(rt_weighted_bps, 4),
+                    },
+                )
         elif rt["count"] == 0:
             diagnosis = "not_observable_no_closed_roundtrips"
         elif rt_net_pnl is None or neg_net_pnl is None or rt_weighted_bps is None or neg_net_bps is None:

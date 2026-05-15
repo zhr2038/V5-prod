@@ -3425,6 +3425,11 @@ def main():
             assert row["mismatch_suspected"] == "false", row
             assert row["diagnosis"] == "not_observable_negative_expectancy_symbol_missing", row
             assert window["negative_expectancy_mismatch_count"] == 0, window
+            medium_missing = [
+                item for item in issues["issues"]
+                if item.get("severity") == "medium" and item.get("code") == "negative_expectancy_symbol_missing"
+            ]
+            assert len(medium_missing) == 1, issues
             assert not any(item.get("code") == "negative_expectancy_roundtrip_mismatch" for item in issues["issues"]), issues
         finally:
             bundle.unlink(missing_ok=True)

@@ -391,6 +391,135 @@ def test_negative_expectancy_orders_fallback_filters_by_close_ts_not_entry_ts(
     assert stats["net_expectancy_bps"] == pytest.approx(200.0)
 
 
+def test_negative_expectancy_recent_trades_fallback_includes_bnb_closed_cycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = tmp_path / "reports"
+    state_path = reports / "negative_expectancy_state.json"
+    orders_path = reports / "orders.sqlite"
+    fills_path = reports / "fills.sqlite"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "bnb-recent-trades-fp",
+                "release_start_ts": _ts_ms("2026-05-11T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    open_run = reports / "runs" / "prod" / "20260511_22"
+    close_run = reports / "runs" / "prod" / "20260512_03"
+    open_run.mkdir(parents=True, exist_ok=True)
+    close_run.mkdir(parents=True, exist_ok=True)
+    entry_px = 663.9
+    exit_px = entry_px * (1.0 - 36.55 / 10000.0)
+    open_run.joinpath("trades.csv").write_text(
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n"
+        f"2026-05-11T22:01:00Z,20260511_22,BNB/USDT,OPEN_LONG,buy,1,{entry_px},{entry_px},0\n",
+        encoding="utf-8",
+    )
+    close_run.joinpath("trades.csv").write_text(
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n"
+        f"2026-05-12T03:00:41Z,20260512_03,BNB/USDT,CLOSE_LONG,sell,1,{exit_px},{exit_px},0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-12T04:00:00Z") / 1000.0,
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=4,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(orders_path),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=360,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BNB/USDT"], config_fingerprint="bnb-recent-trades-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["BNB/USDT"]
+
+    assert stats["source"] == "recent_trades_csv"
+    assert stats["lookback_filter_mode"] == "close_ts"
+    assert stats["closed_cycles"] == 1
+    assert stats["net_pnl_sum_usdt"] == pytest.approx(exit_px - entry_px)
+    assert stats["net_expectancy_bps"] == pytest.approx(-36.55)
+    assert stats["fast_fail_net_expectancy_bps"] == pytest.approx(-36.55)
+    assert stats["last_close_ts"] == "2026-05-12T03:00:41Z"
+    assert state["symbols"] == {}
+
+
+def test_negative_expectancy_merges_recent_trades_when_fills_exist_for_other_symbol(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = tmp_path / "reports"
+    fills_path = reports / "fills.sqlite"
+    orders_path = reports / "orders.sqlite"
+    state_path = reports / "negative_expectancy_state.json"
+    store = FillStore(path=str(fills_path))
+    store.upsert_many(
+        [
+            _fill(trade_id="btc-buy", ts="2026-05-12T00:00:00Z", side="buy", px=100.0, qty=1.0),
+            _fill(trade_id="btc-sell", ts="2026-05-12T01:00:00Z", side="sell", px=99.0, qty=1.0),
+        ]
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "merge-fallback-fp",
+                "release_start_ts": _ts_ms("2026-05-11T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    run_dir = reports / "runs" / "prod" / "20260512_03"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.joinpath("trades.csv").write_text(
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt\n"
+        "2026-05-12T02:00:00Z,20260512_03,BNB/USDT,OPEN_LONG,buy,1,663.9,663.9,0\n"
+        "2026-05-12T03:00:41Z,20260512_03,BNB/USDT,CLOSE_LONG,sell,1,661.4734455,661.4734455,0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-12T04:00:00Z") / 1000.0,
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=4,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(orders_path),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BTC/USDT", "BNB/USDT"], config_fingerprint="merge-fallback-fp")
+
+    state = cooldown.refresh(force=True)
+
+    assert state["stats"]["BTC/USDT"]["source"] == "fills"
+    assert state["stats"]["BNB/USDT"]["source"] == "recent_trades_csv"
+    assert state["stats"]["BNB/USDT"]["closed_cycles"] == 1
+
+
 def test_negative_expectancy_scope_filters_to_whitelist_positions_and_managed_symbols(tmp_path: Path) -> None:
     fills_path = tmp_path / "fills.sqlite"
     state_path = tmp_path / "negative_expectancy_state.json"

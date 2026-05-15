@@ -302,6 +302,7 @@ class NegativeExpectancyCooldown:
             "net_pnl_sum_usdt": 0.0,
             "closed_cycles": 0.0,
             "closed_notional_usdt": 0.0,
+            "last_close_ts_ms": 0.0,
             "fast_fail_gross_pnl_sum_usdt": 0.0,
             "fast_fail_net_pnl_sum_usdt": 0.0,
             "fast_fail_closed_cycles": 0.0,
@@ -319,6 +320,7 @@ class NegativeExpectancyCooldown:
         net_pnl_sum_usdt: float,
         closed_cycles: float,
         closed_notional_usdt: float,
+        last_close_ts_ms: float,
         fast_fail_gross_pnl_sum_usdt: float,
         fast_fail_net_pnl_sum_usdt: float,
         fast_fail_closed_cycles: float,
@@ -335,6 +337,7 @@ class NegativeExpectancyCooldown:
         n = int(closed_cycles or 0)
         ff_n = int(fast_fail_closed_cycles or 0)
         missing_n = int(missing_entry_leg_count or 0)
+        last_close_ms = int(float(last_close_ts_ms or 0.0))
         degraded_reasons = [str(degraded_reason or "").strip()] if str(degraded_reason or "").strip() else []
         if missing_n > 0:
             degraded_reasons.append("missing_entry_leg_for_close_cycle")
@@ -375,6 +378,8 @@ class NegativeExpectancyCooldown:
             "missing_entry_leg_count": missing_n,
             "closed_cycles": n,
             "closed_notional_usdt": float(closed_notional_usdt),
+            "last_close_ts_ms": last_close_ms if last_close_ms > 0 else None,
+            "last_close_ts": NegativeExpectancyCooldown._ms_to_iso(last_close_ms) if last_close_ms > 0 else None,
             "gross_pnl_sum_usdt": float(gross_pnl_sum_usdt),
             "net_pnl_sum_usdt": float(net_pnl_sum_usdt),
             "gross_expectancy_usdt": float(gross_expectancy_usdt),
@@ -399,6 +404,37 @@ class NegativeExpectancyCooldown:
             "fast_fail_expectancy_bps": float(fast_fail_gross_expectancy_bps),
             "fast_fail_avg_hold_minutes": float(ff_hold_minutes_avg),
         }
+
+    @staticmethod
+    def _ms_to_iso(ts_ms: int | float) -> str:
+        try:
+            value = int(float(ts_ms))
+        except Exception:
+            return ""
+        if value <= 0:
+            return ""
+        return datetime.fromtimestamp(value / 1000.0, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _closed_cycle_count(row: Optional[Dict[str, Any]]) -> int:
+        try:
+            return int(float((row or {}).get("closed_cycles") or 0))
+        except Exception:
+            return 0
+
+    def _merge_missing_symbol_stats(self, *sources: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        merged: Dict[str, Dict[str, Any]] = {}
+        for source in sources:
+            for sym, stat in (source or {}).items():
+                if not isinstance(stat, dict):
+                    continue
+                existing = merged.get(sym)
+                if existing is None:
+                    merged[sym] = dict(stat)
+                    continue
+                if self._closed_cycle_count(existing) <= 0 and self._closed_cycle_count(stat) > 0:
+                    merged[sym] = dict(stat)
+        return merged
 
     def _scan_expectancy_from_fills(
         self,
@@ -500,6 +536,7 @@ class NegativeExpectancyCooldown:
                     st["gross_pnl_sum_usdt"] += float(gross_pnl)
                     st["net_pnl_sum_usdt"] += float(net_pnl)
                     st["closed_notional_usdt"] += float(buy_notional)
+                    st["last_close_ts_ms"] = max(float(st.get("last_close_ts_ms") or 0.0), float(event_ts))
                     if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
                         st["fast_fail_closed_cycles"] += 1.0
                         st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
@@ -534,6 +571,7 @@ class NegativeExpectancyCooldown:
                 net_pnl_sum_usdt=float(st.get("net_pnl_sum_usdt") or 0.0),
                 closed_cycles=float(st.get("closed_cycles") or 0.0),
                 closed_notional_usdt=float(st.get("closed_notional_usdt") or 0.0),
+                last_close_ts_ms=float(st.get("last_close_ts_ms") or 0.0),
                 fast_fail_gross_pnl_sum_usdt=float(st.get("fast_fail_gross_pnl_sum_usdt") or 0.0),
                 fast_fail_net_pnl_sum_usdt=float(st.get("fast_fail_net_pnl_sum_usdt") or 0.0),
                 fast_fail_closed_cycles=float(st.get("fast_fail_closed_cycles") or 0.0),
@@ -657,6 +695,7 @@ class NegativeExpectancyCooldown:
                     st["gross_pnl_sum_usdt"] += float(gross_pnl)
                     st["net_pnl_sum_usdt"] += float(net_pnl)
                     st["closed_notional_usdt"] += float(buy_notional)
+                    st["last_close_ts_ms"] = max(float(st.get("last_close_ts_ms") or 0.0), float(event_ts))
                     if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
                         st["fast_fail_closed_cycles"] += 1.0
                         st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
@@ -691,6 +730,7 @@ class NegativeExpectancyCooldown:
                 net_pnl_sum_usdt=float(st.get("net_pnl_sum_usdt") or 0.0),
                 closed_cycles=float(st.get("closed_cycles") or 0.0),
                 closed_notional_usdt=float(st.get("closed_notional_usdt") or 0.0),
+                last_close_ts_ms=float(st.get("last_close_ts_ms") or 0.0),
                 fast_fail_gross_pnl_sum_usdt=float(st.get("fast_fail_gross_pnl_sum_usdt") or 0.0),
                 fast_fail_net_pnl_sum_usdt=float(st.get("fast_fail_net_pnl_sum_usdt") or 0.0),
                 fast_fail_closed_cycles=float(st.get("fast_fail_closed_cycles") or 0.0),
@@ -706,33 +746,235 @@ class NegativeExpectancyCooldown:
             )
         return out
 
+    def _recent_trade_csv_path_candidates(self) -> list[Path]:
+        orders_parent = Path(self.cfg.orders_db_path).parent
+        report_roots = []
+        for candidate in (
+            orders_parent,
+            orders_parent.parent,
+            PROJECT_ROOT / "reports",
+        ):
+            try:
+                resolved = candidate.resolve()
+            except Exception:
+                resolved = candidate
+            if resolved not in report_roots:
+                report_roots.append(resolved)
+
+        paths: list[Path] = []
+        seen: set[Path] = set()
+        for root in report_roots:
+            for pattern in ("runs/prod/*/trades.csv", "recent_runs/*/trades.csv"):
+                for path in sorted(root.glob(pattern)):
+                    try:
+                        resolved = path.resolve()
+                    except Exception:
+                        resolved = path
+                    if resolved in seen:
+                        continue
+                    seen.add(resolved)
+                    paths.append(resolved)
+        return paths
+
+    def _scan_expectancy_from_recent_trade_csvs(
+        self,
+        *,
+        since_ms: int,
+        allowed_symbols: Optional[Set[str]],
+    ) -> Dict[str, Dict[str, Any]]:
+        paths = self._recent_trade_csv_path_candidates()
+        if not paths:
+            return {}
+
+        events: list[Dict[str, Any]] = []
+        for path in paths:
+            try:
+                with path.open("r", encoding="utf-8", newline="") as fh:
+                    for row in csv.DictReader(fh):
+                        sym = self._norm_symbol(str(row.get("symbol") or row.get("inst_id") or "").strip())
+                        if not sym or (allowed_symbols is not None and sym not in allowed_symbols):
+                            continue
+                        event_ts = self._coerce_iso_ms(row.get("ts") or row.get("timestamp") or row.get("ts_utc"))
+                        qty = self._coerce_float(row.get("qty") or row.get("amount") or row.get("sz"))
+                        px = self._coerce_float(row.get("price") or row.get("px") or row.get("avg_px"))
+                        if event_ts is None or qty is None or px is None:
+                            continue
+                        side = str(row.get("side") or "").strip().lower()
+                        intent = str(row.get("intent") or "").strip().upper()
+                        if not side:
+                            if intent == "OPEN_LONG":
+                                side = "buy"
+                            elif intent == "CLOSE_LONG":
+                                side = "sell"
+                        if side not in {"buy", "sell"}:
+                            continue
+                        fee_raw = self._coerce_float(
+                            row.get("fee_usdt")
+                            or row.get("fee")
+                            or row.get("commission_usdt")
+                            or row.get("commission")
+                        )
+                        fee_cost_usdt = abs(float(fee_raw or 0.0))
+                        events.append(
+                            {
+                                "symbol": sym,
+                                "side": side,
+                                "qty": float(qty),
+                                "px": float(px),
+                                "ts": int(event_ts),
+                                "fee_cost_usdt": float(fee_cost_usdt),
+                            }
+                        )
+            except Exception:
+                continue
+
+        if not events:
+            return {}
+        events.sort(key=lambda item: (str(item["symbol"]), int(item["ts"]), 0 if item["side"] == "buy" else 1))
+
+        inv_lots: Dict[str, list[Dict[str, float]]] = {}
+        by_symbol: Dict[str, Dict[str, float]] = {}
+        fast_fail_hold_ms = max(0, int(self.cfg.fast_fail_max_hold_minutes)) * 60 * 1000
+
+        for event in events:
+            sym = str(event["symbol"])
+            side = str(event["side"])
+            qty = float(event["qty"])
+            px = float(event["px"])
+            event_ts = int(event["ts"])
+            fee_cost_usdt = float(event.get("fee_cost_usdt") or 0.0)
+            if qty <= 0 or px <= 0 or event_ts <= 0:
+                continue
+
+            inv_lots.setdefault(sym, [])
+            if side == "buy":
+                inv_lots[sym].append(
+                    {
+                        "qty": qty,
+                        "px": px,
+                        "ts": float(event_ts),
+                        "fee_cost_usdt_remaining": fee_cost_usdt,
+                    }
+                )
+                continue
+
+            remaining = qty
+            sell_fee_remaining = fee_cost_usdt
+            matched_any = False
+            while remaining > 1e-12 and inv_lots[sym]:
+                lot = inv_lots[sym][0]
+                lot_qty = float(lot.get("qty") or 0.0)
+                if lot_qty <= 1e-12:
+                    inv_lots[sym].pop(0)
+                    continue
+                close_qty = min(lot_qty, remaining)
+                buy_px = float(lot.get("px") or px)
+                buy_notional = buy_px * close_qty
+                sell_notional = px * close_qty
+                buy_fee_remaining = float(lot.get("fee_cost_usdt_remaining") or 0.0)
+                buy_fee_alloc = buy_fee_remaining * (close_qty / lot_qty) if lot_qty > 0 else 0.0
+                sell_fee_alloc = sell_fee_remaining * (close_qty / remaining) if remaining > 0 else 0.0
+
+                gross_pnl = sell_notional - buy_notional
+                net_pnl = gross_pnl - buy_fee_alloc - sell_fee_alloc
+                hold_ms = max(0.0, float(event_ts) - float(lot.get("ts") or event_ts))
+                if event_ts >= int(since_ms):
+                    matched_any = True
+                    st = by_symbol.setdefault(sym, self._empty_expectancy_accumulator())
+                    st["closed_cycles"] += 1.0
+                    st["closed_cycles_included_by_close_ts"] += 1.0
+                    if float(lot.get("ts") or 0.0) < float(since_ms):
+                        st["closed_cycles_with_entry_before_window"] += 1.0
+                    st["gross_pnl_sum_usdt"] += float(gross_pnl)
+                    st["net_pnl_sum_usdt"] += float(net_pnl)
+                    st["closed_notional_usdt"] += float(buy_notional)
+                    st["last_close_ts_ms"] = max(float(st.get("last_close_ts_ms") or 0.0), float(event_ts))
+                    if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
+                        st["fast_fail_closed_cycles"] += 1.0
+                        st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
+                        st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
+                        st["fast_fail_closed_notional_usdt"] += float(buy_notional)
+                        st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+
+                remaining = max(0.0, remaining - close_qty)
+                sell_fee_remaining = float(sell_fee_remaining - sell_fee_alloc)
+                left_qty = max(0.0, lot_qty - close_qty)
+                left_buy_fee = float(buy_fee_remaining - buy_fee_alloc)
+                if left_qty <= 1e-12:
+                    inv_lots[sym].pop(0)
+                else:
+                    lot["qty"] = left_qty
+                    lot["fee_cost_usdt_remaining"] = left_buy_fee
+            if event_ts >= int(since_ms) and remaining > 1e-12 and not inv_lots[sym]:
+                st = by_symbol.setdefault(sym, self._empty_expectancy_accumulator())
+                st["missing_entry_leg_count"] += 1.0
+                if not matched_any:
+                    logger.warning(
+                        "NegativeExpectancy missing_entry_leg_for_close_cycle: source=recent_trades symbol=%s close_ts_ms=%s qty=%s",
+                        sym,
+                        event_ts,
+                        qty,
+                    )
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for sym, st in by_symbol.items():
+            out[sym] = self._build_expectancy_row(
+                gross_pnl_sum_usdt=float(st.get("gross_pnl_sum_usdt") or 0.0),
+                net_pnl_sum_usdt=float(st.get("net_pnl_sum_usdt") or 0.0),
+                closed_cycles=float(st.get("closed_cycles") or 0.0),
+                closed_notional_usdt=float(st.get("closed_notional_usdt") or 0.0),
+                last_close_ts_ms=float(st.get("last_close_ts_ms") or 0.0),
+                fast_fail_gross_pnl_sum_usdt=float(st.get("fast_fail_gross_pnl_sum_usdt") or 0.0),
+                fast_fail_net_pnl_sum_usdt=float(st.get("fast_fail_net_pnl_sum_usdt") or 0.0),
+                fast_fail_closed_cycles=float(st.get("fast_fail_closed_cycles") or 0.0),
+                fast_fail_closed_notional_usdt=float(st.get("fast_fail_closed_notional_usdt") or 0.0),
+                fast_fail_hold_minutes_sum=float(st.get("fast_fail_hold_minutes_sum") or 0.0),
+                source="recent_trades_csv",
+                degraded_fee_model=True,
+                degraded_reason="recent run trades.csv fallback uses fee_usdt best-effort",
+                closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
+                closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
+                missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
+                lookback_filter_mode="close_ts",
+            )
+        return out
+
     def _scan_expectancy(
         self,
         *,
         since_ms: int,
         allowed_symbols: Optional[Set[str]],
     ) -> Dict[str, Dict[str, Any]]:
+        fills_stats: Dict[str, Dict[str, Any]] = {}
+        orders_stats: Dict[str, Dict[str, Any]] = {}
+        recent_trade_stats: Dict[str, Dict[str, Any]] = {}
         if bool(getattr(self.cfg, "prefer_net_from_fills", True)):
             fills_stats = self._scan_expectancy_from_fills(
                 since_ms=since_ms,
                 allowed_symbols=allowed_symbols,
             )
-            if fills_stats:
-                return fills_stats
-            return self._scan_expectancy_from_orders(
+            orders_stats = self._scan_expectancy_from_orders(
                 since_ms=since_ms,
                 allowed_symbols=allowed_symbols,
             )
+            recent_trade_stats = self._scan_expectancy_from_recent_trade_csvs(
+                since_ms=since_ms,
+                allowed_symbols=allowed_symbols,
+            )
+            return self._merge_missing_symbol_stats(fills_stats, orders_stats, recent_trade_stats)
         orders_stats = self._scan_expectancy_from_orders(
             since_ms=since_ms,
             allowed_symbols=allowed_symbols,
         )
-        if orders_stats:
-            return orders_stats
-        return self._scan_expectancy_from_fills(
+        fills_stats = self._scan_expectancy_from_fills(
             since_ms=since_ms,
             allowed_symbols=allowed_symbols,
         )
+        recent_trade_stats = self._scan_expectancy_from_recent_trade_csvs(
+            since_ms=since_ms,
+            allowed_symbols=allowed_symbols,
+        )
+        return self._merge_missing_symbol_stats(orders_stats, fills_stats, recent_trade_stats)
 
     @staticmethod
     def _coerce_float(value: Any) -> Optional[float]:
@@ -976,6 +1218,8 @@ class NegativeExpectancyCooldown:
                     "expectancy_usdt": float(st.get("expectancy_usdt") or gross_exp_usdt),
                     "expectancy_bps": float(st.get("expectancy_bps") or st.get("gross_expectancy_bps") or 0.0),
                     "closed_cycles": n,
+                    "last_close_ts": st.get("last_close_ts"),
+                    "last_close_ts_ms": st.get("last_close_ts_ms"),
                     "gross_pnl_sum_usdt": float(st.get("gross_pnl_sum_usdt", st.get("pnl_sum_usdt") or 0.0)),
                     "net_pnl_sum_usdt": float(st.get("net_pnl_sum_usdt", st.get("pnl_sum_usdt") or 0.0)),
                     "pnl_sum_usdt": float(st.get("pnl_sum_usdt") or st.get("gross_pnl_sum_usdt") or 0.0),
