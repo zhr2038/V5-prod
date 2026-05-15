@@ -7,7 +7,7 @@ import os
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 # Ensure repo-local imports work even when the entrypoint is launched outside the repo root.
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -1664,6 +1664,7 @@ def _write_candidate_snapshot_for_run(
     prices: dict[str, Any],
     equity_usdt: Any,
     orders: list[Any],
+    no_signal_reasons: Optional[dict[str, Any]] = None,
 ) -> int:
     from src.reporting.candidate_snapshot import (
         build_candidate_snapshot_rows,
@@ -1684,6 +1685,7 @@ def _write_candidate_snapshot_for_run(
         target_weights_raw=dict(getattr(audit, "targets_pre_risk", {}) or {}),
         target_weights_after_risk=dict(getattr(audit, "targets_post_risk", {}) or {}),
         orders=orders,
+        no_signal_reasons=no_signal_reasons,
         **candidate_snapshot_cost_defaults(cfg),
     )
     write_candidate_snapshot(
@@ -1692,6 +1694,92 @@ def _write_candidate_snapshot_for_run(
         rows=rows,
     )
     return len(rows)
+
+
+def _latest_prices_from_market_data(market_data: Mapping[str, Any] | None) -> dict[str, float]:
+    prices: dict[str, float] = {}
+    for symbol, bars in (market_data or {}).items():
+        close = getattr(bars, "close", None)
+        if not close:
+            continue
+        try:
+            prices[str(symbol)] = float(close[-1])
+        except Exception:
+            continue
+    return prices
+
+
+def _candidate_snapshot_symbol_scope(*groups: Iterable[Any]) -> list[str]:
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for value in group or []:
+            symbol = str(value or "").strip()
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            symbols.append(symbol)
+    return symbols
+
+
+def _write_candidate_snapshot_best_effort(
+    *,
+    cfg: AppConfig,
+    runtime_run_dir: Path,
+    runtime_reports_dir: Path,
+    run_id: str,
+    symbols: Iterable[str],
+    audit: Any,
+    regime_state: Any = None,
+    risk_level: Any = None,
+    positions: Iterable[Any] = (),
+    prices: Mapping[str, Any] | None = None,
+    equity_usdt: Any = None,
+    orders: Iterable[Any] = (),
+    no_signal_reason: str | None = None,
+    log_obj: Any = None,
+) -> int:
+    symbol_scope = _candidate_snapshot_symbol_scope(symbols)
+    no_signal_reasons = {symbol: no_signal_reason for symbol in symbol_scope} if no_signal_reason else None
+    try:
+        candidate_rows = _write_candidate_snapshot_for_run(
+            cfg=cfg,
+            runtime_run_dir=runtime_run_dir,
+            runtime_reports_dir=runtime_reports_dir,
+            run_id=run_id,
+            ts_utc=_utc_now().isoformat().replace("+00:00", "Z"),
+            symbols=symbol_scope,
+            audit=audit,
+            regime_state=regime_state,
+            risk_level=risk_level,
+            positions=list(positions or []),
+            prices=dict(prices or {}),
+            equity_usdt=equity_usdt,
+            orders=list(orders or []),
+            no_signal_reasons=no_signal_reasons,
+        )
+        audit.add_note(f"candidate_snapshot rows={candidate_rows}")
+        audit.save(str(runtime_run_dir))
+        return int(candidate_rows)
+    except Exception as exc:
+        if log_obj is not None:
+            log_obj.warning("candidate snapshot export failed: %s", exc, exc_info=True)
+        _append_audit_high_issue(
+            audit,
+            runtime_run_dir,
+            {
+                "code": "candidate_snapshot_export_failed",
+                "severity": "high",
+                "detail": "failed to write candidate_snapshot.csv for run",
+                "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+                "evidence": {
+                    "run_id": run_id,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:500],
+                },
+            },
+        )
+        return 0
 
 
 def _validate_live_contract(cfg: AppConfig) -> list[str]:
@@ -2093,6 +2181,19 @@ def main() -> None:
         log.error(md_reason)
         audit.reject("market_data_coverage_insufficient")
         audit.add_note(md_reason)
+        _write_candidate_snapshot_best_effort(
+            cfg=cfg,
+            runtime_run_dir=runtime_run_dir,
+            runtime_reports_dir=runtime_reports_dir,
+            run_id=run_id,
+            symbols=_candidate_snapshot_symbol_scope(scored_symbols, managed_symbols),
+            audit=audit,
+            positions=list(store.list() or []),
+            prices=_latest_prices_from_market_data(md_1h),
+            equity_usdt=None,
+            no_signal_reason="market_data_coverage_insufficient",
+            log_obj=log,
+        )
         audit.save(str(runtime_run_dir))
         return
     scored_available = len([sym for sym in scored_symbols if sym in md_1h])
@@ -2145,6 +2246,20 @@ def main() -> None:
         alpha_snap = pipe.alpha_engine.compute_snapshot(alpha_market_data)
 
     if is_trend_update_only:
+        _write_candidate_snapshot_best_effort(
+            cfg=cfg,
+            runtime_run_dir=runtime_run_dir,
+            runtime_reports_dir=runtime_reports_dir,
+            run_id=run_id,
+            symbols=_candidate_snapshot_symbol_scope(scored_symbols, managed_symbols),
+            audit=audit,
+            regime_state=getattr(regime, "state", None),
+            positions=list(store.list() or []),
+            prices=_latest_prices_from_market_data(md_1h),
+            equity_usdt=None,
+            no_signal_reason="trend_update_only_no_order_routing",
+            log_obj=log,
+        )
         save_trend_cache(
             alpha_snap,
             regime,
@@ -2288,6 +2403,26 @@ def main() -> None:
                     audit.budget['current_equity_usdt'] = eq_now
                     audit.budget['utilization_pct'] = budget_result.get('utilization')
                     audit.budget['action_enabled'] = True
+                    budget_candidate_risk_level = None
+                    try:
+                        budget_candidate_risk_level = pipe._load_current_auto_risk_level()
+                    except Exception:
+                        budget_candidate_risk_level = None
+                    _write_candidate_snapshot_best_effort(
+                        cfg=cfg,
+                        runtime_run_dir=runtime_run_dir,
+                        runtime_reports_dir=runtime_reports_dir,
+                        run_id=run_id,
+                        symbols=_candidate_snapshot_symbol_scope(scored_symbols, managed_symbols),
+                        audit=audit,
+                        regime_state=getattr(regime, "state", None),
+                        risk_level=budget_candidate_risk_level,
+                        positions=list(store.list() or []),
+                        prices=dict(prices or {}),
+                        equity_usdt=eq_now,
+                        no_signal_reason="budget_limit_exceeded_no_order_routing",
+                        log_obj=log,
+                    )
                     audit.save(str(runtime_run_dir))
                     log.info("V5 live run completed (BUDGET LIMITED)")
                     return
@@ -2704,46 +2839,26 @@ def main() -> None:
             runtime_run_dir=runtime_run_dir,
         )
 
+    candidate_risk_level = None
     try:
+        candidate_risk_level = pipe._load_current_auto_risk_level()
+    except Exception:
         candidate_risk_level = None
-        try:
-            candidate_risk_level = pipe._load_current_auto_risk_level()
-        except Exception:
-            candidate_risk_level = None
-        candidate_rows = _write_candidate_snapshot_for_run(
-            cfg=cfg,
-            runtime_run_dir=runtime_run_dir,
-            runtime_reports_dir=runtime_reports_dir,
-            run_id=run_id,
-            ts_utc=_utc_now().isoformat().replace("+00:00", "Z"),
-            symbols=list(scored_symbols or []),
-            audit=audit,
-            regime_state=getattr(out.regime, "state", None),
-            risk_level=candidate_risk_level,
-            positions=list(store.list() or []),
-            prices=dict(prices or {}),
-            equity_usdt=eq,
-            orders=list(orders or []),
-        )
-        audit.add_note(f"candidate_snapshot rows={candidate_rows}")
-        audit.save(str(runtime_run_dir))
-    except Exception as exc:
-        log.warning("candidate snapshot export failed: %s", exc, exc_info=True)
-        _append_audit_high_issue(
-            audit,
-            runtime_run_dir,
-            {
-                "code": "candidate_snapshot_export_failed",
-                "severity": "high",
-                "detail": "failed to write candidate_snapshot.csv for run",
-                "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
-                "evidence": {
-                    "run_id": run_id,
-                    "error_type": type(exc).__name__,
-                    "error_message": str(exc)[:500],
-                },
-            },
-        )
+    _write_candidate_snapshot_best_effort(
+        cfg=cfg,
+        runtime_run_dir=runtime_run_dir,
+        runtime_reports_dir=runtime_reports_dir,
+        run_id=run_id,
+        symbols=_candidate_snapshot_symbol_scope(scored_symbols, managed_symbols),
+        audit=audit,
+        regime_state=getattr(out.regime, "state", None),
+        risk_level=candidate_risk_level,
+        positions=list(store.list() or []),
+        prices=dict(prices or {}),
+        equity_usdt=eq,
+        orders=list(orders or []),
+        log_obj=log,
+    )
 
     try:
         from src.reporting.order_lifecycle import annotate_orders_with_arrival, write_order_lifecycle

@@ -561,9 +561,19 @@ def _read_candidate_snapshot_rows(reports: Path) -> list[Dict[str, Any]]:
     return rows
 
 
-def _copy_candidate_snapshot_files(staging: Path, reports: Path) -> None:
+def _copy_candidate_snapshot_files(
+    staging: Path,
+    reports: Path,
+    candidate_rows: list[Dict[str, Any]] | None = None,
+) -> None:
     aggregate = reports / "candidate_snapshot.csv"
-    if aggregate.exists():
+    if candidate_rows:
+        _write_csv(
+            staging / "raw/reports/candidate_snapshot.csv",
+            CANDIDATE_SNAPSHOT_FIELDS,
+            candidate_rows,
+        )
+    elif aggregate.exists():
         _write_text(
             staging / "raw/reports/candidate_snapshot.csv",
             _redact_text(aggregate.read_text(encoding="utf-8", errors="replace")),
@@ -1751,7 +1761,7 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/fill_metrics.csv", FILL_METRICS_FIELDS, fill_metrics_rows)
         _write_csv(staging / "summaries/candidate_snapshot.csv", CANDIDATE_SNAPSHOT_FIELDS, candidate_rows)
         _write_csv(staging / "summaries/order_lifecycle.csv", ORDER_LIFECYCLE_FIELDS, order_lifecycle_rows)
-        _copy_candidate_snapshot_files(staging, reports)
+        _copy_candidate_snapshot_files(staging, reports, candidate_rows)
         _copy_order_lifecycle_files(staging, reports)
         _write_csv(
             staging / "reports/summary_trade_count_mismatch.csv",

@@ -407,6 +407,49 @@ def copy_current_reports():
         record_missing("reports/skipped_candidate_outcomes*.csv")
 
 
+def merge_candidate_snapshot_reports():
+    paths = sorted((OUT / "raw" / "recent_runs").glob("*/candidate_snapshot.csv"))
+    if not paths:
+        return 0
+    rows = []
+    fields = []
+    seen = set()
+    for path in paths:
+        try:
+            with path.open("r", encoding="utf-8", newline="") as fh:
+                reader = csv.DictReader(fh)
+                for field in reader.fieldnames or []:
+                    if field not in fields:
+                        fields.append(field)
+                for row in reader:
+                    if not row:
+                        continue
+                    run_id = flatten_value(row.get("run_id") or path.parent.name)
+                    row["run_id"] = run_id
+                    candidate_id = flatten_value(row.get("candidate_id"))
+                    symbol = flatten_value(row.get("symbol"))
+                    strategy = flatten_value(row.get("strategy_candidate"))
+                    key = (candidate_id, run_id, symbol, strategy)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    rows.append(row)
+        except Exception as exc:
+            collection_errors.append({"source": str(path), "dest": "raw/reports/candidate_snapshot.csv", "error": repr(exc)})
+    if not rows or not fields:
+        return 0
+    dest = OUT / "raw" / "reports" / "candidate_snapshot.csv"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fields})
+    copied_sources["raw/reports/candidate_snapshot.csv"] = "merged raw/recent_runs/*/candidate_snapshot.csv"
+    notes.append(f"merged candidate_snapshot rows={len(rows)} from recent_runs={len(paths)}")
+    return len(rows)
+
+
 def copy_logs():
     log_roots = [ROOT / "logs", ROOT / "reports", ROOT / "runtime", ROOT]
     seen = set()
@@ -8421,6 +8464,7 @@ for src_rel, dest_rel, required in STATE_FILES:
 copy_current_reports()
 provenance_meta = build_provenance_meta()
 copied_runs, recent_24_decisions = copy_recent_runs()
+merged_candidate_snapshot_rows = merge_candidate_snapshot_reports()
 copied_logs = copy_logs()
 summary_meta = build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_meta)
 

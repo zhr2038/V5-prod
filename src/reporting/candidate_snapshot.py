@@ -43,6 +43,7 @@ CANDIDATE_SNAPSHOT_FIELDS = (
     "eligible_before_filters",
     "final_decision",
     "block_reason",
+    "no_signal_reason",
     "strategy_candidate",
 )
 
@@ -104,6 +105,7 @@ def build_candidate_snapshot_rows(
     min_cost_bps_floor: Any = 0.0,
     score_proxy_floor: Any = None,
     score_per_bps: Any = None,
+    no_signal_reasons: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     prices = dict(prices or {})
     target_weights_raw = dict(target_weights_raw or getattr(audit, "targets_pre_risk", {}) or {})
@@ -115,6 +117,7 @@ def build_candidate_snapshot_rows(
     router_decisions = _router_decisions_by_symbol(getattr(audit, "router_decisions", []) or [])
     strategy_lookup = _strategy_signal_lookup(getattr(audit, "strategy_signals", []) or [])
     quant_lab_costs = _quant_lab_cost_lookup(getattr(audit, "quant_lab", {}) or {})
+    no_signal_reasons = dict(no_signal_reasons or {})
     order_lookup = _orders_by_symbol(orders)
     position_lookup = _positions_by_symbol(positions)
     local_cost_value = _first_float(local_cost_bps, 22.0)
@@ -268,6 +271,17 @@ def build_candidate_snapshot_rows(
                 if used_local_cost
                 else "quant_lab_cost_estimate"
             )
+        no_signal_reason = _no_signal_reason(
+            symbol=symbol,
+            final_decision=final_decision,
+            block_reason=block_reason,
+            order=order,
+            top=top,
+            strategy_signals=strategy_signals,
+            target_raw=target_raw,
+            target_after=target_after,
+            no_signal_reasons=no_signal_reasons,
+        )
 
         row = {
             "candidate_id": candidate_id_for(run_id, symbol, strategy_candidate),
@@ -340,6 +354,7 @@ def build_candidate_snapshot_rows(
             ),
             "final_decision": final_decision,
             "block_reason": block_reason,
+            "no_signal_reason": no_signal_reason,
             "strategy_candidate": strategy_candidate,
         }
         rows.append(row)
@@ -657,6 +672,46 @@ def _normalized_cost_source(value: Any, *, qlab_has_cost: bool, used_local_cost:
     if qlab_has_cost:
         return "quant_lab_cached"
     return "local_estimate"
+
+
+def _no_signal_reason(
+    *,
+    symbol: str,
+    final_decision: str,
+    block_reason: Optional[str],
+    order: Any,
+    top: Mapping[str, Any],
+    strategy_signals: Mapping[str, Mapping[str, Any]],
+    target_raw: Optional[float],
+    target_after: Optional[float],
+    no_signal_reasons: Mapping[str, Any],
+) -> Optional[str]:
+    if block_reason or order is not None:
+        return None
+    explicit = _lookup_symbol_value(no_signal_reasons, symbol)
+    if explicit not in (None, ""):
+        return str(explicit)
+    decision = str(final_decision or "").strip()
+    if decision == "no_order":
+        has_candidate = bool(top) or bool(strategy_signals)
+        if has_candidate:
+            return "candidate_not_selected_no_order"
+        if abs(float(target_raw or 0.0)) == 0.0 and abs(float(target_after or 0.0)) == 0.0:
+            return "no_signal"
+        return "target_zero_no_order"
+    if decision == "target_no_order":
+        return "target_positive_no_order_created"
+    if decision == "held_no_order":
+        return "held_position_no_new_order"
+    return None
+
+
+def _lookup_symbol_value(rows: Mapping[str, Any], symbol: Any) -> Any:
+    for alias in _symbol_aliases(symbol):
+        value = rows.get(alias)
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _block_reason(decisions: Sequence[Mapping[str, Any]]) -> Optional[str]:

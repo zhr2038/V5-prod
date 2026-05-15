@@ -235,6 +235,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/trade_metrics.csv" in names
         assert "summaries/fill_metrics.csv" in names
         assert "summaries/candidate_snapshot.csv" in names
+        assert "raw/reports/candidate_snapshot.csv" in names
         assert "summaries/order_lifecycle.csv" in names
         assert "raw/recent_runs/r1/candidate_snapshot.csv" in names
         assert "raw/recent_runs/r1/order_lifecycle.csv" in names
@@ -253,6 +254,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         trade_metrics = list(csv.DictReader(tf.extractfile("summaries/trade_metrics.csv").read().decode("utf-8").splitlines()))
         fill_metrics = list(csv.DictReader(tf.extractfile("summaries/fill_metrics.csv").read().decode("utf-8").splitlines()))
         candidate_snapshot = list(csv.DictReader(tf.extractfile("summaries/candidate_snapshot.csv").read().decode("utf-8").splitlines()))
+        raw_candidate_snapshot = list(csv.DictReader(tf.extractfile("raw/reports/candidate_snapshot.csv").read().decode("utf-8").splitlines()))
         order_lifecycle = list(csv.DictReader(tf.extractfile("summaries/order_lifecycle.csv").read().decode("utf-8").splitlines()))
         mismatch_rows = list(csv.DictReader(tf.extractfile("reports/summary_trade_count_mismatch.csv").read().decode("utf-8").splitlines()))
         manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
@@ -332,6 +334,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert fill_metrics[0]["normalized_symbol"] == "BNB-USDT"
         assert candidate_snapshot[0]["candidate_id"] == "cand_r1_bnb"
         assert candidate_snapshot[0]["symbol"] == "BNB/USDT"
+        assert raw_candidate_snapshot == candidate_snapshot
+        assert "no_signal_reason" in candidate_snapshot[0]
         assert order_lifecycle[0]["lifecycle_id"] == "olc_r1_bnb"
         assert order_lifecycle[0]["arrival_mid"] == "600"
         assert order_lifecycle[0]["avg_fill_px"] == "602"

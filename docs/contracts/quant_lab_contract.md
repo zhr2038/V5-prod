@@ -278,6 +278,7 @@ Required columns:
 - `eligible_before_filters`
 - `final_decision`
 - `block_reason`
+- `no_signal_reason`
 - `strategy_candidate`
 
 Quant Lab imports this file into `silver/v5_candidate_event`. Labels are derived from
@@ -287,4 +288,6 @@ label status. Data quality checks should report rows by run, feature completenes
 completeness, and cost source coverage. Candidate cost fields are populated for actual
 orders, blocked candidates, and no-order candidates: Quant Lab cost estimates are used
 when present, otherwise V5 writes a degraded `local_estimate` based on configured
-roundtrip cost assumptions.
+roundtrip cost assumptions. Every live run should include at least one row per current
+live universe symbol; symbols with no candidate and no order are emitted as
+`final_decision=no_order` with `no_signal_reason`.

@@ -116,6 +116,7 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert bnb["final_decision"] == "OPEN_LONG"
     assert sol["strategy_candidate"] == "Alpha6Factor"
     assert sol["block_reason"] == "protect_entry_alpha6_score_too_low"
+    assert sol["no_signal_reason"] is None
     assert sol["final_decision"] == "blocked"
     assert sol["f4_volume_expansion"] == 0.4
     assert sol["cost_source"] == "local_estimate"
@@ -259,3 +260,48 @@ def test_write_candidate_snapshot_rewrites_old_aggregate_schema(tmp_path: Path) 
     assert aggregate_rows[0]["cost_source"] == "local_estimate"
     assert aggregate_rows[0]["cost_reason"] == "legacy_candidate_snapshot_schema_backfilled_local_estimate"
     assert aggregate_rows[1]["cost_source"] == "local_estimate"
+
+
+def test_candidate_snapshot_covers_full_universe_with_no_order_and_blocked_rows() -> None:
+    audit = SimpleNamespace(
+        top_scores=[{"symbol": "BTC/USDT", "score": 0.72, "rank": 1}],
+        targets_pre_risk={"BTC/USDT": 0.0, "SOL/USDT": 0.0},
+        targets_post_risk={"BTC/USDT": 0.0, "SOL/USDT": 0.0},
+        router_decisions=[
+            {"symbol": "SOL/USDT", "action": "skip", "reason": "protect_entry_alpha6_score_too_low"}
+        ],
+        target_execution_explain=[
+            {
+                "symbol": "SOL/USDT",
+                "alpha6_score": 0.22,
+                "alpha6_side": "buy",
+                "f4_volume_expansion": 0.10,
+                "f5_rsi_trend_confirm": 0.15,
+            }
+        ],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_full_universe",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"],
+        audit=audit,
+        regime_state="Normal",
+        risk_level="PROTECT",
+        local_cost_bps=30.0,
+        local_cost_source_detail="execution.cost_aware_roundtrip_cost_bps",
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+    )
+
+    by_symbol = {row["symbol"]: row for row in rows}
+    assert list(by_symbol) == ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
+    assert len(rows) == 4
+    assert by_symbol["ETH/USDT"]["final_decision"] == "no_order"
+    assert by_symbol["ETH/USDT"]["no_signal_reason"] == "no_signal"
+    assert by_symbol["BNB/USDT"]["final_decision"] == "no_order"
+    assert by_symbol["BNB/USDT"]["no_signal_reason"] == "no_signal"
+    assert by_symbol["SOL/USDT"]["final_decision"] == "blocked"
+    assert by_symbol["SOL/USDT"]["block_reason"] == "protect_entry_alpha6_score_too_low"
+    assert by_symbol["SOL/USDT"]["alpha6_score"] == 0.22
