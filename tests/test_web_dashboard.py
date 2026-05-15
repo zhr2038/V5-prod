@@ -208,6 +208,21 @@ def test_static_files_does_not_spa_fallback_for_api_root(monkeypatch, tmp_path):
     assert response.get_json() == {"error": "api endpoint not found", "path": "/api"}
 
 
+def test_favicon_ico_serves_react_svg_icon(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    build_root = tmp_path / "web" / "dist"
+    build_root.mkdir(parents=True)
+    (build_root / "favicon.svg").write_text("<svg />", encoding="utf-8")
+    monkeypatch.setattr(module, "REACT_BUILD_PATH", build_root)
+    client = module.app.test_client()
+
+    response = client.get("/favicon.ico")
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("image/svg+xml")
+    assert response.get_data(as_text=True) == "<svg />"
+
+
 def test_metrics_route_returns_prometheus_payload(monkeypatch):
     module = load_web_dashboard_module()
     monkeypatch.setattr(module, "render_prometheus_metrics", lambda workspace=None, config=None: "v5_metrics_exporter_up 1\n")
@@ -5530,6 +5545,98 @@ def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path)
     payload = response.get_json()
     assert payload["status"] == "warning"
     assert any(check.get("name") == "OKX API" and check.get("status") == "warning" for check in payload["checks"])
+
+
+def test_health_api_includes_quant_lab_api_status(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    workspace = tmp_path / "ws"
+    reports_dir = workspace / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    orders_db = reports_dir / "orders.sqlite"
+    conn = sqlite3.connect(str(orders_db))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE orders (inst_id TEXT)")
+    cur.execute("INSERT INTO orders(inst_id) VALUES ('BTC-USDT')")
+    conn.commit()
+    conn.close()
+
+    now = datetime.now(timezone.utc)
+    now_ts = now.isoformat().replace("+00:00", "Z")
+    later_ts = (now + timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
+    (reports_dir / "quant_lab_requests.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "endpoint_path": "/v1/health",
+                        "success": True,
+                        "status_code": 200,
+                        "latency_ms": 120.0,
+                        "response_summary": {"status": "ok", "service": "quant-lab"},
+                        "ts_utc": now_ts,
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "endpoint_path": "/v1/risk/live-permission",
+                        "success": True,
+                        "status_code": 200,
+                        "latency_ms": 80.0,
+                        "response_summary": {"permission": "ABORT"},
+                        "ts_utc": later_ts,
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    runtime_paths = module.DashboardRuntimePaths(
+        reports_dir=reports_dir,
+        orders_db=orders_db,
+        fills_db=reports_dir / "fills.sqlite",
+        positions_db=reports_dir / "positions.sqlite",
+        kill_switch_path=reports_dir / "kill_switch.json",
+        reconcile_status_path=reports_dir / "reconcile_status.json",
+        runs_dir=reports_dir / "runs",
+        auto_risk_guard_path=reports_dir / "auto_risk_guard.json",
+        auto_risk_eval_path=reports_dir / "auto_risk_eval.json",
+        telemetry_db=reports_dir / "api_telemetry.sqlite",
+    )
+    monkeypatch.setattr(module, "WORKSPACE", workspace)
+    monkeypatch.setattr(module, "REPORTS_DIR", reports_dir)
+    monkeypatch.setattr(
+        module,
+        "load_config",
+        lambda: {
+            "quant_lab": {
+                "enabled": True,
+                "mode": "shadow",
+                "request_log_path": "reports/quant_lab_requests.jsonl",
+            }
+        },
+    )
+    monkeypatch.setattr(module, "_resolve_dashboard_runtime_paths", lambda _config: runtime_paths)
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+    monkeypatch.setattr(module, "_dashboard_live_account_enabled", lambda: True)
+    monkeypatch.setattr(module, "_load_workspace_exchange_creds", lambda: ("k", "s", "p"))
+    monkeypatch.setattr(module, "_load_okx_account_balance", lambda *_args: {"code": "0", "data": []})
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    quant_lab = next(check for check in payload["checks"] if check.get("name") == "中台 API")
+    assert quant_lab["status"] == "healthy"
+    assert "2/2成功" in quant_lab["detail"]
+    assert "/v1/risk/live-permission" in quant_lab["detail"]
+    assert "mode shadow" in quant_lab["detail"]
 
 
 def test_health_api_error_response_hides_internal_paths(monkeypatch):

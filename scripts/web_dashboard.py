@@ -2311,6 +2311,141 @@ def _load_api_telemetry_summary(
     return summary
 
 
+def _read_recent_jsonl_tail(path: Path, *, max_bytes: int = 1024 * 1024) -> List[Dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        return []
+    try:
+        size = path.stat().st_size
+        with path.open('rb') as fh:
+            if size > max_bytes:
+                fh.seek(size - max_bytes)
+                fh.readline()
+            raw = fh.read()
+    except OSError:
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for line in raw.decode('utf-8', errors='ignore').splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            rows.append(payload)
+    return rows
+
+
+def _resolve_quant_lab_request_log_path(config: Dict[str, Any], runtime_paths: DashboardRuntimePaths) -> Path:
+    quant_lab_cfg = config.get('quant_lab', {}) if isinstance(config, dict) else {}
+    raw_path = quant_lab_cfg.get('request_log_path') if isinstance(quant_lab_cfg, dict) else None
+    return _resolve_dashboard_runtime_artifact_path(
+        runtime_paths.orders_db,
+        raw_path,
+        'reports/quant_lab_requests.jsonl',
+    )
+
+
+def _load_quant_lab_api_status(
+    config: Dict[str, Any],
+    runtime_paths: DashboardRuntimePaths,
+    *,
+    lookback_minutes: int = 120,
+) -> Dict[str, Any]:
+    def _status_code(row: Dict[str, Any]) -> Optional[int]:
+        try:
+            return int(row.get('status_code'))
+        except (TypeError, ValueError):
+            return None
+
+    def _request_succeeded(row: Dict[str, Any]) -> bool:
+        if _dashboard_to_bool(row.get('success')) or _dashboard_to_bool(row.get('ok')):
+            return True
+        code = _status_code(row)
+        return code is not None and 200 <= code < 300 and not row.get('error_type')
+
+    quant_lab_cfg = config.get('quant_lab', {}) if isinstance(config, dict) else {}
+    if not isinstance(quant_lab_cfg, dict) or 'enabled' not in quant_lab_cfg:
+        return {'name': '中台 API', 'status': 'warning', 'detail': 'quant-lab 未配置'}
+
+    mode = str(quant_lab_cfg.get('mode') or 'unknown').strip() or 'unknown'
+    if not _dashboard_to_bool(quant_lab_cfg.get('enabled')):
+        return {'name': '中台 API', 'status': 'warning', 'detail': f'quant-lab 未启用 · mode {mode}'}
+    if mode == 'local_only':
+        return {'name': '中台 API', 'status': 'healthy', 'detail': 'local_only，本轮不调用中台'}
+
+    log_path = _resolve_quant_lab_request_log_path(config, runtime_paths)
+    rows = _read_recent_jsonl_tail(log_path)
+    request_rows = [
+        row for row in rows
+        if isinstance(row, dict) and str(row.get('endpoint_path') or '').startswith('/v1/')
+    ]
+    if not request_rows:
+        return {'name': '中台 API', 'status': 'warning', 'detail': '无中台请求日志'}
+
+    now_epoch = time.time()
+    window_seconds = max(1, int(lookback_minutes or 120)) * 60
+    recent_rows: List[Dict[str, Any]] = []
+    latest_any: Optional[Dict[str, Any]] = None
+    latest_any_epoch = float('-inf')
+    for row in request_rows:
+        epoch = _coerce_timestamp_epoch(row.get('ts_utc') or row.get('ts') or row.get('timestamp'))
+        if epoch is None:
+            continue
+        if epoch > latest_any_epoch:
+            latest_any_epoch = epoch
+            latest_any = row
+        if epoch >= now_epoch - window_seconds:
+            recent_rows.append(row)
+
+    if not recent_rows:
+        latest_label = ''
+        if latest_any_epoch != float('-inf'):
+            age_minutes = max(0.0, (now_epoch - latest_any_epoch) / 60.0)
+            latest_label = f' · 最近{age_minutes:.0f}分钟前'
+        return {'name': '中台 API', 'status': 'warning', 'detail': f'近{int(lookback_minutes)}m无请求{latest_label}'}
+
+    total = len(recent_rows)
+    success_count = sum(1 for row in recent_rows if _request_succeeded(row))
+    error_count = total - success_count
+    fallback_count = sum(1 for row in recent_rows if bool(row.get('fallback_used')))
+    latencies = [
+        float(row.get('latency_ms'))
+        for row in recent_rows
+        if row.get('latency_ms') not in (None, '')
+    ]
+    p95_latency_ms = _percentile_value(latencies, 0.95)
+    latest = max(
+        recent_rows,
+        key=lambda row: float(_coerce_timestamp_epoch(row.get('ts_utc') or row.get('ts') or row.get('timestamp')) or float('-inf')),
+    )
+    latest_endpoint = str(latest.get('endpoint_path') or '--')
+    latest_code = _status_code(latest)
+    latest_summary = latest.get('response_summary') if isinstance(latest.get('response_summary'), dict) else {}
+
+    error_rate = float(error_count) / float(total) if total else 0.0
+    status = 'healthy'
+    if error_count == total or error_rate >= 0.20 or (p95_latency_ms or 0.0) >= 5000.0:
+        status = 'critical'
+    elif error_count > 0 or fallback_count > 0 or error_rate >= 0.05 or (p95_latency_ms or 0.0) >= 2500.0:
+        status = 'warning'
+
+    service_status = str(latest_summary.get('status') or '').strip().lower()
+    if latest_endpoint == '/v1/health' and service_status and service_status not in {'ok', 'healthy', 'ready'}:
+        status = 'critical'
+
+    detail_parts = [f'近{int(lookback_minutes)}m {success_count}/{total}成功']
+    if p95_latency_ms is not None:
+        detail_parts.append(f'P95 {p95_latency_ms:.0f}ms')
+    detail_parts.append(f'{latest_endpoint} {latest_code or "--"}')
+    detail_parts.append(f'mode {mode}')
+    if fallback_count:
+        detail_parts.append(f'fallback {fallback_count}')
+    return {'name': '中台 API', 'status': status, 'detail': ' · '.join(detail_parts)}
+
+
 def _load_backtest_slippage_baseline(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     config = cfg if isinstance(cfg, dict) else load_config()
     backtest_cfg = config.get('backtest', {}) if isinstance(config, dict) else {}
@@ -2735,6 +2870,15 @@ def _is_static_asset_request(filename: str) -> bool:
 def index():
     """主页面 - 新版监控面板"""
     return _render_monitor_v2()
+
+
+@app.route('/favicon.ico')
+def favicon_ico():
+    for root in (REACT_BUILD_PATH, WEB_DIR / 'dashboard' / 'public'):
+        icon_path = root / 'favicon.svg'
+        if icon_path.exists():
+            return send_from_directory(str(root), 'favicon.svg', mimetype='image/svg+xml')
+    return 'Not found', 404
 
 
 @app.route('/monitor')
@@ -6865,7 +7009,8 @@ def api_shadow_ml_overlay():
 def api_health():
     """系统健康检查API"""
     try:
-        runtime_paths = _resolve_dashboard_runtime_paths(load_config())
+        config = load_config()
+        runtime_paths = _resolve_dashboard_runtime_paths(config)
         checks = []
         overall_status = 'healthy'
         
@@ -6956,8 +7101,21 @@ def api_health():
             checks.append({'name': 'OKX API', 'status': 'warning', 'detail': 'okx api unavailable'})
             if overall_status == 'healthy':
                 overall_status = 'warning'
+
+        # 4. 检查 quant-lab 中台 API（只读，基于请求审计日志）
+        try:
+            quant_lab_check = _load_quant_lab_api_status(config, runtime_paths)
+            checks.append(quant_lab_check)
+            if quant_lab_check.get('status') == 'critical':
+                overall_status = 'critical'
+            elif quant_lab_check.get('status') == 'warning' and overall_status == 'healthy':
+                overall_status = 'warning'
+        except Exception:
+            checks.append({'name': '中台 API', 'status': 'warning', 'detail': 'quant-lab status unavailable'})
+            if overall_status == 'healthy':
+                overall_status = 'warning'
         
-        # 4. 检查磁盘空间
+        # 5. 检查磁盘空间
         try:
             import shutil
             total, used, free = shutil.disk_usage(WORKSPACE)
