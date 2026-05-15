@@ -7143,12 +7143,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         )
 
     def quant_lab_cost_row_source_hash(row):
-        return flatten_value(first_observed(
+        value = flatten_value(first_observed(
             row.get("source_snapshot_hash"),
             row.get("deployment_source_snapshot_hash"),
             row.get("source_generation_hash"),
             "",
         )).strip()
+        return "" if value in ("", not_obs, "null") else value
 
     def quant_lab_symbol_cost_hit(row):
         if quant_lab_cost_row_degraded(row):

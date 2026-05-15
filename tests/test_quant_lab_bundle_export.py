@@ -341,4 +341,5 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert readiness_snapshot["legacy_global_default_cost_count"] == 0
         assert window["cost_usage_current_contract_rows"] == 1
         assert window["cost_usage_legacy_rows"] == 0
+        assert window["post_deployment_cost_usage_rows"] == 1
         assert window["post_deployment_global_default_cost_count"] == 0

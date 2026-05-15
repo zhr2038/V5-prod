@@ -2838,8 +2838,10 @@ def main():
             assert window["post_deployment_global_default_cost_count"] == 0, window
             assert window["cost_usage_current_contract_rows"] == 1, window
             assert window["cost_usage_legacy_rows"] == 2, window
+            assert window["post_deployment_cost_usage_rows"] == 1, window
             assert readiness["global_default_cost_count"] == 0, readiness
             assert readiness["post_deployment_global_default_cost_count"] == 0, readiness
+            assert readiness["post_deployment_cost_usage_rows"] == 1, readiness
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

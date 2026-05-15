@@ -288,6 +288,7 @@ def test_cost_usage_summary_separates_legacy_global_default_from_current_contrac
     assert summary["cost_usage_legacy_rows"] == 1
     assert summary["cost_usage_current_contract_rows"] == 1
     assert summary["cost_usage_latest_24h_rows"] == 1
+    assert summary["post_deployment_cost_usage_rows"] == 1
 
 
 def test_shadow_raw_abort_records_effective_allow_and_would_block(tmp_path: Path) -> None:

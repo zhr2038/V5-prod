@@ -1130,12 +1130,13 @@ def _window_summary(
         return schema == SCHEMA_VERSION and contract == CONTRACT_VERSION and event_generation == EVENT_ID_GENERATION_VERSION
 
     def row_source_hash(row: Mapping[str, Any]) -> str:
-        return str(
+        value = str(
             row.get("source_snapshot_hash")
             or row.get("deployment_source_snapshot_hash")
             or row.get("source_generation_hash")
             or ""
         ).strip()
+        return "" if value in {"", "not_observable", "null"} else value
 
     def cost_row_ts(row: Mapping[str, Any]) -> Optional[datetime]:
         return _parse_utc_dt(row.get("ts_utc") or row.get("ts"))
