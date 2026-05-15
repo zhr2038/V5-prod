@@ -143,11 +143,13 @@ if [[ "$USER_MODE" == "1" ]]; then
       v5-daily.timer v5-daily.service \
       v5-cost-rollup.timer v5-cost-rollup.service \
       v5-spread-rollup.timer v5-spread-rollup.service >/dev/null 2>&1 || true
-    systemctl --user disable --now \
+    for disabled_unit in \
       v5-shadow-regime.user.timer v5-shadow-regime.user.service \
       v5-daily-ml-training.timer v5-daily-ml-training.service \
       v5-model-promotion-gate.timer v5-model-promotion-gate.service \
-      v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service >/dev/null 2>&1 || true
+      v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service; do
+      systemctl --user disable --now "$disabled_unit" >/dev/null 2>&1 || true
+    done
     systemctl --user enable --now v5-web-dashboard.service
     systemctl --user enable --now v5-trade-monitor.timer
     systemctl --user enable --now v5-sentiment-collect.timer
