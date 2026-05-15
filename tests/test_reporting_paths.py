@@ -379,7 +379,7 @@ def test_live_finalize_refreshes_summary_after_trades_flush(tmp_path):
     )
 
     audit = decision_audit.DecisionAudit(run_id=run_dir.name)
-    summary = main_module._refresh_live_summary_metrics_after_trades(
+    summary = main_module._finalize_live_run_summary_metrics(
         run_dir,
         audit=audit,
         current_summary={"num_trades": 0},
@@ -389,9 +389,79 @@ def test_live_finalize_refreshes_summary_after_trades_flush(tmp_path):
     assert summary["num_trades"] == 1
     assert summary["fills_count_today"] == 1
     assert summary["budget"]["fills_count_today"] == 1
+    assert summary["fees_usdt_total"] == pytest.approx(0.012)
+    assert summary["slippage_usdt_total"] == pytest.approx(0.001)
+    assert summary["cost_usdt_total"] == pytest.approx(0.013)
     assert persisted["num_trades"] == 1
     assert persisted["budget"]["fills_count_today"] == 1
+    assert persisted["fees_usdt_total"] == pytest.approx(0.012)
+    assert persisted["slippage_usdt_total"] == pytest.approx(0.001)
+    assert persisted["cost_usdt_total"] == pytest.approx(0.013)
     assert audit.issues_to_fix == []
+
+
+def test_live_finalize_refreshes_summary_after_attach_budget(tmp_path):
+    run_dir = tmp_path / "reports" / "runs" / "live_finalize_budget_refresh"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-13T00:00:00Z", equity=100.0)
+    (run_dir / "summary.json").write_text(
+        json.dumps({"run_id": run_dir.name, "num_trades": 0, "budget": {"fills_count_today": 0}}),
+        encoding="utf-8",
+    )
+    _write_trades(
+        run_dir,
+        ["2026-05-13T00:10:00Z,live_finalize_budget_refresh,BNB/USDT,OPEN_LONG,buy,0.02,600,12,0.012,0.001,,"],
+    )
+
+    audit = decision_audit.DecisionAudit(run_id=run_dir.name)
+    summary = main_module._finalize_live_run_summary_metrics(run_dir, audit=audit, current_summary={"num_trades": 0})
+    assert summary["num_trades"] == 1
+
+    summary_writer.attach_budget(str(run_dir), {"fills_count_today": 0, "turnover_used": 0.0})
+    final_summary = main_module._finalize_live_run_summary_metrics(run_dir, audit=audit, current_summary=summary)
+    persisted = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert final_summary["num_trades"] == 1
+    assert final_summary["trades_counted_rows"] == 1
+    assert final_summary["budget"]["fills_count_today"] == 1
+    assert final_summary["fees_usdt_total"] == pytest.approx(0.012)
+    assert final_summary["slippage_usdt_total"] == pytest.approx(0.001)
+    assert final_summary["cost_usdt_total"] == pytest.approx(0.013)
+    assert persisted["num_trades"] == 1
+    assert persisted["budget"]["fills_count_today"] == 1
+    assert persisted["cost_usdt_total"] == pytest.approx(0.013)
+    assert audit.issues_to_fix == []
+
+
+def test_live_finalize_records_high_issue_when_summary_remains_stale(monkeypatch, tmp_path):
+    run_dir = tmp_path / "reports" / "runs" / "live_finalize_stale_summary"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-13T00:00:00Z", equity=100.0)
+    (run_dir / "summary.json").write_text(
+        json.dumps({"run_id": run_dir.name, "num_trades": 0, "budget": {"fills_count_today": 0}}),
+        encoding="utf-8",
+    )
+    _write_trades(
+        run_dir,
+        ["2026-05-13T00:10:00Z,live_finalize_stale_summary,BNB/USDT,OPEN_LONG,buy,0.02,600,12,0.012,0.001,,"],
+    )
+
+    def stale_refresh(_run_dir):
+        return {"run_id": run_dir.name, "num_trades": 0, "budget": {"fills_count_today": 0}}
+
+    monkeypatch.setattr(summary_writer, "refresh_summary_metrics", stale_refresh)
+    audit = decision_audit.DecisionAudit(run_id=run_dir.name)
+    summary = main_module._finalize_live_run_summary_metrics(run_dir, audit=audit, current_summary={"num_trades": 0})
+    loaded = decision_audit.load_decision_audit(str(run_dir))
+    persisted = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert summary["num_trades"] == 0
+    assert persisted["summary_metrics_finalize_warning"] == "trades_csv_nonempty_summary_num_trades_zero_after_live_finalize"
+    assert loaded is not None
+    high_issues = [item for item in loaded.issues_to_fix if item.get("code") == "summary_trade_count_mismatch_after_live_finalize"]
+    assert len(high_issues) == 1
+    assert high_issues[0]["severity"] == "high"
+    assert high_issues[0]["evidence"]["trades_counted_rows"] == 1
 
 
 def test_export_fill_refreshes_summary_for_open_long_trade(tmp_path):

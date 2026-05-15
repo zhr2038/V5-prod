@@ -1551,6 +1551,89 @@ def _refresh_live_summary_metrics_after_trades(
         return dict(current_summary or {})
 
 
+def _validate_live_summary_metrics_after_finalize(
+    runtime_run_dir: Path,
+    summary: Optional[Dict[str, Any]],
+    *,
+    audit: Any = None,
+    log_obj: Any = None,
+) -> Dict[str, Any]:
+    from src.reporting.metrics import read_trades_csv_detailed
+
+    rd = Path(runtime_run_dir)
+    summary_path = rd / "summary.json"
+    current = dict(summary or {})
+    if summary_path.exists():
+        try:
+            loaded = json.loads(summary_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                current = loaded
+        except Exception:
+            pass
+
+    trade_read = read_trades_csv_detailed(str(rd / "trades.csv"))
+    try:
+        summary_num_trades = int(float(current.get("num_trades") or 0))
+    except (TypeError, ValueError):
+        summary_num_trades = 0
+    if int(trade_read.counted_rows) > 0 and summary_num_trades == 0:
+        warning = "trades_csv_nonempty_summary_num_trades_zero_after_live_finalize"
+        current["summary_metrics_finalize_warning"] = warning
+        try:
+            prior_warning_count = int(current.get("summary_metrics_finalize_warning_count") or 0)
+        except (TypeError, ValueError):
+            prior_warning_count = 0
+        current["summary_metrics_finalize_warning_count"] = prior_warning_count + 1
+        try:
+            summary_path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        issue = {
+            "code": "summary_trade_count_mismatch_after_live_finalize",
+            "severity": "high",
+            "detail": "live finalize saw non-empty trades.csv but summary.json still reports num_trades=0",
+            "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+            "evidence": {
+                "run_id": getattr(audit, "run_id", rd.name),
+                "run_dir": str(rd),
+                "trades_counted_rows": int(trade_read.counted_rows),
+                "trades_file_rows": int(trade_read.file_rows),
+                "summary_num_trades": summary_num_trades,
+                "trade_metrics_warning": "; ".join(str(item) for item in trade_read.warnings),
+            },
+        }
+        if log_obj is not None:
+            log_obj.warning(
+                "live summary metrics stale after finalize: trades_counted_rows=%s summary_num_trades=%s run_dir=%s",
+                trade_read.counted_rows,
+                summary_num_trades,
+                rd,
+            )
+        _append_audit_high_issue(audit, rd, issue)
+    return current
+
+
+def _finalize_live_run_summary_metrics(
+    runtime_run_dir: Path,
+    *,
+    audit: Any = None,
+    log_obj: Any = None,
+    current_summary: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    summary = _refresh_live_summary_metrics_after_trades(
+        runtime_run_dir,
+        audit=audit,
+        log_obj=log_obj,
+        current_summary=current_summary,
+    )
+    return _validate_live_summary_metrics_after_finalize(
+        runtime_run_dir,
+        summary,
+        audit=audit,
+        log_obj=log_obj,
+    )
+
+
 def _validate_live_contract(cfg: AppConfig) -> list[str]:
     whitelist = _live_symbol_whitelist(cfg)
     if not whitelist:
@@ -2719,7 +2802,7 @@ def main() -> None:
 
         # Live finalize: force a metrics refresh after fills/trades export has appended and flushed trades.csv.
         if is_live:
-            summ = _refresh_live_summary_metrics_after_trades(
+            summ = _finalize_live_run_summary_metrics(
                 runtime_run_dir,
                 audit=audit,
                 log_obj=log,
@@ -2794,8 +2877,22 @@ def main() -> None:
                     attach_exit_signals(str(runtime_run_dir), audit.exit_signals or [])
                 except Exception:
                     pass
+            if is_live:
+                summ = _finalize_live_run_summary_metrics(
+                    runtime_run_dir,
+                    audit=audit,
+                    log_obj=log,
+                    current_summary=summ,
+                )
         except Exception:
-            pass
+            log.warning("live budget/final summary attachment failed", exc_info=True)
+            if is_live:
+                summ = _finalize_live_run_summary_metrics(
+                    runtime_run_dir,
+                    audit=audit,
+                    log_obj=log,
+                    current_summary=summ,
+                )
 
     except Exception:
         pass
