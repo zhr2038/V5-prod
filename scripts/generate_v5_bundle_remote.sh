@@ -5339,6 +5339,125 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             return not_obs
         return str(future_value > realized_value).lower()
 
+    def config_text_value(key):
+        value = find_config_value(effective_data, key)
+        if value not in (None, "", not_obs):
+            return flatten_value(value)
+        match = re.search(rf"(?m)^\s*{re.escape(key)}\s*:\s*([^#\n]+)", live_config_text or "")
+        if not match:
+            return not_obs
+        return match.group(1).strip().strip("\"'")
+
+    def nested_obj_has_key(obj, key, depth=0):
+        if depth > 8:
+            return False
+        if isinstance(obj, dict):
+            if key in obj:
+                return True
+            return any(nested_obj_has_key(value, key, depth + 1) for value in obj.values())
+        if isinstance(obj, list):
+            return any(nested_obj_has_key(value, key, depth + 1) for value in obj)
+        if isinstance(obj, str):
+            parsed = parse_json_obj(obj, None)
+            if isinstance(parsed, (dict, list)):
+                return nested_obj_has_key(parsed, key, depth + 1)
+        return False
+
+    def first_nested_value_from_obj(obj, keys):
+        for key in keys:
+            found = find_config_value(obj, key)
+            if found is not None and flatten_value(found) not in ("", not_obs):
+                return found
+        return not_obs
+
+    def first_nested_value_from_row(row, keys):
+        for key in keys:
+            if key in row and flatten_value(row.get(key)) not in ("", not_obs):
+                return row.get(key)
+        for item in iter_roundtrip_payload_dicts(row):
+            if not isinstance(item, dict):
+                continue
+            for key in keys:
+                if key in item and flatten_value(item.get(key)) not in ("", not_obs):
+                    return item.get(key)
+        return not_obs
+
+    def row_payload_has_key(row, key):
+        if key in row:
+            return True
+        return any(isinstance(item, dict) and key in item for item in iter_roundtrip_payload_dicts(row))
+
+    def observed_bool_or_not(value):
+        text = bool_observed(value)
+        return text if text in {"true", "false"} else not_obs
+
+    swing_guard_effective_ts = first_observed(
+        config_text_value("swing_atr_early_exit_guard_effective_ts"),
+        config_text_value("swing_atr_early_exit_guard_config_effective_ts"),
+        config_text_value("swing_atr_early_exit_guard_enabled_ts"),
+        not_obs,
+    )
+    swing_guard_effective_dt = parse_dt_utc(swing_guard_effective_ts)
+
+    def swing_guard_context_at_exit(row, exit_dt, early_exit):
+        exit_audit = audit_by_run.get(row.get("run_id"), {})
+        guard_keys = (
+            "swing_atr_early_exit_guard_enabled",
+            "swing_atr_early_exit_guard_active",
+            "swing_atr_early_exit_guard_blocked",
+        )
+        explicit_enabled = first_observed(
+            first_nested_value_from_row(row, ("swing_atr_early_exit_guard_enabled",)),
+            first_nested_value_from_obj(exit_audit, ("swing_atr_early_exit_guard_enabled",)),
+            not_obs,
+        )
+        active_value = first_observed(
+            first_nested_value_from_row(row, ("swing_atr_early_exit_guard_active",)),
+            first_nested_value_from_obj(exit_audit, ("swing_atr_early_exit_guard_active",)),
+            not_obs,
+        )
+        guard_config_seen = any(row_payload_has_key(row, key) or nested_obj_has_key(exit_audit, key) for key in guard_keys)
+        if not guard_config_seen and swing_guard_effective_dt is not None and exit_dt is not None:
+            guard_config_seen = exit_dt >= swing_guard_effective_dt
+        if explicit_enabled != not_obs:
+            guard_enabled_at_exit = observed_bool_or_not(explicit_enabled)
+        elif active_value != not_obs:
+            guard_enabled_at_exit = observed_bool_or_not(active_value)
+        elif guard_config_seen and swing_guard_effective_dt is not None and exit_dt is not None and exit_dt >= swing_guard_effective_dt:
+            guard_enabled_at_exit = str(config_bool("swing_atr_early_exit_guard_enabled", False)).lower()
+        else:
+            guard_enabled_at_exit = not_obs
+        fingerprint = first_observed(
+            first_nested_value_from_row(row, ("config_fingerprint", "effective_config_hash", "effective_live_config_hash", "code_version", "git_commit")),
+            first_nested_value_from_obj(exit_audit, ("config_fingerprint", "effective_config_hash", "effective_live_config_hash", "code_version", "git_commit")),
+            not_obs,
+        )
+        if fingerprint == not_obs and guard_config_seen and swing_guard_effective_dt is not None:
+            fingerprint = first_observed(
+                provenance_meta.get("effective_live_config_hash"),
+                provenance_meta.get("git_commit"),
+                not_obs,
+            )
+        if not early_exit:
+            is_post_fix_sample = "false"
+            diagnosis = "not_early_soft_exit"
+        elif guard_config_seen and guard_enabled_at_exit == "true":
+            is_post_fix_sample = "true"
+            diagnosis = "post_fix_soft_exit_before_min_hold"
+        elif guard_enabled_at_exit == "false":
+            is_post_fix_sample = "false"
+            diagnosis = "guard_disabled_at_exit"
+        else:
+            is_post_fix_sample = not_obs
+            diagnosis = "historical_or_unknown_fix_state"
+        return {
+            "guard_enabled_at_exit": guard_enabled_at_exit,
+            "guard_config_seen_at_exit": str(bool(guard_config_seen)).lower(),
+            "code_version_or_config_fingerprint_at_exit": flatten_value(fingerprint),
+            "is_post_fix_sample": is_post_fix_sample,
+            "diagnosis": diagnosis,
+        }
+
     swing_rt_cost_bps = configured_roundtrip_cost_bps()
     swing_early_exit_rows = []
     for row in closed_roundtrip_rows:
@@ -5368,6 +5487,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         future_72_entry = forward_net_bps(symbol, entry_dt, row.get("entry_px"), 72, swing_rt_cost_bps)
         future_24_after_exit = forward_net_bps(symbol, exit_dt, row.get("exit_px"), 24, swing_rt_cost_bps)
         future_48_after_exit = forward_net_bps(symbol, exit_dt, row.get("exit_px"), 48, swing_rt_cost_bps)
+        guard_context = swing_guard_context_at_exit(row, exit_dt, early_exit)
         swing_early_exit_rows.append({
             "symbol": symbol,
             "entry_ts": row.get("entry_ts", not_obs),
@@ -5390,6 +5510,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             "future_48h_net_bps_after_exit": future_48_after_exit,
             "would_have_been_better_to_hold_24h": better_to_hold_text(future_24_entry, row.get("net_bps")),
             "would_have_been_better_to_hold_48h": better_to_hold_text(future_48_entry, row.get("net_bps")),
+            **guard_context,
         })
 
     def swing_avg_numeric_field(rows, field):
@@ -5446,20 +5567,39 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         else None
     )
     swing_filled_soft_exit_before_min_hold_count = len(swing_early_exit_sample_rows)
+    swing_post_fix_early_exit_sample_rows = [
+        row for row in swing_early_exit_sample_rows
+        if row.get("is_post_fix_sample") == "true"
+    ]
+    swing_historical_or_unknown_early_exit_rows = [
+        row for row in swing_early_exit_sample_rows
+        if row.get("is_post_fix_sample") != "true"
+    ]
     swing_blocked_by_min_hold_count = sum(
         1 for row in early_exit_rows
         if row.get("event_type") == "pending_soft_exit_blocked_by_min_hold"
         or row.get("exit_blocked_by_min_hold") == "true"
     )
-    if swing_filled_soft_exit_before_min_hold_count > 0:
+    if swing_post_fix_early_exit_sample_rows:
         add_issue(
             "high",
             "swing_soft_exit_before_min_hold_filled",
-            "A soft swing exit filled before min-hold; router/live guard should have blocked it.",
+            "A post-fix soft swing exit filled before min-hold while the swing ATR early-exit guard was observable at exit.",
             {
-                "filled_soft_exit_before_min_hold_count": swing_filled_soft_exit_before_min_hold_count,
+                "post_fix_filled_soft_exit_before_min_hold_count": len(swing_post_fix_early_exit_sample_rows),
                 "blocked_by_min_hold_count": swing_blocked_by_min_hold_count,
-                "sample_rows": swing_early_exit_sample_rows[:10],
+                "sample_rows": swing_post_fix_early_exit_sample_rows[:10],
+            },
+        )
+    if swing_historical_or_unknown_early_exit_rows:
+        add_issue(
+            "medium",
+            "swing_soft_exit_before_min_hold_historical_or_unknown",
+            "Soft swing exits before min-hold were observed, but the bundle cannot confirm the swing ATR early-exit guard was active at those exit times.",
+            {
+                "historical_or_unknown_count": len(swing_historical_or_unknown_early_exit_rows),
+                "blocked_by_min_hold_count": swing_blocked_by_min_hold_count,
+                "sample_rows": swing_historical_or_unknown_early_exit_rows[:10],
             },
         )
     if (
@@ -6669,7 +6809,7 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     write_csv(
         "summaries/swing_early_exit_audit.csv",
         swing_early_exit_rows,
-        ["symbol", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "hold_hours", "required_hold_hours", "exited_before_min_hold", "exit_priority", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "min_hold_block_reason", "net_bps_at_exit", "future_24h_net_bps_from_entry", "future_48h_net_bps_from_entry", "future_72h_net_bps_from_entry", "future_24h_net_bps_after_exit", "future_48h_net_bps_after_exit", "would_have_been_better_to_hold_24h", "would_have_been_better_to_hold_48h"],
+        ["symbol", "entry_ts", "exit_ts", "entry_px", "exit_px", "exit_reason", "hold_hours", "required_hold_hours", "exited_before_min_hold", "exit_priority", "exit_allowed_before_min_hold", "exit_blocked_by_min_hold", "min_hold_block_reason", "guard_enabled_at_exit", "guard_config_seen_at_exit", "code_version_or_config_fingerprint_at_exit", "is_post_fix_sample", "diagnosis", "net_bps_at_exit", "future_24h_net_bps_from_entry", "future_48h_net_bps_from_entry", "future_72h_net_bps_from_entry", "future_24h_net_bps_after_exit", "future_48h_net_bps_after_exit", "would_have_been_better_to_hold_24h", "would_have_been_better_to_hold_48h"],
     )
     write_csv(
         "summaries/swing_early_exit_outcomes_by_reason.csv",
@@ -6946,6 +7086,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         if flatten_value(row.get("exit_reason")).strip().lower() == "atr_trailing"
     )
     swing_early_exit_medium_issue_present = any(item.get("code") == "swing_early_exit_premature" for item in issues)
+    swing_post_fix_early_exit_count = len(swing_post_fix_early_exit_sample_rows)
+    swing_historical_or_unknown_early_exit_count = len(swing_historical_or_unknown_early_exit_rows)
+    swing_early_exit_historical_or_unknown_issue_present = any(
+        item.get("code") == "swing_soft_exit_before_min_hold_historical_or_unknown"
+        for item in issues
+    )
     high_score_block_category_counts = dict(sorted(Counter(row.get("high_score_block_category") or not_obs for row in high_score_blocked_rows).items()))
     high_score_recent_24h_rows = [
         row for row in high_score_blocked_rows
@@ -7134,11 +7280,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "protect_sideways_normal_entry_medium_issue": bool(protect_sideways_medium_issue_present),
         "swing_early_exit_audit_rows": len(swing_early_exit_rows),
         "swing_early_exit_count": swing_early_exit_count,
+        "swing_post_fix_early_exit_count": swing_post_fix_early_exit_count,
+        "swing_historical_or_unknown_early_exit_count": swing_historical_or_unknown_early_exit_count,
         "swing_blocked_by_min_hold_count": swing_blocked_by_min_hold_count,
         "swing_filled_soft_exit_before_min_hold_count": swing_filled_soft_exit_before_min_hold_count,
         "swing_early_exit_atr_trailing_count": swing_early_exit_atr_trailing_count,
         "swing_early_exit_better_to_hold_24h_rate": swing_early_exit_better_24_rate if swing_early_exit_better_24_rate is not None else not_obs,
         "swing_early_exit_medium_issue": bool(swing_early_exit_medium_issue_present),
+        "swing_early_exit_historical_or_unknown_issue": bool(swing_early_exit_historical_or_unknown_issue_present),
         "high_score_blocked_target_count": len(high_score_blocked_rows),
         "high_score_blocked_labelable_target_count": len(high_score_labelable_rows),
         "high_score_blocked_non_entry_management_count": len(high_score_non_entry_management_rows),
@@ -7706,12 +7855,15 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "## Swing early exit audit",
         f"- audit rows: {len(swing_early_exit_rows)}",
         f"- early exit count: {swing_early_exit_count}",
+        f"- historical early exits: {swing_historical_or_unknown_early_exit_count}",
+        f"- post-fix early exits: {swing_post_fix_early_exit_count}",
         f"- blocked_by_min_hold count: {swing_blocked_by_min_hold_count}",
         f"- filled soft exit before min_hold count: {swing_filled_soft_exit_before_min_hold_count}",
         f"- by reason: {swing_early_exit_by_reason_text}",
         f"- ATR trailing before min_hold: {swing_early_exit_atr_text}",
         f"- better_to_hold_24h_rate: {swing_early_exit_better_24_text}",
         f"- medium issue present: {'yes' if swing_early_exit_medium_issue_present else 'no'}",
+        f"- historical/unknown fix-state issue present: {'yes' if swing_early_exit_historical_or_unknown_issue_present else 'no'}",
         "",
         "## PROTECT SOL exception shadow",
         f"- experiment_name: {flatten_value(find_config_value(effective_data, 'protect_sol_exception_experiment_name') or 'protect_sol_exception_v1')}",

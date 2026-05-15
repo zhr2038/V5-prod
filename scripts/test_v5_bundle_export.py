@@ -1760,6 +1760,7 @@ def fixture_swing_early_exit_root(root):
         "execution:\n"
         "  swing_hold_enabled: true\n"
         "  swing_min_hold_hours: 24\n"
+        "  swing_atr_early_exit_guard_enabled: true\n"
         "  fee_bps: 0\n"
         "  slippage_bps: 0\n",
     )
@@ -1834,6 +1835,73 @@ def fixture_swing_early_exit_root(root):
         (exit_ts + 24 * 3600, 389.0),
         (exit_ts + 48 * 3600, 388.0),
     ])
+    return run_id
+
+
+def fixture_swing_post_fix_early_exit_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    window_end = int(now.timestamp())
+    run_id = now.strftime("%Y%m%d_%H")
+    entry_ts = window_end - 6 * 3600
+    exit_ts = entry_ts + 5 * 3600
+
+    write_text(
+        root / "configs/live_prod.yaml",
+        "execution:\n"
+        "  swing_hold_enabled: true\n"
+        "  swing_min_hold_hours: 24\n"
+        "  swing_atr_early_exit_guard_enabled: true\n"
+        "  fee_bps: 0\n"
+        "  slippage_bps: 0\n",
+    )
+    write_json(root / "reports/effective_live_config.json", {
+        "execution": {
+            "swing_hold_enabled": True,
+            "swing_min_hold_hours": 24,
+            "swing_atr_early_exit_guard_enabled": True,
+        }
+    })
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    run_dir = root / "reports/runs/prod" / run_id
+    write_json(run_dir / "decision_audit.json", {
+        "now_ts": window_end + 15,
+        "window_end_ts": window_end,
+        "config_fingerprint": "post-fix-fp",
+        "current_level": "PROTECT",
+        "regime": "Trending",
+        "router_decisions": [
+            {"symbol": "SOL/USDT", "action": "create", "intent": "OPEN_LONG", "side": "buy", "reason": "normal_entry"},
+            {
+                "symbol": "SOL/USDT",
+                "action": "create",
+                "intent": "CLOSE_LONG",
+                "side": "sell",
+                "reason": "atr_trailing",
+                "source_reason": "atr_trailing",
+                "swing_atr_early_exit_guard_enabled": True,
+                "swing_atr_early_exit_guard_active": True,
+                "config_fingerprint": "post-fix-fp",
+            },
+        ],
+    })
+    write_text(
+        run_dir / "trades.csv",
+        "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt,raw_meta\n"
+        f"{iso(entry_ts)},{run_id},SOL/USDT,OPEN_LONG,buy,1,100,100,0,\"{{\"\"swing_hold_position\"\": true, \"\"swing_min_hold_hours\"\": 24}}\"\n"
+        f"{iso(exit_ts)},{run_id},SOL/USDT,CLOSE_LONG,sell,1,99.98,99.98,0,\n",
+    )
+    write_text(run_dir / "equity.jsonl", "{}\n")
+    write_json(run_dir / "summary.json", {"run_id": run_id})
     return run_id
 
 
@@ -3160,6 +3228,10 @@ def main():
             assert sol["future_48h_net_bps_from_entry"] == "200", sol
             assert sol["future_72h_net_bps_from_entry"] == "pending", sol
             assert sol["would_have_been_better_to_hold_24h"] == "true", sol
+            assert sol["guard_enabled_at_exit"] == "not_observable", sol
+            assert sol["guard_config_seen_at_exit"] == "false", sol
+            assert sol["is_post_fix_sample"] == "not_observable", sol
+            assert sol["diagnosis"] == "historical_or_unknown_fix_state", sol
             bnb = next(row for row in rows if row["symbol"] == "BNB/USDT")
             assert bnb["exit_reason"] == "stop_loss", bnb
             assert bnb["exited_before_min_hold"] == "false", bnb
@@ -3171,16 +3243,59 @@ def main():
                 item for item in issues["issues"]
                 if item.get("severity") == "high" and item.get("code") == "swing_soft_exit_before_min_hold_filled"
             ]
-            assert len(high_issues) == 1, issues
+            assert len(high_issues) == 0, issues
+            historical_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "medium" and item.get("code") == "swing_soft_exit_before_min_hold_historical_or_unknown"
+            ]
+            assert len(historical_issues) == 1, issues
             assert window["swing_early_exit_audit_rows"] == 4, window
             assert window["swing_early_exit_count"] == 3, window
+            assert window["swing_post_fix_early_exit_count"] == 0, window
+            assert window["swing_historical_or_unknown_early_exit_count"] == 3, window
             assert window["swing_filled_soft_exit_before_min_hold_count"] == 3, window
             assert window["swing_blocked_by_min_hold_count"] == 0, window
             assert window["swing_early_exit_atr_trailing_count"] == 1, window
             assert window["swing_early_exit_medium_issue"] is True, window
+            assert window["swing_early_exit_historical_or_unknown_issue"] is True, window
             assert "## Swing early exit audit" in readme, readme
             assert "early exit count: 3" in readme, readme
+            assert "historical early exits: 3" in readme, readme
+            assert "post-fix early exits: 0" in readme, readme
             assert "ATR trailing before min_hold: yes / 1" in readme, readme
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-swing-post-fix-early-exit-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        fixture_swing_post_fix_early_exit_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/swing_early_exit_audit.csv")).read().decode().splitlines()))
+                issues = json.loads(tf.extractfile(extract_member(tf, "summaries/issues_to_fix.json")).read().decode())
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["exit_reason"] == "atr_trailing", row
+            assert row["exited_before_min_hold"] == "true", row
+            assert row["guard_enabled_at_exit"] == "true", row
+            assert row["guard_config_seen_at_exit"] == "true", row
+            assert row["code_version_or_config_fingerprint_at_exit"] == "post-fix-fp", row
+            assert row["is_post_fix_sample"] == "true", row
+            assert row["diagnosis"] == "post_fix_soft_exit_before_min_hold", row
+            high_issues = [
+                item for item in issues["issues"]
+                if item.get("severity") == "high" and item.get("code") == "swing_soft_exit_before_min_hold_filled"
+            ]
+            assert len(high_issues) == 1, issues
+            assert window["swing_post_fix_early_exit_count"] == 1, window
+            assert window["swing_historical_or_unknown_early_exit_count"] == 0, window
+            assert "historical early exits: 0" in readme, readme
+            assert "post-fix early exits: 1" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
