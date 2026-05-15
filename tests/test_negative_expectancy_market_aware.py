@@ -591,9 +591,53 @@ def test_buy_order_meta_includes_expected_edge_score_proxy(tmp_path: Path) -> No
     assert order.meta["final_score"] == 0.59
     assert order.meta["alpha6_score"] == 0.60
     assert order.meta["trend_score"] == 0.90
-    assert order.meta["expected_edge_source"] == "final_score_proxy"
+    assert order.meta["expected_edge_source"] == "score_proxy"
     assert order.meta["expected_edge_bps"] == pytest.approx((0.59 - 0.18) / 0.0030)
     assert order.meta["alpha6_expected_edge_bps_proxy"] == pytest.approx((0.60 - 0.18) / 0.0030)
+
+
+def test_rebalance_buy_order_meta_includes_expected_edge_score_proxy(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.protect_alt_short_cycle_guard_enabled = False
+    cfg.execution.protect_entry_confirm_rounds = 1
+    cfg.execution.cost_aware_entry_enabled = False
+    cfg.execution.cost_aware_score_per_bps = 0.0030
+    cfg.execution.cost_aware_min_score_floor = 0.18
+    _write_auto_risk_level(cfg.execution.order_store_path, "PROTECT")
+    pipe = _build_pipe(cfg, tmp_path, _strategy_payload_for_symbol("BNB/USDT", score=0.60))
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: _selected_symbol_portfolio(
+        "BNB/USDT"
+    )
+    audit = DecisionAudit(run_id="rebalance-buy-edge-meta")
+
+    out = pipe.run(
+        market_data_1h=_market_data(),
+        positions=[
+            Position(
+                symbol="BNB/USDT",
+                qty=0.002,
+                avg_px=650.0,
+                entry_ts="2026-05-11T00:00:00Z",
+                highest_px=660.0,
+                last_update_ts="2026-05-11T01:00:00Z",
+                last_mark_px=650.0,
+                unrealized_pnl_pct=0.0,
+            )
+        ],
+        cash_usdt=100.0,
+        equity_peak_usdt=120.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BNB/USDT": 0.59}),
+        precomputed_regime=_regime(),
+    )
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.intent == "REBALANCE")
+    assert order.side == "buy"
+    assert order.meta["final_score"] == 0.59
+    assert order.meta["alpha6_score"] == 0.60
+    assert order.meta["trend_score"] == 0.90
+    assert order.meta["expected_edge_source"] == "score_proxy"
+    assert order.meta["expected_edge_bps"] == pytest.approx((0.59 - 0.18) / 0.0030)
 
 
 def test_buy_order_meta_keeps_expected_edge_not_observable_when_final_score_missing(tmp_path: Path) -> None:

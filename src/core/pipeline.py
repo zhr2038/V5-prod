@@ -735,7 +735,7 @@ class V5Pipeline:
             score_floor = 0.0
         if expected_edge_bps is None and final_score_f is not None and score_per_bps is not None and score_per_bps > 0:
             expected_edge_bps = max(0.0, float(final_score_f) - float(score_floor)) / float(score_per_bps)
-            expected_edge_source = "final_score_proxy"
+            expected_edge_source = "score_proxy"
 
         meta: Dict[str, Any] = {
             "final_score": float(final_score_f) if final_score_f is not None else not_obs,
