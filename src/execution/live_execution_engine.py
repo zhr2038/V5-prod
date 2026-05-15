@@ -1810,8 +1810,19 @@ class LiveExecutionEngine:
             budget_snapshot = self._snapshot_in_run_budgets()
             payload = self._build_place_payload(o, inst_id=inst_id, cl_ord_id=clid)
             req_store = dict(payload)
+            req_store["_v5_order_lifecycle_submit"] = {
+                "submit_ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "order_type": payload.get("ordType"),
+                "order_px": payload.get("px"),
+                "cl_ord_id": clid,
+            }
             req_store["_v5_reason"] = str(((o.meta or {}).get("reason")) or "")
             order_meta = dict(o.meta or {})
+            lifecycle_meta = order_meta.get("order_lifecycle")
+            if isinstance(lifecycle_meta, dict):
+                lifecycle_meta = dict(lifecycle_meta)
+                lifecycle_meta.update(req_store["_v5_order_lifecycle_submit"])
+                order_meta["order_lifecycle"] = lifecycle_meta
             position_tags = position_tags_from_order_meta(
                 order_meta,
                 entry_px=float(o.signal_price or 0.0),

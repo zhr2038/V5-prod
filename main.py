@@ -2352,12 +2352,14 @@ def main() -> None:
         log.warning(f"ic monitor update failed: {e}")
 
     # F1.2 spread snapshot (records even when no orders/fills)
+    latest_top_of_book = {}
     try:
         from src.reporting.spread_snapshots import append_spread_snapshot
 
         tob = {}
         if hasattr(provider, "fetch_top_of_book"):
             tob = provider.fetch_top_of_book(scored_symbols)
+        latest_top_of_book = dict(tob or {})
 
         selected = set(getattr(out.portfolio, "selected", []) or [])
         rows = []
@@ -2721,6 +2723,40 @@ def main() -> None:
             },
         )
 
+    try:
+        from src.reporting.order_lifecycle import annotate_orders_with_arrival, write_order_lifecycle
+
+        order_lifecycle_count = annotate_orders_with_arrival(
+            orders=list(orders or []),
+            run_id=run_id,
+            decision_ts=_utc_now().isoformat().replace("+00:00", "Z"),
+            top_of_book=latest_top_of_book,
+        )
+        write_order_lifecycle(
+            run_dir=runtime_run_dir,
+            orders=list(orders or []),
+            append_reports=False,
+        )
+        audit.add_note(f"order_lifecycle decision_rows={order_lifecycle_count}")
+        audit.save(str(runtime_run_dir))
+    except Exception as exc:
+        log.warning("order lifecycle decision export failed: %s", exc, exc_info=True)
+        _append_audit_high_issue(
+            audit,
+            runtime_run_dir,
+            {
+                "code": "order_lifecycle_decision_export_failed",
+                "severity": "high",
+                "detail": "failed to write decision-time order_lifecycle.csv for run",
+                "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+                "evidence": {
+                    "run_id": run_id,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:500],
+                },
+            },
+        )
+
     report = exec_engine.execute(orders)
     report.notes = f"regime={out.regime.state} selected={out.portfolio.selected} orders={len(orders)}"
 
@@ -2803,6 +2839,45 @@ def main() -> None:
                     log.info(f"LIVE_CASH_SYNC usdt={usdt_cash:.8f}")
         except Exception as e:
             log.warning(f"live cash sync failed: {e}")
+
+    try:
+        from src.execution.fill_store import derive_fill_store_path
+        from src.reporting.order_lifecycle import write_order_lifecycle
+
+        live_order_store = getattr(exec_engine, "order_store", None)
+        lifecycle_order_store_path = getattr(live_order_store, "path", None)
+        lifecycle_fill_store_path = (
+            derive_fill_store_path(lifecycle_order_store_path)
+            if lifecycle_order_store_path is not None
+            else None
+        )
+        lifecycle_rows = write_order_lifecycle(
+            run_dir=runtime_run_dir,
+            reports_dir=runtime_reports_dir,
+            orders=list(orders or []),
+            order_store_path=lifecycle_order_store_path,
+            fill_store_path=lifecycle_fill_store_path,
+            append_reports=True,
+        )
+        audit.add_note(f"order_lifecycle finalized_rows={len(lifecycle_rows)}")
+        audit.save(str(runtime_run_dir))
+    except Exception as exc:
+        log.warning("order lifecycle finalize export failed: %s", exc, exc_info=True)
+        _append_audit_high_issue(
+            audit,
+            runtime_run_dir,
+            {
+                "code": "order_lifecycle_finalize_export_failed",
+                "severity": "high",
+                "detail": "failed to refresh order_lifecycle.csv after execution/fill sync",
+                "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+                "evidence": {
+                    "run_id": run_id,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:500],
+                },
+            },
+        )
 
     # After execution/fill reconciliation, reread local positions and clear stale
     # active lifecycle state when a close left only exchange dust.

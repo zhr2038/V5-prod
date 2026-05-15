@@ -24,6 +24,10 @@ from src.reporting.candidate_snapshot import (
     CANDIDATE_SNAPSHOT_FIELDS,
     CANDIDATE_SNAPSHOT_SCHEMA_VERSION,
 )
+from src.reporting.order_lifecycle import (
+    ORDER_LIFECYCLE_FIELDS,
+    ORDER_LIFECYCLE_SCHEMA_VERSION,
+)
 from src.reporting.quant_lab_audit import (
     CONTRACT_VERSION,
     EVENT_ID_GENERATION_VERSION,
@@ -571,6 +575,64 @@ def _copy_candidate_snapshot_files(staging: Path, reports: Path) -> None:
         run_id = path.parent.name
         _write_text(
             staging / "raw/recent_runs" / run_id / "candidate_snapshot.csv",
+            _redact_text(path.read_text(encoding="utf-8", errors="replace")),
+        )
+
+
+def _read_order_lifecycle_rows(reports: Path) -> list[Dict[str, Any]]:
+    rows: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_path(path: Path) -> None:
+        try:
+            with path.open("r", encoding="utf-8", newline="") as fh:
+                for row in csv.DictReader(fh):
+                    if not row:
+                        continue
+                    lifecycle_id = str(row.get("lifecycle_id") or "").strip()
+                    run_id = str(row.get("run_id") or path.parent.name or "").strip()
+                    key = lifecycle_id or "|".join(
+                        [
+                            run_id,
+                            str(row.get("cl_ord_id") or ""),
+                            str(row.get("symbol") or ""),
+                            str(row.get("decision_ts") or row.get("submit_ts") or ""),
+                        ]
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    item = {field: row.get(field, "") for field in ORDER_LIFECYCLE_FIELDS}
+                    item["run_id"] = item.get("run_id") or run_id
+                    item["schema_version"] = item.get("schema_version") or ORDER_LIFECYCLE_SCHEMA_VERSION
+                    rows.append(item)
+        except Exception:
+            return
+
+    runs_dir = reports / "runs"
+    if runs_dir.exists():
+        for path in sorted(runs_dir.rglob("order_lifecycle.csv")):
+            add_path(path)
+    aggregate = reports / "order_lifecycle.csv"
+    if aggregate.exists():
+        add_path(aggregate)
+    return rows
+
+
+def _copy_order_lifecycle_files(staging: Path, reports: Path) -> None:
+    aggregate = reports / "order_lifecycle.csv"
+    if aggregate.exists():
+        _write_text(
+            staging / "raw/reports/order_lifecycle.csv",
+            _redact_text(aggregate.read_text(encoding="utf-8", errors="replace")),
+        )
+    runs_dir = reports / "runs"
+    if not runs_dir.exists():
+        return
+    for path in sorted(runs_dir.rglob("order_lifecycle.csv")):
+        run_id = path.parent.name
+        _write_text(
+            staging / "raw/recent_runs" / run_id / "order_lifecycle.csv",
             _redact_text(path.read_text(encoding="utf-8", errors="replace")),
         )
 
@@ -1582,6 +1644,7 @@ def export_v5_bundle(
     mode_rows = _build_mode_audit_rows(usage_rows)
     trade_metrics_rows, fill_metrics_rows, mismatch_rows = _build_trade_bundle_rows(reports)
     candidate_rows = _read_candidate_snapshot_rows(reports)
+    order_lifecycle_rows = _read_order_lifecycle_rows(reports)
     summary_high_issue_count = len([row for row in mismatch_rows if str(row.get("high_issue")) == "true"])
     run_summary_invalid = summary_high_issue_count > 0
     manifest_meta = _manifest_metadata(root, reports, usage_rows)
@@ -1602,7 +1665,9 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/trade_metrics.csv", TRADE_METRICS_FIELDS, trade_metrics_rows)
         _write_csv(staging / "summaries/fill_metrics.csv", FILL_METRICS_FIELDS, fill_metrics_rows)
         _write_csv(staging / "summaries/candidate_snapshot.csv", CANDIDATE_SNAPSHOT_FIELDS, candidate_rows)
+        _write_csv(staging / "summaries/order_lifecycle.csv", ORDER_LIFECYCLE_FIELDS, order_lifecycle_rows)
         _copy_candidate_snapshot_files(staging, reports)
+        _copy_order_lifecycle_files(staging, reports)
         _write_csv(
             staging / "reports/summary_trade_count_mismatch.csv",
             SUMMARY_TRADE_COUNT_MISMATCH_FIELDS,
@@ -1623,6 +1688,7 @@ def export_v5_bundle(
                 "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
                 "run_summary_invalid": run_summary_invalid,
                 "candidate_snapshot_rows": len(candidate_rows),
+                "order_lifecycle_rows": len(order_lifecycle_rows),
             }
         )
         _write_text(staging / "summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2))
@@ -1679,6 +1745,8 @@ def export_v5_bundle(
             "summary_metrics_version": SUMMARY_METRICS_VERSION,
             "candidate_snapshot_schema_version": CANDIDATE_SNAPSHOT_SCHEMA_VERSION,
             "candidate_snapshot_rows": len(candidate_rows),
+            "order_lifecycle_schema_version": ORDER_LIFECYCLE_SCHEMA_VERSION,
+            "order_lifecycle_rows": len(order_lifecycle_rows),
             "run_summary_invalid": run_summary_invalid,
             "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
             "sanity_checks": {

@@ -204,6 +204,16 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (run_dir / "order_lifecycle.csv").write_text(
+        "\n".join(
+            [
+                "schema_version,lifecycle_id,run_id,ts_utc,symbol,normalized_symbol,side,intent,order_state,decision_ts,signal_price,arrival_bid,arrival_ask,arrival_mid,spread_bps_at_decision,submit_ts,order_type,order_px,cl_ord_id,exchange_order_id,first_fill_ts,last_fill_ts,fill_px,avg_fill_px,filled_qty,fee,fee_ccy,fee_usdt,notional_usdt,requested_notional_usdt,trade_ids,fill_count",
+                "v5.order_lifecycle.v1,olc_r1_bnb,r1,2026-05-11T13:00:04Z,BNB/USDT,BNB-USDT,buy,OPEN_LONG,FILLED,2026-05-11T13:00:00Z,600,599,601,600,33.3333333333,2026-05-11T13:00:01Z,market,null,clid-1,okx-1,2026-05-11T13:00:04Z,2026-05-11T13:00:04Z,602,602,0.02,-0.01204,USDT,0.01204,12.04,12,trade-1,1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
     sha_path = Path(str(bundle) + ".sha256")
@@ -225,7 +235,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/trade_metrics.csv" in names
         assert "summaries/fill_metrics.csv" in names
         assert "summaries/candidate_snapshot.csv" in names
+        assert "summaries/order_lifecycle.csv" in names
         assert "raw/recent_runs/r1/candidate_snapshot.csv" in names
+        assert "raw/recent_runs/r1/order_lifecycle.csv" in names
         assert "reports/summary_trade_count_mismatch.csv" in names
         assert "summaries/window_summary.json" in names
         assert "raw/state/quant_lab_mode.json" in names
@@ -241,6 +253,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         trade_metrics = list(csv.DictReader(tf.extractfile("summaries/trade_metrics.csv").read().decode("utf-8").splitlines()))
         fill_metrics = list(csv.DictReader(tf.extractfile("summaries/fill_metrics.csv").read().decode("utf-8").splitlines()))
         candidate_snapshot = list(csv.DictReader(tf.extractfile("summaries/candidate_snapshot.csv").read().decode("utf-8").splitlines()))
+        order_lifecycle = list(csv.DictReader(tf.extractfile("summaries/order_lifecycle.csv").read().decode("utf-8").splitlines()))
         mismatch_rows = list(csv.DictReader(tf.extractfile("reports/summary_trade_count_mismatch.csv").read().decode("utf-8").splitlines()))
         manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
         window = json.loads(tf.extractfile("summaries/window_summary.json").read().decode("utf-8"))
@@ -319,15 +332,21 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert fill_metrics[0]["normalized_symbol"] == "BNB-USDT"
         assert candidate_snapshot[0]["candidate_id"] == "cand_r1_bnb"
         assert candidate_snapshot[0]["symbol"] == "BNB/USDT"
+        assert order_lifecycle[0]["lifecycle_id"] == "olc_r1_bnb"
+        assert order_lifecycle[0]["arrival_mid"] == "600"
+        assert order_lifecycle[0]["avg_fill_px"] == "602"
         assert mismatch_rows[0]["high_issue"] == "true"
         assert manifest["run_summary_invalid"] is True
         assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v1"
         assert manifest["candidate_snapshot_rows"] == 1
+        assert manifest["order_lifecycle_schema_version"] == "v5.order_lifecycle.v1"
+        assert manifest["order_lifecycle_rows"] == 1
         assert manifest["summary_trade_count_mismatch_high_issue_count"] == 1
         assert manifest["trade_export_schema_version"] == "v5.trade_export.v1"
         assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1"
         assert window["fill_metrics_rows"] == 1
         assert window["candidate_snapshot_rows"] == 1
+        assert window["order_lifecycle_rows"] == 1
         assert config_audit["mode_source"] == "runtime_override"
         assert "api_env_path_present" in config_audit
         assert "api_env_secure_permissions" in config_audit
