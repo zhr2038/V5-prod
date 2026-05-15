@@ -1175,6 +1175,7 @@ def _window_summary(
     permission_rows: Optional[list[Dict[str, Any]]] = None,
     *,
     current_source_snapshot_hash: Optional[str] = None,
+    ml_live_fields: Optional[Mapping[str, Any]] = None,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     latest_permission = None
@@ -1309,8 +1310,13 @@ def _window_summary(
         (row.get("cost_contract_version") or row.get("contract_version") for row in reversed(cost_event_rows) if row.get("cost_contract_version") or row.get("contract_version")),
         CONTRACT_VERSION,
     )
+    ml_fields = dict(ml_live_fields or {})
     return {
         "quant_lab_enabled": bool(rows or request_rows),
+        "ml_live_overlay_status": ml_fields.get("ml_live_overlay_status", "not_observable"),
+        "ml_factor_enabled": ml_fields.get("ml_factor_enabled", "not_observable"),
+        "collect_ml_training_data": ml_fields.get("collect_ml_training_data", "not_observable"),
+        "ml_research_use_stable_universe": ml_fields.get("ml_research_use_stable_universe", "not_observable"),
         "quant_lab_mode": latest_mode,
         "quant_lab_mode_source": latest_mode_source,
         "quant_lab_requested_mode": latest_requested_mode or latest_mode,
@@ -1562,6 +1568,76 @@ def _find_nested_value(obj: Any, names: Iterable[str]) -> Any:
     return "not_observable"
 
 
+def _find_nested_path(obj: Any, path: Iterable[str]) -> Any:
+    current = obj
+    for key in path:
+        if not isinstance(current, Mapping) or key not in current:
+            return "not_observable"
+        current = current.get(key)
+    return current if current not in (None, "") else "not_observable"
+
+
+def _bool_text(value: Any) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return "true"
+    if text in {"0", "false", "no", "off"}:
+        return "false"
+    return text if text else "not_observable"
+
+
+def _ml_effective_live_fields(effective_config: Any) -> Dict[str, str]:
+    effective = effective_config if isinstance(effective_config, Mapping) else {}
+    ml_enabled = _bool_text(
+        next(
+            (
+                value
+                for value in (
+                    _find_nested_path(effective, ("ml_factor_enabled",)),
+                    _find_nested_path(effective, ("alpha", "ml_factor_enabled")),
+                    _find_nested_path(effective, ("alpha", "ml_factor", "enabled")),
+                )
+                if value != "not_observable"
+            ),
+            "not_observable",
+        )
+    )
+    collect_training = _bool_text(
+        next(
+            (
+                value
+                for value in (
+                    _find_nested_path(effective, ("collect_ml_training_data",)),
+                    _find_nested_path(effective, ("execution", "collect_ml_training_data")),
+                )
+                if value != "not_observable"
+            ),
+            "not_observable",
+        )
+    )
+    stable_universe = _bool_text(
+        next(
+            (
+                value
+                for value in (
+                    _find_nested_path(effective, ("ml_research_use_stable_universe",)),
+                    _find_nested_path(effective, ("execution", "ml_research_use_stable_universe")),
+                )
+                if value != "not_observable"
+            ),
+            "not_observable",
+        )
+    )
+    return {
+        "ml_live_overlay_status": "disabled_in_live_prod" if ml_enabled == "false" else "not_observable",
+        "ml_factor_enabled": ml_enabled,
+        "collect_ml_training_data": collect_training,
+        "ml_research_use_stable_universe": stable_universe,
+    }
+
+
 def _find_yaml_scalar(text: str, names: Iterable[str]) -> str:
     for name in names:
         match = re.search(rf"(?m)^\s*{re.escape(name)}\s*:\s*([^#\n]+)", text or "")
@@ -1679,6 +1755,7 @@ def export_v5_bundle(
             compliance_rows,
             permission_rows,
             current_source_snapshot_hash=str(manifest_meta.get("source_snapshot_hash") or "not_observable"),
+            ml_live_fields=_ml_effective_live_fields(_read_json_obj(reports / "effective_live_config.json")),
         )
         window_summary.update(
             {

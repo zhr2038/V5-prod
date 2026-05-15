@@ -1362,8 +1362,17 @@ def _negative_expectancy_release_effective_config(cfg: AppConfig) -> Dict[str, A
 
 def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
     diagnostics = getattr(cfg, "diagnostics", None)
+    ml_factor_cfg = getattr(cfg.alpha, "ml_factor", None)
+    ml_factor_enabled = bool(getattr(ml_factor_cfg, "enabled", False))
+    collect_ml_training_data = bool(getattr(cfg.execution, "collect_ml_training_data", False))
+    ml_research_use_stable_universe = bool(
+        getattr(cfg.execution, "ml_research_use_stable_universe", False)
+    )
     return {
         "symbols": list(cfg.symbols or []),
+        "ml_factor_enabled": ml_factor_enabled,
+        "collect_ml_training_data": collect_ml_training_data,
+        "ml_research_use_stable_universe": ml_research_use_stable_universe,
         "universe": {
             "enabled": bool(getattr(cfg.universe, "enabled", False)),
             "use_universe_symbols": bool(getattr(cfg.universe, "use_universe_symbols", False)),
@@ -1372,10 +1381,16 @@ def _effective_live_config_payload(cfg: AppConfig) -> Dict[str, Any]:
             "alpha158_overlay": {
                 "enabled": bool(getattr(getattr(cfg.alpha, "alpha158_overlay", None), "enabled", False)),
             },
+            "ml_factor": {
+                "enabled": ml_factor_enabled,
+            },
+            "ml_factor_enabled": ml_factor_enabled,
             "long_top_pct": float(getattr(cfg.alpha, "long_top_pct", 0.0) or 0.0),
             "min_score_threshold": float(getattr(cfg.alpha, "min_score_threshold", 0.0) or 0.0),
         },
         "execution": {
+            "collect_ml_training_data": collect_ml_training_data,
+            "ml_research_use_stable_universe": ml_research_use_stable_universe,
             "fee_bps": float(getattr(cfg.execution, "fee_bps", 0.0) or 0.0),
             "cost_aware_roundtrip_cost_bps": (
                 None

@@ -53,7 +53,20 @@ def fixture_root(root):
         "negative_expectancy_cooldown",
     ):
         write_json(root / "reports" / f"{name}.json", {"ok": True})
-    write_json(root / "reports/effective_live_config.json", {"btc_leadership_probe_enabled": True})
+    write_json(
+        root / "reports/effective_live_config.json",
+        {
+            "btc_leadership_probe_enabled": True,
+            "ml_factor_enabled": False,
+            "collect_ml_training_data": False,
+            "ml_research_use_stable_universe": False,
+            "alpha": {"ml_factor": {"enabled": False}},
+            "execution": {
+                "collect_ml_training_data": False,
+                "ml_research_use_stable_universe": False,
+            },
+        },
+    )
     write_text(root / "logs/v5_runtime.log", "fixture log\n")
 
     decisions = [
@@ -2802,9 +2815,13 @@ def main():
             assert window["latest_24h_roundtrip_count"] == 0, window
             assert window["last_72h_trade_count"] == 0, window
             assert window["last_72h_roundtrip_count"] == 0, window
+            assert window["ml_live_overlay_status"] == "disabled_in_live_prod", window
+            assert window["ml_factor_enabled"] == "false", window
+            assert window["collect_ml_training_data"] == "false", window
             assert "是否真实成交: no / 0" in readme, readme
             assert "closed roundtrip gross/net bps: not_applicable_no_trades" in readme, readme
             assert "probe lifecycle: not_applicable_no_probe_trade" in readme, readme
+            assert "ml_live_overlay_status: disabled_in_live_prod" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)

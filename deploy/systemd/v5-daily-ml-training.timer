@@ -1,5 +1,8 @@
 [Unit]
-Description=Run V5 Daily ML Training at 00:30
+Description=Run V5 Daily ML Training at 00:30 (research-only; disabled in live_prod)
+# ML training is kept for offline research and is not active in live_prod.
+# Create /etc/v5-enable-ml-research-timers only for an explicit research host opt-in.
+ConditionPathExists=/etc/v5-enable-ml-research-timers
 
 [Timer]
 OnCalendar=*-*-* 00:30:00

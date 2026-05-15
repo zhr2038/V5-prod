@@ -347,6 +347,27 @@ def test_alpha_engine_latest_model_artifact_mtime_ignores_newer_config_file(tmp_
     assert latest_mtime_ns == model_file.stat().st_mtime_ns
 
 
+def test_disabled_ml_overlay_does_not_resolve_model_pointer(monkeypatch):
+    cfg = AlphaConfig()
+    cfg.ml_factor.enabled = False
+    engine = AlphaEngine(cfg)
+
+    def fail_resolve(*args, **kwargs):
+        raise AssertionError("disabled ML overlay must not resolve model paths")
+
+    monkeypatch.setattr(engine, "_resolve_repo_path", fail_resolve)
+
+    overlay, raw_preds, status = engine._compute_ml_overlay_scores({"BTC/USDT": object()})
+
+    assert overlay == {}
+    assert raw_preds == {}
+    assert engine._ml_model is None
+    assert status["configured_enabled"] is False
+    assert status["overlay_mode"] == "disabled"
+    assert status["reason"] == "disabled_in_live_prod"
+    assert status["prediction_count"] == 0
+
+
 def test_alpha6_calculate_factors_prefers_latest_row_when_dataframe_is_unsorted():
     strategy = Alpha6FactorStrategy(
         config={

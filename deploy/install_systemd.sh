@@ -143,27 +143,27 @@ if [[ "$USER_MODE" == "1" ]]; then
       v5-daily.timer v5-daily.service \
       v5-cost-rollup.timer v5-cost-rollup.service \
       v5-spread-rollup.timer v5-spread-rollup.service >/dev/null 2>&1 || true
-    # Keep the tuned shadow timer intact. It now writes into an isolated workspace
-    # and reports namespace, so production-only deploys should not tear it down.
-    systemctl --user disable --now v5-shadow-regime.user.timer v5-shadow-regime.user.service >/dev/null 2>&1 || true
+    systemctl --user disable --now \
+      v5-shadow-regime.user.timer v5-shadow-regime.user.service \
+      v5-daily-ml-training.timer v5-daily-ml-training.service \
+      v5-model-promotion-gate.timer v5-model-promotion-gate.service \
+      v5-shadow-tuned-xgboost.user.timer v5-shadow-tuned-xgboost.user.service >/dev/null 2>&1 || true
     systemctl --user enable --now v5-web-dashboard.service
     systemctl --user enable --now v5-trade-monitor.timer
     systemctl --user enable --now v5-sentiment-collect.timer
     systemctl --user enable --now v5-auto-risk-eval.timer
-    systemctl --user enable --now v5-daily-ml-training.timer
-    systemctl --user enable --now v5-model-promotion-gate.timer
     systemctl --user enable --now v5-reconcile.timer
     systemctl --user enable --now v5-ledger.timer
     systemctl --user enable --now v5-cost-rollup-real.user.timer
     systemctl --user enable --now v5-spread-rollup.timer
-    systemctl --user enable --now v5-shadow-tuned-xgboost.user.timer
+    echo "[install_systemd] ML training/promotion/shadow XGBoost timers are research-only and disabled in live_prod."
     if [[ "$ENABLE_PROD_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-prod.user.timer
     fi
     if [[ "$ENABLE_EVENT_DRIVEN_TIMER" == "1" ]]; then
       systemctl --user enable --now v5-event-driven.timer
     fi
-    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|daily-ml-training|model-promotion-gate|reconcile|ledger|cost-rollup-real|spread-rollup|shadow-tuned-xgboost)" || true
+    systemctl --user list-timers --all | grep -E "v5-(prod|event-driven|sentiment-collect|auto-risk-eval|reconcile|ledger|cost-rollup-real|spread-rollup)" || true
   else
     systemctl --user enable --now v5-hourly.timer
     systemctl --user enable --now v5-daily.timer

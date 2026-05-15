@@ -78,7 +78,7 @@ alpha:
   multi_strategy_score_transform_scale: 1.0
 
   ml_factor:
-    enabled: true
+    enabled: false
     ml_weight: 0.20
     traditional_weight: 0.80
     online_control_enabled: true
@@ -246,8 +246,8 @@ diagnostics:
 execution:
   mode: live
   dry_run: false
-  collect_ml_training_data: true
-  ml_research_use_stable_universe: true
+  collect_ml_training_data: false
+  ml_research_use_stable_universe: false
   ml_research_universe_path: reports/universe_cache.json
   ml_research_include_config_symbols: true
   ml_research_lookback_bars: 600

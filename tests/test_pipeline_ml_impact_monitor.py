@@ -52,3 +52,36 @@ def test_ml_impact_monitor_uses_latest_close_when_market_series_is_unsorted(tmp_
 
     payload = json.loads(state_path.read_text(encoding="utf-8"))
     assert payload["closes"]["BTC/USDT"] == 120.0
+
+
+def test_ml_disabled_skips_collector_and_writes_disabled_audit_status(tmp_path: Path) -> None:
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.order_store_path = str(tmp_path / "orders.sqlite")
+    cfg.alpha.ml_factor.enabled = False
+    cfg.execution.collect_ml_training_data = False
+
+    pipe = V5Pipeline(cfg)
+
+    assert pipe.data_collector is None
+
+    alpha = AlphaSnapshot(
+        raw_factors={},
+        z_factors={},
+        scores={"BTC/USDT": 0.5},
+        base_scores={"BTC/USDT": 0.5},
+        ml_runtime={
+            "configured_enabled": False,
+            "overlay_mode": "disabled",
+            "reason": "disabled_in_live_prod",
+            "prediction_count": 0,
+        },
+    )
+
+    overview = pipe._build_ml_audit_overview(alpha)
+
+    assert overview["configured_enabled"] is False
+    assert overview["live_active"] is False
+    assert overview["prediction_count"] == 0
+    assert overview["active_symbols"] == 0
+    assert overview["overlay_mode"] == "disabled"
+    assert overview["reason"] == "disabled_in_live_prod"

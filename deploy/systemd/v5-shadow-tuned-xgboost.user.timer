@@ -1,5 +1,8 @@
 [Unit]
-Description=Run V5 tuned XGBoost shadow hourly
+Description=Run V5 tuned XGBoost shadow hourly (research-only; disabled in live_prod)
+# Shadow tuned XGBoost is kept for offline research and is not active in live_prod.
+# Create /etc/v5-enable-ml-research-timers only for an explicit research host opt-in.
+ConditionPathExists=/etc/v5-enable-ml-research-timers
 
 [Timer]
 OnCalendar=*-*-* *:03:30

@@ -496,17 +496,21 @@ class V5Pipeline:
         )
         
         # Phase 3: 初始化ML数据收集器（传入data_provider以便从API获取历史K线）
-        from src.execution.ml_data_collector import MLDataCollector
-        self.data_collector = MLDataCollector(
-            db_path=str(
-                derive_runtime_named_artifact_path(
-                    runtime_order_store_path,
-                    "ml_training_data",
-                    ".db",
-                ).resolve()
-            ),
-            data_provider=self._data_provider,
-        )
+        self.data_collector = None
+        if bool(getattr(cfg.execution, "collect_ml_training_data", True)):
+            # ML collection remains available for offline research, but live_prod can remove it from the main path.
+            from src.execution.ml_data_collector import MLDataCollector
+
+            self.data_collector = MLDataCollector(
+                db_path=str(
+                    derive_runtime_named_artifact_path(
+                        runtime_order_store_path,
+                        "ml_training_data",
+                        ".db",
+                    ).resolve()
+                ),
+                data_provider=self._data_provider,
+            )
 
     def _record_live_whitelist_drop(
         self,
@@ -3339,6 +3343,8 @@ class V5Pipeline:
 
         payloads: Dict[str, Dict[str, Any]] = {}
         missing_symbols: list[str] = []
+        if self.data_collector is None:
+            return payloads, []
         for sym in target_symbols:
             payload = None
             series = market_data_1h.get(sym)
@@ -3904,7 +3910,27 @@ class V5Pipeline:
         overlay_mode = str(ml_runtime.get("overlay_mode") or "disabled")
         prediction_count = int(ml_runtime.get("prediction_count", 0) or 0)
         if not configured_enabled and not promoted and not live_active and not overlay_scores and not overlay_raw_scores:
-            return {}
+            return {
+                "configured_enabled": False,
+                "promoted": False,
+                "live_active": False,
+                "prediction_count": 0,
+                "active_symbols": 0,
+                "coverage_count": 0,
+                "ml_weight": float(ml_runtime.get("ml_weight", 0.0) or 0.0),
+                "configured_ml_weight": float(
+                    ml_runtime.get("configured_ml_weight", ml_runtime.get("ml_weight", 0.0)) or 0.0
+                ),
+                "effective_ml_weight": 0.0,
+                "overlay_mode": "disabled",
+                "online_control_reason": "",
+                "reason": str(ml_runtime.get("reason") or "disabled_in_live_prod"),
+                "last_update": ml_runtime.get("ts"),
+                "impact_status": "disabled",
+                "last_step": {},
+                "rolling_24h": {},
+                "rolling_48h": {},
+            }
 
         base_rank = self._score_rank_map(base_scores)
         final_rank = self._score_rank_map(final_scores)

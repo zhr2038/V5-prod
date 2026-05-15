@@ -105,13 +105,22 @@ The production-only systemd install covers:
 - `v5-cost-rollup-real.user.timer`
 
 Operational timers for sentiment refresh, reconcile, and ledger are enabled by default.
+ML training, model promotion, and tuned XGBoost shadow timers are research-only and remain disabled in `live_prod`.
 
 Live trading timers remain explicit operator choices:
 
 - `--enable-prod-timer`
 - `--enable-event-driven-timer`
 
-## Optional Shadow Deployment
+## Optional Research-Only ML Shadow Deployment
+
+The ML shadow workspace and scripts are retained for offline research only. They are not part of the `live_prod` execution path, and the default production install disables:
+
+- `v5-daily-ml-training.timer`
+- `v5-model-promotion-gate.timer`
+- `v5-shadow-tuned-xgboost.user.timer`
+
+Only use this section on an explicitly approved research host. Do not enable these timers on `live_prod` unless ML live overlay is explicitly re-approved.
 
 Use a separate workspace on the production server for long-running dry-run observation.
 This avoids mixing shadow `reports/` state with the live trading workspace.
@@ -139,7 +148,7 @@ ln -sfn /home/ubuntu/clawd/v5-prod/.venv /home/ubuntu/clawd/v5-shadow-tuned-xgbo
 ln -sfn /home/ubuntu/clawd/v5-prod/.env /home/ubuntu/clawd/v5-shadow-tuned-xgboost/.env
 ```
 
-Then render and enable only the shadow timer:
+Then render the shadow timer. It remains inert unless `/etc/v5-enable-ml-research-timers` exists on that research host:
 
 ```bash
 uid=$(id -u ubuntu)
@@ -154,8 +163,7 @@ sudo -u ubuntu env \
       --root /home/ubuntu/clawd/v5-shadow-tuned-xgboost \
       --mapping v5-shadow-tuned-xgboost.user.service=v5-shadow-tuned-xgboost.user.service \
       --mapping v5-shadow-tuned-xgboost.user.timer=v5-shadow-tuned-xgboost.user.timer &&
-    systemctl --user daemon-reload &&
-    systemctl --user enable --now v5-shadow-tuned-xgboost.user.timer
+    systemctl --user daemon-reload
   '
 ```
 

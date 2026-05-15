@@ -1,7 +1,10 @@
 [Unit]
-Description=V5 tuned XGBoost shadow hourly evaluation
+Description=V5 tuned XGBoost shadow hourly evaluation (research-only; disabled in live_prod)
 Wants=network-online.target
 After=network-online.target
+# Shadow tuned XGBoost is kept for offline research and is not active in live_prod.
+# Create /etc/v5-enable-ml-research-timers only for an explicit research host opt-in.
+ConditionPathExists=/etc/v5-enable-ml-research-timers
 
 [Service]
 Type=oneshot

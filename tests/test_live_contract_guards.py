@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import main as main_module
+from configs.loader import load_config
 from configs.schema import AppConfig, RegimeState
 from src.alpha.alpha_engine import AlphaSnapshot
 from src.core.models import MarketSeries, Order
@@ -301,8 +302,11 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     cfg.universe.enabled = False
     cfg.universe.use_universe_symbols = False
     cfg.alpha.alpha158_overlay.enabled = False
+    cfg.alpha.ml_factor.enabled = False
     cfg.alpha.long_top_pct = 0.50
     cfg.alpha.min_score_threshold = 0.10
+    cfg.execution.collect_ml_training_data = False
+    cfg.execution.ml_research_use_stable_universe = False
     cfg.execution.fee_bps = 10
     cfg.execution.cost_aware_roundtrip_cost_bps = 30
     cfg.execution.rank_exit_max_rank = 5
@@ -333,8 +337,15 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["universe"]["enabled"] is False
     assert payload["universe"]["use_universe_symbols"] is False
     assert payload["alpha"]["alpha158_overlay"]["enabled"] is False
+    assert payload["ml_factor_enabled"] is False
+    assert payload["collect_ml_training_data"] is False
+    assert payload["ml_research_use_stable_universe"] is False
+    assert payload["alpha"]["ml_factor"]["enabled"] is False
+    assert payload["alpha"]["ml_factor_enabled"] is False
     assert payload["alpha"]["long_top_pct"] == pytest.approx(0.50)
     assert payload["alpha"]["min_score_threshold"] == pytest.approx(0.10)
+    assert payload["execution"]["collect_ml_training_data"] is False
+    assert payload["execution"]["ml_research_use_stable_universe"] is False
     assert payload["execution"]["fee_bps"] == pytest.approx(10.0)
     assert payload["execution"]["cost_aware_roundtrip_cost_bps"] == pytest.approx(30.0)
     assert payload["execution"]["rank_exit_max_rank"] == 5
@@ -428,6 +439,7 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["btc_leadership_probe_allow_single_negative_cycle_bypass"] is True
     assert payload["execution"]["btc_leadership_probe_max_negative_cycles_to_bypass"] == 1
     assert payload["execution"]["btc_leadership_probe_min_net_expectancy_bps_to_bypass"] == pytest.approx(-120.0)
+
     assert payload["execution"]["btc_leadership_probe_time_stop_hours"] == 8
     assert payload["execution"]["probe_exit_enabled"] is True
     assert payload["execution"]["probe_take_profit_net_bps"] == pytest.approx(80.0)
@@ -491,6 +503,14 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["negative_expectancy_release_start_ts"] == 2_000_000_000
     assert payload["execution"]["negative_expectancy_release_start_ts_status"] == "ok"
     assert payload["execution"]["negative_expectancy_release_start_ts_warning"] == ""
+
+
+def test_live_prod_disables_ml_live_path() -> None:
+    cfg = load_config(str(ROOT / "configs" / "live_prod.yaml"), env_path=None)
+
+    assert cfg.alpha.ml_factor.enabled is False
+    assert cfg.execution.collect_ml_training_data is False
+    assert cfg.execution.ml_research_use_stable_universe is False
 
 
 def test_write_effective_live_config_recovers_not_observable_release_start(

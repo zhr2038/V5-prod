@@ -1,5 +1,8 @@
 [Unit]
-Description=Run V5 ML Promotion Gate at 00:40
+Description=Run V5 ML Promotion Gate at 00:40 (research-only; disabled in live_prod)
+# ML promotion is kept for offline research and is not active in live_prod.
+# Create /etc/v5-enable-ml-research-timers only for an explicit research host opt-in.
+ConditionPathExists=/etc/v5-enable-ml-research-timers
 
 [Timer]
 OnCalendar=*-*-* 00:40:00

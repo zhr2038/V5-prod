@@ -7260,6 +7260,62 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         sum(quant_lab_shadow_net_pnl_values) if quant_lab_shadow_net_pnl_values else None
     )
 
+    effective_config_for_ml = load_json(OUT / "raw" / "reports" / "effective_live_config.json")
+    if not isinstance(effective_config_for_ml, dict):
+        effective_config_for_ml = {}
+
+    def nested_value(obj, *path):
+        current = obj
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                return not_obs
+            current = current.get(key)
+        return current if current not in (None, "") else not_obs
+
+    ml_factor_enabled = bool_text(
+        first_observed(
+            nested_value(effective_config_for_ml, "ml_factor_enabled"),
+            nested_value(effective_config_for_ml, "alpha", "ml_factor_enabled"),
+            nested_value(effective_config_for_ml, "alpha", "ml_factor", "enabled"),
+            not_obs,
+        )
+    )
+    collect_ml_training_data = bool_text(
+        first_observed(
+            nested_value(effective_config_for_ml, "collect_ml_training_data"),
+            nested_value(effective_config_for_ml, "execution", "collect_ml_training_data"),
+            not_obs,
+        )
+    )
+    ml_research_use_stable_universe = bool_text(
+        first_observed(
+            nested_value(effective_config_for_ml, "ml_research_use_stable_universe"),
+            nested_value(effective_config_for_ml, "execution", "ml_research_use_stable_universe"),
+            not_obs,
+        )
+    )
+    latest_ml_signal_overview = {}
+    for audit in reversed(recent_24_decisions or []):
+        overview = audit.get("ml_signal_overview") if isinstance(audit, dict) else None
+        if isinstance(overview, dict) and overview:
+            latest_ml_signal_overview = overview
+            break
+    if ml_factor_enabled == "false":
+        ml_live_overlay_status = "disabled_in_live_prod"
+    elif latest_ml_signal_overview:
+        if bool_text(latest_ml_signal_overview.get("live_active")) == "true":
+            ml_live_overlay_status = "active"
+        else:
+            ml_live_overlay_status = flatten_value(
+                first_observed(
+                    latest_ml_signal_overview.get("reason"),
+                    latest_ml_signal_overview.get("overlay_mode"),
+                    not_obs,
+                )
+            )
+    else:
+        ml_live_overlay_status = "not_observable"
+
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
         "window_hours": 72,
@@ -7275,6 +7331,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "trade_read_error_count": trade_read_errors,
         "raw_trade_rows": raw_trade_file_rows,
         "trade_rows": len(trade_rows),
+        "ml_live_overlay_status": ml_live_overlay_status,
+        "ml_factor_enabled": ml_factor_enabled,
+        "collect_ml_training_data": collect_ml_training_data,
+        "ml_research_use_stable_universe": ml_research_use_stable_universe,
         "latest_24h_trade_count": latest_24h_trade_count if has_trade_data else not_obs,
         "latest_24h_roundtrip_count": latest_24h_roundtrip_count if has_trade_data else not_obs,
         "last_72h_trade_count": last_72h_trade_count if has_trade_data else not_obs,
@@ -7912,6 +7972,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- strategy_version: {provenance_meta.get('strategy_version', not_obs)}",
         f"- strategy hash: {strategy_hash_text}",
         f"- quant_lab_contract_version: {provenance_meta.get('quant_lab_contract_version', not_obs)}",
+        "",
+        "## ML live overlay",
+        f"- ml_live_overlay_status: {window_summary.get('ml_live_overlay_status', not_obs)}",
+        f"- ml_factor_enabled: {window_summary.get('ml_factor_enabled', not_obs)}",
+        f"- collect_ml_training_data: {window_summary.get('collect_ml_training_data', not_obs)}",
+        f"- ml_research_use_stable_universe: {window_summary.get('ml_research_use_stable_universe', not_obs)}",
+        "- live_prod status: disabled_in_live_prod means ML overlay and training timers are off; research scripts remain available offline.",
         "",
         "## Quant-lab cost readiness",
         f"- global_default_cost_count_total_72h: {window_summary.get('global_default_cost_count', not_obs)}",

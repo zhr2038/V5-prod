@@ -903,10 +903,48 @@ def _build_ml_signal_overview(
     promotion = _load_json_payload(
         derive_runtime_named_artifact_path(orders_db or (reports_dir / 'orders.sqlite'), 'model_promotion_decision', '.json')
     )
+    effective_config = _load_json_payload(reports_dir / 'effective_live_config.json')
     snapshot = _load_json_payload(reports_dir / 'alpha_snapshot.json')
     impact_summary = _load_json_payload(
         derive_runtime_named_artifact_path(orders_db or (reports_dir / 'orders.sqlite'), 'ml_overlay_impact', '.json')
     )
+
+    def _nested_config(*path: str) -> Any:
+        current: Any = effective_config
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current.get(key)
+        return current
+
+    ml_enabled_value = (
+        _nested_config('ml_factor_enabled')
+        if _nested_config('ml_factor_enabled') is not None
+        else _nested_config('alpha', 'ml_factor', 'enabled')
+    )
+    if ml_enabled_value is not None and not _coerce_bool(ml_enabled_value):
+        return {
+            'configured_enabled': False,
+            'promoted': False,
+            'live_active': False,
+            'overlay_mode': 'disabled',
+            'prediction_count': 0,
+            'active_symbols': 0,
+            'coverage_count': 0,
+            'ml_weight': _coerce_float(runtime.get('ml_weight', 0.0)),
+            'configured_ml_weight': _coerce_float(runtime.get('configured_ml_weight', runtime.get('ml_weight', 0.0))),
+            'effective_ml_weight': 0.0,
+            'online_control_reason': '',
+            'reason': 'disabled_in_live_prod',
+            'last_update': runtime.get('ts'),
+            'impact_status': 'research-disabled',
+            'last_step': {},
+            'rolling_24h': {},
+            'rolling_48h': {},
+            'top_contributors': [],
+            'top_promoted': [],
+            'top_suppressed': [],
+        }
 
     raw_factors = snapshot.get('raw_factors', {})
     z_factors = snapshot.get('z_factors', {})

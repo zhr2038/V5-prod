@@ -5,6 +5,9 @@
     "SOL/USDT",
     "BNB/USDT"
   ],
+  "ml_factor_enabled": false,
+  "collect_ml_training_data": false,
+  "ml_research_use_stable_universe": false,
   "universe": {
     "enabled": false,
     "use_universe_symbols": false
@@ -13,10 +16,16 @@
     "alpha158_overlay": {
       "enabled": false
     },
+    "ml_factor": {
+      "enabled": false
+    },
+    "ml_factor_enabled": false,
     "long_top_pct": 0.5,
     "min_score_threshold": 0.1
   },
   "execution": {
+    "collect_ml_training_data": false,
+    "ml_research_use_stable_universe": false,
     "fee_bps": 10.0,
     "cost_aware_roundtrip_cost_bps": 30.0,
     "rank_exit_max_rank": 5,

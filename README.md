@@ -68,6 +68,28 @@ universe:
   use_universe_symbols: false
 ```
 
+### Live ML overlay status
+
+In `configs/live_prod.yaml`, the ML factor overlay and production ML data collection are disabled:
+
+```yaml
+alpha:
+  ml_factor:
+    enabled: false
+
+execution:
+  collect_ml_training_data: false
+  ml_research_use_stable_universe: false
+```
+
+The ML research scripts remain in the repository for offline experiments only:
+
+- `scripts/daily_ml_training.py`
+- `scripts/model_promotion_gate.py`
+- `scripts/run_shadow_tuned_xgboost.py`
+
+Do not enable the ML training, promotion, or tuned XGBoost shadow timers in `live_prod` unless ML live overlay is explicitly re-approved.
+
 这意味着生产策略默认只在明确配置的主流交易对上工作。
 
 ---
