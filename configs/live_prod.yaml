@@ -427,6 +427,10 @@ execution:
   swing_min_alpha6_score: 0.50
   swing_min_f5_rsi: 0.30
   swing_min_f4_volume: 0.0
+  swing_block_f3_dominant_enabled: true
+  swing_f3_dominant_max_contribution_pct: 0.50
+  swing_f3_dominant_require_f4_min: 0.50
+  swing_f3_dominant_require_f5_min: 0.45
   swing_ignore_normal_zero_target_close_before_min_hold: true
   swing_ignore_rank_exit_before_min_hold: true
   swing_allow_exit_on_risk_off: true

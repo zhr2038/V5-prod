@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -62,7 +64,22 @@ def _write_auto_risk_level(order_store_path: str, level: str) -> None:
     path.write_text(json.dumps({"current_level": level}), encoding="utf-8")
 
 
-def _alpha6_payload(symbol: str = "BTC/USDT", *, score: float = 0.60, f4: float = 0.50, f5: float = 0.35):
+def _alpha6_payload(
+    symbol: str = "BTC/USDT",
+    *,
+    score: float = 0.60,
+    f4: float = 0.50,
+    f5: float = 0.35,
+    factor_contribution: dict | None = None,
+):
+    metadata = {
+        "raw_factors": {
+            "f4_volume_expansion": f4,
+            "f5_rsi_trend_confirm": f5,
+        }
+    }
+    if factor_contribution is not None:
+        metadata["factor_contribution"] = factor_contribution
     return {
         "strategies": [
             {
@@ -77,12 +94,7 @@ def _alpha6_payload(symbol: str = "BTC/USDT", *, score: float = 0.60, f4: float 
                         "symbol": symbol,
                         "side": "buy",
                         "score": score,
-                        "metadata": {
-                            "raw_factors": {
-                                "f4_volume_expansion": f4,
-                                "f5_rsi_trend_confirm": f5,
-                            }
-                        },
+                        "metadata": metadata,
                     }
                 ],
             }
@@ -244,6 +256,132 @@ def test_normal_alpha6_entry_marks_swing_hold_in_order_and_position_state(tmp_pa
     assert tags["swing_min_hold_hours"] == 24.0
     assert tags["alpha6_score"] == 0.60
     assert tags["f5_rsi_trend_confirm"] == 0.35
+
+
+def test_f3_dominant_weak_confirmation_does_not_mark_swing_hold(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.swing_min_f4_volume = 0.0
+    cfg.execution.swing_min_f5_rsi = 0.0
+    _write_auto_risk_level(cfg.execution.order_store_path, "NORMAL")
+    pipe = _build_pipe(
+        cfg,
+        tmp_path,
+        _alpha6_payload(
+            f4=0.10,
+            f5=0.20,
+            factor_contribution={"dominant_factor": "f3_vol_adj_ret", "contribution_pct": 0.70},
+        ),
+    )
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="f3-dominant-swing-block")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 100.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    order = out.orders[0]
+    assert order.intent == "OPEN_LONG"
+    assert order.meta["swing_hold_position"] is False
+    assert order.meta["swing_f3_dominant_blocked"] is True
+    assert order.meta["dominant_factor"] == "f3_vol_adj_ret"
+    assert order.meta["contribution_pct"] == pytest.approx(0.70)
+    assert order.meta["f4"] == pytest.approx(0.10)
+    assert order.meta["f5"] == pytest.approx(0.20)
+    assert audit.counts["swing_hold_position_count"] == 0
+    decision = next(d for d in audit.router_decisions if d.get("action") == "create" and d.get("symbol") == "BTC/USDT")
+    assert decision["swing_hold_position"] is False
+    assert decision["swing_f3_dominant_blocked"] is True
+
+
+def test_f3_dominant_strong_f4_f5_allows_swing_hold(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.swing_min_f4_volume = 0.0
+    cfg.execution.swing_min_f5_rsi = 0.0
+    _write_auto_risk_level(cfg.execution.order_store_path, "NORMAL")
+    pipe = _build_pipe(
+        cfg,
+        tmp_path,
+        _alpha6_payload(
+            f4=0.80,
+            f5=0.60,
+            factor_contribution={"dominant_factor": "f3_vol_adj_ret", "contribution_pct": 0.70},
+        ),
+    )
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="f3-dominant-swing-allowed")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 100.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].meta["swing_hold_position"] is True
+    assert "swing_f3_dominant_blocked" not in out.orders[0].meta
+    assert audit.counts["swing_hold_position_count"] == 1
+
+
+def test_non_f3_dominant_does_not_affect_swing_hold(tmp_path: Path) -> None:
+    cfg = _base_cfg(tmp_path)
+    cfg.execution.swing_min_f4_volume = 0.0
+    cfg.execution.swing_min_f5_rsi = 0.0
+    _write_auto_risk_level(cfg.execution.order_store_path, "NORMAL")
+    pipe = _build_pipe(
+        cfg,
+        tmp_path,
+        _alpha6_payload(
+            f4=0.10,
+            f5=0.20,
+            factor_contribution={"dominant_factor": "f4_volume_expansion", "contribution_pct": 0.70},
+        ),
+    )
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={"BTC/USDT": 1.0},
+        selected=["BTC/USDT"],
+        entry_candidates=["BTC/USDT"],
+        volatilities={},
+        notes="",
+    )
+    audit = DecisionAudit(run_id="non-f3-dominant-swing")
+
+    out = pipe.run(
+        market_data_1h={"BTC/USDT": _series("BTC/USDT", 100.0)},
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        audit=audit,
+        precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BTC/USDT": 1.0}),
+        precomputed_regime=_regime(),
+    )
+
+    assert len(out.orders) == 1
+    assert out.orders[0].meta["swing_hold_position"] is True
+    assert "swing_f3_dominant_blocked" not in out.orders[0].meta
+    assert audit.counts["swing_hold_position_count"] == 1
 
 
 def test_same_symbol_reentry_blocks_normal_swing_entry_after_profit_lock(tmp_path: Path) -> None:

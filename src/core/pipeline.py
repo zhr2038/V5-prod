@@ -975,6 +975,164 @@ class V5Pipeline:
             "f5_rsi_trend_confirm": self._alpha6_rsi_confirm(signal),
         }
 
+    @staticmethod
+    def _factor_bucket_value(bucket: Any, factor: str) -> Optional[float]:
+        if not isinstance(bucket, dict):
+            return None
+        aliases = {
+            "f1_mom_5d": ("f1_mom_5d",),
+            "f2_mom_20d": ("f2_mom_20d",),
+            "f3_vol_adj_ret": ("f3_vol_adj_ret", "f3_vol_adj_ret_20d"),
+            "f4_volume_expansion": ("f4_volume_expansion",),
+            "f5_rsi_trend_confirm": ("f5_rsi_trend_confirm",),
+        }.get(str(factor), (str(factor),))
+        for key in aliases:
+            if key not in bucket:
+                continue
+            value = _float_or_none(bucket.get(key))
+            if value is not None:
+                return float(value)
+        return None
+
+    @staticmethod
+    def _canonical_factor_name(factor: Any) -> str:
+        name = str(factor or "").strip()
+        if name == "f3_vol_adj_ret_20d":
+            return "f3_vol_adj_ret"
+        return name
+
+    @staticmethod
+    def _normalized_contribution_pct(value: Any) -> Optional[float]:
+        parsed = _float_or_none(value)
+        if parsed is None:
+            return None
+        parsed = abs(float(parsed))
+        if parsed > 1.0:
+            parsed /= 100.0
+        return max(0.0, min(1.0, parsed))
+
+    def _alpha6_factor_contribution_context(
+        self,
+        signal: Optional[Dict[str, Any]],
+        *,
+        factor_weights: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not isinstance(signal, dict):
+            return {}
+        metadata = signal.get("metadata") if isinstance(signal.get("metadata"), dict) else {}
+
+        explicit = signal.get("factor_contribution")
+        if not isinstance(explicit, dict):
+            explicit = metadata.get("factor_contribution")
+        if not isinstance(explicit, dict):
+            explicit = metadata.get("factor_contributions")
+        if isinstance(explicit, dict):
+            dominant_factor = self._canonical_factor_name(
+                explicit.get("dominant_factor") or explicit.get("factor")
+            )
+            contribution_pct = self._normalized_contribution_pct(
+                explicit.get("contribution_pct", explicit.get("dominant_factor_contribution_pct"))
+            )
+            if dominant_factor and contribution_pct is not None:
+                return {
+                    "dominant_factor": dominant_factor,
+                    "contribution_pct": float(contribution_pct),
+                    "factor_contribution_source": "signal.factor_contribution",
+                }
+
+        weights: Dict[str, float] = {}
+        for key, value in dict(factor_weights or {}).items():
+            parsed = _float_or_none(value)
+            if parsed is not None:
+                weights[self._canonical_factor_name(key)] = float(parsed)
+        if not weights:
+            try:
+                weights = {
+                    self._canonical_factor_name(key): float(value)
+                    for key, value in self.cfg.alpha.weights.to_runtime_weights().items()
+                }
+            except Exception:
+                weights = {}
+
+        z_factors = metadata.get("z_factors") if isinstance(metadata.get("z_factors"), dict) else {}
+        factor_keys = (
+            "f1_mom_5d",
+            "f2_mom_20d",
+            "f3_vol_adj_ret",
+            "f4_volume_expansion",
+            "f5_rsi_trend_confirm",
+        )
+        contributions: Dict[str, float] = {}
+        for factor in factor_keys:
+            z_value = self._factor_bucket_value(z_factors, factor)
+            weight = _float_or_none(weights.get(factor))
+            if z_value is not None and weight is not None:
+                contributions[factor] = float(z_value) * float(weight)
+        if not contributions:
+            return {}
+
+        positive = [(factor, value) for factor, value in contributions.items() if value > 0.0]
+        numeric = list(contributions.items())
+        if positive:
+            dominant_factor, dominant_value = max(positive, key=lambda item: (item[1], item[0]))
+            denominator = sum(value for _, value in positive)
+        else:
+            dominant_factor, dominant_value = max(numeric, key=lambda item: (abs(item[1]), item[0]))
+            denominator = sum(abs(value) for _, value in numeric)
+        if not denominator:
+            return {}
+        return {
+            "dominant_factor": dominant_factor,
+            "contribution_pct": float(abs(dominant_value) / denominator),
+            "factor_contribution_source": "z_factors_x_alpha6_weights",
+        }
+
+    def _swing_f3_dominant_block_meta(
+        self,
+        *,
+        signal: Optional[Dict[str, Any]],
+        f4: Any,
+        f5: Any,
+        factor_weights: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not bool(getattr(self.cfg.execution, "swing_block_f3_dominant_enabled", True)):
+            return None
+        context = self._alpha6_factor_contribution_context(signal, factor_weights=factor_weights)
+        dominant_factor = self._canonical_factor_name(context.get("dominant_factor"))
+        contribution_pct = self._normalized_contribution_pct(context.get("contribution_pct"))
+        if dominant_factor != "f3_vol_adj_ret" or contribution_pct is None:
+            return None
+
+        max_pct = float(getattr(self.cfg.execution, "swing_f3_dominant_max_contribution_pct", 0.50) or 0.0)
+        if float(contribution_pct) < float(max_pct):
+            return None
+
+        f4_value = _float_or_none(f4)
+        f5_value = _float_or_none(f5)
+        min_f4 = float(getattr(self.cfg.execution, "swing_f3_dominant_require_f4_min", 0.50) or 0.0)
+        min_f5 = float(getattr(self.cfg.execution, "swing_f3_dominant_require_f5_min", 0.45) or 0.0)
+        if (
+            f4_value is not None
+            and f5_value is not None
+            and float(f4_value) >= float(min_f4)
+            and float(f5_value) >= float(min_f5)
+        ):
+            return None
+
+        return {
+            "swing_hold_position": False,
+            "swing_f3_dominant_blocked": True,
+            "swing_hold_block_reason": "f3_dominant_weak_confirmation",
+            "dominant_factor": dominant_factor,
+            "contribution_pct": float(contribution_pct),
+            "f4": None if f4_value is None else float(f4_value),
+            "f5": None if f5_value is None else float(f5_value),
+            "swing_f3_dominant_max_contribution_pct": float(max_pct),
+            "swing_f3_dominant_require_f4_min": float(min_f4),
+            "swing_f3_dominant_require_f5_min": float(min_f5),
+            "factor_contribution_source": context.get("factor_contribution_source"),
+        }
+
     def _protect_entry_signal_meets_normal_confirmation(self, signal: Optional[Dict[str, Any]]) -> bool:
         values = self._protect_entry_signal_values(signal)
         if values.get("alpha6_side") != "buy":
@@ -2188,6 +2346,7 @@ class V5Pipeline:
         strategy_signal_lookup: Mapping[str, Dict[str, Dict[str, Any]]],
         current_auto_risk_level: Optional[str],
         now_utc: datetime,
+        factor_weights: Optional[Mapping[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         if not bool(getattr(self.cfg.execution, "swing_hold_enabled", True)):
             return None
@@ -2214,6 +2373,23 @@ class V5Pipeline:
         min_f4 = float(getattr(self.cfg.execution, "swing_min_f4_volume", 0.0) or 0.0)
         if float(alpha6_score) < min_score or float(f5) < min_f5 or float(f4) < min_f4:
             return None
+
+        f3_block_meta = self._swing_f3_dominant_block_meta(
+            signal=alpha6_signal,
+            f4=f4,
+            f5=f5,
+            factor_weights=factor_weights,
+        )
+        if f3_block_meta is not None:
+            return {
+                **f3_block_meta,
+                "entry_reason": "normal_entry",
+                "alpha6_score": float(alpha6_score),
+                "alpha6_side": alpha6_side,
+                "f4_volume_expansion": float(f4),
+                "f5_rsi_trend_confirm": float(f5),
+                "current_level": level,
+            }
 
         min_hold_hours = float(getattr(self.cfg.execution, "swing_min_hold_hours", 24) or 0.0)
         entry_ts = now_utc.isoformat().replace("+00:00", "Z")
@@ -7233,10 +7409,11 @@ class V5Pipeline:
                         strategy_signal_lookup=strategy_signal_lookup,
                         current_auto_risk_level=current_auto_risk_level,
                         now_utc=now_utc,
+                        factor_weights=getattr(alpha, "effective_alpha6_weights", None),
                     )
                 if swing_candidate_meta is not None:
                     swing_meta = swing_candidate_meta
-                    if audit:
+                    if audit and bool(swing_meta.get("swing_hold_position", False)):
                         audit.record_count("swing_hold_position_count", symbol=sym)
                         audit.add_note(
                             "Swing hold position marked: "
@@ -7245,6 +7422,12 @@ class V5Pipeline:
                             f"f4={float(swing_meta.get('f4_volume_expansion') or 0.0):.3f} "
                             f"f5={float(swing_meta.get('f5_rsi_trend_confirm') or 0.0):.3f} "
                             f"level={swing_meta.get('current_level')}"
+                        )
+                    elif audit and bool(swing_meta.get("swing_f3_dominant_blocked", False)):
+                        audit.add_note(
+                            "Swing hold blocked by f3-dominant weak confirmation: "
+                            f"{sym} contribution_pct={float(swing_meta.get('contribution_pct') or 0.0):.3f} "
+                            f"f4={swing_meta.get('f4')} f5={swing_meta.get('f5')}"
                         )
 
             meta = {
@@ -7354,7 +7537,7 @@ class V5Pipeline:
                 if side == "buy" and swing_meta:
                     decision.update(
                         {
-                            "swing_hold_position": True,
+                            "swing_hold_position": bool(swing_meta.get("swing_hold_position", False)),
                             "swing_min_hold_hours": swing_meta.get("swing_min_hold_hours"),
                             "alpha6_score": swing_meta.get("alpha6_score"),
                             "f4_volume_expansion": swing_meta.get("f4_volume_expansion"),
@@ -7367,6 +7550,17 @@ class V5Pipeline:
                             "protect_recovery_entry_support": swing_meta.get("protect_recovery_entry_support"),
                         }
                     )
+                    if bool(swing_meta.get("swing_f3_dominant_blocked", False)):
+                        decision.update(
+                            {
+                                "swing_f3_dominant_blocked": True,
+                                "dominant_factor": swing_meta.get("dominant_factor"),
+                                "contribution_pct": swing_meta.get("contribution_pct"),
+                                "f4": swing_meta.get("f4"),
+                                "f5": swing_meta.get("f5"),
+                                "swing_hold_block_reason": swing_meta.get("swing_hold_block_reason"),
+                            }
+                        )
                 router_decisions.append(decision)
 
         market_impulse_probe_context = self._market_impulse_probe_context(

@@ -374,6 +374,10 @@ def test_write_effective_live_config_writes_required_keys(tmp_path: Path) -> Non
     assert payload["execution"]["swing_hold_enabled"] is True
     assert payload["execution"]["swing_min_hold_hours"] == 24
     assert payload["execution"]["swing_min_alpha6_score"] == pytest.approx(0.50)
+    assert payload["execution"]["swing_block_f3_dominant_enabled"] is True
+    assert payload["execution"]["swing_f3_dominant_max_contribution_pct"] == pytest.approx(0.50)
+    assert payload["execution"]["swing_f3_dominant_require_f4_min"] == pytest.approx(0.50)
+    assert payload["execution"]["swing_f3_dominant_require_f5_min"] == pytest.approx(0.45)
     assert payload["execution"]["swing_ignore_rank_exit_before_min_hold"] is True
     assert payload["execution"]["protect_recovery_multi_position_enabled"] is False
     assert payload["execution"]["protect_recovery_max_positions"] == 2
@@ -460,6 +464,10 @@ def test_write_effective_live_config_writes_btc_probe_defaults_when_yaml_omits_k
     assert payload["execution"]["swing_min_alpha6_score"] == pytest.approx(0.50)
     assert payload["execution"]["swing_min_f5_rsi"] == pytest.approx(0.30)
     assert payload["execution"]["swing_min_f4_volume"] == pytest.approx(0.0)
+    assert payload["execution"]["swing_block_f3_dominant_enabled"] is True
+    assert payload["execution"]["swing_f3_dominant_max_contribution_pct"] == pytest.approx(0.50)
+    assert payload["execution"]["swing_f3_dominant_require_f4_min"] == pytest.approx(0.50)
+    assert payload["execution"]["swing_f3_dominant_require_f5_min"] == pytest.approx(0.45)
     assert payload["execution"]["swing_ignore_normal_zero_target_close_before_min_hold"] is True
     assert payload["execution"]["swing_ignore_rank_exit_before_min_hold"] is True
     assert payload["execution"]["swing_allow_exit_on_risk_off"] is True
