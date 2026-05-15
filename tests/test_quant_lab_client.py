@@ -127,7 +127,7 @@ def test_cost_request_normalizes_concatenated_usdt_symbol(tmp_path: Path) -> Non
     assert cost.required_edge_bps == 1.8
 
 
-@pytest.mark.parametrize("symbol", ["BNB/USDT", "BNB-USDT", "BNBUSDT"])
+@pytest.mark.parametrize("symbol", ["OKX:BNB-USDT", "okx:bnb-usdt", "BNB/USDT", "BNB-USDT", "BNBUSDT"])
 def test_cost_request_normalizes_bnb_symbol_variants(tmp_path: Path, symbol: str) -> None:
     http = _HTTP()
     client = QuantLabClient(

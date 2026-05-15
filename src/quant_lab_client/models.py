@@ -48,6 +48,8 @@ def symbol_to_quant_lab_symbol(symbol: str) -> str:
     raw = str(symbol or "").strip().upper().replace("_", "-").replace("/", "-")
     if not raw:
         return ""
+    if ":" in raw:
+        raw = raw.rsplit(":", 1)[-1].strip()
     if "-" in raw:
         parts = [part for part in raw.split("-") if part]
         return "-".join(parts) if parts else raw

@@ -43,6 +43,8 @@ def test_contract_fixtures_have_required_event_fields() -> None:
 
 
 def test_symbol_normalization_contract_fixtures() -> None:
+    assert symbol_to_quant_lab_symbol("OKX:BNB-USDT") == "BNB-USDT"
+    assert symbol_to_quant_lab_symbol("okx:bnb-usdt") == "BNB-USDT"
     assert symbol_to_quant_lab_symbol("BNB/USDT") == "BNB-USDT"
     assert symbol_to_quant_lab_symbol("BNB-USDT") == "BNB-USDT"
     assert symbol_to_quant_lab_symbol("BNBUSDT") == "BNB-USDT"

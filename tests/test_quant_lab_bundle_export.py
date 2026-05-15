@@ -192,7 +192,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=72)
+    bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
     sha_path = Path(str(bundle) + ".sha256")
 
     assert bundle.exists()
