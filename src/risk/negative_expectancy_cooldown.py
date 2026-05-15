@@ -436,6 +436,30 @@ class NegativeExpectancyCooldown:
                     merged[sym] = dict(stat)
         return merged
 
+    def _empty_expectancy_row(self, *, source: str = "no_closed_cycles") -> Dict[str, Any]:
+        return self._build_expectancy_row(
+            gross_pnl_sum_usdt=0.0,
+            net_pnl_sum_usdt=0.0,
+            closed_cycles=0.0,
+            closed_notional_usdt=0.0,
+            last_close_ts_ms=0.0,
+            fast_fail_gross_pnl_sum_usdt=0.0,
+            fast_fail_net_pnl_sum_usdt=0.0,
+            fast_fail_closed_cycles=0.0,
+            fast_fail_closed_notional_usdt=0.0,
+            fast_fail_hold_minutes_sum=0.0,
+            source=source,
+            lookback_filter_mode="close_ts",
+        )
+
+    def _ensure_scope_symbol_stats(self, stats: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        if not self._scope_symbols:
+            return stats
+        out = {str(sym): dict(st) for sym, st in (stats or {}).items() if isinstance(st, dict)}
+        for sym in sorted(self._scope_symbols):
+            out.setdefault(sym, self._empty_expectancy_row())
+        return out
+
     def _scan_expectancy_from_fills(
         self,
         *,
@@ -939,6 +963,109 @@ class NegativeExpectancyCooldown:
             )
         return out
 
+    def _scan_expectancy_from_roundtrip_summary_csvs(
+        self,
+        *,
+        since_ms: int,
+        allowed_symbols: Optional[Set[str]],
+    ) -> Dict[str, Dict[str, Any]]:
+        paths = [p for p in self._roundtrip_summary_path_candidates() if p.exists()]
+        if not paths:
+            return {}
+
+        by_symbol: Dict[str, Dict[str, float]] = {}
+        fast_fail_hold_ms = max(0, int(self.cfg.fast_fail_max_hold_minutes)) * 60 * 1000
+        seen_rows: set[tuple[str, int, str, str]] = set()
+
+        for path in paths:
+            try:
+                with path.open("r", encoding="utf-8", newline="") as fh:
+                    for row in csv.DictReader(fh):
+                        sym = self._norm_symbol(str(row.get("symbol") or "").strip())
+                        if not sym or (allowed_symbols is not None and sym not in allowed_symbols):
+                            continue
+                        close_ms = self._coerce_iso_ms(row.get("close_time_utc") or row.get("exit_ts"))
+                        if close_ms is None or int(close_ms) < int(since_ms):
+                            continue
+                        entry_ms = self._coerce_iso_ms(row.get("open_time_utc") or row.get("entry_ts"))
+                        dedupe_key = (
+                            sym,
+                            int(close_ms),
+                            str(row.get("open_time_utc") or row.get("entry_ts") or ""),
+                            str(row.get("exit_reason") or ""),
+                        )
+                        if dedupe_key in seen_rows:
+                            continue
+                        seen_rows.add(dedupe_key)
+
+                        qty = self._coerce_float(row.get("qty"))
+                        entry_px = self._coerce_float(row.get("entry_px"))
+                        notional = (abs(float(qty)) * float(entry_px)) if qty and entry_px else None
+                        net_pnl = self._coerce_float(row.get("net_pnl_usdt"))
+                        net_bps = self._coerce_float(row.get("net_bps"))
+                        if (notional is None or notional <= 0.0) and net_pnl is not None and net_bps not in (None, 0.0):
+                            notional = abs(float(net_pnl) / float(net_bps) * 10000.0)
+                        if notional is None or notional <= 0.0:
+                            continue
+                        if net_pnl is None and net_bps is not None:
+                            net_pnl = float(notional) * float(net_bps) / 10000.0
+                        if net_pnl is None:
+                            continue
+                        gross_pnl = self._coerce_float(row.get("gross_pnl_usdt"))
+                        gross_bps = self._coerce_float(row.get("gross_bps"))
+                        if gross_pnl is None and gross_bps is not None:
+                            gross_pnl = float(notional) * float(gross_bps) / 10000.0
+                        if gross_pnl is None:
+                            gross_pnl = float(net_pnl)
+
+                        hold_ms = 0.0
+                        hold_minutes = self._coerce_float(row.get("hold_minutes"))
+                        if hold_minutes is not None:
+                            hold_ms = max(0.0, float(hold_minutes) * 60000.0)
+                        elif entry_ms is not None:
+                            hold_ms = max(0.0, float(close_ms) - float(entry_ms))
+
+                        st = by_symbol.setdefault(sym, self._empty_expectancy_accumulator())
+                        st["closed_cycles"] += 1.0
+                        st["closed_cycles_included_by_close_ts"] += 1.0
+                        if entry_ms is not None and float(entry_ms) < float(since_ms):
+                            st["closed_cycles_with_entry_before_window"] += 1.0
+                        st["gross_pnl_sum_usdt"] += float(gross_pnl)
+                        st["net_pnl_sum_usdt"] += float(net_pnl)
+                        st["closed_notional_usdt"] += float(notional)
+                        st["last_close_ts_ms"] = max(float(st.get("last_close_ts_ms") or 0.0), float(close_ms))
+                        if fast_fail_hold_ms > 0 and hold_ms <= fast_fail_hold_ms:
+                            st["fast_fail_closed_cycles"] += 1.0
+                            st["fast_fail_gross_pnl_sum_usdt"] += float(gross_pnl)
+                            st["fast_fail_net_pnl_sum_usdt"] += float(net_pnl)
+                            st["fast_fail_closed_notional_usdt"] += float(notional)
+                            st["fast_fail_hold_minutes_sum"] += float(hold_ms / 60000.0)
+            except Exception:
+                continue
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for sym, st in by_symbol.items():
+            out[sym] = self._build_expectancy_row(
+                gross_pnl_sum_usdt=float(st.get("gross_pnl_sum_usdt") or 0.0),
+                net_pnl_sum_usdt=float(st.get("net_pnl_sum_usdt") or 0.0),
+                closed_cycles=float(st.get("closed_cycles") or 0.0),
+                closed_notional_usdt=float(st.get("closed_notional_usdt") or 0.0),
+                last_close_ts_ms=float(st.get("last_close_ts_ms") or 0.0),
+                fast_fail_gross_pnl_sum_usdt=float(st.get("fast_fail_gross_pnl_sum_usdt") or 0.0),
+                fast_fail_net_pnl_sum_usdt=float(st.get("fast_fail_net_pnl_sum_usdt") or 0.0),
+                fast_fail_closed_cycles=float(st.get("fast_fail_closed_cycles") or 0.0),
+                fast_fail_closed_notional_usdt=float(st.get("fast_fail_closed_notional_usdt") or 0.0),
+                fast_fail_hold_minutes_sum=float(st.get("fast_fail_hold_minutes_sum") or 0.0),
+                source="trades_roundtrips_csv",
+                degraded_fee_model=True,
+                degraded_reason="trades_roundtrips.csv fallback uses exported net/gross fields",
+                closed_cycles_included_by_close_ts=float(st.get("closed_cycles_included_by_close_ts") or 0.0),
+                closed_cycles_with_entry_before_window=float(st.get("closed_cycles_with_entry_before_window") or 0.0),
+                missing_entry_leg_count=float(st.get("missing_entry_leg_count") or 0.0),
+                lookback_filter_mode="close_ts",
+            )
+        return out
+
     def _scan_expectancy(
         self,
         *,
@@ -961,7 +1088,11 @@ class NegativeExpectancyCooldown:
                 since_ms=since_ms,
                 allowed_symbols=allowed_symbols,
             )
-            return self._merge_missing_symbol_stats(fills_stats, orders_stats, recent_trade_stats)
+            roundtrip_stats = self._scan_expectancy_from_roundtrip_summary_csvs(
+                since_ms=since_ms,
+                allowed_symbols=allowed_symbols,
+            )
+            return self._merge_missing_symbol_stats(fills_stats, orders_stats, recent_trade_stats, roundtrip_stats)
         orders_stats = self._scan_expectancy_from_orders(
             since_ms=since_ms,
             allowed_symbols=allowed_symbols,
@@ -974,7 +1105,11 @@ class NegativeExpectancyCooldown:
             since_ms=since_ms,
             allowed_symbols=allowed_symbols,
         )
-        return self._merge_missing_symbol_stats(orders_stats, fills_stats, recent_trade_stats)
+        roundtrip_stats = self._scan_expectancy_from_roundtrip_summary_csvs(
+            since_ms=since_ms,
+            allowed_symbols=allowed_symbols,
+        )
+        return self._merge_missing_symbol_stats(orders_stats, fills_stats, recent_trade_stats, roundtrip_stats)
 
     @staticmethod
     def _coerce_float(value: Any) -> Optional[float]:
@@ -1002,50 +1137,69 @@ class NegativeExpectancyCooldown:
 
     def _roundtrip_summary_path_candidates(self) -> list[Path]:
         orders_parent = Path(self.cfg.orders_db_path).parent
-        return [
-            orders_parent / "summaries" / "trades_roundtrips.csv",
-            PROJECT_ROOT / "reports" / "summaries" / "trades_roundtrips.csv",
-        ]
+        paths: list[Path] = []
+        seen: set[Path] = set()
+        for root in (orders_parent, orders_parent.parent, PROJECT_ROOT / "reports"):
+            path = root / "summaries" / "trades_roundtrips.csv"
+            try:
+                resolved = path.resolve()
+            except Exception:
+                resolved = path
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            paths.append(resolved)
+        return paths
 
     def _roundtrip_summary_by_symbol(self, *, since_ms: int) -> Dict[str, Dict[str, float]]:
-        path = next((p for p in self._roundtrip_summary_path_candidates() if p.exists()), None)
-        if path is None:
+        paths = [p for p in self._roundtrip_summary_path_candidates() if p.exists()]
+        if not paths:
             return {}
         by_symbol: Dict[str, Dict[str, float]] = {}
-        try:
-            with path.open("r", encoding="utf-8", newline="") as fh:
-                for row in csv.DictReader(fh):
-                    sym = self._norm_symbol(str(row.get("symbol") or "").strip())
-                    if not sym:
-                        continue
-                    close_ms = self._coerce_iso_ms(row.get("close_time_utc") or row.get("exit_ts"))
-                    if close_ms is None or int(close_ms) < int(since_ms):
-                        continue
-                    net_pnl = self._coerce_float(row.get("net_pnl_usdt"))
-                    if net_pnl is None:
-                        continue
-                    qty = self._coerce_float(row.get("qty"))
-                    entry_px = self._coerce_float(row.get("entry_px"))
-                    notional = (float(qty) * float(entry_px)) if qty and entry_px else None
-                    if notional is None or notional <= 0:
-                        net_bps = self._coerce_float(row.get("net_bps"))
-                        if net_bps is not None and abs(float(net_bps)) > 1e-12:
-                            notional = abs(float(net_pnl) / float(net_bps) * 10000.0)
-                    if notional is None or notional <= 0:
-                        continue
-                    st = by_symbol.setdefault(
-                        sym,
-                        {
-                            "roundtrip_summary_net_pnl_usdt": 0.0,
-                            "roundtrip_summary_closed_notional_usdt": 0.0,
-                            "roundtrip_summary_closed_cycles": 0.0,
-                        },
-                    )
-                    st["roundtrip_summary_net_pnl_usdt"] += float(net_pnl)
-                    st["roundtrip_summary_closed_notional_usdt"] += float(notional)
-                    st["roundtrip_summary_closed_cycles"] += 1.0
-        except Exception:
-            return {}
+        seen_rows: set[tuple[str, int, str]] = set()
+        for path in paths:
+            try:
+                with path.open("r", encoding="utf-8", newline="") as fh:
+                    for row in csv.DictReader(fh):
+                        sym = self._norm_symbol(str(row.get("symbol") or "").strip())
+                        if not sym:
+                            continue
+                        close_ms = self._coerce_iso_ms(row.get("close_time_utc") or row.get("exit_ts"))
+                        if close_ms is None or int(close_ms) < int(since_ms):
+                            continue
+                        dedupe_key = (
+                            sym,
+                            int(close_ms),
+                            str(row.get("open_time_utc") or row.get("entry_ts") or ""),
+                        )
+                        if dedupe_key in seen_rows:
+                            continue
+                        seen_rows.add(dedupe_key)
+                        net_pnl = self._coerce_float(row.get("net_pnl_usdt"))
+                        if net_pnl is None:
+                            continue
+                        qty = self._coerce_float(row.get("qty"))
+                        entry_px = self._coerce_float(row.get("entry_px"))
+                        notional = (float(qty) * float(entry_px)) if qty and entry_px else None
+                        if notional is None or notional <= 0:
+                            net_bps = self._coerce_float(row.get("net_bps"))
+                            if net_bps is not None and abs(float(net_bps)) > 1e-12:
+                                notional = abs(float(net_pnl) / float(net_bps) * 10000.0)
+                        if notional is None or notional <= 0:
+                            continue
+                        st = by_symbol.setdefault(
+                            sym,
+                            {
+                                "roundtrip_summary_net_pnl_usdt": 0.0,
+                                "roundtrip_summary_closed_notional_usdt": 0.0,
+                                "roundtrip_summary_closed_cycles": 0.0,
+                            },
+                        )
+                        st["roundtrip_summary_net_pnl_usdt"] += float(net_pnl)
+                        st["roundtrip_summary_closed_notional_usdt"] += float(notional)
+                        st["roundtrip_summary_closed_cycles"] += 1.0
+            except Exception:
+                continue
         for st in by_symbol.values():
             notional = float(st.get("roundtrip_summary_closed_notional_usdt") or 0.0)
             st["roundtrip_summary_net_bps"] = (
@@ -1140,6 +1294,7 @@ class NegativeExpectancyCooldown:
             since_ms=since_ms,
             allowed_symbols=self._scope_symbols,
         )
+        stats = self._ensure_scope_symbol_stats(stats)
         roundtrip_summary = self._roundtrip_summary_by_symbol(since_ms=since_ms)
         roundtrip_sanity: Dict[str, Dict[str, Any]] = {}
         for sym, st in stats.items():

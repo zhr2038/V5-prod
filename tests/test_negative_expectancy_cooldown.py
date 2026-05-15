@@ -460,6 +460,70 @@ def test_negative_expectancy_recent_trades_fallback_includes_bnb_closed_cycle(
     assert state["symbols"] == {}
 
 
+def test_negative_expectancy_roundtrip_summary_fallback_includes_bnb_closed_cycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = tmp_path / "reports"
+    state_path = reports / "negative_expectancy_state.json"
+    orders_path = reports / "orders.sqlite"
+    fills_path = reports / "fills.sqlite"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "bnb-roundtrip-summary-fp",
+                "release_start_ts": _ts_ms("2026-05-11T00:00:00Z"),
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    summaries = reports / "summaries"
+    summaries.mkdir(parents=True, exist_ok=True)
+    summaries.joinpath("trades_roundtrips.csv").write_text(
+        "\n".join(
+            [
+                "open_time_utc,close_time_utc,symbol,qty,entry_px,exit_px,hold_minutes,gross_pnl_usdt,net_pnl_usdt,gross_bps,net_bps,exit_reason",
+                "2026-05-11T22:01:00.596000Z,2026-05-12T03:00:41.218000Z,BNB/USDT,0.0240670465,663.9,661.4734455,299.677033,-0.0584,-0.0584,-36.55,-36.55,atr_trailing",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "src.risk.negative_expectancy_cooldown.time.time",
+        lambda: _ts_ms("2026-05-12T04:00:00Z") / 1000.0,
+    )
+
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=72,
+            min_closed_cycles=4,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(orders_path),
+            fills_db_path=str(fills_path),
+            prefer_net_from_fills=True,
+            fast_fail_max_hold_minutes=360,
+        )
+    )
+    cooldown.set_scope(whitelist_symbols=["BNB/USDT"], config_fingerprint="bnb-roundtrip-summary-fp")
+
+    state = cooldown.refresh(force=True)
+    stats = state["stats"]["BNB/USDT"]
+
+    assert stats["source"] == "trades_roundtrips_csv"
+    assert stats["lookback_filter_mode"] == "close_ts"
+    assert stats["closed_cycles"] == 1
+    assert stats["net_pnl_sum_usdt"] == pytest.approx(-0.0584)
+    assert stats["net_expectancy_bps"] == pytest.approx(-36.55)
+    assert stats["fast_fail_net_expectancy_bps"] == pytest.approx(-36.55)
+    assert stats["last_close_ts"] == "2026-05-12T03:00:41.218000Z"
+    assert state["symbols"] == {}
+
+
 def test_negative_expectancy_merges_recent_trades_when_fills_exist_for_other_symbol(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -570,6 +634,46 @@ def test_negative_expectancy_scope_filters_to_whitelist_positions_and_managed_sy
     assert "DOGE/USDT" not in (state.get("stats") or {})
 
 
+def test_negative_expectancy_writes_zero_stats_for_scoped_symbols_without_cycles(tmp_path: Path) -> None:
+    state_path = tmp_path / "negative_expectancy_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "config_fingerprint": "zero-scope-fp",
+                "release_start_ts": int(time.time() * 1000) - 600_000,
+                "symbols": {},
+                "stats": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cooldown = NegativeExpectancyCooldown(
+        NegativeExpectancyConfig(
+            enabled=True,
+            lookback_hours=24,
+            min_closed_cycles=4,
+            expectancy_threshold_bps=0.0,
+            state_path=str(state_path),
+            orders_db_path=str(tmp_path / "orders.sqlite"),
+            fills_db_path=str(tmp_path / "fills.sqlite"),
+        )
+    )
+    cooldown.set_scope(
+        whitelist_symbols=["BTC/USDT"],
+        managed_symbols=["BNB/USDT"],
+        config_fingerprint="zero-scope-fp",
+    )
+
+    state = cooldown.refresh(force=True)
+
+    assert set(state["stats"].keys()) == {"BTC/USDT", "BNB/USDT"}
+    assert state["stats"]["BNB/USDT"]["closed_cycles"] == 0
+    assert state["stats"]["BNB/USDT"]["net_expectancy_bps"] == 0.0
+    assert state["stats"]["BNB/USDT"]["fast_fail_net_expectancy_bps"] == 0.0
+    assert state["stats"]["BNB/USDT"]["last_close_ts"] is None
+    assert state["symbols"] == {}
+
+
 def test_negative_expectancy_fingerprint_change_resets_legacy_state_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state_path = tmp_path / "negative_expectancy_state.json"
     state_path.write_text(
@@ -618,7 +722,8 @@ def test_negative_expectancy_fingerprint_change_resets_legacy_state_scope(tmp_pa
     assert state["release_start_ts"] == 2_000_000_000
     assert state["whitelist_symbols"] == ["BTC/USDT"]
     assert state["symbols"] == {}
-    assert state["stats"] == {}
+    assert set(state["stats"].keys()) == {"BTC/USDT"}
+    assert state["stats"]["BTC/USDT"]["closed_cycles"] == 0
 
 
 def test_negative_expectancy_fingerprint_change_updates_release_start_ts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -733,7 +838,8 @@ def test_negative_expectancy_zero_release_start_ts_recovers_with_warning(
     assert state["release_start_ts"] == 2_000_000_000
     assert state["release_start_ts_status"] == "recovered"
     assert state["symbols"] == {}
-    assert state["stats"] == {}
+    assert set(state["stats"].keys()) == {"BTC/USDT"}
+    assert state["stats"]["BTC/USDT"]["closed_cycles"] == 0
     assert any("negative_expectancy_release_start_ts_recovered" in warning for warning in state["warnings"])
     assert any("negative_expectancy_release_start_ts_recovered" in record.getMessage() for record in caplog.records)
 
