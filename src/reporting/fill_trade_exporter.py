@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -14,6 +15,8 @@ from src.reporting.trade_log import Fill, TradeLogWriter, normalize_symbol
 from src.reporting.cost_events import append_cost_event
 from src.reporting.spread_snapshot_store import SpreadSnapshotStore
 from src.execution.order_store import OrderStore
+
+log = logging.getLogger(__name__)
 
 
 def _dec(x: Optional[str]) -> Decimal:
@@ -231,6 +234,12 @@ def export_fill(
     )
 
     trade_written = True
+    try:
+        from src.reporting.summary_writer import refresh_summary_metrics
+
+        refresh_summary_metrics(str(run_dir))
+    except Exception as exc:
+        log.warning("failed to refresh summary metrics after trade export for %s: %s", run_dir, exc)
 
     # Cost event (requires window_start_ts)
     cost_event_written = False

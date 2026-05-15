@@ -6,7 +6,7 @@ import pytest
 
 import main as main_module
 from src.core import run_logger
-from src.reporting import budget_state, decision_audit, metrics, reporting, summary_writer, trade_log
+from src.reporting import budget_state, decision_audit, fill_trade_exporter, metrics, reporting, summary_writer, trade_log
 
 
 TRADE_HEADER = (
@@ -392,6 +392,88 @@ def test_live_finalize_refreshes_summary_after_trades_flush(tmp_path):
     assert persisted["num_trades"] == 1
     assert persisted["budget"]["fills_count_today"] == 1
     assert audit.issues_to_fix == []
+
+
+def test_export_fill_refreshes_summary_for_open_long_trade(tmp_path):
+    run_dir = tmp_path / "reports" / "runs" / "20260514_23"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-14T23:00:00Z", equity=100.0)
+    (run_dir / "summary.json").write_text(
+        json.dumps({"run_id": run_dir.name, "num_trades": 0}),
+        encoding="utf-8",
+    )
+
+    fill_trade_exporter.export_fill(
+        fill_ts_ms=1778780400000,
+        inst_id="BTC-USDT",
+        side="buy",
+        fill_px="78000",
+        fill_sz="0.000205128205128",
+        fee="-0.016",
+        fee_ccy="USDT",
+        run_id=run_dir.name,
+        intent="OPEN_LONG",
+        window_start_ts=None,
+        window_end_ts=None,
+        run_dir=str(run_dir),
+    )
+
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["num_trades"] == 1
+    assert summary["trades_counted_rows"] == 1
+    assert summary["turnover_usdt"] == pytest.approx(16.0)
+    assert summary["fees_usdt_total"] == pytest.approx(0.016)
+    assert summary["slippage_usdt_total"] == pytest.approx(0.0)
+
+
+def test_export_fill_refreshes_summary_for_close_long_trade(tmp_path):
+    run_dir = tmp_path / "reports" / "runs" / "20260515_02"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-15T02:00:00Z", equity=100.0)
+    (run_dir / "summary.json").write_text(
+        json.dumps({"run_id": run_dir.name, "num_trades": 0}),
+        encoding="utf-8",
+    )
+
+    fill_trade_exporter.export_fill(
+        fill_ts_ms=1778791200000,
+        inst_id="BTC-USDT",
+        side="sell",
+        fill_px="78500",
+        fill_sz="0.000203821656051",
+        fee="-0.016",
+        fee_ccy="USDT",
+        run_id=run_dir.name,
+        intent="CLOSE_LONG",
+        window_start_ts=None,
+        window_end_ts=None,
+        run_dir=str(run_dir),
+    )
+
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["num_trades"] == 1
+    assert summary["trades_counted_rows"] == 1
+    assert summary["turnover_usdt"] == pytest.approx(16.0)
+    assert summary["fees_usdt_total"] == pytest.approx(0.016)
+    assert summary["slippage_usdt_total"] == pytest.approx(0.0)
+
+
+def test_write_summary_keeps_zero_trades_when_trades_csv_empty(monkeypatch, tmp_path):
+    monkeypatch.setattr(summary_writer, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+
+    run_dir = tmp_path / "reports" / "runs" / "test_no_trades"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-15T00:00:00Z", equity=100.0)
+    _write_trades(run_dir, [])
+
+    summary = summary_writer.write_summary("reports/runs/test_no_trades")
+
+    assert summary["num_trades"] == 0
+    assert summary["trades_counted_rows"] == 0
+    assert summary["turnover_usdt"] == 0.0
+    assert summary["fees_usdt_total"] == 0.0
+    assert summary["slippage_usdt_total"] == 0.0
 
 
 def test_live_finalize_refresh_failure_records_high_issue(monkeypatch, tmp_path):
