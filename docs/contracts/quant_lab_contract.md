@@ -269,7 +269,12 @@ Required columns:
 - `expected_edge_bps`
 - `required_edge_bps`
 - `cost_bps`
+- `selected_total_cost_bps`
 - `cost_source`
+- `cost_model_version`
+- `cost_gate_verified`
+- `would_block_by_cost`
+- `cost_reason`
 - `eligible_before_filters`
 - `final_decision`
 - `block_reason`
@@ -279,4 +284,7 @@ Quant Lab imports this file into `silver/v5_candidate_event`. Labels are derived
 `market_bar` into `gold/v5_candidate_label` at 4h, 8h, 12h, 24h, 48h, 72h, and 120h.
 Label outputs should include gross bps, net bps after cost, MFE bps, MAE bps, win, and
 label status. Data quality checks should report rows by run, feature completeness, label
-completeness, and cost source coverage.
+completeness, and cost source coverage. Candidate cost fields are populated for actual
+orders, blocked candidates, and no-order candidates: Quant Lab cost estimates are used
+when present, otherwise V5 writes a degraded `local_estimate` based on configured
+roundtrip cost assumptions.

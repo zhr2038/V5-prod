@@ -1651,6 +1651,7 @@ def _finalize_live_run_summary_metrics(
 
 def _write_candidate_snapshot_for_run(
     *,
+    cfg: AppConfig,
     runtime_run_dir: Path,
     runtime_reports_dir: Path,
     run_id: str,
@@ -1664,7 +1665,11 @@ def _write_candidate_snapshot_for_run(
     equity_usdt: Any,
     orders: list[Any],
 ) -> int:
-    from src.reporting.candidate_snapshot import build_candidate_snapshot_rows, write_candidate_snapshot
+    from src.reporting.candidate_snapshot import (
+        build_candidate_snapshot_rows,
+        candidate_snapshot_cost_defaults,
+        write_candidate_snapshot,
+    )
 
     rows = build_candidate_snapshot_rows(
         run_id=run_id,
@@ -1679,6 +1684,7 @@ def _write_candidate_snapshot_for_run(
         target_weights_raw=dict(getattr(audit, "targets_pre_risk", {}) or {}),
         target_weights_after_risk=dict(getattr(audit, "targets_post_risk", {}) or {}),
         orders=orders,
+        **candidate_snapshot_cost_defaults(cfg),
     )
     write_candidate_snapshot(
         run_dir=runtime_run_dir,
@@ -2705,6 +2711,7 @@ def main() -> None:
         except Exception:
             candidate_risk_level = None
         candidate_rows = _write_candidate_snapshot_for_run(
+            cfg=cfg,
             runtime_run_dir=runtime_run_dir,
             runtime_reports_dir=runtime_reports_dir,
             run_id=run_id,
