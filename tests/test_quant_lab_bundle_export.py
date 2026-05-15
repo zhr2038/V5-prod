@@ -194,6 +194,16 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         json.dumps({"run_id": "r1", "num_trades": 0, "budget": {"fills_count_today": 0}}),
         encoding="utf-8",
     )
+    (run_dir / "candidate_snapshot.csv").write_text(
+        "\n".join(
+            [
+                "candidate_id,run_id,ts_utc,symbol,strategy_candidate,final_decision",
+                "cand_r1_bnb,r1,2026-05-11T13:00:00Z,BNB/USDT,Alpha6Factor,OPEN_LONG",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     bundle = export_v5_bundle(reports_dir=reports, out_dir=out, window_hours=24 * 3650)
     sha_path = Path(str(bundle) + ".sha256")
@@ -214,6 +224,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert "summaries/quant_lab_config_audit.json" in names
         assert "summaries/trade_metrics.csv" in names
         assert "summaries/fill_metrics.csv" in names
+        assert "summaries/candidate_snapshot.csv" in names
+        assert "raw/recent_runs/r1/candidate_snapshot.csv" in names
         assert "reports/summary_trade_count_mismatch.csv" in names
         assert "summaries/window_summary.json" in names
         assert "raw/state/quant_lab_mode.json" in names
@@ -228,6 +240,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         readiness_snapshot = json.loads(tf.extractfile("summaries/enforce_readiness_snapshot.json").read().decode("utf-8"))
         trade_metrics = list(csv.DictReader(tf.extractfile("summaries/trade_metrics.csv").read().decode("utf-8").splitlines()))
         fill_metrics = list(csv.DictReader(tf.extractfile("summaries/fill_metrics.csv").read().decode("utf-8").splitlines()))
+        candidate_snapshot = list(csv.DictReader(tf.extractfile("summaries/candidate_snapshot.csv").read().decode("utf-8").splitlines()))
         mismatch_rows = list(csv.DictReader(tf.extractfile("reports/summary_trade_count_mismatch.csv").read().decode("utf-8").splitlines()))
         manifest = json.loads(tf.extractfile("manifest.json").read().decode("utf-8"))
         window = json.loads(tf.extractfile("summaries/window_summary.json").read().decode("utf-8"))
@@ -304,12 +317,17 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert trade_metrics[0]["num_trades"] == "1"
         assert trade_metrics[0]["fills_count_today"] == "1"
         assert fill_metrics[0]["normalized_symbol"] == "BNB-USDT"
+        assert candidate_snapshot[0]["candidate_id"] == "cand_r1_bnb"
+        assert candidate_snapshot[0]["symbol"] == "BNB/USDT"
         assert mismatch_rows[0]["high_issue"] == "true"
         assert manifest["run_summary_invalid"] is True
+        assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v1"
+        assert manifest["candidate_snapshot_rows"] == 1
         assert manifest["summary_trade_count_mismatch_high_issue_count"] == 1
         assert manifest["trade_export_schema_version"] == "v5.trade_export.v1"
         assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1"
         assert window["fill_metrics_rows"] == 1
+        assert window["candidate_snapshot_rows"] == 1
         assert config_audit["mode_source"] == "runtime_override"
         assert "api_env_path_present" in config_audit
         assert "api_env_secure_permissions" in config_audit

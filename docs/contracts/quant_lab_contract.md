@@ -231,3 +231,52 @@ Current schema markers:
 
 - `trade_export_schema_version = v5.trade_export.v1`
 - `summary_metrics_version = v5.summary_metrics.v1`
+
+## Candidate Snapshot Export Schema
+
+V5 emits candidate-level research snapshots for Quant Lab alpha search. Each run writes
+`candidate_snapshot.csv`; follow-up bundles include per-run copies under
+`raw/recent_runs/<run_id>/candidate_snapshot.csv` and an aggregate summary at
+`summaries/candidate_snapshot.csv`.
+
+Current marker:
+
+- `candidate_snapshot_schema_version = v5.candidate_snapshot.v1`
+
+Required columns:
+
+- `candidate_id`: stable hash of `run_id + symbol + strategy_candidate`
+- `run_id`
+- `ts_utc`
+- `symbol`
+- `regime_state`
+- `risk_level`
+- `current_position`
+- `current_weight`
+- `target_weight_raw`
+- `target_weight_after_risk`
+- `final_score`
+- `rank`
+- `f1_mom_5d`
+- `f2_mom_20d`
+- `f3_vol_adj_ret`
+- `f4_volume_expansion`
+- `f5_rsi_trend_confirm`
+- `alpha6_score`
+- `alpha6_side`
+- `ml_score`
+- `mean_reversion_score`
+- `expected_edge_bps`
+- `required_edge_bps`
+- `cost_bps`
+- `cost_source`
+- `eligible_before_filters`
+- `final_decision`
+- `block_reason`
+- `strategy_candidate`
+
+Quant Lab imports this file into `silver/v5_candidate_event`. Labels are derived from
+`market_bar` into `gold/v5_candidate_label` at 4h, 8h, 12h, 24h, 48h, 72h, and 120h.
+Label outputs should include gross bps, net bps after cost, MFE bps, MAE bps, win, and
+label status. Data quality checks should report rows by run, feature completeness, label
+completeness, and cost source coverage.

@@ -20,6 +20,10 @@ from src.reporting.metrics import (
     compute_trade_metrics,
     read_trades_csv_detailed,
 )
+from src.reporting.candidate_snapshot import (
+    CANDIDATE_SNAPSHOT_FIELDS,
+    CANDIDATE_SNAPSHOT_SCHEMA_VERSION,
+)
 from src.reporting.quant_lab_audit import (
     CONTRACT_VERSION,
     EVENT_ID_GENERATION_VERSION,
@@ -514,6 +518,61 @@ def _build_trade_bundle_rows(reports: Path) -> tuple[list[Dict[str, Any]], list[
                 }
             )
     return trade_metrics_rows, fill_metrics_rows, mismatch_rows
+
+
+def _read_candidate_snapshot_rows(reports: Path) -> list[Dict[str, Any]]:
+    rows: list[Dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add_path(path: Path) -> None:
+        try:
+            with path.open("r", encoding="utf-8", newline="") as fh:
+                for row in csv.DictReader(fh):
+                    if not row:
+                        continue
+                    run_id = str(row.get("run_id") or path.parent.name or "").strip()
+                    candidate_id = str(row.get("candidate_id") or "").strip()
+                    symbol = str(row.get("symbol") or "").strip()
+                    strategy_candidate = str(row.get("strategy_candidate") or "").strip()
+                    dedupe_key = (candidate_id, run_id, symbol)
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+                    item = {field: row.get(field, "") for field in CANDIDATE_SNAPSHOT_FIELDS}
+                    item["run_id"] = item.get("run_id") or run_id
+                    item["candidate_snapshot_schema_version"] = CANDIDATE_SNAPSHOT_SCHEMA_VERSION
+                    if not item.get("strategy_candidate"):
+                        item["strategy_candidate"] = strategy_candidate
+                    rows.append(item)
+        except Exception:
+            return
+
+    runs_dir = reports / "runs"
+    if runs_dir.exists():
+        for path in sorted(runs_dir.rglob("candidate_snapshot.csv")):
+            add_path(path)
+    aggregate = reports / "candidate_snapshot.csv"
+    if aggregate.exists():
+        add_path(aggregate)
+    return rows
+
+
+def _copy_candidate_snapshot_files(staging: Path, reports: Path) -> None:
+    aggregate = reports / "candidate_snapshot.csv"
+    if aggregate.exists():
+        _write_text(
+            staging / "raw/reports/candidate_snapshot.csv",
+            _redact_text(aggregate.read_text(encoding="utf-8", errors="replace")),
+        )
+    runs_dir = reports / "runs"
+    if not runs_dir.exists():
+        return
+    for path in sorted(runs_dir.rglob("candidate_snapshot.csv")):
+        run_id = path.parent.name
+        _write_text(
+            staging / "raw/recent_runs" / run_id / "candidate_snapshot.csv",
+            _redact_text(path.read_text(encoding="utf-8", errors="replace")),
+        )
 
 
 def _sanitize_bundle_obj(value: Any) -> Any:
@@ -1522,6 +1581,7 @@ def export_v5_bundle(
     fallback_rows = _build_fallback_rows(usage_rows + request_rows)
     mode_rows = _build_mode_audit_rows(usage_rows)
     trade_metrics_rows, fill_metrics_rows, mismatch_rows = _build_trade_bundle_rows(reports)
+    candidate_rows = _read_candidate_snapshot_rows(reports)
     summary_high_issue_count = len([row for row in mismatch_rows if str(row.get("high_issue")) == "true"])
     run_summary_invalid = summary_high_issue_count > 0
     manifest_meta = _manifest_metadata(root, reports, usage_rows)
@@ -1541,6 +1601,8 @@ def export_v5_bundle(
         _write_csv(staging / "summaries/quant_lab_fallbacks.csv", FALLBACK_FIELDS, fallback_rows)
         _write_csv(staging / "summaries/trade_metrics.csv", TRADE_METRICS_FIELDS, trade_metrics_rows)
         _write_csv(staging / "summaries/fill_metrics.csv", FILL_METRICS_FIELDS, fill_metrics_rows)
+        _write_csv(staging / "summaries/candidate_snapshot.csv", CANDIDATE_SNAPSHOT_FIELDS, candidate_rows)
+        _copy_candidate_snapshot_files(staging, reports)
         _write_csv(
             staging / "reports/summary_trade_count_mismatch.csv",
             SUMMARY_TRADE_COUNT_MISMATCH_FIELDS,
@@ -1560,6 +1622,7 @@ def export_v5_bundle(
                 "summary_trade_count_mismatch_count": len(mismatch_rows),
                 "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
                 "run_summary_invalid": run_summary_invalid,
+                "candidate_snapshot_rows": len(candidate_rows),
             }
         )
         _write_text(staging / "summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2))
@@ -1614,6 +1677,8 @@ def export_v5_bundle(
             **manifest_meta,
             "trade_export_schema_version": TRADE_EXPORT_SCHEMA_VERSION,
             "summary_metrics_version": SUMMARY_METRICS_VERSION,
+            "candidate_snapshot_schema_version": CANDIDATE_SNAPSHOT_SCHEMA_VERSION,
+            "candidate_snapshot_rows": len(candidate_rows),
             "run_summary_invalid": run_summary_invalid,
             "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
             "sanity_checks": {

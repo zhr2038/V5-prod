@@ -1634,6 +1634,45 @@ def _finalize_live_run_summary_metrics(
     )
 
 
+def _write_candidate_snapshot_for_run(
+    *,
+    runtime_run_dir: Path,
+    runtime_reports_dir: Path,
+    run_id: str,
+    ts_utc: str,
+    symbols: list[str],
+    audit: Any,
+    regime_state: Any,
+    risk_level: Any,
+    positions: list[Any],
+    prices: dict[str, Any],
+    equity_usdt: Any,
+    orders: list[Any],
+) -> int:
+    from src.reporting.candidate_snapshot import build_candidate_snapshot_rows, write_candidate_snapshot
+
+    rows = build_candidate_snapshot_rows(
+        run_id=run_id,
+        ts_utc=ts_utc,
+        symbols=symbols,
+        audit=audit,
+        regime_state=regime_state,
+        risk_level=risk_level,
+        positions=positions,
+        prices=prices,
+        equity_usdt=equity_usdt,
+        target_weights_raw=dict(getattr(audit, "targets_pre_risk", {}) or {}),
+        target_weights_after_risk=dict(getattr(audit, "targets_post_risk", {}) or {}),
+        orders=orders,
+    )
+    write_candidate_snapshot(
+        run_dir=runtime_run_dir,
+        reports_dir=runtime_reports_dir,
+        rows=rows,
+    )
+    return len(rows)
+
+
 def _validate_live_contract(cfg: AppConfig) -> list[str]:
     whitelist = _live_symbol_whitelist(cfg)
     if not whitelist:
@@ -2640,6 +2679,46 @@ def main() -> None:
             stage="order_intents",
             audit=audit,
             runtime_run_dir=runtime_run_dir,
+        )
+
+    try:
+        candidate_risk_level = None
+        try:
+            candidate_risk_level = pipe._load_current_auto_risk_level()
+        except Exception:
+            candidate_risk_level = None
+        candidate_rows = _write_candidate_snapshot_for_run(
+            runtime_run_dir=runtime_run_dir,
+            runtime_reports_dir=runtime_reports_dir,
+            run_id=run_id,
+            ts_utc=_utc_now().isoformat().replace("+00:00", "Z"),
+            symbols=list(scored_symbols or []),
+            audit=audit,
+            regime_state=getattr(out.regime, "state", None),
+            risk_level=candidate_risk_level,
+            positions=list(store.list() or []),
+            prices=dict(prices or {}),
+            equity_usdt=eq,
+            orders=list(orders or []),
+        )
+        audit.add_note(f"candidate_snapshot rows={candidate_rows}")
+        audit.save(str(runtime_run_dir))
+    except Exception as exc:
+        log.warning("candidate snapshot export failed: %s", exc, exc_info=True)
+        _append_audit_high_issue(
+            audit,
+            runtime_run_dir,
+            {
+                "code": "candidate_snapshot_export_failed",
+                "severity": "high",
+                "detail": "failed to write candidate_snapshot.csv for run",
+                "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+                "evidence": {
+                    "run_id": run_id,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:500],
+                },
+            },
         )
 
     report = exec_engine.execute(orders)

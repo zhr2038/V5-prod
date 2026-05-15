@@ -34,7 +34,7 @@ PAYLOAD_DIRS = [
     "raw/reports",
     "summaries",
 ]
-RUN_FILES = ("decision_audit.json", "trades.csv", "equity.jsonl", "summary.json")
+RUN_FILES = ("decision_audit.json", "trades.csv", "equity.jsonl", "summary.json", "candidate_snapshot.csv")
 STATE_FILES = [
     ("reports/kill_switch.json", "raw/state/kill_switch.json", True),
     ("reports/reconcile_status.json", "raw/state/reconcile_status.json", True),
@@ -56,6 +56,7 @@ CURRENT_REPORT_FILES = [
     ("reports/alt_impulse_shadow_labels.jsonl", "raw/reports/alt_impulse_shadow_labels.jsonl", False),
     ("reports/multi_position_swing_shadow_labels.jsonl", "raw/reports/multi_position_swing_shadow_labels.jsonl", False),
     ("reports/protect_sol_exception_shadow_labels.jsonl", "raw/reports/protect_sol_exception_shadow_labels.jsonl", False),
+    ("reports/candidate_snapshot.csv", "raw/reports/candidate_snapshot.csv", False),
     ("reports/quant_lab_usage.jsonl", "raw/reports/quant_lab_usage.jsonl", False),
     ("reports/quant_lab_requests.jsonl", "raw/reports/quant_lab_requests.jsonl", False),
 ]
