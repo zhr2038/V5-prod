@@ -11,7 +11,7 @@ export function SignalsPanel({ decisionAudit }: SignalsPanelProps) {
   const runId = decisionAudit?.run_id;
 
   return (
-    <div className="liquid-glass-thick tone-plum reading-frame p-5 flex flex-col gap-4">
+    <div className="liquid-glass reading-frame p-4 flex flex-col gap-3 tone-plum">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
           <Signal className="w-4 h-4" />
@@ -20,31 +20,33 @@ export function SignalsPanel({ decisionAudit }: SignalsPanelProps) {
         <div className="text-xs text-[var(--text-dim)]">{runId ? `运行 ${runId}` : '等待策略信号...'}</div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="liquid-glass-thin tone-sage p-3 text-center">
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="liquid-glass-thin list-row tone-sage p-2 text-center">
           <div className="text-xs text-[var(--text-dim)]">入池</div>
-          <div className="text-xl font-semibold">{counts.selected || 0}</div>
+          <div className="font-semibold">{counts.selected || 0}</div>
         </div>
-        <div className="liquid-glass-thin tone-sky p-3 text-center">
+        <div className="liquid-glass-thin list-row tone-sky p-2 text-center">
           <div className="text-xs text-[var(--text-dim)]">订单</div>
-          <div className="text-xl font-semibold">{(counts.orders_rebalance || 0) + (counts.orders_exit || 0)}</div>
+          <div className="font-semibold">{(counts.orders_rebalance || 0) + (counts.orders_exit || 0)}</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="flex max-h-48 flex-col gap-2 overflow-auto pr-1">
         {strategies.map((s, idx) => (
-          <div key={idx} className="liquid-glass-thin list-row tone-pearl p-3 flex flex-col gap-1">
-            <div className="text-sm font-medium">{s.strategy || '策略'}</div>
-            <div className="text-xs text-[var(--text-soft)]">
+          <div key={idx} className="liquid-glass-thin list-row tone-pearl px-2 py-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium truncate">{s.strategy || '策略'}</span>
+              {typeof s.allocation === 'number' && (
+                <span className="text-[var(--text-dim)]">配置 {(s.allocation * 100).toFixed(0)}%</span>
+              )}
+            </div>
+            <div className="mt-1 text-[var(--text-soft)]">
               {s.total_signals || 0} 个信号 · 买 {s.buy_signals || 0} / 卖 {s.sell_signals || 0}
             </div>
-            {typeof s.allocation === 'number' && (
-              <div className="text-xs text-[var(--text-dim)]">配置 {(s.allocation * 100).toFixed(0)}%</div>
-            )}
           </div>
         ))}
         {!strategies.length && (
-          <div className="col-span-full text-center text-sm text-[var(--text-dim)] py-4">当前没有策略信号</div>
+          <div className="text-center text-xs text-[var(--text-dim)] py-2">当前没有策略信号</div>
         )}
       </div>
     </div>

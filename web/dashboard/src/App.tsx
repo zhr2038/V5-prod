@@ -5,7 +5,6 @@ import { MetricsGrid } from './components/MetricsGrid';
 import { MLBand } from './components/MLBand';
 import { PositionsPanel } from './components/PositionsPanel';
 import { MarketRadar } from './components/MarketRadar';
-import { SignalsPanel } from './components/SignalsPanel';
 import { Sidebar } from './components/Sidebar';
 import { BundleExportPanel } from './components/BundleExportPanel';
 import { api } from './api';
@@ -218,7 +217,6 @@ function App() {
                 account={dashboard?.account || null}
               />
               <MarketRadar marketState={marketState} />
-              <SignalsPanel decisionAudit={decisionAudit} />
               {showDeferredPanels ? (
                 secondaryReady ? (
                   <Suspense fallback={<DeferredPanelFallback />}>

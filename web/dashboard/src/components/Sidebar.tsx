@@ -1,5 +1,6 @@
 import { Clock, Route, BarChart3, Receipt, HeartPulse, Gauge } from 'lucide-react';
 import { fmtUsd, fmtNum, fmtPct, statusLabels, sideLabels } from '../lib/format';
+import { SignalsPanel } from './SignalsPanel';
 import type { TimerData, AlphaScore, Trade, HealthData, DecisionAuditData, ApiTelemetryData } from '../types';
 
 interface SidebarProps {
@@ -266,6 +267,8 @@ export function Sidebar({
           </div>
         </div>
       </Section>
+
+      <SignalsPanel decisionAudit={decisionAudit} />
     </div>
   );
 }
