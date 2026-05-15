@@ -458,6 +458,42 @@ def test_export_fill_refreshes_summary_for_close_long_trade(tmp_path):
     assert summary["slippage_usdt_total"] == pytest.approx(0.0)
 
 
+def test_export_fill_fallback_refreshes_summary_when_summary_writer_unavailable(monkeypatch, tmp_path):
+    run_dir = tmp_path / "reports" / "runs" / "20260515_03"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "summary.json").write_text(
+        json.dumps({"run_id": run_dir.name, "num_trades": 0, "budget": {"fills_count_today": 0}}),
+        encoding="utf-8",
+    )
+
+    def fail_summary_writer(_run_dir):
+        raise ImportError("numpy unavailable")
+
+    monkeypatch.setattr(fill_trade_exporter, "_refresh_summary_metrics_with_summary_writer", fail_summary_writer)
+
+    fill_trade_exporter.export_fill(
+        fill_ts_ms=1778794800000,
+        inst_id="BTC-USDT",
+        side="buy",
+        fill_px="80000",
+        fill_sz="0.0002",
+        fee="-0.016",
+        fee_ccy="USDT",
+        run_id=run_dir.name,
+        intent="OPEN_LONG",
+        window_start_ts=None,
+        window_end_ts=None,
+        run_dir=str(run_dir),
+    )
+
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["num_trades"] == 1
+    assert summary["trades_counted_rows"] == 1
+    assert summary["turnover_usdt"] == pytest.approx(16.0)
+    assert summary["fees_usdt_total"] == pytest.approx(0.016)
+    assert summary["budget"]["fills_count_today"] == 1
+
+
 def test_write_summary_keeps_zero_trades_when_trades_csv_empty(monkeypatch, tmp_path):
     monkeypatch.setattr(summary_writer, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from src.execution.fill_store import (
@@ -17,6 +19,7 @@ from src.reporting.spread_snapshot_store import SpreadSnapshotStore
 from src.execution.order_store import OrderStore
 
 log = logging.getLogger(__name__)
+SUMMARY_METRICS_VERSION = "v5.summary_metrics.v1"
 
 
 def _dec(x: Optional[str]) -> Decimal:
@@ -34,6 +37,134 @@ def _iso_utc_from_ts_ms(ts_ms: int) -> str:
     dt = datetime.fromtimestamp(int(ts_ms) / 1000.0, tz=timezone.utc)
     # keep milliseconds
     return dt.isoformat().replace("+00:00", "Z")
+
+
+def _to_float_or_none(value: Any) -> Optional[float]:
+    try:
+        if value is None or str(value).strip() == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _refresh_summary_metrics_with_summary_writer(run_dir: str) -> Dict[str, Any]:
+    from src.reporting.summary_writer import refresh_summary_metrics
+
+    return refresh_summary_metrics(str(run_dir))
+
+
+def _refresh_summary_metrics_fallback(run_dir: str) -> Dict[str, Any]:
+    rd = Path(run_dir)
+    summary_path = rd / "summary.json"
+    summary: Dict[str, Any] = {"run_id": rd.name}
+    if summary_path.exists():
+        try:
+            loaded = json.loads(summary_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                summary = loaded
+        except Exception:
+            summary = {"run_id": rd.name}
+
+    trades_path = rd / "trades.csv"
+    file_rows = 0
+    counted_rows = 0
+    turnover_usdt = 0.0
+    fees_usdt_total = 0.0
+    slippage_usdt_total = 0.0
+    warnings: list[str] = []
+
+    if trades_path.exists():
+        try:
+            with trades_path.open("r", encoding="utf-8", newline="") as fh:
+                reader = csv.DictReader(fh)
+                for line_no, row in enumerate(reader, start=2):
+                    file_rows += 1
+                    if row is None or None in row:
+                        warnings.append(f"trades.csv row {line_no} is empty or malformed")
+                        continue
+                    if not any(str(value or "").strip() for value in row.values()):
+                        continue
+                    notional = _to_float_or_none(row.get("notional_usdt"))
+                    if notional is None or abs(notional) <= 0.0:
+                        qty = _to_float_or_none(row.get("qty"))
+                        price = _to_float_or_none(row.get("price"))
+                        if qty is not None and price is not None:
+                            notional = abs(float(qty) * float(price))
+                    if notional is None or abs(notional) <= 0.0:
+                        warnings.append(f"trades.csv row {line_no} not counted: missing positive notional")
+                        continue
+                    counted_rows += 1
+                    turnover_usdt += abs(float(notional))
+                    fee_value = _to_float_or_none(row.get("fee_usdt"))
+                    slippage_value = _to_float_or_none(row.get("slippage_usdt"))
+                    if fee_value is None:
+                        warnings.append(f"trades.csv row {line_no} missing fee_usdt")
+                    if slippage_value is None:
+                        warnings.append(f"trades.csv row {line_no} missing slippage_usdt")
+                    fees_usdt_total += float(fee_value or 0.0)
+                    slippage_usdt_total += float(slippage_value or 0.0)
+            source = "trades_csv" if file_rows > 0 else "trades_csv_empty"
+        except Exception as exc:
+            warnings.append(f"trades.csv parse failed: {exc!r}")
+            source = "trades_csv_parse_error"
+            file_rows = 0
+            counted_rows = 0
+            turnover_usdt = 0.0
+            fees_usdt_total = 0.0
+            slippage_usdt_total = 0.0
+    else:
+        source = "trades_csv_missing"
+
+    summary.update(
+        {
+            "trade_export_schema_version": "v5.trade_export.v1",
+            "summary_metrics_version": SUMMARY_METRICS_VERSION,
+            "trades_file_exists": bool(trades_path.exists()),
+            "trades_file_rows": int(file_rows),
+            "trades_counted_rows": int(counted_rows),
+            "trade_metrics_source": source,
+            "trade_metrics_warning": "; ".join(warnings),
+            "trade_metrics_warnings": list(warnings),
+            "trade_metrics_warning_count": int(len(warnings)),
+            "num_trades": int(counted_rows),
+            "fills_count_today": int(counted_rows),
+            "notional_usdt_total": float(turnover_usdt),
+            "turnover_usdt": float(turnover_usdt),
+            "fee_usdt_total": float(fees_usdt_total),
+            "fees_usdt_total": float(fees_usdt_total),
+            "slippage_usdt_total": float(slippage_usdt_total),
+            "cost_usdt_total": float(fees_usdt_total + slippage_usdt_total),
+        }
+    )
+    if isinstance(summary.get("budget"), dict) and counted_rows > 0:
+        summary["budget"]["fills_count_today"] = int(counted_rows)
+
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summary
+
+
+def _refresh_summary_metrics_after_trade_export(run_dir: str) -> Dict[str, Any]:
+    try:
+        return _refresh_summary_metrics_with_summary_writer(str(run_dir))
+    except Exception as exc:
+        try:
+            summary = _refresh_summary_metrics_fallback(str(run_dir))
+            log.warning(
+                "summary_writer refresh failed after trade export for %s; fallback trade metrics were written: %s",
+                run_dir,
+                exc,
+            )
+            return summary
+        except Exception as fallback_exc:
+            log.warning(
+                "failed to refresh summary metrics after trade export for %s: primary=%s fallback=%s",
+                run_dir,
+                exc,
+                fallback_exc,
+            )
+            return {}
 
 
 def fee_to_usdt_signed(*, fee: str, fee_ccy: str, inst_id: str, fill_px: str) -> Optional[Decimal]:
@@ -234,12 +365,7 @@ def export_fill(
     )
 
     trade_written = True
-    try:
-        from src.reporting.summary_writer import refresh_summary_metrics
-
-        refresh_summary_metrics(str(run_dir))
-    except Exception as exc:
-        log.warning("failed to refresh summary metrics after trade export for %s: %s", run_dir, exc)
+    _refresh_summary_metrics_after_trade_export(str(run_dir))
 
     # Cost event (requires window_start_ts)
     cost_event_written = False
