@@ -89,6 +89,7 @@ class DecisionAudit:
         "position_state_cleared_after_close_count": 0,
         "stale_position_state_detected_count": 0,
         "swing_min_hold_exit_block_count": 0,
+        "swing_atr_early_exit_guard_count": 0,
     })
     
     # 详细数据

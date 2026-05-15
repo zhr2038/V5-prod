@@ -1466,6 +1466,93 @@ class V5Pipeline:
             return bool(getattr(self.cfg.execution, "swing_allow_exit_on_profit_lock", True))
         return self._exit_priority_for_reason(reason) == "hard"
 
+    @staticmethod
+    def _is_risk_off_regime_label(regime_state: Any) -> bool:
+        norm = str(regime_state.value if hasattr(regime_state, "value") else regime_state or "").strip()
+        return norm in {"Risk-Off", "Risk_Off", "RiskOff", "RISK_OFF"}
+
+    def _swing_atr_early_exit_guard_context(
+        self,
+        *,
+        symbol: str,
+        reason: str,
+        side: str,
+        intent: str,
+        hold_hours: Optional[float],
+        min_hold_hours: float,
+        net_bps: Optional[float],
+        f5_rsi_trend_confirm: Optional[float],
+        regime_state: Any,
+    ) -> Tuple[bool, Dict[str, Any]]:
+        if str(reason or "").strip() != "atr_trailing":
+            return False, {}
+        if not bool(getattr(self.cfg.execution, "swing_atr_early_exit_guard_enabled", True)):
+            return False, {}
+        if not bool(getattr(self.cfg.execution, "swing_atr_early_exit_guard_before_min_hold", True)):
+            return False, {}
+        if hold_hours is None or float(hold_hours) >= float(min_hold_hours):
+            return False, {}
+
+        min_loss_net_bps = float(
+            getattr(self.cfg.execution, "swing_atr_early_exit_min_loss_net_bps", -80.0) or -80.0
+        )
+        f5_floor = float(getattr(self.cfg.execution, "swing_atr_early_exit_f5_floor", -0.30) or -0.30)
+        risk_off = self._is_risk_off_regime_label(regime_state)
+
+        allow_reason = ""
+        if net_bps is None:
+            allow_reason = "net_bps_not_observable"
+        elif float(net_bps) <= float(min_loss_net_bps):
+            allow_reason = "loss_exceeded_swing_atr_guard_threshold"
+        elif risk_off and bool(getattr(self.cfg.execution, "swing_atr_early_exit_allow_if_risk_off", True)):
+            allow_reason = "risk_off"
+        elif (
+            f5_rsi_trend_confirm is not None
+            and float(f5_rsi_trend_confirm) < float(f5_floor)
+            and bool(getattr(self.cfg.execution, "swing_atr_early_exit_allow_if_f5_turns_negative", True))
+        ):
+            allow_reason = "f5_turns_negative"
+
+        context = {
+            "symbol": symbol,
+            "side": side,
+            "intent": intent,
+            "original_exit_reason": "atr_trailing",
+            "source_reason": "atr_trailing",
+            "hold_hours": float(hold_hours),
+            "min_hold_hours": float(min_hold_hours),
+            "required_hold_hours": float(min_hold_hours),
+            "net_bps": None if net_bps is None else float(net_bps),
+            "f5_rsi_trend_confirm": None if f5_rsi_trend_confirm is None else float(f5_rsi_trend_confirm),
+            "swing_atr_early_exit_min_loss_net_bps": float(min_loss_net_bps),
+            "swing_atr_early_exit_f5_floor": float(f5_floor),
+            "regime": str(regime_state.value if hasattr(regime_state, "value") else regime_state or ""),
+            "risk_off": bool(risk_off),
+            "exit_priority": "soft",
+        }
+        if allow_reason:
+            context.update(
+                {
+                    "swing_atr_early_exit_guard_active": True,
+                    "swing_atr_early_exit_guard_blocked": False,
+                    "swing_atr_early_exit_allow_reason": allow_reason,
+                }
+            )
+            return False, context
+
+        context.update(
+            {
+                "action": "skip",
+                "reason": "swing_atr_early_exit_guard",
+                "swing_atr_early_exit_guard_active": True,
+                "swing_atr_early_exit_guard_blocked": True,
+                "exit_allowed_before_min_hold": False,
+                "exit_blocked_by_min_hold": True,
+                "min_hold_block_reason": "swing_atr_early_exit_guard",
+            }
+        )
+        return True, context
+
     def _held_symbol_has_negative_expectancy_hard_block(self, symbol: str) -> bool:
         try:
             if not any(
@@ -5666,16 +5753,44 @@ class V5Pipeline:
                         hold_hours = float(swing_context.get("hold_hours"))
                     if swing_context.get("required_hold_hours") is not None:
                         min_hold_hours = float(swing_context.get("required_hold_hours"))
+                is_swing_hold_position = isinstance(swing_context, dict)
+                net_bps = _float_or_none(meta.get("net_bps"))
+                if net_bps is None and isinstance(swing_context, dict):
+                    net_bps = _float_or_none(swing_context.get("net_bps"))
+                f5_rsi_trend_confirm = _float_or_none(meta.get("f5_rsi_trend_confirm"))
+                if f5_rsi_trend_confirm is None and isinstance(swing_context, dict):
+                    f5_rsi_trend_confirm = _float_or_none(swing_context.get("f5_rsi_trend_confirm"))
+
+                atr_guard_blocked, atr_guard_context = self._swing_atr_early_exit_guard_context(
+                    symbol=str(order.symbol),
+                    reason=reason,
+                    side=str(order.side),
+                    intent=str(order.intent),
+                    hold_hours=hold_hours,
+                    min_hold_hours=float(min_hold_hours),
+                    net_bps=net_bps,
+                    f5_rsi_trend_confirm=f5_rsi_trend_confirm,
+                    regime_state=getattr(regime, "state", None),
+                ) if is_swing_hold_position and not is_probe_exit else (False, {})
+                if atr_guard_context:
+                    meta.update(atr_guard_context)
+                    if not atr_guard_blocked:
+                        allowed_before_min_hold = True
 
                 blocked_by_min_hold = (
-                    not is_probe_exit
+                    is_swing_hold_position
+                    and not is_probe_exit
                     and priority == "soft"
                     and not bool(allowed_before_min_hold)
                     and hold_hours is not None
                     and float(hold_hours) < float(min_hold_hours)
                 )
+                if atr_guard_blocked:
+                    blocked_by_min_hold = True
                 min_hold_block_reason = (
-                    "soft_exit_before_swing_min_hold" if blocked_by_min_hold else ""
+                    str(atr_guard_context.get("min_hold_block_reason") or "soft_exit_before_swing_min_hold")
+                    if blocked_by_min_hold
+                    else ""
                 )
                 meta.update(
                     {
@@ -5685,34 +5800,52 @@ class V5Pipeline:
                         "exit_blocked_by_min_hold": bool(blocked_by_min_hold),
                         "exit_priority": priority,
                         "min_hold_block_reason": min_hold_block_reason,
+                        "net_bps": net_bps,
+                        "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
                         "early_exit_opportunity_cost_bps": None,
                     }
                 )
                 order.meta = meta
                 if blocked_by_min_hold:
-                    decision = {
-                        "symbol": order.symbol,
-                        "action": "skip",
-                        "reason": "swing_min_hold_exit_block",
-                        "source_reason": reason,
-                        "side": order.side,
-                        "intent": order.intent,
-                        "hold_hours": hold_hours,
-                        "min_hold_hours": float(min_hold_hours),
-                        "exit_allowed_before_min_hold": False,
-                        "exit_blocked_by_min_hold": True,
-                        "exit_priority": priority,
-                        "min_hold_block_reason": min_hold_block_reason,
-                        "early_exit_opportunity_cost_bps": None,
-                    }
+                    decision = dict(atr_guard_context) if atr_guard_blocked else {}
+                    decision.update(
+                        {
+                            "symbol": order.symbol,
+                            "action": "skip",
+                            "reason": "swing_atr_early_exit_guard" if atr_guard_blocked else "swing_min_hold_exit_block",
+                            "source_reason": reason,
+                            "original_exit_reason": reason,
+                            "side": order.side,
+                            "intent": order.intent,
+                            "hold_hours": hold_hours,
+                            "min_hold_hours": float(min_hold_hours),
+                            "required_hold_hours": float(min_hold_hours),
+                            "net_bps": net_bps,
+                            "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
+                            "exit_allowed_before_min_hold": bool(allowed_before_min_hold) if atr_guard_blocked else False,
+                            "exit_blocked_by_min_hold": True,
+                            "exit_priority": priority,
+                            "min_hold_block_reason": min_hold_block_reason,
+                            "early_exit_opportunity_cost_bps": None,
+                        }
+                    )
                     swing_min_hold_blocked_decisions.append(decision)
                     if audit:
-                        audit.record_count("swing_min_hold_exit_block_count", symbol=order.symbol)
-                        audit.add_note(
-                            "Swing min-hold blocked soft exit: "
-                            f"{order.symbol} reason={reason} hold_hours={float(hold_hours):.2f} "
-                            f"< min_hold_hours={float(swing_min_hold_hours):.2f}"
-                        )
+                        if atr_guard_blocked:
+                            audit.record_count("swing_atr_early_exit_guard_count", symbol=order.symbol)
+                            audit.add_note(
+                                "Swing ATR early-exit guard blocked atr_trailing: "
+                                f"{order.symbol} hold_hours={float(hold_hours):.2f} "
+                                f"net_bps={float(net_bps or 0.0):.2f} "
+                                f"f5={f5_rsi_trend_confirm}"
+                            )
+                        else:
+                            audit.record_count("swing_min_hold_exit_block_count", symbol=order.symbol)
+                            audit.add_note(
+                                "Swing min-hold blocked soft exit: "
+                                f"{order.symbol} reason={reason} hold_hours={float(hold_hours):.2f} "
+                                f"< min_hold_hours={float(swing_min_hold_hours):.2f}"
+                            )
                     continue
                 guarded_exit_orders.append(order)
             exit_orders = guarded_exit_orders
@@ -5770,6 +5903,11 @@ class V5Pipeline:
                 "exit_priority": meta.get("exit_priority"),
                 "min_hold_block_reason": meta.get("min_hold_block_reason"),
                 "early_exit_opportunity_cost_bps": meta.get("early_exit_opportunity_cost_bps"),
+                "net_bps": meta.get("net_bps"),
+                "f5_rsi_trend_confirm": meta.get("f5_rsi_trend_confirm"),
+                "swing_atr_early_exit_guard_active": meta.get("swing_atr_early_exit_guard_active"),
+                "swing_atr_early_exit_guard_blocked": meta.get("swing_atr_early_exit_guard_blocked"),
+                "swing_atr_early_exit_allow_reason": meta.get("swing_atr_early_exit_allow_reason"),
             }
             if bool(meta.get("probe_exit", False)):
                 router_payload.update(
@@ -5846,6 +5984,10 @@ class V5Pipeline:
                         "exit_priority": meta.get("exit_priority"),
                         "min_hold_block_reason": meta.get("min_hold_block_reason"),
                         "early_exit_opportunity_cost_bps": meta.get("early_exit_opportunity_cost_bps"),
+                        "f5_rsi_trend_confirm": meta.get("f5_rsi_trend_confirm"),
+                        "swing_atr_early_exit_guard_active": meta.get("swing_atr_early_exit_guard_active"),
+                        "swing_atr_early_exit_guard_blocked": meta.get("swing_atr_early_exit_guard_blocked"),
+                        "swing_atr_early_exit_allow_reason": meta.get("swing_atr_early_exit_allow_reason"),
                         "exit_reason": meta.get("exit_reason", meta.get("reason")),
                     }
                 )

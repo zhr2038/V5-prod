@@ -435,6 +435,12 @@ execution:
   swing_hold_current_when_replacement_blocked: true
   swing_hold_min_net_bps_after_min_hold: 0
   swing_hold_min_score_after_min_hold: 0.10
+  swing_atr_early_exit_guard_enabled: true
+  swing_atr_early_exit_guard_before_min_hold: true
+  swing_atr_early_exit_min_loss_net_bps: -80
+  swing_atr_early_exit_allow_if_f5_turns_negative: true
+  swing_atr_early_exit_f5_floor: -0.30
+  swing_atr_early_exit_allow_if_risk_off: true
   protect_recovery_multi_position_enabled: false
   protect_recovery_max_positions: 2
   protect_recovery_max_gross_exposure: 0.18

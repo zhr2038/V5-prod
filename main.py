@@ -1087,6 +1087,12 @@ SWING_HOLD_CONFIG_KEYS = (
     "swing_hold_current_when_replacement_blocked",
     "swing_hold_min_net_bps_after_min_hold",
     "swing_hold_min_score_after_min_hold",
+    "swing_atr_early_exit_guard_enabled",
+    "swing_atr_early_exit_guard_before_min_hold",
+    "swing_atr_early_exit_min_loss_net_bps",
+    "swing_atr_early_exit_allow_if_f5_turns_negative",
+    "swing_atr_early_exit_f5_floor",
+    "swing_atr_early_exit_allow_if_risk_off",
 )
 
 

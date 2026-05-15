@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from configs.schema import ExecutionConfig
 from src.core.models import ExecutionReport, Order
@@ -985,6 +985,103 @@ class LiveExecutionEngine:
             return bool(getattr(self.cfg, "swing_allow_exit_on_profit_lock", True))
         return self._exit_priority_for_reason(reason) == "hard"
 
+    @staticmethod
+    def _is_risk_off_regime_label(regime_state: Any) -> bool:
+        norm = str(regime_state or "").strip()
+        return norm in {"Risk-Off", "Risk_Off", "RiskOff", "RISK_OFF"}
+
+    def _swing_atr_early_exit_live_context(
+        self,
+        *,
+        o: Order,
+        meta: Mapping[str, Any],
+        tags: Mapping[str, Any],
+        hold_hours: float,
+        min_hold_hours: float,
+    ) -> Tuple[bool, Dict[str, Any]]:
+        reason = str(meta.get("reason") or meta.get("exit_reason") or "").strip()
+        if reason != "atr_trailing":
+            return False, {}
+        if not bool(getattr(self.cfg, "swing_atr_early_exit_guard_enabled", True)):
+            return False, {}
+        if not bool(getattr(self.cfg, "swing_atr_early_exit_guard_before_min_hold", True)):
+            return False, {}
+        if float(hold_hours) >= float(min_hold_hours):
+            return False, {}
+
+        min_loss_net_bps = float(getattr(self.cfg, "swing_atr_early_exit_min_loss_net_bps", -80.0) or -80.0)
+        f5_floor = float(getattr(self.cfg, "swing_atr_early_exit_f5_floor", -0.30) or -0.30)
+        net_bps = _safe_float(meta.get("net_bps"))
+        if net_bps is None:
+            entry_px = _safe_float(meta.get("entry_px"))
+            if entry_px is None:
+                entry_px = _safe_float(tags.get("entry_px"))
+            current_px = _safe_float(meta.get("current_px"))
+            if current_px is None:
+                current_px = _safe_float(getattr(o, "signal_price", None))
+            if entry_px and current_px:
+                gross_bps = (float(current_px) / float(entry_px) - 1.0) * 10000.0
+                fee_bps = float(getattr(self.cfg, "fee_bps", 0.0) or 0.0)
+                slippage_bps = float(getattr(self.cfg, "slippage_bps", 0.0) or 0.0)
+                net_bps = float(gross_bps - 2.0 * (fee_bps + slippage_bps))
+        f5 = _safe_float(meta.get("f5_rsi_trend_confirm"))
+        if f5 is None:
+            f5 = _safe_float(tags.get("f5_rsi_trend_confirm"))
+        regime = str(meta.get("regime") or meta.get("current_regime") or tags.get("regime") or tags.get("current_regime") or "")
+        risk_off = self._is_risk_off_regime_label(regime)
+
+        allow_reason = ""
+        if net_bps is None:
+            allow_reason = "net_bps_not_observable"
+        elif float(net_bps) <= float(min_loss_net_bps):
+            allow_reason = "loss_exceeded_swing_atr_guard_threshold"
+        elif risk_off and bool(getattr(self.cfg, "swing_atr_early_exit_allow_if_risk_off", True)):
+            allow_reason = "risk_off"
+        elif (
+            f5 is not None
+            and float(f5) < float(f5_floor)
+            and bool(getattr(self.cfg, "swing_atr_early_exit_allow_if_f5_turns_negative", True))
+        ):
+            allow_reason = "f5_turns_negative"
+
+        context = {
+            "symbol": o.symbol,
+            "side": str(getattr(o, "side", "") or "").lower(),
+            "intent": str(getattr(o, "intent", "") or "").upper(),
+            "original_exit_reason": "atr_trailing",
+            "source_reason": "atr_trailing",
+            "hold_hours": float(hold_hours),
+            "min_hold_hours": float(min_hold_hours),
+            "required_hold_hours": float(min_hold_hours),
+            "net_bps": None if net_bps is None else float(net_bps),
+            "f5_rsi_trend_confirm": None if f5 is None else float(f5),
+            "swing_atr_early_exit_min_loss_net_bps": float(min_loss_net_bps),
+            "swing_atr_early_exit_f5_floor": float(f5_floor),
+            "regime": regime,
+            "risk_off": bool(risk_off),
+            "exit_priority": "soft",
+            "swing_atr_early_exit_guard_active": True,
+        }
+        if allow_reason:
+            context.update(
+                {
+                    "swing_atr_early_exit_guard_blocked": False,
+                    "swing_atr_early_exit_allow_reason": allow_reason,
+                }
+            )
+            return False, context
+        context.update(
+            {
+                "action": "skip",
+                "reason": "swing_atr_early_exit_guard",
+                "swing_atr_early_exit_guard_blocked": True,
+                "exit_allowed_before_min_hold": False,
+                "exit_blocked_by_min_hold": True,
+                "min_hold_block_reason": "swing_atr_early_exit_guard",
+            }
+        )
+        return True, context
+
     def _swing_min_hold_live_block_context(self, o: Order) -> Optional[Dict[str, Any]]:
         side = str(getattr(o, "side", "") or "").lower()
         intent = str(getattr(o, "intent", "") or "").upper()
@@ -1006,6 +1103,7 @@ class LiveExecutionEngine:
         if position is None or float(getattr(position, "qty", 0.0) or 0.0) <= 0.0:
             return None
         tags = _safe_json_obj(getattr(position, "tags_json", "{}"))
+        meta.setdefault("entry_px", getattr(position, "avg_px", None))
         if probe_type_from_meta(tags) in PROBE_POSITION_TYPES:
             return None
 
@@ -1037,15 +1135,36 @@ class LiveExecutionEngine:
             or tags.get("swing_entry_ts") is not None
             or meta.get("swing_entry_ts") is not None
         )
-        if not swing_tagged and not bool(getattr(self.cfg, "swing_hold_enabled", True)):
+        if not swing_tagged:
             return None
+
+        atr_guard_blocked, atr_guard_context = self._swing_atr_early_exit_live_context(
+            o=o,
+            meta=meta,
+            tags=tags,
+            hold_hours=float(hold_hours),
+            min_hold_hours=float(min_hold_hours),
+        )
+        if atr_guard_context:
+            meta.update(atr_guard_context)
+            if not atr_guard_blocked:
+                meta.update(
+                    {
+                        "exit_allowed_before_min_hold": True,
+                        "exit_blocked_by_min_hold": False,
+                        "min_hold_block_reason": "",
+                    }
+                )
+                o.meta = meta
+                return None
 
         blocked = float(hold_hours) < float(min_hold_hours)
         context = {
             "symbol": o.symbol,
             "action": "skip",
-            "reason": "swing_min_hold_exit_block",
+            "reason": "swing_atr_early_exit_guard" if atr_guard_blocked else "swing_min_hold_exit_block",
             "source_reason": reason,
+            "original_exit_reason": reason,
             "side": side,
             "intent": intent,
             "hold_hours": float(hold_hours),
@@ -1053,8 +1172,14 @@ class LiveExecutionEngine:
             "exit_priority": priority,
             "exit_allowed_before_min_hold": bool(allowed_before_min_hold),
             "exit_blocked_by_min_hold": bool(blocked),
-            "min_hold_block_reason": "soft_exit_before_swing_min_hold" if blocked else "",
+            "min_hold_block_reason": (
+                str(atr_guard_context.get("min_hold_block_reason") or "soft_exit_before_swing_min_hold")
+                if blocked
+                else ""
+            ),
         }
+        if atr_guard_context:
+            context.update(atr_guard_context)
         meta.update(context)
         o.meta = meta
         return context if blocked else None
@@ -1488,6 +1613,12 @@ class LiveExecutionEngine:
 
         swing_min_hold_block = self._swing_min_hold_live_block_context(o)
         if swing_min_hold_block is not None:
+            policy_reason = str(swing_min_hold_block.get("reason") or "swing_min_hold_exit_block")
+            policy_message = str(
+                swing_min_hold_block.get("min_hold_block_reason")
+                or swing_min_hold_block.get("reason")
+                or "soft_exit_before_swing_min_hold"
+            )
             self.order_store.upsert_new(
                 cl_ord_id=clid,
                 run_id=self.run_id,
@@ -1502,7 +1633,7 @@ class LiveExecutionEngine:
                 window_end_ts=(o.meta or {}).get("window_end_ts"),
                 req={
                     "blocked_by_policy": True,
-                    "reason": "swing_min_hold_exit_block",
+                    "reason": policy_reason,
                     "swing_min_hold_guard": swing_min_hold_block,
                     "_v5_order_meta": dict(o.meta or {}),
                 },
@@ -1513,9 +1644,9 @@ class LiveExecutionEngine:
             self.order_store.update_state(
                 clid,
                 new_state="REJECTED",
-                last_error_code="swing_min_hold_exit_block",
+                last_error_code=policy_reason,
                 last_error_msg=(
-                    f"soft_exit_before_swing_min_hold: {o.symbol} "
+                    f"{policy_message}: {o.symbol} "
                     f"reason={swing_min_hold_block.get('source_reason')} "
                     f"hold_hours={float(swing_min_hold_block.get('hold_hours') or 0.0):.4f} "
                     f"< min_hold_hours={float(swing_min_hold_block.get('min_hold_hours') or 0.0):.4f}"

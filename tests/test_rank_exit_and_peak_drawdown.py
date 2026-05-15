@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -57,6 +58,16 @@ def _regime() -> RegimeResult:
     )
 
 
+def _risk_off_regime() -> RegimeResult:
+    return RegimeResult(
+        state=RegimeState.RISK_OFF,
+        atr_pct=0.01,
+        ma20=100.0,
+        ma60=95.0,
+        multiplier=0.0,
+    )
+
+
 def _build_pipe(cfg: AppConfig, tmp_path: Path) -> V5Pipeline:
     pipeline_module.REPORTS_DIR = tmp_path
     pipe = V5Pipeline(cfg)
@@ -78,12 +89,19 @@ def _run_swing_min_hold_exit_case(
     *,
     hold_hours: float,
     exit_reason: str,
+    signal_price: float = 600.0,
+    avg_px: float = 600.0,
+    f5_rsi_trend_confirm: float = 0.35,
+    swing_position: bool = True,
+    regime_result: RegimeResult | None = None,
     cfg_mutator=None,
 ):
     now = datetime(2026, 5, 2, 5, 0, tzinfo=timezone.utc)
     entry_ts = (now - timedelta(hours=hold_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
     cfg = AppConfig(symbols=["BNB/USDT"])
     cfg.alpha.use_fused_score_for_weighting = False
+    cfg.execution.fee_bps = 10.0
+    cfg.execution.slippage_bps = 5.0
     cfg.execution.swing_min_hold_exit_guard_enabled = True
     cfg.execution.swing_min_hold_hours = 24.0
     cfg.execution.protect_profit_lock_enabled = False
@@ -105,21 +123,31 @@ def _run_swing_min_hold_exit_case(
             side="sell",
             intent="CLOSE_LONG",
             notional_usdt=12.0,
-            signal_price=600.0,
+            signal_price=signal_price,
             meta={"reason": exit_reason},
         )
     ]
-    market_data = {"BNB/USDT": _series("BNB/USDT", 600.0)}
+    market_data = {"BNB/USDT": _series("BNB/USDT", signal_price)}
+    tags = {}
+    if swing_position:
+        tags = {
+            "swing_hold_position": True,
+            "swing_entry_ts": entry_ts,
+            "swing_min_hold_hours": 24.0,
+            "entry_reason": "normal_entry",
+            "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
+        }
     positions = [
         Position(
             symbol="BNB/USDT",
             qty=0.02,
-            avg_px=600.0,
+            avg_px=avg_px,
             entry_ts=entry_ts,
             highest_px=630.0,
             last_update_ts=entry_ts,
-            last_mark_px=600.0,
+            last_mark_px=signal_price,
             unrealized_pnl_pct=0.0,
+            tags_json=json.dumps(tags),
         )
     ]
     audit = DecisionAudit(run_id=f"swing-min-hold-{exit_reason}-{hold_hours}")
@@ -130,24 +158,71 @@ def _run_swing_min_hold_exit_case(
         equity_peak_usdt=1000.0,
         audit=audit,
         precomputed_alpha=AlphaSnapshot(raw_factors={}, z_factors={}, scores={"BNB/USDT": 1.0}),
-        precomputed_regime=_regime(),
+        precomputed_regime=regime_result or _regime(),
     )
     return out, audit
 
 
-def test_swing_min_hold_blocks_atr_trailing_before_24h(tmp_path):
+def test_swing_atr_early_exit_guard_blocks_small_loss_before_24h(tmp_path):
     out, audit = _run_swing_min_hold_exit_case(tmp_path, hold_hours=5.0, exit_reason="atr_trailing")
 
     assert not any(order.symbol == "BNB/USDT" and order.side == "sell" for order in out.orders)
-    decision = next(d for d in audit.router_decisions if d.get("reason") == "swing_min_hold_exit_block")
-    assert decision["source_reason"] == "atr_trailing"
+    decision = next(d for d in audit.router_decisions if d.get("reason") == "swing_atr_early_exit_guard")
+    assert decision["original_exit_reason"] == "atr_trailing"
     assert decision["hold_hours"] == pytest.approx(5.0)
     assert decision["min_hold_hours"] == pytest.approx(24.0)
+    assert decision["required_hold_hours"] == pytest.approx(24.0)
+    assert decision["net_bps"] == pytest.approx(-30.0)
+    assert decision["f5_rsi_trend_confirm"] == pytest.approx(0.35)
     assert decision["exit_allowed_before_min_hold"] is False
     assert decision["exit_blocked_by_min_hold"] is True
     assert decision["exit_priority"] == "soft"
-    assert decision["min_hold_block_reason"] == "soft_exit_before_swing_min_hold"
-    assert audit.counts["swing_min_hold_exit_block_count"] == 1
+    assert decision["min_hold_block_reason"] == "swing_atr_early_exit_guard"
+    assert audit.counts["swing_atr_early_exit_guard_count"] == 1
+
+
+def test_swing_atr_early_exit_guard_allows_large_loss_before_24h(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(
+        tmp_path,
+        hold_hours=5.0,
+        exit_reason="atr_trailing",
+        avg_px=600.0,
+        signal_price=595.0,
+    )
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert order.meta["net_bps"] < -80.0
+    assert order.meta["swing_atr_early_exit_allow_reason"] == "loss_exceeded_swing_atr_guard_threshold"
+    assert order.meta["exit_allowed_before_min_hold"] is True
+    assert order.meta["exit_blocked_by_min_hold"] is False
+    assert not any(d.get("reason") == "swing_atr_early_exit_guard" for d in audit.router_decisions)
+
+
+def test_swing_atr_early_exit_guard_allows_risk_off_before_24h(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(
+        tmp_path,
+        hold_hours=5.0,
+        exit_reason="atr_trailing",
+        regime_result=_risk_off_regime(),
+    )
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert order.meta["swing_atr_early_exit_allow_reason"] == "risk_off"
+    assert order.meta["exit_allowed_before_min_hold"] is True
+    assert not any(d.get("reason") == "swing_atr_early_exit_guard" for d in audit.router_decisions)
+
+
+def test_swing_atr_early_exit_guard_does_not_affect_non_swing_position(tmp_path):
+    out, audit = _run_swing_min_hold_exit_case(
+        tmp_path,
+        hold_hours=5.0,
+        exit_reason="atr_trailing",
+        swing_position=False,
+    )
+
+    order = next(order for order in out.orders if order.symbol == "BNB/USDT" and order.side == "sell")
+    assert "swing_atr_early_exit_guard_active" not in order.meta
+    assert not any(d.get("reason") == "swing_atr_early_exit_guard" for d in audit.router_decisions)
 
 
 def test_swing_min_hold_allows_hard_stop_loss_before_24h(tmp_path):
