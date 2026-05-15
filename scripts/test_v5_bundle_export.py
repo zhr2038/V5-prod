@@ -2721,8 +2721,11 @@ def main():
             assert len(summary_issues) == 2, issues
             assert window["summary_trade_count_mismatch_count"] == 2, window
             assert window["summary_trade_count_mismatch_high_issue_count"] == 2, window
+            assert window["run_summary_invalid"] is True, window
             assert window["trade_metrics_rows"] == 2, window
             assert window["fill_metrics_rows"] == 2, window
+            assert manifest["run_summary_invalid"] is True, manifest
+            assert manifest["summary_trade_count_mismatch_high_issue_count"] == 2, manifest
             assert manifest["trade_export_schema_version"] == "v5.trade_export.v1", manifest
             assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1", manifest
             assert "## Summary trade metrics check" in readme, readme

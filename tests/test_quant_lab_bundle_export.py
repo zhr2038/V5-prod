@@ -302,6 +302,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert trade_metrics[0]["fills_count_today"] == "1"
         assert fill_metrics[0]["normalized_symbol"] == "BNB-USDT"
         assert mismatch_rows[0]["high_issue"] == "true"
+        assert manifest["run_summary_invalid"] is True
+        assert manifest["summary_trade_count_mismatch_high_issue_count"] == 1
         assert manifest["trade_export_schema_version"] == "v5.trade_export.v1"
         assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1"
         assert window["fill_metrics_rows"] == 1

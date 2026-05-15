@@ -1391,6 +1391,8 @@ def export_v5_bundle(
     fallback_rows = _build_fallback_rows(usage_rows + request_rows)
     mode_rows = _build_mode_audit_rows(usage_rows)
     trade_metrics_rows, fill_metrics_rows, mismatch_rows = _build_trade_bundle_rows(reports)
+    summary_high_issue_count = len([row for row in mismatch_rows if str(row.get("high_issue")) == "true"])
+    run_summary_invalid = summary_high_issue_count > 0
 
     stamp = _utc_stamp()
     bundle_name = f"v5_live_followup_bundle_{stamp}.tar.gz"
@@ -1418,9 +1420,8 @@ def export_v5_bundle(
                 "trade_metrics_rows": len(trade_metrics_rows),
                 "fill_metrics_rows": len(fill_metrics_rows),
                 "summary_trade_count_mismatch_count": len(mismatch_rows),
-                "summary_trade_count_mismatch_high_issue_count": len(
-                    [row for row in mismatch_rows if str(row.get("high_issue")) == "true"]
-                ),
+                "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
+                "run_summary_invalid": run_summary_invalid,
             }
         )
         _write_text(staging / "summaries/window_summary.json", json.dumps(window_summary, ensure_ascii=False, indent=2))
@@ -1476,6 +1477,8 @@ def export_v5_bundle(
             **manifest_meta,
             "trade_export_schema_version": TRADE_EXPORT_SCHEMA_VERSION,
             "summary_metrics_version": SUMMARY_METRICS_VERSION,
+            "run_summary_invalid": run_summary_invalid,
+            "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
             "sanity_checks": {
                 "no_env_files": True,
                 "no_unredacted_secret_assignments": findings == 0,

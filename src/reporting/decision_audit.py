@@ -145,6 +145,7 @@ class DecisionAudit:
 
     # 备注
     notes: List[str] = field(default_factory=list)
+    issues_to_fix: List[Dict[str, Any]] = field(default_factory=list)
     
     # Ensemble regime详细信息
     regime_details: Dict[str, Any] = field(default_factory=dict)
@@ -251,6 +252,7 @@ def load_decision_audit(run_dir: str) -> Optional[DecisionAudit]:
     audit.universe_config = data.get("universe_config", {})
     audit.exit_signals = data.get("exit_signals", [])
     audit.notes = data.get("notes", [])
+    audit.issues_to_fix = data.get("issues_to_fix", []) or []
     audit.regime_details = data.get("regime_details", {})
     audit.strategy_signals = data.get("strategy_signals", [])
     audit.ml_signal_overview = data.get("ml_signal_overview", {})

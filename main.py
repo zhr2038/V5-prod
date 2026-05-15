@@ -1472,6 +1472,81 @@ def _audit_and_raise(audit, runtime_run_dir: Path, reject_reason: str, message: 
     raise RuntimeError(message)
 
 
+def _append_audit_high_issue(audit: Any, runtime_run_dir: Path, issue: dict[str, Any]) -> None:
+    if audit is not None:
+        issues = getattr(audit, "issues_to_fix", None)
+        if not isinstance(issues, list):
+            issues = []
+        key = (
+            str(issue.get("severity") or ""),
+            str(issue.get("code") or ""),
+            json.dumps(issue.get("evidence", {}), sort_keys=True, default=str),
+        )
+        if not any(
+            isinstance(existing, dict)
+            and (
+                str(existing.get("severity") or ""),
+                str(existing.get("code") or ""),
+                json.dumps(existing.get("evidence", {}), sort_keys=True, default=str),
+            )
+            == key
+            for existing in issues
+        ):
+            issues.append(issue)
+        audit.issues_to_fix = issues
+        audit.add_note(f"high issue: {issue.get('code')} {issue.get('detail')}")
+        audit.save(str(runtime_run_dir))
+        return
+
+    issue_path = Path(runtime_run_dir) / "issues_to_fix.json"
+    payload: dict[str, Any] = {"issues": []}
+    if issue_path.exists():
+        try:
+            loaded = json.loads(issue_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = {"issues": []}
+    issues = payload.get("issues")
+    if not isinstance(issues, list):
+        issues = []
+    issues.append(issue)
+    payload["issues"] = issues
+    payload["high_issue_count"] = sum(1 for item in issues if isinstance(item, dict) and item.get("severity") == "high")
+    issue_path.parent.mkdir(parents=True, exist_ok=True)
+    issue_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _refresh_live_summary_metrics_after_trades(
+    runtime_run_dir: Path,
+    *,
+    audit: Any = None,
+    log_obj: Any = None,
+    current_summary: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    from src.reporting.summary_writer import refresh_summary_metrics
+
+    try:
+        return refresh_summary_metrics(str(runtime_run_dir))
+    except Exception as exc:
+        issue = {
+            "code": "summary_metrics_refresh_failed",
+            "severity": "high",
+            "detail": "live finalize failed to refresh summary metrics after trades.csv export",
+            "ts_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+            "evidence": {
+                "run_id": getattr(audit, "run_id", Path(runtime_run_dir).name),
+                "run_dir": str(runtime_run_dir),
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:500],
+            },
+        }
+        if log_obj is not None:
+            log_obj.error("live summary metrics refresh failed after trades export: %s", exc, exc_info=True)
+        _append_audit_high_issue(audit, runtime_run_dir, issue)
+        return dict(current_summary or {})
+
+
 def _validate_live_contract(cfg: AppConfig) -> list[str]:
     whitelist = _live_symbol_whitelist(cfg)
     if not whitelist:
@@ -2638,14 +2713,14 @@ def main() -> None:
             window_end_ts=window_end_ts,
         )
 
-        # Live finalize: refresh summary metrics after fills/trades export may have appended rows.
-        try:
-            if is_live:
-                from src.reporting.summary_writer import refresh_summary_metrics
-
-                summ = refresh_summary_metrics(str(runtime_run_dir))
-        except Exception:
-            pass
+        # Live finalize: force a metrics refresh after fills/trades export has appended and flushed trades.csv.
+        if is_live:
+            summ = _refresh_live_summary_metrics_after_trades(
+                runtime_run_dir,
+                audit=audit,
+                log_obj=log,
+                current_summary=summ,
+            )
 
         # F3.0 budget monitoring (monitor + tagging only, no behavior change)
         try:

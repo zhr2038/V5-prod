@@ -6874,6 +6874,10 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             1 for row in summary_trade_count_mismatch_rows
             if str(row.get("diagnosis") or "").startswith("high_issue")
         ),
+        "run_summary_invalid": any(
+            str(row.get("diagnosis") or "").startswith("high_issue")
+            for row in summary_trade_count_mismatch_rows
+        ),
         "trade_metrics_rows": len(trade_metrics_rows),
         "fill_metrics_rows": len(fill_metrics_rows),
         "negative_expectancy_consistency_rows": len(negative_consistency_rows),
@@ -7593,6 +7597,14 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "medium_issue_count": medium_count,
         "warning_count": warning_count,
         "roundtrip_warning": roundtrip_warning,
+        "summary_trade_count_mismatch_high_issue_count": sum(
+            1 for row in summary_trade_count_mismatch_rows
+            if str(row.get("diagnosis") or "").startswith("high_issue")
+        ),
+        "run_summary_invalid": any(
+            str(row.get("diagnosis") or "").startswith("high_issue")
+            for row in summary_trade_count_mismatch_rows
+        ),
     }
 
 
@@ -7934,6 +7946,10 @@ manifest = {
     "event_id_generation_version": provenance_meta.get("event_id_generation_version", QUANT_LAB_EVENT_ID_GENERATION_VERSION),
     "trade_export_schema_version": provenance_meta.get("trade_export_schema_version", TRADE_EXPORT_SCHEMA_VERSION),
     "summary_metrics_version": provenance_meta.get("summary_metrics_version", SUMMARY_METRICS_VERSION),
+    "run_summary_invalid": bool(summary_meta.get("run_summary_invalid", False)),
+    "summary_trade_count_mismatch_high_issue_count": int(
+        summary_meta.get("summary_trade_count_mismatch_high_issue_count", 0) or 0
+    ),
     "strategy_version": provenance_meta.get("strategy_version", "not_observable"),
     "strategy_hash": provenance_meta.get("strategy_hash", "not_observable"),
     "strategy_file_count": provenance_meta.get("strategy_file_count", 0),

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+import main as main_module
 from src.core import run_logger
 from src.reporting import budget_state, decision_audit, metrics, reporting, summary_writer, trade_log
 
@@ -362,6 +363,60 @@ def test_attach_budget_keeps_fills_count_today_in_sync_with_trades(monkeypatch, 
     assert summary["num_trades"] == 1
     assert summary["fills_count_today"] == 1
     assert summary["budget"]["fills_count_today"] == 1
+
+
+def test_live_finalize_refreshes_summary_after_trades_flush(tmp_path):
+    run_dir = tmp_path / "reports" / "runs" / "live_finalize_trade_flush"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_equity(run_dir, ts="2026-05-13T00:00:00Z", equity=100.0)
+    (run_dir / "summary.json").write_text(
+        json.dumps({"run_id": run_dir.name, "num_trades": 0, "budget": {"fills_count_today": 0}}),
+        encoding="utf-8",
+    )
+    _write_trades(
+        run_dir,
+        ["2026-05-13T00:10:00Z,live_finalize_trade_flush,BNB/USDT,OPEN_LONG,buy,0.02,600,12,0.012,0.001,,"],
+    )
+
+    audit = decision_audit.DecisionAudit(run_id=run_dir.name)
+    summary = main_module._refresh_live_summary_metrics_after_trades(
+        run_dir,
+        audit=audit,
+        current_summary={"num_trades": 0},
+    )
+    persisted = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert summary["num_trades"] == 1
+    assert summary["fills_count_today"] == 1
+    assert summary["budget"]["fills_count_today"] == 1
+    assert persisted["num_trades"] == 1
+    assert persisted["budget"]["fills_count_today"] == 1
+    assert audit.issues_to_fix == []
+
+
+def test_live_finalize_refresh_failure_records_high_issue(monkeypatch, tmp_path):
+    run_dir = tmp_path / "reports" / "runs" / "live_finalize_refresh_fail"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    audit = decision_audit.DecisionAudit(run_id=run_dir.name)
+
+    def fail_refresh(_run_dir):
+        raise RuntimeError("refresh broke")
+
+    monkeypatch.setattr(summary_writer, "refresh_summary_metrics", fail_refresh)
+    summary = main_module._refresh_live_summary_metrics_after_trades(
+        run_dir,
+        audit=audit,
+        current_summary={"num_trades": 0},
+    )
+    loaded = decision_audit.load_decision_audit(str(run_dir))
+
+    assert summary["num_trades"] == 0
+    assert loaded is not None
+    assert loaded.issues_to_fix
+    issue = loaded.issues_to_fix[0]
+    assert issue["severity"] == "high"
+    assert issue["code"] == "summary_metrics_refresh_failed"
+    assert issue["evidence"]["error_type"] == "RuntimeError"
 
 
 def test_write_summary_sorts_unsorted_equity_rows_by_timestamp(monkeypatch, tmp_path):
