@@ -526,7 +526,7 @@ def _build_trade_bundle_rows(reports: Path) -> tuple[list[Dict[str, Any]], list[
 
 def _read_candidate_snapshot_rows(reports: Path) -> list[Dict[str, Any]]:
     rows: list[Dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
 
     def add_path(path: Path) -> None:
         try:
@@ -538,7 +538,7 @@ def _read_candidate_snapshot_rows(reports: Path) -> list[Dict[str, Any]]:
                     candidate_id = str(row.get("candidate_id") or "").strip()
                     symbol = str(row.get("symbol") or "").strip()
                     strategy_candidate = str(row.get("strategy_candidate") or "").strip()
-                    dedupe_key = (candidate_id, run_id, symbol)
+                    dedupe_key = (candidate_id, run_id, symbol, strategy_candidate)
                     if dedupe_key in seen:
                         continue
                     seen.add(dedupe_key)
@@ -559,6 +559,17 @@ def _read_candidate_snapshot_rows(reports: Path) -> list[Dict[str, Any]]:
     if aggregate.exists():
         add_path(aggregate)
     return rows
+
+
+def _candidate_cost_source_coverage(rows: list[Mapping[str, Any]]) -> float:
+    if not rows:
+        return 0.0
+    filled = [
+        row
+        for row in rows
+        if str(row.get("cost_source") or "").strip().lower() not in {"", "null", "not_observable"}
+    ]
+    return float(len(filled)) / float(len(rows))
 
 
 def _copy_candidate_snapshot_files(
@@ -1739,6 +1750,7 @@ def export_v5_bundle(
     mode_rows = _build_mode_audit_rows(usage_rows)
     trade_metrics_rows, fill_metrics_rows, mismatch_rows = _build_trade_bundle_rows(reports)
     candidate_rows = _read_candidate_snapshot_rows(reports)
+    candidate_cost_source_coverage = _candidate_cost_source_coverage(candidate_rows)
     order_lifecycle_rows = _read_order_lifecycle_rows(reports)
     summary_high_issue_count = len([row for row in mismatch_rows if str(row.get("high_issue")) == "true"])
     run_summary_invalid = summary_high_issue_count > 0
@@ -1784,6 +1796,7 @@ def export_v5_bundle(
                 "summary_trade_count_mismatch_high_issue_count": summary_high_issue_count,
                 "run_summary_invalid": run_summary_invalid,
                 "candidate_snapshot_rows": len(candidate_rows),
+                "candidate_cost_source_coverage": candidate_cost_source_coverage,
                 "order_lifecycle_rows": len(order_lifecycle_rows),
             }
         )
@@ -1841,6 +1854,7 @@ def export_v5_bundle(
             "summary_metrics_version": SUMMARY_METRICS_VERSION,
             "candidate_snapshot_schema_version": CANDIDATE_SNAPSHOT_SCHEMA_VERSION,
             "candidate_snapshot_rows": len(candidate_rows),
+            "candidate_cost_source_coverage": candidate_cost_source_coverage,
             "order_lifecycle_schema_version": ORDER_LIFECYCLE_SCHEMA_VERSION,
             "order_lifecycle_rows": len(order_lifecycle_rows),
             "run_summary_invalid": run_summary_invalid,

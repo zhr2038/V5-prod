@@ -83,6 +83,43 @@ PROBE_EXIT_REASONS = {
     "probe_time_stop",
     "market_impulse_probe_time_stop",
 }
+CANDIDATE_SNAPSHOT_FIELDS = (
+    "candidate_id",
+    "run_id",
+    "ts_utc",
+    "symbol",
+    "regime_state",
+    "risk_level",
+    "current_position",
+    "current_weight",
+    "target_weight_raw",
+    "target_weight_after_risk",
+    "final_score",
+    "rank",
+    "f1_mom_5d",
+    "f2_mom_20d",
+    "f3_vol_adj_ret",
+    "f4_volume_expansion",
+    "f5_rsi_trend_confirm",
+    "alpha6_score",
+    "alpha6_side",
+    "ml_score",
+    "mean_reversion_score",
+    "expected_edge_bps",
+    "required_edge_bps",
+    "cost_bps",
+    "selected_total_cost_bps",
+    "cost_source",
+    "cost_model_version",
+    "cost_gate_verified",
+    "would_block_by_cost",
+    "cost_reason",
+    "eligible_before_filters",
+    "final_decision",
+    "block_reason",
+    "no_signal_reason",
+    "strategy_candidate",
+)
 SOURCE_SNAPSHOT_PATHS = (
     "main.py",
     "event_driven_check.py",
@@ -408,11 +445,13 @@ def copy_current_reports():
 
 
 def merge_candidate_snapshot_reports():
-    paths = sorted((OUT / "raw" / "recent_runs").glob("*/candidate_snapshot.csv"))
-    if not paths:
-        return 0
+    paths = []
+    aggregate = OUT / "raw" / "reports" / "candidate_snapshot.csv"
+    if aggregate.is_file():
+        paths.append(aggregate)
+    paths.extend(sorted((OUT / "raw" / "recent_runs").glob("*/candidate_snapshot.csv")))
     rows = []
-    fields = []
+    fields = list(CANDIDATE_SNAPSHOT_FIELDS)
     seen = set()
     for path in paths:
         try:
@@ -436,18 +475,40 @@ def merge_candidate_snapshot_reports():
                     rows.append(row)
         except Exception as exc:
             collection_errors.append({"source": str(path), "dest": "raw/reports/candidate_snapshot.csv", "error": repr(exc)})
-    if not rows or not fields:
-        return 0
-    dest = OUT / "raw" / "reports" / "candidate_snapshot.csv"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fields)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({field: row.get(field, "") for field in fields})
-    copied_sources["raw/reports/candidate_snapshot.csv"] = "merged raw/recent_runs/*/candidate_snapshot.csv"
-    notes.append(f"merged candidate_snapshot rows={len(rows)} from recent_runs={len(paths)}")
+    for dest_rel in ("raw/reports/candidate_snapshot.csv", "summaries/candidate_snapshot.csv"):
+        dest = OUT / dest_rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with dest.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({field: row.get(field, "") for field in fields})
+    copied_sources["raw/reports/candidate_snapshot.csv"] = "merged reports/candidate_snapshot.csv + raw/recent_runs/*/candidate_snapshot.csv"
+    copied_sources["summaries/candidate_snapshot.csv"] = copied_sources["raw/reports/candidate_snapshot.csv"]
+    notes.append(f"merged candidate_snapshot rows={len(rows)} from sources={len(paths)}")
     return len(rows)
+
+
+def read_candidate_snapshot_summary_rows():
+    path = OUT / "summaries" / "candidate_snapshot.csv"
+    if not path.is_file():
+        return []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            return [dict(row) for row in csv.DictReader(fh) if row]
+    except Exception as exc:
+        collection_errors.append({"source": str(path), "error": f"candidate_snapshot_summary_load: {exc!r}"})
+        return []
+
+
+def candidate_cost_source_coverage(rows):
+    if not rows:
+        return 0.0
+    filled = [
+        row for row in rows
+        if str(row.get("cost_source") or "").strip().lower() not in {"", "null", "not_observable"}
+    ]
+    return len(filled) / len(rows)
 
 
 def copy_logs():
@@ -551,6 +612,8 @@ def write_csv(path, rows, fieldnames):
 
 def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_meta):
     not_obs = "not_observable"
+    candidate_snapshot_rows = read_candidate_snapshot_summary_rows()
+    candidate_cost_source_coverage_value = candidate_cost_source_coverage(candidate_snapshot_rows)
 
     def as_float(value):
         if value in (None, "", not_obs):
@@ -7370,6 +7433,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "run_count": len(copied_runs),
         "recent_24h_decision_audit_count": len(recent_24_decisions),
         "log_file_count": len(copied_logs),
+        "candidate_snapshot_rows": len(candidate_snapshot_rows),
+        "candidate_cost_source_coverage": candidate_cost_source_coverage_value,
         "router_decision_rows": len(router_rows),
         "has_trade_data": has_trade_data,
         "trade_observation_status": trade_observation_status,
@@ -8215,6 +8280,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
             str(row.get("diagnosis") or "").startswith("high_issue")
             for row in summary_trade_count_mismatch_rows
         ),
+        "candidate_snapshot_rows": len(candidate_snapshot_rows),
+        "candidate_cost_source_coverage": candidate_cost_source_coverage_value,
     }
 
 
@@ -8483,6 +8550,7 @@ sanity = {
     "contains summaries/enforce_readiness_snapshot.json": (OUT / "summaries/enforce_readiness_snapshot.json").is_file(),
     "contains summaries/quant_lab_cost_usage.csv": (OUT / "summaries/quant_lab_cost_usage.csv").is_file(),
     "contains summaries/quant_lab_fallbacks.csv": (OUT / "summaries/quant_lab_fallbacks.csv").is_file(),
+    "contains summaries/candidate_snapshot.csv": (OUT / "summaries/candidate_snapshot.csv").is_file(),
     "contains summaries/issues_to_fix.json": (OUT / "summaries/issues_to_fix.json").is_file(),
     "provenance_status": provenance_meta.get("provenance_status", "not_observable"),
     "code provenance ok/degraded": provenance_meta.get("code_provenance", "not_observable"),
@@ -8518,6 +8586,7 @@ failure_check_names = [
     "contains summaries/enforce_readiness_snapshot.json",
     "contains summaries/quant_lab_cost_usage.csv",
     "contains summaries/quant_lab_fallbacks.csv",
+    "contains summaries/candidate_snapshot.csv",
     "contains summaries/issues_to_fix.json",
     "provenance_status explicit",
     "no .env files",
@@ -8561,6 +8630,8 @@ manifest = {
     "summary_trade_count_mismatch_high_issue_count": int(
         summary_meta.get("summary_trade_count_mismatch_high_issue_count", 0) or 0
     ),
+    "candidate_snapshot_rows": int(summary_meta.get("candidate_snapshot_rows", 0) or 0),
+    "candidate_cost_source_coverage": summary_meta.get("candidate_cost_source_coverage", 0.0),
     "strategy_version": provenance_meta.get("strategy_version", "not_observable"),
     "strategy_hash": provenance_meta.get("strategy_hash", "not_observable"),
     "strategy_file_count": provenance_meta.get("strategy_file_count", 0),

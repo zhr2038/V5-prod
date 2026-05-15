@@ -197,8 +197,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
     (run_dir / "candidate_snapshot.csv").write_text(
         "\n".join(
             [
-                "candidate_id,run_id,ts_utc,symbol,strategy_candidate,final_decision",
-                "cand_r1_bnb,r1,2026-05-11T13:00:00Z,BNB/USDT,Alpha6Factor,OPEN_LONG",
+                "candidate_id,run_id,ts_utc,symbol,strategy_candidate,final_decision,expected_edge_bps,required_edge_bps,cost_bps,cost_source,cost_model_version,cost_gate_verified",
+                "cand_r1_bnb,r1,2026-05-11T13:00:00Z,BNB/USDT,f4_volume_swing,OPEN_LONG,60,45,30,cost_not_available,v5_local_execution.cost_aware_roundtrip_cost_bps,false",
             ]
         )
         + "\n",
@@ -334,6 +334,8 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert fill_metrics[0]["normalized_symbol"] == "BNB-USDT"
         assert candidate_snapshot[0]["candidate_id"] == "cand_r1_bnb"
         assert candidate_snapshot[0]["symbol"] == "BNB/USDT"
+        assert candidate_snapshot[0]["strategy_candidate"] == "f4_volume_swing"
+        assert candidate_snapshot[0]["cost_source"] == "cost_not_available"
         assert raw_candidate_snapshot == candidate_snapshot
         assert "no_signal_reason" in candidate_snapshot[0]
         assert order_lifecycle[0]["lifecycle_id"] == "olc_r1_bnb"
@@ -341,8 +343,9 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert order_lifecycle[0]["avg_fill_px"] == "602"
         assert mismatch_rows[0]["high_issue"] == "true"
         assert manifest["run_summary_invalid"] is True
-        assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v1"
+        assert manifest["candidate_snapshot_schema_version"] == "v5.candidate_snapshot.v2"
         assert manifest["candidate_snapshot_rows"] == 1
+        assert manifest["candidate_cost_source_coverage"] == 1.0
         assert manifest["order_lifecycle_schema_version"] == "v5.order_lifecycle.v1"
         assert manifest["order_lifecycle_rows"] == 1
         assert manifest["summary_trade_count_mismatch_high_issue_count"] == 1
@@ -350,6 +353,7 @@ def test_bundle_export_contains_quant_lab_files_and_sha(tmp_path: Path) -> None:
         assert manifest["summary_metrics_version"] == "v5.summary_metrics.v1"
         assert window["fill_metrics_rows"] == 1
         assert window["candidate_snapshot_rows"] == 1
+        assert window["candidate_cost_source_coverage"] == 1.0
         assert window["order_lifecycle_rows"] == 1
         assert config_audit["mode_source"] == "runtime_override"
         assert "api_env_path_present" in config_audit

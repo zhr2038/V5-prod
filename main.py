@@ -1693,6 +1693,14 @@ def _write_candidate_snapshot_for_run(
         reports_dir=runtime_reports_dir,
         rows=rows,
     )
+    try:
+        audit.counts["candidate_snapshot_rows"] = len(rows)
+        filled_sources = [row for row in rows if row.get("cost_source") not in (None, "", "null")]
+        audit.counts["candidate_cost_source_coverage"] = (
+            float(len(filled_sources)) / float(len(rows)) if rows else 0.0
+        )
+    except Exception:
+        pass
     return len(rows)
 
 
@@ -1712,7 +1720,8 @@ def _latest_prices_from_market_data(market_data: Mapping[str, Any] | None) -> di
 def _candidate_snapshot_symbol_scope(*groups: Iterable[Any]) -> list[str]:
     symbols: list[str] = []
     seen: set[str] = set()
-    for group in groups:
+    required_symbols = ("BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT")
+    for group in (*groups, required_symbols):
         for value in group or []:
             symbol = str(value or "").strip()
             if not symbol or symbol in seen:

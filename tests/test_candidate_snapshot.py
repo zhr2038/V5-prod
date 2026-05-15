@@ -102,7 +102,8 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert all(row["cost_source"] for row in rows)
     bnb = rows[0]
     sol = rows[1]
-    assert bnb["candidate_id"] == candidate_id_for("run_001", "BNB/USDT", "MeanReversion")
+    assert bnb["candidate_id"] == candidate_id_for("run_001", "BNB/USDT", "portfolio_alpha6_factor")
+    assert bnb["strategy_candidate"] == "portfolio_alpha6_factor"
     assert bnb["current_weight"] == 0.12
     assert bnb["expected_edge_bps"] == 60.0
     assert bnb["required_edge_bps"] == 45.0
@@ -114,19 +115,19 @@ def test_candidate_snapshot_builds_symbol_rows_and_stable_ids(tmp_path: Path) ->
     assert bnb["would_block_by_cost"] is False
     assert bnb["cost_reason"] == "cost_gate_passed"
     assert bnb["final_decision"] == "OPEN_LONG"
-    assert sol["strategy_candidate"] == "Alpha6Factor"
+    assert sol["strategy_candidate"] == "sol_protect_alpha6_low_exception"
     assert sol["block_reason"] == "protect_entry_alpha6_score_too_low"
     assert sol["no_signal_reason"] is None
     assert sol["final_decision"] == "blocked"
     assert sol["f4_volume_expansion"] == 0.4
-    assert sol["cost_source"] == "local_estimate"
+    assert sol["cost_source"] == "cost_not_requested_no_order"
     assert sol["cost_bps"] == 30.0
     assert sol["selected_total_cost_bps"] == 30.0
     assert sol["required_edge_bps"] == 45.0
     assert sol["expected_edge_bps"] == (0.83 - 0.18) / 0.003
     assert sol["cost_gate_verified"] is False
     assert sol["would_block_by_cost"] is False
-    assert sol["cost_reason"] == "local_cost_estimate_no_quant_lab_cost:execution.cost_aware_roundtrip_cost_bps"
+    assert sol["cost_reason"] == "cost_not_requested_no_order"
 
     run_dir = tmp_path / "reports" / "runs" / "run_001"
     reports_dir = tmp_path / "reports"
@@ -217,13 +218,13 @@ def test_candidate_snapshot_falls_back_to_local_estimate_without_remote_cost() -
     )
 
     eth = rows[0]
-    assert eth["cost_source"] == "local_estimate"
+    assert eth["cost_source"] == "cost_not_requested_no_order"
     assert eth["cost_bps"] == 30.0
     assert eth["selected_total_cost_bps"] == 30.0
     assert eth["cost_model_version"] == "v5_local_execution.cost_aware_roundtrip_cost_bps"
     assert eth["required_edge_bps"] == 45.0
     assert eth["cost_gate_verified"] is False
-    assert eth["cost_reason"] == "local_cost_estimate_no_quant_lab_cost:execution.cost_aware_roundtrip_cost_bps"
+    assert eth["cost_reason"] == "cost_not_requested_no_order"
 
 
 def test_write_candidate_snapshot_rewrites_old_aggregate_schema(tmp_path: Path) -> None:
@@ -245,7 +246,7 @@ def test_write_candidate_snapshot_rewrites_old_aggregate_schema(tmp_path: Path) 
             "run_id": "new_run",
             "ts_utc": "2026-05-15T00:00:00Z",
             "symbol": "BTC/USDT",
-            "strategy_candidate": "Alpha6Factor",
+            "strategy_candidate": "portfolio_alpha6_factor",
             "final_decision": "blocked",
             "cost_source": "local_estimate",
             "cost_bps": 30.0,
@@ -305,3 +306,73 @@ def test_candidate_snapshot_covers_full_universe_with_no_order_and_blocked_rows(
     assert by_symbol["SOL/USDT"]["final_decision"] == "blocked"
     assert by_symbol["SOL/USDT"]["block_reason"] == "protect_entry_alpha6_score_too_low"
     assert by_symbol["SOL/USDT"]["alpha6_score"] == 0.22
+    assert by_symbol["SOL/USDT"]["strategy_candidate"] == "sol_protect_alpha6_low_exception"
+    assert all(row["expected_edge_bps"] is not None for row in rows)
+    assert all(row["required_edge_bps"] is not None for row in rows)
+    assert all(row["cost_bps"] is not None for row in rows)
+    assert all(row["cost_source"] == "cost_not_requested_no_order" for row in rows)
+    assert all(row["cost_model_version"] for row in rows)
+
+
+def test_candidate_snapshot_maps_specific_btc_leadership_candidates() -> None:
+    audit = SimpleNamespace(
+        top_scores=[
+            {"symbol": "BTC/USDT", "score": 0.78, "rank": 1},
+            {"symbol": "ETH/USDT", "score": 0.62, "rank": 2, "source": "TrendFollowing"},
+        ],
+        targets_pre_risk={"BTC/USDT": 0.10, "ETH/USDT": 0.05},
+        targets_post_risk={"BTC/USDT": 0.0, "ETH/USDT": 0.05},
+        router_decisions=[
+            {
+                "symbol": "BTC/USDT",
+                "action": "skip",
+                "reason": "btc_leadership_probe_alpha6_score_too_low",
+            }
+        ],
+        target_execution_explain=[],
+        strategy_signals=[
+            {"strategy": "TrendFollowing", "signals": [{"symbol": "ETH/USDT", "side": "buy", "score": 0.62}]}
+        ],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_specific",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BTC/USDT", "ETH/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+    )
+    by_symbol = {row["symbol"]: row for row in rows}
+
+    assert by_symbol["BTC/USDT"]["strategy_candidate"] == "btc_leadership_alpha6_low_blocked"
+    assert by_symbol["ETH/USDT"]["strategy_candidate"] == "portfolio_trend_following"
+
+
+def test_candidate_snapshot_classifies_f3_and_f4_candidates() -> None:
+    audit = SimpleNamespace(
+        top_scores=[
+            {"symbol": "BNB/USDT", "score": 0.66, "rank": 1, "f3_vol_adj_ret": 2.4, "f4_volume_expansion": 0.2},
+            {"symbol": "SOL/USDT", "score": 0.55, "rank": 2, "f3_vol_adj_ret": 0.1, "f4_volume_expansion": 1.4},
+        ],
+        targets_pre_risk={"BNB/USDT": 0.10, "SOL/USDT": 0.10},
+        targets_post_risk={"BNB/USDT": 0.10, "SOL/USDT": 0.10},
+        router_decisions=[],
+        target_execution_explain=[],
+        strategy_signals=[],
+        quant_lab={},
+    )
+
+    rows = build_candidate_snapshot_rows(
+        run_id="run_factors",
+        ts_utc="2026-05-15T00:00:00Z",
+        symbols=["BNB/USDT", "SOL/USDT"],
+        audit=audit,
+        local_cost_bps=30.0,
+        local_cost_model_version="v5_local_execution.cost_aware_roundtrip_cost_bps",
+    )
+    by_symbol = {row["symbol"]: row for row in rows}
+
+    assert by_symbol["BNB/USDT"]["strategy_candidate"] == "f3_dominant_entry"
+    assert by_symbol["SOL/USDT"]["strategy_candidate"] == "f4_volume_swing"

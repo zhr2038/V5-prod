@@ -7,7 +7,20 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 
-CANDIDATE_SNAPSHOT_SCHEMA_VERSION = "v5.candidate_snapshot.v1"
+CANDIDATE_SNAPSHOT_SCHEMA_VERSION = "v5.candidate_snapshot.v2"
+
+SPECIFIC_STRATEGY_CANDIDATES = {
+    "btc_leadership_probe_strict",
+    "btc_leadership_alpha6_low_blocked",
+    "btc_leadership_f5_low_blocked",
+    "btc_leadership_no_breakout_blocked",
+    "sol_protect_rsi_weak_exception",
+    "sol_protect_alpha6_low_exception",
+    "portfolio_alpha6_factor",
+    "portfolio_trend_following",
+    "f3_dominant_entry",
+    "f4_volume_swing",
+}
 
 CANDIDATE_SNAPSHOT_FIELDS = (
     "candidate_id",
@@ -163,13 +176,59 @@ def build_candidate_snapshot_rows(
             target_weight=target_after,
             current_weight=current_weight,
         )
-        strategy_candidate = _strategy_candidate(order, top, strategy_signals)
         final_score = _first_float(top.get("final_score"), top.get("score"), explain.get("final_score"))
         alpha6_score = _first_float(
             explain.get("alpha6_score"),
             alpha6.get("score"),
             alpha6.get("raw_score"),
             _find_nested(top, "alpha6_score"),
+        )
+        f1_mom_5d = _first_float(
+            _find_nested(top, "f1_mom_5d"),
+            _find_nested(alpha6, "f1_mom_5d"),
+            _find_nested(explain, "f1_mom_5d"),
+        )
+        f2_mom_20d = _first_float(
+            _find_nested(top, "f2_mom_20d"),
+            _find_nested(alpha6, "f2_mom_20d"),
+            _find_nested(explain, "f2_mom_20d"),
+        )
+        f3_vol_adj_ret = _first_float(
+            _find_nested(top, "f3_vol_adj_ret"),
+            _find_nested(alpha6, "f3_vol_adj_ret"),
+            _find_nested(explain, "f3_vol_adj_ret"),
+        )
+        f4_volume_expansion = _first_float(
+            explain.get("f4_volume_expansion"),
+            _find_nested(top, "f4_volume_expansion"),
+            _find_nested(alpha6, "f4_volume_expansion"),
+        )
+        f5_rsi_trend_confirm = _first_float(
+            explain.get("f5_rsi_trend_confirm"),
+            _find_nested(top, "f5_rsi_trend_confirm"),
+            _find_nested(alpha6, "f5_rsi_trend_confirm"),
+        )
+        alpha6_side = _first(
+            explain.get("alpha6_side"),
+            alpha6.get("side"),
+            alpha6.get("direction"),
+            _find_nested(top, "alpha6_side"),
+        )
+        strategy_candidate = _strategy_candidate(
+            symbol=symbol,
+            order=order,
+            top=top,
+            explain=explain,
+            strategy_signals=strategy_signals,
+            block_reason=block_reason,
+            final_decision=final_decision,
+            f1_mom_5d=f1_mom_5d,
+            f2_mom_20d=f2_mom_20d,
+            f3_vol_adj_ret=f3_vol_adj_ret,
+            f4_volume_expansion=f4_volume_expansion,
+            f5_rsi_trend_confirm=f5_rsi_trend_confirm,
+            alpha6_score=alpha6_score,
+            alpha6_side=alpha6_side,
         )
         expected_edge = _first_float(
             _nested_get(order, ("meta", "expected_edge_bps")),
@@ -190,6 +249,8 @@ def build_candidate_snapshot_rows(
                 score_floor=score_proxy_floor,
                 score_per_bps=score_per_bps,
             )
+        if expected_edge is None:
+            expected_edge = 0.0
         required_edge = _first_float(
             _nested_get(qlab, ("required_edge_bps",)),
             _nested_get(qlab, ("min_required_edge_bps",)),
@@ -227,6 +288,7 @@ def build_candidate_snapshot_rows(
             selected_total_cost_bps = cost_bps
         if required_edge is None and cost_bps is not None:
             required_edge = float(cost_bps) * float(multiplier)
+        cost_absence_reason = _cost_absence_reason(order=order, final_decision=final_decision)
         cost_source = _normalized_cost_source(
             _first(
                 _nested_get(qlab, ("cost_source",)),
@@ -235,6 +297,7 @@ def build_candidate_snapshot_rows(
             ),
             qlab_has_cost=qlab_has_cost,
             used_local_cost=used_local_cost,
+            absence_reason=cost_absence_reason,
         )
         cost_model_version = _first(
             _nested_get(qlab, ("cost_model_version",)),
@@ -267,7 +330,7 @@ def build_candidate_snapshot_rows(
         )
         if not cost_reason:
             cost_reason = (
-                f"local_cost_estimate_no_quant_lab_cost:{local_cost_source_detail or 'default_roundtrip_cost'}"
+                cost_absence_reason
                 if used_local_cost
                 else "quant_lab_cost_estimate"
             )
@@ -296,38 +359,13 @@ def build_candidate_snapshot_rows(
             "target_weight_after_risk": target_after,
             "final_score": final_score,
             "rank": _first(top.get("rank"), top.get("selected_rank"), explain.get("selected_rank")),
-            "f1_mom_5d": _first_float(
-                _find_nested(top, "f1_mom_5d"),
-                _find_nested(alpha6, "f1_mom_5d"),
-                _find_nested(explain, "f1_mom_5d"),
-            ),
-            "f2_mom_20d": _first_float(
-                _find_nested(top, "f2_mom_20d"),
-                _find_nested(alpha6, "f2_mom_20d"),
-                _find_nested(explain, "f2_mom_20d"),
-            ),
-            "f3_vol_adj_ret": _first_float(
-                _find_nested(top, "f3_vol_adj_ret"),
-                _find_nested(alpha6, "f3_vol_adj_ret"),
-                _find_nested(explain, "f3_vol_adj_ret"),
-            ),
-            "f4_volume_expansion": _first_float(
-                explain.get("f4_volume_expansion"),
-                _find_nested(top, "f4_volume_expansion"),
-                _find_nested(alpha6, "f4_volume_expansion"),
-            ),
-            "f5_rsi_trend_confirm": _first_float(
-                explain.get("f5_rsi_trend_confirm"),
-                _find_nested(top, "f5_rsi_trend_confirm"),
-                _find_nested(alpha6, "f5_rsi_trend_confirm"),
-            ),
+            "f1_mom_5d": f1_mom_5d,
+            "f2_mom_20d": f2_mom_20d,
+            "f3_vol_adj_ret": f3_vol_adj_ret,
+            "f4_volume_expansion": f4_volume_expansion,
+            "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
             "alpha6_score": alpha6_score,
-            "alpha6_side": _first(
-                explain.get("alpha6_side"),
-                alpha6.get("side"),
-                alpha6.get("direction"),
-                _find_nested(top, "alpha6_side"),
-            ),
+            "alpha6_side": alpha6_side,
             "ml_score": _first_float(
                 top.get("ml_score"),
                 top.get("ml_overlay_score"),
@@ -662,16 +700,34 @@ def _score_proxy_expected_edge(
     return max(0.0, float(score) - float(floor)) / float(per_bps)
 
 
-def _normalized_cost_source(value: Any, *, qlab_has_cost: bool, used_local_cost: bool) -> str:
+def _normalized_cost_source(
+    value: Any,
+    *,
+    qlab_has_cost: bool,
+    used_local_cost: bool,
+    absence_reason: str | None = None,
+) -> str:
     text = str(value or "").strip()
     lowered = text.lower()
     if used_local_cost or lowered in {"local_only", "permission_only_skip_cost", "local"}:
-        return "local_estimate"
+        return absence_reason or "cost_not_available"
     if text:
         return text
     if qlab_has_cost:
         return "quant_lab_cached"
-    return "local_estimate"
+    return absence_reason or "cost_not_available"
+
+
+def _cost_absence_reason(*, order: Any, final_decision: str) -> str:
+    if order is not None:
+        side = str(getattr(order, "side", "") or "").strip().lower()
+        intent = str(getattr(order, "intent", "") or "").strip().upper()
+        if side == "sell" or intent == "CLOSE_LONG":
+            return "cost_not_requested_management_only"
+        return "cost_not_available"
+    if str(final_decision or "").strip() == "held_no_order":
+        return "cost_not_requested_management_only"
+    return "cost_not_requested_no_order"
 
 
 def _no_signal_reason(
@@ -749,22 +805,155 @@ def _final_decision(
     return "no_order"
 
 
-def _strategy_candidate(order: Any, top: Mapping[str, Any], strategy_signals: Mapping[str, Mapping[str, Any]]) -> str:
+def _strategy_candidate(
+    *,
+    symbol: str,
+    order: Any,
+    top: Mapping[str, Any],
+    explain: Mapping[str, Any],
+    strategy_signals: Mapping[str, Mapping[str, Any]],
+    block_reason: Optional[str],
+    final_decision: str,
+    f1_mom_5d: Any,
+    f2_mom_20d: Any,
+    f3_vol_adj_ret: Any,
+    f4_volume_expansion: Any,
+    f5_rsi_trend_confirm: Any,
+    alpha6_score: Any,
+    alpha6_side: Any,
+) -> str:
+    reason = _first(
+        block_reason,
+        _nested_get(order, ("meta", "reason")),
+        _nested_get(order, ("meta", "entry_reason")),
+        _nested_get(order, ("meta", "probe_type")),
+        explain.get("router_reason"),
+        explain.get("blocked_reason"),
+        explain.get("high_score_block_category"),
+        top.get("reason"),
+    )
+    reason_l = str(reason or "").strip().lower()
+    symbol_u = str(symbol or "").strip().upper()
+
+    explicit = _specific_candidate_from_metadata(order, top)
+    if explicit is not None:
+        return explicit
+
+    if symbol_u in {"BTC/USDT", "BTC-USDT"} and "btc_leadership_probe" in reason_l:
+        if "alpha6" in reason_l and ("low" in reason_l or "score" in reason_l):
+            return "btc_leadership_alpha6_low_blocked"
+        if "f5" in reason_l or "rsi" in reason_l:
+            return "btc_leadership_f5_low_blocked"
+        if "breakout" in reason_l or "no_alpha6_buy" in reason_l:
+            return "btc_leadership_no_breakout_blocked"
+        return "btc_leadership_probe_strict"
+
+    if symbol_u in {"SOL/USDT", "SOL-USDT"}:
+        if "protect_entry_alpha6_score_too_low" in reason_l or "alpha6_low" in reason_l:
+            return "sol_protect_alpha6_low_exception"
+        if (
+            "protect_entry_rsi_confirm_too_weak" in reason_l
+            or "protect_entry_no_alpha6_confirmation" in reason_l
+            or "f5_rsi" in reason_l
+        ):
+            return "sol_protect_rsi_weak_exception"
+
+    dominant_factor = str(
+        _first(
+            top.get("dominant_factor"),
+            explain.get("dominant_factor"),
+            _find_nested(top, "dominant_factor"),
+            _dominant_factor(
+                {
+                    "f1_mom_5d": f1_mom_5d,
+                    "f2_mom_20d": f2_mom_20d,
+                    "f3_vol_adj_ret": f3_vol_adj_ret,
+                    "f4_volume_expansion": f4_volume_expansion,
+                    "f5_rsi_trend_confirm": f5_rsi_trend_confirm,
+                }
+            ),
+        )
+        or ""
+    )
+    if dominant_factor == "f3_vol_adj_ret":
+        return "f3_dominant_entry"
+
+    f4 = _float_or_none(f4_volume_expansion)
+    if f4 is not None and f4 >= 1.0:
+        return "f4_volume_swing"
+    if "volume" in reason_l or "f4" in reason_l or "swing" in reason_l:
+        return "f4_volume_swing"
+
+    if _has_strategy_name(top, strategy_signals, "TrendFollowing"):
+        return "portfolio_trend_following"
+    if _has_strategy_name(top, strategy_signals, "Alpha6Factor") or alpha6_score is not None or alpha6_side:
+        return "portfolio_alpha6_factor"
+
+    if str(final_decision or "").strip().upper() in {"OPEN_LONG", "REBALANCE"}:
+        return "portfolio_alpha6_factor"
+    return "portfolio_trend_following"
+
+
+def _specific_candidate_from_metadata(order: Any, top: Mapping[str, Any]) -> Optional[str]:
     meta = getattr(order, "meta", None)
     if isinstance(meta, Mapping):
         for key in ("strategy_candidate", "strategy_id", "strategy", "source"):
             value = meta.get(key)
-            if value not in (None, ""):
-                return str(value)
+            candidate = _normalize_strategy_candidate(value)
+            if candidate is not None:
+                return candidate
     for key in ("strategy_candidate", "strategy", "source"):
         value = top.get(key)
-        if value not in (None, ""):
-            return str(value)
-    if "Alpha6Factor" in strategy_signals:
-        return "Alpha6Factor"
-    if strategy_signals:
-        return sorted(strategy_signals.keys())[0]
-    return "portfolio"
+        candidate = _normalize_strategy_candidate(value)
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def _normalize_strategy_candidate(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text in SPECIFIC_STRATEGY_CANDIDATES:
+        return text
+    lowered = text.lower()
+    if lowered in {"alpha6factor", "alpha6", "portfolio_alpha6", "portfolio"}:
+        return "portfolio_alpha6_factor"
+    if lowered in {"trendfollowing", "trend_following", "trend", "portfolio_trend"}:
+        return "portfolio_trend_following"
+    if "btc_leadership" in lowered:
+        return "btc_leadership_probe_strict"
+    if "f3" in lowered and "vol" in lowered:
+        return "f3_dominant_entry"
+    if "f4" in lowered or "volume" in lowered:
+        return "f4_volume_swing"
+    return None
+
+
+def _dominant_factor(values: Mapping[str, Any]) -> Optional[str]:
+    scored: list[tuple[str, float]] = []
+    for key, value in values.items():
+        number = _float_or_none(value)
+        if number is not None:
+            scored.append((key, abs(float(number))))
+    if not scored:
+        return None
+    return max(scored, key=lambda item: item[1])[0]
+
+
+def _has_strategy_name(
+    top: Mapping[str, Any],
+    strategy_signals: Mapping[str, Mapping[str, Any]],
+    strategy_name: str,
+) -> bool:
+    if strategy_name in strategy_signals:
+        return True
+    target = strategy_name.lower()
+    for key in ("strategy_candidate", "strategy", "source"):
+        value = str(top.get(key) or "").strip().lower()
+        if value == target:
+            return True
+    return False
 
 
 def _nested_get(obj: Any, path: Sequence[str]) -> Any:
