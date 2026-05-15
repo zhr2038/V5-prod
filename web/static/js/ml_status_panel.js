@@ -1,8 +1,6 @@
 const ML_STATUS_REFRESH_MS = 30000;
 
 const ML_PHASE_LABELS = {
-  disabled_in_live_prod: "ML overlay disabled in live_prod",
-  "research-disabled": "ML overlay disabled in live_prod",
   live_active: "实盘已使用",
   promoted: "门控已通过",
   trained: "模型已训练",
@@ -42,7 +40,6 @@ function mapMlPhaseLabel(phase) {
 }
 
 function buildMlDetail(data) {
-  if (isMlDisabledInLiveProd(data)) return "ML overlay disabled in live_prod";
   const parts = [];
   if (data.total_samples != null && data.labeled_samples != null) {
     parts.push(`样本 ${Number(data.labeled_samples || 0)} / ${Number(data.total_samples || 0)}`);
@@ -63,9 +60,6 @@ function buildMlDetail(data) {
 }
 
 function buildMlMeta(data) {
-  if (isMlDisabledInLiveProd(data)) {
-    return ["research-only", "health ignored"];
-  }
   const stages = data.stages || {};
   return [
     `采样 ${stages.sampling ? "是" : "否"}`,
@@ -114,6 +108,14 @@ async function loadMlStagePanel() {
 
   try {
     const data = await fetchMlStageStatus();
+    if (isMlDisabledInLiveProd(data)) {
+      band.hidden = true;
+      band.style.display = "none";
+      return;
+    }
+    band.hidden = false;
+    band.style.display = "";
+
     const phaseLabel = mapMlPhaseLabel(data.phase || data.status);
     const progress = Math.max(0, Math.min(100, Number(data.progress_percent || 0)));
 

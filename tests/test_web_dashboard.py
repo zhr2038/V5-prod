@@ -14,6 +14,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "scripts" / "web_dashboard.py"
 MONITOR_V2_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "monitor_v2.js"
+ML_STATUS_PANEL_JS_PATH = REPO_ROOT / "web" / "static" / "js" / "ml_status_panel.js"
+ML_BAND_TSX_PATH = REPO_ROOT / "web" / "dashboard" / "src" / "components" / "MLBand.tsx"
 
 
 def load_web_dashboard_module():
@@ -166,6 +168,19 @@ def test_index_renders_monitor_template():
     assert "XGBoost 归因" not in body
     assert 'src="/static/js/monitor_v2.js?v=' in body
     assert 'src="/static/js/ml_status_panel.js?v=' in body
+
+
+def test_disabled_live_prod_ml_web_surfaces_are_hidden():
+    monitor_js = MONITOR_V2_JS_PATH.read_text(encoding="utf-8")
+    ml_status_js = ML_STATUS_PANEL_JS_PATH.read_text(encoding="utf-8")
+    ml_band_tsx = ML_BAND_TSX_PATH.read_text(encoding="utf-8")
+
+    for web_source in (monitor_js, ml_status_js, ml_band_tsx):
+        assert "ML overlay disabled in live_prod" not in web_source
+
+    assert 'if (disabledInLiveProd) return "";' in monitor_js
+    assert "band.hidden = true" in ml_status_js
+    assert "if (disabledInLiveProd) return null;" in ml_band_tsx
 
 
 def test_static_files_serves_assets_and_spa_fallback(monkeypatch, tmp_path):
