@@ -256,4 +256,6 @@ def test_write_candidate_snapshot_rewrites_old_aggregate_schema(tmp_path: Path) 
     aggregate_rows = list(csv.DictReader((reports_dir / "candidate_snapshot.csv").read_text().splitlines()))
     assert list(aggregate_rows[0].keys()) == list(CANDIDATE_SNAPSHOT_FIELDS)
     assert [row["candidate_id"] for row in aggregate_rows] == ["old_cand", "new_cand"]
+    assert aggregate_rows[0]["cost_source"] == "local_estimate"
+    assert aggregate_rows[0]["cost_reason"] == "legacy_candidate_snapshot_schema_backfilled_local_estimate"
     assert aggregate_rows[1]["cost_source"] == "local_estimate"

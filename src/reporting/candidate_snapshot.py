@@ -398,13 +398,51 @@ def _rewrite_csv_with_current_schema(path: Path, new_rows: Sequence[Mapping[str,
                 existing_rows = [dict(row) for row in csv.DictReader(fh) if row]
         except Exception:
             existing_rows = []
+    fallback_cost = _first_float(
+        *[row.get("cost_bps") for row in new_rows],
+        *[row.get("selected_total_cost_bps") for row in new_rows],
+        22.0,
+    )
+    fallback_model = _first(
+        *[row.get("cost_model_version") for row in new_rows],
+        "v5_local_legacy_candidate_snapshot_rewrite",
+    )
     tmp = path.with_name(f"{path.name}.tmp")
     with tmp.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(CANDIDATE_SNAPSHOT_FIELDS))
         writer.writeheader()
-        for row in [*existing_rows, *list(new_rows)]:
+        for row in [
+            *[_backfill_legacy_cost_fields(row, fallback_cost, fallback_model) for row in existing_rows],
+            *list(new_rows),
+        ]:
             writer.writerow(_format_row(row))
     tmp.replace(path)
+
+
+def _backfill_legacy_cost_fields(
+    row: Mapping[str, Any],
+    fallback_cost_bps: Any,
+    fallback_model: Any,
+) -> dict[str, Any]:
+    out = dict(row)
+    if not _missing_value(out.get("cost_source")):
+        return out
+    cost_bps = _first_float(
+        out.get("cost_bps"),
+        out.get("selected_total_cost_bps"),
+        out.get("total_cost_bps"),
+        out.get("effective_total_cost_bps"),
+        fallback_cost_bps,
+    )
+    out["cost_source"] = "local_estimate"
+    out["cost_bps"] = cost_bps
+    out["selected_total_cost_bps"] = _first_float(out.get("selected_total_cost_bps"), cost_bps)
+    out["cost_model_version"] = _first(out.get("cost_model_version"), fallback_model)
+    out["required_edge_bps"] = _first_float(out.get("required_edge_bps"), out.get("min_required_edge_bps"), (cost_bps or 0.0) * 1.5)
+    out["cost_gate_verified"] = False
+    out["would_block_by_cost"] = False
+    out["cost_reason"] = _first(out.get("cost_reason"), "legacy_candidate_snapshot_schema_backfilled_local_estimate")
+    return out
 
 
 def _format_row(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -719,7 +757,7 @@ def _first_float(*values: Any) -> Optional[float]:
 
 def _first_bool(*values: Any) -> Optional[bool]:
     for value in values:
-        if value in (None, "", "null", "not_observable"):
+        if _missing_value(value):
             continue
         if isinstance(value, bool):
             return value
@@ -734,12 +772,16 @@ def _first_bool(*values: Any) -> Optional[bool]:
 
 
 def _float_or_none(value: Any) -> Optional[float]:
-    if value in (None, "", "null", "not_observable"):
+    if _missing_value(value):
         return None
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _missing_value(value: Any) -> bool:
+    return value in (None, "", "null", "not_observable")
 
 
 def _string_or_none(value: Any) -> Optional[str]:
