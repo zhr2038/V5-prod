@@ -797,6 +797,19 @@ function renderMlImpactCardClean(ml) {
   const rolling = ml.rolling_24h || {};
   const rolling48 = ml.rolling_48h || {};
   const impactStatus = String(ml.impact_status || "");
+  const disabledInLiveProd = (
+    ml.reason === "disabled_in_live_prod" ||
+    impactStatus === "research-disabled" ||
+    ml.overlay_mode === "disabled" && ml.configured_enabled === false
+  );
+
+  if (disabledInLiveProd) {
+    return `<div class="signal">
+      <div class="label">ML overlay</div>
+      <div class="value">ML overlay disabled in live_prod</div>
+      <div class="subtle">research-only; promotion_not_passed is not a live health incident.</div>
+    </div>`;
+  }
 
   if (!enabled && !promoted && !liveActive && !coverageCount && !contributors.length) {
     return "";

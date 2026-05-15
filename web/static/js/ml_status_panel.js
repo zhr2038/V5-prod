@@ -1,12 +1,24 @@
 const ML_STATUS_REFRESH_MS = 30000;
 
 const ML_PHASE_LABELS = {
+  disabled_in_live_prod: "ML overlay disabled in live_prod",
+  "research-disabled": "ML overlay disabled in live_prod",
   live_active: "实盘已使用",
   promoted: "门控已通过",
   trained: "模型已训练",
   collecting: "采样中",
   no_data: "无数据",
 };
+
+function isMlDisabledInLiveProd(data) {
+  return data && (
+    data.live_overlay_status === "disabled_in_live_prod" ||
+    data.ml_live_overlay_status === "disabled_in_live_prod" ||
+    data.phase === "disabled_in_live_prod" ||
+    data.runtime_reason === "disabled_in_live_prod" ||
+    data.status === "research-disabled"
+  );
+}
 
 const ML_STAGE_CONFIG = [
   { key: "sampling", title: "采样", summary: (data) => `${Number(data.labeled_samples || 0)} / ${Number(data.samples_needed || 0) || "--"}` },
@@ -30,6 +42,7 @@ function mapMlPhaseLabel(phase) {
 }
 
 function buildMlDetail(data) {
+  if (isMlDisabledInLiveProd(data)) return "ML overlay disabled in live_prod";
   const parts = [];
   if (data.total_samples != null && data.labeled_samples != null) {
     parts.push(`样本 ${Number(data.labeled_samples || 0)} / ${Number(data.total_samples || 0)}`);
@@ -50,6 +63,9 @@ function buildMlDetail(data) {
 }
 
 function buildMlMeta(data) {
+  if (isMlDisabledInLiveProd(data)) {
+    return ["research-only", "health ignored"];
+  }
   const stages = data.stages || {};
   return [
     `采样 ${stages.sampling ? "是" : "否"}`,

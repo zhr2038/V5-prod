@@ -333,7 +333,7 @@ f5_rsi_trend_confirm
 
 ### ML Factor
 
-系统支持 ML overlay，但生产配置要求 promotion 通过，且会根据在线表现自动 downweight 或 shadow。没有通过 promotion 的模型不应直接主导实盘。
+当前 `live_prod` 不启用 ML overlay。ML 训练、promotion gate 和 shadow tuned XGBoost 脚本仅保留为离线研究能力，不参与生产下单、健康判定或主链路异常统计。未来只有在独立 promotion gate 重新通过、并显式批准 live overlay 后，才考虑重新接入生产。
 
 ### Alpha158 Overlay
 
@@ -1120,7 +1120,7 @@ alt_impulse_shadow_outcomes
 
 ### Q5：ML 会直接参与实盘吗？
 
-只有在 promotion 通过、模型不过期、在线控制允许的情况下，ML overlay 才能参与。否则应该 shadow 或 downweight。
+不会。当前 `live_prod` 显式关闭 ML overlay，相关脚本只用于离线研究；`promotion_not_passed` 代表研究链路未通过，不应作为生产 health 红色事故。未来若要启用，必须先通过 promotion gate，并显式打开 live 配置。
 
 ### Q6：如何判断 gate 是否太严格？
 

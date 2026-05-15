@@ -2818,6 +2818,8 @@ def main():
             assert window["ml_live_overlay_status"] == "disabled_in_live_prod", window
             assert window["ml_factor_enabled"] == "false", window
             assert window["collect_ml_training_data"] == "false", window
+            ml_issue_codes = {"ml_missing_model", "promotion_not_passed", "model_artifact_missing"}
+            assert not any(item.get("code") in ml_issue_codes for item in issues["issues"]), issues
             assert "是否真实成交: no / 0" in readme, readme
             assert "closed roundtrip gross/net bps: not_applicable_no_trades" in readme, readme
             assert "probe lifecycle: not_applicable_no_probe_trade" in readme, readme

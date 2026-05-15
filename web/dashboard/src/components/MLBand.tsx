@@ -40,6 +40,30 @@ const stageConfig = [
 ];
 
 export function MLBand({ mlTraining }: MLBandProps) {
+  const disabledInLiveProd =
+    mlTraining?.live_overlay_status === 'disabled_in_live_prod' ||
+    mlTraining?.ml_live_overlay_status === 'disabled_in_live_prod' ||
+    mlTraining?.phase === 'disabled_in_live_prod' ||
+    mlTraining?.runtime_reason === 'disabled_in_live_prod' ||
+    mlTraining?.status === 'research-disabled';
+
+  if (disabledInLiveProd) {
+    return (
+      <div className="relative z-10 px-6 pb-6">
+        <div className="max-w-[1780px] mx-auto material-surface material-regular tone-neutral p-4 sm:p-5">
+          <div className="flex items-center gap-2 text-sm text-[var(--text-dim)]">
+            <Brain className="w-4 h-4" />
+            <span>ML overlay disabled in live_prod</span>
+            <span className="ml-auto text-xs text-[var(--text-soft)]">research-only</span>
+          </div>
+          <div className="mt-2 text-xs text-[var(--text-dim)]">
+            Offline ML scripts remain available, but promotion_not_passed is not a live health incident.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const stages = (mlTraining?.stages || {}) as Record<string, boolean>;
   const progress = mlTraining?.progress_percent || 0;
   const stageTone: Record<string, string> = {

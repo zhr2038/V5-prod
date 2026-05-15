@@ -244,6 +244,11 @@ export interface MLTrainingData {
   last_ic?: number;
   runtime_prediction_count?: number;
   runtime_reason?: string;
+  configured_enabled?: boolean;
+  live_overlay_status?: string;
+  ml_live_overlay_status?: string;
+  research_only?: boolean;
+  message?: string;
   [k: string]: any;
 }
 

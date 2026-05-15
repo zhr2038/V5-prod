@@ -106,6 +106,29 @@ def _assert_body_hides_internal_details(body: str, *fragments: str):
         assert fragment not in body
 
 
+def _force_ml_factor_enabled(module, monkeypatch):
+    class _Cfg:
+        class _Alpha:
+            class _ML:
+                enabled = True
+                model_path = "models/ml_factor_model"
+                active_model_pointer_path = "models/ml_factor_model_active.txt"
+                promotion_decision_path = "reports/model_promotion_decision.json"
+                runtime_status_path = "reports/ml_runtime_status.json"
+
+            ml_factor = _ML()
+
+        alpha = _Alpha()
+
+        def model_dump(self, mode="python"):
+            return {
+                "alpha": {"ml_factor": {"enabled": True}},
+                "execution": {"order_store_path": "reports/orders.sqlite"},
+            }
+
+    monkeypatch.setattr(module, "load_app_config", lambda *args, **kwargs: _Cfg())
+
+
 def _find_headless_browser() -> str | None:
     candidates = [
         shutil.which("chrome"),
@@ -3974,6 +3997,7 @@ def test_smart_alerts_error_response_hides_internal_paths(monkeypatch):
 def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
+    _force_ml_factor_enabled(module, monkeypatch)
 
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
@@ -4052,6 +4076,7 @@ def test_ml_training_api_reports_four_stage_chain(monkeypatch, tmp_path):
 def test_ml_training_api_prefers_model_artifact_over_newer_config_file(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
+    _force_ml_factor_enabled(module, monkeypatch)
 
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
@@ -4100,6 +4125,7 @@ def test_ml_training_api_prefers_model_artifact_over_newer_config_file(monkeypat
 def test_ml_training_api_treats_string_false_flags_as_false(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
+    _force_ml_factor_enabled(module, monkeypatch)
 
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
@@ -4169,6 +4195,47 @@ def test_ml_training_api_treats_string_false_flags_as_false(monkeypatch, tmp_pat
         "liveActive": False,
     }
     assert payload["last_training_gate_passed"] is False
+
+
+def test_ml_training_api_downgrades_disabled_live_prod_ml(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
+    reports_dir = module.REPORTS_DIR
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "effective_live_config.json").write_text(
+        json.dumps(
+            {
+                "ml_factor_enabled": False,
+                "alpha": {"ml_factor": {"enabled": False}},
+                "execution": {"collect_ml_training_data": False},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "model_promotion_decision.json").write_text(
+        json.dumps({"passed": False, "fail_reasons": ["promotion_not_passed"]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (reports_dir / "ml_runtime_status.json").write_text(
+        json.dumps({"reason": "promotion_not_passed", "prediction_count": 0}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/ml_training")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["phase"] == "disabled_in_live_prod"
+    assert payload["status"] == "research-disabled"
+    assert payload["display_status"] == "ML overlay disabled in live_prod"
+    assert payload["runtime_reason"] == "disabled_in_live_prod"
+    assert payload["promotion_fail_reasons"] == []
+    assert payload["runtime_prediction_count"] == 0
+    assert payload["health_impact"] == "ignored"
 
 
 def test_ml_training_api_uses_active_runtime_reports_dir(monkeypatch, tmp_path):
@@ -4622,6 +4689,7 @@ def test_ml_training_api_uses_suffixed_runtime_artifacts(monkeypatch, tmp_path):
 def test_ml_training_api_prefers_latest_history_entry_by_timestamp_when_history_is_unsorted(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()
+    _force_ml_factor_enabled(module, monkeypatch)
 
     monkeypatch.setattr(module, "WORKSPACE", tmp_path)
     monkeypatch.setattr(module, "REPORTS_DIR", tmp_path / "reports")
@@ -5545,6 +5613,43 @@ def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path)
     payload = response.get_json()
     assert payload["status"] == "warning"
     assert any(check.get("name") == "OKX API" and check.get("status") == "warning" for check in payload["checks"])
+
+
+def test_health_api_does_not_treat_disabled_ml_promotion_as_critical(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "_pick_timer_name", lambda: "v5-prod.user.timer")
+    monkeypatch.setattr(module, "_get_timer_state", lambda _name: {"active": True, "error": None})
+    monkeypatch.setattr(module, "_load_quant_lab_api_status", lambda *_args, **_kwargs: {"name": "quant-lab API", "status": "healthy", "detail": "disabled"})
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
+
+    conn = sqlite3.connect(str(tmp_path / "orders.sqlite"))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE orders (inst_id TEXT)")
+    cur.execute("INSERT INTO orders(inst_id) VALUES ('BTC-USDT')")
+    conn.commit()
+    conn.close()
+
+    (tmp_path / "effective_live_config.json").write_text(
+        json.dumps({"ml_factor_enabled": False, "alpha": {"ml_factor": {"enabled": False}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "model_promotion_decision.json").write_text(
+        json.dumps({"passed": False, "fail_reasons": ["promotion_not_passed"]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["critical_count"] == 0
+    assert payload["status"] != "critical"
+    assert not any("ML" in str(check.get("name", "")) and check.get("status") == "critical" for check in payload["checks"])
 
 
 def test_health_api_includes_quant_lab_api_status(monkeypatch, tmp_path):

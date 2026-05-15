@@ -873,6 +873,67 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return bool(default)
 
 
+_MISSING = object()
+
+
+def _nested_payload_value(payload: Any, *path: str) -> Any:
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return _MISSING
+        current = current.get(key)
+    return current
+
+
+def _ml_factor_enabled_from_payload(payload: Any) -> Optional[bool]:
+    for path in (
+        ('ml_factor_enabled',),
+        ('alpha', 'ml_factor_enabled'),
+        ('alpha', 'ml_factor', 'enabled'),
+    ):
+        value = _nested_payload_value(payload, *path)
+        if value is not _MISSING:
+            return _coerce_bool(value)
+    return None
+
+
+def _disabled_live_prod_ml_training_payload() -> Dict[str, Any]:
+    return {
+        'status': 'research-disabled',
+        'phase': 'disabled_in_live_prod',
+        'display_status': 'ML overlay disabled in live_prod',
+        'message': 'ML overlay disabled in live_prod',
+        'configured_enabled': False,
+        'research_only': True,
+        'live_overlay_status': 'disabled_in_live_prod',
+        'ml_live_overlay_status': 'disabled_in_live_prod',
+        'stages': {
+            'sampling': False,
+            'trained': False,
+            'promoted': False,
+            'liveActive': False,
+        },
+        'total_samples': 0,
+        'labeled_samples': 0,
+        'samples_needed': 0,
+        'progress_percent': 0,
+        'latest_model': None,
+        'model_date': None,
+        'last_ic': None,
+        'last_training_ts': None,
+        'last_training_gate_passed': False,
+        'last_promotion_ts': None,
+        'promotion_fail_reasons': [],
+        'last_runtime_ts': None,
+        'runtime_reason': 'disabled_in_live_prod',
+        'runtime_prediction_count': 0,
+        'model_path': None,
+        'active_model_path': None,
+        'last_update': '',
+        'health_impact': 'ignored',
+    }
+
+
 def _normalize_symbol_key(symbol: Any) -> str:
     return str(symbol or '').strip().upper().replace('-', '/')
 
@@ -5586,6 +5647,7 @@ def _api_ml_training_v2():
         return latest.stat().st_mtime
 
     configured_enabled = False
+    configured_enabled_seen = False
     min_samples = 200
     model_base_path = WORKSPACE / 'models' / 'ml_factor_model'
     pointer_path = WORKSPACE / 'models' / 'ml_factor_model_active.txt'
@@ -5604,6 +5666,7 @@ def _api_ml_training_v2():
         ml_cfg = getattr(getattr(cfg, 'alpha', None), 'ml_factor', None)
         if ml_cfg is not None:
             configured_enabled = _coerce_bool(getattr(ml_cfg, 'enabled', False))
+            configured_enabled_seen = True
             model_base_path = _normalize_model_base_path(
                 _resolve_workspace_path(getattr(ml_cfg, 'model_path', 'models/ml_factor_model'), 'models/ml_factor_model')
             )
@@ -5623,6 +5686,15 @@ def _api_ml_training_v2():
             )
     except Exception:
         pass
+
+    effective_enabled = _ml_factor_enabled_from_payload(
+        _load_json_payload(runtime_paths.reports_dir / 'effective_live_config.json')
+    )
+    if effective_enabled is not None:
+        configured_enabled = effective_enabled
+        configured_enabled_seen = True
+    if configured_enabled_seen and not configured_enabled:
+        return jsonify(_disabled_live_prod_ml_training_payload())
 
     total_samples = 0
     labeled_samples = 0
