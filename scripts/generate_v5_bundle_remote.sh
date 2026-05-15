@@ -1530,6 +1530,8 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
     quant_lab_mode_audit_rows = []
     quant_lab_cost_usage_rows = []
     quant_lab_fallback_rows = []
+    quant_lab_shadow_outcome_rows = []
+    quant_lab_shadow_outcomes_by_permission = []
     quant_lab_request_success_count = 0
     quant_lab_request_error_count = 0
     trade_file_stats_by_run = {}
@@ -6369,6 +6371,160 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         ):
             quant_lab_mode_audit_rows.append(quant_lab_mode_audit_row(row))
 
+    def normalize_shadow_side(value, intent):
+        text = flatten_value(value).strip().lower()
+        intent_text = flatten_value(intent).strip().upper()
+        if text in {"buy", "sell"}:
+            return text
+        if intent_text == "OPEN_LONG":
+            return "buy"
+        if intent_text == "CLOSE_LONG":
+            return "sell"
+        return text or not_obs
+
+    def normalize_shadow_intent(value, side):
+        text = flatten_value(value).strip().upper()
+        side_text = flatten_value(side).strip().lower()
+        if text:
+            return text
+        if side_text == "buy":
+            return "OPEN_LONG"
+        if side_text == "sell":
+            return "CLOSE_LONG"
+        return not_obs
+
+    def shadow_roundtrip_key(run_id, symbol, side="buy", intent="OPEN_LONG"):
+        return (
+            flatten_value(run_id),
+            flatten_value(symbol),
+            normalize_shadow_side(side, intent),
+            normalize_shadow_intent(intent, side),
+        )
+
+    roundtrip_rows_by_entry_key = defaultdict(list)
+    roundtrip_rows_by_entry_run = defaultdict(list)
+    for row in trade_rows:
+        symbol = flatten_value(row.get("symbol"))
+        entry_ts = flatten_value(row.get("entry_ts"))
+        if symbol in ("", not_obs) or entry_ts in ("", not_obs):
+            continue
+        entry_run_id = entry_run_id_from_roundtrip_source(row.get("source_file"))
+        if entry_run_id in ("", not_obs):
+            entry_run_id = flatten_value(row.get("run_id"))
+        key = shadow_roundtrip_key(entry_run_id, symbol, "buy", "OPEN_LONG")
+        roundtrip_rows_by_entry_key[key].append(row)
+        roundtrip_rows_by_entry_run[entry_run_id].append(row)
+
+    def choose_shadow_roundtrip(rows):
+        if not rows:
+            return None
+        closed_rows = [row for row in rows if row.get("roundtrip_status") == "closed"]
+        if closed_rows:
+            return closed_rows[0]
+        return rows[0]
+
+    def quant_lab_shadow_permission(row):
+        return flatten_value(first_observed(
+            row.get("raw_permission_decision"),
+            row.get("permission_decision"),
+            row.get("quant_lab_permission"),
+            row.get("permission"),
+            not_obs,
+        ))
+
+    def quant_lab_shadow_final_permission(row):
+        return flatten_value(first_observed(
+            row.get("effective_permission_decision"),
+            row.get("effective_decision"),
+            row.get("final_permission"),
+            not_obs,
+        ))
+
+    def quant_lab_shadow_outcome_bucket(actual_executed, matched_row):
+        if not actual_executed:
+            return "not_executed_or_no_matching_roundtrip"
+        status = flatten_value(matched_row.get("roundtrip_status") if matched_row else not_obs)
+        if status != "closed":
+            return "executed_roundtrip_pending"
+        net_bps = as_float(matched_row.get("net_bps"))
+        if net_bps is None:
+            return "executed_closed_outcome_not_observable"
+        if net_bps > 0:
+            return "profitable_blocked_by_shadow"
+        if net_bps < 0:
+            return "losing_blocked_by_shadow"
+        return "flat_blocked_by_shadow"
+
+    shadow_permission_candidates = []
+    shadow_permission_seen = set()
+    for row in quant_lab_permission_audit_rows:
+        if not truthy_observed(row.get("would_block_if_enforced")):
+            continue
+        raw_run_id = flatten_value(row.get("run_id") or not_obs)
+        raw_symbol = flatten_value(row.get("symbol") or not_obs)
+        side = normalize_shadow_side(row.get("side"), row.get("intent"))
+        intent = normalize_shadow_intent(row.get("intent"), side)
+        inferred_roundtrip = None
+        if raw_symbol in ("", not_obs):
+            run_rows = roundtrip_rows_by_entry_run.get(raw_run_id, [])
+            observed_symbols = {flatten_value(item.get("symbol")) for item in run_rows if flatten_value(item.get("symbol")) not in ("", not_obs)}
+            if len(observed_symbols) == 1:
+                inferred_roundtrip = choose_shadow_roundtrip(run_rows)
+                raw_symbol = next(iter(observed_symbols))
+                side = "buy"
+                intent = "OPEN_LONG"
+        if raw_run_id in ("", not_obs) or raw_symbol in ("", not_obs):
+            continue
+        if side not in {"buy", not_obs} and intent != "OPEN_LONG":
+            continue
+        if intent not in {"OPEN_LONG", not_obs} and side != "buy":
+            continue
+        side = "buy" if side == not_obs else side
+        intent = "OPEN_LONG" if intent == not_obs else intent
+        dedupe_key = (raw_run_id, raw_symbol, side, intent)
+        if dedupe_key in shadow_permission_seen:
+            continue
+        shadow_permission_seen.add(dedupe_key)
+        shadow_permission_candidates.append((row, raw_run_id, raw_symbol, side, intent, inferred_roundtrip))
+
+    for row, run_id, symbol, side, intent, inferred_roundtrip in shadow_permission_candidates:
+        matched = inferred_roundtrip or choose_shadow_roundtrip(roundtrip_rows_by_entry_key.get(shadow_roundtrip_key(run_id, symbol, side, intent), []))
+        actual_executed = matched is not None and flatten_value(matched.get("roundtrip_status")) in {"closed", "open", "open_residual", "open_dust_residual_ignored"}
+        quant_lab_shadow_outcome_rows.append({
+            "run_id": run_id,
+            "symbol": symbol,
+            "side": side,
+            "intent": intent,
+            "entry_ts": matched.get("entry_ts", not_obs) if matched else flatten_value(row.get("ts_utc") or row.get("ts") or not_obs),
+            "exit_ts": matched.get("exit_ts", not_obs) if matched else not_obs,
+            "quant_lab_permission": quant_lab_shadow_permission(row),
+            "final_permission": quant_lab_shadow_final_permission(row),
+            "would_block_if_enforced": "true",
+            "actual_executed": str(bool(actual_executed)).lower(),
+            "roundtrip_status": matched.get("roundtrip_status", "not_matched") if matched else "not_matched",
+            "net_bps": matched.get("net_bps", not_obs) if matched else not_obs,
+            "net_pnl_usdt": matched.get("net_pnl_usdt", not_obs) if matched else not_obs,
+            "exit_reason": matched.get("exit_reason", not_obs) if matched else not_obs,
+            "outcome_bucket": quant_lab_shadow_outcome_bucket(actual_executed, matched),
+        })
+
+    shadow_rows_by_permission = defaultdict(list)
+    for row in quant_lab_shadow_outcome_rows:
+        shadow_rows_by_permission[row.get("quant_lab_permission") or not_obs].append(row)
+    for permission, rows in sorted(shadow_rows_by_permission.items()):
+        numeric_net = [as_float(row.get("net_bps")) for row in rows if row.get("actual_executed") == "true"]
+        numeric_net = [value for value in numeric_net if value is not None]
+        numeric_pnl = [as_float(row.get("net_pnl_usdt")) for row in rows if row.get("actual_executed") == "true"]
+        numeric_pnl = [value for value in numeric_pnl if value is not None]
+        quant_lab_shadow_outcomes_by_permission.append({
+            "permission": permission,
+            "would_block_count": len(rows),
+            "executed_count": sum(1 for row in rows if row.get("actual_executed") == "true"),
+            "avg_net_bps": fmt_num(sum(numeric_net) / len(numeric_net), 6) if numeric_net else not_obs,
+            "win_rate": fmt_num(sum(1 for value in numeric_net if value > 0) / len(numeric_net), 6) if numeric_net else not_obs,
+            "net_pnl_sum_usdt": fmt_num(sum(numeric_pnl), 12) if numeric_pnl else not_obs,
+        })
+
     config_runtime_consumption_rows = build_config_runtime_consumption_audit()
     config_runtime_not_consumed_count = sum(
         1 for row in config_runtime_consumption_rows
@@ -6479,6 +6635,16 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "summaries/quant_lab_fallbacks.csv",
         quant_lab_fallback_rows,
         ["source", "run_id", "ts_utc", "event_type", "event_id", "request_id", "original_request_id", "original_event_id", "endpoint", "endpoint_path", "status_code", "success", "latency_ms", "symbol", "side", "intent", "fail_policy", "effective_decision", "fallback_used", "error", "error_type", "error_message_short", "diagnosis", "raw_json"],
+    )
+    write_csv(
+        "summaries/quant_lab_shadow_outcomes.csv",
+        quant_lab_shadow_outcome_rows,
+        ["run_id", "symbol", "side", "intent", "entry_ts", "exit_ts", "quant_lab_permission", "final_permission", "would_block_if_enforced", "actual_executed", "roundtrip_status", "net_bps", "net_pnl_usdt", "exit_reason", "outcome_bucket"],
+    )
+    write_csv(
+        "summaries/quant_lab_shadow_outcomes_by_permission.csv",
+        quant_lab_shadow_outcomes_by_permission,
+        ["permission", "would_block_count", "executed_count", "avg_net_bps", "win_rate", "net_pnl_sum_usdt"],
     )
     write_csv(
         "summaries/rank_exit_consistency.csv",
@@ -6856,6 +7022,30 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         (row for row in reversed(quant_lab_mode_audit_rows) if row.get("mode") not in (None, "", not_obs)),
         quant_lab_mode_audit_rows[-1] if quant_lab_mode_audit_rows else {},
     )
+    quant_lab_shadow_executed_count = sum(1 for row in quant_lab_shadow_outcome_rows if row.get("actual_executed") == "true")
+    quant_lab_shadow_profitable_blocked_count = sum(
+        1 for row in quant_lab_shadow_outcome_rows
+        if row.get("outcome_bucket") == "profitable_blocked_by_shadow"
+    )
+    quant_lab_shadow_net_values = [
+        value for value in (as_float(row.get("net_bps")) for row in quant_lab_shadow_outcome_rows)
+        if value is not None
+    ]
+    quant_lab_shadow_net_pnl_values = [
+        value for value in (as_float(row.get("net_pnl_usdt")) for row in quant_lab_shadow_outcome_rows)
+        if value is not None
+    ]
+    quant_lab_shadow_avg_net_bps = (
+        sum(quant_lab_shadow_net_values) / len(quant_lab_shadow_net_values)
+        if quant_lab_shadow_net_values else None
+    )
+    quant_lab_shadow_win_rate = (
+        sum(1 for value in quant_lab_shadow_net_values if value > 0) / len(quant_lab_shadow_net_values)
+        if quant_lab_shadow_net_values else None
+    )
+    quant_lab_shadow_net_pnl_sum_usdt = (
+        sum(quant_lab_shadow_net_pnl_values) if quant_lab_shadow_net_pnl_values else None
+    )
 
     window_summary = {
         "sampled_at_utc": NOW.isoformat(),
@@ -6914,6 +7104,13 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         "effective_block_count": effective_block_count,
         "quant_lab_cost_usage_rows": len(quant_lab_cost_usage_rows),
         "quant_lab_fallback_rows": len(quant_lab_fallback_rows),
+        "quant_lab_shadow_outcome_rows": len(quant_lab_shadow_outcome_rows),
+        "quant_lab_shadow_would_block_count": len(quant_lab_shadow_outcome_rows),
+        "quant_lab_shadow_executed_count": quant_lab_shadow_executed_count,
+        "quant_lab_shadow_profitable_blocked_count": quant_lab_shadow_profitable_blocked_count,
+        "quant_lab_shadow_avg_net_bps": fmt_num(quant_lab_shadow_avg_net_bps, 6) if quant_lab_shadow_avg_net_bps is not None else not_obs,
+        "quant_lab_shadow_win_rate": fmt_num(quant_lab_shadow_win_rate, 6) if quant_lab_shadow_win_rate is not None else not_obs,
+        "quant_lab_shadow_net_pnl_sum_usdt": fmt_num(quant_lab_shadow_net_pnl_sum_usdt, 12) if quant_lab_shadow_net_pnl_sum_usdt is not None else not_obs,
         "quant_lab_request_success_count": quant_lab_request_success_count,
         "quant_lab_request_error_count": quant_lab_request_error_count,
         "quant_lab_actual_fallback_count": len(quant_lab_fallback_rows),
@@ -7397,6 +7594,36 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
 
     factor_contribution_summary = factor_contribution_summary_text()
 
+    def quant_lab_shadow_profitability_text():
+        if not quant_lab_shadow_outcome_rows:
+            return "not_observable_no_would_block_shadow_orders"
+        if quant_lab_shadow_executed_count <= 0:
+            return f"not_observable_no_executed_roundtrips / would_block={len(quant_lab_shadow_outcome_rows)}"
+        if quant_lab_shadow_avg_net_bps is None:
+            return f"not_observable_missing_net_bps / executed={quant_lab_shadow_executed_count}"
+        return (
+            f"{'yes' if quant_lab_shadow_avg_net_bps > 0 else 'no'} / "
+            f"would_block={len(quant_lab_shadow_outcome_rows)}, executed={quant_lab_shadow_executed_count}, "
+            f"avg_net_bps={fmt_num(quant_lab_shadow_avg_net_bps, 6)}, "
+            f"win_rate={fmt_num(quant_lab_shadow_win_rate, 6) if quant_lab_shadow_win_rate is not None else not_obs}, "
+            f"net_pnl_sum_usdt={fmt_num(quant_lab_shadow_net_pnl_sum_usdt, 12) if quant_lab_shadow_net_pnl_sum_usdt is not None else not_obs}"
+        )
+
+    def quant_lab_shadow_enforce_support_text():
+        if not quant_lab_shadow_outcome_rows:
+            return "not_observable_no_shadow_blocks"
+        if quant_lab_shadow_executed_count <= 0 or quant_lab_shadow_avg_net_bps is None:
+            return "not_supported_yet_no_completed_outcomes"
+        if quant_lab_shadow_avg_net_bps > 0 or quant_lab_shadow_net_pnl_sum_usdt and quant_lab_shadow_net_pnl_sum_usdt > 0:
+            return "no_profitable_shadow_blocks_do_not_support_enforce"
+        return "potentially_supported_by_nonprofitable_shadow_blocks_continue_monitoring"
+
+    quant_lab_shadow_by_permission_text = (
+        aggregate_summary_lines(quant_lab_shadow_outcomes_by_permission, ["permission"])
+        if quant_lab_shadow_outcomes_by_permission
+        else "not_observable_no_rows"
+    )
+
     def protect_sol_exception_shadow_text():
         if not protect_sol_exception_shadow_by_horizon:
             if protect_sol_exception_shadow_heartbeat_rows:
@@ -7506,6 +7733,12 @@ def build_summaries(copied_runs, copied_logs, recent_24_decisions, provenance_me
         f"- output: summaries/summary_trade_count_mismatch.csv and reports/summary_trade_count_mismatch.csv",
         f"- trade_metrics rows: {len(trade_metrics_rows)}",
         f"- fill_metrics rows: {len(fill_metrics_rows)}",
+        "",
+        "## Quant-lab shadow outcome",
+        f"- quant-lab would block orders post-trade profitability: {quant_lab_shadow_profitability_text()}",
+        f"- supports enabling enforce: {quant_lab_shadow_enforce_support_text()}",
+        f"- by_permission: {quant_lab_shadow_by_permission_text}",
+        f"- output: summaries/quant_lab_shadow_outcomes.csv and summaries/quant_lab_shadow_outcomes_by_permission.csv",
         "",
         "## Skipped candidate extended forward labels",
         f"- horizons_hours: {','.join(str(int(h)) for h in label_horizons)}",

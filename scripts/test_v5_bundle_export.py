@@ -466,6 +466,114 @@ def fixture_quant_lab_summary_root(root):
     write_text(root / "reports/quant_lab_requests.jsonl", "\n".join(json.dumps(row) for row in request_rows) + "\n")
 
 
+def fixture_quant_lab_shadow_outcome_root(root):
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=1, second=0, microsecond=0)
+    entry_dt = now - dt.timedelta(hours=3)
+    exit_dt = now
+    entry_run_id = entry_dt.strftime("%Y%m%d_%H")
+    exit_run_id = exit_dt.strftime("%Y%m%d_%H")
+    entry_ts = entry_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    exit_ts = exit_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry_px = 80000.0
+    exit_px = 80260.96
+    qty = 0.0001122777
+    notional = qty * entry_px
+    exit_notional = qty * exit_px
+
+    write_text(root / "configs/live_prod.yaml", "quant_lab:\n  enabled: true\n  mode: shadow\n")
+    for name in (
+        "kill_switch",
+        "reconcile_status",
+        "ledger_status",
+        "ledger_state",
+        "auto_risk_eval",
+        "negative_expectancy_cooldown",
+    ):
+        write_json(root / "reports" / f"{name}.json", {"ok": True})
+    write_text(root / "logs/v5_runtime.log", "fixture log\n")
+
+    entry_run = root / "reports/runs/prod" / entry_run_id
+    write_json(entry_run / "decision_audit.json", {
+        "window_end_ts": int(entry_dt.timestamp()),
+        "quant_lab": {
+            "mode": "shadow",
+            "permission_gate_enforced": False,
+            "raw_permission_decision": "ABORT",
+            "effective_permission_decision": "ALLOW",
+            "would_block_if_enforced": True,
+            "permission": {
+                "decision": "ABORT",
+                "effective_decision": "ALLOW",
+                "mode": "shadow",
+                "permission_gate_enforced": False,
+            },
+            "filtered_orders": [
+                {
+                    "symbol": "BTC/USDT",
+                    "side": "buy",
+                    "intent": "OPEN_LONG",
+                    "raw_permission_decision": "ABORT",
+                    "effective_permission_decision": "ALLOW",
+                    "would_block_if_enforced": True,
+                    "permission_gate_enforced": False,
+                    "filtered": False,
+                    "filter_reason": "quant_lab_shadow_mode",
+                }
+            ],
+        },
+        "router_decisions": [
+            {
+                "symbol": "BTC/USDT",
+                "action": "create",
+                "intent": "OPEN_LONG",
+                "side": "buy",
+                "reason": "btc_leadership_probe",
+                "btc_leadership_probe": True,
+            }
+        ],
+    })
+    write_text(
+        entry_run / "trades.csv",
+        "\n".join(
+            [
+                "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt",
+                f"{entry_ts},{entry_run_id},BTC/USDT,OPEN_LONG,buy,{qty:.10f},{entry_px:.2f},{notional:.8f},0",
+            ]
+        )
+        + "\n",
+    )
+    write_text(entry_run / "equity.jsonl", "{}\n")
+    write_json(entry_run / "summary.json", {"run_id": entry_run_id, "num_trades": 1})
+
+    exit_run = root / "reports/runs/prod" / exit_run_id
+    write_json(exit_run / "decision_audit.json", {
+        "window_end_ts": int(exit_dt.timestamp()),
+        "router_decisions": [
+            {
+                "symbol": "BTC/USDT",
+                "action": "create",
+                "intent": "CLOSE_LONG",
+                "side": "sell",
+                "reason": "probe_trailing_stop",
+                "probe_exit_policy_active": True,
+            }
+        ],
+    })
+    write_text(
+        exit_run / "trades.csv",
+        "\n".join(
+            [
+                "ts,run_id,symbol,intent,side,qty,price,notional_usdt,fee_usdt",
+                f"{exit_ts},{exit_run_id},BTC/USDT,CLOSE_LONG,sell,{qty:.10f},{exit_px:.2f},{exit_notional:.8f},0",
+            ]
+        )
+        + "\n",
+    )
+    write_text(exit_run / "equity.jsonl", "{}\n")
+    write_json(exit_run / "summary.json", {"run_id": exit_run_id, "num_trades": 1})
+    return entry_run_id
+
+
 def fixture_provenance_root(root):
     run_id = fixture_root(root)
     write_text(root / "main.py", "print('fixture')\n")
@@ -2626,6 +2734,47 @@ def main():
             assert window["quant_lab_actual_fallback_count"] == 2, window
             assert window["quant_lab_fallback_count"] == 2, window
             assert window["quant_lab_fallback_rows"] == 2, window
+        finally:
+            bundle.unlink(missing_ok=True)
+            pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
+            shutil.rmtree(pathlib.Path("/tmp") / bundle.name.removesuffix(".tar.gz"), ignore_errors=True)
+
+    with tempfile.TemporaryDirectory(prefix="v5-quant-lab-shadow-outcome-") as tmp:
+        root = pathlib.Path(tmp) / "root"
+        entry_run_id = fixture_quant_lab_shadow_outcome_root(root)
+        bundle = run_bundle(root)
+        try:
+            with tarfile.open(bundle, "r:gz") as tf:
+                rows = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/quant_lab_shadow_outcomes.csv")).read().decode().splitlines()))
+                by_permission = list(csv.DictReader(tf.extractfile(extract_member(tf, "summaries/quant_lab_shadow_outcomes_by_permission.csv")).read().decode().splitlines()))
+                readme = tf.extractfile(extract_member(tf, "README.md")).read().decode()
+                window = json.loads(tf.extractfile(extract_member(tf, "summaries/window_summary.json")).read().decode())
+
+            assert len(rows) == 1, rows
+            row = rows[0]
+            assert row["run_id"] == entry_run_id, row
+            assert row["symbol"] == "BTC/USDT", row
+            assert row["intent"] == "OPEN_LONG", row
+            assert row["quant_lab_permission"] == "ABORT", row
+            assert row["final_permission"] == "ALLOW", row
+            assert row["would_block_if_enforced"] == "true", row
+            assert row["actual_executed"] == "true", row
+            assert row["roundtrip_status"] == "closed", row
+            assert row["exit_reason"] == "probe_trailing_stop", row
+            assert row["outcome_bucket"] == "profitable_blocked_by_shadow", row
+            assert abs(float(row["net_bps"]) - 32.62) < 0.01, row
+            assert abs(float(row["net_pnl_usdt"]) - 0.0293) < 0.0001, row
+
+            abort_row = next(item for item in by_permission if item["permission"] == "ABORT")
+            assert abort_row["would_block_count"] == "1", abort_row
+            assert abort_row["executed_count"] == "1", abort_row
+            assert abs(float(abort_row["avg_net_bps"]) - 32.62) < 0.01, abort_row
+            assert abort_row["win_rate"] == "1", abort_row
+            assert abs(float(abort_row["net_pnl_sum_usdt"]) - 0.0293) < 0.0001, abort_row
+            assert window["quant_lab_shadow_outcome_rows"] == 1, window
+            assert window["quant_lab_shadow_profitable_blocked_count"] == 1, window
+            assert "## Quant-lab shadow outcome" in readme, readme
+            assert "profitable_shadow_blocks_do_not_support_enforce" in readme, readme
         finally:
             bundle.unlink(missing_ok=True)
             pathlib.Path(f"{bundle}.sha256").unlink(missing_ok=True)
