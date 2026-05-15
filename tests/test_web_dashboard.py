@@ -139,9 +139,8 @@ def test_index_renders_monitor_template():
     assert 'id="position-kline-chart"' in body
     assert 'id="position-kline-symbols"' in body
     assert 'id="position-kline-timeframes"' in body
-    assert 'id="ml-impact-headline"' in body
-    assert 'id="ml-impact-subtitle"' in body
-    assert 'id="ml-impact-content"' in body
+    assert "旁路模型叠加" not in body
+    assert "XGBoost 归因" not in body
     assert 'src="/static/js/monitor_v2.js?v=' in body
     assert 'src="/static/js/ml_status_panel.js?v=' in body
 
@@ -249,6 +248,96 @@ def test_static_files_rejects_encoded_path_traversal(monkeypatch, tmp_path):
     assert fallback_response.get_data(as_text=True) == "INDEX"
 
 
+def test_live_followup_bundles_lists_latest_five(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+
+    for idx in range(6):
+        bundle = bundle_dir / f"v5_live_followup_bundle_2026051{idx}T010203Z.tar.gz"
+        bundle.write_bytes(f"bundle-{idx}".encode("utf-8"))
+        (bundle_dir / f"{bundle.name}.sha256").write_text(f"sha{idx}  {bundle.name}\n", encoding="utf-8")
+        os.utime(bundle, (100 + idx, 100 + idx))
+
+    ignored = bundle_dir / "not_a_bundle.tar.gz"
+    ignored.write_text("ignore", encoding="utf-8")
+    os.utime(ignored, (999, 999))
+    monkeypatch.setattr(module, "_bundle_search_dirs", lambda config=None: [bundle_dir])
+    client = module.app.test_client()
+
+    response = client.get("/api/live_followup_bundles")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["count"] == 5
+    assert payload["bundles"][0]["name"] == "v5_live_followup_bundle_20260515T010203Z.tar.gz"
+    assert payload["bundles"][0]["sha256"] == "sha5"
+    assert payload["bundles"][0]["download_url"].endswith("v5_live_followup_bundle_20260515T010203Z.tar.gz")
+    assert all(item["name"].startswith("v5_live_followup_bundle_") for item in payload["bundles"])
+
+
+def test_live_followup_bundle_download_rejects_path_traversal(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    monkeypatch.setattr(module, "_bundle_search_dirs", lambda config=None: [tmp_path])
+    client = module.app.test_client()
+
+    response = client.get("/api/live_followup_bundles/download?file=../.env")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid bundle file"
+
+
+def test_generate_live_followup_bundle_runs_packager(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    bundle = bundle_dir / "v5_live_followup_bundle_20260515T010203Z.tar.gz"
+    bundle.write_bytes(b"bundle")
+    os.utime(bundle, (200, 200))
+    monkeypatch.setattr(module, "_bundle_search_dirs", lambda config=None: [bundle_dir])
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    (script_dir / "generate_v5_bundle_remote.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=(
+                f"BUNDLE_PATH={bundle}\n"
+                f"SHA256_PATH={bundle}.sha256\n"
+                "SHA256=abc\n"
+                "SIZE_BYTES=6\n"
+                "HIGH_ISSUES=0\n"
+                "MEDIUM_ISSUES=1\n"
+                "FILE_COUNT=42\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/bin/bash" if name == "bash" else None)
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    client = module.app.test_client()
+
+    response = client.post("/api/live_followup_bundles/generate")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["bundle_path"] == str(bundle)
+    assert payload["size_bytes"] == 6
+    assert payload["medium_issues"] == 1
+    assert payload["file_count"] == 42
+    assert payload["bundles"][0]["name"] == bundle.name
+    assert calls
+    assert calls[0][0][-1] == str(tmp_path)
+
+
 def test_resolve_react_build_path_ignores_legacy_admin_dist(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     monkeypatch.delenv("V5_DASHBOARD_DIST", raising=False)
@@ -279,8 +368,7 @@ def test_monitor_v2_static_script_contains_expected_entrypoints():
     assert "showHmmProbs:true" in body
     assert "showStateBars:true" in body
     assert "showSummary:true" in body
-    assert "renderShadowMlPanel" in body
-    assert "/api/shadow_ml_overlay" in body
+    assert "/api/shadow_ml_overlay" not in body
     assert "buildCandlestickSvg" in body
     assert "syncPositionSpotlight" in body
     assert "/api/position_kline" in body

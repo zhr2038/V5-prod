@@ -284,6 +284,44 @@ export interface ShadowMLSymbol {
   return_bps?: number;
 }
 
+export interface LiveFollowupBundle {
+  name: string;
+  size_bytes: number;
+  mtime_utc: string;
+  sha256?: string;
+  sha256_available?: boolean;
+  download_url: string;
+  sha256_download_url?: string;
+  source_dir?: string;
+}
+
+export interface LiveFollowupBundlesData {
+  ok: boolean;
+  bundles: LiveFollowupBundle[];
+  count: number;
+  limit?: number;
+  searched_dirs?: string[];
+  last_update?: string;
+  error?: string;
+}
+
+export interface LiveFollowupBundleGenerateResult {
+  ok: boolean;
+  return_code?: number;
+  elapsed_seconds?: number;
+  bundle_path?: string;
+  sha256_path?: string;
+  sha256?: string;
+  size_bytes?: number;
+  high_issues?: number;
+  medium_issues?: number;
+  file_count?: number;
+  stdout_tail?: string;
+  stderr_tail?: string;
+  bundles?: LiveFollowupBundle[];
+  error?: string;
+}
+
 export interface KlineData {
   timestamp?: number;
   ts?: number;

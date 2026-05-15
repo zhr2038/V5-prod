@@ -7,17 +7,14 @@ import { PositionsPanel } from './components/PositionsPanel';
 import { MarketRadar } from './components/MarketRadar';
 import { SignalsPanel } from './components/SignalsPanel';
 import { Sidebar } from './components/Sidebar';
+import { BundleExportPanel } from './components/BundleExportPanel';
 import { api } from './api';
 import { useInterval } from './hooks/useInterval';
-import type { DashboardData, RiskGuardData, MarketStateData, DecisionAuditData, HealthData, ShadowMLData } from './types';
+import type { DashboardData, RiskGuardData, MarketStateData, DecisionAuditData, HealthData } from './types';
 
 const ExecutionInsightsPanel = lazy(() =>
   import('./components/ExecutionInsightsPanel').then((module) => ({ default: module.ExecutionInsightsPanel }))
 );
-const ShadowMLPanel = lazy(() =>
-  import('./components/ShadowMLPanel').then((module) => ({ default: module.ShadowMLPanel }))
-);
-
 function DeferredPanelFallback() {
   return (
     <div className="material-surface material-reading reading-frame p-5" aria-hidden="true">
@@ -110,7 +107,6 @@ function App() {
   const [marketState, setMarketState] = useState<MarketStateData | null>(null);
   const [decisionAudit, setDecisionAudit] = useState<DecisionAuditData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
-  const [shadowML, setShadowML] = useState<ShadowMLData | null>(null);
   const [updateTime, setUpdateTime] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [showDeferredPanels, setShowDeferredPanels] = useState(false);
@@ -150,13 +146,6 @@ function App() {
     });
   }, []);
 
-  const loadDeferred = useCallback(async () => {
-    const s = await api.shadowMl();
-    startTransition(() => {
-      if (s) setShadowML(s);
-    });
-  }, []);
-
   useEffect(() => {
     let timeoutId: number | null = null;
     const primaryTimeoutId = globalThis.setTimeout(() => {
@@ -190,16 +179,6 @@ function App() {
     };
   }, [loadPrimary, loadSecondary]);
 
-  useEffect(() => {
-    if (!showDeferredPanels) return;
-    const timeoutId = globalThis.setTimeout(() => {
-      void loadDeferred();
-    }, isTouchWebKit() ? 1800 : 0);
-    return () => {
-      globalThis.clearTimeout(timeoutId);
-    };
-  }, [showDeferredPanels, loadDeferred]);
-
   useInterval(() => {
     loadPrimary();
   }, 30000);
@@ -207,11 +186,6 @@ function App() {
   useInterval(() => {
     loadSecondary();
   }, 60000);
-
-  useInterval(() => {
-    if (!showDeferredPanels) return;
-    loadDeferred();
-  }, showDeferredPanels ? 120000 : null);
 
   const focusSymbol = dashboard?.positions?.[0]?.symbol?.replace('-USDT', '') || '';
 
@@ -271,11 +245,7 @@ function App() {
 
         <div className="px-6 mt-4">
           <div className="max-w-[1780px] mx-auto">
-            {showDeferredPanels ? (
-              <Suspense fallback={<DeferredPanelFallback />}>
-                <ShadowMLPanel shadowML={shadowML} />
-              </Suspense>
-            ) : null}
+            <BundleExportPanel />
           </div>
         </div>
 

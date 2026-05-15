@@ -172,6 +172,13 @@ _OKX_HEALTH_CHECK_CACHE: Dict[tuple[str, str, str], tuple[float, Any, float]] = 
 _OKX_HEALTH_CHECK_CACHE_LOCK = threading.Lock()
 _DASHBOARD_ROUTE_CACHE: Dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, Any, int]] = {}
 _DASHBOARD_ROUTE_CACHE_LOCK = threading.Lock()
+_BUNDLE_GENERATE_LOCK = threading.Lock()
+BUNDLE_NAME_RE = re.compile(r'^v5_live_followup_bundle_\d{8}T\d{6}Z\.tar\.gz(?:\.sha256)?$')
+BUNDLE_GENERATION_OUTPUT_KEY_RE = re.compile(r'^(BUNDLE_PATH|SHA256_PATH|SHA256|SIZE_BYTES|HIGH_ISSUES|MEDIUM_ISSUES|FILE_COUNT)=(.*)$')
+BUNDLE_SECRET_VALUE_RE = re.compile(
+    r'(?i)(authorization|api[_-]?(?:key|secret)|secret|token|cookie|pass(?:word|phrase)|private[_-]?key)'
+    r'([\"\']?\s*[:=]\s*[\"\']?)([^\"\'\s,;#}\]]+)'
+)
 
 # 注册健康检查蓝图
 try:
@@ -2767,6 +2774,226 @@ def static_files(filename):
         return _send_react_asset('index.html')
     
     return 'Not found', 404
+
+
+def _bundle_search_dirs(config: Optional[Dict[str, Any]] = None) -> List[Path]:
+    """Return directories that may contain generated follow-up bundles."""
+    dirs: List[Path] = []
+
+    raw_env = os.getenv('V5_DASHBOARD_BUNDLE_DIRS', '')
+    if raw_env:
+        for part in re.split(r'[,\n;]+', raw_env):
+            value = part.strip()
+            if value:
+                dirs.append(Path(value).expanduser())
+
+    dirs.append(Path('/tmp'))
+
+    cfg = config
+    if cfg is None:
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = {}
+    quant_lab = cfg.get('quant_lab', {}) if isinstance(cfg, dict) else {}
+    export_dir = quant_lab.get('export_bundle_dir') if isinstance(quant_lab, dict) else None
+    if export_dir:
+        dirs.append(Path(str(export_dir)).expanduser())
+
+    dirs.append(Path('/var/lib/v5/exports/bundles'))
+
+    unique: List[Path] = []
+    seen: set[str] = set()
+    for candidate in dirs:
+        try:
+            key = str(candidate.resolve())
+        except Exception:
+            key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _is_allowed_bundle_name(name: str) -> bool:
+    return bool(BUNDLE_NAME_RE.match(str(name or '').strip()))
+
+
+def _find_bundle_file_by_name(name: str, dirs: Optional[List[Path]] = None) -> Optional[Path]:
+    safe_name = Path(str(name or '')).name
+    if safe_name != name or not _is_allowed_bundle_name(safe_name):
+        return None
+
+    matches: List[Path] = []
+    for directory in dirs or _bundle_search_dirs():
+        candidate = directory / safe_name
+        try:
+            if candidate.is_file():
+                matches.append(candidate)
+        except OSError:
+            continue
+    if not matches:
+        return None
+    return max(matches, key=lambda path: path.stat().st_mtime)
+
+
+def _read_bundle_sha256(path: Path) -> str:
+    sidecar = Path(f"{path}.sha256")
+    try:
+        if sidecar.is_file():
+            text = sidecar.read_text(encoding='utf-8', errors='ignore').strip()
+            return text.split()[0] if text else ''
+    except OSError:
+        return ''
+    return ''
+
+
+def _bundle_file_payload(path: Path) -> Dict[str, Any]:
+    stat = path.stat()
+    sha_path = Path(f"{path}.sha256")
+    mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return {
+        'name': path.name,
+        'size_bytes': int(stat.st_size),
+        'mtime_utc': mtime,
+        'sha256': _read_bundle_sha256(path),
+        'sha256_available': sha_path.is_file(),
+        'download_url': f"/api/live_followup_bundles/download?file={path.name}",
+        'sha256_download_url': f"/api/live_followup_bundles/download?file={path.name}.sha256" if sha_path.is_file() else '',
+    }
+
+
+def _list_live_followup_bundles(limit: int = 5) -> List[Dict[str, Any]]:
+    bundle_paths: Dict[str, Path] = {}
+    for directory in _bundle_search_dirs():
+        try:
+            candidates = list(directory.glob('v5_live_followup_bundle_*.tar.gz'))
+        except OSError:
+            continue
+        for path in candidates:
+            if not path.is_file() or not _is_allowed_bundle_name(path.name):
+                continue
+            current = bundle_paths.get(path.name)
+            if current is None or path.stat().st_mtime > current.stat().st_mtime:
+                bundle_paths[path.name] = path
+
+    latest = sorted(bundle_paths.values(), key=lambda path: path.stat().st_mtime, reverse=True)
+    return [_bundle_file_payload(path) for path in latest[: max(1, int(limit or 5))]]
+
+
+def _sanitize_bundle_command_output(value: Any, *, max_lines: int = 80) -> str:
+    text = str(value or '')
+    text = BUNDLE_SECRET_VALUE_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}<REDACTED>", text)
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    return '\n'.join(lines)
+
+
+def _parse_bundle_generation_output(stdout: str) -> Dict[str, Any]:
+    parsed: Dict[str, Any] = {}
+    for line in str(stdout or '').splitlines():
+        match = BUNDLE_GENERATION_OUTPUT_KEY_RE.match(line.strip())
+        if not match:
+            continue
+        key, value = match.groups()
+        parsed[key.lower()] = value.strip()
+    return parsed
+
+
+def _bundle_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+@app.route('/api/live_followup_bundles')
+def api_live_followup_bundles():
+    try:
+        limit_raw = request.args.get('limit', '5')
+        try:
+            limit = min(20, max(1, int(limit_raw)))
+        except ValueError:
+            limit = 5
+        bundles = _list_live_followup_bundles(limit=limit)
+        return jsonify({
+            'ok': True,
+            'bundles': bundles,
+            'count': len(bundles),
+            'limit': limit,
+            'last_update': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        })
+    except Exception as exc:
+        return _json_internal_error_response(exc, ok=False, bundles=[])
+
+
+@app.route('/api/live_followup_bundles/download')
+def api_live_followup_bundle_download():
+    name = str(request.args.get('file') or '').strip()
+    if not _is_allowed_bundle_name(name) or Path(name).name != name:
+        return jsonify({'ok': False, 'error': 'invalid bundle file'}), 400
+
+    path = _find_bundle_file_by_name(name)
+    if path is None:
+        return jsonify({'ok': False, 'error': 'bundle not found'}), 404
+    return send_from_directory(str(path.parent), path.name, as_attachment=True)
+
+
+@app.route('/api/live_followup_bundles/generate', methods=['POST'])
+def api_generate_live_followup_bundle():
+    if not _BUNDLE_GENERATE_LOCK.acquire(blocking=False):
+        return jsonify({'ok': False, 'error': 'bundle generation already running'}), 409
+
+    try:
+        script = WORKSPACE / 'scripts' / 'generate_v5_bundle_remote.sh'
+        if not script.is_file():
+            return jsonify({'ok': False, 'error': 'bundle script not found'}), 404
+
+        bash_bin = os.getenv('V5_DASHBOARD_BASH') or shutil.which('bash') or '/bin/bash'
+        timeout_sec = int(os.getenv('V5_DASHBOARD_BUNDLE_GENERATE_TIMEOUT_SEC', '900') or '900')
+        started = time.time()
+        proc = subprocess.run(
+            [bash_bin, str(script), str(WORKSPACE)],
+            cwd=str(WORKSPACE),
+            text=True,
+            capture_output=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+        elapsed = time.time() - started
+        parsed = _parse_bundle_generation_output(proc.stdout)
+        ok = proc.returncode == 0
+        payload = {
+            'ok': ok,
+            'return_code': proc.returncode,
+            'elapsed_seconds': round(elapsed, 2),
+            'bundle_path': parsed.get('bundle_path', ''),
+            'sha256_path': parsed.get('sha256_path', ''),
+            'sha256': parsed.get('sha256', ''),
+            'size_bytes': _bundle_int(parsed.get('size_bytes')),
+            'high_issues': _bundle_int(parsed.get('high_issues')),
+            'medium_issues': _bundle_int(parsed.get('medium_issues')),
+            'file_count': _bundle_int(parsed.get('file_count')),
+            'stdout_tail': _sanitize_bundle_command_output(proc.stdout),
+            'stderr_tail': _sanitize_bundle_command_output(proc.stderr),
+            'bundles': _list_live_followup_bundles(limit=5),
+        }
+        if not ok:
+            payload['error'] = 'bundle generation failed'
+        return jsonify(payload), 200 if ok else 500
+    except subprocess.TimeoutExpired as exc:
+        return jsonify({
+            'ok': False,
+            'error': 'bundle generation timed out',
+            'stdout_tail': _sanitize_bundle_command_output(exc.stdout),
+            'stderr_tail': _sanitize_bundle_command_output(exc.stderr),
+        }), 504
+    except Exception as exc:
+        return _json_internal_error_response(exc, ok=False)
+    finally:
+        _BUNDLE_GENERATE_LOCK.release()
 
 
 @app.route('/api/account')

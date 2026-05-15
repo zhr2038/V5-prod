@@ -5,9 +5,10 @@ import type {
   DecisionAuditData,
   HealthData,
   MLTrainingData,
-  ShadowMLData,
   PositionKlinePayload,
   Trade,
+  LiveFollowupBundlesData,
+  LiveFollowupBundleGenerateResult,
 } from './types';
 
 const API_BASE = '';
@@ -36,6 +37,25 @@ async function fetchJson<T>(url: string): Promise<T | null> {
     return (await res.json()) as T;
   } catch (err) {
     console.error('fetch failed', url, err);
+    return null;
+  }
+}
+
+async function postJson<T>(url: string): Promise<T | null> {
+  try {
+    const res = await fetch(`${API_BASE}${url}`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    const payload = (await res.json()) as T;
+    if (!res.ok) {
+      console.error('post failed', url, payload);
+      return payload;
+    }
+    return payload;
+  } catch (err) {
+    console.error('post failed', url, err);
     return null;
   }
 }
@@ -110,7 +130,8 @@ export const api = {
   decisionAudit: () => fetchJson<DecisionAuditData>('/api/decision_audit'),
   health: () => fetchJson<HealthData>('/api/health'),
   mlTraining: () => fetchJson<MLTrainingData>('/api/ml_training'),
-  shadowMl: () => fetchJson<ShadowMLData>('/api/shadow_ml_overlay'),
+  liveFollowupBundles: () => fetchJson<LiveFollowupBundlesData>('/api/live_followup_bundles?limit=5'),
+  generateLiveFollowupBundle: () => postJson<LiveFollowupBundleGenerateResult>('/api/live_followup_bundles/generate'),
   positionKline: async (symbol: string, timeframe: string): Promise<PositionKlinePayload> => {
     const payload = await fetchJson<PositionKlinePayload>(
       `/api/position_kline?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`
