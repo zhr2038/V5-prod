@@ -35,11 +35,14 @@ Persistent server-local state:
 - `logs/`
 - `data/` caches produced on the server
 
+Production Python dependencies come from `requirements.txt`. Optional ML/research-only dependencies live in `requirements-research.txt` and are not required for `live_prod`.
+
 Synced code surface:
 
 - `main.py`
 - `event_driven_check.py`
 - `requirements.txt`
+- `requirements-research.txt`
 - `pyproject.toml`
 - `configs/`
 - `deploy/`

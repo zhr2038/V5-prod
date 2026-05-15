@@ -16,9 +16,13 @@ dependencies = [
   "ccxt>=4.0",
   "flask>=3.0",
   "waitress>=3.0",
+  "paramiko>=3.5",
+]
+
+[project.optional-dependencies]
+research = [
   "scikit-learn>=1.4",
   "xgboost>=3.2,<3.3",
-  "paramiko>=3.5",
 ]
 
 [tool.pytest.ini_options]

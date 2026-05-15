@@ -15,6 +15,7 @@ from configs.runtime_config import load_runtime_config, resolve_runtime_config_p
 from scripts.task_config_compat import load_task_config_with_compat as load_task_config_with_compat_legacy
 from src.execution.fill_store import derive_runtime_reports_dir
 from src.execution.ml_factor_model import LIGHTGBM_AVAILABLE, XGBOOST_AVAILABLE
+from src.research.dependency_guard import require_research_dependencies
 from src.research.processors import (
     align_cycle_samples as _align_cycle_samples_impl,
     apply_rolling_window as _apply_rolling_window_impl,
@@ -217,6 +218,7 @@ def _build_task_config() -> dict:
 
 
 def main() -> int:
+    require_research_dependencies(("sklearn", "xgboost"))
     task_config = _build_task_config()
     result = run_ml_training_task(project_root=PROJECT_ROOT, task_config=task_config)
     if not result.get("gate_passed", False) and result.get("fail_reasons"):

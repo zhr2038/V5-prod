@@ -195,9 +195,15 @@ class MLFactorModel:
         self.training_device = "cpu"
 
         if self.config.model_type == "lightgbm" and not LIGHTGBM_AVAILABLE:
-            raise ImportError("lightgbm is required. Install with: pip install lightgbm")
+            raise ImportError(
+                "lightgbm is required for this research model. "
+                "Install it with: pip install lightgbm"
+            )
         if self.config.model_type == "xgboost" and not XGBOOST_AVAILABLE:
-            raise ImportError("xgboost is required. Install with: pip install xgboost")
+            raise ImportError(
+                "xgboost is required for this research model. "
+                "Install optional research dependencies with: pip install -r requirements-research.txt"
+            )
 
     def _value_from_data(self, data, key: str):
         if isinstance(data, dict):
@@ -533,13 +539,19 @@ class MLFactorModel:
 
         if self.config.model_type == "lightgbm":
             if not LIGHTGBM_AVAILABLE:
-                raise ImportError("lightgbm is required to load this model")
+                raise ImportError(
+                    "lightgbm is required to load this research model. "
+                    "Install it with: pip install lightgbm"
+                )
             self.model = lgb.Booster(model_file=f"{path}.txt")
             self.scaler = None
             self.training_device = "cpu"
         elif self.config.model_type == "xgboost":
             if not XGBOOST_AVAILABLE:
-                raise ImportError("xgboost is required to load this model")
+                raise ImportError(
+                    "xgboost is required to load this research model. "
+                    "Install optional research dependencies with: pip install -r requirements-research.txt"
+                )
             self.model = xgb.XGBRegressor()
             self.model.load_model(f"{path}.json")
             self.scaler = None

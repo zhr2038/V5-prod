@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import scripts.run_shadow_tuned_xgboost as shadow_mod
 from scripts.run_shadow_tuned_xgboost import SHADOW_REPORT_REDIRECTS
 
@@ -42,3 +44,14 @@ def test_resolve_shadow_base_config_path_prefers_explicit_arg(monkeypatch, tmp_p
     assert shadow_mod._resolve_shadow_base_config_path("configs/prod_alt.yaml") == (
         tmp_path / "configs" / "prod_alt.yaml"
     ).resolve()
+
+
+def test_shadow_tuned_xgboost_exits_with_research_dependency_hint(monkeypatch) -> None:
+    def missing_deps(_modules):
+        raise SystemExit("Missing optional ML/research dependencies: xgboost. Install them with: pip install -r requirements-research.txt")
+
+    monkeypatch.setattr(shadow_mod, "require_research_dependencies", missing_deps)
+    monkeypatch.setattr(shadow_mod, "run_main", lambda: pytest.fail("shadow run should not start without research deps"))
+
+    with pytest.raises(SystemExit, match="requirements-research.txt"):
+        shadow_mod.main()

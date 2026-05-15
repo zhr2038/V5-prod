@@ -43,6 +43,7 @@ Required operational scripts:
 - `configs/blacklist.json`
 - `configs/borrow_prevention_rules.json`
 - `requirements.txt`
+- `requirements-research.txt` is optional and only needed for offline ML/research scripts
 - `pyproject.toml`
 
 ## Required deploy units
@@ -146,6 +147,7 @@ v5-trading-bot/
   main.py
   event_driven_check.py
   requirements.txt
+  requirements-research.txt  # optional ML/research-only dependencies
   pyproject.toml
   configs/
   deploy/systemd/

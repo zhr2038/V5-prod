@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 from pathlib import Path
 
@@ -85,3 +86,23 @@ def test_ml_disabled_skips_collector_and_writes_disabled_audit_status(tmp_path: 
     assert overview["active_symbols"] == 0
     assert overview["overlay_mode"] == "disabled"
     assert overview["reason"] == "disabled_in_live_prod"
+
+
+def test_pipeline_starts_without_xgboost_when_ml_is_disabled(monkeypatch, tmp_path: Path) -> None:
+    original_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "xgboost" or name.startswith("xgboost."):
+            raise AssertionError("production pipeline must not import xgboost when ML is disabled")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    cfg = AppConfig(symbols=["BTC/USDT"])
+    cfg.execution.order_store_path = str(tmp_path / "orders.sqlite")
+    cfg.alpha.ml_factor.enabled = False
+    cfg.execution.collect_ml_training_data = False
+
+    pipe = V5Pipeline(cfg)
+
+    assert pipe.data_collector is None

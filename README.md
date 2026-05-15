@@ -886,18 +886,24 @@ scipy
 ccxt
 flask
 waitress
-scikit-learn
-xgboost
 paramiko
 ```
 
-安装示例：
+生产安装示例：
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+ML / research-only scripts use optional dependencies:
+
+```bash
+pip install -r requirements-research.txt
+```
+
+`scikit-learn` and `xgboost` are intentionally not required by `live_prod`.
 
 ---
 

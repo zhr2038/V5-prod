@@ -31,6 +31,7 @@ from deploy.prod_release import (
 SHADOW_SYNC_ITEMS = (
     "main.py",
     "requirements.txt",
+    "requirements-research.txt",
     "pyproject.toml",
     "models",
     "configs",

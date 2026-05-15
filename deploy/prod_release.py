@@ -20,6 +20,7 @@ PRODUCTION_SYNC_ITEMS = (
     "main.py",
     "event_driven_check.py",
     "requirements.txt",
+    "requirements-research.txt",
     "pyproject.toml",
     "models",
     "configs",

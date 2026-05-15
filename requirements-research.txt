@@ -1,0 +1,5 @@
+# Optional ML/research dependencies.
+# These are not required for the live_prod runtime path.
+scikit-learn>=1.4
+xgboost>=3.2,<3.3
+# optuna is not imported by current research scripts; add it here if a new optimizer experiment requires it.

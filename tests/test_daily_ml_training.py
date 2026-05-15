@@ -39,3 +39,18 @@ def test_runtime_reports_dir_fails_fast_when_config_is_missing(monkeypatch, tmp_
 
     with pytest.raises(FileNotFoundError, match="runtime config not found"):
         daily_ml_training._runtime_reports_dir()
+
+
+def test_daily_ml_training_exits_with_research_dependency_hint(monkeypatch) -> None:
+    def missing_deps(_modules):
+        raise SystemExit("Missing optional ML/research dependencies: xgboost. Install them with: pip install -r requirements-research.txt")
+
+    monkeypatch.setattr(daily_ml_training, "require_research_dependencies", missing_deps)
+    monkeypatch.setattr(
+        daily_ml_training,
+        "run_ml_training_task",
+        lambda **kwargs: pytest.fail("training should not start when research dependencies are missing"),
+    )
+
+    with pytest.raises(SystemExit, match="requirements-research.txt"):
+        daily_ml_training.main()

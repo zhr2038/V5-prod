@@ -1530,7 +1530,16 @@ def _hash_file(path: Path) -> str:
 
 def _hash_source_snapshot(root: Path) -> str:
     candidates: list[Path] = []
-    for rel in ("main.py", "event_driven_check.py", "src", "scripts", "configs", "pyproject.toml", "requirements.txt"):
+    for rel in (
+        "main.py",
+        "event_driven_check.py",
+        "src",
+        "scripts",
+        "configs",
+        "pyproject.toml",
+        "requirements.txt",
+        "requirements-research.txt",
+    ):
         path = root / rel
         if path.is_file():
             candidates.append(path)

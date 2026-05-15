@@ -91,6 +91,7 @@ SOURCE_SNAPSHOT_PATHS = (
     "configs",
     "pyproject.toml",
     "requirements.txt",
+    "requirements-research.txt",
     "requirements-lock.txt",
     "requirements.lock",
     "poetry.lock",
@@ -106,6 +107,7 @@ STRATEGY_SNAPSHOT_PATHS = (
 )
 DEPENDENCY_LOCK_PATHS = (
     "requirements.txt",
+    "requirements-research.txt",
     "requirements-lock.txt",
     "requirements.lock",
     "pyproject.toml",

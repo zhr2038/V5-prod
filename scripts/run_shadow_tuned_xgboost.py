@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from configs.runtime_config import resolve_runtime_config_path
 from main import main as run_main
+from src.research.dependency_guard import require_research_dependencies
 
 
 SHADOW_REPORT_REDIRECTS: tuple[tuple[str, str], ...] = (
@@ -157,6 +158,7 @@ def _resolve_shadow_base_config_path(raw_base_config_path: str | None = None) ->
 
 
 def main() -> int:
+    require_research_dependencies(("sklearn", "xgboost"))
     parser = argparse.ArgumentParser(
         description="Run tuned XGBoost in paper/shadow mode using live_prod as the base config."
     )
